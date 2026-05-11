@@ -1,0 +1,247 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./features/calendar/calendar.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ── Design system tokens ─────────────────────────────────────────────────── */
+:root {
+  --ds-bg:           #07122b;
+  --ds-bg-2:         #0c1c3d;
+  --ds-card:         #102346;
+  --ds-card-2:       #0d1d3d;
+  --ds-panel:        rgba(74, 142, 239, 0.04);
+  --ds-panel-2:      rgba(74, 142, 239, 0.06);
+  --ds-border:       #1e3a6b;
+  --ds-border-soft:  #1a325a;
+  --ds-blue:         #4a8eef;
+  --ds-blue-bright:  #5b9bff;
+  --ds-blue-deep:    #2563eb;
+  --ds-white:        #ffffff;
+  --ds-muted:        #94a3b8;
+  --ds-muted-2:      #64748b;
+  --ds-green:        #4ade80;
+  --ds-green-deep:   #22c55e;
+  --ds-red:          #f87171;
+  --ds-amber:        #fbbf24;
+
+  /* ── Tailwind / shadcn semantic tokens → dark palette ──────────────────── */
+  --primary:              #4a8eef;
+  --primary-foreground:   #ffffff;
+  --ring:                 #4a8eef;
+
+  --background:           #07122b;
+  --foreground:           #ffffff;
+  --card:                 #102346;
+  --card-foreground:      #ffffff;
+  --popover:              #102346;
+  --popover-foreground:   #ffffff;
+
+  --secondary:            #0c1c3d;
+  --secondary-foreground: #94a3b8;
+  --muted:                #0c1c3d;
+  --muted-foreground:     #94a3b8;
+  --accent:               #1e3a6b;
+  --accent-foreground:    #5b9bff;
+
+  --destructive:             #f87171;
+  --destructive-foreground:  #ffffff;
+
+  --border: #1e3a6b;
+  --input:  #1a325a;
+  --radius: 0.375rem;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background-color: #07122b;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── KPI Tile ─────────────────────────────────────────────────────────────── */
+.ds-kpi {
+  background: rgba(74, 142, 239, 0.06);
+  border: 1px solid #1a325a;
+  border-radius: 7px;
+  padding: 10px 14px;
+  min-width: 0;
+}
+.ds-kpi.active {
+  border-color: #4a8eef;
+  background: rgba(74, 142, 239, 0.13);
+}
+.ds-kpi-label {
+  color: #94a3b8;
+  font-size: 9px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.ds-kpi-value {
+  color: #ffffff;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.ds-kpi-value.blue  { color: #5b9bff; }
+.ds-kpi-value.green { color: #4ade80; }
+.ds-kpi-value.red   { color: #f87171; }
+.ds-kpi-value.amber { color: #fbbf24; }
+.ds-kpi-sub {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* ── Dashboard Container ─────────────────────────────────────────────────── */
+.ds-dashboard {
+  background: linear-gradient(180deg, #0e2454 0%, #0a1830 100%);
+  border: 1px solid #1e3a6b;
+  border-radius: 10px;
+  padding: 10px 12px 8px 12px;
+}
+.ds-dashboard-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1a325a;
+  margin-bottom: 8px;
+}
+.ds-logo-pill {
+  background: #000;
+  padding: 4px 10px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.ds-dashboard-title {
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  flex: 1;
+}
+.ds-dashboard-sub {
+  color: #94a3b8;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+/* ── Panel (inside dashboard) ────────────────────────────────────────────── */
+.ds-panel {
+  background: rgba(74, 142, 239, 0.04);
+  border: 1px solid #1a325a;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.ds-panel h4 {
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.ds-panel .p-sub {
+  color: #94a3b8;
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+
+/* ── Data List ───────────────────────────────────────────────────────────── */
+.ds-list { list-style: none; padding: 0; margin: 0; }
+.ds-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(30, 58, 107, 0.45);
+  font-size: 12px;
+  color: #94a3b8;
+}
+.ds-list li:last-child { border-bottom: none; }
+.ds-list .li-label { color: #ffffff; font-weight: 600; }
+.ds-list .li-val   { color: #5b9bff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ds-list .li-val.good { color: #4ade80; }
+.ds-list .li-val.bad  { color: #f87171; }
+.ds-list .li-val.warn { color: #fbbf24; }
+
+/* ── Pill / Badge ────────────────────────────────────────────────────────── */
+.ds-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.ds-pill.green { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+.ds-pill.red   { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+.ds-pill.blue  { background: rgba(74,142,239,0.15);  color: #5b9bff; border: 1px solid rgba(74,142,239,0.3); }
+.ds-pill.amber { background: rgba(251,191,36,0.15);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.3); }
+
+/* ── Horizontal bar ──────────────────────────────────────────────────────── */
+.ds-bar-h { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 11px; color: #94a3b8; }
+.ds-bar-h .bar-label { width: 56px; flex-shrink: 0; font-size: 10px; }
+.ds-bar-h .bar-track {
+  flex: 1; height: 6px;
+  background: rgba(74, 142, 239, 0.08);
+  border-radius: 3px; overflow: hidden;
+}
+.ds-bar-h .bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #2563eb, #5b9bff);
+  border-radius: 3px;
+}
+.ds-bar-h .bar-fill.green { background: linear-gradient(90deg, #16a34a, #4ade80); }
+.ds-bar-h .bar-fill.red   { background: linear-gradient(90deg, #b91c1c, #f87171); }
+.ds-bar-h .bar-val { width: 32px; text-align: right; color: #ffffff; font-weight: 700; font-size: 11px; }
+
+/* ── Section label ───────────────────────────────────────────────────────── */
+.ds-section-label {
+  font-size: 9px;
+  color: #5b9bff;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.ds-section-label.red   { color: #f87171; }
+.ds-section-label.green { color: #4ade80; }

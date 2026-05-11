@@ -1,0 +1,129 @@
+import { useRef, useState, useEffect, useCallback } from 'react'
+import FullCalendar from '@fullcalendar/react'
+import type { DatesSetArg } from '@fullcalendar/core'
+import { useAppStore } from '@/store/useAppStore'
+import { useLoads } from '@/hooks/useLoads'
+import { useDrivers } from '@/hooks/useDrivers'
+import { useConflictDetection } from '@/hooks/useConflictDetection'
+import { CalendarToolbar } from './CalendarToolbar'
+import { SchedulerView } from './SchedulerView'
+import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { CalendarErrorBoundary } from './CalendarErrorBoundary'
+import { formatDateShort } from '@/lib/date'
+import type { ViewMode } from '@/types'
+
+const FC_VIEW_NAMES: Record<ViewMode, string> = {
+  'day': 'resourceTimelineDay',
+  'work-week': 'resourceTimelineWorkWeek',
+  'full-week': 'resourceTimelineWeek',
+  'two-week': 'resourceTimeline2Weeks',
+  'month': 'resourceTimelineMonth',
+}
+
+export function CalendarPage() {
+  const weekStart = useAppStore((s) => s.weekStart)
+  const viewMode = useAppStore((s) => s.viewMode)
+  const filterDriverId = useAppStore((s) => s.filterDriverId)
+  const searchQuery = useAppStore((s) => s.searchQuery)
+  const filters = useAppStore((s) => s.filters)
+
+  const { loads } = useLoads()
+  const { drivers } = useDrivers()
+
+  const calendarRef = useRef<FullCalendar>(null)
+
+  // Local state for toolbar — FC is the source of truth for dates/view after init
+  const [currentView, setCurrentView] = useState<ViewMode>(viewMode)
+  const [dateLabel, setDateLabel] = useState('')
+
+  // ── Calendar API helpers ──────────────────────────────────────────────────
+
+  const getApi = useCallback(() => calendarRef.current?.getApi(), [])
+
+  const onPrev = useCallback(() => getApi()?.prev(), [getApi])
+  const onNext = useCallback(() => getApi()?.next(), [getApi])
+  const onToday = useCallback(() => getApi()?.today(), [getApi])
+
+  const onViewChange = useCallback((view: ViewMode) => {
+    setCurrentView(view)
+    getApi()?.changeView(FC_VIEW_NAMES[view])
+  }, [getApi])
+
+  const onDatesSet = useCallback((info: DatesSetArg) => {
+    const start = info.start
+    const end = new Date(info.end)
+    end.setDate(end.getDate() - 1) // FC's end is exclusive
+    const label = start.toDateString() === end.toDateString()
+      ? formatDateShort(start.toISOString())
+      : `${formatDateShort(start.toISOString())} – ${formatDateShort(end.toISOString())}`
+    setDateLabel(label)
+  }, [])
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+
+      if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault()
+        useAppStore.getState().setSelectedLoad(null, 'create')
+      }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); getApi()?.prev() }
+      if (e.key === 'ArrowRight') { e.preventDefault(); getApi()?.next() }
+      if (e.key === 'Escape') { useAppStore.getState().setFilterDriver(null) }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [getApi])
+
+  // ── Filter loads ──────────────────────────────────────────────────────────
+
+  const visibleLoads = loads.filter((l) => {
+    if (filters.readyToInvoice && !l.readyToInvoice) return false
+    if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
+    if (filters.unassigned && l.pickupDriverId !== null) return false
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase()
+      if (
+        !l.aljexId.toLowerCase().includes(q) &&
+        !l.tmsId.toLowerCase().includes(q) &&
+        !l.pickupNumber.toLowerCase().includes(q)
+      ) return false
+    }
+    return true
+  })
+
+  const conflictIds = useConflictDetection(visibleLoads, drivers)
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <CalendarToolbar
+        currentView={currentView}
+        dateLabel={dateLabel}
+        onPrev={onPrev}
+        onNext={onNext}
+        onToday={onToday}
+        onViewChange={onViewChange}
+      />
+
+      <CalendarErrorBoundary>
+        <SchedulerView
+          calendarRef={calendarRef}
+          loads={visibleLoads}
+          drivers={drivers}
+          conflictIds={conflictIds}
+          filterDriverId={filterDriverId}
+          viewMode={viewMode}
+          weekStart={weekStart}
+          onDatesSet={onDatesSet}
+        />
+      </CalendarErrorBoundary>
+
+      <LoadDrawer />
+    </div>
+  )
+}

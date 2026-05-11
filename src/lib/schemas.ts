@@ -1,0 +1,53 @@
+import { z } from 'zod'
+
+export const driverSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  phone: z
+    .string()
+    .min(10, 'Phone must be at least 10 digits')
+    .regex(/^\+?1?\d{10}$|^\(\d{3}\)\s?\d{3}-\d{4}$|^\d{10}$/, 'Invalid phone number'),
+  active: z.boolean(),
+  type: z.enum(['driver', 'broker']),
+  notes: z.string().optional(),
+})
+
+const apptTypeEnum = z.enum(['exact', 'range', 'fcfs'])
+
+export const loadSchema = z
+  .object({
+    aljexId: z.string().min(1, 'ALJEX ID is required'),
+    tmsId: z.string().min(1, 'TMS ID / PO is required'),
+    pickupNumber: z.string().min(1, 'PU# is required'),
+
+    originName:      z.string().optional(),
+    originCity:      z.string().optional(),
+    destinationName: z.string().optional(),
+    destinationCity: z.string().optional(),
+
+    pickupApptType: apptTypeEnum,
+    pickupAppt: z.string().min(1, 'Pickup appointment is required'),
+    pickupApptEnd: z.string().optional(),
+
+    deliveryApptType: apptTypeEnum,
+    deliveryAppt: z.string().min(1, 'Delivery appointment is required'),
+    deliveryApptEnd: z.string().optional(),
+
+    pickupDriverId: z.string().nullable(),
+    deliveryDriverId: z.string().nullable(),
+    readyToInvoice: z.boolean(),
+  })
+  .refine(
+    (d) => d.deliveryAppt >= d.pickupAppt,
+    { message: 'Delivery must be on or after pickup', path: ['deliveryAppt'] }
+  )
+  .refine(
+    (d) => d.pickupApptType !== 'range' || (!!d.pickupApptEnd && d.pickupApptEnd > d.pickupAppt),
+    { message: 'Range end must be after start', path: ['pickupApptEnd'] }
+  )
+  .refine(
+    (d) => d.deliveryApptType !== 'range' || (!!d.deliveryApptEnd && d.deliveryApptEnd > d.deliveryAppt),
+    { message: 'Range end must be after start', path: ['deliveryApptEnd'] }
+  )
+
+export type DriverFormValues = z.infer<typeof driverSchema>
+export type LoadFormValues = z.infer<typeof loadSchema>

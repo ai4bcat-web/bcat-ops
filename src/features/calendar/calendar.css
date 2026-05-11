@@ -1,0 +1,167 @@
+/* ── FullCalendar dark-navy override layer ────────────────────────────────────
+   All rules scoped to .fc to avoid leaking into the rest of the app.
+   FullCalendar injects its styles first (via JS); these override them. */
+
+/* ── CSS variable overrides ──────────────────────────────────────────────── */
+.fc {
+  --fc-border-color:                #1e3a6b;
+  --fc-page-bg-color:               #07122b;
+  --fc-neutral-bg-color:            #0c1c3d;
+  --fc-neutral-text-color:          #94a3b8;
+  --fc-today-bg-color:              rgba(74, 142, 239, 0.07);
+  --fc-highlight-color:             rgba(74, 142, 239, 0.14);
+  --fc-event-bg-color:              transparent;
+  --fc-event-border-color:          transparent;
+  --fc-event-text-color:            inherit;
+  --fc-event-selected-overlay-color: rgba(0, 0, 0, 0.25);
+  --fc-small-font-size:             0.75rem;
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+
+/* ── Header / day labels ──────────────────────────────────────────────────── */
+.fc .fc-col-header-cell {
+  background: #07122b;
+  border-color: #1e3a6b;
+  padding: 0;
+}
+
+.fc .fc-col-header-cell-cushion {
+  padding: 8px 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  text-decoration: none !important;
+}
+
+.fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
+  color: #5b9bff;
+}
+
+/* Slot (hour/day) labels on left of timeline */
+.fc .fc-timeline-slot-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Resource (driver) column ─────────────────────────────────────────────── */
+.fc .fc-datagrid-header {
+  background: #07122b;
+  border-color: #1e3a6b;
+}
+
+.fc .fc-datagrid-cell-frame {
+  min-height: 120px !important;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border-color: #1e3a6b;
+  background: #07122b;
+}
+
+.fc .fc-datagrid-body .fc-scrollgrid-sync-table td {
+  border-color: #1e3a6b;
+  background: #07122b;
+}
+
+/* ── Timeline lanes (rows) ────────────────────────────────────────────────── */
+.fc .fc-timeline-lane {
+  min-height: 120px;
+  background: #07122b;
+}
+
+.fc .fc-timeline-lane-frame {
+  min-height: 120px;
+  background: #07122b;
+}
+
+.fc .fc-timeline-body .fc-scrollgrid-sync-table td {
+  border-color: #1e3a6b;
+  background: #07122b;
+}
+
+/* Alternating row shade */
+.fc .fc-resource:nth-child(even) .fc-timeline-lane {
+  background: rgba(12, 28, 61, 0.5);
+}
+.fc .fc-resource:nth-child(even) .fc-datagrid-cell-frame {
+  background: rgba(12, 28, 61, 0.5);
+}
+
+/* ── Event blocks ─────────────────────────────────────────────────────────── */
+.fc .fc-timeline-event {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+
+.fc .fc-event-main {
+  overflow: hidden;
+  height: 100%;
+}
+
+.fc .fc-event-dragging { opacity: 0.6; }
+.fc .fc-event-resizing  { opacity: 0.8; }
+
+/* Hide default event title */
+.fc .fc-event-title { display: none; }
+
+/* ── Today column highlight ───────────────────────────────────────────────── */
+.fc .fc-day-today {
+  background-color: rgba(74, 142, 239, 0.06) !important;
+}
+
+/* ── Scrollgrid / borders ─────────────────────────────────────────────────── */
+.fc .fc-scrollgrid       { border-color: #1e3a6b; background: #07122b; }
+.fc .fc-scrollgrid td,
+.fc .fc-scrollgrid th    { border-color: #1e3a6b; }
+
+/* ── Now indicator ────────────────────────────────────────────────────────── */
+.fc .fc-timeline-now-indicator-line {
+  border-color: #5b9bff;
+  border-width: 2px;
+}
+.fc .fc-timeline-now-indicator-arrow {
+  border-top-color: #5b9bff;
+}
+
+/* ── Resource area header label ───────────────────────────────────────────── */
+.fc .fc-datagrid-header .fc-datagrid-cell-frame {
+  padding: 0 12px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: #07122b;
+}
+
+/* ── Remove FullCalendar button defaults ─────────────────────────────────── */
+.fc .fc-button,
+.fc .fc-button-group { display: none !important; }
+
+/* ── Drag placeholder ────────────────────────────────────────────────────── */
+.fc .fc-event-mirror { opacity: 0.5; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+.fc .fc-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: #1e3a6b transparent;
+}
+.fc .fc-scroller::-webkit-scrollbar { width: 5px; height: 5px; }
+.fc .fc-scroller::-webkit-scrollbar-thumb {
+  background: #1e3a6b;
+  border-radius: 3px;
+}
+
+/* ── Prevent white flash on FC internal backgrounds ─────────────────────── */
+.fc-theme-standard td,
+.fc-theme-standard th { border-color: #1e3a6b; }
+.fc-theme-standard .fc-scrollgrid { border-color: #1e3a6b; }
