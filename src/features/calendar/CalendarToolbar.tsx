@@ -118,28 +118,6 @@ export function CalendarToolbar({
 
         <Separator orientation="vertical" className="h-5 mx-1 shrink-0" />
 
-        {/* Search */}
-        <div className="relative shrink-0">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
-          <Input
-            placeholder="Search loads…"
-            className="h-8 pl-8 w-36 text-sm"
-            style={{ background: 'rgba(255,255,255,0.05)' }}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            aria-label="Search loads"
-          />
-          {searchQuery && (
-            <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setSearchQuery('')}
-              aria-label="Clear search"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-        </div>
-
         {/* Filter chips */}
         <div className="flex items-center gap-1.5 shrink-0">
           {anyFilter && (
@@ -177,6 +155,28 @@ export function CalendarToolbar({
 
       {/* ── Fixed right section — always visible ─────────────────────────── */}
       <div className="flex items-center gap-2 px-4 shrink-0 border-l border-border py-2">
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            placeholder="Search loads…"
+            className="h-8 pl-8 w-36 text-sm"
+            style={{ background: 'rgba(255,255,255,0.05)' }}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            aria-label="Search loads"
+          />
+          {searchQuery && (
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => setSearchQuery('')}
+              aria-label="Clear search"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+        </div>
+
         <Button
           size="sm"
           className="h-8 gap-1.5 font-semibold whitespace-nowrap"
