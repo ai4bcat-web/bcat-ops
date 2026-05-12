@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { AuthProvider } from '@/context/AuthContext'
 import { AuthGuard } from '@/components/AuthGuard'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
@@ -13,6 +14,7 @@ import { UsersPage } from '@/features/users/UsersPage'
 export default function App() {
   return (
     <BrowserRouter>
+      <AuthProvider>
       <TooltipProvider>
         <AuthGuard>
           <Routes>
@@ -28,6 +30,7 @@ export default function App() {
         </AuthGuard>
         <Toaster position="bottom-right" richColors />
       </TooltipProvider>
+      </AuthProvider>
     </BrowserRouter>
   )
 }
