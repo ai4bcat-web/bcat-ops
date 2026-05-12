@@ -8,6 +8,7 @@ export const driverSchema = z.object({
     .regex(/^\+?1?\d{10}$|^\(\d{3}\)\s?\d{3}-\d{4}$|^\d{10}$/, 'Invalid phone number'),
   active: z.boolean(),
   type: z.enum(['driver', 'broker']),
+  colorKey: z.enum(['driver-1','driver-2','driver-3','driver-4','driver-5','driver-6','broker']).optional(),
   notes: z.string().optional(),
 })
 

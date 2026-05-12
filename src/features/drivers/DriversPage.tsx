@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X } from 'lucide-react'
+import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check } from 'lucide-react'
 import { useDrivers } from '@/hooks/useDrivers'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
+import { COLOR_MAP, getColor } from '@/lib/driverColors'
+import type { ColorKey } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -56,15 +58,16 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   const [shouldDeletePhoto, setShouldDeletePhoto] = useState(false)
 
   const {
-    register, handleSubmit, reset, control, watch,
+    register, handleSubmit, reset, control, watch, setValue,
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', notes: '' },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '' },
   })
 
   const watchType = watch('type')
   const watchName = watch('name')
+  const watchColorKey = watch('colorKey')
 
   // Sync photo preview when drawer opens/switches driver
   useEffect(() => {
@@ -78,8 +81,8 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
       reset(driver
-        ? { name: driver.name, phone: driver.phone, active: driver.active, type: driver.type ?? 'driver', notes: driver.notes ?? '' }
-        : { name: '', phone: '', active: true, type: 'driver', notes: '' })
+        ? { name: driver.name, phone: driver.phone, active: driver.active, type: driver.type ?? 'driver', colorKey: driver.colorKey, notes: driver.notes ?? '' }
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '' })
     } else {
       onClose()
     }
@@ -104,7 +107,10 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   }
 
   const onSubmit = async (values: DriverFormValues) => {
-    const normalized = { ...values, phone: normalizePhone(values.phone) }
+    // Auto-assign a color if none chosen
+    const colorKeys: ColorKey[] = ['driver-1','driver-2','driver-3','driver-4','driver-5','driver-6']
+    const autoColor = values.colorKey ?? colorKeys[Math.floor(Math.random() * colorKeys.length)]
+    const normalized = { ...values, phone: normalizePhone(values.phone), colorKey: autoColor }
     try {
       let driverId: string
       if (isEdit) {
@@ -266,6 +272,32 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
               )}
             </div>
 
+            {/* Color picker */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Calendar Color</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {(Object.entries(COLOR_MAP) as [ColorKey, typeof COLOR_MAP[ColorKey]][])
+                  .filter(([key]) => key !== 'broker')
+                  .map(([key, c]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      title={key}
+                      onClick={() => setValue('colorKey', key, { shouldDirty: true })}
+                      className="relative size-7 rounded-full transition-transform hover:scale-110 focus:outline-none"
+                      style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px #07122b, 0 0 0 5px ${c.border}` : undefined }}
+                    >
+                      {watchColorKey === key && (
+                        <Check className="absolute inset-0 m-auto size-3.5 text-[#07122b]" strokeWidth={3} />
+                      )}
+                    </button>
+                  ))}
+              </div>
+              {!watchColorKey && (
+                <p className="text-xs text-muted-foreground">A color will be auto-assigned if none is picked.</p>
+              )}
+            </div>
+
             {/* Notes */}
             <div className="space-y-1.5">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Notes</Label>
@@ -392,8 +424,19 @@ export function DriversPage() {
                 >
                   <TableCell className="font-semibold text-foreground">
                     <div className="flex items-center gap-2">
-                      <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="sm" />
+                      <Avatar
+                        src={driver.photoUrl}
+                        initials={getInitials(driver.name)}
+                        size="sm"
+                        style={driver.colorKey ? { background: getColor(driver.colorKey).border, color: '#07122b' } : undefined}
+                      />
                       {driver.name}
+                      {driver.colorKey && (
+                        <span
+                          className="size-2.5 rounded-full shrink-0"
+                          style={{ background: getColor(driver.colorKey).border }}
+                        />
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
