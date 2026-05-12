@@ -5,7 +5,9 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "strict": true,
-    "lib": ["ES2020"]
+    "skipLibCheck": true,
+    "lib": ["ES2020"],
+    "types": ["node"]
   },
   "include": ["**/*.ts"]
 }

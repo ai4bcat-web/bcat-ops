@@ -22,7 +22,7 @@ backend.userManagement.resources.lambda.addToRolePolicy(
 )
 
 // Pass the User Pool ID to the Lambda as an environment variable
-backend.userManagement.resources.lambda.addEnvironment(
+backend.userManagement.addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId
 )
