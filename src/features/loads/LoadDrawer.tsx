@@ -216,7 +216,7 @@ export function LoadDrawer() {
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, load?.id, isCreate])
+  }, [isOpen, load?.id, isCreate, drawerMode])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
