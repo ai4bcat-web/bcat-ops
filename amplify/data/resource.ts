@@ -46,7 +46,7 @@ const schema = a.schema({
       changes:    a.json().required(),
     })
     .authorization((allow) => [
-      allow.authenticated().to(['create', 'read', 'list']),
+      allow.authenticated().to(['create', 'read']),
     ]),
 
   // Admin-only: manage Cognito users via Lambda
