@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Truck, CalendarDays, Table2, Users, History, Settings, LogOut, Command, MessageSquare } from 'lucide-react' // eslint-disable-line @typescript-eslint/no-unused-vars
+import { Truck, CalendarDays, Table2, Users, History, Settings, LogOut, Command, MessageSquare, UserCog } from 'lucide-react'
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel,
@@ -7,18 +7,20 @@ import {
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Avatar } from '@/components/ui/avatar'
-
+import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
-  { to: '/',        label: 'Calendar',  icon: CalendarDays },
-  { to: '/grid',    label: 'Load Grid', icon: Table2       },
-  { to: '/drivers', label: 'Drivers',   icon: Users        },
-  { to: '/schedule', label: 'Schedules',  icon: MessageSquare },
+  { to: '/',         label: 'Calendar',  icon: CalendarDays  },
+  { to: '/grid',     label: 'Load Grid', icon: Table2        },
+  { to: '/drivers',  label: 'Drivers',   icon: Users         },
+  { to: '/schedule', label: 'Schedules', icon: MessageSquare },
   { to: '/audit',    label: 'Audit Log', icon: History       },
 ]
 
 export function NavBar() {
+  const { user, logout, isAdmin } = useAuth()
+
   return (
     <header className="h-14 shrink-0 flex items-center gap-3 px-6 bg-background border-b border-border">
       {/* Logo + wordmark */}
@@ -53,6 +55,21 @@ export function NavBar() {
       </nav>
 
       {/* Spacer */}
+      {/* Users link — admin only */}
+      {isAdmin && (
+        <NavLink to="/users">
+          {({ isActive }) => (
+            <span className={cn(
+              'inline-flex items-center gap-2 px-3 h-9 rounded-md text-sm font-medium transition-colors cursor-pointer select-none whitespace-nowrap',
+              isActive ? 'bg-green-500 text-black' : 'text-foreground/65 hover:text-foreground hover:bg-muted',
+            )}>
+              <UserCog className={cn('size-4 shrink-0', isActive ? 'text-black' : 'text-foreground/50')} />
+              Users
+            </span>
+          )}
+        </NavLink>
+      )}
+
       <div className="flex-1 min-w-4" />
 
       {/* Cmd+K trigger */}
@@ -86,14 +103,17 @@ export function NavBar() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground pb-1">
-            dispatch@bcat.local
+            {user?.email ?? 'dispatch'}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem disabled className="gap-2">
             <Settings className="size-4 text-muted-foreground" /> Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem disabled className="gap-2 text-destructive focus:text-destructive">
+          <DropdownMenuItem
+            className="gap-2 text-destructive focus:text-destructive cursor-pointer"
+            onClick={() => logout()}
+          >
             <LogOut className="size-4" /> Sign out
           </DropdownMenuItem>
         </DropdownMenuContent>

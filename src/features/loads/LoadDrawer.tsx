@@ -22,7 +22,7 @@ import {
 } from '@/lib/date'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import type { ApptType } from '@/types'
+import type { ApptType, Load } from '@/types'
 
 // ── Field wrappers ────────────────────────────────────────────────────────────
 
@@ -218,22 +218,32 @@ export function LoadDrawer() {
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleRateConfirmUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleRateConfirmUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !load) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      updateLoad(load.id, { rateConfirmUrl: reader.result as string })
-      toast.success('Rate confirmation uploaded')
-    }
-    reader.readAsDataURL(file)
     e.target.value = ''
+    try {
+      const { uploadRateConfirm } = await import('@/lib/apiClient')
+      const key = await uploadRateConfirm(load.id, file)
+      await updateLoad(load.id, { rateConfirmKey: key } as never)
+      toast.success('Rate confirmation uploaded')
+    } catch {
+      toast.error('Upload failed')
+    }
   }
 
-  const handleRateConfirmRemove = () => {
+  const handleRateConfirmRemove = async () => {
     if (!load) return
-    updateLoad(load.id, { rateConfirmUrl: undefined })
-    toast('Rate confirmation removed')
+    try {
+      if (load.rateConfirmUrl) {
+        const { deleteRateConfirm } = await import('@/lib/apiClient')
+        await deleteRateConfirm((load as Load & { rateConfirmKey?: string }).rateConfirmKey ?? '')
+      }
+      await updateLoad(load.id, { rateConfirmKey: undefined } as never)
+      toast('Rate confirmation removed')
+    } catch {
+      toast.error('Failed to remove')
+    }
   }
 
   const watchPickupDriver = watch('pickupDriverId')

@@ -18,6 +18,10 @@ dist-ssr
 !.env.example
 *.local
 
+# Amplify sandbox artifacts (local dev only)
+.amplify/
+.amplify-hosting/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
