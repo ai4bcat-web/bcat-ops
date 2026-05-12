@@ -50,6 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUser])
 
   const login = useCallback(async (email: string, password: string) => {
+    // Clear any stale Cognito session so signIn() never throws UserAlreadyAuthenticatedException
+    try { await signOut() } catch { /* no-op if nothing was signed in */ }
     const output = await signIn({ username: email, password })
     if (output.nextStep.signInStep === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED') {
       setNeedsNewPassword(true)
