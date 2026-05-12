@@ -18,7 +18,7 @@ const LOAD_FIELDS = `
 `
 
 const DRIVER_FIELDS = `
-  id name phone active type colorKey notes createdAt updatedAt
+  id name phone active type colorKey notes photoKey createdAt updatedAt
 `
 
 const AUDIT_FIELDS = `
@@ -71,7 +71,8 @@ export async function listDrivers(): Promise<Driver[]> {
   const result = await client.graphql({
     query: `query ListDrivers { listDrivers(limit: 1000) { items { ${DRIVER_FIELDS} } } }`,
   }) as { data: { listDrivers: { items: Driver[] } } }
-  return result.data.listDrivers.items ?? []
+  const items = result.data.listDrivers.items ?? []
+  return Promise.all(items.map(resolveDriverPhotoUrl))
 }
 
 export async function createDriver(
@@ -88,11 +89,12 @@ export async function updateDriver(
   id: string,
   patch: Partial<Omit<Driver, 'id' | 'createdAt'>>
 ): Promise<Driver> {
+  const { photoUrl: _skip, ...rest } = patch as typeof patch & { photoUrl?: string }
   const result = await client.graphql({
     query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${DRIVER_FIELDS} } }`,
-    variables: { input: { id, ...patch } },
+    variables: { input: { id, ...rest } },
   }) as { data: { updateDriver: Driver } }
-  return result.data.updateDriver
+  return resolveDriverPhotoUrl(result.data.updateDriver)
 }
 
 export async function deleteDriver(id: string): Promise<void> {
@@ -189,7 +191,35 @@ export async function deleteRateConfirm(key: string): Promise<void> {
   await remove({ path: key })
 }
 
-// ── Internal helper ───────────────────────────────────────────────────────────
+// ── S3 driver photos ──────────────────────────────────────────────────────────
+
+export async function uploadDriverPhoto(driverId: string, file: File): Promise<string> {
+  const ext = file.name.split('.').pop() ?? 'jpg'
+  const key = `driver-photos/${driverId}.${ext}`
+  await uploadData({ path: key, data: file, options: { contentType: file.type } }).result
+  return key
+}
+
+export async function getDriverPhotoUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+export async function deleteDriverPhoto(key: string): Promise<void> {
+  await remove({ path: key })
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
+
+async function resolveDriverPhotoUrl(driver: Driver): Promise<Driver> {
+  if (!driver.photoKey) return driver
+  try {
+    const url = await getDriverPhotoUrl(driver.photoKey)
+    return { ...driver, photoUrl: url }
+  } catch {
+    return driver
+  }
+}
 
 async function resolveRateConfirmUrl(
   load: Load & { rateConfirmKey?: string }

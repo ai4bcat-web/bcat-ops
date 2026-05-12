@@ -51,7 +51,7 @@ interface AppState {
   setCurrentUser: (email: string) => void
 
   // ── Driver actions ─────────────────────────────────────────────────────────
-  addDriver: (d: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
+  addDriver: (d: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Driver>
   updateDriver: (id: string, patch: Partial<Omit<Driver, 'id' | 'createdAt'>>) => Promise<void>
   deleteDriver: (id: string) => Promise<void>
 
@@ -132,6 +132,7 @@ export const useAppStore = create<AppState>()(
         writeAudit(get().currentUserEmail, 'Driver', driver.id, 'create', {
           _snapshot: { from: null, to: driver },
         })
+        return driver
       },
 
       updateDriver: async (id, patch) => {

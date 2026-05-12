@@ -3,20 +3,27 @@ import { cn } from '@/lib/utils'
 
 interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   initials: string
-  size?: 'sm' | 'md'
+  src?: string
+  size?: 'xs' | 'sm' | 'md'
 }
 
-function Avatar({ initials, size = 'md', className, ...props }: AvatarProps) {
+function Avatar({ initials, src, size = 'md', className, ...props }: AvatarProps) {
+  const [imgError, setImgError] = React.useState(false)
+  const showImg = src && !imgError
+
   return (
     <div
       className={cn(
-        'rounded-full bg-primary flex items-center justify-center font-semibold text-primary-foreground shrink-0 select-none',
-        size === 'sm' ? 'size-6 text-[10px]' : 'size-8 text-xs',
+        'rounded-full bg-primary flex items-center justify-center font-semibold text-primary-foreground shrink-0 select-none overflow-hidden',
+        size === 'xs' ? 'size-4 text-[8px]' : size === 'sm' ? 'size-6 text-[10px]' : 'size-8 text-xs',
         className,
       )}
       {...props}
     >
-      {initials}
+      {showImg
+        ? <img src={src} alt={initials} className="w-full h-full object-cover" onError={() => setImgError(true)} />
+        : initials
+      }
     </div>
   )
 }

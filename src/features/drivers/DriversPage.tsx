@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck } from 'lucide-react'
+import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X } from 'lucide-react'
 import { useDrivers } from '@/hooks/useDrivers'
+import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Avatar } from '@/components/ui/avatar'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
 } from '@/components/ui/sheet'
@@ -24,6 +26,10 @@ import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+
+function getInitials(name: string): string {
+  return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()
+}
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '').replace(/^1/, '')
@@ -43,6 +49,12 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   const { addDriver, updateDriver, deleteDriver } = useDrivers()
   const isEdit = driver !== null
 
+  // Photo state
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [shouldDeletePhoto, setShouldDeletePhoto] = useState(false)
+
   const {
     register, handleSubmit, reset, control, watch,
     formState: { errors, isSubmitting },
@@ -52,6 +64,16 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   })
 
   const watchType = watch('type')
+  const watchName = watch('name')
+
+  // Sync photo preview when drawer opens/switches driver
+  useEffect(() => {
+    if (open) {
+      setPhotoFile(null)
+      setPhotoPreview(driver?.photoUrl ?? null)
+      setShouldDeletePhoto(false)
+    }
+  }, [open, driver?.id, driver?.photoUrl])
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
@@ -63,16 +85,54 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     }
   }
 
-  const onSubmit = (values: DriverFormValues) => {
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPhotoFile(file)
+    setShouldDeletePhoto(false)
+    const reader = new FileReader()
+    reader.onload = (ev) => setPhotoPreview(ev.target?.result as string)
+    reader.readAsDataURL(file)
+    // Reset input so selecting same file again still triggers onChange
+    e.target.value = ''
+  }
+
+  const handleRemovePhoto = () => {
+    setPhotoFile(null)
+    setPhotoPreview(null)
+    setShouldDeletePhoto(true)
+  }
+
+  const onSubmit = async (values: DriverFormValues) => {
     const normalized = { ...values, phone: normalizePhone(values.phone) }
-    if (isEdit) {
-      updateDriver(driver.id, normalized)
-      toast('Driver updated', { description: normalized.name })
-    } else {
-      addDriver(normalized)
-      toast('Driver added', { description: normalized.name })
+    try {
+      let driverId: string
+      if (isEdit) {
+        await updateDriver(driver.id, normalized)
+        driverId = driver.id
+      } else {
+        const newDriver = await addDriver(normalized)
+        driverId = newDriver.id
+      }
+
+      // Handle photo upload / removal separately
+      try {
+        if (shouldDeletePhoto && driver?.photoKey) {
+          await deleteDriverPhoto(driver.photoKey)
+          await updateDriver(driverId, { photoKey: '' })
+        } else if (photoFile) {
+          const key = await uploadDriverPhoto(driverId, photoFile)
+          await updateDriver(driverId, { photoKey: key })
+        }
+      } catch {
+        toast.error('Driver saved but photo upload failed')
+      }
+
+      toast(isEdit ? 'Driver updated' : 'Driver added', { description: normalized.name })
+      onClose()
+    } catch {
+      toast.error('Failed to save driver')
     }
-    onClose()
   }
 
   const handleDelete = () => {
@@ -93,6 +153,42 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
           <SheetBody className="space-y-4">
+
+            {/* Photo upload */}
+            <div className="flex flex-col items-center gap-2 pt-1">
+              <div
+                className="relative group cursor-pointer"
+                onClick={() => photoInputRef.current?.click()}
+              >
+                <Avatar
+                  src={photoPreview ?? undefined}
+                  initials={getInitials(watchName || driver?.name || '?')}
+                  className="size-20 text-2xl"
+                />
+                <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Camera className="size-6 text-white" />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Click to upload photo</p>
+              {photoPreview && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1 text-xs text-destructive hover:underline"
+                  onClick={handleRemovePhoto}
+                >
+                  <X className="size-3" /> Remove photo
+                </button>
+              )}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoSelect}
+              />
+            </div>
+
+            <Separator />
 
             {/* Name */}
             <div className="space-y-1.5">
@@ -272,7 +368,12 @@ export function DriversPage() {
                   key={driver.id}
                   className={cn(!driver.active && 'opacity-50')}
                 >
-                  <TableCell className="font-semibold text-foreground">{driver.name}</TableCell>
+                  <TableCell className="font-semibold text-foreground">
+                    <div className="flex items-center gap-2">
+                      <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="sm" />
+                      {driver.name}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     <a
                       href={`tel:${driver.phone}`}

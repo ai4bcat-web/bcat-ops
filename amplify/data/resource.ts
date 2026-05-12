@@ -34,6 +34,7 @@ const schema = a.schema({
       type:     a.string(),
       colorKey: a.string(),
       notes:    a.string(),
+      photoKey: a.string(),
     })
     .authorization((allow) => [allow.authenticated()]),
 

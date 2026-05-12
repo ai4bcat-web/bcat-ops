@@ -8,6 +8,8 @@ export interface Driver {
   type?: 'driver' | 'broker' // default 'driver'
   colorKey?: ColorKey
   notes?: string
+  photoKey?: string  // S3 key for driver photo
+  photoUrl?: string  // client-side: resolved presigned URL
   createdAt: string
   updatedAt: string
 }

@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, Clock, ArrowRight } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Avatar } from '@/components/ui/avatar'
 import type { Load, Driver } from '@/types'
 import type { DriverColor } from '@/lib/driverColors'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
@@ -22,9 +23,10 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
   const isMultiDay = !isSameChicagoDay(load.pickupAppt, load.deliveryAppt)
   const isFCFS = load.pickupApptType === 'fcfs'
 
+  const pickupDriver = drivers.find((d) => d.id === load.pickupDriverId)
   const deliveryDriver = drivers.find((d) => d.id === load.deliveryDriverId)
   const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
-  const pickupDriverName = drivers.find((d) => d.id === load.pickupDriverId)?.name ?? 'Unassigned'
+  const pickupDriverName = pickupDriver?.name ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
   // Dark-optimised colors
@@ -85,14 +87,24 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           {load.aljexId}
         </span>
 
-        {/* Driver name */}
-        <span
-          className="text-[10px] font-semibold truncate leading-tight"
-          style={{ color: '#e2e8f0' }}
+        {/* Driver name + avatar */}
+        <div
+          className="flex items-center gap-1 min-w-0"
           title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
         >
-          {isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
-        </span>
+          <Avatar
+            src={pickupDriver?.photoUrl}
+            initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
+            size="xs"
+            className="shrink-0"
+          />
+          <span
+            className="text-[10px] font-semibold truncate leading-tight"
+            style={{ color: '#e2e8f0' }}
+          >
+            {isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
+          </span>
+        </div>
 
         {/* Origin name · city */}
         {(load.originName || load.originCity) && (

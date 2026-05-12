@@ -6,5 +6,8 @@ export const storage = defineStorage({
     'rate-confirms/*': [
       allow.authenticated.to(['read', 'write', 'delete']),
     ],
+    'driver-photos/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+    ],
   }),
 })
