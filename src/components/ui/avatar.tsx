@@ -14,7 +14,7 @@ function Avatar({ initials, src, size = 'md', className, ...props }: AvatarProps
   return (
     <div
       className={cn(
-        'rounded-full bg-primary flex items-center justify-center font-semibold text-primary-foreground shrink-0 select-none overflow-hidden',
+        'rounded-full bg-slate-500 flex items-center justify-center font-semibold text-white shrink-0 select-none overflow-hidden',
         size === 'xs' ? 'size-4 text-[8px]' : size === 'sm' ? 'size-6 text-[10px]' : 'size-8 text-xs',
         className,
       )}

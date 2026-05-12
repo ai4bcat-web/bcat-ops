@@ -97,6 +97,7 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
             initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
             size="xs"
             className="shrink-0"
+            style={{ background: borderColor, color: '#07122b' }}
           />
           <span
             className="text-[10px] font-semibold truncate leading-tight"
