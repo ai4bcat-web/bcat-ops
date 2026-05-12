@@ -155,30 +155,52 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
           <SheetBody className="space-y-4">
 
             {/* Photo upload */}
-            <div className="flex flex-col items-center gap-2 pt-1">
-              <div
-                className="relative group cursor-pointer"
-                onClick={() => photoInputRef.current?.click()}
-              >
-                <Avatar
-                  src={photoPreview ?? undefined}
-                  initials={getInitials(watchName || driver?.name || '?')}
-                  className="size-20 text-2xl"
-                />
-                <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Camera className="size-6 text-white" />
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Photo</Label>
+              <div className="flex items-center gap-4">
+                {/* Avatar preview */}
+                <div
+                  className="relative group cursor-pointer shrink-0"
+                  onClick={() => photoInputRef.current?.click()}
+                  title="Click to upload photo"
+                >
+                  {photoPreview ? (
+                    <img src={photoPreview} alt="Driver" className="size-16 rounded-full object-cover border-2 border-border" />
+                  ) : (
+                    <div className="size-16 rounded-full bg-muted flex items-center justify-center text-xl font-bold text-muted-foreground border-2 border-dashed border-border select-none">
+                      {getInitials(watchName || driver?.name || '?') || '?'}
+                    </div>
+                  )}
+                  <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Camera className="size-6 text-white" />
+                  </div>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    <Camera className="size-3.5" />
+                    {photoPreview ? 'Change Photo' : 'Upload Photo'}
+                  </Button>
+                  {photoPreview && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={handleRemovePhoto}
+                    >
+                      <X className="size-3.5" /> Remove
+                    </Button>
+                  )}
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">Click to upload photo</p>
-              {photoPreview && (
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-xs text-destructive hover:underline"
-                  onClick={handleRemovePhoto}
-                >
-                  <X className="size-3" /> Remove photo
-                </button>
-              )}
               <input
                 ref={photoInputRef}
                 type="file"
