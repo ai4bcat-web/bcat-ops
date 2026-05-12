@@ -69,23 +69,20 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   const watchName = watch('name')
   const watchColorKey = watch('colorKey')
 
-  // Sync photo preview when drawer opens/switches driver
+  // Reset form and photo state whenever the drawer opens or the driver changes
   useEffect(() => {
     if (open) {
+      reset(driver
+        ? { name: driver.name, phone: driver.phone, active: driver.active, type: driver.type ?? 'driver', colorKey: driver.colorKey, notes: driver.notes ?? '' }
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '' })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
     }
-  }, [open, driver?.id, driver?.photoUrl])
+  }, [open, driver?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
-      reset(driver
-        ? { name: driver.name, phone: driver.phone, active: driver.active, type: driver.type ?? 'driver', colorKey: driver.colorKey, notes: driver.notes ?? '' }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '' })
-    } else {
-      onClose()
-    }
+    if (!nextOpen) onClose()
   }
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
