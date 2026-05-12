@@ -148,8 +148,12 @@ export async function listCognitoUsers(): Promise<CognitoUser[]> {
   const result = await client.graphql({
     query: `query ManageUsers($action: String!) { manageUsers(action: $action) }`,
     variables: { action: 'list' },
-  }) as { data: { manageUsers: string } }
-  return JSON.parse(result.data.manageUsers ?? '[]')
+  }) as { data: { manageUsers: unknown } }
+  const raw = result.data.manageUsers
+  // AppSync AWSJSON may already be parsed or still a string — handle both
+  if (Array.isArray(raw)) return raw as CognitoUser[]
+  if (typeof raw === 'string') return JSON.parse(raw) as CognitoUser[]
+  return []
 }
 
 export async function createCognitoUser(email: string): Promise<void> {
