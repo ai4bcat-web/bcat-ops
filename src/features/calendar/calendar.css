@@ -7,7 +7,7 @@
   --fc-border-color:                #1e3a6b;
   --fc-page-bg-color:               #07122b;
   --fc-neutral-bg-color:            #0c1c3d;
-  --fc-neutral-text-color:          #94a3b8;
+  --fc-neutral-text-color:          #22c55e;
   --fc-today-bg-color:              rgba(74, 142, 239, 0.07);
   --fc-highlight-color:             rgba(74, 142, 239, 0.14);
   --fc-event-bg-color:              transparent;
@@ -32,7 +32,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #94a3b8;
+  color: #22c55e;
   text-decoration: none !important;
 }
 
@@ -44,7 +44,7 @@
 .fc .fc-timeline-slot-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #64748b;
+  color: #22c55e;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -137,7 +137,7 @@
   padding: 0 12px;
   font-size: 0.6rem;
   font-weight: 700;
-  color: #64748b;
+  color: #22c55e;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   background: #07122b;
