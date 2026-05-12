@@ -133,8 +133,8 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
       toast(isEdit ? 'Driver updated' : 'Driver added', { description: normalized.name })
       onClose()
-    } catch {
-      toast.error('Failed to save driver')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save driver')
     }
   }
 
@@ -327,6 +327,11 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
           </SheetBody>
 
           <SheetFooter>
+            {Object.keys(errors).length > 0 && (
+              <p className="w-full text-xs text-destructive mb-1">
+                Please fix the errors above before saving.
+              </p>
+            )}
             {isEdit && (
               <Button
                 type="button"

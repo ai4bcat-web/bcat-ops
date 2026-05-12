@@ -4,8 +4,10 @@ export const driverSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z
     .string()
-    .min(10, 'Phone must be at least 10 digits')
-    .regex(/^\+?1?\d{10}$|^\(\d{3}\)\s?\d{3}-\d{4}$|^\d{10}$/, 'Invalid phone number'),
+    .refine(
+      (v) => v.replace(/\D/g, '').length >= 10,
+      'Phone must contain at least 10 digits'
+    ),
   active: z.boolean(),
   type: z.enum(['driver', 'broker']),
   colorKey: z.enum(['driver-1','driver-2','driver-3','driver-4','driver-5','driver-6','broker']).optional(),
