@@ -43,6 +43,14 @@
     "zod": "^4.4.3",
     "zustand": "^5.0.13"
   },
+  "overrides": {
+    "@aws-amplify/data-construct": {
+      "zod": "3.25.17"
+    },
+    "@aws-amplify/graphql-api-construct": {
+      "zod": "3.25.17"
+    }
+  },
   "devDependencies": {
     "@aws-amplify/backend": "^1.22.0",
     "@aws-amplify/backend-cli": "^1.8.2",
