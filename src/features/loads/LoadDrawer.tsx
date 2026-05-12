@@ -15,6 +15,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useAuth } from '@/hooks/useAuth'
 import { loadSchema, type LoadFormValues } from '@/lib/schemas'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
@@ -155,6 +156,7 @@ export function LoadDrawer() {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { loads, addLoad, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
+  const { user } = useAuth()
 
   const load         = loads.find((l) => l.id === selectedLoadId)
   const isOpen       = drawerMode !== null
@@ -254,20 +256,30 @@ export function LoadDrawer() {
 
   const onClose = () => setSelectedLoad(null)
 
-  const onSubmit = (values: LoadFormValues) => {
+  const onSubmit = async (values: LoadFormValues) => {
     const toIso = (s: string, t: ApptType) => t === 'fcfs' ? fromDateInput(s) : fromDateTimeInput(s)
+    const userEmail = user?.email ?? 'dispatch'
     const payload = {
       ...values,
       pickupAppt:      toIso(values.pickupAppt, values.pickupApptType),
       pickupApptEnd:   values.pickupApptType === 'range' && values.pickupApptEnd ? fromDateTimeInput(values.pickupApptEnd) : undefined,
       deliveryAppt:    toIso(values.deliveryAppt, values.deliveryApptType),
       deliveryApptEnd: values.deliveryApptType === 'range' && values.deliveryApptEnd ? fromDateTimeInput(values.deliveryApptEnd) : undefined,
-      createdBy: 'dispatch@bcat.local',
-      updatedBy: 'dispatch@bcat.local',
+      createdBy: userEmail,
+      updatedBy: userEmail,
     }
-    if (isCreate) { addLoad(payload); toast.success('Load created') }
-    else if (load) { updateLoad(load.id, payload); toast.success('Load updated') }
-    onClose()
+    try {
+      if (isCreate) {
+        await addLoad(payload)
+        toast.success('Load created')
+      } else if (load) {
+        await updateLoad(load.id, payload)
+        toast.success('Load updated')
+      }
+      onClose()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save load')
+    }
   }
 
   const handleDelete = () => {

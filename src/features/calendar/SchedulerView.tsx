@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent,
 } from '@/components/ui/dropdown-menu'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -455,10 +456,32 @@ export function SchedulerView({
             <DropdownMenuTrigger asChild>
               <div className="size-0" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuContent align="start" className="w-52">
               <DropdownMenuItem onClick={() => { setSelectedLoad(ctxLoad!.id, 'edit'); setContextMenu(null) }}>
                 Edit load
               </DropdownMenuItem>
+
+              {/* Assign Pickup Driver submenu */}
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Assign Pickup Driver</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-44 max-h-64 overflow-y-auto">
+                  <DropdownMenuItem
+                    onClick={() => { updateLoad(ctxLoad!.id, { pickupDriverId: null, deliveryDriverId: null }); setContextMenu(null) }}
+                  >
+                    Unassigned
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {drivers.filter((d) => d.active).map((d) => (
+                    <DropdownMenuItem
+                      key={d.id}
+                      onClick={() => { updateLoad(ctxLoad!.id, { pickupDriverId: d.id, deliveryDriverId: d.id }); setContextMenu(null) }}
+                    >
+                      {d.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
               <DropdownMenuItem onClick={ctxMarkRTI}>
                 {ctxLoad?.readyToInvoice ? 'Mark not ready' : 'Mark ready to invoice'}
               </DropdownMenuItem>
