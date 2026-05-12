@@ -57,6 +57,7 @@ const schema = a.schema({
       action:   a.string().required(),
       email:    a.string(),
       username: a.string(),
+      pages:    a.string(),
     })
     .returns(a.json())
     .authorization((allow) => [allow.group('ADMIN')])

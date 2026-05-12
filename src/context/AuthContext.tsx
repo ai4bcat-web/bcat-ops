@@ -18,6 +18,7 @@ interface AuthContextValue {
   completeNewPassword: (newPassword: string) => Promise<void>
   logout: () => Promise<void>
   isAdmin: boolean
+  hasPageAccess: (pageKey: string) => boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -74,6 +75,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsNewPassword(false)
   }, [])
 
+  const isAdmin = user?.groups.includes('ADMIN') ?? false
+
   return (
     <AuthContext.Provider value={{
       user,
@@ -82,7 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       completeNewPassword,
       logout,
-      isAdmin: user?.groups.includes('ADMIN') ?? false,
+      isAdmin,
+      hasPageAccess: (pageKey: string) =>
+        isAdmin || (user?.groups.includes(`page-${pageKey}`) ?? false),
     }}>
       {children}
     </AuthContext.Provider>

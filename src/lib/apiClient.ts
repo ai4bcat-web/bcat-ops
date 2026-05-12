@@ -177,6 +177,24 @@ export async function enableCognitoUser(username: string): Promise<void> {
   })
 }
 
+export async function getUserGroups(username: string): Promise<string[]> {
+  const result = await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String) { manageUsers(action: $action, username: $username) }`,
+    variables: { action: 'getGroups', username },
+  }) as { data: { manageUsers: unknown } }
+  const raw = result.data.manageUsers
+  if (Array.isArray(raw)) return raw as string[]
+  if (typeof raw === 'string') return JSON.parse(raw) as string[]
+  return []
+}
+
+export async function setUserPageGroups(username: string, pages: string[]): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $pages: String) { manageUsers(action: $action, username: $username, pages: $pages) }`,
+    variables: { action: 'setPageGroups', username, pages: JSON.stringify(pages) },
+  })
+}
+
 // ── S3 rate confirmations ─────────────────────────────────────────────────────
 
 export async function uploadRateConfirm(loadId: string, file: File): Promise<string> {

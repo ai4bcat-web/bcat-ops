@@ -11,15 +11,15 @@ import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
-  { to: '/',         label: 'Calendar',  icon: CalendarDays  },
-  { to: '/grid',     label: 'Load Grid', icon: Table2        },
-  { to: '/drivers',  label: 'Drivers',   icon: Users         },
-  { to: '/schedule', label: 'Schedules', icon: MessageSquare },
-  { to: '/audit',    label: 'Audit Log', icon: History       },
+  { to: '/',         label: 'Calendar',  icon: CalendarDays,  pageKey: 'calendar'  },
+  { to: '/grid',     label: 'Load Grid', icon: Table2,        pageKey: 'grid'      },
+  { to: '/drivers',  label: 'Drivers',   icon: Users,         pageKey: 'drivers'   },
+  { to: '/schedule', label: 'Schedules', icon: MessageSquare, pageKey: 'schedule'  },
+  { to: '/audit',    label: 'Audit Log', icon: History,       pageKey: 'audit'     },
 ]
 
 export function NavBar() {
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, hasPageAccess } = useAuth()
 
   return (
     <header className="h-14 shrink-0 flex items-center gap-3 px-6 bg-background border-b border-border">
@@ -35,7 +35,7 @@ export function NavBar() {
 
       {/* Nav links */}
       <nav className="flex items-center gap-0.5 min-w-0">
-        {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
+        {NAV_ITEMS.filter(({ pageKey }) => hasPageAccess(pageKey)).map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} end={to === '/'}>
             {({ isActive }) => (
               <span
