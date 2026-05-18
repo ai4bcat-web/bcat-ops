@@ -37,16 +37,11 @@ export function CalendarPage() {
   const calendarRef = useRef<FullCalendar>(null)
 
   // Local state for toolbar — FC is the source of truth for dates/view after init
-  const [currentView, setCurrentView] = useState<ViewMode>(
-    ALL_VIEW_MODES.includes(viewMode) ? viewMode : 'compact'
-  )
+  const [currentView, setCurrentView] = useState<ViewMode>('compact')
   const [dateLabel, setDateLabel] = useState('')
 
   // Compact view has its own week state (not driven by FullCalendar)
-  const [compactWeek, setCompactWeek] = useState<Date>(() => {
-    const d = weekStart ? new Date(weekStart) : new Date()
-    return getMondayOf(isNaN(d.getTime()) ? new Date() : d)
-  })
+  const [compactWeek, setCompactWeek] = useState<Date>(() => getMondayOf(new Date()))
 
   const compactDateLabel = useMemo(() => {
     const end = addDays(compactWeek, 6)
