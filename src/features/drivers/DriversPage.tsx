@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check } from 'lucide-react'
+import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP, getColor } from '@/lib/driverColors'
@@ -137,13 +138,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
       // Log the raw error so GraphQL error objects are visible in the console
       console.error('Driver save error:', err)
       // @aws-amplify/data throws { errors: [...] } (not Error instances) for GraphQL errors
-      const gqlErrors = (err as { errors?: { message: string }[] })?.errors
-      const msg = Array.isArray(gqlErrors)
-        ? gqlErrors.map((e) => e.message).join('; ')
-        : err instanceof Error
-          ? err.message
-          : 'Failed to save driver'
-      toast.error(msg)
+      toast.error(errorMessage(err))
     }
   }
 

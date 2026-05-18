@@ -5,6 +5,7 @@ import type { Truck } from '@/types/truck'
 import type { Expense } from '@/types/expense'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
+import { errorMessage } from '@/lib/utils/errorMessage'
 
 // ── Truck seed data ────────────────────────────────────────────────────────────
 const SEED_TRUCKS: Truck[] = [
@@ -174,7 +175,8 @@ export const useAppStore = create<AppState>()(
           ])
           set({ loads, drivers, auditLog, isLoading: false })
         } catch (err) {
-          set({ isLoading: false, error: String(err) })
+          console.error('[store] initializeData failed', err)
+          set({ isLoading: false, error: errorMessage(err) })
         }
       },
 

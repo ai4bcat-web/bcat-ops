@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, Upload, X, FileImage } from 'lucide-react'
@@ -278,7 +279,8 @@ export function LoadDrawer() {
       }
       onClose()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save load')
+      console.error('Load save error:', err)
+      toast.error(errorMessage(err))
     }
   }
 

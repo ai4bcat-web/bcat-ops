@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { errorMessage } from '@/lib/utils/errorMessage'
 import { Users, Plus, UserCheck, UserX, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Loader2, KeyRound, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -240,6 +241,7 @@ export function UsersPage() {
   const [users, setUsers] = useState<CognitoUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [rawError, setRawError] = useState<unknown>(null)
   const [newEmail, setNewEmail] = useState('')
   const [creating, setCreating] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
@@ -257,13 +259,18 @@ export function UsersPage() {
   const loadUsers = useCallback(async () => {
     setLoading(true)
     setError(null)
+    setRawError(null)
     try {
       const list = await listCognitoUsers()
       setUsers(Array.isArray(list) ? list : [])
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err)
-      setError(msg)
-      toast.error(`Failed to load users: ${msg}`)
+      console.error('[users] fetch failed', {
+        error: err,
+        errorMessage: errorMessage(err),
+      })
+      setRawError(err)
+      setError(errorMessage(err))
+      toast.error(`Failed to load users: ${errorMessage(err)}`)
     } finally {
       setLoading(false)
     }
@@ -283,7 +290,7 @@ export function UsersPage() {
       setNewEmail('')
       await loadUsers()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to send invite')
+      toast.error(errorMessage(err))
     } finally {
       setCreating(false)
     }
@@ -301,7 +308,7 @@ export function UsersPage() {
       }
       await loadUsers()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update user')
+      toast.error(errorMessage(err))
     } finally {
       setTogglingId(null)
     }
@@ -314,7 +321,7 @@ export function UsersPage() {
       await resetCognitoPassword(user.username)
       toast.success(`Password reset email sent to ${user.email}`)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Failed to reset password')
+      toast.error(errorMessage(err))
     } finally {
       setResettingId(null)
     }
@@ -407,15 +414,25 @@ export function UsersPage() {
           </h2>
 
           {error && (
-            <div className="flex items-center gap-3 rounded-xl border border-destructive/30 bg-red-50 px-5 py-4">
-              <AlertTriangle className="size-4 text-destructive shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-destructive font-medium">Failed to load users</p>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{error}</p>
+            <div className="rounded-xl border border-destructive/30 bg-red-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="size-4 text-destructive shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-destructive font-medium">Failed to load users</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{error}</p>
+                </div>
+                <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={loadUsers}>
+                  Retry
+                </Button>
               </div>
-              <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={loadUsers}>
-                Retry
-              </Button>
+              {import.meta.env.DEV && (
+                <details className="mt-3 text-xs text-slate-500">
+                  <summary className="cursor-pointer select-none font-medium">Error details (dev only)</summary>
+                  <pre className="mt-2 whitespace-pre-wrap break-all bg-white/70 border border-slate-200 p-2 rounded text-[11px] leading-relaxed">
+                    {JSON.stringify(rawError, null, 2)}
+                  </pre>
+                </details>
+              )}
             </div>
           )}
 
