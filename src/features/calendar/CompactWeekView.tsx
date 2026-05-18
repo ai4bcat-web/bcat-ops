@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from 'react'
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
 import type { Load, Driver } from '@/types'
 import {
   getFullWeek, chicagoDateStr, formatApptTime, formatDateTime, formatDayHeader,
@@ -8,6 +8,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CheckCircle2, ArrowRight } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useLoads } from '@/hooks/useLoads'
 import { cn } from '@/lib/utils'
 
 // ── Compact card ──────────────────────────────────────────────────────────────
@@ -27,7 +28,29 @@ function initials(name: string) {
 
 function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReorder }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const { updateLoad } = useLoads()
   const [pickingOrder, setPickingOrder] = useState(false)
+  const [pickingDriver, setPickingDriver] = useState(false)
+  const driverPickerRef = useRef<HTMLDivElement>(null)
+
+  // Close driver picker on outside click
+  useEffect(() => {
+    if (!pickingDriver) return
+    const handler = (e: MouseEvent) => {
+      if (driverPickerRef.current && !driverPickerRef.current.contains(e.target as Node)) {
+        setPickingDriver(false)
+      }
+    }
+    setTimeout(() => window.addEventListener('mousedown', handler), 0)
+    return () => window.removeEventListener('mousedown', handler)
+  }, [pickingDriver])
+
+  const assignDriver = (driverId: string | null) => {
+    updateLoad(load.id, { pickupDriverId: driverId, deliveryDriverId: driverId })
+    setPickingDriver(false)
+  }
+
+  const activeDrivers = drivers.filter((d) => d.active).sort((a, b) => a.name.localeCompare(b.name))
 
   const isRTI      = load.readyToInvoice
   const isConflict = conflictIds.has(load.id)
@@ -59,7 +82,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
       }}
-      onClick={() => { if (!pickingOrder) setSelectedLoad(load.id, 'view') }}
+      onClick={() => { if (!pickingOrder && !pickingDriver) setSelectedLoad(load.id, 'view') }}
     >
       {/* Main row: left content + right column (badge above avatar) */}
       <div className="flex items-start gap-1 min-w-0">
@@ -130,26 +153,72 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
               {orderNumber}
             </span>
           )}
-          {/* Avatar(s) */}
-          <div className="flex items-center">
-            <Avatar
-              src={pickupDriver?.photoUrl}
-              initials={initials(pickupDriverName)}
-              size="xs"
-              className="shrink-0"
-              style={{ background: borderColor, color: '#fff' }}
-            />
-            {isSplit && deliveryDriver && (
-              <Avatar
-                src={deliveryDriver.photoUrl}
-                initials={initials(deliveryDriverName)}
-                size="xs"
-                className="shrink-0 -ml-1"
-                style={{ background: deliveryColor.border, color: '#fff' }}
-              />
+          {/* Avatar(s) or Unassigned link — click to reassign */}
+          <div className="relative" ref={driverPickerRef}>
+            {isAssigned ? (
+              <div
+                className="flex items-center cursor-pointer hover:opacity-75 transition-opacity"
+                onClick={(e) => { e.stopPropagation(); setPickingDriver(true) }}
+                title="Click to reassign driver"
+              >
+                <Avatar
+                  src={pickupDriver?.photoUrl}
+                  initials={initials(pickupDriverName)}
+                  size="xs"
+                  className="shrink-0"
+                  style={{ background: borderColor, color: '#fff' }}
+                />
+                {isSplit && deliveryDriver && (
+                  <Avatar
+                    src={deliveryDriver.photoUrl}
+                    initials={initials(deliveryDriverName)}
+                    size="xs"
+                    className="shrink-0 -ml-1"
+                    style={{ background: deliveryColor.border, color: '#fff' }}
+                  />
+                )}
+              </div>
+            ) : (
+              <button
+                className="text-[9px] font-semibold text-amber-500 underline underline-offset-1 hover:text-amber-600 leading-none"
+                onClick={(e) => { e.stopPropagation(); setPickingDriver(true) }}
+              >
+                Unassigned
+              </button>
             )}
-            {!isAssigned && (
-              <span className="text-[10px] font-bold text-amber-500 leading-none">!</span>
+
+            {/* Driver picker dropdown */}
+            {pickingDriver && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-lg shadow-xl border border-slate-200 py-1 min-w-[150px] max-h-52 overflow-y-auto">
+                <button
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-slate-500 hover:bg-slate-50 flex items-center gap-2"
+                  onClick={(e) => { e.stopPropagation(); assignDriver(null) }}
+                >
+                  <span className="size-5 rounded-full bg-amber-100 border border-amber-300 flex items-center justify-center text-[9px] font-bold text-amber-500 shrink-0">?</span>
+                  Unassigned
+                </button>
+                <div className="border-t border-slate-100 my-0.5" />
+                {activeDrivers.map((d) => {
+                  const dc = d.colorKey ? getColor(d.colorKey) : UNASSIGNED_COLOR
+                  const isCurrent = d.id === load.pickupDriverId
+                  return (
+                    <button
+                      key={d.id}
+                      className={cn('w-full text-left px-3 py-1.5 text-[11px] hover:bg-slate-50 flex items-center gap-2', isCurrent && 'font-semibold')}
+                      onClick={(e) => { e.stopPropagation(); assignDriver(d.id) }}
+                    >
+                      <span
+                        className="size-5 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0"
+                        style={{ background: dc.avatarBg, color: dc.border, border: `1px solid ${dc.border}` }}
+                      >
+                        {initials(d.name)}
+                      </span>
+                      {d.name}
+                      {isCurrent && <span className="ml-auto text-slate-400">✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
         </div>
@@ -157,7 +226,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
     </div>
   )
 
-  if (pickingOrder) return <div>{card}</div>
+  if (pickingOrder || pickingDriver) return <div>{card}</div>
 
   return (
     <Tooltip delayDuration={400}>
