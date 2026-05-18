@@ -19,7 +19,6 @@ const LOAD_FIELDS = `
 
 const DRIVER_FIELDS = `
   id name phone active type colorKey notes photoKey assignedTruckId
-  email cdl cdlExpiration medCardExpiration drugTestDate hireDate driverType
   createdAt updatedAt
 `
 
