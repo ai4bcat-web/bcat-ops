@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock } from 'lucide-react'
+import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock, ExternalLink } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -25,7 +25,6 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
 import { formatPhone } from '@/lib/utils'
-import { formatDateTime } from '@/lib/date'
 import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
@@ -90,7 +89,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, driverFileUrl: '' },
   })
 
   const watchType = watch('type')
@@ -107,9 +106,10 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
             email: driver.email ?? '', cdl: driver.cdl ?? '',
             cdlExpiration: driver.cdlExpiration ?? '', medCardExpiration: driver.medCardExpiration ?? '',
             drugTestDate: driver.drugTestDate ?? '', hireDate: driver.hireDate ?? '',
-            driverType: (driver.driverType as 'company' | 'owner_op' | undefined),
+            driverType: (driver.driverType || undefined) as 'company' | 'owner_op' | undefined,
+            driverFileUrl: driver.driverFileUrl ?? '',
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, driverFileUrl: '' })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -353,6 +353,10 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5 col-span-2">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Driver File URL</Label>
+                <Input {...register('driverFileUrl')} placeholder="https://drive.google.com/…" className="h-9" type="url" />
+              </div>
+              <div className="space-y-1.5 col-span-2">
                 <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email</Label>
                 <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
               </div>
@@ -547,6 +551,7 @@ export function DriversPage() {
                 <TableHead className="min-w-[110px]">Med Card Exp</TableHead>
                 <TableHead className="min-w-[110px]">Drug Test</TableHead>
                 <TableHead className="min-w-[110px]">Hire Date</TableHead>
+                <TableHead className="min-w-[100px]">Driver File</TableHead>
                 <TableHead className="min-w-[180px]">Notes</TableHead>
                 <TableHead className="w-20" />
               </TableRow>
@@ -610,6 +615,13 @@ export function DriversPage() {
                         ? <span className="text-xs font-mono text-muted-foreground">{driver.hireDate}</span>
                         : <span className="text-muted-foreground/40 text-xs">—</span>}
                     </TableCell>
+                    <TableCell>
+                      {driver.driverFileUrl
+                        ? <a href={driver.driverFileUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline font-medium">
+                            <ExternalLink className="size-3 shrink-0" />View
+                          </a>
+                        : <span className="text-muted-foreground/40 text-xs">—</span>}
+                    </TableCell>
                     <TableCell className="text-muted-foreground text-xs max-w-[180px] truncate">
                       {driver.notes || '—'}
                     </TableCell>
@@ -644,7 +656,7 @@ export function DriversPage() {
               })}
               {sorted.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={11} className="py-12 text-center text-muted-foreground text-sm">
+                  <TableCell colSpan={12} className="py-12 text-center text-muted-foreground text-sm">
                     {drivers.length === 0 ? 'No drivers yet. Add one to get started.' : 'No drivers match your filter.'}
                   </TableCell>
                 </TableRow>

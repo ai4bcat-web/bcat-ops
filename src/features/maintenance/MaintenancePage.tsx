@@ -7,10 +7,10 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
 import {
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Trash2, Pencil, X, Plus,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Trash2, Pencil, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { MaintenanceTask, MaintenanceInvoice, TaskPriority, TaskStatus } from '@/types/equipment'
+import type { MaintenanceTask, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

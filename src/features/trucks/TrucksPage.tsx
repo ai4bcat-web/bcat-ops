@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,8 +29,17 @@ function expiryState(dateStr?: string): ExpiryState {
   return 'ok'
 }
 
-function ExpiryBadge({ date, label }: { date?: string; label: string }) {
-  const state = expiryState(date)
+// DOT inspection uses a past-based threshold: red if > 1 year ago, amber if > 11 months ago
+function dotInspectionState(dateStr?: string): ExpiryState {
+  if (!dateStr) return 'none'
+  const daysSince = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000)
+  if (daysSince >= 365) return 'overdue'
+  if (daysSince >= 335) return 'expiring'
+  return 'ok'
+}
+
+function ExpiryBadge({ date, label, stateFn = expiryState }: { date?: string; label: string; stateFn?: (d?: string) => ExpiryState }) {
+  const state = stateFn(date)
   if (state === 'none') return <span className="text-xs text-slate-400">—</span>
   const styles: Record<ExpiryState, string> = {
     overdue:  'bg-red-50 text-red-700 border-red-200',
@@ -52,8 +60,8 @@ function ExpiryBadge({ date, label }: { date?: string; label: string }) {
   )
 }
 
-function DateCell({ date }: { date?: string }) {
-  const state = expiryState(date)
+function DateCell({ date, stateFn = expiryState }: { date?: string; stateFn?: (d?: string) => ExpiryState }) {
+  const state = stateFn(date)
   if (state === 'none') return <span className="text-muted-foreground/40 text-xs">—</span>
   const cls = state === 'overdue' ? 'text-red-600 font-semibold' : state === 'expiring' ? 'text-amber-600 font-semibold' : 'text-emerald-700'
   const icon = state === 'overdue' ? <AlertTriangle className="size-3 shrink-0" /> : state === 'expiring' ? <Clock className="size-3 shrink-0" /> : null
@@ -479,7 +487,7 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Compliance</p>
         <div className="flex flex-wrap gap-2">
-          <ExpiryBadge date={equip.dotInspectionDate}       label="DOT" />
+          <ExpiryBadge date={equip.dotInspectionDate}       label="DOT" stateFn={dotInspectionState} />
           <ExpiryBadge date={equip.insuranceExpirationDate} label="Insurance" />
           {isTruck && <ExpiryBadge date={equip.iftaExpirationDate} label="IFTA" />}
           {isTruck && <ExpiryBadge date={equip.irpExpirationDate}  label="IRP" />}
@@ -640,11 +648,6 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, onEdit, onDelet
   const repairSpend   = invoices.reduce((s, i) => s + i.amount, 0)
   const isTruck       = equip.type === 'truck'
 
-  const hasAlert = [
-    equip.dotInspectionDate, equip.insuranceExpirationDate,
-    equip.iftaExpirationDate, equip.irpExpirationDate, equip.bobtailInsuranceDate,
-  ].some((d) => expiryState(d) === 'overdue' || expiryState(d) === 'expiring')
-
   return (
     <>
       <TableRow
@@ -679,7 +682,7 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, onEdit, onDelet
         </TableCell>
 
         {/* DOT Inspection */}
-        <TableCell className="py-3"><DateCell date={equip.dotInspectionDate} /></TableCell>
+        <TableCell className="py-3"><DateCell date={equip.dotInspectionDate} stateFn={dotInspectionState} /></TableCell>
 
         {/* IFTA */}
         <TableCell className="py-3">
@@ -807,10 +810,11 @@ export function TrucksPage() {
 
   const trucks   = equipment.filter((e) => e.type === 'truck')
   const trailers = equipment.filter((e) => e.type === 'trailer')
-  const alertCount = equipment.filter((e) => {
-    return [e.dotInspectionDate, e.insuranceExpirationDate, e.iftaExpirationDate, e.irpExpirationDate, e.bobtailInsuranceDate]
+  const alertCount = equipment.filter((e) =>
+    ['overdue', 'expiring'].includes(dotInspectionState(e.dotInspectionDate)) ||
+    [e.insuranceExpirationDate, e.iftaExpirationDate, e.irpExpirationDate, e.bobtailInsuranceDate]
       .some((d) => expiryState(d) === 'overdue' || expiryState(d) === 'expiring')
-  }).length
+  ).length
 
   function handleSave(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) {
     if (showForm && showForm !== 'new') {
