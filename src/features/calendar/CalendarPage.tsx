@@ -38,7 +38,7 @@ export function CalendarPage() {
 
   // Local state for toolbar — FC is the source of truth for dates/view after init
   const [currentView, setCurrentView] = useState<ViewMode>(
-    ALL_VIEW_MODES.includes(viewMode) ? viewMode : 'week'
+    ALL_VIEW_MODES.includes(viewMode) ? viewMode : 'compact'
   )
   const [dateLabel, setDateLabel] = useState('')
 

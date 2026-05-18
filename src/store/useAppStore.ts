@@ -433,7 +433,7 @@ export const useAppStore = create<AppState>()(
       maintenanceInvoices: SEED_INVOICES,
       expenses: SEED_EXPENSES,
 
-      viewMode: 'week' as ViewMode,
+      viewMode: 'compact' as ViewMode,
       weekStart: initWeekStart(),
       selectedLoadId: null,
       drawerMode: null,

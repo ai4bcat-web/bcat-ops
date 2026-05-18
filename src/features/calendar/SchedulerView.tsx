@@ -433,6 +433,7 @@ export function SchedulerView({
             slotDuration: '01:00:00',
             slotLabelFormat: [{ hour: 'numeric', meridiem: 'short' }],
             snapDuration: '01:00:00',
+            scrollTime: '06:00:00',
           },
         }}
         resourceLabelContent={renderResourceLabel as never}
