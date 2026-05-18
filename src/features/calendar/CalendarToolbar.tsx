@@ -28,9 +28,21 @@ const VIEW_LABELS: Record<ViewMode, string> = {
 const VIEW_ORDER: ViewMode[] = ['day', 'work-week', 'full-week', 'two-week', 'month']
 
 const FILTER_CHIPS = [
-  { key: 'readyToInvoice', label: 'RTI' },
-  { key: 'split',          label: 'Split' },
-  { key: 'unassigned',     label: 'Unassigned' },
+  {
+    key: 'readyToInvoice', label: 'RTI',
+    active:   'bg-emerald-50 border-emerald-300 text-emerald-700',
+    inactive: 'border-slate-200 text-slate-500 hover:border-emerald-200 hover:text-emerald-600 hover:bg-emerald-50/50',
+  },
+  {
+    key: 'split', label: 'Split',
+    active:   'bg-violet-50 border-violet-300 text-violet-700',
+    inactive: 'border-slate-200 text-slate-500 hover:border-violet-200 hover:text-violet-600 hover:bg-violet-50/50',
+  },
+  {
+    key: 'unassigned', label: 'Unassigned',
+    active:   'bg-amber-50 border-amber-300 text-amber-700',
+    inactive: 'border-slate-200 text-slate-500 hover:border-amber-200 hover:text-amber-600 hover:bg-amber-50/50',
+  },
 ] as const
 
 export function CalendarToolbar({
@@ -121,31 +133,26 @@ export function CalendarToolbar({
         {/* Filter chips */}
         <div className="flex items-center gap-1.5 shrink-0">
           {anyFilter && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-xs text-muted-foreground gap-1"
+            <button
               aria-label="Clear all filters"
               onClick={() => {
                 setSearchQuery('')
                 FILTER_CHIPS.forEach(({ key }) => { if (filters[key]) toggleFilter(key) })
               }}
+              className="h-6 px-2 text-[11px] font-medium text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors"
             >
               <X className="size-3" /> Clear
-            </Button>
+            </button>
           )}
-          {FILTER_CHIPS.map(({ key, label }) => (
+          {FILTER_CHIPS.map(({ key, label, active, inactive }) => (
             <button
               key={key}
               onClick={() => toggleFilter(key)}
               aria-pressed={filters[key]}
               className={cn(
-                'h-7 px-3 text-xs font-semibold rounded-full border transition-all whitespace-nowrap',
-                !filters[key] && 'text-muted-foreground border-border hover:text-foreground hover:border-white/20',
+                'h-6 px-2.5 text-[11px] font-semibold rounded-full border transition-all whitespace-nowrap',
+                filters[key] ? active : inactive,
               )}
-              style={filters[key]
-                ? { background: 'rgba(30,168,243,0.08)', borderColor: 'rgba(30,168,243,0.35)', color: '#1ea8f3' }
-                : {}}
             >
               {label}
             </button>
