@@ -14,35 +14,32 @@ interface EventCardProps {
   isConflict: boolean
   isSelected: boolean
   orderNumber: number
+  onEdit: () => void
   onContextMenu: (e: React.MouseEvent) => void
 }
 
-export function EventCard({ load, drivers, color, isConflict, isSelected, orderNumber, onContextMenu }: EventCardProps) {
+export function EventCard({ load, drivers, color, isConflict, isSelected, orderNumber, onEdit, onContextMenu }: EventCardProps) {
   const isRTI = load.readyToInvoice
   const isSplit = load.pickupDriverId !== load.deliveryDriverId && load.deliveryDriverId !== null
   const isMultiDay = !isSameChicagoDay(load.pickupAppt, load.deliveryAppt)
-  const isFCFS = load.pickupApptType === 'fcfs'
 
-  const pickupDriver = drivers.find((d) => d.id === load.pickupDriverId)
+  const pickupDriver   = drivers.find((d) => d.id === load.pickupDriverId)
   const deliveryDriver = drivers.find((d) => d.id === load.deliveryDriverId)
-  const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
-  const pickupDriverName = pickupDriver?.name ?? 'Unassigned'
+  const deliveryColor  = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
+  const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  // Light-theme colors
   const borderColor = isConflict ? '#ef4444' : isRTI ? '#16a34a' : color.border
   const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? 'rgba(22,163,74,0.08)' : color.bg
   const textColor   = isRTI ? '#15803d' : color.text
 
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
-  const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
 
   const card = (
     <div
       className={cn(
-        'h-full w-full rounded-md border border-l-[3px] overflow-hidden',
-        'transition-shadow cursor-pointer',
-        'hover:shadow-lg hover:brightness-110',
+        'h-full w-full rounded-md border border-l-[3px] overflow-hidden relative',
+        'transition-shadow cursor-pointer hover:shadow-lg hover:brightness-110',
         isSelected && 'ring-2 ring-offset-1',
         isConflict && 'animate-pulse-once',
       )}
@@ -54,105 +51,85 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
       }}
       onContextMenu={onContextMenu}
     >
-      <div className="px-2 py-1.5 h-full flex flex-col justify-between gap-0.5 overflow-hidden">
+      <div className="px-2 py-1.5 h-full flex flex-col gap-0.5 overflow-hidden">
 
-        {/* Top row: order badge + time + PU# */}
-        <div className="flex items-baseline justify-between gap-1 min-w-0">
-          <div className="flex items-baseline gap-1.5 min-w-0">
-            <span
-              className="text-[10px] font-black shrink-0 size-4 rounded-full flex items-center justify-center leading-none"
-              style={{ background: borderColor, color: '#ffffff', minWidth: '16px', minHeight: '16px', lineHeight: 1 }}
-            >
-              {orderNumber}
+        {/* Row 1: ALJEX ID (primary) — or amber CTA if missing */}
+        <div className="flex items-center justify-between gap-1 min-w-0">
+          {load.aljexId ? (
+            <span className="text-xs font-bold truncate leading-tight" style={{ color: textColor }} title={load.aljexId}>
+              {load.aljexId}
             </span>
-            <span
-              className={cn('text-[11px] font-bold truncate', isFCFS && 'tracking-wide uppercase text-[10px]')}
-              style={{ color: '#111827' }}
-              title={puTime}
+          ) : (
+            <button
+              className="text-[11px] font-semibold italic truncate text-amber-600 underline underline-offset-2 hover:text-amber-700"
+              onClick={(e) => { e.stopPropagation(); onEdit() }}
             >
-              {puTime}
-            </span>
-          </div>
-          <span className="text-[10px] font-mono shrink-0" style={{ color: '#6b7280' }} title={load.pickupNumber}>
-            {load.pickupNumber}
-          </span>
-        </div>
-
-        {/* ALJEX ID */}
-        <span
-          className="text-xs font-bold truncate leading-tight"
-          style={{ color: textColor }}
-          title={load.aljexId}
-        >
-          {load.aljexId}
-        </span>
-
-        {/* Driver name + avatar */}
-        <div
-          className="flex items-center gap-1 min-w-0"
-          title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
-        >
-          <Avatar
-            src={pickupDriver?.photoUrl}
-            initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
-            size="xs"
-            className="shrink-0"
-            style={{ background: borderColor, color: '#ffffff' }}
-          />
+              Need to build
+            </button>
+          )}
           <span
-            className="text-[10px] font-semibold truncate leading-tight"
-            style={{ color: '#374151' }}
+            className="text-[9px] font-black shrink-0 rounded-full flex items-center justify-center leading-none"
+            style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px' }}
           >
-            {isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
+            {orderNumber}
           </span>
         </div>
 
-        {/* Origin name · city */}
+        {/* Row 2: TMS ID → PU# */}
+        <div className="flex items-center gap-0.5 min-w-0">
+          <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }}>{load.tmsId}</span>
+          <ArrowRight className="size-2 shrink-0" style={{ color: '#9ca3af' }} />
+          <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }}>{load.pickupNumber}</span>
+        </div>
+
+        {/* Origin */}
         {(load.originName || load.originCity) && (
-          <div
-            className="text-[10px] leading-tight truncate font-medium"
-            style={{ color: '#374151' }}
-            title={[load.originName, load.originCity].filter(Boolean).join(' · ')}
-          >
+          <div className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}
+            title={[load.originName, load.originCity].filter(Boolean).join(' · ')}>
             {load.originName}
             {load.originCity && <span style={{ color: '#6b7280' }}> · {load.originCity}</span>}
           </div>
         )}
 
-        {/* Destination name · city */}
+        {/* Destination */}
         {(load.destinationName || load.destinationCity) && (
-          <div className="flex items-center gap-0.5 min-w-0" title={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')}>
-            <ArrowRight className="size-2.5 shrink-0" style={{ color: '#2563eb' }} />
-            <span
-              className="text-[10px] leading-tight truncate font-medium"
-              style={{ color: '#374151' }}
-            >
+          <div className="flex items-center gap-0.5 min-w-0"
+            title={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')}>
+            <ArrowRight className="size-2 shrink-0" style={{ color: '#2563eb' }} />
+            <span className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}>
               {load.destinationName}
               {load.destinationCity && <span style={{ color: '#6b7280' }}> · {load.destinationCity}</span>}
             </span>
           </div>
         )}
 
-        {/* Bottom: TMS ID + delivery time */}
-        <div className="flex items-center gap-0.5 min-w-0">
-          <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }} title={load.tmsId}>{load.tmsId}</span>
-          <ArrowRight className="size-2.5 shrink-0" style={{ color: '#2563eb' }} />
-          <span className="text-[10px] truncate font-medium" style={{ color: '#374151' }} title={deTime}>{deTime}</span>
+        <div className="flex-1" />
+
+        {/* Bottom row: time (left) · RTI icon + driver avatar + name (right) */}
+        <div className="flex items-center justify-between gap-1 min-w-0">
+          <span className="text-[10px] shrink-0 tabular-nums" style={{ color: '#6b7280' }}>{puTime}</span>
+          <div className="flex items-center gap-1 min-w-0 overflow-hidden"
+            title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}>
+            {isRTI && <CheckCircle2 className="size-3 text-emerald-600 shrink-0" />}
+            <Avatar
+              src={pickupDriver?.photoUrl}
+              initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
+              size="xs"
+              className="shrink-0"
+              style={{ background: borderColor, color: '#ffffff' }}
+            />
+            <span className="text-[10px] font-medium truncate" style={{ color: '#374151' }}>
+              {isSplit ? `${pickupDriverName}→${deliveryDriverName}` : pickupDriverName}
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Top-right badges: conflict + multi-day */}
-      <div className="absolute top-1 right-1 flex items-center gap-0.5">
+      {/* Top-right: conflict + multi-day badges */}
+      <div className="absolute top-1 right-1 flex items-center gap-0.5 pointer-events-none">
         {isConflict && <AlertTriangle className="size-3 text-red-500" />}
-        {isMultiDay && <Clock         className="size-3" style={{ color: '#9ca3af' }} />}
+        {isMultiDay  && <Clock className="size-3" style={{ color: '#9ca3af' }} />}
       </div>
-
-      {/* Bottom-right: RTI checkmark */}
-      {isRTI && (
-        <div className="absolute bottom-1 right-1">
-          <CheckCircle2 className="size-3.5 text-emerald-600" />
-        </div>
-      )}
     </div>
   )
 

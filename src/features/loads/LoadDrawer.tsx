@@ -147,9 +147,18 @@ function ApptFields({
       )}
 
       {type === 'tbd' && (
-        <p className="text-xs text-muted-foreground italic">
-          Appointment to be determined — no date required.
-        </p>
+        <div>
+          <Input
+            type="date"
+            className="h-9 text-sm"
+            value={startField.value.slice(0, 10)}
+            onChange={(e) => startField.onChange(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Exact time TBD — select the date so the load appears on the calendar.
+          </p>
+          {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
+        </div>
       )}
     </div>
   )
@@ -198,10 +207,10 @@ export function LoadDrawer() {
         destinationName: load.destinationName ?? '',
         destinationCity: load.destinationCity ?? '',
         pickupApptType:   (load.pickupApptType   ?? 'exact') as ApptType,
-        pickupAppt:       load.pickupApptType === 'tbd' ? 'TBD' : load.pickupApptType === 'fcfs' ? formatDateInput(load.pickupAppt) : formatDateTimeInput(load.pickupAppt),
+        pickupAppt:       (load.pickupApptType === 'tbd' || load.pickupApptType === 'fcfs') ? formatDateInput(load.pickupAppt) : formatDateTimeInput(load.pickupAppt),
         pickupApptEnd:    load.pickupApptEnd ? formatDateTimeInput(load.pickupApptEnd) : '',
         deliveryApptType: (load.deliveryApptType ?? 'exact') as ApptType,
-        deliveryAppt:     load.deliveryApptType === 'tbd' ? 'TBD' : load.deliveryApptType === 'fcfs' ? formatDateInput(load.deliveryAppt) : formatDateTimeInput(load.deliveryAppt),
+        deliveryAppt:     (load.deliveryApptType === 'tbd' || load.deliveryApptType === 'fcfs') ? formatDateInput(load.deliveryAppt) : formatDateTimeInput(load.deliveryAppt),
         deliveryApptEnd:  load.deliveryApptEnd ? formatDateTimeInput(load.deliveryApptEnd) : '',
         pickupDriverId:   load.pickupDriverId,
         deliveryDriverId: load.deliveryDriverId,
@@ -265,7 +274,7 @@ export function LoadDrawer() {
   const onClose = () => setSelectedLoad(null)
 
   const onSubmit = async (values: LoadFormValues) => {
-    const toIso = (s: string, t: ApptType) => t === 'tbd' ? 'TBD' : t === 'fcfs' ? fromDateInput(s) : fromDateTimeInput(s)
+    const toIso = (s: string, t: ApptType) => (t === 'tbd' || t === 'fcfs') ? fromDateInput(s.slice(0, 10)) : fromDateTimeInput(s)
     const userEmail = user?.email ?? 'dispatch'
     const payload = {
       ...values,
@@ -377,7 +386,7 @@ export function LoadDrawer() {
                     <Controller name="pickupApptEnd" control={control} render={({ field: ef }) => (
                       <ApptFields
                         label="Pickup"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (v === 'tbd') sf.onChange('TBD'); else if (tf.value === 'tbd') sf.onChange('') } }}
+                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
                         startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                         endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                         startError={errors.pickupAppt?.message}
@@ -397,7 +406,7 @@ export function LoadDrawer() {
                     <Controller name="deliveryApptEnd" control={control} render={({ field: ef }) => (
                       <ApptFields
                         label="Delivery"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (v === 'tbd') sf.onChange('TBD'); else if (tf.value === 'tbd') sf.onChange('') } }}
+                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
                         startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                         endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                         startError={errors.deliveryAppt?.message}

@@ -152,6 +152,7 @@ export function SchedulerView({
         isConflict={conflictIds.has(load.id)}
         isSelected={selectedIds.has(load.id)}
         orderNumber={loadOrderMap.get(load.id) ?? 1}
+        onEdit={() => setSelectedLoad(load.id, 'edit')}
         onContextMenu={(e) => {
           e.preventDefault()
           setContextMenu({ x: e.clientX, y: e.clientY, load })
