@@ -10,6 +10,7 @@ export interface Driver {
   notes?: string
   photoKey?: string  // S3 key for driver photo
   photoUrl?: string  // client-side: resolved presigned URL
+  assignedTruckId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -35,6 +36,11 @@ export interface Load {
   deliveryDriverId: string | null
   readyToInvoice: boolean
   rateConfirmUrl?: string   // base64 data URL of rate confirmation image
+  // Extended fields (nullable — populated as data becomes available)
+  truckId?: string | null
+  rate?: number | null      // total load revenue in cents
+  miles?: number | null     // load distance
+  customer?: string | null  // customer/broker name
   createdAt: string
   updatedAt: string
   createdBy: string
@@ -54,4 +60,4 @@ export interface AuditLogEntry {
   createdAt: string
 }
 
-export type ViewMode = 'work-week' | 'full-week' | 'two-week' | 'day' | 'month'
+export type ViewMode = 'day' | 'week' | 'two-week' | 'month'

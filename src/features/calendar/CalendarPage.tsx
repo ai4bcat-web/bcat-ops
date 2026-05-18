@@ -13,11 +13,10 @@ import { formatDateShort } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
 const FC_VIEW_NAMES: Record<ViewMode, string> = {
-  'day': 'resourceTimelineDay',
-  'work-week': 'resourceTimelineWorkWeek',
-  'full-week': 'resourceTimelineWeek',
+  'day':      'resourceTimelineDay',
+  'week':     'resourceTimelineWorkWeek',
   'two-week': 'resourceTimeline2Weeks',
-  'month': 'resourceTimelineMonth',
+  'month':    'resourceTimelineMonth',
 }
 
 export function CalendarPage() {
@@ -33,7 +32,10 @@ export function CalendarPage() {
   const calendarRef = useRef<FullCalendar>(null)
 
   // Local state for toolbar — FC is the source of truth for dates/view after init
-  const [currentView, setCurrentView] = useState<ViewMode>(viewMode)
+  const [currentView, setCurrentView] = useState<ViewMode>(
+    // Guard against stale persisted value from old ViewMode type
+    (['day','week','two-week','month'] as ViewMode[]).includes(viewMode) ? viewMode : 'week'
+  )
   const [dateLabel, setDateLabel] = useState('')
 
   // ── Calendar API helpers ──────────────────────────────────────────────────
@@ -110,18 +112,20 @@ export function CalendarPage() {
         onViewChange={onViewChange}
       />
 
-      <CalendarErrorBoundary>
-        <SchedulerView
-          calendarRef={calendarRef}
-          loads={visibleLoads}
-          drivers={drivers}
-          conflictIds={conflictIds}
-          filterDriverId={filterDriverId}
-          viewMode={viewMode}
-          weekStart={weekStart}
-          onDatesSet={onDatesSet}
-        />
-      </CalendarErrorBoundary>
+      <div className="flex-1 overflow-hidden mx-4 mb-4 mt-3 rounded-xl border border-slate-200 shadow-sm">
+        <CalendarErrorBoundary>
+          <SchedulerView
+            calendarRef={calendarRef}
+            loads={visibleLoads}
+            drivers={drivers}
+            conflictIds={conflictIds}
+            filterDriverId={filterDriverId}
+            viewMode={viewMode}
+            weekStart={weekStart}
+            onDatesSet={onDatesSet}
+          />
+        </CalendarErrorBoundary>
+      </div>
 
       <LoadDrawer />
     </div>

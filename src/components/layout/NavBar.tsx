@@ -1,13 +1,19 @@
 import { NavLink } from 'react-router-dom'
-import { Truck, CalendarDays, Table2, Users, History, MessageSquare, LogOut, UserCog } from 'lucide-react'
+import {
+  Truck, CalendarDays, Table2, Users, History, MessageSquare, LogOut, UserCog,
+  LayoutDashboard, DollarSign,
+} from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
 const NAV_ITEMS = [
-  { to: '/',         label: 'Calendar',  icon: CalendarDays,  pageKey: 'calendar'  },
-  { to: '/grid',     label: 'Load Grid', icon: Table2,        pageKey: 'grid'      },
-  { to: '/drivers',  label: 'Drivers',   icon: Users,         pageKey: 'drivers'   },
-  { to: '/schedule', label: 'Schedules', icon: MessageSquare, pageKey: 'schedule'  },
-  { to: '/audit',    label: 'Audit Log', icon: History,       pageKey: 'audit'     },
+  { to: '/dashboard', label: 'Dashboard',  icon: LayoutDashboard, pageKey: 'dashboard' },
+  { to: '/calendar',  label: 'Calendar',   icon: CalendarDays,    pageKey: 'calendar'  },
+  { to: '/loads',     label: 'Loads',      icon: Table2,          pageKey: 'loads'     },
+  { to: '/drivers',   label: 'Drivers',    icon: Users,           pageKey: 'drivers'   },
+  { to: '/trucks',    label: 'Trucks',     icon: Truck,           pageKey: 'trucks'    },
+  { to: '/expenses',  label: 'Expenses',   icon: DollarSign,      pageKey: 'expenses'  },
+  { to: '/schedule',  label: 'Schedules',  icon: MessageSquare,   pageKey: 'schedule'  },
+  { to: '/audit-log', label: 'Audit Log',  icon: History,         pageKey: 'audit'     },
 ]
 
 export function NavBar() {
@@ -25,7 +31,6 @@ export function NavBar() {
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
             className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
           >
             <Icon size={16} style={{ flexShrink: 0 }} />

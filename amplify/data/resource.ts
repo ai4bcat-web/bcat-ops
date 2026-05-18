@@ -21,6 +21,10 @@ const schema = a.schema({
       deliveryDriverId: a.string(),
       readyToInvoice:  a.boolean().required(),
       rateConfirmKey:  a.string(),
+      truckId:         a.string(),
+      rate:            a.integer(),
+      miles:           a.integer(),
+      customer:        a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -28,13 +32,14 @@ const schema = a.schema({
 
   Driver: a
     .model({
-      name:     a.string().required(),
-      phone:    a.string().required(),
-      active:   a.boolean().required(),
-      type:     a.string(),
-      colorKey: a.string(),
-      notes:    a.string(),
-      photoKey: a.string(),
+      name:            a.string().required(),
+      phone:           a.string().required(),
+      active:          a.boolean().required(),
+      type:            a.string(),
+      colorKey:        a.string(),
+      notes:           a.string(),
+      photoKey:        a.string(),
+      assignedTruckId: a.string(),
     })
     .authorization((allow) => [allow.authenticated()]),
 
