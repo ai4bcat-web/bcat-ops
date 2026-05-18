@@ -144,7 +144,7 @@ export function CalendarToolbar({
                 !filters[key] && 'text-muted-foreground border-border hover:text-foreground hover:border-white/20',
               )}
               style={filters[key]
-                ? { background: 'rgba(74,142,239,0.15)', borderColor: 'rgba(74,142,239,0.4)', color: '#5b9bff' }
+                ? { background: 'rgba(194,65,12,0.08)', borderColor: 'rgba(194,65,12,0.35)', color: '#c2410c' }
                 : {}}
             >
               {label}
@@ -161,7 +161,7 @@ export function CalendarToolbar({
           <Input
             placeholder="Search loads…"
             className="h-8 pl-8 w-36 text-sm"
-            style={{ background: 'rgba(255,255,255,0.05)' }}
+            style={{ background: '#ffffff' }}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             aria-label="Search loads"

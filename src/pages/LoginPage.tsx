@@ -47,11 +47,11 @@ export function LoginPage() {
   return (
     <div
       className="min-h-screen flex items-center justify-center"
-      style={{ background: '#07122b' }}
+      style={{ background: '#f7f7f5' }}
     >
       <div
         className="w-full max-w-sm rounded-xl border border-border p-8 space-y-6"
-        style={{ background: '#0d1d3d' }}
+        style={{ background: '#ffffff' }}
       >
         {/* Logo */}
         <div className="flex items-center gap-3">
@@ -65,7 +65,7 @@ export function LoginPage() {
         {!needsNewPassword ? (
           <>
             <div className="space-y-1">
-              <h1 className="text-lg font-semibold text-white">Sign in</h1>
+              <h1 className="text-lg font-semibold">Sign in</h1>
               <p className="text-sm text-muted-foreground">
                 Enter your credentials to access dispatch
               </p>
@@ -117,7 +117,7 @@ export function LoginPage() {
         ) : (
           <>
             <div className="space-y-1">
-              <h1 className="text-lg font-semibold text-white">Set new password</h1>
+              <h1 className="text-lg font-semibold">Set new password</h1>
               <p className="text-sm text-muted-foreground">
                 Your temporary password has expired. Create a permanent password to continue.
               </p>

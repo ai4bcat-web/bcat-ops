@@ -1,28 +1,28 @@
-/* ── FullCalendar dark-navy override layer ────────────────────────────────────
+/* ── FullCalendar Two J's override layer ──────────────────────────────────
    All rules scoped to .fc to avoid leaking into the rest of the app.
    FullCalendar injects its styles first (via JS); these override them. */
 
 /* ── CSS variable overrides ──────────────────────────────────────────────── */
 .fc {
-  --fc-border-color:                #1e3a6b;
-  --fc-page-bg-color:               #07122b;
-  --fc-neutral-bg-color:            #0c1c3d;
-  --fc-neutral-text-color:          #22c55e;
-  --fc-today-bg-color:              rgba(74, 142, 239, 0.07);
-  --fc-highlight-color:             rgba(74, 142, 239, 0.14);
+  --fc-border-color:                #e5e5e2;
+  --fc-page-bg-color:               #f7f7f5;
+  --fc-neutral-bg-color:            #f0f0ec;
+  --fc-neutral-text-color:          #1a1a1a;
+  --fc-today-bg-color:              rgba(194, 65, 12, 0.05);
+  --fc-highlight-color:             rgba(194, 65, 12, 0.08);
   --fc-event-bg-color:              transparent;
   --fc-event-border-color:          transparent;
   --fc-event-text-color:            inherit;
-  --fc-event-selected-overlay-color: rgba(0, 0, 0, 0.25);
+  --fc-event-selected-overlay-color: rgba(0, 0, 0, 0.06);
   --fc-small-font-size:             0.75rem;
-  font-family: inherit;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
   font-size: 0.875rem;
 }
 
 /* ── Header / day labels ──────────────────────────────────────────────────── */
 .fc .fc-col-header-cell {
-  background: #07122b;
-  border-color: #1e3a6b;
+  background: #f0f0ec;
+  border-color: #e5e5e2;
   padding: 0;
 }
 
@@ -32,27 +32,27 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #22c55e;
+  color: #6b6b66;
   text-decoration: none !important;
 }
 
 .fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
-  color: #5b9bff;
+  color: #c2410c;
 }
 
 /* Slot (hour/day) labels on left of timeline */
 .fc .fc-timeline-slot-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #22c55e;
+  color: #6b6b66;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 /* ── Resource (driver) column ─────────────────────────────────────────────── */
 .fc .fc-datagrid-header {
-  background: #07122b;
-  border-color: #1e3a6b;
+  background: #f0f0ec;
+  border-color: #e5e5e2;
 }
 
 .fc .fc-datagrid-cell-frame {
@@ -60,37 +60,37 @@
   display: flex;
   align-items: center;
   padding: 0;
-  border-color: #1e3a6b;
-  background: #07122b;
+  border-color: #e5e5e2;
+  background: #ffffff;
 }
 
 .fc .fc-datagrid-body .fc-scrollgrid-sync-table td {
-  border-color: #1e3a6b;
-  background: #07122b;
+  border-color: #e5e5e2;
+  background: #ffffff;
 }
 
 /* ── Timeline lanes (rows) ────────────────────────────────────────────────── */
 .fc .fc-timeline-lane {
   min-height: 120px;
-  background: #07122b;
+  background: #ffffff;
 }
 
 .fc .fc-timeline-lane-frame {
   min-height: 120px;
-  background: #07122b;
+  background: #ffffff;
 }
 
 .fc .fc-timeline-body .fc-scrollgrid-sync-table td {
-  border-color: #1e3a6b;
-  background: #07122b;
+  border-color: #e5e5e2;
+  background: #ffffff;
 }
 
 /* Alternating row shade */
 .fc .fc-resource:nth-child(even) .fc-timeline-lane {
-  background: rgba(12, 28, 61, 0.5);
+  background: #fafaf8;
 }
 .fc .fc-resource:nth-child(even) .fc-datagrid-cell-frame {
-  background: rgba(12, 28, 61, 0.5);
+  background: #fafaf8;
 }
 
 /* ── Event blocks ─────────────────────────────────────────────────────────── */
@@ -115,21 +115,21 @@
 
 /* ── Today column highlight ───────────────────────────────────────────────── */
 .fc .fc-day-today {
-  background-color: rgba(74, 142, 239, 0.06) !important;
+  background-color: rgba(194, 65, 12, 0.04) !important;
 }
 
 /* ── Scrollgrid / borders ─────────────────────────────────────────────────── */
-.fc .fc-scrollgrid       { border-color: #1e3a6b; background: #07122b; }
+.fc .fc-scrollgrid       { border-color: #e5e5e2; background: #ffffff; }
 .fc .fc-scrollgrid td,
-.fc .fc-scrollgrid th    { border-color: #1e3a6b; }
+.fc .fc-scrollgrid th    { border-color: #e5e5e2; }
 
 /* ── Now indicator ────────────────────────────────────────────────────────── */
 .fc .fc-timeline-now-indicator-line {
-  border-color: #5b9bff;
+  border-color: #c2410c;
   border-width: 2px;
 }
 .fc .fc-timeline-now-indicator-arrow {
-  border-top-color: #5b9bff;
+  border-top-color: #c2410c;
 }
 
 /* ── Resource area header label ───────────────────────────────────────────── */
@@ -137,10 +137,10 @@
   padding: 0 12px;
   font-size: 0.6rem;
   font-weight: 700;
-  color: #22c55e;
+  color: #6b6b66;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  background: #07122b;
+  background: #f0f0ec;
 }
 
 /* ── Remove FullCalendar button defaults ─────────────────────────────────── */
@@ -153,15 +153,15 @@
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 .fc .fc-scroller {
   scrollbar-width: thin;
-  scrollbar-color: #1e3a6b transparent;
+  scrollbar-color: #c7c7c2 transparent;
 }
 .fc .fc-scroller::-webkit-scrollbar { width: 5px; height: 5px; }
 .fc .fc-scroller::-webkit-scrollbar-thumb {
-  background: #1e3a6b;
+  background: #c7c7c2;
   border-radius: 3px;
 }
 
-/* ── Prevent white flash on FC internal backgrounds ─────────────────────── */
+/* ── Borders ─────────────────────────────────────────────────────────────── */
 .fc-theme-standard td,
-.fc-theme-standard th { border-color: #1e3a6b; }
-.fc-theme-standard .fc-scrollgrid { border-color: #1e3a6b; }
+.fc-theme-standard th { border-color: #e5e5e2; }
+.fc-theme-standard .fc-scrollgrid { border-color: #e5e5e2; }

@@ -29,10 +29,10 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
   const pickupDriverName = pickupDriver?.name ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  // Dark-optimised colors
-  const borderColor = isConflict ? '#f87171' : isRTI ? '#4ade80' : color.border
-  const bgColor     = isConflict ? 'rgba(248,113,113,0.18)' : isRTI ? 'rgba(74,222,128,0.15)' : color.bg
-  const textColor   = isRTI ? '#86efac' : color.text
+  // Light-theme colors
+  const borderColor = isConflict ? '#ef4444' : isRTI ? '#16a34a' : color.border
+  const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? 'rgba(22,163,74,0.08)' : color.bg
+  const textColor   = isRTI ? '#15803d' : color.text
 
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
   const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
@@ -43,11 +43,11 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
         'h-full w-full rounded-md border border-l-[3px] overflow-hidden',
         'transition-shadow cursor-pointer',
         'hover:shadow-lg hover:brightness-110',
-        isSelected && 'ring-2 ring-blue-400 ring-offset-1 ring-offset-[#07122b]',
+        isSelected && 'ring-2 ring-offset-1',
         isConflict && 'animate-pulse-once',
       )}
       style={{
-        borderColor:     isConflict ? 'rgba(248,113,113,0.35)' : isRTI ? 'rgba(74,222,128,0.3)' : '#1e3a6b',
+        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e5e2',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         ...(isSplit ? { borderRightColor: deliveryColor.border, borderRightWidth: 3 } : {}),
@@ -61,19 +61,19 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           <div className="flex items-baseline gap-1.5 min-w-0">
             <span
               className="text-[10px] font-black shrink-0 size-4 rounded-full flex items-center justify-center leading-none"
-              style={{ background: borderColor, color: '#07122b', minWidth: '16px', minHeight: '16px', lineHeight: 1 }}
+              style={{ background: borderColor, color: '#ffffff', minWidth: '16px', minHeight: '16px', lineHeight: 1 }}
             >
               {orderNumber}
             </span>
             <span
               className={cn('text-[11px] font-bold truncate', isFCFS && 'tracking-wide uppercase text-[10px]')}
-              style={{ color: '#ffffff' }}
+              style={{ color: '#111827' }}
               title={puTime}
             >
               {puTime}
             </span>
           </div>
-          <span className="text-[10px] font-mono shrink-0" style={{ color: 'rgba(203,213,225,0.8)' }} title={load.pickupNumber}>
+          <span className="text-[10px] font-mono shrink-0" style={{ color: '#6b7280' }} title={load.pickupNumber}>
             {load.pickupNumber}
           </span>
         </div>
@@ -97,11 +97,11 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
             initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
             size="xs"
             className="shrink-0"
-            style={{ background: borderColor, color: '#07122b' }}
+            style={{ background: borderColor, color: '#ffffff' }}
           />
           <span
             className="text-[10px] font-semibold truncate leading-tight"
-            style={{ color: '#e2e8f0' }}
+            style={{ color: '#374151' }}
           >
             {isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
           </span>
@@ -111,46 +111,46 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
         {(load.originName || load.originCity) && (
           <div
             className="text-[10px] leading-tight truncate font-medium"
-            style={{ color: '#cbd5e1' }}
+            style={{ color: '#374151' }}
             title={[load.originName, load.originCity].filter(Boolean).join(' · ')}
           >
             {load.originName}
-            {load.originCity && <span style={{ color: '#94a3b8' }}> · {load.originCity}</span>}
+            {load.originCity && <span style={{ color: '#6b7280' }}> · {load.originCity}</span>}
           </div>
         )}
 
         {/* Destination name · city */}
         {(load.destinationName || load.destinationCity) && (
           <div className="flex items-center gap-0.5 min-w-0" title={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')}>
-            <ArrowRight className="size-2.5 shrink-0" style={{ color: '#5b9bff' }} />
+            <ArrowRight className="size-2.5 shrink-0" style={{ color: '#2563eb' }} />
             <span
               className="text-[10px] leading-tight truncate font-medium"
-              style={{ color: '#cbd5e1' }}
+              style={{ color: '#374151' }}
             >
               {load.destinationName}
-              {load.destinationCity && <span style={{ color: '#94a3b8' }}> · {load.destinationCity}</span>}
+              {load.destinationCity && <span style={{ color: '#6b7280' }}> · {load.destinationCity}</span>}
             </span>
           </div>
         )}
 
         {/* Bottom: TMS ID + delivery time */}
         <div className="flex items-center gap-0.5 min-w-0">
-          <span className="text-[10px] font-mono truncate" style={{ color: '#94a3b8' }} title={load.tmsId}>{load.tmsId}</span>
-          <ArrowRight className="size-2.5 shrink-0" style={{ color: '#5b9bff' }} />
-          <span className="text-[10px] truncate font-medium" style={{ color: '#e2e8f0' }} title={deTime}>{deTime}</span>
+          <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }} title={load.tmsId}>{load.tmsId}</span>
+          <ArrowRight className="size-2.5 shrink-0" style={{ color: '#2563eb' }} />
+          <span className="text-[10px] truncate font-medium" style={{ color: '#374151' }} title={deTime}>{deTime}</span>
         </div>
       </div>
 
       {/* Top-right badges: conflict + multi-day */}
       <div className="absolute top-1 right-1 flex items-center gap-0.5">
-        {isConflict && <AlertTriangle className="size-3 text-red-400" />}
-        {isMultiDay && <Clock         className="size-3" style={{ color: '#64748b' }} />}
+        {isConflict && <AlertTriangle className="size-3 text-red-500" />}
+        {isMultiDay && <Clock         className="size-3" style={{ color: '#9ca3af' }} />}
       </div>
 
       {/* Bottom-right: RTI checkmark */}
       {isRTI && (
         <div className="absolute bottom-1 right-1">
-          <CheckCircle2 className="size-3.5 text-emerald-400" />
+          <CheckCircle2 className="size-3.5 text-emerald-600" />
         </div>
       )}
     </div>

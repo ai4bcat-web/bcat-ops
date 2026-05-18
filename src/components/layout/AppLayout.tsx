@@ -15,11 +15,11 @@ export function AppLayout() {
   }, [user?.email, initializeData])
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="app">
       <NavBar />
-      <main className="flex-1 overflow-hidden flex flex-col min-w-0">
+      <div className="app-main">
         <Outlet />
-      </main>
+      </div>
     </div>
   )
 }
