@@ -405,10 +405,10 @@ export function LoadDrawer() {
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Pickup Driver" error={errors.pickupDriverId?.message}>
                   <Controller name="pickupDriverId" control={control} render={({ field }) => (
-                    <Select value={field.value ?? ''} onValueChange={(v) => field.onChange(v || null)}>
+                    <Select value={field.value ?? '__none__'} onValueChange={(v) => field.onChange(v === '__none__' ? null : v)}>
                       <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Unassigned</SelectItem>
+                        <SelectItem value="__none__">Unassigned</SelectItem>
                         {activeDrivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -421,10 +421,10 @@ export function LoadDrawer() {
                   hint={!deliveryLocked ? 'Mirrors pickup' : undefined}
                 >
                   <Controller name="deliveryDriverId" control={control} render={({ field }) => (
-                    <Select value={field.value ?? ''} onValueChange={(v) => { field.onChange(v || null); setDeliveryLocked(true) }}>
+                    <Select value={field.value ?? '__none__'} onValueChange={(v) => { field.onChange(v === '__none__' ? null : v); setDeliveryLocked(true) }}>
                       <SelectTrigger className="h-9"><SelectValue placeholder="Same as pickup" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Unassigned</SelectItem>
+                        <SelectItem value="__none__">Unassigned</SelectItem>
                         {activeDrivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
@@ -544,6 +544,9 @@ export function LoadDrawer() {
         <SheetFooter>
           {isEdit ? (
             <>
+              {Object.keys(errors).length > 0 && (
+                <p className="w-full text-xs text-destructive mb-1">Please fill in the required fields above.</p>
+              )}
               <Button variant="outline" className="flex-1 h-9" onClick={onClose}>Cancel</Button>
               <Button type="submit" form="load-form" className="flex-1 h-9">
                 {isCreate ? 'Create Load' : 'Save Changes'}
