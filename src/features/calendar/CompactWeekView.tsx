@@ -27,7 +27,6 @@ function initials(name: string) {
 
 function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReorder }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
-  const [pickingOrder, setPickingOrder] = useState(false)
 
   const isRTI      = load.readyToInvoice
   const isConflict = conflictIds.has(load.id)
@@ -49,101 +48,87 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
   const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
 
+  // Cycle order 1→2→…→min(groupSize,5)→1 on each click
+  const cycleOrder = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const max = Math.min(groupSize, 5)
+    if (max <= 1) return
+    onReorder(load.id, (orderNumber % max) + 1)
+  }
+
   const card = (
     <div
-      className="relative rounded border border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none"
+      className="rounded border border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none"
       style={{
         borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e7eb',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
       }}
-      onClick={() => { if (!pickingOrder) setSelectedLoad(load.id, 'view') }}
+      onClick={() => setSelectedLoad(load.id, 'view')}
     >
-      {/* Order badge — top-right corner */}
-      {pickingOrder ? (
-        <div
-          className="absolute top-0.5 right-0.5 flex items-center gap-0.5 z-10"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {Array.from({ length: groupSize }, (_, i) => i + 1).map((n) => (
-            <button
-              key={n}
-              className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity"
-              style={{
-                background: n === orderNumber ? '#94a3b8' : borderColor,
-                color: '#fff',
-                minWidth: '14px',
-                minHeight: '14px',
-                padding: '0 2px',
-                opacity: n === orderNumber ? 0.5 : 1,
-                cursor: n === orderNumber ? 'default' : 'pointer',
-              }}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (n !== orderNumber) onReorder(load.id, n)
-                setPickingOrder(false)
-              }}
-            >
-              {n}
-            </button>
-          ))}
-          <button
-            className="text-[9px] leading-none text-slate-400 hover:text-slate-600 px-0.5"
-            onClick={(e) => { e.stopPropagation(); setPickingOrder(false) }}
+      {/* Main row: left content + right column (badge above avatar) */}
+      <div className="flex items-start gap-1 min-w-0">
+        {/* Left: time + aljex id + RTI */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1 min-w-0">
+            <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">{puTime}</span>
+            <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
+              {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
+            </span>
+            {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
+          </div>
+          {/* Line 2: origin city → destination city */}
+          {(load.originCity || load.destinationCity) && (
+            <div className="flex items-center gap-0.5 min-w-0 mt-0.5">
+              <span className="text-[10px] text-slate-400 truncate leading-none">{load.originCity || '—'}</span>
+              <ArrowRight className="size-2 shrink-0 text-slate-300" />
+              <span className="text-[10px] text-slate-400 truncate leading-none">{load.destinationCity || '—'}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Right column: order badge on top, avatar(s) below */}
+        <div className="flex flex-col items-center gap-0.5 shrink-0">
+          {/* Order badge — click to cycle */}
+          <span
+            className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity hover:opacity-75"
+            style={{
+              background: borderColor,
+              color: '#fff',
+              minWidth: '14px',
+              minHeight: '14px',
+              padding: '0 2px',
+              cursor: Math.min(groupSize, 5) > 1 ? 'pointer' : 'default',
+            }}
+            title={Math.min(groupSize, 5) > 1 ? 'Click to cycle order' : undefined}
+            onClick={cycleOrder}
           >
-            ✕
-          </button>
+            {orderNumber}
+          </span>
+          {/* Avatar(s) */}
+          <div className="flex items-center">
+            <Avatar
+              src={pickupDriver?.photoUrl}
+              initials={initials(pickupDriverName)}
+              size="xs"
+              className="shrink-0"
+              style={{ background: borderColor, color: '#fff' }}
+            />
+            {isSplit && deliveryDriver && (
+              <Avatar
+                src={deliveryDriver.photoUrl}
+                initials={initials(deliveryDriverName)}
+                size="xs"
+                className="shrink-0 -ml-1"
+                style={{ background: deliveryColor.border, color: '#fff' }}
+              />
+            )}
+            {!isAssigned && (
+              <span className="text-[10px] font-bold text-amber-500 leading-none">!</span>
+            )}
+          </div>
         </div>
-      ) : (
-        <span
-          className="absolute top-0.5 right-0.5 text-[9px] font-black rounded-full flex items-center justify-center leading-none hover:opacity-75 transition-opacity z-10"
-          style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px', cursor: groupSize > 1 ? 'pointer' : 'default' }}
-          title={groupSize > 1 ? 'Click to change order' : undefined}
-          onClick={(e) => { e.stopPropagation(); if (groupSize > 1) setPickingOrder(true) }}
-        >
-          {orderNumber}
-        </span>
-      )}
-
-      {/* Line 1: time · aljex id · RTI · driver avatar(s) */}
-      <div className="flex items-center gap-1 min-w-0 pr-4">
-        <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">{puTime}</span>
-        <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
-          {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
-        </span>
-        {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
-        {/* Pickup driver avatar */}
-        <Avatar
-          src={pickupDriver?.photoUrl}
-          initials={initials(pickupDriverName)}
-          size="xs"
-          className="shrink-0"
-          style={{ background: borderColor, color: '#fff' }}
-        />
-        {/* Delivery driver avatar — only for split loads */}
-        {isSplit && deliveryDriver && (
-          <Avatar
-            src={deliveryDriver.photoUrl}
-            initials={initials(deliveryDriverName)}
-            size="xs"
-            className="shrink-0 -ml-1"
-            style={{ background: deliveryColor.border, color: '#fff' }}
-          />
-        )}
-        {/* Amber "!" flag when unassigned */}
-        {!isAssigned && (
-          <span className="text-[10px] font-bold text-amber-500 shrink-0 leading-none">!</span>
-        )}
       </div>
-
-      {/* Line 2: origin city → destination city */}
-      {(load.originCity || load.destinationCity) && (
-        <div className="flex items-center gap-0.5 min-w-0 mt-0.5">
-          <span className="text-[10px] text-slate-400 truncate leading-none">{load.originCity || '—'}</span>
-          <ArrowRight className="size-2 shrink-0 text-slate-300" />
-          <span className="text-[10px] text-slate-400 truncate leading-none">{load.destinationCity || '—'}</span>
-        </div>
-      )}
     </div>
   )
 
