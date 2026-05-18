@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, Upload, X, FileImage } from 'lucide-react'
+import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
 } from '@/components/ui/sheet'
@@ -56,6 +56,7 @@ const APPT_TYPE_OPTIONS: { value: ApptType; label: string; icon: React.ElementTy
   { value: 'exact', label: 'Exact',  icon: Clock        },
   { value: 'range', label: 'Range',  icon: CalendarRange },
   { value: 'fcfs',  label: 'FCFS',   icon: AlarmClock   },
+  { value: 'tbd',   label: 'TBD',    icon: HelpCircle   },
 ]
 
 function ApptFields({
@@ -144,6 +145,12 @@ function ApptFields({
           {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
         </div>
       )}
+
+      {type === 'tbd' && (
+        <p className="text-xs text-muted-foreground italic">
+          Appointment to be determined — no date required.
+        </p>
+      )}
     </div>
   )
 }
@@ -191,10 +198,10 @@ export function LoadDrawer() {
         destinationName: load.destinationName ?? '',
         destinationCity: load.destinationCity ?? '',
         pickupApptType:   (load.pickupApptType   ?? 'exact') as ApptType,
-        pickupAppt:       load.pickupApptType === 'fcfs' ? formatDateInput(load.pickupAppt) : formatDateTimeInput(load.pickupAppt),
+        pickupAppt:       load.pickupApptType === 'tbd' ? 'TBD' : load.pickupApptType === 'fcfs' ? formatDateInput(load.pickupAppt) : formatDateTimeInput(load.pickupAppt),
         pickupApptEnd:    load.pickupApptEnd ? formatDateTimeInput(load.pickupApptEnd) : '',
         deliveryApptType: (load.deliveryApptType ?? 'exact') as ApptType,
-        deliveryAppt:     load.deliveryApptType === 'fcfs' ? formatDateInput(load.deliveryAppt) : formatDateTimeInput(load.deliveryAppt),
+        deliveryAppt:     load.deliveryApptType === 'tbd' ? 'TBD' : load.deliveryApptType === 'fcfs' ? formatDateInput(load.deliveryAppt) : formatDateTimeInput(load.deliveryAppt),
         deliveryApptEnd:  load.deliveryApptEnd ? formatDateTimeInput(load.deliveryApptEnd) : '',
         pickupDriverId:   load.pickupDriverId,
         deliveryDriverId: load.deliveryDriverId,
@@ -258,7 +265,7 @@ export function LoadDrawer() {
   const onClose = () => setSelectedLoad(null)
 
   const onSubmit = async (values: LoadFormValues) => {
-    const toIso = (s: string, t: ApptType) => t === 'fcfs' ? fromDateInput(s) : fromDateTimeInput(s)
+    const toIso = (s: string, t: ApptType) => t === 'tbd' ? 'TBD' : t === 'fcfs' ? fromDateInput(s) : fromDateTimeInput(s)
     const userEmail = user?.email ?? 'dispatch'
     const payload = {
       ...values,
@@ -294,6 +301,7 @@ export function LoadDrawer() {
   const driverName = (id: string | null) => id ? (drivers.find((d) => d.id === id)?.name ?? id) : '—'
 
   const apptLabel = (appt: string, type?: string, apptEnd?: string) => {
+    if (type === 'tbd') return 'TBD'
     if (type === 'fcfs') return 'FCFS (first come first serve)'
     if (type === 'range' && apptEnd) return `${formatDateTime(appt)} – ${formatDateTime(apptEnd)}`
     return formatDateTime(appt)
@@ -369,7 +377,7 @@ export function LoadDrawer() {
                     <Controller name="pickupApptEnd" control={control} render={({ field: ef }) => (
                       <ApptFields
                         label="Pickup"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange('') } }}
+                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (v === 'tbd') sf.onChange('TBD'); else if (tf.value === 'tbd') sf.onChange('') } }}
                         startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                         endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                         startError={errors.pickupAppt?.message}
@@ -389,7 +397,7 @@ export function LoadDrawer() {
                     <Controller name="deliveryApptEnd" control={control} render={({ field: ef }) => (
                       <ApptFields
                         label="Delivery"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange('') } }}
+                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (v === 'tbd') sf.onChange('TBD'); else if (tf.value === 'tbd') sf.onChange('') } }}
                         startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                         endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                         startError={errors.deliveryAppt?.message}
@@ -434,27 +442,27 @@ export function LoadDrawer() {
 
               <Separator />
 
-              {/* RTI toggle */}
+              {/* RTI — one-way: click to mark ready, no toggle back */}
               <Controller
                 name="readyToInvoice"
                 control={control}
                 render={({ field }) => (
-                  <Button
-                    type="button"
-                    variant={field.value ? 'outline' : 'outline'}
-                    className={cn(
-                      'w-full h-9 gap-2 justify-start font-medium',
-                      field.value
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                        : 'text-muted-foreground',
-                    )}
-                    onClick={() => field.onChange(!field.value)}
-                  >
-                    {field.value
-                      ? <CheckCircle2 className="size-4 text-emerald-600" />
-                      : <Circle className="size-4" />}
-                    {field.value ? 'Ready to Invoice' : 'Not Ready to Invoice'}
-                  </Button>
+                  field.value ? (
+                    <div className="flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 h-9 text-emerald-700 text-sm font-medium">
+                      <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
+                      Ready to Invoice
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full h-9 gap-2 justify-start font-medium text-muted-foreground"
+                      onClick={() => field.onChange(true)}
+                    >
+                      <Circle className="size-4" />
+                      Mark as Ready to Invoice
+                    </Button>
+                  )
                 )}
               />
 

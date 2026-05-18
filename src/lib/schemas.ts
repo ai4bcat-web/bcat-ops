@@ -26,7 +26,7 @@ export const driverSchema = z.object({
   driverType: z.string().optional(),
 })
 
-const apptTypeEnum = z.enum(['exact', 'range', 'fcfs'])
+const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])
 
 export const loadSchema = z
   .object({
@@ -52,7 +52,7 @@ export const loadSchema = z
     readyToInvoice: z.boolean(),
   })
   .refine(
-    (d) => d.deliveryAppt >= d.pickupAppt,
+    (d) => d.pickupApptType === 'tbd' || d.deliveryApptType === 'tbd' || d.deliveryAppt >= d.pickupAppt,
     { message: 'Delivery must be on or after pickup', path: ['deliveryAppt'] }
   )
   .refine(

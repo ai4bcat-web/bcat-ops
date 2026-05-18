@@ -26,7 +26,7 @@ export interface Driver {
   updatedAt: string
 }
 
-export type ApptType = 'exact' | 'range' | 'fcfs'
+export type ApptType = 'exact' | 'range' | 'fcfs' | 'tbd'
 
 export interface Load {
   id: string
