@@ -26,8 +26,10 @@ backend.userManagement.resources.lambda.addToRolePolicy(
   })
 )
 
-// Pass the User Pool ID to the Lambda as an environment variable
-backend.userManagement.addEnvironment(
+// Pass the User Pool ID to the Lambda as an environment variable.
+// Must use resources.lambda.addEnvironment (not backend.userManagement.addEnvironment)
+// because the Amplify-level API only accepts plain strings, not CDK tokens.
+backend.userManagement.resources.lambda.addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId
 )
