@@ -49,7 +49,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
   const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
 
-  const maxPos = Math.min(groupSize, 5)
+  const maxPos = 5
 
   const card = (
     <div
@@ -125,7 +125,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
                 padding: '0 2px',
                 cursor: maxPos > 1 ? 'pointer' : 'default',
               }}
-              onClick={(e) => { e.stopPropagation(); if (maxPos > 1) setPickingOrder(true) }}
+              onClick={(e) => { e.stopPropagation(); setPickingOrder(true) }}
             >
               {orderNumber}
             </span>
