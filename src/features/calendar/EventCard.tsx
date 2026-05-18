@@ -158,6 +158,9 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
 
   const tooltipApptLine = (label: string, appt: string, type?: string, apptEnd?: string) => {
     const display = formatApptTime(appt, type, apptEnd)
+    if (type === 'tbd') return (
+      <><span className="text-muted-foreground">{label}</span><span>TBD</span></>
+    )
     const full = formatDateTime(appt)
     return (
       <>
