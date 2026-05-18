@@ -282,10 +282,10 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                       title={key}
                       onClick={() => setValue('colorKey', key, { shouldDirty: true })}
                       className="relative size-7 rounded-full transition-transform hover:scale-110 focus:outline-none"
-                      style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px #07122b, 0 0 0 5px ${c.border}` : undefined }}
+                      style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px #fff, 0 0 0 5px ${c.border}` : undefined }}
                     >
                       {watchColorKey === key && (
-                        <Check className="absolute inset-0 m-auto size-3.5 text-[#07122b]" strokeWidth={3} />
+                        <Check className="absolute inset-0 m-auto size-3.5 text-white" strokeWidth={3} />
                       )}
                     </button>
                   ))}
@@ -377,14 +377,14 @@ export function DriversPage() {
   return (
     <div className="h-full overflow-auto">
       {/* KPI + header */}
-      <div className="sticky top-0 z-10 border-b border-border" style={{ background: 'linear-gradient(180deg,#0e2454 0%,#07122b 100%)' }}>
-        <div className="flex items-center justify-between px-6 pt-4 pb-3">
-          <h1 className="text-base font-bold text-white tracking-tight">Drivers &amp; Brokers</h1>
-          <Button size="sm" className="h-8 gap-1.5" onClick={openCreate}>
-            <Plus className="size-3.5" /> Add Driver
+      <div className="sticky top-0 z-10 border-b border-border bg-white">
+        <div className="flex items-center justify-between px-8 pt-5 pb-3">
+          <h1 className="text-2xl font-semibold text-foreground tracking-tight">Drivers &amp; Brokers</h1>
+          <Button size="lg" className="gap-1.5" onClick={openCreate}>
+            <Plus className="size-4" /> Add Driver
           </Button>
         </div>
-        <div className="flex items-center gap-3 px-6 pb-3 overflow-x-auto">
+        <div className="flex items-center gap-3 px-8 pb-4 overflow-x-auto">
           <div className="ds-kpi">
             <div className="ds-kpi-label">Total</div>
             <div className="ds-kpi-value">{drivers.length}</div>
@@ -405,8 +405,8 @@ export function DriversPage() {
       </div>
 
       {/* Table */}
-      <div className="p-6">
-        <div className="rounded-lg border border-border overflow-hidden" style={{ background: '#0d1d3d' }}>
+      <div className="p-8">
+        <div className="rounded-xl border border-slate-200/60 overflow-hidden bg-white shadow-sm">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -430,7 +430,7 @@ export function DriversPage() {
                         src={driver.photoUrl}
                         initials={getInitials(driver.name)}
                         size="sm"
-                        style={driver.colorKey ? { background: getColor(driver.colorKey).border, color: '#07122b' } : undefined}
+                        style={driver.colorKey ? { background: getColor(driver.colorKey).border, color: '#ffffff' } : undefined}
                       />
                       {driver.name}
                       {driver.colorKey && (

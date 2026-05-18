@@ -16,8 +16,8 @@ export function NavBar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
-        <Truck size={16} style={{ color: '#c2410c', flexShrink: 0 }} />
-        <span>BCAT <span style={{ color: '#c2410c' }}>OPS</span></span>
+        <Truck size={16} style={{ color: '#1ea8f3', flexShrink: 0 }} />
+        <span>BCAT <span style={{ color: '#1ea8f3' }}>OPS</span></span>
       </div>
 
       <nav className="sidebar-nav">

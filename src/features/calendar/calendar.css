@@ -4,12 +4,12 @@
 
 /* ── CSS variable overrides ──────────────────────────────────────────────── */
 .fc {
-  --fc-border-color:                #e5e5e2;
-  --fc-page-bg-color:               #f7f7f5;
-  --fc-neutral-bg-color:            #f0f0ec;
-  --fc-neutral-text-color:          #1a1a1a;
-  --fc-today-bg-color:              rgba(194, 65, 12, 0.05);
-  --fc-highlight-color:             rgba(194, 65, 12, 0.08);
+  --fc-border-color:                #e2e8f0;
+  --fc-page-bg-color:               #f8fafc;
+  --fc-neutral-bg-color:            #f1f5f9;
+  --fc-neutral-text-color:          #0a0a0a;
+  --fc-today-bg-color:              rgba(30, 168, 243, 0.05);
+  --fc-highlight-color:             rgba(30, 168, 243, 0.08);
   --fc-event-bg-color:              transparent;
   --fc-event-border-color:          transparent;
   --fc-event-text-color:            inherit;
@@ -21,8 +21,8 @@
 
 /* ── Header / day labels ──────────────────────────────────────────────────── */
 .fc .fc-col-header-cell {
-  background: #f0f0ec;
-  border-color: #e5e5e2;
+  background: #f1f5f9;
+  border-color: #e2e8f0;
   padding: 0;
 }
 
@@ -32,27 +32,27 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #6b6b66;
+  color: #64748b;
   text-decoration: none !important;
 }
 
 .fc .fc-col-header-cell.fc-day-today .fc-col-header-cell-cushion {
-  color: #c2410c;
+  color: #1ea8f3;
 }
 
 /* Slot (hour/day) labels on left of timeline */
 .fc .fc-timeline-slot-label {
   font-size: 0.7rem;
   font-weight: 600;
-  color: #6b6b66;
+  color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 /* ── Resource (driver) column ─────────────────────────────────────────────── */
 .fc .fc-datagrid-header {
-  background: #f0f0ec;
-  border-color: #e5e5e2;
+  background: #f1f5f9;
+  border-color: #e2e8f0;
 }
 
 .fc .fc-datagrid-cell-frame {
@@ -60,12 +60,12 @@
   display: flex;
   align-items: center;
   padding: 0;
-  border-color: #e5e5e2;
+  border-color: #e2e8f0;
   background: #ffffff;
 }
 
 .fc .fc-datagrid-body .fc-scrollgrid-sync-table td {
-  border-color: #e5e5e2;
+  border-color: #e2e8f0;
   background: #ffffff;
 }
 
@@ -81,16 +81,16 @@
 }
 
 .fc .fc-timeline-body .fc-scrollgrid-sync-table td {
-  border-color: #e5e5e2;
+  border-color: #e2e8f0;
   background: #ffffff;
 }
 
 /* Alternating row shade */
 .fc .fc-resource:nth-child(even) .fc-timeline-lane {
-  background: #fafaf8;
+  background: #f8fafc;
 }
 .fc .fc-resource:nth-child(even) .fc-datagrid-cell-frame {
-  background: #fafaf8;
+  background: #f8fafc;
 }
 
 /* ── Event blocks ─────────────────────────────────────────────────────────── */
@@ -115,21 +115,21 @@
 
 /* ── Today column highlight ───────────────────────────────────────────────── */
 .fc .fc-day-today {
-  background-color: rgba(194, 65, 12, 0.04) !important;
+  background-color: rgba(30, 168, 243, 0.04) !important;
 }
 
 /* ── Scrollgrid / borders ─────────────────────────────────────────────────── */
-.fc .fc-scrollgrid       { border-color: #e5e5e2; background: #ffffff; }
+.fc .fc-scrollgrid       { border-color: #e2e8f0; background: #ffffff; }
 .fc .fc-scrollgrid td,
-.fc .fc-scrollgrid th    { border-color: #e5e5e2; }
+.fc .fc-scrollgrid th    { border-color: #e2e8f0; }
 
 /* ── Now indicator ────────────────────────────────────────────────────────── */
 .fc .fc-timeline-now-indicator-line {
-  border-color: #c2410c;
+  border-color: #1ea8f3;
   border-width: 2px;
 }
 .fc .fc-timeline-now-indicator-arrow {
-  border-top-color: #c2410c;
+  border-top-color: #1ea8f3;
 }
 
 /* ── Resource area header label ───────────────────────────────────────────── */
@@ -137,10 +137,10 @@
   padding: 0 12px;
   font-size: 0.6rem;
   font-weight: 700;
-  color: #6b6b66;
+  color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  background: #f0f0ec;
+  background: #f1f5f9;
 }
 
 /* ── Remove FullCalendar button defaults ─────────────────────────────────── */
@@ -153,15 +153,15 @@
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
 .fc .fc-scroller {
   scrollbar-width: thin;
-  scrollbar-color: #c7c7c2 transparent;
+  scrollbar-color: #cbd5e1 transparent;
 }
 .fc .fc-scroller::-webkit-scrollbar { width: 5px; height: 5px; }
 .fc .fc-scroller::-webkit-scrollbar-thumb {
-  background: #c7c7c2;
+  background: #cbd5e1;
   border-radius: 3px;
 }
 
 /* ── Borders ─────────────────────────────────────────────────────────────── */
 .fc-theme-standard td,
-.fc-theme-standard th { border-color: #e5e5e2; }
-.fc-theme-standard .fc-scrollgrid { border-color: #e5e5e2; }
+.fc-theme-standard th { border-color: #e2e8f0; }
+.fc-theme-standard .fc-scrollgrid { border-color: #e2e8f0; }

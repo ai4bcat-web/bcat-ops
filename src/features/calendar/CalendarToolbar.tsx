@@ -45,7 +45,7 @@ export function CalendarToolbar({
   const anyFilter = Object.values(filters).some(Boolean) || searchQuery.length > 0
 
   return (
-    <div className="flex items-center border-b border-border bg-background shrink-0 min-h-[52px]">
+    <div className="flex items-center border-b border-border bg-background shrink-0 min-h-[64px]">
 
       {/* ── Scrollable left section ──────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-4 flex-1 overflow-x-auto min-w-0 py-2">
@@ -57,7 +57,7 @@ export function CalendarToolbar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0"
+                className="h-9 w-9 p-0"
                 onClick={onPrev}
                 aria-label="Previous period"
               >
@@ -70,7 +70,7 @@ export function CalendarToolbar({
           <Button
             variant="outline"
             size="sm"
-            className="h-8 px-3 text-sm font-medium shrink-0"
+            className="h-9 px-3 text-sm font-medium shrink-0"
             onClick={onToday}
           >
             Today
@@ -81,7 +81,7 @@ export function CalendarToolbar({
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 p-0"
+                className="h-9 w-9 p-0"
                 onClick={onNext}
                 aria-label="Next period"
               >
@@ -144,7 +144,7 @@ export function CalendarToolbar({
                 !filters[key] && 'text-muted-foreground border-border hover:text-foreground hover:border-white/20',
               )}
               style={filters[key]
-                ? { background: 'rgba(194,65,12,0.08)', borderColor: 'rgba(194,65,12,0.35)', color: '#c2410c' }
+                ? { background: 'rgba(30,168,243,0.08)', borderColor: 'rgba(30,168,243,0.35)', color: '#1ea8f3' }
                 : {}}
             >
               {label}
@@ -160,7 +160,7 @@ export function CalendarToolbar({
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
           <Input
             placeholder="Search loads…"
-            className="h-8 pl-8 w-36 text-sm"
+            className="h-9 pl-8 w-56 text-sm"
             style={{ background: '#ffffff' }}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -178,8 +178,8 @@ export function CalendarToolbar({
         </div>
 
         <Button
-          size="sm"
-          className="h-8 gap-1.5 font-semibold whitespace-nowrap"
+          size="lg"
+          className="gap-1.5 font-semibold whitespace-nowrap"
           onClick={() => setSelectedLoad(null, 'create')}
         >
           <Plus className="size-4" />

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 interface AvatarProps extends React.HTMLAttributes<HTMLDivElement> {
   initials: string
   src?: string
-  size?: 'xs' | 'sm' | 'md'
+  size?: 'xs' | 'sm' | 'md' | 'lg'
 }
 
 function Avatar({ initials, src, size = 'md', className, ...props }: AvatarProps) {
@@ -14,8 +14,11 @@ function Avatar({ initials, src, size = 'md', className, ...props }: AvatarProps
   return (
     <div
       className={cn(
-        'rounded-full bg-slate-500 flex items-center justify-center font-semibold text-white shrink-0 select-none overflow-hidden',
-        size === 'xs' ? 'size-4 text-[8px]' : size === 'sm' ? 'size-6 text-[10px]' : 'size-8 text-xs',
+        'rounded-full flex items-center justify-center font-semibold text-white shrink-0 select-none overflow-hidden ring-2 ring-white shadow-sm',
+        size === 'xs' ? 'size-6 text-[10px]' :
+        size === 'sm' ? 'size-8 text-xs' :
+        size === 'lg' ? 'size-10 text-sm' :
+        'size-8 text-xs',
         className,
       )}
       {...props}

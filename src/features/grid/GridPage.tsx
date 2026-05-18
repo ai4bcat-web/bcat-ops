@@ -142,7 +142,7 @@ export function GridPage() {
       accessorFn: (row) => driverName(row.deliveryDriverId),
       cell: ({ getValue }) => {
         const name = getValue() as string
-        return <span className={cn('text-sm', name === 'Unassigned' && 'text-amber-400')}>{name}</span>
+        return <span className={cn('text-sm', name === 'Unassigned' && 'text-amber-600')}>{name}</span>
       },
     },
     {
@@ -228,7 +228,7 @@ export function GridPage() {
   return (
     <div className="flex flex-col h-full">
       {/* KPI strip */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border shrink-0 overflow-x-auto" style={{ background: 'linear-gradient(180deg,#0e2454 0%,#07122b 100%)' }}>
+      <div className="flex items-center gap-3 px-6 py-3 border-b border-border bg-white shrink-0 overflow-x-auto">
         <div className="ds-kpi">
           <div className="ds-kpi-label">Total Loads</div>
           <div className="ds-kpi-value blue">{loads.length}</div>
@@ -248,10 +248,10 @@ export function GridPage() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 h-12 border-b border-border bg-background shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 px-4 h-14 border-b border-border bg-background shrink-0 flex-wrap">
         <Input
           placeholder="Search all fields…"
-          className="h-8 w-52 text-xs bg-muted/40"
+          className="h-9 w-52 text-xs bg-muted/40"
           value={globalFilter}
           onChange={(e) => setGlobalFilter(e.target.value)}
         />
@@ -259,7 +259,7 @@ export function GridPage() {
         {/* Column visibility */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+            <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs">
               <Eye className="size-3.5" /> Columns
             </Button>
           </DropdownMenuTrigger>
@@ -281,7 +281,7 @@ export function GridPage() {
         <Button
           variant={groupByDay ? 'default' : 'outline'}
           size="sm"
-          className="h-8 text-xs"
+          className="h-9 text-xs"
           onClick={() => setGroupByDay((v) => !v)}
         >
           Group by day
@@ -294,7 +294,7 @@ export function GridPage() {
           <>
             <Separator orientation="vertical" className="h-5" />
             <Badge variant="secondary" className="text-xs">{selectedRows.length} selected</Badge>
-            <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={bulkMarkRTI}>
+            <Button variant="outline" size="sm" className="h-9 gap-1 text-xs" onClick={bulkMarkRTI}>
               <UserCheck className="size-3.5" /> Mark RTI
             </Button>
             <Select onValueChange={(driverId) => {
@@ -302,7 +302,7 @@ export function GridPage() {
               toast(`${selectedLoads.length} load(s) reassigned`)
               setRowSelection({})
             }}>
-              <SelectTrigger className="h-8 w-36 text-xs"><SelectValue placeholder="Reassign to…" /></SelectTrigger>
+              <SelectTrigger className="h-9 w-36 text-xs"><SelectValue placeholder="Reassign to…" /></SelectTrigger>
               <SelectContent>
                 {drivers.filter((d) => d.active).map((d) => (
                   <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
@@ -312,7 +312,7 @@ export function GridPage() {
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
+              className="h-9 gap-1 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
               onClick={bulkDelete}
             >
               <Trash2 className="size-3.5" /> Delete
@@ -322,8 +322,8 @@ export function GridPage() {
 
         <div className="flex-1" />
 
-        <Button size="sm" className="h-8 gap-1.5" onClick={() => setSelectedLoad(null, 'create')}>
-          <Plus className="size-3.5" /> Add Load
+        <Button size="lg" className="gap-1.5" onClick={() => setSelectedLoad(null, 'create')}>
+          <Plus className="size-4" /> Add Load
         </Button>
       </div>
 
@@ -395,9 +395,9 @@ function GridRow({
       onClick={onRowClick}
       className={cn(
         'border-b border-border/50 cursor-pointer transition-colors',
-        isRTI        ? 'bg-emerald-500/10 hover:bg-emerald-500/15' :
-        isUnassigned ? 'bg-amber-500/10 hover:bg-amber-500/15' :
-                       'hover:bg-white/5',
+        isRTI        ? 'bg-emerald-50 hover:bg-emerald-100/70' :
+        isUnassigned ? 'bg-amber-50 hover:bg-amber-100/70' :
+                       'hover:bg-slate-50',
         row.getIsSelected() && 'bg-primary/10 hover:bg-primary/15',
       )}
     >

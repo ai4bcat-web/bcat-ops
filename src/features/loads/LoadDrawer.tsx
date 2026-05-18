@@ -443,10 +443,9 @@ export function LoadDrawer() {
                     className={cn(
                       'w-full h-9 gap-2 justify-start font-medium',
                       field.value
-                        ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                         : 'text-muted-foreground',
                     )}
-                    style={field.value ? { background: 'rgba(74,222,128,0.08)' } : {}}
                     onClick={() => field.onChange(!field.value)}
                   >
                     {field.value

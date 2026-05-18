@@ -16,18 +16,18 @@ export function AuditPage() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="px-6 py-4 border-b border-border sticky top-0 z-10" style={{ background: 'linear-gradient(180deg,#0e2454 0%,#07122b 100%)' }}>
-        <h1 className="text-base font-bold text-white tracking-tight">Audit Log</h1>
+      <div className="px-8 py-5 border-b border-border sticky top-0 z-10 bg-white">
+        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Audit Log</h1>
         <p className="text-xs text-muted-foreground mt-0.5">{entries.length} entries · most recent first</p>
       </div>
 
-      <div className="p-6">
+      <div className="p-8">
         {entries.length === 0 ? (
           <div className="text-center py-16 text-muted-foreground text-sm">
             No audit entries yet. Make a change to see it here.
           </div>
         ) : (
-          <div className="rounded-lg border border-border overflow-hidden" style={{ background: '#0d1d3d' }}>
+          <div className="rounded-xl border border-slate-200/60 overflow-hidden bg-white shadow-sm">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -60,7 +60,7 @@ export function AuditPage() {
                         <summary className="text-xs text-muted-foreground hover:text-foreground transition-colors">
                           {Object.keys(entry.changes).length} field(s)
                         </summary>
-                        <pre className="mt-1.5 text-[10px] text-muted-foreground rounded-md p-2 max-w-xs overflow-auto border border-border" style={{ background: '#07122b' }}>
+                        <pre className="mt-1.5 text-[10px] text-muted-foreground rounded-md p-2 max-w-xs overflow-auto border border-border bg-slate-100">
                           {JSON.stringify(entry.changes, null, 2)}
                         </pre>
                       </details>

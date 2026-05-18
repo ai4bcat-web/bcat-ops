@@ -78,7 +78,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     <Button
       variant="outline"
       size="sm"
-      className={cn('h-8 gap-1.5 text-xs shrink-0', className)}
+      className={cn('h-9 gap-1.5 text-xs shrink-0', className)}
       onClick={handleCopy}
     >
       {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
@@ -94,9 +94,9 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
   const isBroker = driver.type === 'broker'
 
   return (
-    <div className="rounded-lg border border-border overflow-hidden shadow-sm" style={{ background: '#0d1d3d' }}>
+    <div className="rounded-xl border border-slate-200/60 overflow-hidden shadow-sm bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border" style={{ background: 'rgba(74,142,239,0.06)' }}>
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-slate-50/60">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm text-foreground truncate">{driver.name}</span>
@@ -153,7 +153,7 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
       )}
 
       {/* SMS preview */}
-      <div className="border-t border-border px-4 py-3" style={{ background: 'rgba(74,142,239,0.03)' }}>
+      <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/40">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
           SMS Preview
         </p>
@@ -199,7 +199,7 @@ export function SchedulePage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 h-13 min-h-[52px] border-b border-border shrink-0 overflow-x-auto" style={{ background: 'linear-gradient(180deg,#0e2454 0%,#07122b 100%)' }}>
+      <div className="flex items-center gap-2 px-4 min-h-[64px] border-b border-border bg-white shrink-0 overflow-x-auto">
         <MessageSquare className="size-4 text-muted-foreground shrink-0" />
         <span className="text-sm font-semibold text-foreground shrink-0">Driver Schedules</span>
 
@@ -207,13 +207,13 @@ export function SchedulePage() {
 
         {/* Date nav */}
         <div className="flex items-center gap-1 shrink-0">
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={prevDay} aria-label="Previous day">
+          <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={prevDay} aria-label="Previous day">
             <ChevronLeft className="size-4" />
           </Button>
-          <Button variant="outline" size="sm" className="h-8 px-3 text-sm" onClick={goToday}>
+          <Button variant="outline" size="sm" className="h-9 px-3 text-sm" onClick={goToday}>
             Today
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={nextDay} aria-label="Next day">
+          <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={nextDay} aria-label="Next day">
             <ChevronRight className="size-4" />
           </Button>
         </div>

@@ -32,59 +32,59 @@
 
 /* ── Design system tokens ─────────────────────────────────────────────────── */
 :root {
-  --ds-bg:           #f7f7f5;
-  --ds-bg-2:         #f0f0ec;
+  --ds-bg:           #f8fafc;
+  --ds-bg-2:         #f1f5f9;
   --ds-card:         #ffffff;
-  --ds-card-2:       #f0f0ec;
-  --ds-panel:        rgba(240, 240, 236, 0.6);
-  --ds-panel-2:      rgba(240, 240, 236, 0.8);
-  --ds-border:       #e5e5e2;
-  --ds-border-soft:  #f0f0ec;
-  --ds-blue:         #c2410c;
-  --ds-blue-bright:  #9a3309;
-  --ds-blue-deep:    #7c2d12;
-  --ds-white:        #1a1a1a;
-  --ds-muted:        #6b6b66;
-  --ds-muted-2:      #9ca3af;
+  --ds-card-2:       #f1f5f9;
+  --ds-panel:        rgba(241, 245, 249, 0.6);
+  --ds-panel-2:      rgba(241, 245, 249, 0.8);
+  --ds-border:       #e2e8f0;
+  --ds-border-soft:  #f1f5f9;
+  --ds-blue:         #1ea8f3;
+  --ds-blue-bright:  #3bb5f5;
+  --ds-blue-deep:    #0d8fd9;
+  --ds-white:        #0a0a0a;
+  --ds-muted:        #64748b;
+  --ds-muted-2:      #94a3b8;
   --ds-green:        #15803d;
   --ds-green-deep:   #166534;
   --ds-red:          #b91c1c;
   --ds-amber:        #b45309;
 
-  /* ── Tailwind / shadcn semantic tokens → Two J's palette ───────────────── */
-  --primary:              #c2410c;
+  /* ── Tailwind / shadcn semantic tokens ──────────────────────────────────── */
+  --primary:              #1ea8f3;
   --primary-foreground:   #ffffff;
-  --ring:                 #c2410c;
+  --ring:                 #1ea8f3;
 
-  --background:           #f7f7f5;
-  --foreground:           #1a1a1a;
+  --background:           #f8fafc;
+  --foreground:           #0a0a0a;
   --card:                 #ffffff;
-  --card-foreground:      #1a1a1a;
+  --card-foreground:      #0a0a0a;
   --popover:              #ffffff;
-  --popover-foreground:   #1a1a1a;
+  --popover-foreground:   #0a0a0a;
 
-  --secondary:            #f0f0ec;
-  --secondary-foreground: #1a1a1a;
-  --muted:                #f0f0ec;
-  --muted-foreground:     #6b6b66;
-  --accent:               #f0f0ec;
-  --accent-foreground:    #1a1a1a;
+  --secondary:            #f1f5f9;
+  --secondary-foreground: #0a0a0a;
+  --muted:                #f1f5f9;
+  --muted-foreground:     #64748b;
+  --accent:               #f1f5f9;
+  --accent-foreground:    #0a0a0a;
 
   --destructive:             #b91c1c;
   --destructive-foreground:  #ffffff;
 
-  --border: #e5e5e2;
-  --input:  #e5e5e2;
+  --border: #e2e8f0;
+  --input:  #e2e8f0;
   --radius: 0.375rem;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  background-color: #f7f7f5;
+  background-color: #f8fafc;
   font-family: Inter, system-ui, -apple-system, sans-serif;
   font-size: 14px;
-  color: #1a1a1a;
+  color: #0a0a0a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-numeric: tabular-nums;
@@ -93,20 +93,20 @@ body {
 /* ── KPI Tile ─────────────────────────────────────────────────────────────── */
 .ds-kpi {
   background: #ffffff;
-  border: 1px solid #e5e5e2;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 14px 16px;
   min-width: 0;
   cursor: pointer;
   transition: border-color .15s;
 }
-.ds-kpi:hover { border-color: #c7c7c2; }
+.ds-kpi:hover { border-color: #cbd5e1; }
 .ds-kpi.active {
-  border-color: #c2410c;
-  background: rgba(194, 65, 12, 0.04);
+  border-color: #1ea8f3;
+  background: rgba(30, 168, 243, 0.04);
 }
 .ds-kpi-label {
-  color: #6b6b66;
+  color: #64748b;
   font-size: 11px;
   letter-spacing: .06em;
   font-weight: 500;
@@ -116,20 +116,20 @@ body {
   white-space: nowrap;
 }
 .ds-kpi-value {
-  color: #1a1a1a;
+  color: #0a0a0a;
   font-size: 24px;
   font-weight: 700;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   letter-spacing: -.02em;
 }
-.ds-kpi-value.blue  { color: #c2410c; }
+.ds-kpi-value.blue  { color: #1ea8f3; }
 .ds-kpi-value.green { color: #15803d; }
 .ds-kpi-value.red   { color: #b91c1c; }
 .ds-kpi-value.amber { color: #b45309; }
 .ds-kpi-sub {
   font-size: 12px;
-  color: #6b6b66;
+  color: #64748b;
   margin-top: 4px;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -137,8 +137,8 @@ body {
 
 /* ── Dashboard Container ─────────────────────────────────────────────────── */
 .ds-dashboard {
-  background: #f0f0ec;
-  border: 1px solid #e5e5e2;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 10px 12px 8px 12px;
 }
@@ -147,11 +147,11 @@ body {
   align-items: center;
   gap: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #e5e5e2;
+  border-bottom: 1px solid #e2e8f0;
   margin-bottom: 8px;
 }
 .ds-logo-pill {
-  background: #1a1a1a;
+  background: #0a0a0a;
   padding: 4px 10px;
   border-radius: 4px;
   display: flex;
@@ -161,13 +161,13 @@ body {
   flex-shrink: 0;
 }
 .ds-dashboard-title {
-  color: #1a1a1a;
+  color: #0a0a0a;
   font-size: 13px;
   font-weight: 700;
   flex: 1;
 }
 .ds-dashboard-sub {
-  color: #6b6b66;
+  color: #64748b;
   font-size: 10px;
   letter-spacing: 1.2px;
   text-transform: uppercase;
@@ -175,19 +175,19 @@ body {
 
 /* ── Panel (inside dashboard) ────────────────────────────────────────────── */
 .ds-panel {
-  background: rgba(240, 240, 236, 0.7);
-  border: 1px solid #e5e5e2;
+  background: rgba(241, 245, 249, 0.7);
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 8px 10px;
 }
 .ds-panel h4 {
-  color: #1a1a1a;
+  color: #0a0a0a;
   font-size: 11px;
   font-weight: 700;
   margin-bottom: 2px;
 }
 .ds-panel .p-sub {
-  color: #6b6b66;
+  color: #64748b;
   font-size: 10px;
   margin-bottom: 6px;
 }
@@ -199,13 +199,13 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 5px 0;
-  border-bottom: 1px solid rgba(229, 229, 226, 0.7);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
   font-size: 12px;
-  color: #6b6b66;
+  color: #64748b;
 }
 .ds-list li:last-child { border-bottom: none; }
-.ds-list .li-label { color: #1a1a1a; font-weight: 600; }
-.ds-list .li-val   { color: #c2410c; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ds-list .li-label { color: #0a0a0a; font-weight: 600; }
+.ds-list .li-val   { color: #1ea8f3; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ds-list .li-val.good { color: #15803d; }
 .ds-list .li-val.bad  { color: #b91c1c; }
 .ds-list .li-val.warn { color: #b45309; }
@@ -224,31 +224,31 @@ body {
 }
 .ds-pill.green { background: #15803d; color: #fff; }
 .ds-pill.red   { background: #b91c1c; color: #fff; }
-.ds-pill.blue  { background: #c2410c; color: #fff; }
+.ds-pill.blue  { background: #1ea8f3; color: #fff; }
 .ds-pill.amber { background: #b45309; color: #fff; }
-.ds-pill.muted { background: #e5e5e2; color: #6b6b66; }
+.ds-pill.muted { background: #e2e8f0; color: #64748b; }
 
 /* ── Horizontal bar ──────────────────────────────────────────────────────── */
-.ds-bar-h { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 11px; color: #6b6b66; }
+.ds-bar-h { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 11px; color: #64748b; }
 .ds-bar-h .bar-label { width: 56px; flex-shrink: 0; font-size: 10px; }
 .ds-bar-h .bar-track {
   flex: 1; height: 6px;
-  background: #e5e5e2;
+  background: #e2e8f0;
   border-radius: 3px; overflow: hidden;
 }
 .ds-bar-h .bar-fill {
   height: 100%;
-  background: #1a1a1a;
+  background: #0a0a0a;
   border-radius: 3px;
 }
 .ds-bar-h .bar-fill.green { background: linear-gradient(90deg, #15803d, #22c55e); }
 .ds-bar-h .bar-fill.red   { background: linear-gradient(90deg, #991b1b, #ef4444); }
-.ds-bar-h .bar-val { width: 32px; text-align: right; color: #1a1a1a; font-weight: 700; font-size: 11px; }
+.ds-bar-h .bar-val { width: 32px; text-align: right; color: #0a0a0a; font-weight: 700; font-size: 11px; }
 
 /* ── Section label ───────────────────────────────────────────────────────── */
 .ds-section-label {
   font-size: 9px;
-  color: #c2410c;
+  color: #1ea8f3;
   letter-spacing: 1.5px;
   font-weight: 700;
   text-transform: uppercase;
@@ -258,7 +258,7 @@ body {
 
 /* ── App Layout ──────────────────────────────────────────────────────────── */
 .app { display: flex; height: 100vh; overflow: hidden; }
-.app-main { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; background: #f7f7f5; }
+.app-main { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; background: #f8fafc; }
 
 /* ── Sidebar ─────────────────────────────────────────────────────────────── */
 .sidebar { width: 220px; background: #1a1a1a; color: #fff; display: flex; flex-direction: column; flex-shrink: 0; }
@@ -287,5 +287,5 @@ body {
   cursor: pointer;
 }
 .sidebar-link:hover { color: #fff; background: #222; }
-.sidebar-link.active { color: #fff; border-left-color: #c2410c; background: #222; }
+.sidebar-link.active { color: #fff; border-left-color: #1ea8f3; background: #222; }
 .sidebar-footer { padding: 14px 18px; border-top: 1px solid #2a2a2a; color: #9ca3af; font-size: 12px; }

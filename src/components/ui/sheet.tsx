@@ -31,7 +31,7 @@ const SheetContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed z-50 h-full w-full max-w-[480px] bg-background shadow-xl flex flex-col',
+        'fixed z-50 h-full w-full max-w-[560px] bg-white shadow-2xl flex flex-col',
         'data-[state=open]:animate-in data-[state=closed]:animate-out duration-200',
         side === 'right'
           ? 'right-0 top-0 data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right'
@@ -49,7 +49,7 @@ SheetContent.displayName = 'SheetContent'
 function SheetHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('flex items-center justify-between px-6 py-4 border-b flex-shrink-0', className)}
+      className={cn('flex items-center justify-between px-8 py-5 border-b border-slate-200 flex-shrink-0 min-h-[64px] bg-white', className)}
       {...props}
     />
   )
@@ -64,13 +64,13 @@ function SheetDescription({ className, ...props }: React.ComponentPropsWithoutRe
 }
 
 function SheetBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('flex-1 overflow-y-auto px-6 py-5', className)} {...props} />
+  return <div className={cn('flex-1 overflow-y-auto px-8 py-6 space-y-5', className)} {...props} />
 }
 
 function SheetFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('flex items-center gap-3 px-6 py-4 border-t flex-shrink-0', className)}
+      className={cn('flex items-center gap-3 px-8 py-5 border-t border-slate-200 bg-slate-50/50 flex-shrink-0 min-h-[72px]', className)}
       {...props}
     />
   )
