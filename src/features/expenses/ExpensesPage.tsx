@@ -32,7 +32,7 @@ function shortDate(iso: string): string {
 
 export function ExpensesPage() {
   const { expenses } = useExpenses()
-  const trucks = useAppStore((s) => s.trucks)
+  const trucks = useAppStore((s) => s.equipment.filter((e) => e.type === 'truck'))
 
   const total = expenses.reduce((sum, e) => sum + e.amount, 0)
   const sorted = [...expenses].sort((a, b) => b.date.localeCompare(a.date))
@@ -78,7 +78,7 @@ export function ExpensesPage() {
                       {shortDate(expense.date)}
                     </TableCell>
                     <TableCell className="text-sm font-medium text-foreground">
-                      {truck ? `#${truck.number}` : <span className="text-slate-300">—</span>}
+                      {truck ? `#${truck.unitNumber}` : <span className="text-slate-300">—</span>}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary" className={CATEGORY_COLORS[expense.category]}>

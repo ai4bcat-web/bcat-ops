@@ -1,19 +1,42 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Driver, Load, AuditLogEntry, ViewMode, EntityType, AuditAction } from '@/types'
-import type { Truck } from '@/types/truck'
+import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import type { Expense } from '@/types/expense'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
 import { errorMessage } from '@/lib/utils/errorMessage'
 
-// ── Truck seed data ────────────────────────────────────────────────────────────
-const SEED_TRUCKS: Truck[] = [
-  { id: 'truck-530', number: '530', make: 'Freightliner', model: 'Cascadia', year: 2019, plate: 'IL-T530', vin: '1FUJGLDR9KSLV8530', active: true, currentDriverId: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-  { id: 'truck-685', number: '685', make: 'Kenworth',     model: 'T680',     year: 2020, plate: 'IL-T685', vin: '1XKWD49X1LJ685001', active: true, currentDriverId: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-  { id: 'truck-780', number: '780', make: 'Peterbilt',    model: '579',      year: 2021, plate: 'IL-T780', vin: '1XPBD49X6MD780002', active: true, currentDriverId: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-  { id: 'truck-299', number: '299', make: 'Freightliner', model: 'Cascadia', year: 2018, plate: 'IL-T299', vin: '1FUJGLDR8JSLV8299', active: true, currentDriverId: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
+// ── Equipment seed data ────────────────────────────────────────────────────────
+const SEED_EQUIPMENT: Equipment[] = [
+  {
+    id: 'truck-530', type: 'truck', unitNumber: '530', make: 'Freightliner', model: 'Cascadia',
+    year: 2019, plate: 'IL-T530', vin: '1FUJGLDR9KSLV8530', ownership: 'owned',
+    insured: true, active: true, onTollwayAccount: true,
+    createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 'truck-685', type: 'truck', unitNumber: '685', make: 'Kenworth', model: 'T680',
+    year: 2020, plate: 'IL-T685', vin: '1XKWD49X1LJ685001', ownership: 'owned',
+    insured: true, active: true, onTollwayAccount: true,
+    createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 'truck-780', type: 'truck', unitNumber: '780', make: 'Peterbilt', model: '579',
+    year: 2021, plate: 'IL-T780', vin: '1XPBD49X6MD780002', ownership: 'owned',
+    insured: true, active: true, onTollwayAccount: false,
+    createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 'truck-299', type: 'truck', unitNumber: '299', make: 'Freightliner', model: 'Cascadia',
+    year: 2018, plate: 'IL-T299', vin: '1FUJGLDR8JSLV8299', ownership: 'owned',
+    insured: true, active: true, onTollwayAccount: true,
+    createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z',
+  },
 ]
+
+const SEED_TASKS: MaintenanceTask[] = []
+const SEED_INVOICES: MaintenanceInvoice[] = []
 
 // ── Expense seed data ──────────────────────────────────────────────────────────
 function daysAgo(n: number): string {
@@ -74,7 +97,9 @@ interface AppState {
   currentUserEmail: string
 
   // ── Local data (no backend yet — Zustand only) ─────────────────────────────
-  trucks: Truck[]
+  equipment: Equipment[]
+  maintenanceTasks: MaintenanceTask[]
+  maintenanceInvoices: MaintenanceInvoice[]
   expenses: Expense[]
 
   // ── UI (persisted to localStorage) ────────────────────────────────────────
@@ -101,10 +126,18 @@ interface AppState {
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
   deleteLoad: (id: string) => Promise<void>
 
-  // ── Truck actions (local) ──────────────────────────────────────────────────
-  addTruck: (t: Omit<Truck, 'id' | 'createdAt' | 'updatedAt'>) => void
-  updateTruck: (id: string, patch: Partial<Omit<Truck, 'id' | 'createdAt'>>) => void
-  archiveTruck: (id: string) => void
+  // ── Equipment actions (local) ──────────────────────────────────────────────
+  addEquipment: (e: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => Equipment
+  updateEquipment: (id: string, patch: Partial<Omit<Equipment, 'id' | 'createdAt'>>) => void
+  deleteEquipment: (id: string) => void
+
+  // ── Maintenance actions (local) ────────────────────────────────────────────
+  addMaintenanceTask: (t: Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>) => void
+  updateMaintenanceTask: (id: string, patch: Partial<Omit<MaintenanceTask, 'id' | 'createdAt'>>) => void
+  deleteMaintenanceTask: (id: string) => void
+  addMaintenanceInvoice: (i: Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>) => void
+  updateMaintenanceInvoice: (id: string, patch: Partial<Omit<MaintenanceInvoice, 'id' | 'createdAt'>>) => void
+  deleteMaintenanceInvoice: (id: string) => void
 
   // ── Expense actions (local) ────────────────────────────────────────────────
   addExpense: (e: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>) => void
@@ -150,7 +183,9 @@ export const useAppStore = create<AppState>()(
       error: null,
       currentUserEmail: 'dispatch@bcat.local',
 
-      trucks: SEED_TRUCKS,
+      equipment: SEED_EQUIPMENT,
+      maintenanceTasks: SEED_TASKS,
+      maintenanceInvoices: SEED_INVOICES,
       expenses: SEED_EXPENSES,
 
       viewMode: 'week' as ViewMode,
@@ -241,16 +276,45 @@ export const useAppStore = create<AppState>()(
         })
       },
 
-      // ── Trucks ─────────────────────────────────────────────────────────────
-      addTruck: (t) => {
-        const truck: Truck = { ...t, id: `truck-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
-        set((s) => ({ trucks: [...s.trucks, truck] }))
+      // ── Equipment ──────────────────────────────────────────────────────────
+      addEquipment: (e) => {
+        const item: Equipment = { ...e, id: `equip-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
+        set((s) => ({ equipment: [...s.equipment, item] }))
+        return item
       },
-      updateTruck: (id, patch) => {
-        set((s) => ({ trucks: s.trucks.map((t) => t.id === id ? { ...t, ...patch, updatedAt: nowIso() } : t) }))
+      updateEquipment: (id, patch) => {
+        set((s) => ({ equipment: s.equipment.map((e) => e.id === id ? { ...e, ...patch, updatedAt: nowIso() } : e) }))
       },
-      archiveTruck: (id) => {
-        set((s) => ({ trucks: s.trucks.map((t) => t.id === id ? { ...t, active: false, updatedAt: nowIso() } : t) }))
+      deleteEquipment: (id) => {
+        set((s) => ({
+          equipment: s.equipment.filter((e) => e.id !== id),
+          maintenanceTasks: s.maintenanceTasks.filter((t) => t.equipmentId !== id),
+          maintenanceInvoices: s.maintenanceInvoices.filter((i) => i.equipmentId !== id),
+        }))
+      },
+
+      // ── Maintenance tasks ──────────────────────────────────────────────────
+      addMaintenanceTask: (t) => {
+        const task: MaintenanceTask = { ...t, id: `task-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
+        set((s) => ({ maintenanceTasks: [...s.maintenanceTasks, task] }))
+      },
+      updateMaintenanceTask: (id, patch) => {
+        set((s) => ({ maintenanceTasks: s.maintenanceTasks.map((t) => t.id === id ? { ...t, ...patch, updatedAt: nowIso() } : t) }))
+      },
+      deleteMaintenanceTask: (id) => {
+        set((s) => ({ maintenanceTasks: s.maintenanceTasks.filter((t) => t.id !== id) }))
+      },
+
+      // ── Maintenance invoices ───────────────────────────────────────────────
+      addMaintenanceInvoice: (i) => {
+        const inv: MaintenanceInvoice = { ...i, id: `inv-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
+        set((s) => ({ maintenanceInvoices: [...s.maintenanceInvoices, inv] }))
+      },
+      updateMaintenanceInvoice: (id, patch) => {
+        set((s) => ({ maintenanceInvoices: s.maintenanceInvoices.map((i) => i.id === id ? { ...i, ...patch, updatedAt: nowIso() } : i) }))
+      },
+      deleteMaintenanceInvoice: (id) => {
+        set((s) => ({ maintenanceInvoices: s.maintenanceInvoices.filter((i) => i.id !== id) }))
       },
 
       // ── Expenses ───────────────────────────────────────────────────────────
@@ -281,11 +345,14 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'bcat-ops-ui-v3',
-      // Only persist UI preferences — data comes from the API
+      // Persist UI prefs + local-only data (equipment/maintenance have no backend yet)
       partialize: (s) => ({
         viewMode: s.viewMode,
         weekStart: s.weekStart,
         filters: s.filters,
+        equipment: s.equipment,
+        maintenanceTasks: s.maintenanceTasks,
+        maintenanceInvoices: s.maintenanceInvoices,
       }),
     }
   )

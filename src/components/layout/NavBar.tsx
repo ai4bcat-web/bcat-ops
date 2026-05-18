@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Truck, CalendarDays, Table2, Users, History, MessageSquare, LogOut, UserCog,
-  LayoutDashboard, DollarSign,
+  LayoutDashboard, DollarSign, Wrench,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -10,8 +10,9 @@ const NAV_ITEMS = [
   { to: '/calendar',  label: 'Calendar',   icon: CalendarDays,    pageKey: 'calendar'  },
   { to: '/loads',     label: 'Loads',      icon: Table2,          pageKey: 'loads'     },
   { to: '/drivers',   label: 'Drivers',    icon: Users,           pageKey: 'drivers'   },
-  { to: '/trucks',    label: 'Trucks',     icon: Truck,           pageKey: 'trucks'    },
-  { to: '/expenses',  label: 'Expenses',   icon: DollarSign,      pageKey: 'expenses'  },
+  { to: '/trucks',      label: 'Fleet',       icon: Truck,      pageKey: 'trucks'       },
+  { to: '/maintenance', label: 'Maintenance', icon: Wrench,     pageKey: 'maintenance'  },
+  { to: '/expenses',    label: 'Expenses',    icon: DollarSign, pageKey: 'expenses'     },
   { to: '/schedule',  label: 'Schedules',  icon: MessageSquare,   pageKey: 'schedule'  },
   { to: '/audit-log', label: 'Audit Log',  icon: History,         pageKey: 'audit'     },
 ]
