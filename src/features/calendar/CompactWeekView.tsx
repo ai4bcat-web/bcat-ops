@@ -27,6 +27,7 @@ function initials(name: string) {
 
 function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReorder }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const [pickingOrder, setPickingOrder] = useState(false)
 
   const isRTI      = load.readyToInvoice
   const isConflict = conflictIds.has(load.id)
@@ -48,13 +49,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
   const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
 
-  // Cycle order 1→2→…→min(groupSize,5)→1 on each click
-  const cycleOrder = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    const max = Math.min(groupSize, 5)
-    if (max <= 1) return
-    onReorder(load.id, (orderNumber % max) + 1)
-  }
+  const maxPos = Math.min(groupSize, 5)
 
   const card = (
     <div
@@ -64,7 +59,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
       }}
-      onClick={() => setSelectedLoad(load.id, 'view')}
+      onClick={() => { if (!pickingOrder) setSelectedLoad(load.id, 'view') }}
     >
       {/* Main row: left content + right column (badge above avatar) */}
       <div className="flex items-start gap-1 min-w-0">
@@ -89,22 +84,48 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
 
         {/* Right column: order badge on top, avatar(s) below */}
         <div className="flex flex-col items-center gap-0.5 shrink-0">
-          {/* Order badge — click to cycle */}
-          <span
-            className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity hover:opacity-75"
-            style={{
-              background: borderColor,
-              color: '#fff',
-              minWidth: '14px',
-              minHeight: '14px',
-              padding: '0 2px',
-              cursor: Math.min(groupSize, 5) > 1 ? 'pointer' : 'default',
-            }}
-            title={Math.min(groupSize, 5) > 1 ? 'Click to cycle order' : undefined}
-            onClick={cycleOrder}
-          >
-            {orderNumber}
-          </span>
+          {/* Order badge — click to open picker, or picker buttons */}
+          {pickingOrder ? (
+            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+              {Array.from({ length: maxPos }, (_, i) => i + 1).map((n) => (
+                <button
+                  key={n}
+                  className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity"
+                  style={{
+                    background: n === orderNumber ? '#94a3b8' : borderColor,
+                    color: '#fff',
+                    minWidth: '14px',
+                    minHeight: '14px',
+                    padding: '0 2px',
+                    opacity: n === orderNumber ? 0.5 : 1,
+                    cursor: n === orderNumber ? 'default' : 'pointer',
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    if (n !== orderNumber) onReorder(load.id, n)
+                    setPickingOrder(false)
+                  }}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <span
+              className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity hover:opacity-75"
+              style={{
+                background: borderColor,
+                color: '#fff',
+                minWidth: '14px',
+                minHeight: '14px',
+                padding: '0 2px',
+                cursor: maxPos > 1 ? 'pointer' : 'default',
+              }}
+              onClick={(e) => { e.stopPropagation(); if (maxPos > 1) setPickingOrder(true) }}
+            >
+              {orderNumber}
+            </span>
+          )}
           {/* Avatar(s) */}
           <div className="flex items-center">
             <Avatar
@@ -131,6 +152,8 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
       </div>
     </div>
   )
+
+  if (pickingOrder) return <div>{card}</div>
 
   return (
     <Tooltip delayDuration={400}>
