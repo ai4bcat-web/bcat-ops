@@ -55,7 +55,10 @@ const schema = a.schema({
       allow.authenticated().to(['create', 'read']),
     ]),
 
-  // Admin-only: manage Cognito users via Lambda
+  // Admin-only: manage Cognito users via Lambda.
+  // Authorization is allow.authenticated() so the Lambda receives the call and can
+  // inspect event.identity.claims.email — the Lambda throws for non-admin callers.
+  // Client-side: isAdminEmail() in AuthContext gates the UI and the nav link.
   manageUsers: a
     .query()
     .arguments({
@@ -65,7 +68,7 @@ const schema = a.schema({
       pages:    a.string(),
     })
     .returns(a.json())
-    .authorization((allow) => [allow.group('ADMIN')])
+    .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(userManagement)),
 })
 

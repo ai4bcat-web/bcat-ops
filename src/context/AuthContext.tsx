@@ -3,6 +3,7 @@ import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
   confirmSignIn, type SignInOutput,
 } from 'aws-amplify/auth'
+import { isAdminEmail } from '@/lib/auth/admin'
 
 export interface AuthUser {
   userId: string
@@ -75,7 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsNewPassword(false)
   }, [])
 
-  const isAdmin = user?.groups.includes('ADMIN') ?? false
+  // Admin access is gated by email, not Cognito group membership.
+  // The ADMIN_EMAILS list in src/lib/auth/admin.ts is the single source of truth.
+  // The Lambda enforces the same check server-side via event.identity.claims.email.
+  const isAdmin = isAdminEmail(user?.email)
 
   return (
     <AuthContext.Provider value={{

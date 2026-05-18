@@ -14,14 +14,28 @@ import {
 const cognito = new CognitoIdentityProviderClient({})
 const USER_POOL_ID = process.env.USER_POOL_ID!
 
-// All controllable page groups (must match frontend PAGE_GROUPS keys)
-const PAGE_GROUPS = ['page-calendar', 'page-grid', 'page-drivers', 'page-schedule', 'page-audit']
+// Server-side admin gate — mirrors src/lib/auth/admin.ts.
+// Update both files when adding or removing admin emails.
+const ADMIN_EMAILS = ['ryne@bcatcorp.com']
+
+// All controllable page groups (must match frontend PAGE_OPTIONS keys)
+const PAGE_GROUPS = [
+  'page-dashboard', 'page-calendar', 'page-loads', 'page-drivers',
+  'page-trucks', 'page-expenses', 'page-schedule', 'page-audit',
+]
 
 interface Args {
   action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups' | 'resetPassword'
   email?: string
   username?: string
   pages?: string // JSON string: string[]
+}
+
+// AppSync Cognito User Pools identity shape
+interface AppSyncIdentity {
+  sub: string
+  username: string
+  claims: { email?: string; [key: string]: unknown }
 }
 
 // Ensure a Cognito group exists (no-op if already exists)
@@ -33,7 +47,17 @@ async function ensureGroup(name: string) {
   }
 }
 
-export const handler = async (event: { arguments: Args }) => {
+export const handler = async (event: { arguments: Args; identity?: AppSyncIdentity | null }) => {
+  // ── Server-side admin enforcement ────────────────────────────────────────────
+  // The AppSync resolver allows any authenticated user to reach this Lambda.
+  // We independently verify the caller's email here so that even a direct API
+  // call (bypassing the UI) is rejected for non-admins.
+  const callerEmail = (event.identity?.claims?.email ?? '').toLowerCase().trim()
+  if (!callerEmail || !ADMIN_EMAILS.includes(callerEmail)) {
+    throw new Error('Forbidden: admin access required')
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const { action, email, username, pages } = event.arguments
 
   switch (action) {

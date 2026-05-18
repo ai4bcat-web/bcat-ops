@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Users, Plus, UserCheck, UserX, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Loader2, KeyRound } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Users, Plus, UserCheck, UserX, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Loader2, KeyRound, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAuth } from '@/hooks/useAuth'
+import { isAdminEmail } from '@/lib/auth/admin'
 import {
   listCognitoUsers, createCognitoUser,
   disableCognitoUser, enableCognitoUser,
@@ -18,9 +20,12 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 const PAGE_OPTIONS = [
+  { key: 'dashboard', label: 'Dashboard' },
   { key: 'calendar',  label: 'Calendar'  },
-  { key: 'grid',      label: 'Load Grid' },
+  { key: 'loads',     label: 'Loads'     },
   { key: 'drivers',   label: 'Drivers'   },
+  { key: 'trucks',    label: 'Trucks'    },
+  { key: 'expenses',  label: 'Expenses'  },
   { key: 'schedule',  label: 'Schedules' },
   { key: 'audit',     label: 'Audit Log' },
 ] as const
@@ -97,8 +102,16 @@ function UserRow({
       {/* Main row */}
       <div className="flex items-center gap-3 px-6 py-4">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-foreground truncate">
-            {user.email ?? user.username ?? '—'}
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-foreground truncate">
+              {user.email ?? user.username ?? '—'}
+            </span>
+            {isAdminEmail(user.email) && (
+              <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 gap-1 shrink-0">
+                <ShieldCheck className="size-3" />
+                Admin
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2 mt-1">
             <StatusBadge user={user} />
@@ -222,7 +235,8 @@ function UserRow({
 }
 
 export function UsersPage() {
-  const { isAdmin } = useAuth()
+  const { loading: authLoading, isAdmin } = useAuth()
+  const navigate = useNavigate()
   const [users, setUsers] = useState<CognitoUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -230,6 +244,15 @@ export function UsersPage() {
   const [creating, setCreating] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [resettingId, setResettingId] = useState<string | null>(null)
+
+  // Client-side access gate — redirect non-admins immediately.
+  // Server-side enforcement is handled independently in the Lambda.
+  useEffect(() => {
+    if (!authLoading && !isAdmin) {
+      toast.error("You don't have access to that page.")
+      navigate('/dashboard', { replace: true })
+    }
+  }, [authLoading, isAdmin, navigate])
 
   const loadUsers = useCallback(async () => {
     setLoading(true)
@@ -240,7 +263,7 @@ export function UsersPage() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg)
-      toast.error('Failed to load users')
+      toast.error(`Failed to load users: ${msg}`)
     } finally {
       setLoading(false)
     }
@@ -297,14 +320,8 @@ export function UsersPage() {
     }
   }
 
-  if (!isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-        <Users className="size-10 opacity-20" />
-        <p className="text-sm">Admin access required</p>
-      </div>
-    )
-  }
+  // Never flash real UI for non-admins while the redirect is in flight
+  if (authLoading || !isAdmin) return null
 
   const activeCount   = users.filter((u) => u.enabled && u.status !== 'FORCE_CHANGE_PASSWORD').length
   const pendingCount  = users.filter((u) => u.status === 'FORCE_CHANGE_PASSWORD').length
