@@ -106,7 +106,10 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
   const onSubmit = async (values: DriverFormValues) => {
     // Auto-assign a color if none chosen
-    const colorKeys: ColorKey[] = ['driver-1','driver-2','driver-3','driver-4','driver-5','driver-6']
+    const colorKeys: ColorKey[] = [
+      'driver-1','driver-2','driver-3','driver-4','driver-5','driver-6',
+      'driver-7','driver-8','driver-9','driver-10','driver-11','driver-12',
+    ]
     const autoColor = values.colorKey ?? colorKeys[Math.floor(Math.random() * colorKeys.length)]
     const normalized = { ...values, phone: normalizePhone(values.phone), colorKey: autoColor }
     try {

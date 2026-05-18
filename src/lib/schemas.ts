@@ -10,7 +10,11 @@ export const driverSchema = z.object({
     ),
   active: z.boolean(),
   type: z.enum(['driver', 'broker']),
-  colorKey: z.enum(['driver-1','driver-2','driver-3','driver-4','driver-5','driver-6','broker']).optional(),
+  colorKey: z.enum([
+    'driver-1','driver-2','driver-3','driver-4','driver-5','driver-6',
+    'driver-7','driver-8','driver-9','driver-10','driver-11','driver-12',
+    'broker',
+  ]).optional(),
   notes: z.string().optional(),
 })
 

@@ -1,4 +1,7 @@
-export type ColorKey = 'driver-1' | 'driver-2' | 'driver-3' | 'driver-4' | 'driver-5' | 'driver-6' | 'broker'
+export type ColorKey =
+  | 'driver-1' | 'driver-2' | 'driver-3' | 'driver-4' | 'driver-5' | 'driver-6'
+  | 'driver-7' | 'driver-8' | 'driver-9' | 'driver-10' | 'driver-11' | 'driver-12'
+  | 'broker'
 
 export interface Driver {
   id: string
