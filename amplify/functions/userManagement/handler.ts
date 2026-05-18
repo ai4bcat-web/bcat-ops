@@ -7,6 +7,7 @@ import {
   AdminListGroupsForUserCommand,
   AdminAddUserToGroupCommand,
   AdminRemoveUserFromGroupCommand,
+  AdminResetUserPasswordCommand,
   CreateGroupCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 
@@ -17,7 +18,7 @@ const USER_POOL_ID = process.env.USER_POOL_ID!
 const PAGE_GROUPS = ['page-calendar', 'page-grid', 'page-drivers', 'page-schedule', 'page-audit']
 
 interface Args {
-  action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups'
+  action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups' | 'resetPassword'
   email?: string
   username?: string
   pages?: string // JSON string: string[]
@@ -104,6 +105,11 @@ export const handler = async (event: { arguments: Args }) => {
           UserPoolId: USER_POOL_ID, Username: username, GroupName: g,
         }))),
       ])
+      return JSON.stringify({ success: true })
+    }
+    case 'resetPassword': {
+      if (!username) throw new Error('username is required')
+      await cognito.send(new AdminResetUserPasswordCommand({ UserPoolId: USER_POOL_ID, Username: username }))
       return JSON.stringify({ success: true })
     }
     default:

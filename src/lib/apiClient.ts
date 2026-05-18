@@ -195,6 +195,13 @@ export async function setUserPageGroups(username: string, pages: string[]): Prom
   })
 }
 
+export async function resetCognitoPassword(username: string): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String) { manageUsers(action: $action, username: $username) }`,
+    variables: { action: 'resetPassword', username },
+  })
+}
+
 // ── S3 rate confirmations ─────────────────────────────────────────────────────
 
 export async function uploadRateConfirm(loadId: string, file: File): Promise<string> {
