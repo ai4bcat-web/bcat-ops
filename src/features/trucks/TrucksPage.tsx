@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
-  Truck, Trailer, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Loader2,
+  Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, TaskPriority, TaskStatus } from '@/types/equipment'
@@ -643,7 +643,7 @@ function EquipRow({ equip, index, tasks, invoices, driverName, onEdit, onDelete 
         <div className="size-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
           {equip.type === 'truck'
             ? <Truck className="size-4 text-slate-500" />
-            : <Trailer className="size-4 text-slate-500" />}
+            : <Container className="size-4 text-slate-500" />}
         </div>
 
         {/* Main info */}
