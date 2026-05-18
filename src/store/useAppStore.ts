@@ -191,7 +191,9 @@ export const useAppStore = create<AppState>()(
       updateDriver: async (id, patch) => {
         const before = get().drivers.find((d) => d.id === id)
         if (!before) return
-        const after = await api.updateDriver(id, { ...patch, updatedAt: nowIso() })
+        // Do NOT pass updatedAt — Amplify Gen 2 manages it server-side.
+        // Passing it in UpdateDriverInput causes a GraphQL validation error.
+        const after = await api.updateDriver(id, patch)
         set((s) => ({ drivers: s.drivers.map((d) => (d.id === id ? after : d)) }))
         writeAudit(get().currentUserEmail, 'Driver', id, 'update', diffChanges(before, after))
       },
@@ -218,10 +220,10 @@ export const useAppStore = create<AppState>()(
       updateLoad: async (id, patch) => {
         const before = get().loads.find((l) => l.id === id)
         if (!before) return
+        // Do NOT pass updatedAt — Amplify Gen 2 manages it server-side.
         const after = await api.updateLoad(id, {
           ...patch,
           updatedBy: get().currentUserEmail,
-          updatedAt: nowIso(),
         })
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))

@@ -134,7 +134,16 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
       toast(isEdit ? 'Driver updated' : 'Driver added', { description: normalized.name })
       onClose()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save driver')
+      // Log the raw error so GraphQL error objects are visible in the console
+      console.error('Driver save error:', err)
+      // @aws-amplify/data throws { errors: [...] } (not Error instances) for GraphQL errors
+      const gqlErrors = (err as { errors?: { message: string }[] })?.errors
+      const msg = Array.isArray(gqlErrors)
+        ? gqlErrors.map((e) => e.message).join('; ')
+        : err instanceof Error
+          ? err.message
+          : 'Failed to save driver'
+      toast.error(msg)
     }
   }
 

@@ -89,7 +89,7 @@ export function CalendarToolbar({
         {dateLabel}
       </span>
 
-      <Separator orientation="vertical" className="h-8 mx-2 shrink-0" />
+      <Separator orientation="vertical" className="h-8 mx-3 shrink-0" />
 
       {/* ── View switcher ────────────────────────────────────────────────── */}
       <ToggleGroup
@@ -110,7 +110,7 @@ export function CalendarToolbar({
         ))}
       </ToggleGroup>
 
-      <Separator orientation="vertical" className="h-8 mx-2 shrink-0" />
+      <Separator orientation="vertical" className="h-8 mx-3 shrink-0" />
 
       {/* ── Filter chips ─────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 flex-1 overflow-x-auto min-w-0">
@@ -120,8 +120,8 @@ export function CalendarToolbar({
             onClick={() => toggleFilter(key)}
             aria-pressed={filters[key]}
             className={cn(
-              'h-10 pl-3 text-sm font-medium rounded-full border transition-all whitespace-nowrap flex items-center gap-2 shrink-0',
-              filters[key] ? `${active} pr-2` : `${inactive} pr-4`,
+              'h-10 pl-5 text-sm font-medium rounded-full border transition-all whitespace-nowrap flex items-center gap-2 shrink-0',
+              filters[key] ? `${active} pr-3` : `${inactive} pr-5`,
             )}
           >
             <Icon className="size-3.5 shrink-0" />
@@ -139,12 +139,12 @@ export function CalendarToolbar({
       </div>
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
-      <div className="relative shrink-0">
+      <div className="relative w-72 shrink-0">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
         <input
           type="search"
           placeholder="Search by ALJEX, TMS, or PU#"
-          className="h-10 w-72 pl-10 pr-4 rounded-lg border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-shadow"
+          className="h-10 w-full pl-10 pr-4 rounded-lg border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-shadow"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           aria-label="Search loads"
@@ -162,7 +162,7 @@ export function CalendarToolbar({
 
       {/* ── New Load ─────────────────────────────────────────────────────── */}
       <Button
-        className="h-10 px-5 gap-2 font-medium shrink-0"
+        className="h-10 px-6 gap-2 font-medium shrink-0 whitespace-nowrap"
         onClick={() => setSelectedLoad(null, 'create')}
       >
         <Plus className="size-4" />
