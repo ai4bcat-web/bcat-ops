@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Search, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
@@ -140,13 +140,13 @@ export function CalendarToolbar({
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
       <div className="relative w-72 shrink-0">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none" />
         <input
-          type="search"
+          type="text"
           placeholder="Search by ALJEX, TMS, or PU#"
-          className="h-10 w-full pl-10 pr-4 rounded-lg border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-shadow"
+          className="h-10 w-full pl-3 pr-4 rounded-lg border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-shadow"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          onFocus={() => setSearchQuery('')}
           aria-label="Search loads"
         />
         {searchQuery && (

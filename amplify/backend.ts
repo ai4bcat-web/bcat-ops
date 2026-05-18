@@ -11,11 +11,16 @@ const backend = defineBackend({ auth, data, storage, userManagement })
 backend.userManagement.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions: [
-      'cognito-idp:AdminCreateUser',
       'cognito-idp:ListUsers',
+      'cognito-idp:AdminCreateUser',
       'cognito-idp:AdminDisableUser',
       'cognito-idp:AdminEnableUser',
       'cognito-idp:AdminGetUser',
+      'cognito-idp:AdminListGroupsForUser',
+      'cognito-idp:AdminAddUserToGroup',
+      'cognito-idp:AdminRemoveUserFromGroup',
+      'cognito-idp:AdminResetUserPassword',
+      'cognito-idp:CreateGroup',
     ],
     resources: [backend.auth.resources.userPool.userPoolArn],
   })

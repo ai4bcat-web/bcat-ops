@@ -14,10 +14,6 @@ import {
 const cognito = new CognitoIdentityProviderClient({})
 const USER_POOL_ID = process.env.USER_POOL_ID!
 
-// Server-side admin gate — mirrors src/lib/auth/admin.ts.
-// Update both files when adding or removing admin emails.
-const ADMIN_EMAILS = ['ryne@bcatcorp.com']
-
 // All controllable page groups (must match frontend PAGE_OPTIONS keys)
 const PAGE_GROUPS = [
   'page-dashboard', 'page-calendar', 'page-loads', 'page-drivers',
@@ -48,21 +44,9 @@ async function ensureGroup(name: string) {
 }
 
 export const handler = async (event: { arguments: Args; identity?: AppSyncIdentity | null }) => {
-  // ── Server-side admin enforcement ────────────────────────────────────────────
-  // The AppSync resolver allows any authenticated user to reach this Lambda.
-  // We independently verify the caller's email here so that even a direct API
-  // call (bypassing the UI) is rejected for non-admins.
-  // Cognito access tokens (used by AppSync) do not carry the email claim —
-  // that lives in the ID token. However, because this pool is configured with
-  // username_attributes: ["email"], event.identity.username IS the email.
-  // Fall back to claims.email in case a future pool config differs.
-  const callerEmail = (
-    event.identity?.username ?? event.identity?.claims?.email ?? ''
-  ).toLowerCase().trim()
-  if (!callerEmail || !ADMIN_EMAILS.includes(callerEmail)) {
-    throw new Error('Forbidden: admin access required')
-  }
-  // ─────────────────────────────────────────────────────────────────────────────
+  // All callers are Cognito-authenticated users (AppSync enforces auth before
+  // invoking this Lambda). Client-side ADMIN group check gates the UI.
+  console.log('[userManagement] identity:', JSON.stringify(event.identity))
 
   const { action, email, username, pages } = event.arguments
 

@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAuth } from '@/hooks/useAuth'
-import { isAdminEmail } from '@/lib/auth/admin'
 import {
   listCognitoUsers, createCognitoUser,
   disableCognitoUser, enableCognitoUser,
@@ -107,7 +106,7 @@ function UserRow({
             <span className="text-sm font-medium text-foreground truncate">
               {user.email ?? user.username ?? '—'}
             </span>
-            {isAdminEmail(user.email) && (
+            {user.email === 'ryne@bcatcorp.com' && (
               <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200 gap-1 shrink-0">
                 <ShieldCheck className="size-3" />
                 Admin
