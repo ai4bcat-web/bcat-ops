@@ -52,7 +52,13 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
   // The AppSync resolver allows any authenticated user to reach this Lambda.
   // We independently verify the caller's email here so that even a direct API
   // call (bypassing the UI) is rejected for non-admins.
-  const callerEmail = (event.identity?.claims?.email ?? '').toLowerCase().trim()
+  // Cognito access tokens (used by AppSync) do not carry the email claim —
+  // that lives in the ID token. However, because this pool is configured with
+  // username_attributes: ["email"], event.identity.username IS the email.
+  // Fall back to claims.email in case a future pool config differs.
+  const callerEmail = (
+    event.identity?.username ?? event.identity?.claims?.email ?? ''
+  ).toLowerCase().trim()
   if (!callerEmail || !ADMIN_EMAILS.includes(callerEmail)) {
     throw new Error('Forbidden: admin access required')
   }
