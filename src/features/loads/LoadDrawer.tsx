@@ -451,16 +451,21 @@ export function LoadDrawer() {
 
               <Separator />
 
-              {/* RTI — one-way: click to mark ready, no toggle back */}
+              {/* RTI — toggleable */}
               <Controller
                 name="readyToInvoice"
                 control={control}
                 render={({ field }) => (
                   field.value ? (
-                    <div className="flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 h-9 text-emerald-700 text-sm font-medium">
+                    <button
+                      type="button"
+                      className="flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 h-9 text-emerald-700 text-sm font-medium w-full hover:bg-emerald-100 transition-colors"
+                      onClick={() => field.onChange(false)}
+                    >
                       <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
                       Ready to Invoice
-                    </div>
+                      <span className="ml-auto text-[10px] text-emerald-500 font-normal">click to undo</span>
+                    </button>
                   ) : (
                     <Button
                       type="button"

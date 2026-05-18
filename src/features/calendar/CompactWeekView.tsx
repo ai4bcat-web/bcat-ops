@@ -51,7 +51,7 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
 
   const card = (
     <div
-      className="rounded border border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none"
+      className="relative rounded border border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none"
       style={{
         borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e7eb',
         borderLeftColor: borderColor,
@@ -59,59 +59,58 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
       }}
       onClick={() => { if (!pickingOrder) setSelectedLoad(load.id, 'view') }}
     >
-      {/* Line 1: time · aljex id · order badge · RTI · driver avatar(s) */}
-      <div className="flex items-center gap-1 min-w-0">
+      {/* Order badge — top-right corner */}
+      {pickingOrder ? (
+        <div
+          className="absolute top-0.5 right-0.5 flex items-center gap-0.5 z-10"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {Array.from({ length: groupSize }, (_, i) => i + 1).map((n) => (
+            <button
+              key={n}
+              className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity"
+              style={{
+                background: n === orderNumber ? '#94a3b8' : borderColor,
+                color: '#fff',
+                minWidth: '14px',
+                minHeight: '14px',
+                padding: '0 2px',
+                opacity: n === orderNumber ? 0.5 : 1,
+                cursor: n === orderNumber ? 'default' : 'pointer',
+              }}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (n !== orderNumber) onReorder(load.id, n)
+                setPickingOrder(false)
+              }}
+            >
+              {n}
+            </button>
+          ))}
+          <button
+            className="text-[9px] leading-none text-slate-400 hover:text-slate-600 px-0.5"
+            onClick={(e) => { e.stopPropagation(); setPickingOrder(false) }}
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <span
+          className="absolute top-0.5 right-0.5 text-[9px] font-black rounded-full flex items-center justify-center leading-none hover:opacity-75 transition-opacity z-10"
+          style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px', cursor: groupSize > 1 ? 'pointer' : 'default' }}
+          title={groupSize > 1 ? 'Click to change order' : undefined}
+          onClick={(e) => { e.stopPropagation(); if (groupSize > 1) setPickingOrder(true) }}
+        >
+          {orderNumber}
+        </span>
+      )}
+
+      {/* Line 1: time · aljex id · RTI · driver avatar(s) */}
+      <div className="flex items-center gap-1 min-w-0 pr-4">
         <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">{puTime}</span>
         <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
           {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
         </span>
-
-        {/* Order badge — click to pick new position */}
-        {pickingOrder ? (
-          <div
-            className="flex items-center gap-0.5 shrink-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {Array.from({ length: groupSize }, (_, i) => i + 1).map((n) => (
-              <button
-                key={n}
-                className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity"
-                style={{
-                  background: n === orderNumber ? '#94a3b8' : borderColor,
-                  color: '#fff',
-                  minWidth: '14px',
-                  minHeight: '14px',
-                  padding: '0 2px',
-                  opacity: n === orderNumber ? 0.5 : 1,
-                  cursor: n === orderNumber ? 'default' : 'pointer',
-                }}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (n !== orderNumber) onReorder(load.id, n)
-                  setPickingOrder(false)
-                }}
-              >
-                {n}
-              </button>
-            ))}
-            <button
-              className="text-[9px] leading-none text-slate-400 hover:text-slate-600 px-0.5"
-              onClick={(e) => { e.stopPropagation(); setPickingOrder(false) }}
-            >
-              ✕
-            </button>
-          </div>
-        ) : (
-          <span
-            className="text-[9px] font-black shrink-0 rounded-full flex items-center justify-center leading-none hover:opacity-75 transition-opacity"
-            style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px', cursor: groupSize > 1 ? 'pointer' : 'default' }}
-            title={groupSize > 1 ? 'Click to change order' : undefined}
-            onClick={(e) => { e.stopPropagation(); if (groupSize > 1) setPickingOrder(true) }}
-          >
-            {orderNumber}
-          </span>
-        )}
-
         {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
         {/* Pickup driver avatar */}
         <Avatar
