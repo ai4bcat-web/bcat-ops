@@ -16,13 +16,14 @@ interface CompactCardProps {
   load: Load
   drivers: Driver[]
   conflictIds: Set<string>
+  orderNumber: number
 }
 
 function initials(name: string) {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
 }
 
-function CompactCard({ load, drivers, conflictIds }: CompactCardProps) {
+function CompactCard({ load, drivers, conflictIds, orderNumber }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   const isRTI      = load.readyToInvoice
@@ -60,6 +61,12 @@ function CompactCard({ load, drivers, conflictIds }: CompactCardProps) {
         <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">{puTime}</span>
         <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
           {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
+        </span>
+        <span
+          className="text-[9px] font-black shrink-0 rounded-full flex items-center justify-center leading-none"
+          style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px' }}
+        >
+          {orderNumber}
         </span>
         {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
         {/* Pickup driver avatar */}
@@ -135,6 +142,24 @@ interface CompactWeekViewProps {
 export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: CompactWeekViewProps) {
   const days = getFullWeek(weekStart) // [Mon … Sun]
 
+  // Order number per load: sequence # within driver's day (sorted by pickupAppt)
+  const loadOrderMap = useMemo(() => {
+    const map = new Map<string, number>()
+    const groups = new Map<string, Load[]>()
+    loads.forEach((l) => {
+      const date = chicagoDateStr(l.pickupAppt)
+      const key = `${l.pickupDriverId ?? 'unassigned'}-${date}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(l)
+    })
+    groups.forEach((group) => {
+      group
+        .sort((a, b) => a.pickupAppt.localeCompare(b.pickupAppt))
+        .forEach((l, i) => map.set(l.id, i + 1))
+    })
+    return map
+  }, [loads])
+
   const loadsByDay = useMemo(() => {
     return days.map((day) => {
       const dayStr = chicagoDateStr(day.toISOString())
@@ -180,7 +205,7 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
             {/* Compact cards stacked top-to-bottom */}
             <div className="flex-1 overflow-y-auto p-1 space-y-0.5">
               {dayLoads.map((load) => (
-                <CompactCard key={load.id} load={load} drivers={drivers} conflictIds={conflictIds} />
+                <CompactCard key={load.id} load={load} drivers={drivers} conflictIds={conflictIds} orderNumber={loadOrderMap.get(load.id) ?? 1} />
               ))}
               {dayLoads.length === 0 && (
                 <div className="text-center text-[10px] text-slate-300 pt-6 select-none">—</div>
