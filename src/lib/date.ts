@@ -3,12 +3,14 @@ export const TZ = 'America/Chicago'
 // ── Display formatters (all output in Chicago time) ──────────────────────────
 
 export function formatTime(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso  // return raw string (e.g. 'TBD') if not a valid date
   return new Intl.DateTimeFormat('en-US', {
     timeZone: TZ,
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
-  }).format(new Date(iso))
+  }).format(d)
 }
 
 export function formatDateShort(iso: string): string {
@@ -108,9 +110,10 @@ export function fromDateTimeInput(localStr: string): string {
 
 // ── Date math ────────────────────────────────────────────────────────────────
 
-/** YYYY-MM-DD in Chicago timezone */
+/** YYYY-MM-DD in Chicago timezone. Returns '' for invalid/non-date strings (e.g. 'TBD'). */
 export function chicagoDateStr(iso: string | Date): string {
   const d = typeof iso === 'string' ? new Date(iso) : iso
+  if (isNaN(d.getTime())) return ''
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(d)
 }
 
@@ -153,15 +156,17 @@ export function isToday(date: Date): boolean {
 
 /** Do two ISO datetimes fall on the same calendar day in Chicago? */
 export function isSameChicagoDay(a: string, b: string): boolean {
+  if (!a || !b || isNaN(new Date(a).getTime()) || isNaN(new Date(b).getTime())) return false
   return chicagoDateStr(a) === chicagoDateStr(b)
 }
 
-/** Format an appointment time respecting its type (exact / range / FCFS) */
+/** Format an appointment time respecting its type (exact / range / FCFS / TBD) */
 export function formatApptTime(
   appt: string,
   type?: string,
   apptEnd?: string,
 ): string {
+  if (type === 'tbd') return 'TBD'
   if (type === 'fcfs') return 'FCFS'
   if (type === 'range' && apptEnd) return `${formatTime(appt)}–${formatTime(apptEnd)}`
   return formatTime(appt)
@@ -177,11 +182,11 @@ export function fromDateInput(dateStr: string): string {
   return fromDateTimeInput(`${dateStr}T00:00`)
 }
 
-/** Duration between pickup and delivery in whole days */
+/** Duration between pickup and delivery in whole days. Returns 1 for TBD/invalid dates. */
 export function spanDays(pickupIso: string, deliveryIso: string): number {
   const p = chicagoDateStr(pickupIso)
   const d = chicagoDateStr(deliveryIso)
-  if (p === d) return 1
+  if (!p || !d || p === d) return 1
   const ms = new Date(d).getTime() - new Date(p).getTime()
   return Math.max(1, Math.round(ms / 86_400_000) + 1)
 }
