@@ -16,6 +16,14 @@ export const driverSchema = z.object({
     'broker',
   ]).optional(),
   notes: z.string().optional(),
+  // Compliance fields
+  email: z.string().optional(),
+  cdl: z.string().optional(),
+  cdlExpiration: z.string().optional(),
+  medCardExpiration: z.string().optional(),
+  drugTestDate: z.string().optional(),
+  hireDate: z.string().optional(),
+  driverType: z.enum(['company', 'owner_op']).optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs'])

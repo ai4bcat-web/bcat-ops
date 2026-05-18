@@ -14,6 +14,14 @@ export interface Driver {
   photoKey?: string  // S3 key for driver photo
   photoUrl?: string  // client-side: resolved presigned URL
   assignedTruckId?: string | null
+  // Compliance & profile fields
+  email?: string
+  cdl?: string           // CDL number e.g. "CDL-A IL-8823901"
+  cdlExpiration?: string // YYYY-MM-DD
+  medCardExpiration?: string // YYYY-MM-DD
+  drugTestDate?: string  // YYYY-MM-DD — last test date
+  hireDate?: string      // YYYY-MM-DD
+  driverType?: string    // 'company' | 'owner_op'
   createdAt: string
   updatedAt: string
 }

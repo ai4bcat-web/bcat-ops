@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check } from 'lucide-react'
+import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -30,6 +30,32 @@ import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+
+function expiryState(date?: string): 'none' | 'overdue' | 'expiring' | 'ok' {
+  if (!date) return 'none'
+  const diff = (new Date(date).getTime() - Date.now()) / 86_400_000
+  if (diff < 0) return 'overdue'
+  if (diff <= 30) return 'expiring'
+  return 'ok'
+}
+
+function DateBadge({ date, label }: { date?: string; label: string }) {
+  const state = expiryState(date)
+  if (state === 'none') return <span className="text-muted-foreground/40 text-xs">—</span>
+  const cls =
+    state === 'overdue' ? 'text-red-600 font-semibold' :
+    state === 'expiring' ? 'text-amber-600 font-semibold' :
+    'text-emerald-700'
+  const icon =
+    state === 'overdue' ? <AlertTriangle className="size-3 shrink-0" /> :
+    state === 'expiring' ? <Clock className="size-3 shrink-0" /> :
+    null
+  return (
+    <span className={cn('inline-flex items-center gap-1 text-xs font-mono', cls)} title={label}>
+      {icon}{date}
+    </span>
+  )
+}
 
 function getInitials(name: string): string {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()
@@ -64,7 +90,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '' },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined },
   })
 
   const watchType = watch('type')
@@ -75,8 +101,15 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   useEffect(() => {
     if (open) {
       reset(driver
-        ? { name: driver.name, phone: driver.phone, active: driver.active, type: driver.type ?? 'driver', colorKey: driver.colorKey, notes: driver.notes ?? '' }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '' })
+        ? {
+            name: driver.name, phone: driver.phone, active: driver.active,
+            type: driver.type ?? 'driver', colorKey: driver.colorKey, notes: driver.notes ?? '',
+            email: driver.email ?? '', cdl: driver.cdl ?? '',
+            cdlExpiration: driver.cdlExpiration ?? '', medCardExpiration: driver.medCardExpiration ?? '',
+            drugTestDate: driver.drugTestDate ?? '', hireDate: driver.hireDate ?? '',
+            driverType: (driver.driverType as 'company' | 'owner_op' | undefined),
+          }
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -315,6 +348,56 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
             <Separator />
 
+            {/* Compliance */}
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Compliance &amp; Profile</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5 col-span-2">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email</Label>
+                <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">CDL Number</Label>
+                <Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Driver Type</Label>
+                <Controller
+                  name="driverType"
+                  control={control}
+                  render={({ field }) => (
+                    <select
+                      value={field.value ?? ''}
+                      onChange={(e) => field.onChange(e.target.value || undefined)}
+                      className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="">Select…</option>
+                      <option value="company">Company Driver</option>
+                      <option value="owner_op">Owner Operator</option>
+                    </select>
+                  )}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">CDL Expiration</Label>
+                <Input {...register('cdlExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Med Card Expiration</Label>
+                <Input {...register('medCardExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Drug Test</Label>
+                <Input {...register('drugTestDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Hire Date</Label>
+                <Input {...register('hireDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
+              </div>
+            </div>
+
+            <Separator />
+
             {/* Active switch */}
             <div className="flex items-center justify-between">
               <div>
@@ -458,9 +541,13 @@ export function DriversPage() {
                 <TableHead className="min-w-[180px]">Name</TableHead>
                 <TableHead className="min-w-[140px]">Phone</TableHead>
                 <TableHead className="min-w-[130px]">Type</TableHead>
-                <TableHead className="min-w-[120px]">Assigned Truck</TableHead>
+                <TableHead className="min-w-[120px]">Truck</TableHead>
                 <TableHead className="min-w-[90px]">Status</TableHead>
-                <TableHead className="min-w-[200px]">Notes</TableHead>
+                <TableHead className="min-w-[110px]">CDL Exp</TableHead>
+                <TableHead className="min-w-[110px]">Med Card Exp</TableHead>
+                <TableHead className="min-w-[110px]">Drug Test</TableHead>
+                <TableHead className="min-w-[110px]">Hire Date</TableHead>
+                <TableHead className="min-w-[180px]">Notes</TableHead>
                 <TableHead className="w-20" />
               </TableRow>
             </TableHeader>
@@ -511,7 +598,19 @@ export function DriversPage() {
                         ? <Badge variant="green">Active</Badge>
                         : <Badge variant="secondary">Inactive</Badge>}
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">
+                    <TableCell><DateBadge date={driver.cdlExpiration} label="CDL Expiration" /></TableCell>
+                    <TableCell><DateBadge date={driver.medCardExpiration} label="Med Card Expiration" /></TableCell>
+                    <TableCell>
+                      {driver.drugTestDate
+                        ? <span className="text-xs font-mono text-muted-foreground">{driver.drugTestDate}</span>
+                        : <span className="text-muted-foreground/40 text-xs">—</span>}
+                    </TableCell>
+                    <TableCell>
+                      {driver.hireDate
+                        ? <span className="text-xs font-mono text-muted-foreground">{driver.hireDate}</span>
+                        : <span className="text-muted-foreground/40 text-xs">—</span>}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs max-w-[180px] truncate">
                       {driver.notes || '—'}
                     </TableCell>
                     <TableCell>
@@ -545,7 +644,7 @@ export function DriversPage() {
               })}
               {sorted.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-muted-foreground text-sm">
+                  <TableCell colSpan={11} className="py-12 text-center text-muted-foreground text-sm">
                     {drivers.length === 0 ? 'No drivers yet. Add one to get started.' : 'No drivers match your filter.'}
                   </TableCell>
                 </TableRow>

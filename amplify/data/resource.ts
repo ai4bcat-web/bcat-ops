@@ -32,14 +32,22 @@ const schema = a.schema({
 
   Driver: a
     .model({
-      name:            a.string().required(),
-      phone:           a.string().required(),
-      active:          a.boolean().required(),
-      type:            a.string(),
-      colorKey:        a.string(),
-      notes:           a.string(),
-      photoKey:        a.string(),
-      assignedTruckId: a.string(),
+      name:               a.string().required(),
+      phone:              a.string().required(),
+      active:             a.boolean().required(),
+      type:               a.string(),
+      colorKey:           a.string(),
+      notes:              a.string(),
+      photoKey:           a.string(),
+      assignedTruckId:    a.string(),
+      // Compliance & profile fields
+      email:              a.string(),
+      cdl:                a.string(),   // CDL number e.g. "CDL-A IL-8823901"
+      cdlExpiration:      a.string(),   // YYYY-MM-DD
+      medCardExpiration:  a.string(),   // YYYY-MM-DD
+      drugTestDate:       a.string(),   // YYYY-MM-DD — last test date
+      hireDate:           a.string(),   // YYYY-MM-DD
+      driverType:         a.string(),   // 'company' | 'owner_op'
     })
     .authorization((allow) => [allow.authenticated()]),
 
