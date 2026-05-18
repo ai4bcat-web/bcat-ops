@@ -66,11 +66,15 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
         {/* Left: time + aljex id + RTI */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 min-w-0">
-            <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">{puTime}</span>
             <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
               {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
             </span>
             {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
+          </div>
+          <div className="flex items-center gap-1 min-w-0 mt-0.5">
+            <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">PU: {puTime}</span>
+            <ArrowRight className="size-2 shrink-0 text-slate-300" />
+            <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">DE: {deTime}</span>
           </div>
           {/* Line 2: origin city → destination city */}
           {(load.originCity || load.destinationCity) && (
