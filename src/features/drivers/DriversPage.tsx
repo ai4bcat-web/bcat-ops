@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP, getColor } from '@/lib/driverColors'
 import type { ColorKey } from '@/types'
@@ -365,13 +366,25 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
 export function DriversPage() {
   const { drivers, updateDriver } = useDrivers()
+  const equipment = useAppStore((s) => s.equipment)
   const [drawerOpen, setDrawerOpen]     = useState(false)
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null)
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<'all' | 'driver' | 'broker'>('all')
 
-  const sorted = [...drivers].sort((a, b) => {
-    if (a.active !== b.active) return a.active ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
+  const sorted = [...drivers]
+    .filter((d) => {
+      if (typeFilter !== 'all' && (d.type ?? 'driver') !== typeFilter) return false
+      if (search) {
+        const q = search.toLowerCase()
+        return d.name.toLowerCase().includes(q) || (d.phone ?? '').toLowerCase().includes(q) || (d.notes ?? '').toLowerCase().includes(q)
+      }
+      return true
+    })
+    .sort((a, b) => {
+      if (a.active !== b.active) return a.active ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
 
   const openCreate = () => { setEditingDriver(null); setDrawerOpen(true) }
   const openEdit   = (d: Driver) => { setEditingDriver(d); setDrawerOpen(true) }
@@ -411,103 +424,129 @@ export function DriversPage() {
         </div>
       </div>
 
-      {/* Table */}
+      {/* Filters + Table */}
       <div className="p-8">
-        <div className="rounded-xl border border-slate-200/60 overflow-hidden bg-white shadow-sm">
+        {/* Filter bar */}
+        <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
+            {(['all', 'driver', 'broker'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setTypeFilter(f)}
+                className={cn(
+                  'px-3 py-1.5 font-medium transition-colors',
+                  typeFilter === f ? 'bg-foreground text-white' : 'bg-white text-muted-foreground hover:bg-slate-50'
+                )}
+              >
+                {f === 'all' ? 'All' : f === 'driver' ? 'Company Drivers' : 'Brokers / 3PL'}
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, phone, notes…"
+            className="h-9 px-3 text-sm rounded-lg border border-border bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 w-60"
+          />
+        </div>
+
+        <div className="rounded-xl border border-slate-200/60 overflow-x-auto bg-white shadow-sm">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Name</TableHead>
-                <TableHead>Phone</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Notes</TableHead>
-                <TableHead>Last Updated</TableHead>
+                <TableHead className="min-w-[180px]">Name</TableHead>
+                <TableHead className="min-w-[140px]">Phone</TableHead>
+                <TableHead className="min-w-[130px]">Type</TableHead>
+                <TableHead className="min-w-[120px]">Assigned Truck</TableHead>
+                <TableHead className="min-w-[90px]">Status</TableHead>
+                <TableHead className="min-w-[200px]">Notes</TableHead>
                 <TableHead className="w-20" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sorted.map((driver) => (
-                <TableRow
-                  key={driver.id}
-                  className={cn(!driver.active && 'opacity-50')}
-                >
-                  <TableCell className="font-semibold text-foreground">
-                    <div className="flex items-center gap-2">
-                      <Avatar
-                        src={driver.photoUrl}
-                        initials={getInitials(driver.name)}
-                        size="sm"
-                        style={driver.colorKey ? { background: getColor(driver.colorKey).border, color: '#ffffff' } : undefined}
-                      />
-                      {driver.name}
-                      {driver.colorKey && (
-                        <span
-                          className="size-2.5 rounded-full shrink-0"
-                          style={{ background: getColor(driver.colorKey).border }}
+              {sorted.map((driver) => {
+                const assignedTruck = equipment.find((e) => e.id === driver.assignedTruckId && e.type === 'truck')
+                const driverType = driver.type ?? 'driver'
+                return (
+                  <TableRow key={driver.id} className={cn(!driver.active && 'opacity-50')}>
+                    <TableCell className="font-semibold text-foreground">
+                      <div className="flex items-center gap-2">
+                        <Avatar
+                          src={driver.photoUrl}
+                          initials={getInitials(driver.name)}
+                          size="sm"
+                          style={driver.colorKey ? { background: getColor(driver.colorKey).border, color: '#ffffff' } : undefined}
                         />
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    <a
-                      href={`tel:${driver.phone}`}
-                      className="flex items-center gap-1.5 hover:text-primary transition-colors w-fit text-sm"
-                    >
-                      <Phone className="size-3.5" />
-                      {formatPhone(driver.phone)}
-                    </a>
-                  </TableCell>
-                  <TableCell>
-                    {driver.active
-                      ? <Badge variant="green">Active</Badge>
-                      : <Badge variant="secondary">Inactive</Badge>}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">
-                    {driver.notes || '—'}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {formatDateTime(driver.updatedAt)}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1 justify-end">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => openEdit(driver)}
-                            aria-label="Edit driver"
-                          >
-                            <Edit2 className="size-3.5" />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Edit</TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="size-8"
-                            onClick={() => updateDriver(driver.id, { active: !driver.active })}
-                            aria-label={driver.active ? 'Deactivate driver' : 'Activate driver'}
-                          >
-                            {driver.active
-                              ? <ToggleRight className="size-4 text-emerald-600" />
-                              : <ToggleLeft className="size-4 text-muted-foreground" />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>{driver.active ? 'Deactivate' : 'Activate'}</TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        <span>{driver.name}</span>
+                        {driver.colorKey && (
+                          <span className="size-2.5 rounded-full shrink-0" style={{ background: getColor(driver.colorKey).border }} />
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {driver.phone
+                        ? <a href={`tel:${driver.phone}`} className="flex items-center gap-1.5 hover:text-primary transition-colors w-fit text-sm">
+                            <Phone className="size-3.5" />{formatPhone(driver.phone)}
+                          </a>
+                        : <span className="text-muted-foreground/50">—</span>}
+                    </TableCell>
+                    <TableCell>
+                      {driverType === 'broker'
+                        ? <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-200">Broker / 3PL</Badge>
+                        : <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200">
+                            <Building2 className="size-3 mr-1" />Company Driver
+                          </Badge>}
+                    </TableCell>
+                    <TableCell>
+                      {assignedTruck
+                        ? <span className="flex items-center gap-1.5 text-sm text-foreground font-medium">
+                            <Truck className="size-3.5 text-muted-foreground" />#{assignedTruck.unitNumber}
+                            <span className="text-muted-foreground font-normal text-xs">{assignedTruck.make} {assignedTruck.model}</span>
+                          </span>
+                        : <span className="text-muted-foreground/50 text-sm">Unassigned</span>}
+                    </TableCell>
+                    <TableCell>
+                      {driver.active
+                        ? <Badge variant="green">Active</Badge>
+                        : <Badge variant="secondary">Inactive</Badge>}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs max-w-[200px] truncate">
+                      {driver.notes || '—'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1 justify-end">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="size-8" onClick={() => openEdit(driver)} aria-label="Edit driver">
+                              <Edit2 className="size-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Edit</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost" size="icon" className="size-8"
+                              onClick={() => updateDriver(driver.id, { active: !driver.active })}
+                              aria-label={driver.active ? 'Deactivate driver' : 'Activate driver'}
+                            >
+                              {driver.active
+                                ? <ToggleRight className="size-4 text-emerald-600" />
+                                : <ToggleLeft className="size-4 text-muted-foreground" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>{driver.active ? 'Deactivate' : 'Activate'}</TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
               {sorted.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-12 text-center text-muted-foreground text-sm">
-                    No drivers yet. Add one to get started.
+                  <TableCell colSpan={7} className="py-12 text-center text-muted-foreground text-sm">
+                    {drivers.length === 0 ? 'No drivers yet. Add one to get started.' : 'No drivers match your filter.'}
                   </TableCell>
                 </TableRow>
               )}

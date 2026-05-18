@@ -8,8 +8,11 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Check,
 } from 'lucide-react'
+import {
+  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+} from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, TaskPriority, TaskStatus } from '@/types/equipment'
 
@@ -47,6 +50,14 @@ function ExpiryBadge({ date, label }: { date?: string; label: string }) {
       {icon[state]}{label}: {date}
     </span>
   )
+}
+
+function DateCell({ date }: { date?: string }) {
+  const state = expiryState(date)
+  if (state === 'none') return <span className="text-muted-foreground/40 text-xs">—</span>
+  const cls = state === 'overdue' ? 'text-red-600 font-semibold' : state === 'expiring' ? 'text-amber-600 font-semibold' : 'text-emerald-700'
+  const icon = state === 'overdue' ? <AlertTriangle className="size-3 shrink-0" /> : state === 'expiring' ? <Clock className="size-3 shrink-0" /> : null
+  return <span className={cn('inline-flex items-center gap-1 text-xs font-mono', cls)}>{icon}{date}</span>
 }
 
 function priorityColor(p: TaskPriority) {
@@ -609,107 +620,158 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
   )
 }
 
-// ── Equipment Row ──────────────────────────────────────────────────────────────
+// ── Equipment Table Row ────────────────────────────────────────────────────────
 
 interface EquipRowProps {
   equip: Equipment
-  index: number
   tasks: MaintenanceTask[]
   invoices: MaintenanceInvoice[]
   driverName?: string
+  colSpan: number
   onEdit: (e: Equipment) => void
   onDelete: (id: string) => void
 }
 
-function EquipRow({ equip, index, tasks, invoices, driverName, onEdit, onDelete }: EquipRowProps) {
+function EquipRow({ equip, tasks, invoices, driverName, colSpan, onEdit, onDelete }: EquipRowProps) {
   const [expanded, setExpanded] = useState(false)
 
-  const overdueCount = [
-    equip.dotInspectionDate, equip.insuranceExpirationDate,
-    equip.iftaExpirationDate, equip.irpExpirationDate, equip.bobtailInsuranceDate,
-  ].filter((d) => expiryState(d) === 'overdue').length
-
-  const expiringCount = [
-    equip.dotInspectionDate, equip.insuranceExpirationDate,
-    equip.iftaExpirationDate, equip.irpExpirationDate, equip.bobtailInsuranceDate,
-  ].filter((d) => expiryState(d) === 'expiring').length
-
   const upcomingTasks = tasks.filter((t) => t.status === 'upcoming')
+  const highTasks     = upcomingTasks.filter((t) => t.priority === 'high')
+  const repairSpend   = invoices.reduce((s, i) => s + i.amount, 0)
+  const isTruck       = equip.type === 'truck'
+
+  const hasAlert = [
+    equip.dotInspectionDate, equip.insuranceExpirationDate,
+    equip.iftaExpirationDate, equip.irpExpirationDate, equip.bobtailInsuranceDate,
+  ].some((d) => expiryState(d) === 'overdue' || expiryState(d) === 'expiring')
 
   return (
-    <div className={cn(index !== 0 && 'border-t border-slate-100')}>
-      <div className="flex items-center gap-3 px-6 py-4">
-        {/* Icon */}
-        <div className="size-9 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
-          {equip.type === 'truck'
-            ? <Truck className="size-4 text-slate-500" />
-            : <Container className="size-4 text-slate-500" />}
-        </div>
+    <>
+      <TableRow
+        className={cn('cursor-pointer hover:bg-slate-50/80 transition-colors', !equip.active && 'opacity-50', expanded && 'bg-slate-50')}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        {/* Type */}
+        <TableCell className="py-3">
+          <span className={cn('inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border',
+            isTruck ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-violet-50 text-violet-700 border-violet-200'
+          )}>
+            {isTruck ? <Truck className="size-3" /> : <Container className="size-3" />}
+            {isTruck ? 'Truck' : 'Trailer'}
+          </span>
+        </TableCell>
 
-        {/* Main info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-foreground">#{equip.unitNumber}</span>
-            {equip.nickname && <span className="text-xs text-muted-foreground">· {equip.nickname}</span>}
-            <Badge variant="secondary" className={cn('text-xs', equip.type === 'truck' ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-violet-50 text-violet-700 border-violet-200')}>
-              {equip.type === 'truck' ? 'Truck' : 'Trailer'}
-            </Badge>
-            {!equip.active && <Badge variant="secondary" className="text-xs bg-slate-50 text-slate-500 border-slate-200">Inactive</Badge>}
-          </div>
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {[equip.year, equip.make, equip.model].filter(Boolean).join(' ')}
-            {equip.plate && <span className="ml-2 font-mono">{equip.plate}</span>}
-            {driverName && <span className="ml-2">· {driverName}</span>}
-          </div>
-        </div>
+        {/* Unit # */}
+        <TableCell className="py-3 font-bold text-sm text-foreground">
+          #{equip.unitNumber}
+          {equip.nickname && <div className="text-xs text-muted-foreground font-normal">{equip.nickname}</div>}
+        </TableCell>
 
-        {/* Alert badges */}
-        <div className="flex items-center gap-2 shrink-0">
-          {overdueCount > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">
-              <AlertTriangle className="size-3" /> {overdueCount} overdue
-            </span>
-          )}
-          {expiringCount > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">
-              <Clock className="size-3" /> {expiringCount} expiring
-            </span>
-          )}
-          {upcomingTasks.length > 0 && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
-              <Wrench className="size-3" /> {upcomingTasks.length}
-            </span>
-          )}
-        </div>
+        {/* Year / Make / Model */}
+        <TableCell className="py-3 text-sm">
+          <span className="font-medium">{equip.year}</span>
+          <span className="text-muted-foreground ml-1">{[equip.make, equip.model].filter(Boolean).join(' ')}</span>
+        </TableCell>
+
+        {/* Plate */}
+        <TableCell className="py-3 text-xs font-mono text-foreground">
+          {equip.plate || <span className="text-muted-foreground/40">—</span>}
+        </TableCell>
+
+        {/* DOT Inspection */}
+        <TableCell className="py-3"><DateCell date={equip.dotInspectionDate} /></TableCell>
+
+        {/* IFTA */}
+        <TableCell className="py-3">
+          {isTruck ? <DateCell date={equip.iftaExpirationDate} /> : <span className="text-muted-foreground/40 text-xs">—</span>}
+        </TableCell>
+
+        {/* IRP */}
+        <TableCell className="py-3">
+          {isTruck ? <DateCell date={equip.irpExpirationDate} /> : <span className="text-muted-foreground/40 text-xs">—</span>}
+        </TableCell>
+
+        {/* Insurance */}
+        <TableCell className="py-3"><DateCell date={equip.insuranceExpirationDate} /></TableCell>
+
+        {/* Bobtail */}
+        <TableCell className="py-3">
+          {isTruck ? <DateCell date={equip.bobtailInsuranceDate} /> : <span className="text-muted-foreground/40 text-xs">—</span>}
+        </TableCell>
+
+        {/* Driver */}
+        <TableCell className="py-3 text-sm">
+          {isTruck
+            ? driverName
+              ? <span className="text-foreground font-medium">{driverName}</span>
+              : <span className="text-muted-foreground/40 text-xs">Unassigned</span>
+            : <span className="text-muted-foreground/40 text-xs">—</span>}
+        </TableCell>
+
+        {/* Fleet Mgr */}
+        <TableCell className="py-3 text-xs text-muted-foreground capitalize">
+          {equip.fleetManagerAssignee || '—'}
+        </TableCell>
+
+        {/* Tollway */}
+        <TableCell className="py-3">
+          {equip.onTollwayAccount
+            ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-medium"><Check className="size-3" />Yes</span>
+            : <span className="text-xs text-muted-foreground/40">No</span>}
+        </TableCell>
+
+        {/* Tasks */}
+        <TableCell className="py-3">
+          {upcomingTasks.length === 0
+            ? <span className="text-xs text-muted-foreground/40">None</span>
+            : highTasks.length > 0
+              ? <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600">
+                  <AlertTriangle className="size-3" />{highTasks.length} high{upcomingTasks.length > highTasks.length ? ` · ${upcomingTasks.length - highTasks.length} other` : ''}
+                </span>
+              : <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
+                  <Wrench className="size-3" />{upcomingTasks.length} open
+                </span>}
+        </TableCell>
+
+        {/* Repair Spend */}
+        <TableCell className="py-3 text-xs font-mono font-semibold text-foreground">
+          {repairSpend > 0 ? formatCents(repairSpend) : <span className="text-muted-foreground/40">—</span>}
+        </TableCell>
 
         {/* Actions */}
-        <div className="flex items-center gap-1 shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => onEdit(equip)}>
-                <Pencil className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Edit</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-destructive hover:bg-destructive/5" onClick={() => onDelete(equip.id)}>
-                <Trash2 className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Delete</TooltipContent>
-          </Tooltip>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-          </Button>
-        </div>
-      </div>
+        <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1 justify-end">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onEdit(equip)}>
+                  <Pencil className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Edit</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => onDelete(equip.id)}>
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Delete</TooltipContent>
+            </Tooltip>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground">
+              {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
 
       {expanded && (
-        <DetailPanel equip={equip} tasks={tasks} invoices={invoices} driverName={driverName} />
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={colSpan} className="p-0 border-b border-slate-100">
+            <DetailPanel equip={equip} tasks={tasks} invoices={invoices} driverName={driverName} />
+          </TableCell>
+        </TableRow>
       )}
-    </div>
+    </>
   )
 }
 
@@ -788,7 +850,7 @@ export function TrucksPage() {
         </div>
       </div>
 
-      <div className="p-8 max-w-5xl space-y-6">
+      <div className="p-8 space-y-4">
         {/* Toolbar */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
@@ -812,31 +874,54 @@ export function TrucksPage() {
           />
         </div>
 
-        {/* Equipment list */}
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+        {/* Equipment table */}
+        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-x-auto">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <Truck className="size-8 opacity-20" />
               <p className="text-sm">No equipment found.</p>
             </div>
           ) : (
-            filtered.map((e, i) => {
-              const driver = drivers.find((d) => d.id === e.assignedDriverId)
-              const tasks  = maintenanceTasks.filter((t) => t.equipmentId === e.id)
-              const invs   = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id)
-              return (
-                <EquipRow
-                  key={e.id}
-                  equip={e}
-                  index={i}
-                  tasks={tasks}
-                  invoices={invs}
-                  driverName={driver?.name}
-                  onEdit={setShowForm}
-                  onDelete={handleDelete}
-                />
-              )
-            })
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent bg-slate-50/60">
+                  <TableHead className="py-3 text-xs">Type</TableHead>
+                  <TableHead className="py-3 text-xs">Unit #</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[160px]">Year / Make / Model</TableHead>
+                  <TableHead className="py-3 text-xs">Plate</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px]">DOT Insp</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px]">IFTA Exp</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px]">IRP Exp</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px]">Insurance</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px]">Bobtail Ins</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[120px]">Driver</TableHead>
+                  <TableHead className="py-3 text-xs">Fleet Mgr</TableHead>
+                  <TableHead className="py-3 text-xs">Tollway</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[120px]">Open Tasks</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px]">Repair Spend</TableHead>
+                  <TableHead className="py-3 w-24" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((e) => {
+                  const driver = drivers.find((d) => d.id === e.assignedDriverId)
+                  const tasks  = maintenanceTasks.filter((t) => t.equipmentId === e.id)
+                  const invs   = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id)
+                  return (
+                    <EquipRow
+                      key={e.id}
+                      equip={e}
+                      tasks={tasks}
+                      invoices={invs}
+                      driverName={driver?.name}
+                      colSpan={15}
+                      onEdit={setShowForm}
+                      onDelete={handleDelete}
+                    />
+                  )
+                })}
+              </TableBody>
+            </Table>
           )}
         </div>
       </div>
