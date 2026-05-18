@@ -132,8 +132,6 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReo
     </div>
   )
 
-  if (pickingOrder) return <div>{card}</div>
-
   return (
     <Tooltip delayDuration={400}>
       <TooltipTrigger asChild>
