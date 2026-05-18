@@ -1,5 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { storage } from './storage/resource'
@@ -27,9 +28,10 @@ backend.userManagement.resources.lambda.addToRolePolicy(
 )
 
 // Pass the User Pool ID to the Lambda as an environment variable.
-// Must use resources.lambda.addEnvironment (not backend.userManagement.addEnvironment)
-// because the Amplify-level API only accepts plain strings, not CDK tokens.
-backend.userManagement.resources.lambda.addEnvironment(
+// Must cast IFunction → Function because addEnvironment is only on the concrete class.
+// The Amplify-level addEnvironment() only accepts plain strings (not CDK tokens), so
+// we use the CDK Lambda Function's own addEnvironment which resolves tokens correctly.
+;(backend.userManagement.resources.lambda as LambdaFunction).addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId
 )
