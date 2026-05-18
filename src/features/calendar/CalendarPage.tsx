@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import FullCalendar from '@fullcalendar/react'
 import type { DatesSetArg } from '@fullcalendar/core'
 import { useAppStore } from '@/store/useAppStore'
@@ -7,17 +7,22 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useConflictDetection } from '@/hooks/useConflictDetection'
 import { CalendarToolbar } from './CalendarToolbar'
 import { SchedulerView } from './SchedulerView'
+import { CompactWeekView } from './CompactWeekView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
-import { formatDateShort } from '@/lib/date'
+import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
-const FC_VIEW_NAMES: Record<ViewMode, string> = {
+type FCViewMode = Exclude<ViewMode, 'compact'>
+
+const FC_VIEW_NAMES: Record<FCViewMode, string> = {
   'day':      'resourceTimelineDay',
   'week':     'resourceTimelineWorkWeek',
   'two-week': 'resourceTimeline2Weeks',
   'month':    'resourceTimelineMonth',
 }
+
+const ALL_VIEW_MODES: ViewMode[] = ['day', 'week', 'compact', 'two-week', 'month']
 
 export function CalendarPage() {
   const weekStart = useAppStore((s) => s.weekStart)
@@ -33,22 +38,47 @@ export function CalendarPage() {
 
   // Local state for toolbar — FC is the source of truth for dates/view after init
   const [currentView, setCurrentView] = useState<ViewMode>(
-    // Guard against stale persisted value from old ViewMode type
-    (['day','week','two-week','month'] as ViewMode[]).includes(viewMode) ? viewMode : 'week'
+    ALL_VIEW_MODES.includes(viewMode) ? viewMode : 'week'
   )
   const [dateLabel, setDateLabel] = useState('')
+
+  // Compact view has its own week state (not driven by FullCalendar)
+  const [compactWeek, setCompactWeek] = useState<Date>(() => {
+    const d = weekStart ? new Date(weekStart) : new Date()
+    return getMondayOf(isNaN(d.getTime()) ? new Date() : d)
+  })
+
+  const compactDateLabel = useMemo(() => {
+    const end = addDays(compactWeek, 6)
+    return `${formatDateShort(compactWeek.toISOString())} – ${formatDateShort(end.toISOString())}`
+  }, [compactWeek])
+
+  const effectiveDateLabel = currentView === 'compact' ? compactDateLabel : dateLabel
 
   // ── Calendar API helpers ──────────────────────────────────────────────────
 
   const getApi = useCallback(() => calendarRef.current?.getApi(), [])
 
-  const onPrev = useCallback(() => getApi()?.prev(), [getApi])
-  const onNext = useCallback(() => getApi()?.next(), [getApi])
-  const onToday = useCallback(() => getApi()?.today(), [getApi])
+  const onPrev = useCallback(() => {
+    if (currentView === 'compact') setCompactWeek((w) => addDays(w, -7))
+    else getApi()?.prev()
+  }, [currentView, getApi])
+
+  const onNext = useCallback(() => {
+    if (currentView === 'compact') setCompactWeek((w) => addDays(w, 7))
+    else getApi()?.next()
+  }, [currentView, getApi])
+
+  const onToday = useCallback(() => {
+    if (currentView === 'compact') setCompactWeek(getMondayOf(new Date()))
+    else getApi()?.today()
+  }, [currentView, getApi])
 
   const onViewChange = useCallback((view: ViewMode) => {
     setCurrentView(view)
-    getApi()?.changeView(FC_VIEW_NAMES[view])
+    if (view !== 'compact') {
+      getApi()?.changeView(FC_VIEW_NAMES[view as FCViewMode])
+    }
   }, [getApi])
 
   const onDatesSet = useCallback((info: DatesSetArg) => {
@@ -105,7 +135,7 @@ export function CalendarPage() {
     <div className="flex flex-col h-full overflow-hidden">
       <CalendarToolbar
         currentView={currentView}
-        dateLabel={dateLabel}
+        dateLabel={effectiveDateLabel}
         onPrev={onPrev}
         onNext={onNext}
         onToday={onToday}
@@ -114,16 +144,25 @@ export function CalendarPage() {
 
       <div className="flex-1 overflow-hidden mx-4 mb-4 mt-3 rounded-xl border border-slate-200 shadow-sm">
         <CalendarErrorBoundary>
-          <SchedulerView
-            calendarRef={calendarRef}
-            loads={visibleLoads}
-            drivers={drivers}
-            conflictIds={conflictIds}
-            filterDriverId={filterDriverId}
-            viewMode={viewMode}
-            weekStart={weekStart}
-            onDatesSet={onDatesSet}
-          />
+          {currentView === 'compact' ? (
+            <CompactWeekView
+              loads={visibleLoads}
+              drivers={drivers}
+              conflictIds={conflictIds}
+              weekStart={compactWeek}
+            />
+          ) : (
+            <SchedulerView
+              calendarRef={calendarRef}
+              loads={visibleLoads}
+              drivers={drivers}
+              conflictIds={conflictIds}
+              filterDriverId={filterDriverId}
+              viewMode={viewMode}
+              weekStart={weekStart}
+              onDatesSet={onDatesSet}
+            />
+          )}
         </CalendarErrorBoundary>
       </div>
 

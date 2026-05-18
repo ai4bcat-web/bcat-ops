@@ -71,4 +71,4 @@ export interface AuditLogEntry {
   createdAt: string
 }
 
-export type ViewMode = 'day' | 'week' | 'two-week' | 'month'
+export type ViewMode = 'day' | 'week' | 'compact' | 'two-week' | 'month'

@@ -111,16 +111,28 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           <div className="flex items-center gap-1 min-w-0 overflow-hidden"
             title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}>
             {isRTI && <CheckCircle2 className="size-3 text-emerald-600 shrink-0" />}
-            <Avatar
-              src={pickupDriver?.photoUrl}
-              initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
-              size="xs"
-              className="shrink-0"
-              style={{ background: borderColor, color: '#ffffff' }}
-            />
-            <span className="text-[10px] font-medium truncate" style={{ color: '#374151' }}>
-              {isSplit ? `${pickupDriverName}→${deliveryDriverName}` : pickupDriverName}
-            </span>
+            {load.pickupDriverId ? (
+              <>
+                <Avatar
+                  src={pickupDriver?.photoUrl}
+                  initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
+                  size="xs"
+                  className="shrink-0"
+                  style={{ background: borderColor, color: '#ffffff' }}
+                />
+                {isSplit && deliveryDriver && (
+                  <Avatar
+                    src={deliveryDriver.photoUrl}
+                    initials={(deliveryDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
+                    size="xs"
+                    className="shrink-0 -ml-1"
+                    style={{ background: deliveryColor.border, color: '#ffffff' }}
+                  />
+                )}
+              </>
+            ) : (
+              <span className="text-[10px] font-medium text-amber-500 shrink-0">Unassigned</span>
+            )}
           </div>
         </div>
       </div>
