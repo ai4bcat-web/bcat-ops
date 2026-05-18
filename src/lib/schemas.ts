@@ -23,7 +23,7 @@ export const driverSchema = z.object({
   medCardExpiration: z.string().optional(),
   drugTestDate: z.string().optional(),
   hireDate: z.string().optional(),
-  driverType: z.enum(['company', 'owner_op']).optional(),
+  driverType: z.string().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs'])
