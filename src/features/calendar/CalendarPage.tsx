@@ -8,12 +8,13 @@ import { useConflictDetection } from '@/hooks/useConflictDetection'
 import { CalendarToolbar } from './CalendarToolbar'
 import { SchedulerView } from './SchedulerView'
 import { CompactWeekView } from './CompactWeekView'
+import { PlannerView } from './PlannerView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
-type FCViewMode = Exclude<ViewMode, 'compact'>
+type FCViewMode = Exclude<ViewMode, 'compact' | 'planner'>
 
 const FC_VIEW_NAMES: Record<FCViewMode, string> = {
   'day':      'resourceTimelineDay',
@@ -46,30 +47,31 @@ export function CalendarPage() {
     return `${formatDateShort(compactWeek.toISOString())} – ${formatDateShort(end.toISOString())}`
   }, [compactWeek])
 
-  const effectiveDateLabel = currentView === 'compact' ? compactDateLabel : dateLabel
+  const isCustomView = currentView === 'compact' || currentView === 'planner'
+  const effectiveDateLabel = isCustomView ? compactDateLabel : dateLabel
 
   // ── Calendar API helpers ──────────────────────────────────────────────────
 
   const getApi = useCallback(() => calendarRef.current?.getApi(), [])
 
   const onPrev = useCallback(() => {
-    if (currentView === 'compact') setCompactWeek((w) => addDays(w, -7))
+    if (isCustomView) setCompactWeek((w) => addDays(w, -7))
     else getApi()?.prev()
-  }, [currentView, getApi])
+  }, [isCustomView, getApi])
 
   const onNext = useCallback(() => {
-    if (currentView === 'compact') setCompactWeek((w) => addDays(w, 7))
+    if (isCustomView) setCompactWeek((w) => addDays(w, 7))
     else getApi()?.next()
-  }, [currentView, getApi])
+  }, [isCustomView, getApi])
 
   const onToday = useCallback(() => {
-    if (currentView === 'compact') setCompactWeek(getMondayOf(new Date()))
+    if (isCustomView) setCompactWeek(getMondayOf(new Date()))
     else getApi()?.today()
-  }, [currentView, getApi])
+  }, [isCustomView, getApi])
 
   const onViewChange = useCallback((view: ViewMode) => {
     setCurrentView(view)
-    if (view !== 'compact') {
+    if (view !== 'compact' && view !== 'planner') {
       getApi()?.changeView(FC_VIEW_NAMES[view as FCViewMode])
     }
   }, [getApi])
@@ -144,6 +146,8 @@ export function CalendarPage() {
               conflictIds={conflictIds}
               weekStart={compactWeek}
             />
+          ) : currentView === 'planner' ? (
+            <PlannerView weekStart={compactWeek} />
           ) : (
             <SchedulerView
               calendarRef={calendarRef}
