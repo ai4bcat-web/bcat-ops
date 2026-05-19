@@ -264,7 +264,7 @@ The existing **BCAT Intake Bridge** Apps Script needs two additions:
 
 **Add to the top of the script (alongside existing constants):**
 ```javascript
-const FUEL_IMPORT_WEBHOOK_URL = 'PASTE_FUEL_IMPORT_FUNCTION_URL_HERE';
+const FUEL_IMPORT_WEBHOOK_URL = 'https://xutbpfi7se725wneassdl7dqfm0kkqmm.lambda-url.us-east-1.on.aws/';
 const EFS_LABEL               = 'efs-report';
 const EFS_PROCESSED_LABEL     = 'efs-processed';
 ```
@@ -330,7 +330,7 @@ function setupEfs() {
 ### 8d — Test the EFS import
 
 ```bash
-curl -X POST PASTE_FUEL_IMPORT_FUNCTION_URL_HERE \
+curl -X POST https://xutbpfi7se725wneassdl7dqfm0kkqmm.lambda-url.us-east-1.on.aws/ \
   -H "Content-Type: application/json" \
   -d '{
     "secret": "855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89",
