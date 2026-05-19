@@ -8,14 +8,14 @@
 
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { GripVertical, X } from 'lucide-react'
-import { addDays, formatDayHeader, formatTime } from '@/lib/date'
+import { addDays, formatDayHeader, formatTime, formatDateShort } from '@/lib/date'
 import { getColor } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { cn } from '@/lib/utils'
 import type { Load, Driver } from '@/types'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { aljex: 60, tms: 60, pu: 72, puAppt: 52, deAppt: 52, driver: 96 } as const
+const COL = { aljex: 60, tms: 60, pu: 72, puAppt: 72, deAppt: 72, driver: 96 } as const
 const ROW_H = 28
 
 // ── Chicago date string ───────────────────────────────────────────────────────
@@ -27,11 +27,17 @@ function chicagoDateStr(iso: string): string {
 }
 
 // ── Appt display ──────────────────────────────────────────────────────────────
-function apptLabel(iso: string | undefined, type?: string): string {
-  if (!iso) return '—'
-  if (type === 'fcfs') return 'FCFS'
-  if (type === 'tbd')  return 'TBD'
-  return formatTime(iso)
+function ApptCell({ iso, type, color }: { iso?: string; type?: string; color: string }) {
+  if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width: COL.puAppt }}>—</div>
+  const isSpecial = type === 'fcfs' || type === 'tbd'
+  return (
+    <div className={`flex flex-col justify-center px-1.5 leading-tight ${color}`} style={{ width: COL.puAppt }}>
+      <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
+      <span className="text-[11px] font-medium truncate">
+        {isSpecial ? type!.toUpperCase() : formatTime(iso)}
+      </span>
+    </div>
+  )
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -174,14 +180,10 @@ function PlannerRow({
       <Cell width={COL.pu}>{load.pickupNumber || '—'}</Cell>
 
       {/* PU Appt */}
-      <Cell width={COL.puAppt} color="text-blue-600">
-        {apptLabel(load.pickupAppt, load.pickupApptType)}
-      </Cell>
+      <ApptCell iso={load.pickupAppt} type={load.pickupApptType} color="text-blue-600" />
 
       {/* DE Appt */}
-      <Cell width={COL.deAppt} color="text-violet-600">
-        {apptLabel(load.deliveryAppt, load.deliveryApptType)}
-      </Cell>
+      <ApptCell iso={load.deliveryAppt} type={load.deliveryApptType} color="text-violet-600" />
 
       {/* Route */}
       <Cell flex className="text-slate-500">
