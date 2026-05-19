@@ -117,7 +117,7 @@ function EditTaskModal({ task, onSave, onClose }: { task: MaintenanceTask; onSav
               </select>
             </div>
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="flex justify-end gap-3 pt-4">
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit">Save</Button>
           </div>

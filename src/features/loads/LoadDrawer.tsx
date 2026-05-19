@@ -42,7 +42,7 @@ function Field({ label, children, error, hint }: {
 
 function ReadonlyField({ label, value }: { label: string; value?: string | null }) {
   return (
-    <div className="flex justify-between items-start py-2.5 border-b border-border last:border-b-0">
+    <div className="flex justify-between items-start py-3 border-b border-border last:border-b-0">
       <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{label}</span>
       <span className="text-sm font-medium text-foreground text-right max-w-[60%]">{value || '—'}</span>
     </div>
@@ -76,7 +76,7 @@ function ApptFields({
   const type = typeField.value
 
   return (
-    <div className="space-y-2 rounded-md border border-border p-3 bg-muted/30">
+    <div className="space-y-3 rounded-md border border-border p-4 bg-muted/30">
       <div className="flex items-center justify-between gap-3">
         <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">{label}</Label>
         <ToggleGroup

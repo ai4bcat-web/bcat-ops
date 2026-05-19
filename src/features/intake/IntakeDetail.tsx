@@ -81,7 +81,7 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white">
       {/* Header */}
-      <div className="flex items-start gap-3 px-5 pt-4 pb-3 border-b border-slate-100 shrink-0">
+      <div className="flex items-start gap-3 px-6 pt-5 pb-4 border-b border-slate-100 shrink-0">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-foreground leading-snug truncate">
             {item.subject || '(no subject)'}
@@ -97,7 +97,7 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
       </div>
 
       {/* Controls row */}
-      <div className="flex items-center gap-2 px-5 py-2 border-b border-slate-100 shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 px-6 py-3 border-b border-slate-100 shrink-0 flex-wrap">
         {/* Status */}
         <div className="relative">
           <select
@@ -173,7 +173,7 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
               </div>
             )}
 
-            <div className="p-3">
+            <div className="p-4">
               {pdfLoading ? (
                 <div className="flex items-center justify-center h-48 text-muted-foreground text-sm gap-2">
                   <Loader2 className="size-4 animate-spin" /> Loading PDF…
@@ -202,13 +202,13 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
         )}
 
         {/* Email body */}
-        <div className="px-5 py-4 space-y-3">
+        <div className="px-6 py-5 space-y-4">
           {item.bodyText && (
             <div>
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                 Email Body
               </p>
-              <pre className="text-xs text-foreground whitespace-pre-wrap font-sans leading-relaxed bg-slate-50 rounded-lg border border-slate-100 p-3 max-h-48 overflow-y-auto">
+              <pre className="text-xs text-foreground whitespace-pre-wrap font-sans leading-relaxed bg-slate-50 rounded-lg border border-slate-100 p-4 max-h-48 overflow-y-auto">
                 {item.bodyText}
               </pre>
             </div>

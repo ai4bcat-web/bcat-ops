@@ -108,7 +108,7 @@ function sumQty(txs: FuelTransaction[]) { return txs.reduce((s, t) => s + t.quan
 
 function KpiCard({ label, value, sub, title }: { label: string; value: string; sub?: string; title?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm px-5 py-4" title={title}>
+    <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm px-6 py-5" title={title}>
       <div className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-1">{label}</div>
       <div className="text-2xl font-semibold text-foreground">{value}</div>
       {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
@@ -272,19 +272,6 @@ export function ExpensesPage() {
         return { label, ulsd, defd, total }
       })
   }, [pivotRows, fuelTxs])
-
-  // ── Other charges by truck ────────────────────────────────────────────────
-  const otherByTruck = useMemo(() => {
-    return trucks.map((truck) => {
-      const txs = otherTxs.filter((t) => t.truckId === truck.id)
-      if (txs.length === 0) return null
-      const scale = txs.filter((t) => t.itemCategory === 'SCALE').reduce((s, t) => s + t.amount, 0)
-      const cash  = txs.filter((t) => t.itemCategory === 'CASH_ADVANCE').reduce((s, t) => s + t.amount, 0)
-      const other = txs.filter((t) => t.itemCategory !== 'SCALE' && t.itemCategory !== 'CASH_ADVANCE').reduce((s, t) => s + t.amount, 0)
-      const total = txs.reduce((s, t) => s + t.amount, 0)
-      return { truck, label: `#${truck.unitNumber}`, scale, cash, other, total }
-    }).filter(Boolean).sort((a, b) => b!.total - a!.total) as Array<{ truck: Equipment; label: string; scale: number; cash: number; other: number; total: number }>
-  }, [trucks, otherTxs])
 
   // ── Chart (fuel-only, weekly or daily) ───────────────────────────────────
   const rangeDays  = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000)
@@ -480,50 +467,6 @@ export function ExpensesPage() {
               </table>
             </div>
           </div>
-
-          {/* ── Other Charges by Truck ── */}
-          {otherByTruck.length > 0 && (
-            <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
-              <div className="px-5 py-3 border-b border-slate-100">
-                <h2 className="text-sm font-semibold text-foreground">Other Charges by Truck</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Scale fees, cash advances, and other non-fuel items</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Truck</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-amber-600">Scale $</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-emerald-600">Cash Adv $</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Other $</th>
-                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Total $</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {otherByTruck.map((r, i) => (
-                      <tr
-                        key={r.truck.id}
-                        className="border-t border-slate-100 cursor-pointer hover:bg-sky-50/40"
-                        onClick={() => { setDrillTruck(r.truck); setDrillWeek(null) }}
-                      >
-                        <td className="px-4 py-2 font-bold" style={{ color: truckColor(i) }}>{r.label}</td>
-                        <td className="px-4 py-2 tabular-nums text-right">
-                          {r.scale > 0 ? fmtMoney(r.scale) : <span className="text-muted-foreground/30">—</span>}
-                        </td>
-                        <td className="px-4 py-2 tabular-nums text-right">
-                          {r.cash > 0 ? fmtMoney(r.cash) : <span className="text-muted-foreground/30">—</span>}
-                        </td>
-                        <td className="px-4 py-2 tabular-nums text-right">
-                          {r.other > 0 ? fmtMoney(r.other) : <span className="text-muted-foreground/30">—</span>}
-                        </td>
-                        <td className="px-4 py-2 tabular-nums text-right font-semibold">{fmtMoney(r.total)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
 
           {/* ── Breakdown by Fuel Type (collapsible) ── */}
           {fuelBreakdown.length > 0 && (

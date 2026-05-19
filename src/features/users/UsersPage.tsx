@@ -464,7 +464,7 @@ export function UsersPage() {
               {import.meta.env.DEV && (
                 <details className="mt-3 text-xs text-slate-500">
                   <summary className="cursor-pointer select-none font-medium">Error details (dev only)</summary>
-                  <pre className="mt-2 whitespace-pre-wrap break-all bg-white/70 border border-slate-200 p-2 rounded text-[11px] leading-relaxed">
+                  <pre className="mt-2 whitespace-pre-wrap break-all bg-white/70 border border-slate-200 p-3 rounded text-[11px] leading-relaxed">
                     {JSON.stringify(rawError, null, 2)}
                   </pre>
                 </details>
