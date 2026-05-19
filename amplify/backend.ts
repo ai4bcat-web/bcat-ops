@@ -44,7 +44,7 @@ const webhookFn = backend.intakeWebhook.resources.lambda as LambdaFunction
 const intakeTable = backend.data.resources.tables['IntakeItem']
 backend.intakeWebhook.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions: ['dynamodb:PutItem', 'dynamodb:Scan'],
+    actions: ['dynamodb:PutItem', 'dynamodb:Query'],
     resources: [intakeTable.tableArn],
   })
 )

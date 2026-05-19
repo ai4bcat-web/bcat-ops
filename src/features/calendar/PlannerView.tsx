@@ -227,24 +227,21 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
       onDragOver={(e) => e.preventDefault()}
     >
 
-      {/* Slot badge — only on pickup day (or same-day) */}
+      {/* Slot badge — always editable */}
       <div
         className="relative flex items-center justify-center shrink-0"
         style={{ width: COL.slot }}
-        tabIndex={isDeliveryDay ? -1 : 0}
-        onFocus={() => !isDeliveryDay && setShowSlot(true)}
+        tabIndex={0}
+        onClick={() => setShowSlot((v) => !v)}
         onBlur={closeOnBlur(() => setShowSlot(false))}
       >
         <span
-          className={cn(
-            'text-[9px] font-black rounded-full flex items-center justify-center leading-none',
-            !isDeliveryDay && 'cursor-pointer hover:opacity-75',
-          )}
-          style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px', opacity: isDeliveryDay ? 0.4 : 1 }}
+          className="text-[9px] font-black rounded-full flex items-center justify-center leading-none cursor-pointer hover:opacity-75"
+          style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px' }}
         >
           {slotNum ?? '·'}
         </span>
-        {showSlot && !isDeliveryDay && (
+        {showSlot && (
           <div
             className="absolute z-50 top-full left-0 mt-0.5 flex gap-1 p-1.5 rounded-lg border border-slate-200 bg-white shadow-xl"
             onMouseDown={(e) => e.stopPropagation()}
@@ -270,19 +267,19 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
         )}
       </div>
 
-      {/* Color swatch */}
+      {/* Color swatch — always editable */}
       <div
         className="relative flex items-center justify-center shrink-0"
         style={{ width: COL.color }}
-        tabIndex={isDeliveryDay ? -1 : 0}
-        onFocus={() => !isDeliveryDay && setShowColor(true)}
+        tabIndex={0}
+        onClick={() => setShowColor((v) => !v)}
         onBlur={closeOnBlur(() => setShowColor(false))}
       >
         <span
-          className={cn('size-3 rounded-full transition-all', !isDeliveryDay && 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300')}
-          style={{ background: color.border, opacity: isDeliveryDay ? 0.4 : 1 }}
+          className="size-3 rounded-full transition-all cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300"
+          style={{ background: color.border }}
         />
-        {showColor && !isDeliveryDay && (
+        {showColor && (
           <ColorPicker loadId={load.id} current={load.colorKey} onClose={() => setShowColor(false)} />
         )}
       </div>
@@ -324,12 +321,12 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
       {/* Route */}
       <Cell flex className="text-slate-500">{route}</Cell>
 
-      {/* Driver — editable on pickup day, read-only label on delivery day */}
+      {/* Driver — editable on pickup/same-day, read-only label on delivery day */}
       <div
         className="relative shrink-0 flex items-center"
         style={{ width: COL.driver }}
         tabIndex={isDeliveryDay ? -1 : 0}
-        onFocus={() => !isDeliveryDay && setShowDriver(true)}
+        onClick={() => !isDeliveryDay && setShowDriver((v) => !v)}
         onBlur={closeOnBlur(() => setShowDriver(false))}
       >
         <div className={cn(

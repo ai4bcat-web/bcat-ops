@@ -260,22 +260,22 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
                     <thead className="bg-slate-50">
                       <tr>
                         {['Truck', 'Date', 'Invoice', 'Location', 'Type', 'Gal', '$/gal', 'Fees', 'Total'].map((h) => (
-                          <th key={h} className="text-left px-3 py-2 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                          <th key={h} className="text-left px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
                       {preview.map((row) => (
                         <tr key={row.key} className={cn('border-t border-slate-100', row.unmapped && 'bg-amber-50/50')}>
-                          <td className="px-3 py-1.5 font-medium whitespace-nowrap">
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">
                             {row.unmapped
                               ? <span className="text-amber-600">{row.truckLabel}</span>
                               : row.truckLabel}
                           </td>
-                          <td className="px-3 py-1.5 font-mono whitespace-nowrap">{row.transactionDate}</td>
-                          <td className="px-3 py-1.5 text-muted-foreground">{row.invoiceNumber}</td>
-                          <td className="px-3 py-1.5 max-w-[160px] truncate">{row.locationName}, {row.city}</td>
-                          <td className="px-3 py-1.5">
+                          <td className="px-4 py-2.5 font-mono whitespace-nowrap">{row.transactionDate}</td>
+                          <td className="px-4 py-2.5 text-muted-foreground">{row.invoiceNumber}</td>
+                          <td className="px-4 py-2.5 max-w-[160px] truncate">{row.locationName}, {row.city}</td>
+                          <td className="px-4 py-2.5">
                             <span className={cn(
                               'px-1.5 py-0.5 rounded font-medium',
                               row.fuelType === 'ULSD' ? 'bg-sky-50 text-sky-700' : 'bg-violet-50 text-violet-700',
@@ -283,12 +283,12 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
                               {row.fuelType}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 tabular-nums text-right">{row.quantity.toFixed(2)}</td>
-                          <td className="px-3 py-1.5 tabular-nums text-right">{fmtMoney(row.pricePerUnit)}</td>
-                          <td className="px-3 py-1.5 tabular-nums text-right">
+                          <td className="px-4 py-2.5 tabular-nums text-right">{row.quantity.toFixed(2)}</td>
+                          <td className="px-4 py-2.5 tabular-nums text-right">{fmtMoney(row.pricePerUnit)}</td>
+                          <td className="px-4 py-2.5 tabular-nums text-right">
                             {row.fees > 0 ? fmtMoney(row.fees) : <span className="text-muted-foreground/40">—</span>}
                           </td>
-                          <td className="px-3 py-1.5 tabular-nums text-right font-medium">{fmtMoney(row.amount)}</td>
+                          <td className="px-4 py-2.5 tabular-nums text-right font-medium">{fmtMoney(row.amount)}</td>
                         </tr>
                       ))}
                     </tbody>

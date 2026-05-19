@@ -123,15 +123,17 @@ Paste the URL into the Apps Script `WEBHOOK_URL` constant below.
 ```javascript
 // Apps Script: BCAT Intake Bridge
 // Polls Gmail every 5 min for labeled emails and POSTs to our webhook
+//
+// FIX (2025-05): Tracks processed state per MESSAGE ID (PropertiesService),
+// not per thread label. The old thread-label approach silently dropped any
+// email that arrived in an already-processed thread (reply, forward chain).
 
 const WEBHOOK_URL    = 'https://odpxmuebxwqrc2kwxtarvf5btu0evziw.lambda-url.us-east-1.on.aws/';
 const WEBHOOK_SECRET = '855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89';
 const LABELS         = ['ivan-intake', 'bcat-intake'];
-const PROCESSED_LABEL = 'intake-processed';
 
 function processIntakeEmails() {
-  const processedLabel = GmailApp.getUserLabelByName(PROCESSED_LABEL)
-    || GmailApp.createLabel(PROCESSED_LABEL);
+  const props = PropertiesService.getScriptProperties();
 
   LABELS.forEach(labelName => {
     const label = GmailApp.getUserLabelByName(labelName);
@@ -140,9 +142,10 @@ function processIntakeEmails() {
     const threads = label.getThreads(0, 20);
     threads.forEach(thread => {
       thread.getMessages().forEach(message => {
-        // Skip if already processed
-        const threadLabels = thread.getLabels().map(l => l.getName());
-        if (threadLabels.includes(PROCESSED_LABEL)) return;
+        const msgId = message.getId();
+
+        // Skip if this specific message was already processed
+        if (props.getProperty(msgId)) return;
 
         const attachments = message.getAttachments()
           .filter(a => a.getContentType() === 'application/pdf')
@@ -154,7 +157,7 @@ function processIntakeEmails() {
 
         const payload = {
           secret:          WEBHOOK_SECRET,
-          gmailMessageId:  message.getId(),
+          gmailMessageId:  msgId,
           label:           labelName,
           from:            message.getFrom(),
           subject:         message.getSubject(),
@@ -173,7 +176,8 @@ function processIntakeEmails() {
           });
           const code = response.getResponseCode();
           if (code === 200) {
-            thread.addLabel(processedLabel);
+            // Mark this message ID as processed so we never re-send it
+            props.setProperty(msgId, new Date().toISOString());
             console.log('Processed:', message.getSubject(), '→', response.getContentText());
           } else {
             console.error('Webhook failed:', code, response.getContentText());
@@ -187,10 +191,9 @@ function processIntakeEmails() {
 }
 
 function setup() {
-  // Run once to authorize Gmail access and create processed label
+  // Run once to authorize Gmail access
   GmailApp.getUserLabelByName('ivan-intake');
   GmailApp.getUserLabelByName('bcat-intake');
-  GmailApp.createLabel('intake-processed');
   console.log('Setup complete — Gmail access authorized');
 }
 ```

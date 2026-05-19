@@ -142,7 +142,7 @@ function TxDetail({
           <thead className="bg-slate-50">
             <tr>
               {['Date', 'Category', 'Location', 'City', 'St', 'Qty', '$/unit', 'Fees', 'Total', 'Driver', 'Odo'].map((h) => (
-                <th key={h} className="text-left px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
+                <th key={h} className="text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
@@ -151,8 +151,8 @@ function TxDetail({
               const fuel = isFuel(tx)
               return (
                 <tr key={tx.id} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-3 py-2 font-mono whitespace-nowrap">{tx.transactionDate}</td>
-                  <td className="px-3 py-2">
+                  <td className="px-4 py-3 font-mono whitespace-nowrap">{tx.transactionDate}</td>
+                  <td className="px-4 py-3">
                     <span className={cn(
                       'px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap',
                       fuel && tx.fuelType === 'ULSD' ? 'bg-sky-50 text-sky-700'
@@ -167,19 +167,19 @@ function TxDetail({
                       <span className="ml-1 text-[10px] text-muted-foreground">{categoryLabel(tx)}</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 max-w-[140px] truncate">{tx.locationName}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{tx.city}</td>
-                  <td className="px-3 py-2">{tx.state}</td>
-                  <td className="px-3 py-2 tabular-nums text-right">{tx.quantity.toFixed(2)}</td>
-                  <td className="px-3 py-2 tabular-nums text-right">
+                  <td className="px-4 py-3 max-w-[140px] truncate">{tx.locationName}</td>
+                  <td className="px-4 py-3 whitespace-nowrap">{tx.city}</td>
+                  <td className="px-4 py-3">{tx.state}</td>
+                  <td className="px-4 py-3 tabular-nums text-right">{tx.quantity.toFixed(2)}</td>
+                  <td className="px-4 py-3 tabular-nums text-right">
                     {tx.pricePerUnit > 0 ? fmtMoney(tx.pricePerUnit) : <span className="text-muted-foreground/30">—</span>}
                   </td>
-                  <td className="px-3 py-2 tabular-nums text-right">
+                  <td className="px-4 py-3 tabular-nums text-right">
                     {(tx.fees ?? 0) > 0 ? fmtMoney(tx.fees!) : <span className="text-muted-foreground/40">—</span>}
                   </td>
-                  <td className="px-3 py-2 tabular-nums text-right font-medium">{fmtMoney(tx.amount)}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{tx.driverName || <span className="text-muted-foreground/40">—</span>}</td>
-                  <td className="px-3 py-2 tabular-nums text-right text-muted-foreground">
+                  <td className="px-4 py-3 tabular-nums text-right font-medium">{fmtMoney(tx.amount)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{tx.driverName || <span className="text-muted-foreground/40">—</span>}</td>
+                  <td className="px-4 py-3 tabular-nums text-right text-muted-foreground">
                     {tx.odometer ? tx.odometer.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
                   </td>
                 </tr>
@@ -336,7 +336,7 @@ export function ExpensesPage() {
               <button
                 key={o.value}
                 onClick={() => setRangeKey(o.value)}
-                className={cn('px-3 py-1.5 text-xs font-medium transition-colors',
+                className={cn('px-4 py-2 text-xs font-medium transition-colors',
                   rangeKey === o.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
                 )}
               >
@@ -385,7 +385,7 @@ export function ExpensesPage() {
 
           {/* ── Weekly Spend by Truck (fuel only) ── */}
           <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
-            <div className="px-5 py-3 border-b border-slate-100">
+            <div className="px-6 py-4 border-b border-slate-100">
               <h2 className="text-sm font-semibold text-foreground">Weekly Fuel Spend by Truck</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · fuel only · click a cell to see transactions</p>
             </div>
@@ -393,15 +393,15 @@ export function ExpensesPage() {
               <table className="w-full text-xs">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">
+                    <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
                       Truck
                     </th>
                     {weeks.map((w) => (
-                      <th key={w.label} className="text-right px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">
+                      <th key={w.label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
                         {w.label}
                       </th>
                     ))}
-                    <th className="text-right px-4 py-2.5 font-medium text-muted-foreground whitespace-nowrap">Total</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -421,7 +421,7 @@ export function ExpensesPage() {
                   ) : pivotRows.map((row, i) => (
                     <tr key={row.truck.id} className="border-t border-slate-100">
                       <td
-                        className="sticky left-0 bg-white z-10 px-4 py-2 font-bold whitespace-nowrap cursor-pointer hover:underline"
+                        className="sticky left-0 bg-white z-10 px-4 py-3 font-bold whitespace-nowrap cursor-pointer hover:underline"
                         style={{ color: truckColor(i) }}
                         onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
                       >
@@ -431,7 +431,7 @@ export function ExpensesPage() {
                         <td
                           key={wi}
                           className={cn(
-                            'px-4 py-2 tabular-nums text-right',
+                            'px-4 py-3 tabular-nums text-right',
                             amt > 0 ? 'cursor-pointer hover:bg-sky-50/60' : 'text-muted-foreground/30',
                           )}
                           onClick={() => {
@@ -442,7 +442,7 @@ export function ExpensesPage() {
                         </td>
                       ))}
                       <td
-                        className="px-4 py-2 tabular-nums text-right font-semibold cursor-pointer hover:bg-sky-50/60"
+                        className="px-4 py-3 tabular-nums text-right font-semibold cursor-pointer hover:bg-sky-50/60"
                         onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
                       >
                         {row.total > 0 ? fmtMoney(row.total) : '—'}
@@ -452,15 +452,15 @@ export function ExpensesPage() {
 
                   {!loading && pivotRows.length > 0 && (
                     <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
-                      <td className="sticky left-0 bg-slate-50 z-10 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider">
+                      <td className="sticky left-0 bg-slate-50 z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">
                         Total
                       </td>
                       {weekTotals.map((v, wi) => (
-                        <td key={wi} className="px-4 py-2 tabular-nums text-right">
+                        <td key={wi} className="px-4 py-3 tabular-nums text-right">
                           {v > 0 ? fmtMoney(v) : '—'}
                         </td>
                       ))}
-                      <td className="px-4 py-2 tabular-nums text-right">{grandTotal > 0 ? fmtMoney(grandTotal) : '—'}</td>
+                      <td className="px-4 py-3 tabular-nums text-right">{grandTotal > 0 ? fmtMoney(grandTotal) : '—'}</td>
                     </tr>
                   )}
                 </tbody>
@@ -472,7 +472,7 @@ export function ExpensesPage() {
           {fuelBreakdown.length > 0 && (
             <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
               <button
-                className="w-full flex items-center gap-2 px-5 py-3 text-left hover:bg-slate-50/60 transition-colors"
+                className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-slate-50/60 transition-colors"
                 onClick={() => setBreakdownOpen((o) => !o)}
               >
                 {breakdownOpen
@@ -486,23 +486,23 @@ export function ExpensesPage() {
                   <table className="w-full text-xs">
                     <thead className="bg-slate-50">
                       <tr>
-                        <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Truck</th>
-                        <th className="text-right px-4 py-2.5 font-medium text-sky-600">ULSD $</th>
-                        <th className="text-right px-4 py-2.5 font-medium text-violet-600">DEF $</th>
-                        <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Total $</th>
+                        <th className="text-left px-4 py-3 font-medium text-muted-foreground">Truck</th>
+                        <th className="text-right px-4 py-3 font-medium text-sky-600">ULSD $</th>
+                        <th className="text-right px-4 py-3 font-medium text-violet-600">DEF $</th>
+                        <th className="text-right px-4 py-3 font-medium text-muted-foreground">Total $</th>
                       </tr>
                     </thead>
                     <tbody>
                       {fuelBreakdown.map((r) => (
                         <tr key={r.label} className="border-t border-slate-100">
-                          <td className="px-4 py-2 font-medium">{r.label}</td>
-                          <td className="px-4 py-2 tabular-nums text-right">
+                          <td className="px-4 py-3 font-medium">{r.label}</td>
+                          <td className="px-4 py-3 tabular-nums text-right">
                             {r.ulsd > 0 ? fmtMoney(r.ulsd) : <span className="text-muted-foreground/30">—</span>}
                           </td>
-                          <td className="px-4 py-2 tabular-nums text-right">
+                          <td className="px-4 py-3 tabular-nums text-right">
                             {r.defd > 0 ? fmtMoney(r.defd) : <span className="text-muted-foreground/30">—</span>}
                           </td>
-                          <td className="px-4 py-2 tabular-nums text-right font-semibold">{fmtMoney(r.total)}</td>
+                          <td className="px-4 py-3 tabular-nums text-right font-semibold">{fmtMoney(r.total)}</td>
                         </tr>
                       ))}
                     </tbody>

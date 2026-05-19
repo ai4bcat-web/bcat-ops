@@ -516,7 +516,7 @@ export function DriversPage() {
                 key={f}
                 onClick={() => setTypeFilter(f)}
                 className={cn(
-                  'px-3 py-1.5 font-medium transition-colors',
+                  'px-4 py-2 font-medium transition-colors',
                   typeFilter === f ? 'bg-foreground text-white' : 'bg-white text-muted-foreground hover:bg-slate-50'
                 )}
               >

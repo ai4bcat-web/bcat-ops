@@ -122,8 +122,8 @@ export function CalendarToolbar({
             onClick={() => toggleFilter(key)}
             aria-pressed={filters[key]}
             className={cn(
-              'h-10 pl-5 text-sm font-medium rounded-full border transition-all whitespace-nowrap flex items-center gap-2 shrink-0',
-              filters[key] ? `${active} pr-3` : `${inactive} pr-5`,
+              'h-9 px-4 text-sm font-medium rounded-full border transition-all whitespace-nowrap flex items-center gap-2 shrink-0',
+              filters[key] ? active : inactive,
             )}
           >
             <Icon className="size-3.5 shrink-0" />

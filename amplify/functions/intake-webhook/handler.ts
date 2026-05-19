@@ -1,6 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
-  DynamoDBDocumentClient, PutCommand, ScanCommand,
+  DynamoDBDocumentClient, PutCommand, QueryCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 import { randomUUID } from 'crypto'
@@ -82,10 +82,11 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   console.log('[intake-webhook] processing', { gmailMessageId, label, from, subject })
 
-  // ── Dedup check (scan on gmailMessageId) ──────────────────────────────────
-  const existing = await dynamo.send(new ScanCommand({
+  // ── Dedup check via gmailMessageId GSI ───────────────────────────────────
+  const existing = await dynamo.send(new QueryCommand({
     TableName: TABLE_NAME,
-    FilterExpression: 'gmailMessageId = :gid',
+    IndexName: 'gmailMessageId-index',
+    KeyConditionExpression: 'gmailMessageId = :gid',
     ExpressionAttributeValues: { ':gid': gmailMessageId },
     Limit: 1,
     ProjectionExpression: 'id',

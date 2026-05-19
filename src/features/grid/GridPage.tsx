@@ -336,7 +336,7 @@ export function GridPage() {
                 {hg.headers.map((h) => (
                   <th
                     key={h.id}
-                    className="text-left px-3 py-2.5 text-xs text-muted-foreground font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/50 last:border-r-0"
+                    className="text-left px-4 py-3 text-xs text-muted-foreground font-semibold uppercase tracking-wide whitespace-nowrap border-r border-border/50 last:border-r-0"
                     style={{ width: h.column.getSize() }}
                   >
                     {flexRender(h.column.columnDef.header, h.getContext())}
@@ -411,7 +411,7 @@ function GridRow({
       )}
     >
       {row.getVisibleCells().map((cell) => (
-        <td key={cell.id} className="px-3 py-2.5 border-r border-border/30 last:border-r-0">
+        <td key={cell.id} className="px-4 py-3 border-r border-border/30 last:border-r-0">
           {flexRender(cell.column.columnDef.cell, cell.getContext())}
         </td>
       ))}
