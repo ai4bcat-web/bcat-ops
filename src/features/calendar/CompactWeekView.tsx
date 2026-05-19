@@ -228,24 +228,40 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
         </div>
       </div>
 
-      {/* Row 2: PU → DE with appt type badges */}
-      <div className="flex items-center gap-0.5 min-w-0 mt-0.5 flex-wrap">
-        {isContinuation ? (
-          <>
-            <span className="text-[9px] text-slate-400 shrink-0 leading-none">DE:</span>
-            <ApptBadge type={load.deliveryApptType ?? 'exact'} />
-            <span className="text-[9px] tabular-nums text-slate-500 shrink-0 leading-none">{deTime}</span>
-          </>
-        ) : (
-          <>
-            <ApptBadge type={load.pickupApptType ?? 'exact'} />
-            <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
-            <ArrowRight className="size-2 shrink-0 text-slate-300" />
-            <ApptBadge type={load.deliveryApptType ?? 'exact'} />
-            <span className="text-[9px] tabular-nums text-slate-500 leading-none">{deTime}</span>
-          </>
-        )}
-      </div>
+      {/* Row 2: appt info — PU only on pickup day, DE only on delivery day, both for single-day */}
+      {(() => {
+        const pickupDay   = chicagoDateStr(load.pickupAppt)
+        const deliveryDay = load.deliveryAppt ? chicagoDateStr(load.deliveryAppt) : pickupDay
+        const isMultiDay  = pickupDay !== deliveryDay
+        return (
+          <div className="flex items-center gap-0.5 min-w-0 mt-0.5 flex-wrap">
+            {isContinuation ? (
+              // Delivery day of a multi-day load — show DE only
+              <>
+                <span className="text-[9px] text-slate-400 shrink-0 leading-none">DE:</span>
+                <ApptBadge type={load.deliveryApptType ?? 'exact'} />
+                <span className="text-[9px] tabular-nums text-slate-500 shrink-0 leading-none">{deTime}</span>
+              </>
+            ) : isMultiDay ? (
+              // Pickup day of a multi-day load — show PU only
+              <>
+                <span className="text-[9px] text-slate-400 shrink-0 leading-none">PU:</span>
+                <ApptBadge type={load.pickupApptType ?? 'exact'} />
+                <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
+              </>
+            ) : (
+              // Single-day load — show both
+              <>
+                <ApptBadge type={load.pickupApptType ?? 'exact'} />
+                <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
+                <ArrowRight className="size-2 shrink-0 text-slate-300" />
+                <ApptBadge type={load.deliveryApptType ?? 'exact'} />
+                <span className="text-[9px] tabular-nums text-slate-500 leading-none">{deTime}</span>
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Row 3: origin → destination */}
       {(load.originCity || load.destinationCity) && (
