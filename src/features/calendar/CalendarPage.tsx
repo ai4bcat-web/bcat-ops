@@ -22,8 +22,6 @@ const FC_VIEW_NAMES: Record<FCViewMode, string> = {
   'month':    'resourceTimelineMonth',
 }
 
-const ALL_VIEW_MODES: ViewMode[] = ['day', 'week', 'compact', 'two-week', 'month']
-
 export function CalendarPage() {
   const weekStart = useAppStore((s) => s.weekStart)
   const viewMode = useAppStore((s) => s.viewMode)

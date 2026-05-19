@@ -25,10 +25,11 @@ import {
 const LICENSE = import.meta.env.VITE_FULLCALENDAR_LICENSE ?? 'GPL-My-Project-Is-Open-Source'
 
 const FC_VIEWS: Record<ViewMode, string> = {
-  'day': 'resourceTimelineDay',
-  'week': 'resourceTimelineWorkWeek',
+  'day':      'resourceTimelineDay',
+  'week':     'resourceTimelineWorkWeek',
+  'compact':  'resourceTimelineDay',   // SchedulerView is never shown in compact mode; fallback only
   'two-week': 'resourceTimeline2Weeks',
-  'month': 'resourceTimelineMonth',
+  'month':    'resourceTimelineMonth',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

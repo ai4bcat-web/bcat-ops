@@ -22,7 +22,6 @@ import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
   formatDateInput, fromDateInput,
 } from '@/lib/date'
-import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { ApptType, Load } from '@/types'
 

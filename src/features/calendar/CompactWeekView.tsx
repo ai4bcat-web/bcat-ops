@@ -26,7 +26,7 @@ function initials(name: string) {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
 }
 
-function CompactCard({ load, drivers, conflictIds, orderNumber, groupSize, onReorder }: CompactCardProps) {
+function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { updateLoad } = useLoads()
   const [pickingOrder, setPickingOrder] = useState(false)
