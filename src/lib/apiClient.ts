@@ -154,7 +154,8 @@ export async function listCognitoUsers(): Promise<CognitoUser[]> {
   // AppSync AWSJSON may already be parsed or still a string — handle both
   if (Array.isArray(raw)) return raw as CognitoUser[]
   if (typeof raw === 'string') return JSON.parse(raw) as CognitoUser[]
-  return []
+  // null means the Lambda didn't return a value — surface as error instead of silently showing 0 users
+  throw new Error(`manageUsers returned null — Lambda may not be deployed or USER_POOL_ID may be misconfigured. Raw response: ${JSON.stringify(raw)}`)
 }
 
 export async function createCognitoUser(email: string): Promise<void> {

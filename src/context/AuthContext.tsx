@@ -3,6 +3,7 @@ import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
   confirmSignIn, type SignInOutput,
 } from 'aws-amplify/auth'
+import { isAdminEmail } from '@/lib/auth/admin'
 
 export interface AuthUser {
   userId: string
@@ -75,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setNeedsNewPassword(false)
   }, [])
 
-  const isAdmin = user?.groups.includes('ADMIN') ?? false
+  const isAdmin = (user?.groups.includes('ADMIN') || isAdminEmail(user?.email)) ?? false
 
   return (
     <AuthContext.Provider value={{

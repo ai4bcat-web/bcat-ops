@@ -12,7 +12,8 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider'
 
 const cognito = new CognitoIdentityProviderClient({})
-const USER_POOL_ID = process.env.USER_POOL_ID!
+// Fall back to the production pool ID if the env var isn't set (e.g. deployment gap)
+const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 
 // All controllable page groups (must match frontend PAGE_OPTIONS keys)
 const PAGE_GROUPS = [
@@ -47,6 +48,8 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
   // All callers are Cognito-authenticated users (AppSync enforces auth before
   // invoking this Lambda). Client-side ADMIN group check gates the UI.
   console.log('[userManagement] identity:', JSON.stringify(event.identity))
+  console.log('[userManagement] USER_POOL_ID:', USER_POOL_ID)
+  console.log('[userManagement] action:', event.arguments.action)
 
   const { action, email, username, pages } = event.arguments
 

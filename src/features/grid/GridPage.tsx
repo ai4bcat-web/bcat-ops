@@ -248,7 +248,7 @@ export function GridPage() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 h-14 border-b border-border bg-background shrink-0 flex-wrap">
+      <div className="flex items-center gap-2 px-4 min-h-[56px] py-2 border-b border-border bg-background shrink-0 flex-wrap">
         <Input
           placeholder="Search all fields…"
           className="h-9 w-52 text-xs bg-muted/40"
@@ -294,7 +294,7 @@ export function GridPage() {
           <>
             <Separator orientation="vertical" className="h-5" />
             <Badge variant="secondary" className="text-xs">{selectedRows.length} selected</Badge>
-            <Button variant="outline" size="sm" className="h-9 gap-1 text-xs" onClick={bulkMarkRTI}>
+            <Button type="button" variant="outline" size="sm" className="h-9 gap-1 text-xs" onClick={bulkMarkRTI}>
               <UserCheck className="size-3.5" /> Mark RTI
             </Button>
             <Select onValueChange={(driverId) => {
@@ -322,7 +322,7 @@ export function GridPage() {
 
         <div className="flex-1" />
 
-        <Button size="lg" className="gap-1.5" onClick={() => setSelectedLoad(null, 'create')}>
+        <Button type="button" size="lg" className="gap-1.5" onClick={() => setSelectedLoad(null, 'create')}>
           <Plus className="size-4" /> Add Load
         </Button>
       </div>
@@ -367,8 +367,17 @@ export function GridPage() {
                 ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-4 py-12 text-center text-muted-foreground text-sm">
-                  No loads match your search.
+                <td colSpan={columns.length} className="px-4 py-16 text-center">
+                  {loads.length === 0 ? (
+                    <div className="flex flex-col items-center gap-3">
+                      <p className="text-muted-foreground text-sm">No loads yet.</p>
+                      <Button type="button" size="sm" className="gap-1.5" onClick={() => setSelectedLoad(null, 'create')}>
+                        <Plus className="size-3.5" /> Add your first load
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">No loads match your search.</p>
+                  )}
                 </td>
               </tr>
             )}
