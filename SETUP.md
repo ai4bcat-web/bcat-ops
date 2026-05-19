@@ -124,7 +124,7 @@ Paste the URL into the Apps Script `WEBHOOK_URL` constant below.
 // Apps Script: BCAT Intake Bridge
 // Polls Gmail every 5 min for labeled emails and POSTs to our webhook
 
-const WEBHOOK_URL    = 'PASTE_LAMBDA_FUNCTION_URL_HERE';
+const WEBHOOK_URL    = 'https://odpxmuebxwqrc2kwxtarvf5btu0evziw.lambda-url.us-east-1.on.aws/';
 const WEBHOOK_SECRET = '855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89';
 const LABELS         = ['ivan-intake', 'bcat-intake'];
 const PROCESSED_LABEL = 'intake-processed';
@@ -202,7 +202,7 @@ function setup() {
 After deploy, verify the webhook works without Apps Script:
 
 ```bash
-curl -X POST <LAMBDA_FUNCTION_URL> \
+curl -X POST https://odpxmuebxwqrc2kwxtarvf5btu0evziw.lambda-url.us-east-1.on.aws/ \
   -H "Content-Type: application/json" \
   -d '{
     "secret": "855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89",
