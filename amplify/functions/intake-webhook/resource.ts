@@ -3,6 +3,7 @@ import { defineFunction, secret } from '@aws-amplify/backend'
 export const intakeWebhook = defineFunction({
   name: 'intake-webhook',
   entry: './handler.ts',
+  resourceGroupName: 'data',
   // Webhook secret is stored as an Amplify secret (SSM Parameter Store).
   // Set it in Amplify Console → Secrets → INTAKE_WEBHOOK_SECRET before deploying.
   environment: {
