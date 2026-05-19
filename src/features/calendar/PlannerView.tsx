@@ -1,11 +1,15 @@
 /**
  * PlannerView — dense spreadsheet-style weekly view
  *
+ * Multi-day loads appear on BOTH their pickup and delivery day:
+ *   Pickup day  : PU Appt = real time,  DE Appt = "Yard",  Route = Origin → Yard
+ *   Delivery day: PU Appt = "Yard",     DE Appt = real time, Route = Yard → Destination
+ *
  * Editable per row:
- *   • Color   — small swatch → palette popover → saves load.colorKey to DB
- *   • Slot    — numbered badge → 1-5 picker → saves load.daySlot to DB
- *   • Driver  — driver cell → search popover → saves load.pickupDriverId to DB
- *   • Order   — drag handle → reorders rows within day (local session state)
+ *   • Color  — dot → palette popover → saves load.colorKey to DB
+ *   • Slot   — badge → 1-5 picker   → saves load.daySlot to DB
+ *   • Driver — driver cell → search → saves load.pickupDriverId to DB
+ *   • Order  — drag handle → reorders within day (session state)
  */
 
 import { useState, useRef, useCallback, useMemo } from 'react'
@@ -20,11 +24,22 @@ import type { Load, Driver, ColorKey } from '@/types'
 // ── Column widths ─────────────────────────────────────────────────────────────
 const COL = { slot: 22, color: 20, aljex: 60, tms: 60, pu: 72, puAppt: 72, deAppt: 72, driver: 96 } as const
 const ROW_H = 28
+const DRAG_HANDLE_W = 16
 
-// ── Color palette entries ─────────────────────────────────────────────────────
+// ── Color palette ─────────────────────────────────────────────────────────────
 const PALETTE: { key: ColorKey; hex: string }[] = (
   Object.entries(COLOR_MAP) as [ColorKey, { border: string }][]
 ).map(([key, v]) => ({ key, hex: v.border }))
+
+// ── Day entry type ────────────────────────────────────────────────────────────
+type Role = 'pickup' | 'delivery' | 'same-day'
+
+interface DayEntry {
+  load: Load
+  role: Role
+  /** Stable key for ordering/dragging: `${loadId}:${role}` */
+  key:  string
+}
 
 // ── Chicago date string ───────────────────────────────────────────────────────
 function chicagoDateStr(iso: string): string {
@@ -34,10 +49,22 @@ function chicagoDateStr(iso: string): string {
   }).format(new Date(iso)).replace(/(\d+)\/(\d+)\/(\d+)/, '$3-$1-$2')
 }
 
-// ── Appt cell ─────────────────────────────────────────────────────────────────
-function ApptCell({ iso, type, colorCls }: { iso?: string; type?: string; colorCls: string }) {
+// ── Appt cell (date + time stacked) ──────────────────────────────────────────
+function ApptCell({ iso, type, colorCls, yard }: {
+  iso?: string; type?: string; colorCls: string; yard?: boolean
+}) {
   const w = COL.puAppt
+
+  if (yard) {
+    return (
+      <div className="flex flex-col justify-center px-1.5 leading-tight text-slate-400" style={{ width: w }}>
+        <span className="text-[11px] font-medium italic">Yard</span>
+      </div>
+    )
+  }
+
   if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width: w }}>—</div>
+
   const isSpecial = type === 'fcfs' || type === 'tbd'
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
@@ -52,17 +79,13 @@ function ApptCell({ iso, type, colorCls }: { iso?: string; type?: string; colorC
 // ── Color picker popover ──────────────────────────────────────────────────────
 function ColorPicker({ loadId, current, onClose }: { loadId: string; current?: ColorKey | null; onClose: () => void }) {
   const { updateLoad } = useLoads()
-  const pick = async (key: ColorKey | null) => {
-    await updateLoad(loadId, { colorKey: key })
-    onClose()
-  }
+  const pick = async (key: ColorKey | null) => { await updateLoad(loadId, { colorKey: key }); onClose() }
   return (
     <div
       className="absolute z-50 top-full left-0 mt-1 p-2 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-wrap gap-1.5"
       style={{ width: 160 }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Clear option */}
       <button
         className="size-5 rounded-full border-2 border-slate-200 flex items-center justify-center hover:bg-slate-100"
         title="No color"
@@ -88,7 +111,7 @@ function DriverPicker({ loadId, currentId, drivers, onClose }: {
   loadId: string; currentId: string | null; drivers: Driver[]; onClose: () => void
 }) {
   const { updateLoad } = useLoads()
-  const [query, setQuery] = useState('')
+  const [query, setQuery]   = useState('')
   const [saving, setSaving] = useState(false)
   const filtered = drivers.filter((d) => d.active && d.name.toLowerCase().includes(query.toLowerCase()))
 
@@ -125,9 +148,9 @@ function DriverPicker({ loadId, currentId, drivers, onClose }: {
           return (
             <button
               key={d.id}
+              disabled={saving}
               className={cn('flex w-full items-center gap-2 px-3 py-1.5 text-[11px] text-slate-700 hover:bg-slate-50', d.id === currentId && 'font-semibold')}
               onClick={() => pick(d.id)}
-              disabled={saving}
             >
               <span className="size-2 rounded-full shrink-0" style={{ background: c.border }} />
               {d.name}
@@ -142,30 +165,39 @@ function DriverPicker({ loadId, currentId, drivers, onClose }: {
 
 // ── Planner row ───────────────────────────────────────────────────────────────
 interface PlannerRowProps {
-  load:        Load
+  entry:       DayEntry
   drivers:     Driver[]
   dragging:    boolean
   dragOver:    boolean
-  onDragStart: (id: string) => void
-  onDragEnter: (id: string) => void
+  onDragStart: (key: string) => void
+  onDragEnter: (key: string) => void
   onDragEnd:   () => void
 }
 
-function PlannerRow({ load, drivers, dragging, dragOver, onDragStart, onDragEnter, onDragEnd }: PlannerRowProps) {
+function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnter, onDragEnd }: PlannerRowProps) {
+  const { load, role } = entry
   const { updateLoad } = useLoads()
   const [showColor,  setShowColor]  = useState(false)
   const [showSlot,   setShowSlot]   = useState(false)
   const [showDriver, setShowDriver] = useState(false)
 
-  const color      = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
-  const puDriver   = drivers.find((d) => d.id === load.pickupDriverId)
-  const deDriver   = drivers.find((d) => d.id === load.deliveryDriverId)
-  const isSplit    = load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
+  const color    = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
+  const puDriver = drivers.find((d) => d.id === load.pickupDriverId)
+  const deDriver = drivers.find((d) => d.id === load.deliveryDriverId)
+  const isSplit  = load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
   const driverName = isSplit
     ? `${puDriver?.name ?? '—'} / ${deDriver?.name ?? '—'}`
     : (puDriver?.name ?? '—')
 
   const slotNum = load.daySlot ?? null
+  const isDeliveryDay = role === 'delivery'
+
+  // Route text
+  const route = (() => {
+    if (role === 'pickup')   return [load.originCity, 'Yard'].filter(Boolean).join(' → ') || '—'
+    if (role === 'delivery') return ['Yard', load.destinationCity].filter(Boolean).join(' → ') || '—'
+    return [load.originCity, load.destinationCity].filter(Boolean).join(' → ') || '—'
+  })()
 
   const closeOnBlur = (fn: () => void) => () => setTimeout(fn, 150)
 
@@ -173,33 +205,41 @@ function PlannerRow({ load, drivers, dragging, dragOver, onDragStart, onDragEnte
     <div
       className={cn(
         'group flex items-center border-b border-slate-100 transition-colors',
-        dragging && 'opacity-40',
-        dragOver  && 'ring-1 ring-inset ring-blue-400 bg-blue-50',
+        dragging      && 'opacity-40',
+        dragOver      && 'ring-1 ring-inset ring-blue-400 bg-blue-50',
+        isDeliveryDay && !dragOver && !dragging && 'opacity-80',
         !dragOver && !dragging && 'hover:bg-white',
       )}
-      style={{ height: ROW_H, borderLeft: `3px solid ${color.border}`, background: dragOver ? undefined : color.bg }}
+      style={{
+        height: ROW_H,
+        borderLeft: `3px solid ${isDeliveryDay ? color.border + '80' : color.border}`,
+        background: dragOver ? undefined : color.bg,
+      }}
       draggable
-      onDragStart={() => onDragStart(load.id)}
-      onDragEnter={() => onDragEnter(load.id)}
+      onDragStart={() => onDragStart(entry.key)}
+      onDragEnter={() => onDragEnter(entry.key)}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
     >
 
-      {/* ── Slot badge ───────────────────────────────────────────────────── */}
+      {/* Slot badge — only on pickup day (or same-day) */}
       <div
         className="relative flex items-center justify-center shrink-0"
         style={{ width: COL.slot }}
-        tabIndex={0}
-        onFocus={() => setShowSlot(true)}
+        tabIndex={isDeliveryDay ? -1 : 0}
+        onFocus={() => !isDeliveryDay && setShowSlot(true)}
         onBlur={closeOnBlur(() => setShowSlot(false))}
       >
         <span
-          className="text-[9px] font-black rounded-full flex items-center justify-center cursor-pointer hover:opacity-75 leading-none"
-          style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px' }}
+          className={cn(
+            'text-[9px] font-black rounded-full flex items-center justify-center leading-none',
+            !isDeliveryDay && 'cursor-pointer hover:opacity-75',
+          )}
+          style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px', opacity: isDeliveryDay ? 0.4 : 1 }}
         >
           {slotNum ?? '·'}
         </span>
-        {showSlot && (
+        {showSlot && !isDeliveryDay && (
           <div
             className="absolute z-50 top-full left-0 mt-0.5 flex gap-1 p-1.5 rounded-lg border border-slate-200 bg-white shadow-xl"
             onMouseDown={(e) => e.stopPropagation()}
@@ -215,7 +255,7 @@ function PlannerRow({ load, drivers, dragging, dragOver, onDragStart, onDragEnte
               </button>
             ))}
             <button
-              className="size-5 text-[10px] font-black rounded-full flex items-center justify-center hover:opacity-80 bg-slate-200"
+              className="size-5 text-[10px] rounded-full flex items-center justify-center hover:opacity-80 bg-slate-200"
               title="Clear"
               onClick={() => { updateLoad(load.id, { daySlot: null }); setShowSlot(false) }}
             >
@@ -225,61 +265,76 @@ function PlannerRow({ load, drivers, dragging, dragOver, onDragStart, onDragEnte
         )}
       </div>
 
-      {/* ── Color swatch ─────────────────────────────────────────────────── */}
+      {/* Color swatch */}
       <div
         className="relative flex items-center justify-center shrink-0"
         style={{ width: COL.color }}
-        tabIndex={0}
-        onFocus={() => setShowColor(true)}
+        tabIndex={isDeliveryDay ? -1 : 0}
+        onFocus={() => !isDeliveryDay && setShowColor(true)}
         onBlur={closeOnBlur(() => setShowColor(false))}
       >
         <span
-          className="size-3 rounded-full cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300 transition-all"
-          style={{ background: color.border }}
+          className={cn('size-3 rounded-full transition-all', !isDeliveryDay && 'cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300')}
+          style={{ background: color.border, opacity: isDeliveryDay ? 0.4 : 1 }}
         />
-        {showColor && (
-          <ColorPicker
-            loadId={load.id}
-            current={load.colorKey}
-            onClose={() => setShowColor(false)}
-          />
+        {showColor && !isDeliveryDay && (
+          <ColorPicker loadId={load.id} current={load.colorKey} onClose={() => setShowColor(false)} />
         )}
       </div>
 
-      {/* ── Drag handle ──────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-center w-4 shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing">
+      {/* Drag handle */}
+      <div className="flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing" style={{ width: DRAG_HANDLE_W }}>
         <GripVertical className="size-3 text-slate-400" />
       </div>
 
-      {/* ── Data cells ───────────────────────────────────────────────────── */}
+      {/* ALJEX */}
       <Cell width={COL.aljex} bold onClick={() => useAppStore.getState().setSelectedLoad(load.id, 'edit')}>
         {load.aljexId || '—'}
       </Cell>
-      <Cell width={COL.tms}>{load.tmsId || '—'}</Cell>
-      <Cell width={COL.pu}>{load.pickupNumber || '—'}</Cell>
 
-      <ApptCell iso={load.pickupAppt}   type={load.pickupApptType}   colorCls="text-blue-600" />
-      <ApptCell iso={load.deliveryAppt} type={load.deliveryApptType} colorCls="text-violet-600" />
-
-      <Cell flex className="text-slate-500">
-        {[load.originCity, load.destinationCity].filter(Boolean).join(' → ') || '—'}
+      {/* TMS + PU# — only on pickup day to avoid clutter on delivery continuation */}
+      <Cell width={COL.tms} className={isDeliveryDay ? 'text-slate-300' : undefined}>
+        {isDeliveryDay ? '↳' : (load.tmsId || '—')}
+      </Cell>
+      <Cell width={COL.pu} className={isDeliveryDay ? 'text-slate-300' : undefined}>
+        {isDeliveryDay ? '' : (load.pickupNumber || '—')}
       </Cell>
 
-      {/* Driver — editable */}
+      {/* PU Appt */}
+      <ApptCell
+        iso={load.pickupAppt}
+        type={load.pickupApptType}
+        colorCls="text-blue-600"
+        yard={isDeliveryDay}
+      />
+
+      {/* DE Appt */}
+      <ApptCell
+        iso={load.deliveryAppt}
+        type={load.deliveryApptType}
+        colorCls="text-violet-600"
+        yard={role === 'pickup'}
+      />
+
+      {/* Route */}
+      <Cell flex className="text-slate-500">{route}</Cell>
+
+      {/* Driver — editable on pickup day, read-only label on delivery day */}
       <div
         className="relative shrink-0 flex items-center"
         style={{ width: COL.driver }}
-        tabIndex={0}
-        onFocus={() => setShowDriver(true)}
+        tabIndex={isDeliveryDay ? -1 : 0}
+        onFocus={() => !isDeliveryDay && setShowDriver(true)}
         onBlur={closeOnBlur(() => setShowDriver(false))}
       >
         <div className={cn(
-          'w-full h-full flex items-center px-1.5 text-[11px] font-medium text-slate-800 truncate cursor-pointer rounded hover:bg-black/5',
+          'w-full h-full flex items-center px-1.5 text-[11px] font-medium truncate rounded',
+          isDeliveryDay ? 'text-slate-400' : 'text-slate-800 cursor-pointer hover:bg-black/5',
           showDriver && 'ring-1 ring-blue-400 bg-blue-50',
         )}>
           {driverName}
         </div>
-        {showDriver && (
+        {showDriver && !isDeliveryDay && (
           <DriverPicker
             loadId={load.id}
             currentId={load.pickupDriverId}
@@ -330,55 +385,77 @@ interface PlannerViewProps {
 export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
 
-  // Group loads by pickup date
-  const loadsByDay = useMemo(() => {
-    const map = new Map<string, Load[]>()
+  // Group loads into day entries — multi-day loads appear on BOTH pickup and delivery day
+  const entriesByDay = useMemo(() => {
+    const map = new Map<string, DayEntry[]>()
+
+    const add = (dayStr: string, entry: DayEntry) => {
+      if (!map.has(dayStr)) map.set(dayStr, [])
+      map.get(dayStr)!.push(entry)
+    }
+
     for (const l of loads) {
-      const d = chicagoDateStr(l.pickupAppt)
-      if (!map.has(d)) map.set(d, [])
-      map.get(d)!.push(l)
+      const puDay = chicagoDateStr(l.pickupAppt)
+      const deDay = l.deliveryAppt ? chicagoDateStr(l.deliveryAppt) : puDay
+      const isMultiDay = puDay !== deDay
+
+      if (isMultiDay) {
+        add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })
+        add(deDay, { load: l, role: 'delivery', key: `${l.id}:delivery` })
+      } else {
+        add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
+      }
     }
+
+    // Sort each day: same-day and pickup entries by pickupAppt, delivery entries at the end by deliveryAppt
     for (const arr of map.values()) {
-      arr.sort((a, b) => a.pickupAppt.localeCompare(b.pickupAppt))
+      arr.sort((a, b) => {
+        const aTime = a.role === 'delivery' ? (a.load.deliveryAppt ?? '') : a.load.pickupAppt
+        const bTime = b.role === 'delivery' ? (b.load.deliveryAppt ?? '') : b.load.pickupAppt
+        return aTime.localeCompare(bTime)
+      })
     }
+
     return map
   }, [loads])
 
-  // Per-day local order override (drag-to-reorder, session only)
-  const [dayOrder, setDayOrder] = useState<Map<string, string[]>>(new Map())
-  const dragId = useRef<string | null>(null)
-  const dragDay = useRef<string | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  // Per-day local drag-to-reorder (session state, keys are DayEntry.key)
+  const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
+  const dragKey  = useRef<string | null>(null)
+  const dragDay  = useRef<string | null>(null)
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
 
-  const handleDragStart = useCallback((day: string, id: string) => {
-    dragId.current = id; dragDay.current = day
+  const handleDragStart = useCallback((day: string, key: string) => {
+    dragKey.current = key; dragDay.current = day
   }, [])
 
-  const handleDragEnter = useCallback((day: string, id: string) => {
-    if (dragId.current === id || dragDay.current !== day) return
-    setDragOverId(id)
+  const handleDragEnter = useCallback((day: string, key: string) => {
+    if (dragKey.current === key || dragDay.current !== day) return
+    setDragOverKey(key)
     setDayOrder((prev) => {
-      const base  = loadsByDay.get(day) ?? []
-      const order = prev.get(day) ?? base.map((l) => l.id)
-      const from  = order.indexOf(dragId.current!)
-      const to    = order.indexOf(id)
+      const base  = (entriesByDay.get(day) ?? []).map((e) => e.key)
+      const order = prev.get(day) ?? base
+      const from  = order.indexOf(dragKey.current!)
+      const to    = order.indexOf(key)
       if (from < 0 || to < 0 || from === to) return prev
-      const next = [...order]; next.splice(from, 1); next.splice(to, 0, dragId.current!)
+      const next = [...order]; next.splice(from, 1); next.splice(to, 0, dragKey.current!)
       return new Map(prev).set(day, next)
     })
-  }, [loadsByDay])
+  }, [entriesByDay])
 
   const handleDragEnd = useCallback(() => {
-    dragId.current = null; dragDay.current = null; setDragOverId(null)
+    dragKey.current = null; dragDay.current = null; setDragOverKey(null)
   }, [])
 
-  function orderedLoads(day: string): Load[] {
-    const base  = loadsByDay.get(day) ?? []
-    const order = dayOrder.get(day)
+  function orderedEntries(dayStr: string): DayEntry[] {
+    const base  = entriesByDay.get(dayStr) ?? []
+    const order = dayOrder.get(dayStr)
     if (!order) return base
-    const byId = new Map(base.map((l) => [l.id, l]))
-    return order.map((id) => byId.get(id)).filter(Boolean) as Load[]
+    const byKey = new Map(base.map((e) => [e.key, e]))
+    return order.map((k) => byKey.get(k)).filter(Boolean) as DayEntry[]
   }
+
+  const headerPad = 3 + COL.slot + COL.color + DRAG_HANDLE_W
 
   return (
     <div className="flex flex-col h-full overflow-auto bg-slate-50 select-none">
@@ -386,7 +463,7 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
       {/* Sticky column header */}
       <div
         className="flex items-center border-b-2 border-slate-300 bg-white sticky top-0 z-20 shrink-0"
-        style={{ height: ROW_H, paddingLeft: 3 + COL.slot + COL.color + 16 }}
+        style={{ height: ROW_H, paddingLeft: headerPad }}
       >
         <ColHeader width={COL.aljex}>#</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
@@ -401,7 +478,8 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
       {days.map((day, di) => {
         const dayStr = chicagoDateStr(day.toISOString())
         const { weekday, date } = formatDayHeader(day.toISOString())
-        const rows = orderedLoads(dayStr)
+        const entries = orderedEntries(dayStr)
+        const loadCount = entries.filter((e) => e.role !== 'delivery').length
 
         return (
           <div key={di} className="border-b border-slate-200 shrink-0">
@@ -411,25 +489,25 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
             >
               <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">{weekday}</span>
               <span className="text-[11px] text-slate-500">{date}</span>
-              {rows.length > 0 && (
-                <span className="text-[10px] text-slate-400">· {rows.length} load{rows.length !== 1 ? 's' : ''}</span>
+              {loadCount > 0 && (
+                <span className="text-[10px] text-slate-400">· {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
               )}
             </div>
 
-            {rows.length === 0 ? (
+            {entries.length === 0 ? (
               <div className="flex items-center px-6 text-[11px] text-slate-300 italic" style={{ height: ROW_H }}>
                 No loads
               </div>
             ) : (
-              rows.map((load) => (
+              entries.map((entry) => (
                 <PlannerRow
-                  key={load.id}
-                  load={load}
+                  key={entry.key}
+                  entry={entry}
                   drivers={drivers}
-                  dragging={dragId.current === load.id}
-                  dragOver={dragOverId === load.id}
-                  onDragStart={(id) => handleDragStart(dayStr, id)}
-                  onDragEnter={(id) => handleDragEnter(dayStr, id)}
+                  dragging={dragKey.current === entry.key}
+                  dragOver={dragOverKey === entry.key}
+                  onDragStart={(k) => handleDragStart(dayStr, k)}
+                  onDragEnter={(k) => handleDragEnter(dayStr, k)}
                   onDragEnd={handleDragEnd}
                 />
               ))
