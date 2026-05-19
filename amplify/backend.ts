@@ -7,8 +7,9 @@ import { data } from './data/resource'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { intakeWebhook } from './functions/intake-webhook/resource'
+import { fuelImport } from './functions/fuel-import/resource'
 
-const backend = defineBackend({ auth, data, storage, userManagement, intakeWebhook })
+const backend = defineBackend({ auth, data, storage, userManagement, intakeWebhook, fuelImport })
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
 
@@ -71,4 +72,30 @@ const fnUrl = new FunctionUrl(webhookFn.stack, 'IntakeWebhookUrl', {
 new CfnOutput(webhookFn.stack, 'IntakeWebhookFunctionUrl', {
   value: fnUrl.url,
   description: 'Paste into SETUP.md → WEBHOOK_URL and Apps Script WEBHOOK_URL',
+})
+
+// ── fuelImport Lambda ──────────────────────────────────────────────────────
+
+const fuelImportFn = backend.fuelImport.resources.lambda as LambdaFunction
+
+// DynamoDB: read + write FuelTransaction table
+const fuelTxTable = backend.data.resources.tables['FuelTransaction']
+backend.fuelImport.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Scan', 'dynamodb:PutItem'],
+    resources: [fuelTxTable.tableArn],
+  })
+)
+
+fuelImportFn.addEnvironment('FUEL_TX_TABLE_NAME', fuelTxTable.tableName)
+
+// Function URL — same auth pattern as intake-webhook (secret enforced in handler)
+const fuelImportUrl = new FunctionUrl(fuelImportFn.stack, 'FuelImportFunctionUrl', {
+  function: fuelImportFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+
+new CfnOutput(fuelImportFn.stack, 'FuelImportFunctionUrlOutput', {
+  value: fuelImportUrl.url,
+  description: 'Paste into SETUP.md → FUEL_IMPORT_WEBHOOK_URL and Apps Script FUEL_IMPORT_WEBHOOK_URL',
 })

@@ -223,6 +223,131 @@ Then open the app → **Intake** → Dennis tab → confirm the item appears.
 
 ---
 
+---
+
+## Section 8 — EFS Fuel Report Auto-Import
+
+EFS sends a daily email to **ai4bcat@gmail.com** containing a link to download the transaction report.
+The setup below automatically detects that email, fetches the report, and inserts new fuel transactions
+into the app (duplicate-safe).
+
+### 8a — Gmail Filter
+
+1. Open Gmail → ⚙️ Settings → **See all settings** → **Filters and Blocked Addresses**
+2. Click **Create a new filter**
+3. Set **From:** to the EFS sender address (e.g. `no-reply@efsglobal.com` or `reports@wexfleet.com` — check an existing report email for the exact address)
+4. Click **Create filter**
+5. Check:
+   - ✅ Apply the label → **New label...** → `efs-report`
+   - ✅ Mark as read
+   - ✅ Skip the Inbox (Archive it)
+6. Click **Create filter**
+
+### 8b — Lambda Function URL
+
+After the Amplify backend deploys:
+
+1. Open AWS CloudFormation → find the Amplify stack → **Outputs** tab
+2. Copy the value of **FuelImportFunctionUrlOutput**
+
+OR go to Lambda Console → `fuel-import-*` function → **Configuration** → **Function URL**.
+
+Paste the URL as `FUEL_IMPORT_WEBHOOK_URL` in the Apps Script below.
+
+### 8c — Apps Script additions
+
+The existing **BCAT Intake Bridge** Apps Script needs two additions:
+
+1. Add `FUEL_IMPORT_WEBHOOK_URL` constant at the top
+2. Add the `processFuelReportEmails` function
+3. Add a new time-driven trigger for `processFuelReportEmails` (every 30 minutes is fine)
+
+**Add to the top of the script (alongside existing constants):**
+```javascript
+const FUEL_IMPORT_WEBHOOK_URL = 'PASTE_FUEL_IMPORT_FUNCTION_URL_HERE';
+const EFS_LABEL               = 'efs-report';
+const EFS_PROCESSED_LABEL     = 'efs-processed';
+```
+
+**Add this function to the script:**
+```javascript
+function processFuelReportEmails() {
+  const efsLabel       = GmailApp.getUserLabelByName(EFS_LABEL);
+  if (!efsLabel) { console.log('Label efs-report not found — skipping'); return; }
+
+  const processedLabel = GmailApp.getUserLabelByName(EFS_PROCESSED_LABEL)
+    || GmailApp.createLabel(EFS_PROCESSED_LABEL);
+
+  const threads = efsLabel.getThreads(0, 10);
+  threads.forEach(thread => {
+    const threadLabels = thread.getLabels().map(l => l.getName());
+    if (threadLabels.includes(EFS_PROCESSED_LABEL)) return;
+
+    thread.getMessages().forEach(message => {
+      const payload = {
+        secret:         WEBHOOK_SECRET,
+        gmailMessageId: message.getId(),
+        subject:        message.getSubject(),
+        bodyText:       message.getPlainBody(),
+        bodyHtml:       message.getBody(),
+        receivedAt:     message.getDate().toISOString(),
+      };
+
+      try {
+        const response = UrlFetchApp.fetch(FUEL_IMPORT_WEBHOOK_URL, {
+          method:             'post',
+          contentType:        'application/json',
+          payload:            JSON.stringify(payload),
+          muteHttpExceptions: true,
+        });
+        const code = response.getResponseCode();
+        console.log('Fuel import response:', code, response.getContentText());
+        if (code === 200) {
+          thread.addLabel(processedLabel);
+        } else {
+          console.error('Fuel import webhook failed:', code, response.getContentText());
+        }
+      } catch (e) {
+        console.error('Error processing EFS email:', e);
+      }
+    });
+  });
+}
+
+function setupEfs() {
+  GmailApp.createLabel('efs-report');
+  GmailApp.createLabel('efs-processed');
+  console.log('EFS labels created');
+}
+```
+
+**Add a trigger:**
+1. In Apps Script → **Triggers** (clock icon) → **Add Trigger**
+2. Function: `processFuelReportEmails`
+3. Event source: **Time-driven** → **Minutes timer** → **Every 30 minutes**
+4. Click **Save**
+
+### 8d — Test the EFS import
+
+```bash
+curl -X POST PASTE_FUEL_IMPORT_FUNCTION_URL_HERE \
+  -H "Content-Type: application/json" \
+  -d '{
+    "secret": "855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89",
+    "gmailMessageId": "test-fuel-001",
+    "subject": "EFS Transaction Report",
+    "bodyText": "Your report is ready: https://PASTE_REAL_EFS_REPORT_URL_HERE",
+    "receivedAt": "2026-05-19T12:00:00Z"
+  }'
+```
+
+Expected response:
+```json
+{ "status": "ok", "parsed": 11, "added": 11, "skipped": 0, "errors": 0 }
+```
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
