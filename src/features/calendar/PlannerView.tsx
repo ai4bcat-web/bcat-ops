@@ -42,11 +42,14 @@ interface DayEntry {
 }
 
 // ── Chicago date string ───────────────────────────────────────────────────────
-function chicagoDateStr(iso: string): string {
+function chicagoDateStr(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return null
   return new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Chicago',
     year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(new Date(iso)).replace(/(\d+)\/(\d+)\/(\d+)/, '$3-$1-$2')
+  }).format(d).replace(/(\d+)\/(\d+)\/(\d+)/, '$3-$1-$2')
 }
 
 // ── Appt cell (date + time stacked) ──────────────────────────────────────────
@@ -396,7 +399,8 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
 
     for (const l of loads) {
       const puDay = chicagoDateStr(l.pickupAppt)
-      const deDay = l.deliveryAppt ? chicagoDateStr(l.deliveryAppt) : puDay
+      if (!puDay) continue  // skip loads with invalid pickup date
+      const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
       const isMultiDay = puDay !== deDay
 
       if (isMultiDay) {
@@ -410,8 +414,8 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
     // Sort each day: same-day and pickup entries by pickupAppt, delivery entries at the end by deliveryAppt
     for (const arr of map.values()) {
       arr.sort((a, b) => {
-        const aTime = a.role === 'delivery' ? (a.load.deliveryAppt ?? '') : a.load.pickupAppt
-        const bTime = b.role === 'delivery' ? (b.load.deliveryAppt ?? '') : b.load.pickupAppt
+        const aTime = a.role === 'delivery' ? (a.load.deliveryAppt ?? a.load.pickupAppt ?? '') : (a.load.pickupAppt ?? '')
+        const bTime = b.role === 'delivery' ? (b.load.deliveryAppt ?? b.load.pickupAppt ?? '') : (b.load.pickupAppt ?? '')
         return aTime.localeCompare(bTime)
       })
     }
