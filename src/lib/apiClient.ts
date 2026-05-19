@@ -14,6 +14,7 @@ const LOAD_FIELDS = `
   deliveryAppt deliveryApptEnd deliveryApptType
   pickupDriverId deliveryDriverId
   readyToInvoice rateConfirmKey
+  colorKey daySlot
   createdBy updatedBy createdAt updatedAt
 `
 
