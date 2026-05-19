@@ -1,14 +1,17 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda'
+import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda'
+import { CfnOutput } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
+import { intakeWebhook } from './functions/intake-webhook/resource'
 
-const backend = defineBackend({ auth, data, storage, userManagement })
+const backend = defineBackend({ auth, data, storage, userManagement, intakeWebhook })
 
-// Grant the userManagement Lambda permission to call Cognito admin APIs
+// ── userManagement Lambda ──────────────────────────────────────────────────
+
 backend.userManagement.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions: [
@@ -27,11 +30,45 @@ backend.userManagement.resources.lambda.addToRolePolicy(
   })
 )
 
-// Pass the User Pool ID to the Lambda as an environment variable.
-// Must cast IFunction → Function because addEnvironment is only on the concrete class.
-// The Amplify-level addEnvironment() only accepts plain strings (not CDK tokens), so
-// we use the CDK Lambda Function's own addEnvironment which resolves tokens correctly.
 ;(backend.userManagement.resources.lambda as LambdaFunction).addEnvironment(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId
 )
+
+// ── intakeWebhook Lambda ───────────────────────────────────────────────────
+
+const webhookFn = backend.intakeWebhook.resources.lambda as LambdaFunction
+
+// DynamoDB: read + write to the IntakeItem table (for dedup scan and PutItem)
+const intakeTable = backend.data.resources.tables['IntakeItem']
+backend.intakeWebhook.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:PutItem', 'dynamodb:Scan'],
+    resources: [intakeTable.tableArn],
+  })
+)
+
+// S3: write intake PDFs to the existing rate-confirms bucket
+const bucketArn = backend.storage.resources.bucket.bucketArn
+backend.intakeWebhook.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['s3:PutObject'],
+    resources: [`${bucketArn}/intake-pdfs/*`],
+  })
+)
+
+// Environment variables (CDK tokens resolve at synthesis time)
+webhookFn.addEnvironment('TABLE_NAME',  intakeTable.tableName)
+webhookFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+
+// Function URL — auth NONE, secret enforced in handler
+const fnUrl = new FunctionUrl(webhookFn.stack, 'IntakeWebhookUrl', {
+  function: webhookFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+
+// Expose URL in CloudFormation outputs so it's easy to find after deploy
+new CfnOutput(webhookFn.stack, 'IntakeWebhookFunctionUrl', {
+  value: fnUrl.url,
+  description: 'Paste into SETUP.md → WEBHOOK_URL and Apps Script WEBHOOK_URL',
+})

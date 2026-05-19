@@ -51,6 +51,31 @@ const schema = a.schema({
     })
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Intake queue ──────────────────────────────────────────────────────────
+  // Records created by the intake-webhook Lambda when Gmail forwards load emails.
+  IntakeItem: a
+    .model({
+      source:               a.enum(['IVAN_CARTAGE', 'BCAT_LOGISTICS']),
+      status:               a.enum(['NEW', 'IN_PROGRESS', 'BUILT', 'ARCHIVED']),
+      assignedTo:           a.string(),        // email of the team member responsible
+      receivedAt:           a.datetime(),
+      fromEmail:            a.string(),
+      subject:              a.string(),
+      bodyText:             a.string(),
+      bodyHtml:             a.string(),
+      s3KeyPdfAttachments:  a.string().array(),
+      gmailMessageId:       a.string(),        // deduplication key
+      extractedMetadata:    a.json(),
+      builtLoadId:          a.id(),
+      notes:                a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('assignedTo').sortKeys(['receivedAt']),
+      index('source').sortKeys(['receivedAt']),
+      index('gmailMessageId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   AuditLog: a
     .model({
       entityType: a.string().required(),
