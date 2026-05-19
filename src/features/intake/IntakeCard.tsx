@@ -3,17 +3,13 @@ import { cn } from '@/lib/utils'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const STATUS_STYLES: Record<IntakeStatus, string> = {
-  NEW:         'bg-sky-50 text-sky-700 border-sky-200',
-  IN_PROGRESS: 'bg-amber-50 text-amber-700 border-amber-200',
-  BUILT:       'bg-emerald-50 text-emerald-700 border-emerald-200',
-  ARCHIVED:    'bg-slate-100 text-slate-500 border-slate-200',
+  NEED_TO_BUILD: 'bg-amber-50 text-amber-700 border-amber-200',
+  BUILT:         'bg-emerald-50 text-emerald-700 border-emerald-200',
 }
 
 const STATUS_LABELS: Record<IntakeStatus, string> = {
-  NEW:         'New',
-  IN_PROGRESS: 'In Progress',
-  BUILT:       'Built',
-  ARCHIVED:    'Archived',
+  NEED_TO_BUILD: 'Need to Build',
+  BUILT:         'Built',
 }
 
 function relativeTime(iso: string) {

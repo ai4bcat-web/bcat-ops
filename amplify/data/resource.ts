@@ -56,7 +56,7 @@ const schema = a.schema({
   IntakeItem: a
     .model({
       source:               a.enum(['IVAN_CARTAGE', 'BCAT_LOGISTICS']),
-      status:               a.enum(['NEW', 'IN_PROGRESS', 'BUILT', 'ARCHIVED']),
+      status:               a.enum(['NEED_TO_BUILD', 'BUILT']),
       assignedTo:           a.string(),        // email of the team member responsible
       receivedAt:           a.datetime(),
       fromEmail:            a.string(),

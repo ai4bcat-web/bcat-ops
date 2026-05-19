@@ -125,7 +125,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       __typename:          'IntakeItem',
       id,
       source:              mapping.source,
-      status:              'NEW',
+      status:              'NEED_TO_BUILD',
       assignedTo:          mapping.assignedTo,
       receivedAt:          receivedAt ?? now,
       fromEmail:           from ?? '',

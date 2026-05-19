@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
-import { listIntakeItems, updateIntakeItem } from '@/lib/apiClient'
+import { listIntakeItems, updateIntakeItem, deleteIntakeItem } from '@/lib/apiClient'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const POLL_MS = 30_000
@@ -54,5 +54,10 @@ export function useIntakeItems(filter?: { assignedTo?: string; source?: string }
     return updated
   }, [])
 
-  return { items, loading, refresh: load, updateItem }
+  const deleteItem = useCallback(async (id: string) => {
+    await deleteIntakeItem(id)
+    setItems((prev) => prev.filter((i) => i.id !== id))
+  }, [])
+
+  return { items, loading, refresh: load, updateItem, deleteItem }
 }

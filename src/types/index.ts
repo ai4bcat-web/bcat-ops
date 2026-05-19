@@ -76,7 +76,7 @@ export type ViewMode = 'day' | 'week' | 'compact' | 'two-week' | 'month'
 // ── Intake queue ───────────────────────────────────────────────────────────
 
 export type IntakeSource = 'IVAN_CARTAGE' | 'BCAT_LOGISTICS'
-export type IntakeStatus = 'NEW' | 'IN_PROGRESS' | 'BUILT' | 'ARCHIVED'
+export type IntakeStatus = 'NEED_TO_BUILD' | 'BUILT'
 
 export interface IntakeItem {
   id: string

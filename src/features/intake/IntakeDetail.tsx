@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Loader2, ExternalLink, X, ChevronDown } from 'lucide-react'
+import { Loader2, ExternalLink, X, ChevronDown, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store/useAppStore'
 import { getIntakePdfUrl } from '@/lib/apiClient'
@@ -7,10 +7,8 @@ import { cn } from '@/lib/utils'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const STATUS_OPTIONS: { value: IntakeStatus; label: string }[] = [
-  { value: 'NEW',         label: 'New'         },
-  { value: 'IN_PROGRESS', label: 'In Progress'  },
-  { value: 'BUILT',       label: 'Built'        },
-  { value: 'ARCHIVED',    label: 'Archived'     },
+  { value: 'NEED_TO_BUILD', label: 'Need to Build' },
+  { value: 'BUILT',         label: 'Built'         },
 ]
 
 const ASSIGNEE_OPTIONS = [
@@ -21,10 +19,11 @@ const ASSIGNEE_OPTIONS = [
 interface IntakeDetailProps {
   item: IntakeItem
   onUpdate: (id: string, patch: { status?: IntakeStatus; assignedTo?: string; notes?: string; builtLoadId?: string }) => Promise<IntakeItem>
+  onDelete: (id: string) => Promise<void>
   onClose: () => void
 }
 
-export function IntakeDetail({ item, onUpdate, onClose }: IntakeDetailProps) {
+export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetailProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   // Notes — autosave with 800 ms debounce
@@ -68,9 +67,15 @@ export function IntakeDetail({ item, onUpdate, onClose }: IntakeDetailProps) {
     await onUpdate(item.id, { assignedTo })
   }
 
-  const handleBuildLoad = () => {
-    // Open LoadDrawer in create mode — subject / from prefill goes into notes
+  const handleBuildLoad = async () => {
+    await onUpdate(item.id, { status: 'BUILT' })
     setSelectedLoad(null, 'create')
+  }
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this intake item? This cannot be undone.')) return
+    await onDelete(item.id)
+    onClose()
   }
 
   return (
@@ -123,14 +128,23 @@ export function IntakeDetail({ item, onUpdate, onClose }: IntakeDetailProps) {
 
         <div className="flex-1" />
 
+        {/* Delete */}
+        <button
+          onClick={handleDelete}
+          className="h-7 w-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors"
+          title="Delete"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+
         {/* Build Load */}
-        {item.status !== 'BUILT' && item.status !== 'ARCHIVED' && (
+        {item.status !== 'BUILT' && (
           <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={handleBuildLoad}>
             Build Load
           </Button>
         )}
-        {item.builtLoadId && (
-          <span className="text-xs text-emerald-700 font-medium">Load built ✓</span>
+        {item.status === 'BUILT' && (
+          <span className="text-xs text-emerald-700 font-medium">Built ✓</span>
         )}
       </div>
 

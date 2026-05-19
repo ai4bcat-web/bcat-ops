@@ -180,6 +180,13 @@ export async function updateIntakeItem(id: string, patch: {
   return result.data.updateIntakeItem
 }
 
+export async function deleteIntakeItem(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteIntakeItem($input: DeleteIntakeItemInput!) { deleteIntakeItem(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
 export async function getIntakePdfUrl(s3Key: string): Promise<string> {
   return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
 }
