@@ -17,8 +17,8 @@ interface CalendarToolbarProps {
 }
 
 const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: 'compact',  label: 'List'     },
   { value: 'planner',  label: 'Planner'  },
+  { value: 'compact',  label: 'List'     },
   { value: 'day',      label: 'Day'      },
   { value: 'week',     label: 'Week'     },
   { value: 'two-week', label: '2 Weeks'  },

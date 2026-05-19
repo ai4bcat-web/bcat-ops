@@ -147,7 +147,7 @@ export function CalendarPage() {
               weekStart={compactWeek}
             />
           ) : currentView === 'planner' ? (
-            <PlannerView weekStart={compactWeek} />
+            <PlannerView loads={visibleLoads} drivers={drivers} weekStart={compactWeek} />
           ) : (
             <SchedulerView
               calendarRef={calendarRef}
