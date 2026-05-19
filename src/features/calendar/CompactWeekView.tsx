@@ -18,15 +18,17 @@ interface CompactCardProps {
   drivers: Driver[]
   conflictIds: Set<string>
   orderNumber: number
-  groupSize: number
+  isContinuation?: boolean
   onReorder: (loadId: string, newPosition: number) => void
 }
+
+// groupSizeMap intentionally unused — kept in useMemo for potential future features
 
 function initials(name: string) {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
 }
 
-function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: CompactCardProps) {
+function CompactCard({ load, drivers, conflictIds, orderNumber, isContinuation, onReorder }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { updateLoad } = useLoads()
   const [pickingOrder, setPickingOrder] = useState(false)
@@ -66,25 +68,28 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: Com
   const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
 
   const borderColor = isConflict ? '#ef4444' : isRTI ? '#16a34a' : color.border
-  const bgColor     = isConflict ? 'rgba(239,68,68,0.06)' : isRTI ? 'rgba(22,163,74,0.06)' : color.bg
+  const bgColor     = isContinuation
+    ? 'rgba(0,0,0,0.02)'
+    : isConflict ? 'rgba(239,68,68,0.06)' : isRTI ? 'rgba(22,163,74,0.06)' : color.bg
   const textColor   = isRTI ? '#15803d' : color.text
 
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
   const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
 
-  const maxPos = 5
-
   const card = (
     <div
       className="rounded border border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none"
       style={{
-        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e7eb',
+        borderColor:     isContinuation
+          ? 'rgba(0,0,0,0.08)'
+          : isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e7eb',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
+        opacity: isContinuation ? 0.7 : 1,
       }}
       onClick={() => { if (!pickingOrder && !pickingDriver) setSelectedLoad(load.id, 'view') }}
     >
-      {/* Main row: left content + right column (badge above avatar) */}
+      {/* Main row: left content + right column */}
       <div className="flex items-start gap-1 min-w-0">
         {/* Left: time + aljex id + RTI */}
         <div className="flex-1 min-w-0">
@@ -93,13 +98,16 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: Com
               {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
             </span>
             {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
+            {isContinuation && <ArrowRight className="size-2.5 text-slate-300 shrink-0" />}
           </div>
-          <div className="flex items-center gap-1 min-w-0 mt-0.5">
-            <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">PU: {puTime}</span>
-            <ArrowRight className="size-2 shrink-0 text-slate-300" />
-            <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">DE: {deTime}</span>
-          </div>
-          {/* Line 2: origin city → destination city */}
+          {!isContinuation && (
+            <div className="flex items-center gap-1 min-w-0 mt-0.5">
+              <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">PU: {puTime}</span>
+              <ArrowRight className="size-2 shrink-0 text-slate-300" />
+              <span className="text-[10px] tabular-nums text-slate-500 shrink-0 leading-none">DE: {deTime}</span>
+            </div>
+          )}
+          {/* Origin → destination */}
           {(load.originCity || load.destinationCity) && (
             <div className="flex items-center gap-0.5 min-w-0 mt-0.5">
               <span className="text-[10px] text-slate-400 truncate leading-none">{load.originCity || '—'}</span>
@@ -109,27 +117,25 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: Com
           )}
         </div>
 
-        {/* Right column: order badge on top, avatar(s) below */}
+        {/* Right column: order badge + avatar(s) */}
         <div className="flex flex-col items-center gap-0.5 shrink-0">
-          {/* Order badge — click to open picker, or picker buttons */}
+          {/* Order badge — always shows 1–5 picker, free assignment */}
           {pickingOrder ? (
             <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-              {Array.from({ length: maxPos }, (_, i) => i + 1).map((n) => (
+              {[1, 2, 3, 4, 5].map((n) => (
                 <button
                   key={n}
-                  className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity"
+                  className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity hover:opacity-80"
                   style={{
                     background: n === orderNumber ? '#94a3b8' : borderColor,
                     color: '#fff',
                     minWidth: '14px',
                     minHeight: '14px',
                     padding: '0 2px',
-                    opacity: n === orderNumber ? 0.5 : 1,
-                    cursor: n === orderNumber ? 'default' : 'pointer',
                   }}
                   onClick={(e) => {
                     e.stopPropagation()
-                    if (n !== orderNumber) onReorder(load.id, n)
+                    onReorder(load.id, n)
                     setPickingOrder(false)
                   }}
                 >
@@ -139,21 +145,21 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: Com
             </div>
           ) : (
             <span
-              className="text-[9px] font-black rounded-full flex items-center justify-center leading-none transition-opacity hover:opacity-75"
+              className="text-[9px] font-black rounded-full flex items-center justify-center leading-none hover:opacity-75 cursor-pointer"
               style={{
                 background: borderColor,
                 color: '#fff',
                 minWidth: '14px',
                 minHeight: '14px',
                 padding: '0 2px',
-                cursor: maxPos > 1 ? 'pointer' : 'default',
               }}
               onClick={(e) => { e.stopPropagation(); setPickingOrder(true) }}
             >
               {orderNumber}
             </span>
           )}
-          {/* Avatar(s) or Unassigned link — click to reassign */}
+
+          {/* Avatar(s) or Unassigned link */}
           <div className="relative" ref={driverPickerRef}>
             {isAssigned ? (
               <div
@@ -244,10 +250,12 @@ function CompactCard({ load, drivers, conflictIds, orderNumber, onReorder }: Com
           <span>{deTime === 'TBD' ? 'TBD' : formatDateTime(load.deliveryAppt)}</span>
           <span className="text-muted-foreground">Driver</span>
           <span>{isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}</span>
-          <span className="text-muted-foreground">RTI</span>
-          <span className={isRTI ? 'text-emerald-400 font-medium' : 'text-muted-foreground'}>
-            {isRTI ? 'Ready to Invoice' : 'Pending'}
-          </span>
+          {isRTI && (
+            <>
+              <span className="text-muted-foreground">RTI</span>
+              <span className="text-emerald-400 font-medium">Ready to Invoice</span>
+            </>
+          )}
         </div>
       </TooltipContent>
     </Tooltip>
@@ -283,23 +291,32 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
   // Manual reorder overrides: groupKey → ordered array of load IDs
   const [groupOrderings, setGroupOrderings] = useState<Map<string, string[]>>(new Map())
 
+  // Per-load slot overrides: loadId → 1–5 (free label, independent of group size)
+  const [loadSlots, setLoadSlots] = useState<Map<string, number>>(new Map())
+
   const handleReorder = useCallback((loadId: string, newPosition: number) => {
+    // Update the free slot label
+    setLoadSlots((prev) => {
+      const next = new Map(prev)
+      next.set(loadId, newPosition)
+      return next
+    })
+
+    // Also update the group stacking order
     const load = loads.find((l) => l.id === loadId)
     if (!load) return
     const key = groupKey(load)
 
     setGroupOrderings((prev) => {
-      // Get the current group (all loads with this key), compute base ordering
       const groupLoads = loads.filter((l) => groupKey(l) === key)
       const base = prev.get(key) ?? naturalOrder(groupLoads)
-      // Reconcile: keep only IDs still in the group, append any new ones
       const presentIds = new Set(groupLoads.map((l) => l.id))
       const reconciled = base.filter((id) => presentIds.has(id))
       groupLoads.forEach((l) => { if (!reconciled.includes(l.id)) reconciled.push(l.id) })
 
-      // Move loadId to newPosition (1-indexed)
       const without = reconciled.filter((id) => id !== loadId)
-      without.splice(newPosition - 1, 0, loadId)
+      // Clamp to actual group size for stacking purposes
+      without.splice(Math.min(newPosition - 1, without.length), 0, loadId)
 
       const next = new Map(prev)
       next.set(key, without)
@@ -307,12 +324,10 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
     })
   }, [loads])
 
-  // Build loadOrderMap and groupSizeMap from orderings
-  const { loadOrderMap, groupSizeMap } = useMemo(() => {
+  const { loadOrderMap } = useMemo(() => {
     const orderMap = new Map<string, number>()
     const sizeMap  = new Map<string, number>()
 
-    // Collect all driver-day groups
     const groups = new Map<string, Load[]>()
     loads.forEach((l) => {
       const key = groupKey(l)
@@ -335,29 +350,45 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
       groupLoads.forEach((l) => sizeMap.set(l.id, groupLoads.length))
     })
 
-    return { loadOrderMap: orderMap, groupSizeMap: sizeMap }
+    return { loadOrderMap: orderMap }
   }, [loads, groupOrderings])
 
+  // Build per-day load list — include loads whose span covers this day
   const loadsByDay = useMemo(() => {
     return days.map((day) => {
       const dayStr = chicagoDateStr(day.toISOString())
-      const dayLoads = loads
-        .filter((l) => !!l.pickupAppt && chicagoDateStr(l.pickupAppt) === dayStr)
-        .sort((a, b) => {
-          // Sort by driver group then by order within group
-          const keyA = groupKey(a), keyB = groupKey(b)
-          if (keyA !== keyB) return keyA.localeCompare(keyB)
-          return (loadOrderMap.get(a.id) ?? 1) - (loadOrderMap.get(b.id) ?? 1)
-        })
-      return { day, dayLoads }
+      const dayEntries: { load: Load; isContinuation: boolean }[] = []
+
+      for (const l of loads) {
+        if (!l.pickupAppt) continue
+        const pickupDay   = chicagoDateStr(l.pickupAppt)
+        const deliveryDay = l.deliveryAppt ? chicagoDateStr(l.deliveryAppt) : pickupDay
+
+        if (pickupDay === dayStr) {
+          dayEntries.push({ load: l, isContinuation: false })
+        } else if (pickupDay < dayStr && deliveryDay >= dayStr) {
+          dayEntries.push({ load: l, isContinuation: true })
+        }
+      }
+
+      // Sort: primary loads first (by group + order), then continuations
+      dayEntries.sort((a, b) => {
+        if (a.isContinuation !== b.isContinuation) return a.isContinuation ? 1 : -1
+        const keyA = groupKey(a.load), keyB = groupKey(b.load)
+        if (keyA !== keyB) return keyA.localeCompare(keyB)
+        return (loadOrderMap.get(a.load.id) ?? 1) - (loadOrderMap.get(b.load.id) ?? 1)
+      })
+
+      return { day, dayEntries }
     })
   }, [loads, days, loadOrderMap])
 
   return (
     <div className="flex h-full overflow-hidden bg-white rounded-xl">
-      {loadsByDay.map(({ day, dayLoads }, colIdx) => {
+      {loadsByDay.map(({ day, dayEntries }, colIdx) => {
         const { weekday, date } = formatDayHeader(day.toISOString())
-        const isWeekend = colIdx >= 5 // Sat + Sun are index 5 and 6
+        const isWeekend = colIdx >= 5
+        const primaryCount = dayEntries.filter((e) => !e.isContinuation).length
         return (
           <div
             key={colIdx}
@@ -373,27 +404,27 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
             )}>
               <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide leading-none">{weekday}</div>
               <div className="text-[10px] text-slate-400 tabular-nums mt-0.5">{date}</div>
-              {dayLoads.length > 0 && (
+              {primaryCount > 0 && (
                 <div className="text-[9px] font-semibold text-slate-400 mt-0.5">
-                  {dayLoads.length} load{dayLoads.length !== 1 ? 's' : ''}
+                  {primaryCount} load{primaryCount !== 1 ? 's' : ''}
                 </div>
               )}
             </div>
 
-            {/* Compact cards stacked top-to-bottom */}
+            {/* Cards */}
             <div className="flex-1 overflow-y-auto p-1 space-y-0.5">
-              {dayLoads.map((load) => (
+              {dayEntries.map(({ load, isContinuation }) => (
                 <CompactCard
-                  key={load.id}
+                  key={`${load.id}-${isContinuation ? 'cont' : 'pri'}`}
                   load={load}
                   drivers={drivers}
                   conflictIds={conflictIds}
-                  orderNumber={loadOrderMap.get(load.id) ?? 1}
-                  groupSize={groupSizeMap.get(load.id) ?? 1}
+                  orderNumber={loadSlots.get(load.id) ?? loadOrderMap.get(load.id) ?? 1}
+                  isContinuation={isContinuation}
                   onReorder={handleReorder}
                 />
               ))}
-              {dayLoads.length === 0 && (
+              {dayEntries.length === 0 && (
                 <div className="text-center text-[10px] text-slate-300 pt-6 select-none">—</div>
               )}
             </div>
