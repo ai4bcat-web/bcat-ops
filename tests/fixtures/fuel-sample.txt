@@ -1,0 +1,86 @@
+                                                                                                         Transaction Report
+                                                                                                                                                                             2026-05-19 12:47
+      Carrier:   IVAN CARTAGE CO                                           Start Date:    2026-05-16     End Date:        2026-05-19 Carrier Id   677334                 Contract Id:  All
+
+      Group by:   Card Number                                              Sort by:    Transaction Date                                                                                              Total Records: 11
+      Card #              Tran Date         Invoice     Unit      Driver Name              Odometer      Location Name            City                 State/   Fees    ItemUnit Price                   Qty                  Amt DB  Currency
+                                                                                                                                                       Prov
+
+      00007               2026-05-18        0093283     685       Armando Arando           291048        SPEEDWAY 7FLEET #4440    BEACH PARK           IL               ULSD     5.999                 99.67               597.92  N  USD/Gallon
+
+      Group:           1   00007                                                            Amount         Quantity            Avg PPU
+                                                             ULSD                           597.92            99.67              5.999
+
+                                                             Fees                             0.00                               0.000
+                                                             Totals                         597.92                               0.000
+
+                                                             Total Fuel                     597.92            99.67
+
+      00023               2026-05-19        59983       780       John Nelson              607168        LOVES #770 TRAVEL STOP   WADSWORTH            IL       2.00    ULSD     6.489                 99.00               642.44  N  USD/Gallon
+
+      Group:           2   00023                                                            Amount         Quantity            Avg PPU
+
+                                                             ULSD                           642.44            99.00              6.489
+                                                             Fees                             2.00                               0.000
+                                                             Totals                         644.44                               0.000
+
+                                                             Total Fuel                     642.44            99.00
+
+      00031               2026-05-18        0092984     0530                               365003        KWIK TRIP #597           KENOSHA              WI               ULSD     5.939                 60.01               356.40  N  USD/Gallon
+      Group:           3   00031                                                            Amount         Quantity            Avg PPU
+
+                                                             ULSD                           356.40            60.01              5.939
+                                                             Fees                             0.00                               0.000
+
+                                                             Totals                         356.40                               0.000
+                                                             Total Fuel                     356.40            60.01
+
+      00049               2026-05-16        0094596     009                                400           QUIK TRIP #7909          EL PASO              TX               ULSD     4.778                 42.02               200.81  N  USD/Gallon
+      00049               2026-05-16        73234       009                                400           LOVES #817 TRAVEL STOP   SANTA TERESA         NM       2.00    ULSD     5.189                 29.21               151.58  N  USD/Gallon
+      00049               2026-05-16        0091682     009                                400           MOLLER RETAIL INC #802   ROAD FORKS           NM               ULSD     4.688                 26.89               126.08  N  USD/Gallon
+      00049               2026-05-17        0097791     009                                400           CIRCLE K #2741675        TOLLESON             AZ               ULSD     5.616                 60.37               339.07  N  USD/Gallon
+      00049               2026-05-18        0097840     009                                400           CIRCLE K #2741675        TOLLESON             AZ               ULSD     5.616                 62.98               353.73  N  USD/Gallon
+      00049               2026-05-19        0091296     009                                400           QUIK TRIP #1432          PHOENIX              AZ               ULSD     5.239                 58.15               304.65  N  USD/Gallon
+      Group:           4   00049                                                            Amount         Quantity            Avg PPU
+
+                                                             ULSD                         1,475.92           279.62              5.188
+                                                             Fees                             2.00                               0.000
+
+                                                             Totals                       1,477.92                               0.000
+                                                             Total Fuel                   1,475.92           279.62
+
+      00056               2026-05-18        0098228     299                                422336        ROAD RANGER #276         WACO                 TX               DEFD     4.999                  6.09                30.44  N  USD/Gallon
+                                                                                                                                                                        ULSD     4.800                142.71               685.14  N  USD/Gallon
+      Group:           5   00056
+                                                                                            Amount         Quantity            Avg PPU
+                                                             DEFD                            30.44             6.09              4.999
+                                                             ULSD                           685.14           142.71              4.800
+
+                                                             Fees                             0.00                               0.000
+                                                             Totals                         715.58                               0.000
+
+                                                             Total Fuel                     685.14           142.71
+
+
+
+                                                                                                            Page 1 of 2
+
+
+
+
+                                                                                                         Transaction Report
+                                                                                                                                                                             2026-05-19 12:47
+                                                                                                Grand Totals
+
+                                                                                             Amount         Quantity          Avg PPU
+                                                             DEFD                            30.44              6.09            4.999
+                                                             ULSD                         3,757.82            681.01            5.435
+
+                                                             Fees                             4.00
+                                                             Totals                       3,792.26
+
+                                                             Total Fuel                   3,757.82           681.01
+
+
+
+                                                                                                            Page 2 of 2
