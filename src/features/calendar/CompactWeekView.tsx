@@ -79,8 +79,8 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
   const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  const color         = pickupDriver?.colorKey  ? getColor(pickupDriver.colorKey)  : UNASSIGNED_COLOR
-  const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
+  const color         = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
+  const deliveryColor = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
 
   const borderColor = isConflict ? '#ef4444' : isRTI ? '#16a34a' : color.border
   const bgColor     = isContinuation
@@ -333,12 +333,10 @@ function groupKey(load: Load): string {
 export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: CompactWeekViewProps) {
   const days = getFullWeek(weekStart) // [Mon … Sun]
 
-  // Per-load slot label overrides (free 1–5 label, independent of track/row)
-  const [loadSlots, setLoadSlots] = useState<Map<string, number>>(new Map())
-
+  const { updateLoad } = useLoads()
   const handleSetSlot = useCallback((loadId: string, slot: number) => {
-    setLoadSlots((prev) => { const next = new Map(prev); next.set(loadId, slot); return next })
-  }, [])
+    updateLoad(loadId, { daySlot: slot })
+  }, [updateLoad])
 
   // ── Track assignment ───────────────────────────────────────────────────────
   // Each load gets a row index (track). Multi-day loads hold the same track
@@ -453,7 +451,7 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
                             load={entry.load}
                             drivers={drivers}
                             conflictIds={conflictIds}
-                            slotLabel={loadSlots.get(entry.load.id) ?? (track + 1)}
+                            slotLabel={entry.load.daySlot ?? (track + 1)}
                             isContinuation={entry.isContinuation}
                             onSetSlot={handleSetSlot}
                           />

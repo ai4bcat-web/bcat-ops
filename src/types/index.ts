@@ -52,6 +52,8 @@ export interface Load {
   rate?: number | null      // total load revenue in cents
   miles?: number | null     // load distance
   customer?: string | null  // customer/broker name
+  colorKey?: ColorKey | null  // load's own color swatch
+  daySlot?: number | null     // display order badge 1-5 within pickup day
   createdAt: string
   updatedAt: string
   createdBy: string
