@@ -485,8 +485,8 @@ export function ExpensesPage() {
                         <div className="rounded-lg border border-slate-200 bg-white shadow-md px-3 py-2 text-xs space-y-1">
                           <p className="font-medium">{format(new Date(`${label}T12:00:00`), 'MMM d, yyyy')}</p>
                           {payload.map((p) => (
-                            <p key={p.dataKey as string} style={{ color: p.color }}>
-                              {p.dataKey}: {chartMode === '$' ? fmtMoney(p.value as number) : `${(p.value as number).toFixed(2)} gal`}
+                            <p key={String(p.dataKey)} style={{ color: p.color }}>
+                              {String(p.dataKey)}: {chartMode === '$' ? fmtMoney(p.value as number) : `${(p.value as number).toFixed(2)} gal`}
                             </p>
                           ))}
                         </div>

@@ -227,8 +227,9 @@ export function SchedulerView({
   const handleEventDrop = useCallback((info: EventDropArg) => {
     const load = info.event.extendedProps.load as Load
     const modifier = dragModifierRef.current
-    const newDriverId = info.newResource
-      ? (info.newResource.id === 'unassigned' ? null : info.newResource.id)
+    const infoAny = info as unknown as { newResource?: { id: string } }
+    const newDriverId = infoAny.newResource
+      ? (infoAny.newResource.id === 'unassigned' ? null : infoAny.newResource.id)
       : load.pickupDriverId
     const deltaDays = Math.round(info.delta.milliseconds / 86_400_000)
     const snapshot = { ...load }
