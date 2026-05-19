@@ -214,12 +214,11 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
       )}
       style={{
         height: ROW_H,
-        // Full-row background tint from load color; delivery-day rows slightly lighter
+        // Full-row background tint — hex alpha suffix, universally supported
         background: dragOver
-          ? `color-mix(in srgb, ${color.border} 25%, #dbeafe)`
-          : `color-mix(in srgb, ${color.border} ${isDeliveryDay ? '8%' : '15%'}, white)`,
-        // Keep a subtle left stripe so the color origin is still scannable
-        borderLeft: `3px solid ${isDeliveryDay ? color.border + '60' : color.border}`,
+          ? `${color.border}44`
+          : `${color.border}${isDeliveryDay ? '18' : '30'}`,
+        borderLeft: `3px solid ${color.border}${isDeliveryDay ? '80' : 'ff'}`,
       }}
       draggable
       onDragStart={() => onDragStart(entry.key)}

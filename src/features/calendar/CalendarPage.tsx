@@ -36,7 +36,7 @@ export function CalendarPage() {
   const calendarRef = useRef<FullCalendar>(null)
 
   // Local state for toolbar — FC is the source of truth for dates/view after init
-  const [currentView, setCurrentView] = useState<ViewMode>('compact')
+  const [currentView, setCurrentView] = useState<ViewMode>('planner')
   const [dateLabel, setDateLabel] = useState('')
 
   // Compact view has its own week state (not driven by FullCalendar)
