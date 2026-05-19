@@ -135,6 +135,96 @@ export async function createAuditLog(entry: {
   })
 }
 
+// ── Fuel transactions ─────────────────────────────────────────────────────────
+
+export interface FuelTransaction {
+  id: string
+  transactionDate: string
+  cardNumber: string
+  invoiceNumber?: string
+  unitNumber?: string
+  truckId?: string
+  driverName?: string
+  odometer?: number
+  locationName?: string
+  city?: string
+  state?: string
+  fees?: number
+  fuelType: string
+  pricePerUnit: number
+  quantity: number
+  amount: number
+  currency?: string
+  sourceFile?: string
+  importedAt?: string
+  createdAt: string
+  updatedAt: string
+}
+
+const FUEL_TX_FIELDS = `
+  id transactionDate cardNumber invoiceNumber unitNumber truckId driverName
+  odometer locationName city state fees fuelType pricePerUnit quantity amount
+  currency sourceFile importedAt createdAt updatedAt
+`
+
+export async function listFuelTransactions(filter?: {
+  truckId?: string
+  cardNumber?: string
+  startDate?: string
+  endDate?: string
+}): Promise<FuelTransaction[]> {
+  // Load all and filter client-side for simplicity (dataset is small enough)
+  const result = await client.graphql({
+    query: `query ListFuelTransactions { listFuelTransactions(limit: 10000) { items { ${FUEL_TX_FIELDS} } } }`,
+  }) as { data: { listFuelTransactions: { items: FuelTransaction[] } } }
+  let items = result.data.listFuelTransactions.items ?? []
+  if (filter?.truckId)   items = items.filter((t) => t.truckId === filter.truckId)
+  if (filter?.cardNumber) items = items.filter((t) => t.cardNumber === filter.cardNumber)
+  if (filter?.startDate) items = items.filter((t) => t.transactionDate >= filter.startDate!)
+  if (filter?.endDate)   items = items.filter((t) => t.transactionDate <= filter.endDate!)
+  return items
+}
+
+export async function createFuelTransaction(
+  input: Omit<FuelTransaction, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<FuelTransaction> {
+  const result = await client.graphql({
+    query: `mutation CreateFuelTransaction($input: CreateFuelTransactionInput!) { createFuelTransaction(input: $input) { ${FUEL_TX_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createFuelTransaction: FuelTransaction } }
+  return result.data.createFuelTransaction
+}
+
+export async function deleteFuelTransaction(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteFuelTransaction($input: DeleteFuelTransactionInput!) { deleteFuelTransaction(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+/** Check for existing transactions matching the dedup key to skip duplicates */
+export async function checkFuelTxExists(
+  transactionDate: string,
+  cardNumber: string,
+  invoiceNumber: string,
+  fuelType: string,
+): Promise<boolean> {
+  const result = await client.graphql({
+    query: `query ListFuelTransactions($filter: ModelFuelTransactionFilterInput) {
+      listFuelTransactions(filter: $filter, limit: 1) { items { id } }
+    }`,
+    variables: {
+      filter: {
+        transactionDate: { eq: transactionDate },
+        cardNumber:      { eq: cardNumber },
+        invoiceNumber:   { eq: invoiceNumber },
+        fuelType:        { eq: fuelType },
+      },
+    },
+  }) as { data: { listFuelTransactions: { items: { id: string }[] } } }
+  return (result.data.listFuelTransactions.items ?? []).length > 0
+}
+
 // ── Intake items ──────────────────────────────────────────────────────────────
 
 import type { IntakeItem, IntakeStatus } from '@/types'

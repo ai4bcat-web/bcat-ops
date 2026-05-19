@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts'
 import {
-  TrendingUp, Wrench, Truck, Package, Users, CheckCircle2, DollarSign,
+  TrendingUp, Truck, Package, Users, CheckCircle2, DollarSign,
   ArrowUp, ArrowDown, Minus,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/table'
 import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
+import { useFuelTransactions } from '@/hooks/useFuelTransactions'
+import { FuelWidget } from './FuelWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -103,6 +105,7 @@ const RANGE_OPTIONS: { value: DateRangeKey; label: string }[] = [
 export function DashboardPage() {
   const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-week')
   const metrics = useDashboardMetrics(rangeKey)
+  const { transactions: fuelTxs, loading: fuelLoading } = useFuelTransactions()
 
   const chartColors = useMemo(() =>
     metrics.loadsPerDriver.map((d) => getColor(d.colorKey as never).border),
@@ -306,26 +309,19 @@ export function DashboardPage() {
           </Table>
         </div>
 
-        {/* ── Coming soon ────────────────────────────────────────────────── */}
-        <div>
-          <h2 className="text-base font-semibold text-foreground mb-4">Coming Soon</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <ComingSoonCard
-              icon={TrendingUp}
-              title="Profitability"
-              description="Track revenue minus expenses per truck, driver, and time period."
-            />
-            <ComingSoonCard
-              icon={Wrench}
-              title="Fuel & Maintenance"
-              description="Log fuel and maintenance costs per truck for true cost-of-operation."
-            />
-            <ComingSoonCard
-              icon={Truck}
-              title="Truck Utilization"
-              description="See miles, hours, and idle time per truck per day."
-            />
-          </div>
+        {/* ── Fuel widget + Coming soon ────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
+          <ComingSoonCard
+            icon={TrendingUp}
+            title="Profitability"
+            description="Track revenue minus expenses per truck, driver, and time period."
+          />
+          <ComingSoonCard
+            icon={Truck}
+            title="Truck Utilization"
+            description="See miles, hours, and idle time per truck per day."
+          />
         </div>
 
       </div>
