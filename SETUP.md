@@ -1,0 +1,234 @@
+# BCAT Ops — Email Intake Setup Guide
+
+This guide walks through configuring Gmail, Google Apps Script, and Amplify so that emails forwarded from
+`ivanloads@bcatcorp.com` and `bcatloads@bcatcorp.com` automatically appear in the app's Intake queue.
+
+---
+
+## Prerequisites
+
+- Access to the Gmail account **ai4bcat@gmail.com**
+- Access to the Amplify Console for this app
+- The webhook Lambda Function URL (obtained after the Amplify backend deploy — see Section 5)
+
+---
+
+## Section 1 — Set the Amplify Webhook Secret
+
+Before deploying, the webhook secret must be stored as an Amplify secret (it is never committed to git).
+
+**Generated secret (copy this value):**
+```
+855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89
+```
+
+**To set in Amplify Console (production):**
+1. Open [Amplify Console](https://console.aws.amazon.com/amplify/)
+2. Select your app → **Hosting** → **Environment variables**
+3. Under the **Secrets** section, click **Manage secrets**
+4. Click **Add secret** → Name: `INTAKE_WEBHOOK_SECRET` → Value: *(paste secret above)*
+5. Click **Save**
+
+**To set locally (sandbox):**
+```bash
+npx ampx sandbox secret set INTAKE_WEBHOOK_SECRET
+# paste the secret when prompted
+```
+
+---
+
+## Section 2 — Email Provider Forwarding
+
+> **We need to know what email provider hosts `ivanloads@bcatcorp.com` and `bcatloads@bcatcorp.com`
+> to give exact steps.** Common providers and their forwarding locations:
+>
+> - **Google Workspace**: Admin Console → Gmail → Routing → Add default routing rule → forward to `ai4bcat@gmail.com`
+> - **Microsoft 365**: Admin Center → Exchange → Mail flow → Rules → forward to `ai4bcat@gmail.com`
+> - **cPanel / Zoho / other**: Account settings → Email forwarding → add `ai4bcat@gmail.com` as destination
+>
+> Once forwarding is confirmed, the emails will arrive at Gmail with the original `To:` header preserved,
+> which is what the Gmail filters in Section 3 key off.
+
+---
+
+## Section 3 — Gmail Filter Setup
+
+Sign in to **ai4bcat@gmail.com** and create two filters:
+
+### Filter 1 — Ivan Cartage
+
+1. Open Gmail → ⚙️ Settings → **See all settings** → **Filters and Blocked Addresses**
+2. Click **Create a new filter**
+3. Set **To:** field to `ivanloads@bcatcorp.com`
+4. Click **Create filter**
+5. Check:
+   - ✅ Apply the label → **New label...** → `ivan-intake`
+   - ✅ Mark as read
+   - ✅ Skip the Inbox (Archive it) *(optional — keeps inbox clean)*
+6. Click **Create filter**
+
+### Filter 2 — BCAT Logistics
+
+Repeat the steps above with:
+- **To:** `bcatloads@bcatcorp.com`
+- Label: `bcat-intake`
+
+> **Note:** If the forwarding provider rewrites the `To:` header, use the **From:** field instead
+> (e.g. `From: ivanloads@bcatcorp.com`). Test by forwarding a real email and checking which
+> headers Gmail receives.
+
+---
+
+## Section 4 — Apps Script Setup
+
+1. Go to [script.google.com](https://script.google.com) and sign in as **ai4bcat@gmail.com**
+2. Click **New project** → rename it **BCAT Intake Bridge**
+3. Replace the default code with the script below
+4. Fill in `WEBHOOK_URL` (from Section 5) and `WEBHOOK_SECRET` (from Section 1)
+5. Click **Run** → select `setup` → approve the OAuth consent screen (Gmail access)
+6. Click **Triggers** (clock icon) → **Add Trigger**:
+   - Function: `processIntakeEmails`
+   - Event source: **Time-driven**
+   - Type: **Minutes timer**
+   - Interval: **Every 5 minutes**
+7. Click **Save**
+
+### Test the connection
+
+Send a test email to `ai4bcat@gmail.com` with the subject containing "TEST", then:
+- Manually label it `ivan-intake` in Gmail
+- In Apps Script: **Run** → `processIntakeEmails`
+- Check the Execution log for `[200]` response
+- Open the app → Intake page → confirm the item appears
+
+---
+
+## Section 5 — Lambda Function URL
+
+After the Amplify backend deploys:
+
+1. Open [AWS CloudFormation](https://console.aws.amazon.com/cloudformation/)
+2. Find the stack for this Amplify app (name starts with `amplify-`)
+3. Open the stack → **Outputs** tab
+4. Copy the value of **IntakeWebhookFunctionUrl**
+
+OR go directly to Lambda Console → `intake-webhook-*` function → **Configuration** → **Function URL**.
+
+Paste the URL into the Apps Script `WEBHOOK_URL` constant below.
+
+---
+
+## Section 6 — Apps Script Code
+
+```javascript
+// Apps Script: BCAT Intake Bridge
+// Polls Gmail every 5 min for labeled emails and POSTs to our webhook
+
+const WEBHOOK_URL    = 'PASTE_LAMBDA_FUNCTION_URL_HERE';
+const WEBHOOK_SECRET = '855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89';
+const LABELS         = ['ivan-intake', 'bcat-intake'];
+const PROCESSED_LABEL = 'intake-processed';
+
+function processIntakeEmails() {
+  const processedLabel = GmailApp.getUserLabelByName(PROCESSED_LABEL)
+    || GmailApp.createLabel(PROCESSED_LABEL);
+
+  LABELS.forEach(labelName => {
+    const label = GmailApp.getUserLabelByName(labelName);
+    if (!label) return;
+
+    const threads = label.getThreads(0, 20);
+    threads.forEach(thread => {
+      thread.getMessages().forEach(message => {
+        // Skip if already processed
+        const threadLabels = thread.getLabels().map(l => l.getName());
+        if (threadLabels.includes(PROCESSED_LABEL)) return;
+
+        const attachments = message.getAttachments()
+          .filter(a => a.getContentType() === 'application/pdf')
+          .map(a => ({
+            filename:    a.getName(),
+            contentType: a.getContentType(),
+            base64:      Utilities.base64Encode(a.getBytes()),
+          }));
+
+        const payload = {
+          secret:          WEBHOOK_SECRET,
+          gmailMessageId:  message.getId(),
+          label:           labelName,
+          from:            message.getFrom(),
+          subject:         message.getSubject(),
+          bodyText:        message.getPlainBody(),
+          bodyHtml:        message.getBody(),
+          receivedAt:      message.getDate().toISOString(),
+          attachments:     attachments,
+        };
+
+        try {
+          const response = UrlFetchApp.fetch(WEBHOOK_URL, {
+            method:           'post',
+            contentType:      'application/json',
+            payload:          JSON.stringify(payload),
+            muteHttpExceptions: true,
+          });
+          const code = response.getResponseCode();
+          if (code === 200) {
+            thread.addLabel(processedLabel);
+            console.log('Processed:', message.getSubject(), '→', response.getContentText());
+          } else {
+            console.error('Webhook failed:', code, response.getContentText());
+          }
+        } catch (e) {
+          console.error('Error processing message:', e);
+        }
+      });
+    });
+  });
+}
+
+function setup() {
+  // Run once to authorize Gmail access and create processed label
+  GmailApp.getUserLabelByName('ivan-intake');
+  GmailApp.getUserLabelByName('bcat-intake');
+  GmailApp.createLabel('intake-processed');
+  console.log('Setup complete — Gmail access authorized');
+}
+```
+
+---
+
+## Section 7 — End-to-End Test (curl)
+
+After deploy, verify the webhook works without Apps Script:
+
+```bash
+curl -X POST <LAMBDA_FUNCTION_URL> \
+  -H "Content-Type: application/json" \
+  -d '{
+    "secret": "855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89",
+    "gmailMessageId": "test-msg-001",
+    "label": "ivan-intake",
+    "from": "test@example.com",
+    "subject": "Test Load #12345",
+    "bodyText": "Please find the load details attached.",
+    "bodyHtml": "<p>Please find the load details attached.</p>",
+    "receivedAt": "2025-01-01T12:00:00Z",
+    "attachments": []
+  }'
+```
+
+Expected response: `{"status":"created","id":"<uuid>"}`
+
+Then open the app → **Intake** → Dennis tab → confirm the item appears.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Apps Script shows 401 | Wrong WEBHOOK_SECRET — check it matches what's in Amplify Secrets |
+| Items not appearing in app | Lambda not deployed yet, or TABLE_NAME env var not set |
+| PDF preview blank | S3 presigned URL expired or wrong bucket name |
+| Duplicate items | gmailMessageId dedup scan failed — check CloudWatch for DynamoDB errors |
+| Emails not labeled | Gmail filter `To:` header didn't survive forwarding — try `From:` instead |
