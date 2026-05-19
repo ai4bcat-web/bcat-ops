@@ -209,14 +209,17 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
       className={cn(
         'group flex items-center border-b border-slate-100 transition-colors',
         dragging      && 'opacity-40',
-        dragOver      && 'ring-1 ring-inset ring-blue-400 bg-blue-50',
-        isDeliveryDay && !dragOver && !dragging && 'opacity-80',
-        !dragOver && !dragging && 'hover:bg-white',
+        dragOver      && 'ring-1 ring-inset ring-blue-400',
+        isDeliveryDay && !dragOver && !dragging && 'opacity-75',
       )}
       style={{
         height: ROW_H,
-        borderLeft: `3px solid ${isDeliveryDay ? color.border + '80' : color.border}`,
-        background: dragOver ? undefined : color.bg,
+        // Full-row background tint from load color; delivery-day rows slightly lighter
+        background: dragOver
+          ? `color-mix(in srgb, ${color.border} 25%, #dbeafe)`
+          : `color-mix(in srgb, ${color.border} ${isDeliveryDay ? '8%' : '15%'}, white)`,
+        // Keep a subtle left stripe so the color origin is still scannable
+        borderLeft: `3px solid ${isDeliveryDay ? color.border + '60' : color.border}`,
       }}
       draggable
       onDragStart={() => onDragStart(entry.key)}
