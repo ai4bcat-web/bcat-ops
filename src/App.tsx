@@ -14,6 +14,7 @@ import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { UsersPage } from '@/features/users/UsersPage'
+import { IntakePage } from '@/features/intake/IntakePage'
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/expenses" element={<ExpensesPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/audit-log" element={<AuditPage />} />
+              <Route path="/intake"   element={<IntakePage />} />
               <Route path="/users" element={<UsersPage />} />
               {/* legacy redirects */}
               <Route path="/grid" element={<Navigate to="/loads" replace />} />

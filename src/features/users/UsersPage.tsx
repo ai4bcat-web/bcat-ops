@@ -23,6 +23,7 @@ const PAGE_OPTIONS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'calendar',  label: 'Calendar'  },
   { key: 'loads',     label: 'Loads'     },
+  { key: 'intake',    label: 'Intake'    },
   { key: 'drivers',   label: 'Drivers'   },
   { key: 'trucks',    label: 'Trucks'    },
   { key: 'expenses',  label: 'Expenses'  },

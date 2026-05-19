@@ -72,3 +72,27 @@ export interface AuditLogEntry {
 }
 
 export type ViewMode = 'day' | 'week' | 'compact' | 'two-week' | 'month'
+
+// ── Intake queue ───────────────────────────────────────────────────────────
+
+export type IntakeSource = 'IVAN_CARTAGE' | 'BCAT_LOGISTICS'
+export type IntakeStatus = 'NEW' | 'IN_PROGRESS' | 'BUILT' | 'ARCHIVED'
+
+export interface IntakeItem {
+  id: string
+  source: IntakeSource
+  status: IntakeStatus
+  assignedTo: string
+  receivedAt: string
+  fromEmail: string
+  subject: string
+  bodyText: string
+  bodyHtml: string
+  s3KeyPdfAttachments: string[]
+  gmailMessageId: string
+  extractedMetadata?: Record<string, unknown> | null
+  builtLoadId?: string | null
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
+}

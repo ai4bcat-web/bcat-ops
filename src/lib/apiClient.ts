@@ -135,6 +135,55 @@ export async function createAuditLog(entry: {
   })
 }
 
+// ── Intake items ──────────────────────────────────────────────────────────────
+
+import type { IntakeItem, IntakeStatus } from '@/types'
+
+const INTAKE_FIELDS = `
+  id source status assignedTo receivedAt fromEmail subject
+  bodyText bodyHtml s3KeyPdfAttachments gmailMessageId
+  extractedMetadata builtLoadId notes createdAt updatedAt
+`
+
+export async function listIntakeItems(filter?: { assignedTo?: string; source?: string }): Promise<IntakeItem[]> {
+  let filterArg = ''
+  const vars: Record<string, unknown> = {}
+  if (filter?.assignedTo) { filterArg = '(filter: { assignedTo: { eq: $assignedTo } })'; vars['assignedTo'] = filter.assignedTo }
+  else if (filter?.source) { filterArg = '(filter: { source: { eq: $source } })'; vars['source'] = filter.source }
+
+  const varDef = filter?.assignedTo ? '($assignedTo: String)' : filter?.source ? '($source: String)' : ''
+  const result = await client.graphql({
+    query: `query ListIntakeItems${varDef} { listIntakeItems${filterArg}(limit: 200) { items { ${INTAKE_FIELDS} } } }`,
+    variables: vars,
+  }) as { data: { listIntakeItems: { items: IntakeItem[] } } }
+  return result.data.listIntakeItems.items ?? []
+}
+
+export async function getIntakeItem(id: string): Promise<IntakeItem | null> {
+  const result = await client.graphql({
+    query: `query GetIntakeItem($id: ID!) { getIntakeItem(id: $id) { ${INTAKE_FIELDS} } }`,
+    variables: { id },
+  }) as { data: { getIntakeItem: IntakeItem | null } }
+  return result.data.getIntakeItem
+}
+
+export async function updateIntakeItem(id: string, patch: {
+  status?: IntakeStatus
+  assignedTo?: string
+  notes?: string
+  builtLoadId?: string
+}): Promise<IntakeItem> {
+  const result = await client.graphql({
+    query: `mutation UpdateIntakeItem($input: UpdateIntakeItemInput!) { updateIntakeItem(input: $input) { ${INTAKE_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateIntakeItem: IntakeItem } }
+  return result.data.updateIntakeItem
+}
+
+export async function getIntakePdfUrl(s3Key: string): Promise<string> {
+  return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
+}
+
 // ── User management ───────────────────────────────────────────────────────────
 
 export interface CognitoUser {
