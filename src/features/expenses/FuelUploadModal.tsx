@@ -106,7 +106,12 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
       setUnmappedCards([...new Set(checked.filter((r) => r.unmapped).map((r) => r.cardNumber))])
       setStep('preview')
     } catch (err) {
-      setParseError(err instanceof Error ? err.message : String(err))
+      if (err && typeof err === 'object' && 'errors' in err) {
+        const gqlErr = (err as { errors: { message: string }[] }).errors
+        setParseError(gqlErr?.[0]?.message ?? JSON.stringify(err))
+      } else {
+        setParseError(err instanceof Error ? err.message : JSON.stringify(err))
+      }
     }
   }, [trucks])
 

@@ -1,2 +1,8 @@
 #\!/bin/sh
+if git diff --cached --name-only | grep -q "^package.json$"; then
+  if ! git diff --cached --name-only | grep -q "^package-lock.json$"; then
+    echo "ERROR: package.json changed but package-lock.json was not updated. Run 'npm install --legacy-peer-deps' and commit the lockfile."
+    exit 1
+  fi
+fi
 npx tsc --noEmit
