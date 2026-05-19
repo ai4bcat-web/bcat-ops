@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { parseEfsTransactionReport, fuelTxDedupKey } from './efsTransactionReport'
 
 const SAMPLE = readFileSync(
@@ -41,6 +41,7 @@ describe('parseEfsTransactionReport', () => {
     expect(tx).toBeDefined()
     expect(tx!.unitNumber).toBe('685')
     expect(tx!.fuelType).toBe('ULSD')
+    expect(tx!.itemCategory).toBe('FUEL')
     expect(tx!.driverName).toBe('Armando Arando')
     expect(tx!.transactionDate).toBe('2026-05-18')
     expect(tx!.amount).toBeCloseTo(597.92, 2)
@@ -80,6 +81,9 @@ describe('parseEfsTransactionReport', () => {
     const ulsd = txs.find((t) => t.fuelType === 'ULSD')
     expect(defd).toBeDefined()
     expect(ulsd).toBeDefined()
+    // Both are fuel items
+    expect(defd!.itemCategory).toBe('FUEL')
+    expect(ulsd!.itemCategory).toBe('FUEL')
     // Continuation row inherits same invoice and date
     expect(ulsd!.invoiceNumber).toBe(defd!.invoiceNumber)
     expect(ulsd!.transactionDate).toBe(defd!.transactionDate)
@@ -89,6 +93,10 @@ describe('parseEfsTransactionReport', () => {
     // DEFD
     expect(defd!.amount).toBeCloseTo(30.44, 2)
     expect(defd!.quantity).toBeCloseTo(6.09, 2)
+  })
+
+  it('all 11 transactions have itemCategory set to FUEL', () => {
+    expect(transactions.every((t) => t.itemCategory === 'FUEL')).toBe(true)
   })
 
   it('parsed ULSD sum matches grand total (validator passes)', () => {
@@ -107,5 +115,90 @@ describe('parseEfsTransactionReport', () => {
     const keys = transactions.map(fuelTxDedupKey)
     const unique = new Set(keys)
     expect(unique.size).toBe(transactions.length)
+  })
+})
+
+// ── SCLE (scale fee) synthetic report ─────────────────────────────────────────
+
+const SCLE_REPORT = [
+  '      00007               2026-05-18        0093283     685       Driver A                 100000        STATION A                CITY A               IL               ULSD     5.000                100.00               500.00  N  USD/Gallon',
+  '      00007               2026-05-18        0093283     685       Driver A                 100000        STATION A                CITY A               IL               SCLE                           1                10.00  N  USD/Gallon',
+  '      00023               2026-05-19        59983       780       Driver B                 200000        STATION B                CITY B               IL               SCLE                           1                 9.75  N  USD/Gallon',
+  '',
+  '                                                                                            Grand Totals',
+  '',
+  '                                                                                         Amount         Quantity          Avg PPU',
+  '                                                             ULSD                           500.00            100.00            5.000',
+  '                                                             SCLE                            19.75              2',
+  '',
+  '                                                             Fees                             0.00',
+  '                                                             Totals                         519.75',
+  '',
+  '                                                             Total Fuel                     500.00           100.00',
+].join('\n')
+
+describe('SCLE (scale fee) transactions', () => {
+  const result = parseEfsTransactionReport(SCLE_REPORT)
+  const { transactions: txs } = result
+
+  it('parses 3 transactions total (1 ULSD + 2 SCLE)', () => {
+    expect(txs).toHaveLength(3)
+  })
+
+  it('SCLE transactions have itemCategory SCALE', () => {
+    const scle = txs.filter((t) => t.fuelType === 'SCLE')
+    expect(scle).toHaveLength(2)
+    expect(scle.every((t) => t.itemCategory === 'SCALE')).toBe(true)
+  })
+
+  it('2 SCLE transactions total $19.75', () => {
+    const scle = txs.filter((t) => t.fuelType === 'SCLE')
+    const total = scle.reduce((s, t) => s + t.amount, 0)
+    expect(total).toBeCloseTo(19.75, 2)
+  })
+
+  it('SCLE transactions have pricePerUnit of 0', () => {
+    const scle = txs.filter((t) => t.fuelType === 'SCLE')
+    expect(scle.every((t) => t.pricePerUnit === 0)).toBe(true)
+  })
+
+  it('ULSD transaction has itemCategory FUEL', () => {
+    const ulsd = txs.find((t) => t.fuelType === 'ULSD')
+    expect(ulsd).toBeDefined()
+    expect(ulsd!.itemCategory).toBe('FUEL')
+  })
+
+  it('grand-total validation passes (no errors thrown)', () => {
+    expect(() => parseEfsTransactionReport(SCLE_REPORT)).not.toThrow()
+  })
+})
+
+// ── Unknown item type ──────────────────────────────────────────────────────────
+
+const UNKNOWN_TYPE_REPORT = [
+  '      00007               2026-05-18        0093283     685       Driver A                 100000        STATION A                CITY A               IL               ULSD     5.000                100.00               500.00  N  USD/Gallon',
+  '      00007               2026-05-18        0093283     685       Driver A                 100000        STATION A                CITY A               IL               XYZW                           1                 5.00  N  USD/Gallon',
+  '',
+  '                                                                                            Grand Totals',
+  '',
+  '                                                                                         Amount         Quantity          Avg PPU',
+  '                                                             ULSD                           500.00            100.00            5.000',
+  '                                                             XYZW                             5.00              1',
+  '',
+  '                                                             Fees                             0.00',
+  '                                                             Totals                         505.00',
+  '',
+  '                                                             Total Fuel                     500.00           100.00',
+].join('\n')
+
+describe('unknown item type', () => {
+  it('logs a warning and assigns itemCategory OTHER without crashing', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { transactions: txs } = parseEfsTransactionReport(UNKNOWN_TYPE_REPORT)
+    const unknown = txs.find((t) => t.fuelType === 'XYZW')
+    expect(unknown).toBeDefined()
+    expect(unknown!.itemCategory).toBe('OTHER')
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('XYZW'))
+    warnSpy.mockRestore()
   })
 })

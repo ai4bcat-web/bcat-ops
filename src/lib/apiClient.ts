@@ -151,6 +151,7 @@ export interface FuelTransaction {
   state?: string
   fees?: number
   fuelType: string
+  itemCategory?: string
   pricePerUnit: number
   quantity: number
   amount: number
@@ -163,7 +164,7 @@ export interface FuelTransaction {
 
 const FUEL_TX_FIELDS = `
   id transactionDate cardNumber invoiceNumber unitNumber truckId driverName
-  odometer locationName city state fees fuelType pricePerUnit quantity amount
+  odometer locationName city state fees fuelType itemCategory pricePerUnit quantity amount
   currency sourceFile importedAt createdAt updatedAt
 `
 

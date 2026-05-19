@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { parseEfsTransactionReport, fuelTxDedupKey } from '@/lib/parsers/efsTransactionReport'
+import type { ItemCategory } from '@/lib/parsers/efsTransactionReport'
 import { createFuelTransaction, checkFuelTxExists } from '@/lib/apiClient'
 import type { FuelTransaction } from '@/lib/apiClient'
 import type { Equipment } from '@/types/equipment'
@@ -26,6 +27,7 @@ interface PreviewRow {
   city: string
   state: string
   fuelType: string
+  itemCategory: ItemCategory
   quantity: number
   pricePerUnit: number
   amount: number
@@ -79,6 +81,7 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
           city:            tx.city,
           state:           tx.state,
           fuelType:        tx.fuelType,
+          itemCategory:    tx.itemCategory,
           quantity:        tx.quantity,
           pricePerUnit:    tx.pricePerUnit,
           amount:          tx.amount,
@@ -155,6 +158,7 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
           state:           tx.state || undefined,
           fees:            tx.fees,
           fuelType:        tx.fuelType,
+          itemCategory:    tx.itemCategory,
           pricePerUnit:    tx.pricePerUnit,
           quantity:        tx.quantity,
           amount:          tx.amount,

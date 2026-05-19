@@ -89,7 +89,8 @@ const schema = a.schema({
     ]),
 
   // ── Fuel transactions ──────────────────────────────────────────────────────
-  // Imported from EFS Transaction Reports. One record per line item (ULSD/DEFD).
+  // Imported from EFS Transaction Reports. One record per line item.
+  // Covers fuel (ULSD/DEFD), scale fees (SCLE), cash advances (CASH), and others.
   FuelTransaction: a
     .model({
       transactionDate: a.date().required(),
@@ -103,7 +104,8 @@ const schema = a.schema({
       city:            a.string(),
       state:           a.string(),
       fees:            a.float(),               // dollars; 0 if none
-      fuelType:        a.string().required(),   // ULSD, DEFD, etc.
+      fuelType:        a.string().required(),   // raw item type: ULSD, DEFD, SCLE, CASH, etc.
+      itemCategory:    a.enum(['FUEL', 'SCALE', 'CASH_ADVANCE', 'OTHER']), // derived category
       pricePerUnit:    a.float().required(),
       quantity:        a.float().required(),
       amount:          a.float().required(),

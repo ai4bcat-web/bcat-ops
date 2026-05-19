@@ -44,7 +44,7 @@ function getRange(key: RangeKey, customStart: Date, customEnd: Date): [Date, Dat
   }
 }
 
-// ── Week buckets ──────────────────────────────────────────────────────────────
+// ── Week buckets (Sun–Sat) ────────────────────────────────────────────────────
 
 interface WeekBucket { wStart: Date; wEnd: Date; label: string }
 
@@ -57,6 +57,24 @@ function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
     wStart = addWeeks(wStart, 1)
   }
   return weeks
+}
+
+// ── Category helpers ──────────────────────────────────────────────────────────
+
+const FUEL_TYPES_SET = new Set(['ULSD', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
+
+function isFuel(tx: FuelTransaction): boolean {
+  // Prefer explicit itemCategory (set on new records); fall back to fuelType lookup
+  if (tx.itemCategory) return tx.itemCategory === 'FUEL'
+  return FUEL_TYPES_SET.has((tx.fuelType ?? '').toUpperCase())
+}
+
+function categoryLabel(tx: FuelTransaction): string {
+  const cat = tx.itemCategory
+  if (cat === 'SCALE') return 'Scale Fee'
+  if (cat === 'CASH_ADVANCE') return 'Cash Advance'
+  if (cat === 'OTHER') return 'Other'
+  return tx.fuelType
 }
 
 // ── Colors / formatters ───────────────────────────────────────────────────────
@@ -88,9 +106,9 @@ function sumQty(txs: FuelTransaction[]) { return txs.reduce((s, t) => s + t.quan
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
-function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function KpiCard({ label, value, sub, title }: { label: string; value: string; sub?: string; title?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm px-5 py-4">
+    <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm px-5 py-4" title={title}>
       <div className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-1">{label}</div>
       <div className="text-2xl font-semibold text-foreground">{value}</div>
       {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
@@ -123,38 +141,50 @@ function TxDetail({
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
-              {['Date', 'Location', 'City', 'State', 'Type', 'Gal', '$/gal', 'Fees', 'Total', 'Driver', 'Odometer'].map((h) => (
+              {['Date', 'Category', 'Location', 'City', 'St', 'Qty', '$/unit', 'Fees', 'Total', 'Driver', 'Odo'].map((h) => (
                 <th key={h} className="text-left px-3 py-2.5 font-medium text-muted-foreground whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {sorted.map((tx) => (
-              <tr key={tx.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2 font-mono whitespace-nowrap">{tx.transactionDate}</td>
-                <td className="px-3 py-2 max-w-[140px] truncate">{tx.locationName}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{tx.city}</td>
-                <td className="px-3 py-2">{tx.state}</td>
-                <td className="px-3 py-2">
-                  <span className={cn(
-                    'px-1.5 py-0.5 rounded text-[10px] font-medium',
-                    tx.fuelType === 'ULSD' ? 'bg-sky-50 text-sky-700' : 'bg-violet-50 text-violet-700',
-                  )}>
-                    {tx.fuelType}
-                  </span>
-                </td>
-                <td className="px-3 py-2 tabular-nums text-right">{tx.quantity.toFixed(2)}</td>
-                <td className="px-3 py-2 tabular-nums text-right">{fmtMoney(tx.pricePerUnit)}</td>
-                <td className="px-3 py-2 tabular-nums text-right">
-                  {(tx.fees ?? 0) > 0 ? fmtMoney(tx.fees!) : <span className="text-muted-foreground/40">—</span>}
-                </td>
-                <td className="px-3 py-2 tabular-nums text-right font-medium">{fmtMoney(tx.amount)}</td>
-                <td className="px-3 py-2 text-muted-foreground">{tx.driverName || <span className="text-muted-foreground/40">—</span>}</td>
-                <td className="px-3 py-2 tabular-nums text-right text-muted-foreground">
-                  {tx.odometer ? tx.odometer.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
-                </td>
-              </tr>
-            ))}
+            {sorted.map((tx) => {
+              const fuel = isFuel(tx)
+              return (
+                <tr key={tx.id} className="border-t border-slate-100 hover:bg-slate-50">
+                  <td className="px-3 py-2 font-mono whitespace-nowrap">{tx.transactionDate}</td>
+                  <td className="px-3 py-2">
+                    <span className={cn(
+                      'px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap',
+                      fuel && tx.fuelType === 'ULSD' ? 'bg-sky-50 text-sky-700'
+                        : fuel ? 'bg-violet-50 text-violet-700'
+                        : tx.itemCategory === 'SCALE' ? 'bg-amber-50 text-amber-700'
+                        : tx.itemCategory === 'CASH_ADVANCE' ? 'bg-emerald-50 text-emerald-700'
+                        : 'bg-slate-100 text-slate-600',
+                    )}>
+                      {tx.fuelType}
+                    </span>
+                    {!fuel && (
+                      <span className="ml-1 text-[10px] text-muted-foreground">{categoryLabel(tx)}</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 max-w-[140px] truncate">{tx.locationName}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{tx.city}</td>
+                  <td className="px-3 py-2">{tx.state}</td>
+                  <td className="px-3 py-2 tabular-nums text-right">{tx.quantity.toFixed(2)}</td>
+                  <td className="px-3 py-2 tabular-nums text-right">
+                    {tx.pricePerUnit > 0 ? fmtMoney(tx.pricePerUnit) : <span className="text-muted-foreground/30">—</span>}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-right">
+                    {(tx.fees ?? 0) > 0 ? fmtMoney(tx.fees!) : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums text-right font-medium">{fmtMoney(tx.amount)}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{tx.driverName || <span className="text-muted-foreground/40">—</span>}</td>
+                  <td className="px-3 py-2 tabular-nums text-right text-muted-foreground">
+                    {tx.odometer ? tx.odometer.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -183,60 +213,91 @@ export function ExpensesPage() {
 
   const [rangeStart, rangeEnd] = getRange(rangeKey, customStart, customEnd)
 
-  // All txs in the selected range (all fuel types combined)
+  // All txs in date range (all categories)
   const filteredTxs = useMemo(
     () => filterByDate(transactions, rangeStart, rangeEnd),
     [transactions, rangeStart, rangeEnd],
   )
 
-  // Summary KPIs
-  const totalSpend = sumAmt(filteredTxs)
-  const totalGal   = sumQty(filteredTxs)
-  const avgPpg     = totalGal > 0 ? totalSpend / totalGal : 0
-  const txCount    = filteredTxs.length
+  // Fuel-only txs for pivot, chart, KPIs
+  const fuelTxs = useMemo(() => filteredTxs.filter(isFuel), [filteredTxs])
 
-  // Sun–Sat week columns for the pivot table
+  // Non-fuel txs (scale fees, cash, other)
+  const otherTxs = useMemo(() => filteredTxs.filter((t) => !isFuel(t)), [filteredTxs])
+
+  // ── Summary KPIs ──────────────────────────────────────────────────────────
+  const totalFuelSpend = sumAmt(fuelTxs)
+  const totalGal       = sumQty(fuelTxs)
+  const avgPpg         = totalGal > 0 ? totalFuelSpend / totalGal : 0
+  const fuelTxCount    = fuelTxs.length
+
+  const otherSpend = sumAmt(otherTxs)
+  const otherBreakdownTitle = useMemo(() => {
+    if (otherTxs.length === 0) return undefined
+    const bycat: Record<string, number> = {}
+    for (const tx of otherTxs) {
+      const cat = tx.itemCategory ?? 'Other'
+      bycat[cat] = (bycat[cat] ?? 0) + tx.amount
+    }
+    return Object.entries(bycat)
+      .map(([k, v]) => `${k}: ${fmtMoney(v)}`)
+      .join(' · ')
+  }, [otherTxs])
+
+  // ── Weekly pivot ──────────────────────────────────────────────────────────
   const weeks = useMemo(() => getWeeksInRange(rangeStart, rangeEnd), [rangeStart, rangeEnd])
 
-  // Pivot rows: one per truck, weekAmts[] aligned to weeks[]
   const pivotRows = useMemo(() => {
     return trucks.map((truck) => {
-      const truckTxs = filteredTxs.filter((t) => t.truckId === truck.id)
+      const truckFuelTxs = fuelTxs.filter((t) => t.truckId === truck.id)
       const weekAmts = weeks.map(({ wStart, wEnd }) =>
-        sumAmt(filterByDate(truckTxs, wStart, wEnd)),
+        sumAmt(filterByDate(truckFuelTxs, wStart, wEnd)),
       )
-      const total = sumAmt(truckTxs)
+      const total = sumAmt(truckFuelTxs)
       return { truck, label: `#${truck.unitNumber}`, weekAmts, total }
     }).sort((a, b) => b.total - a.total)
-  }, [trucks, filteredTxs, weeks])
+  }, [trucks, fuelTxs, weeks])
 
   const weekTotals = weeks.map((_, wi) => pivotRows.reduce((s, r) => s + r.weekAmts[wi], 0))
   const grandTotal = pivotRows.reduce((s, r) => s + r.total, 0)
 
-  // Breakdown by fuel type (ULSD vs DEF per truck)
+  // ── Fuel type breakdown (ULSD vs DEF) ─────────────────────────────────────
   const fuelBreakdown = useMemo(() => {
     return pivotRows
       .filter((r) => r.total > 0)
       .map(({ truck, label, total }) => {
-        const truckTxs = filteredTxs.filter((t) => t.truckId === truck.id)
+        const truckTxs = fuelTxs.filter((t) => t.truckId === truck.id)
         const ulsd = truckTxs.filter((t) => t.fuelType === 'ULSD').reduce((s, t) => s + t.amount, 0)
         const defd = truckTxs.filter((t) => t.fuelType === 'DEFD').reduce((s, t) => s + t.amount, 0)
         return { label, ulsd, defd, total }
       })
-  }, [pivotRows, filteredTxs])
+  }, [pivotRows, fuelTxs])
 
-  // Chart: group by week when range > 14 days
-  const rangeDays = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000)
+  // ── Other charges by truck ────────────────────────────────────────────────
+  const otherByTruck = useMemo(() => {
+    return trucks.map((truck) => {
+      const txs = otherTxs.filter((t) => t.truckId === truck.id)
+      if (txs.length === 0) return null
+      const scale = txs.filter((t) => t.itemCategory === 'SCALE').reduce((s, t) => s + t.amount, 0)
+      const cash  = txs.filter((t) => t.itemCategory === 'CASH_ADVANCE').reduce((s, t) => s + t.amount, 0)
+      const other = txs.filter((t) => t.itemCategory !== 'SCALE' && t.itemCategory !== 'CASH_ADVANCE').reduce((s, t) => s + t.amount, 0)
+      const total = txs.reduce((s, t) => s + t.amount, 0)
+      return { truck, label: `#${truck.unitNumber}`, scale, cash, other, total }
+    }).filter(Boolean).sort((a, b) => b!.total - a!.total) as Array<{ truck: Equipment; label: string; scale: number; cash: number; other: number; total: number }>
+  }, [trucks, otherTxs])
+
+  // ── Chart (fuel-only, weekly or daily) ───────────────────────────────────
+  const rangeDays  = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000)
   const groupByWeek = rangeDays > 14
 
   const chartData = useMemo(() => {
     const buckets: Record<string, Record<string, number>> = {}
-    for (const tx of filteredTxs) {
+    for (const tx of fuelTxs) {
       const truck = trucks.find((t) => t.id === tx.truckId)
       if (!truck) continue
       const label = `#${truck.unitNumber}`
-      const d = new Date(`${tx.transactionDate}T12:00:00`)
-      const key = groupByWeek
+      const d     = new Date(`${tx.transactionDate}T12:00:00`)
+      const key   = groupByWeek
         ? format(startOfWeek(d, { weekStartsOn: 0 }), 'yyyy-MM-dd')
         : tx.transactionDate
       if (!buckets[key]) buckets[key] = {}
@@ -245,11 +306,11 @@ export function ExpensesPage() {
     return Object.entries(buckets)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, vals]) => ({ date, ...vals }))
-  }, [filteredTxs, trucks, groupByWeek, chartMode])
+  }, [fuelTxs, trucks, groupByWeek, chartMode])
 
   const truckLabels = useMemo(() => trucks.map((t) => `#${t.unitNumber}`), [trucks])
 
-  // Drill-down transactions
+  // ── Drill-down (shows ALL transaction types) ──────────────────────────────
   const drillTxs = useMemo(() => {
     if (!drillTruck) return []
     const base = transactions.filter((t) => t.truckId === drillTruck.id)
@@ -299,19 +360,13 @@ export function ExpensesPage() {
 
           {rangeKey === 'custom' && (
             <div className="flex items-center gap-1.5 text-xs">
-              <input
-                type="date"
-                value={format(customStart, 'yyyy-MM-dd')}
+              <input type="date" value={format(customStart, 'yyyy-MM-dd')}
                 onChange={(e) => setCustomStart(new Date(e.target.value))}
-                className="h-8 rounded-md border border-slate-200 px-2 text-xs"
-              />
+                className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
               <span className="text-muted-foreground">to</span>
-              <input
-                type="date"
-                value={format(customEnd, 'yyyy-MM-dd')}
+              <input type="date" value={format(customEnd, 'yyyy-MM-dd')}
                 onChange={(e) => setCustomEnd(new Date(e.target.value))}
-                className="h-8 rounded-md border border-slate-200 px-2 text-xs"
-              />
+                className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
             </div>
           )}
         </div>
@@ -328,18 +383,24 @@ export function ExpensesPage() {
         <div className="p-8 space-y-6">
 
           {/* ── KPI strip ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard label="Total Spend"  value={fmtMoney(totalSpend)} sub={`${txCount} transaction${txCount !== 1 ? 's' : ''}`} />
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <KpiCard label="Total Fuel Spend"  value={fmtMoney(totalFuelSpend)} sub={`${fuelTxCount} fuel transaction${fuelTxCount !== 1 ? 's' : ''}`} />
             <KpiCard label="Total Gallons" value={fmtGal(totalGal)} />
-            <KpiCard label="Avg $/Gallon" value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
-            <KpiCard label="Transactions" value={txCount.toLocaleString()} />
+            <KpiCard label="Avg $/Gallon"  value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
+            <KpiCard label="Fuel Transactions" value={fuelTxCount.toLocaleString()} />
+            <KpiCard
+              label="Other Charges"
+              value={otherSpend > 0 ? fmtMoney(otherSpend) : '—'}
+              sub={otherTxs.length > 0 ? `${otherTxs.length} non-fuel item${otherTxs.length !== 1 ? 's' : ''}` : undefined}
+              title={otherBreakdownTitle}
+            />
           </div>
 
-          {/* ── Weekly Spend by Truck ── */}
+          {/* ── Weekly Spend by Truck (fuel only) ── */}
           <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
             <div className="px-5 py-3 border-b border-slate-100">
-              <h2 className="text-sm font-semibold text-foreground">Weekly Spend by Truck</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · click a cell to see transactions</p>
+              <h2 className="text-sm font-semibold text-foreground">Weekly Fuel Spend by Truck</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · fuel only · click a cell to see transactions</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -372,7 +433,6 @@ export function ExpensesPage() {
                     </tr>
                   ) : pivotRows.map((row, i) => (
                     <tr key={row.truck.id} className="border-t border-slate-100">
-                      {/* Truck label — click to drill full range */}
                       <td
                         className="sticky left-0 bg-white z-10 px-4 py-2 font-bold whitespace-nowrap cursor-pointer hover:underline"
                         style={{ color: truckColor(i) }}
@@ -380,7 +440,6 @@ export function ExpensesPage() {
                       >
                         {row.label}
                       </td>
-                      {/* Week cells — click to drill that week */}
                       {row.weekAmts.map((amt, wi) => (
                         <td
                           key={wi}
@@ -395,7 +454,6 @@ export function ExpensesPage() {
                           {amt > 0 ? fmtMoney(amt) : '—'}
                         </td>
                       ))}
-                      {/* Row total */}
                       <td
                         className="px-4 py-2 tabular-nums text-right font-semibold cursor-pointer hover:bg-sky-50/60"
                         onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
@@ -405,7 +463,6 @@ export function ExpensesPage() {
                     </tr>
                   ))}
 
-                  {/* Column totals row */}
                   {!loading && pivotRows.length > 0 && (
                     <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
                       <td className="sticky left-0 bg-slate-50 z-10 px-4 py-2 text-xs text-muted-foreground uppercase tracking-wider">
@@ -423,6 +480,50 @@ export function ExpensesPage() {
               </table>
             </div>
           </div>
+
+          {/* ── Other Charges by Truck ── */}
+          {otherByTruck.length > 0 && (
+            <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+              <div className="px-5 py-3 border-b border-slate-100">
+                <h2 className="text-sm font-semibold text-foreground">Other Charges by Truck</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Scale fees, cash advances, and other non-fuel items</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Truck</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-amber-600">Scale $</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-emerald-600">Cash Adv $</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Other $</th>
+                      <th className="text-right px-4 py-2.5 font-medium text-muted-foreground">Total $</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {otherByTruck.map((r, i) => (
+                      <tr
+                        key={r.truck.id}
+                        className="border-t border-slate-100 cursor-pointer hover:bg-sky-50/40"
+                        onClick={() => { setDrillTruck(r.truck); setDrillWeek(null) }}
+                      >
+                        <td className="px-4 py-2 font-bold" style={{ color: truckColor(i) }}>{r.label}</td>
+                        <td className="px-4 py-2 tabular-nums text-right">
+                          {r.scale > 0 ? fmtMoney(r.scale) : <span className="text-muted-foreground/30">—</span>}
+                        </td>
+                        <td className="px-4 py-2 tabular-nums text-right">
+                          {r.cash > 0 ? fmtMoney(r.cash) : <span className="text-muted-foreground/30">—</span>}
+                        </td>
+                        <td className="px-4 py-2 tabular-nums text-right">
+                          {r.other > 0 ? fmtMoney(r.other) : <span className="text-muted-foreground/30">—</span>}
+                        </td>
+                        <td className="px-4 py-2 tabular-nums text-right font-semibold">{fmtMoney(r.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* ── Breakdown by Fuel Type (collapsible) ── */}
           {fuelBreakdown.length > 0 && (
@@ -468,7 +569,7 @@ export function ExpensesPage() {
             </div>
           )}
 
-          {/* ── Fuel Over Time chart ── */}
+          {/* ── Fuel Over Time chart (fuel-only) ── */}
           {chartData.length > 0 && (
             <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
