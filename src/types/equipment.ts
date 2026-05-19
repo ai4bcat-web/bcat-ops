@@ -25,6 +25,7 @@ export interface Equipment {
   assignedDriverId?: string | null
   fleetManagerAssignee?: string     // 'jason' | 'ryne' | ''
   onTollwayAccount: boolean
+  fuelCardNumbers?: string[]    // EFS card # prefixes, e.g. ["00007"]
   notes?: string
   createdAt: string
   updatedAt: string

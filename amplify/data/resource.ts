@@ -88,6 +88,36 @@ const schema = a.schema({
       allow.authenticated().to(['create', 'read']),
     ]),
 
+  // ── Fuel transactions ──────────────────────────────────────────────────────
+  // Imported from EFS Transaction Reports. One record per line item (ULSD/DEFD).
+  FuelTransaction: a
+    .model({
+      transactionDate: a.date().required(),
+      cardNumber:      a.string().required(),   // as it appears in the EFS report (e.g. "00007")
+      invoiceNumber:   a.string(),
+      unitNumber:      a.string(),              // raw from report Unit column
+      truckId:         a.string(),              // Equipment.id resolved via cardNumber lookup
+      driverName:      a.string(),
+      odometer:        a.integer(),
+      locationName:    a.string(),
+      city:            a.string(),
+      state:           a.string(),
+      fees:            a.float(),               // dollars; 0 if none
+      fuelType:        a.string().required(),   // ULSD, DEFD, etc.
+      pricePerUnit:    a.float().required(),
+      quantity:        a.float().required(),
+      amount:          a.float().required(),
+      currency:        a.string(),
+      sourceFile:      a.string(),
+      importedAt:      a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index('truckId').sortKeys(['transactionDate']),
+      index('cardNumber').sortKeys(['transactionDate']),
+      index('transactionDate'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.

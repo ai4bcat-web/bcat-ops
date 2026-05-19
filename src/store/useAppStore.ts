@@ -12,7 +12,7 @@ const SEED_EQUIPMENT: Equipment[] = [
   {
     id: 'eq-mnmpi9jxwd12', type: 'truck', unitNumber: '009', make: 'FREIGHTLINER', model: 'CASCADIA',
     year: 2012, plate: 'ANO4392', vin: '1FUJGLDR9CSBA3413', ownership: 'owned',
-    insured: true, active: true, onTollwayAccount: false,
+    insured: true, active: true, onTollwayAccount: false, fuelCardNumbers: ['00049'],
     dotInspectionDate: '2026-02-26', iftaExpirationDate: '2026-12-31', irpExpirationDate: '2026-12-31',
     insuranceExpirationDate: '2026-08-21', bobtailInsuranceDate: '2027-03-17',
     fleetManagerAssignee: 'ryne',
@@ -21,7 +21,7 @@ const SEED_EQUIPMENT: Equipment[] = [
   {
     id: 'eq-mnevxuyoxpd8', type: 'truck', unitNumber: '299', make: 'FREIGHTLINER', model: 'CASCADIA',
     year: 2014, plate: 'P1343771', vin: '3AKJLGBG2ESFT2299', ownership: 'owned',
-    insured: true, active: true, onTollwayAccount: true,
+    insured: true, active: true, onTollwayAccount: true, fuelCardNumbers: ['00056'],
     dotInspectionDate: '2026-02-09', iftaExpirationDate: '2026-12-31', irpExpirationDate: '2027-03-31',
     insuranceExpirationDate: '2026-08-21',
     fleetManagerAssignee: 'ryne',
@@ -30,7 +30,7 @@ const SEED_EQUIPMENT: Equipment[] = [
   {
     id: 'eq-mnevuhxgs5jf', type: 'truck', unitNumber: '530', make: 'VOLVO', model: 'VNL',
     year: 2018, plate: 'P1233771', vin: '4V4NC9EH8JN893530', ownership: 'financed',
-    insured: true, active: true, onTollwayAccount: true,
+    insured: true, active: true, onTollwayAccount: true, fuelCardNumbers: ['00031'],
     dotInspectionDate: '2026-01-31', iftaExpirationDate: '2026-12-31', irpExpirationDate: '2027-03-31',
     insuranceExpirationDate: '2026-08-21',
     fleetManagerAssignee: 'jason',
@@ -39,7 +39,7 @@ const SEED_EQUIPMENT: Equipment[] = [
   {
     id: 'eq-mnevvq8q6tcx', type: 'truck', unitNumber: '685', make: 'VOLVO', model: 'VNL',
     year: 2018, plate: 'P1170810', vin: '4V4NC9EH0JN890685', ownership: 'financed',
-    insured: true, active: true, onTollwayAccount: true,
+    insured: true, active: true, onTollwayAccount: true, fuelCardNumbers: ['00007'],
     iftaExpirationDate: '2026-12-31', irpExpirationDate: '2027-03-31',
     insuranceExpirationDate: '2026-08-21',
     fleetManagerAssignee: 'jason',
@@ -48,7 +48,7 @@ const SEED_EQUIPMENT: Equipment[] = [
   {
     id: 'eq-mnevwst30vwt', type: 'truck', unitNumber: '780', make: 'MACK', model: '',
     year: 2013, plate: 'P1170809', vin: '1M1AW02Y5DM034780', ownership: 'owned',
-    insured: true, active: true, onTollwayAccount: true,
+    insured: true, active: true, onTollwayAccount: true, fuelCardNumbers: ['00023'],
     dotInspectionDate: '2026-03-17', iftaExpirationDate: '2026-12-31', irpExpirationDate: '2027-03-31',
     insuranceExpirationDate: '2026-08-21',
     fleetManagerAssignee: 'jason',
