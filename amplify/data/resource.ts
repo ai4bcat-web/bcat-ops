@@ -74,6 +74,7 @@ const schema = a.schema({
       email:    a.string(),
       username: a.string(),
       pages:    a.string(),
+      isAdmin:  a.boolean(),
     })
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])

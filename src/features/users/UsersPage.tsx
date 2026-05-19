@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { Users, Plus, UserCheck, UserX, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Loader2, KeyRound, ShieldCheck } from 'lucide-react'
+import { Users, Plus, UserCheck, UserX, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Loader2, KeyRound, ShieldCheck, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,7 +12,7 @@ import { useAuth } from '@/hooks/useAuth'
 import {
   listCognitoUsers, createCognitoUser,
   disableCognitoUser, enableCognitoUser,
-  resetCognitoPassword,
+  resetCognitoPassword, setUserAdmin,
   getUserGroups, setUserPageGroups,
   type CognitoUser,
 } from '@/lib/apiClient'
@@ -59,6 +59,7 @@ function UserRow({
   const [groups, setGroups] = useState<string[] | null>(null)
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [savingGroups, setSavingGroups] = useState(false)
+  const [togglingAdmin, setTogglingAdmin] = useState(false)
 
   const handleExpand = async () => {
     if (!expanded && groups === null) {
@@ -96,6 +97,21 @@ function UserRow({
   const isAdmin = groups?.includes('ADMIN') ?? false
   const isToggling = togglingId === user.username
   const isResetting = resettingId === user.username
+
+  const handleAdminToggle = async () => {
+    if (!groups) return
+    setTogglingAdmin(true)
+    const next = !isAdmin
+    try {
+      await setUserAdmin(user.username, next)
+      setGroups(next ? [...groups, 'ADMIN'] : groups.filter((g) => g !== 'ADMIN'))
+      toast.success(next ? `${user.email} is now an admin` : `Admin removed from ${user.email}`)
+    } catch {
+      toast.error('Failed to update admin status')
+    } finally {
+      setTogglingAdmin(false)
+    }
+  }
 
   return (
     <div className={cn(index !== 0 && 'border-t border-slate-100')}>
@@ -201,7 +217,17 @@ function UserRow({
             {loadingGroups ? (
               <p className="text-xs text-muted-foreground">Loading…</p>
             ) : isAdmin ? (
-              <p className="text-xs text-emerald-700 font-medium">Admin — full access to all pages</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-emerald-700 font-medium">Admin — full access to all pages</p>
+                <button
+                  onClick={handleAdminToggle}
+                  disabled={togglingAdmin}
+                  className="text-[11px] text-muted-foreground hover:text-destructive transition-colors flex items-center gap-1"
+                >
+                  {togglingAdmin ? <Loader2 className="size-3 animate-spin" /> : <Shield className="size-3" />}
+                  Remove admin
+                </button>
+              </div>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {PAGE_OPTIONS.map(({ key, label }) => {
@@ -224,9 +250,19 @@ function UserRow({
                 })}
               </div>
             )}
-            <p className="text-[11px] text-muted-foreground mt-2.5">
-              Click a page to toggle access. Changes save instantly.
-            </p>
+            <div className="flex items-center justify-between mt-2.5">
+              <p className="text-[11px] text-muted-foreground">
+                Click a page to toggle access. Changes save instantly.
+              </p>
+              <button
+                onClick={handleAdminToggle}
+                disabled={togglingAdmin || groups === null}
+                className="text-[11px] text-sky-600 hover:text-sky-800 transition-colors flex items-center gap-1 shrink-0"
+              >
+                {togglingAdmin ? <Loader2 className="size-3 animate-spin" /> : <Shield className="size-3" />}
+                Make admin
+              </button>
+            </div>
           </div>
         </div>
       )}

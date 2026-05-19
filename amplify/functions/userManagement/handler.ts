@@ -12,8 +12,9 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider'
 
 const cognito = new CognitoIdentityProviderClient({})
-// Fall back to the production pool ID if the env var isn't set (e.g. deployment gap)
-const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
+// Use env var if set; fall back to known production pool.
+// `||` (not `??`) so an empty string also triggers the fallback.
+const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 
 // All controllable page groups (must match frontend PAGE_OPTIONS keys)
 const PAGE_GROUPS = [
@@ -21,11 +22,15 @@ const PAGE_GROUPS = [
   'page-trucks', 'page-expenses', 'page-schedule', 'page-audit',
 ]
 
+const ADMIN_GROUP = 'ADMIN'
+const DEFAULT_GROUP = 'DISPATCHER'  // auto-assigned to new invited users
+
 interface Args {
-  action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups' | 'resetPassword'
+  action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups' | 'resetPassword' | 'setAdmin'
   email?: string
   username?: string
-  pages?: string // JSON string: string[]
+  pages?: string    // JSON string: string[]
+  isAdmin?: boolean // used by setAdmin action
 }
 
 // AppSync Cognito User Pools identity shape
@@ -45,17 +50,22 @@ async function ensureGroup(name: string) {
 }
 
 export const handler = async (event: { arguments: Args; identity?: AppSyncIdentity | null }) => {
-  // All callers are Cognito-authenticated users (AppSync enforces auth before
-  // invoking this Lambda). Client-side ADMIN group check gates the UI.
-  console.log('[userManagement] identity:', JSON.stringify(event.identity))
-  console.log('[userManagement] USER_POOL_ID:', USER_POOL_ID)
-  console.log('[userManagement] action:', event.arguments.action)
+  console.log('[userManagement] action:', event.arguments?.action, '| pool:', USER_POOL_ID)
 
-  const { action, email, username, pages } = event.arguments
+  const { action, email, username, pages, isAdmin: makeAdmin } = event.arguments
 
   switch (action) {
     case 'list': {
-      const result = await cognito.send(new ListUsersCommand({ UserPoolId: USER_POOL_ID }))
+      // Wrap in try-catch so IAM/SDK errors surface as a descriptive message
+      // in the UI error box rather than a generic "null response."
+      let result
+      try {
+        result = await cognito.send(new ListUsersCommand({ UserPoolId: USER_POOL_ID }))
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+        console.error('[list] Cognito error:', msg, '| pool:', USER_POOL_ID)
+        throw new Error(`ListUsers failed (pool=${USER_POOL_ID}): ${msg}`)
+      }
       const users = (result.Users ?? []).map((u) => ({
         username: u.Username,
         email: u.Attributes?.find((a) => a.Name === 'email')?.Value,
@@ -63,6 +73,7 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         enabled: u.Enabled,
         createdAt: u.UserCreateDate?.toISOString(),
       }))
+      console.log('[list] returned', users.length, 'users from pool', USER_POOL_ID)
       return JSON.stringify(users)
     }
     case 'create': {
@@ -76,6 +87,15 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         ],
         DesiredDeliveryMediums: ['EMAIL'],
       }))
+      // Auto-assign the default group so new users have basic menu access immediately
+      await ensureGroup(DEFAULT_GROUP)
+      try {
+        await cognito.send(new AdminAddUserToGroupCommand({
+          UserPoolId: USER_POOL_ID, Username: email, GroupName: DEFAULT_GROUP,
+        }))
+      } catch (e: unknown) {
+        console.warn('[create] could not add to default group:', String(e))
+      }
       return JSON.stringify({ success: true })
     }
     case 'disable': {
@@ -127,6 +147,25 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
     case 'resetPassword': {
       if (!username) throw new Error('username is required')
       await cognito.send(new AdminResetUserPasswordCommand({ UserPoolId: USER_POOL_ID, Username: username }))
+      return JSON.stringify({ success: true })
+    }
+    case 'setAdmin': {
+      if (!username) throw new Error('username is required')
+      await ensureGroup(ADMIN_GROUP)
+      if (makeAdmin) {
+        await cognito.send(new AdminAddUserToGroupCommand({
+          UserPoolId: USER_POOL_ID, Username: username, GroupName: ADMIN_GROUP,
+        }))
+      } else {
+        // Remove from admin group — ignore "not in group" errors
+        try {
+          await cognito.send(new AdminRemoveUserFromGroupCommand({
+            UserPoolId: USER_POOL_ID, Username: username, GroupName: ADMIN_GROUP,
+          }))
+        } catch (e: unknown) {
+          if ((e as { name?: string }).name !== 'UserNotFoundException') console.warn('[setAdmin] remove warning:', String(e))
+        }
+      }
       return JSON.stringify({ success: true })
     }
     default:

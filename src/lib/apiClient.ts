@@ -204,6 +204,13 @@ export async function resetCognitoPassword(username: string): Promise<void> {
   })
 }
 
+export async function setUserAdmin(username: string, isAdmin: boolean): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String, $isAdmin: Boolean) { manageUsers(action: $action, username: $username, isAdmin: $isAdmin) }`,
+    variables: { action: 'setAdmin', username, isAdmin },
+  })
+}
+
 // ── S3 rate confirmations ─────────────────────────────────────────────────────
 
 export async function uploadRateConfirm(loadId: string, file: File): Promise<string> {
