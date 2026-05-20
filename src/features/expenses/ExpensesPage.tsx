@@ -226,10 +226,18 @@ export function ExpensesPage() {
   const otherTxs = useMemo(() => filteredTxs.filter((t) => !isFuel(t)), [filteredTxs])
 
   // ── Summary KPIs ──────────────────────────────────────────────────────────
-  const totalFuelSpend = sumAmt(fuelTxs)
-  const totalGal       = sumQty(fuelTxs)
+  // Restrict KPIs to the same trucks shown in the pivot table so the card
+  // total and the table grand total are always identical.
+  const pivotTruckIds = useMemo(() => new Set(trucks.map((t) => t.id)), [trucks])
+  const pivotFuelTxs  = useMemo(
+    () => fuelTxs.filter((t) => t.truckId && pivotTruckIds.has(t.truckId)),
+    [fuelTxs, pivotTruckIds],
+  )
+
+  const totalFuelSpend = sumAmt(pivotFuelTxs)
+  const totalGal       = sumQty(pivotFuelTxs)
   const avgPpg         = totalGal > 0 ? totalFuelSpend / totalGal : 0
-  const fuelTxCount    = fuelTxs.length
+  const fuelTxCount    = pivotFuelTxs.length
 
   const otherSpend = sumAmt(otherTxs)
   const otherBreakdownTitle = useMemo(() => {
@@ -348,14 +356,18 @@ export function ExpensesPage() {
           {rangeKey === 'custom' && (
             <div className="flex items-center gap-1.5 text-xs">
               <input type="date" value={format(customStart, 'yyyy-MM-dd')}
-                onChange={(e) => setCustomStart(new Date(e.target.value))}
+                onChange={(e) => setCustomStart(new Date(e.target.value + 'T00:00:00'))}
                 className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
               <span className="text-muted-foreground">to</span>
               <input type="date" value={format(customEnd, 'yyyy-MM-dd')}
-                onChange={(e) => setCustomEnd(new Date(e.target.value))}
+                onChange={(e) => setCustomEnd(new Date(e.target.value + 'T00:00:00'))}
                 className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
             </div>
           )}
+
+          <span className="text-xs text-muted-foreground">
+            Showing {format(rangeStart, 'MMM d, yyyy')} – {format(rangeEnd, 'MMM d, yyyy')}
+          </span>
         </div>
       </div>
 
