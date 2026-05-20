@@ -1,6 +1,8 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda'
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events'
+import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
 import { CfnOutput } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
@@ -9,6 +11,7 @@ import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
+import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
 
 const backend = defineBackend({
   auth,
@@ -18,6 +21,7 @@ const backend = defineBackend({
   slackIntakeWebhook,
   slackStatusNotifier,
   fuelImport,
+  generateRecurringExpenses,
 })
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
@@ -111,3 +115,37 @@ new CfnOutput(fuelImportFn.stack, 'FuelImportFunctionUrlOutput', {
   value:       fuelImportUrl.url,
   description: 'Paste into SETUP.md → FUEL_IMPORT_WEBHOOK_URL',
 })
+
+// ── generateRecurringExpenses Lambda ──────────────────────────────────────
+
+const recurringFn = backend.generateRecurringExpenses.resources.lambda as LambdaFunction
+
+const expenseTypeTable   = backend.data.resources.tables['ExpenseType']
+const allocationTable    = backend.data.resources.tables['TruckExpenseAllocation']
+const recurringTable     = backend.data.resources.tables['RecurringExpense']
+const expenseRecordTable = backend.data.resources.tables['ExpenseRecord']
+
+// Permissions: read RecurringExpense, write ExpenseRecord, read+write seed tables
+backend.generateRecurringExpenses.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
+    resources: [
+      expenseTypeTable.tableArn,
+      allocationTable.tableArn,
+      recurringTable.tableArn,
+      expenseRecordTable.tableArn,
+    ],
+  })
+)
+
+recurringFn.addEnvironment('EXPENSE_TYPE_TABLE_NAME',   expenseTypeTable.tableName)
+recurringFn.addEnvironment('ALLOCATION_TABLE_NAME',     allocationTable.tableName)
+recurringFn.addEnvironment('RECURRING_TABLE_NAME',      recurringTable.tableName)
+recurringFn.addEnvironment('EXPENSE_RECORD_TABLE_NAME', expenseRecordTable.tableName)
+
+// EventBridge cron — 1st of every month at 00:05 UTC
+const monthlyRule = new Rule(recurringFn.stack, 'RecurringExpensesMonthlyRule', {
+  schedule:    Schedule.cron({ minute: '5', hour: '0', day: '1', month: '*' }),
+  description: 'Generate recurring expense records on the 1st of each month',
+})
+monthlyRule.addTarget(new EventsLambdaTarget(recurringFn))

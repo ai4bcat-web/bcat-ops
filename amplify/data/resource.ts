@@ -2,6 +2,9 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
 import { userManagement } from '../functions/userManagement/resource'
 import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
 
+// ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
+// model field — Amplify Gen 2 does not require top-level enum declarations.
+
 const schema = a.schema({
   Load: a
     .model({
@@ -128,6 +131,77 @@ const schema = a.schema({
       index('truckId').sortKeys(['transactionDate']),
       index('cardNumber').sortKeys(['transactionDate']),
       index('transactionDate'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Per-truck expense tracking ─────────────────────────────────────────────
+
+  // Catalog of cost categories (insurance, fuel, financing, etc.)
+  ExpenseType: a
+    .model({
+      name:               a.string().required(),
+      // FUEL is tracked via FuelTransaction; this entry enables fuel in the
+      // aggregation engine without duplicating data into ExpenseRecord.
+      category:           a.enum(['FUEL', 'INSURANCE', 'FINANCING', 'LEASE', 'MAINTENANCE', 'PERMITS', 'TOLLS', 'OTHER']),
+      defaultEntryMethod: a.enum(['FIXED', 'MANUAL', 'AUTO_INGESTED']),
+      active:             a.boolean().required(),
+      notes:              a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Defines which trucks share a cost and how it splits
+  TruckExpenseAllocation: a
+    .model({
+      expenseTypeId:    a.string().required(),
+      // DIRECT: one truck per record (directTruckId on ExpenseRecord)
+      // SPLIT_EVEN: amount ÷ truckIds.length, shared across truckIds
+      allocationMethod: a.enum(['DIRECT', 'SPLIT_EVEN']),
+      truckIds:         a.string().array(),  // trucks in this allocation
+      notes:            a.string(),
+      // Reserved for future SPLIT_WEIGHTED (per-truck percent/shares):
+      // shares: a.json(),
+    })
+    .secondaryIndexes((index) => [
+      index('expenseTypeId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Actual cost record for a time period
+  // Store the TOTAL amount once; per-truck share is computed on read.
+  ExpenseRecord: a
+    .model({
+      expenseTypeId:   a.string().required(),
+      allocationId:    a.string(),           // → TruckExpenseAllocation (SPLIT_EVEN)
+      amount:          a.float().required(),  // total cost before any split
+      periodMonth:     a.string(),           // "2026-05" — for recurring/monthly costs
+      transactionDate: a.date(),             // specific date — for one-off costs
+      entryMethod:     a.enum(['FIXED', 'MANUAL', 'AUTO_INGESTED']),
+      directTruckId:   a.string(),           // set for DIRECT allocation only
+      notes:           a.string(),
+      source:          a.string(),           // "recurring-generator", "manual-entry", etc.
+    })
+    .secondaryIndexes((index) => [
+      index('expenseTypeId').sortKeys(['periodMonth']),
+      index('periodMonth'),
+      index('directTruckId').sortKeys(['transactionDate']),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Template for FIXED costs that repeat monthly.
+  // The generate-recurring-expenses Lambda creates one ExpenseRecord per
+  // active RecurringExpense per calendar month.
+  RecurringExpense: a
+    .model({
+      expenseTypeId: a.string().required(),
+      allocationId:  a.string().required(),
+      monthlyAmount: a.float().required(),
+      startMonth:    a.string().required(),  // "2026-05"
+      endMonth:      a.string(),             // null = ongoing
+      active:        a.boolean().required(),
+      notes:         a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('expenseTypeId'),
     ])
     .authorization((allow) => [allow.authenticated()]),
 
