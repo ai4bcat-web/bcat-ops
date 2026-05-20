@@ -33,7 +33,7 @@ function initials(name: string): string {
 }
 
 function shortDate(iso: string): string {
-  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 }
 
 // ── KPI Card ──────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ const RANGE_OPTIONS: { value: DateRangeKey; label: string }[] = [
 ]
 
 export function DashboardPage() {
-  const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-year')
+  const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-month')
   const metrics = useDashboardMetrics(rangeKey)
   const { transactions: fuelTxs, loading: fuelLoading } = useFuelTransactions()
 

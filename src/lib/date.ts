@@ -20,6 +20,7 @@ export function formatDateShort(iso: string): string {
     timeZone: TZ,
     month: 'short',
     day: 'numeric',
+    year: 'numeric',
   }).format(d)
 }
 
@@ -27,7 +28,7 @@ export function formatDayHeader(iso: string): { weekday: string; date: string } 
   const d = new Date(iso)
   if (isNaN(d.getTime())) return { weekday: '—', date: '—' }
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(d)
-  const date    = new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric' }).format(d)
+  const date    = new Intl.DateTimeFormat('en-US', { timeZone: TZ, month: 'short', day: 'numeric', year: 'numeric' }).format(d)
   return { weekday, date }
 }
 
@@ -53,6 +54,7 @@ export function formatDateTime(iso: string | null | undefined): string {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
+      year: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
