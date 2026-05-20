@@ -211,10 +211,34 @@ function dedupKey(tx: ParsedFuelTransaction): string {
 }
 
 // ── URL extraction ────────────────────────────────────────────────────────────
+//
+// Fleet One CardsJob URLs have the form:
+//   https://manage.fleetone.com/cards/CardsJob.action?getJobFile&fileId=<uuid>.<ts>.jobdata
+//
+// Crucially, the notification email contains NO whitespace between the URL and
+// the following sentence ("Please do not reply…"), so a generic "stop at
+// whitespace" regex captures trailing text and produces a broken URL.
+// We anchor the match on .jobdata to avoid this.
+//
+// The generic fallback still handles other URL shapes (e.g. presigned S3 links)
+// that may appear in future email templates.
 
-function extractUrls(text: string): string[] {
-  const matches = text.match(/https?:\/\/[^\s"<>)]+/g) ?? []
-  return [...new Set(matches)]
+export function extractUrls(text: string): string[] {
+  const urls: string[] = []
+
+  // 1. Fleet One CardsJob — anchored at .jobdata
+  const fleetOneRe = /https:\/\/manage\.fleetone\.com\/cards\/CardsJob\.action\?[^\s"<>]*?\.jobdata/gi
+  for (const m of text.matchAll(fleetOneRe)) urls.push(m[0])
+
+  // 2. Generic fallback for any other https URLs in the body
+  const genericRe = /https?:\/\/[^\s"<>)]+/g
+  for (const m of text.matchAll(genericRe)) {
+    // Skip Fleet One URLs already captured above (they would be mangled by the
+    // generic regex because of the missing delimiter after .jobdata)
+    if (!m[0].includes('manage.fleetone.com')) urls.push(m[0])
+  }
+
+  return [...new Set(urls)]
 }
 
 // ── Lambda handler ────────────────────────────────────────────────────────────
