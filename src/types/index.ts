@@ -74,7 +74,7 @@ export interface AuditLogEntry {
   createdAt: string
 }
 
-export type ViewMode = 'day' | 'week' | 'planner' | 'two-week'
+export type ViewMode = 'day' | 'planner' | 'two-week'
 
 // ── Intake queue ───────────────────────────────────────────────────────────
 
