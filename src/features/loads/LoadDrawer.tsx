@@ -264,15 +264,30 @@ export function LoadDrawer() {
     }
   }
 
-  const watchPickupDriver = watch('pickupDriverId')
-  const [deliveryLocked, setDeliveryLocked] = useState(false)
+  // Auto-sync delivery driver when pickup changes, unless they were already different
+  const watchPickupDriver  = watch('pickupDriverId')
+  const watchDeliveryDriver = watch('deliveryDriverId')
+  const prevPickupDriver = useRef(watchPickupDriver)
   useEffect(() => {
-    if (!deliveryLocked && watchPickupDriver) setValue('deliveryDriverId', watchPickupDriver)
-  }, [watchPickupDriver, deliveryLocked, setValue])
+    const prev = prevPickupDriver.current
+    prevPickupDriver.current = watchPickupDriver
+    // Only mirror if delivery was tracking the same driver as pickup (or unset)
+    if (watchDeliveryDriver === prev || watchDeliveryDriver === null) {
+      setValue('deliveryDriverId', watchPickupDriver)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchPickupDriver])
 
   const onClose = () => setSelectedLoad(null)
 
   const onSubmit = async (values: LoadFormValues) => {
+    const duplicate = loads.find(
+      (l) => l.aljexId === values.aljexId && l.id !== load?.id
+    )
+    if (duplicate) {
+      toast.error(`Pro # ${values.aljexId} is already used on another load`)
+      return
+    }
     const toIso = (s: string, t: ApptType) => (t === 'tbd' || t === 'fcfs') ? fromDateInput(s.slice(0, 10)) : fromDateTimeInput(s)
     const userEmail = user?.email ?? 'dispatch'
     const payload = {
@@ -419,7 +434,7 @@ export function LoadDrawer() {
               <Separator />
 
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Pickup Driver" error={errors.pickupDriverId?.message}>
+                <Field label="PU Driver" error={errors.pickupDriverId?.message}>
                   <Controller name="pickupDriverId" control={control} render={({ field }) => (
                     <Select value={field.value ?? '__none__'} onValueChange={(v) => field.onChange(v === '__none__' ? null : v)}>
                       <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
@@ -430,15 +445,10 @@ export function LoadDrawer() {
                     </Select>
                   )} />
                 </Field>
-
-                <Field
-                  label="Delivery Driver"
-                  error={errors.deliveryDriverId?.message}
-                  hint={!deliveryLocked ? 'Mirrors pickup' : undefined}
-                >
+                <Field label="DE Driver" error={errors.deliveryDriverId?.message}>
                   <Controller name="deliveryDriverId" control={control} render={({ field }) => (
-                    <Select value={field.value ?? '__none__'} onValueChange={(v) => { field.onChange(v === '__none__' ? null : v); setDeliveryLocked(true) }}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="Same as pickup" /></SelectTrigger>
+                    <Select value={field.value ?? '__none__'} onValueChange={(v) => field.onChange(v === '__none__' ? null : v)}>
+                      <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">Unassigned</SelectItem>
                         {activeDrivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
@@ -506,7 +516,9 @@ export function LoadDrawer() {
               <ReadonlyField label="Pickup"     value={apptLabel(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)} />
               <ReadonlyField label="Delivery"   value={apptLabel(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)} />
               <ReadonlyField label="PU Driver"  value={driverName(load.pickupDriverId)} />
-              <ReadonlyField label="DE Driver"  value={driverName(load.deliveryDriverId)} />
+              {load.deliveryDriverId !== load.pickupDriverId && (
+                <ReadonlyField label="DE Driver" value={driverName(load.deliveryDriverId)} />
+              )}
               <ReadonlyField label="Status"     value={load.readyToInvoice ? 'Ready to Invoice' : 'Pending'} />
               <ReadonlyField label="Created"    value={formatDateTime(load.createdAt)} />
               <ReadonlyField label="Updated"    value={formatDateTime(load.updatedAt)} />

@@ -72,11 +72,15 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
   const isRTI      = load.readyToInvoice
   const isConflict = conflictIds.has(load.id)
   const isAssigned = !!load.pickupDriverId
+  const isSplit    = load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
 
-  const pickupDriver     = drivers.find((d) => d.id === load.pickupDriverId)
-  const pickupDriverName = pickupDriver?.name ?? 'Unassigned'
+  const pickupDriver       = drivers.find((d) => d.id === load.pickupDriverId)
+  const deliveryDriver     = isSplit ? drivers.find((d) => d.id === load.deliveryDriverId) : undefined
+  const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
+  const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  const color = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
+  const color         = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
+  const deliveryColor = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
 
   const borderColor = isConflict ? '#ef4444' : isRTI ? '#15803d' : color.border
   const bgColor     = isContinuation
@@ -159,7 +163,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
               <div
                 className="flex items-center cursor-pointer hover:opacity-75 transition-opacity"
                 onClick={(e) => { e.stopPropagation(); setPickingDriver(true) }}
-                title="Click to reassign driver"
+                title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}
               >
                 <Avatar
                   src={pickupDriver?.photoUrl}
@@ -168,6 +172,15 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
                   className="shrink-0"
                   style={{ background: borderColor, color: '#fff' }}
                 />
+                {isSplit && deliveryDriver && (
+                  <Avatar
+                    src={deliveryDriver.photoUrl}
+                    initials={initials(deliveryDriverName)}
+                    size="xs"
+                    className="shrink-0 -ml-1"
+                    style={{ background: deliveryColor.border, color: '#fff' }}
+                  />
+                )}
               </div>
             ) : (
               <button
@@ -273,8 +286,11 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
             {' '}
             <span className="text-muted-foreground text-[10px]">({APPT_TYPE_CONFIG[load.deliveryApptType ?? 'exact']?.label})</span>
           </span>
-          <span className="text-muted-foreground">Driver</span>
+          <span className="text-muted-foreground">PU Driver</span>
           <span>{pickupDriverName}</span>
+          {isSplit && (
+            <><span className="text-muted-foreground">DE Driver</span><span>{deliveryDriverName}</span></>
+          )}
           {isRTI && (
             <>
               <span className="text-muted-foreground">RTI</span>

@@ -3,6 +3,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Avatar } from '@/components/ui/avatar'
 import type { Load, Driver } from '@/types'
 import type { DriverColor } from '@/lib/driverColors'
+import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
 import { formatApptTime, formatDateTime, isSameChicagoDay } from '@/lib/date'
 import { cn } from '@/lib/utils'
 
@@ -18,11 +19,15 @@ interface EventCardProps {
 }
 
 export function EventCard({ load, drivers, color, isConflict, isSelected, orderNumber, onEdit, onContextMenu }: EventCardProps) {
-  const isRTI = load.readyToInvoice
+  const isRTI    = load.readyToInvoice
+  const isSplit  = load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
   const isMultiDay = !isSameChicagoDay(load.pickupAppt, load.deliveryAppt)
 
-  const pickupDriver     = drivers.find((d) => d.id === load.pickupDriverId)
-  const pickupDriverName = pickupDriver?.name ?? 'Unassigned'
+  const pickupDriver       = drivers.find((d) => d.id === load.pickupDriverId)
+  const deliveryDriver     = isSplit ? drivers.find((d) => d.id === load.deliveryDriverId) : undefined
+  const deliveryColor      = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
+  const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
+  const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
   const borderColor = isConflict ? '#ef4444' : isRTI ? '#15803d' : color.border
   const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? '#22c55e' : color.bg
@@ -42,6 +47,7 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
         borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#e5e5e2',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
+        ...(isSplit ? { borderRightColor: deliveryColor.border, borderRightWidth: 3 } : {}),
       }}
       onContextMenu={onContextMenu}
     >
@@ -102,16 +108,28 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
         {/* Bottom row: time (left) · RTI icon + driver avatar + name (right) */}
         <div className="flex items-center justify-between gap-1 min-w-0">
           <span className="text-[10px] shrink-0 tabular-nums" style={{ color: '#6b7280' }}>{puTime}</span>
-          <div className="flex items-center gap-1 min-w-0 overflow-hidden" title={pickupDriverName}>
+          <div className="flex items-center gap-1 min-w-0 overflow-hidden"
+            title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}>
             {isRTI && <CheckCircle2 className="size-3 shrink-0" style={{ color: '#fff' }} />}
             {load.pickupDriverId ? (
-              <Avatar
-                src={pickupDriver?.photoUrl}
-                initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
-                size="xs"
-                className="shrink-0"
-                style={{ background: borderColor, color: '#ffffff' }}
-              />
+              <>
+                <Avatar
+                  src={pickupDriver?.photoUrl}
+                  initials={(pickupDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
+                  size="xs"
+                  className="shrink-0"
+                  style={{ background: borderColor, color: '#ffffff' }}
+                />
+                {isSplit && deliveryDriver && (
+                  <Avatar
+                    src={deliveryDriver.photoUrl}
+                    initials={(deliveryDriverName.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase()) || '?'}
+                    size="xs"
+                    className="shrink-0 -ml-1"
+                    style={{ background: deliveryColor.border, color: '#ffffff' }}
+                  />
+                )}
+              </>
             ) : (
               <span className="text-[10px] font-medium text-amber-500 shrink-0">Unassigned</span>
             )}
@@ -161,7 +179,8 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           )}
           {tooltipApptLine('Pickup', load.pickupAppt, load.pickupApptType, load.pickupApptEnd)}
           {tooltipApptLine('Delivery', load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)}
-          <span className="text-muted-foreground">Driver</span><span>{pickupDriverName}</span>
+          <span className="text-muted-foreground">PU Driver</span><span>{pickupDriverName}</span>
+          {isSplit && <><span className="text-muted-foreground">DE Driver</span><span>{deliveryDriverName}</span></>}
           <span className="text-muted-foreground">RTI</span>
           <span className={isRTI ? 'text-emerald-400 font-medium' : 'text-muted-foreground'}>
             {isRTI ? 'Ready to Invoice' : 'Pending'}
