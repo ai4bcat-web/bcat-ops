@@ -69,11 +69,13 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   const ev = payload.event as Record<string, unknown>
 
-  // Only handle top-level messages (skip bots, edits, deletes, thread replies)
+  // Skip edits, deletes, and other non-content subtypes.
+  // file_share is intentionally allowed — that's how PDF pastes arrive.
+  const SKIP_SUBTYPES = new Set(['message_changed', 'message_deleted', 'channel_join', 'channel_leave', 'bot_message'])
   if (
     ev.type !== 'message' ||
     ev.bot_id            ||
-    ev.subtype           ||
+    SKIP_SUBTYPES.has(ev.subtype as string) ||
     ev.thread_ts         // skip thread replies to avoid reply loops
   ) {
     return { statusCode: 200, body: 'ok' }
@@ -105,8 +107,13 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     return { statusCode: 200, body: 'Duplicate' }
   }
 
-  // Build subject from first non-empty line, max 80 chars
-  const subject = (text.split('\n').find((l) => l.trim()) ?? '(no message)').slice(0, 80)
+  // Build subject: prefer message text, fall back to uploaded file names
+  const files = (ev.files as Array<{ name?: string }> | undefined) ?? []
+  const fileNames = files.map((f) => f.name).filter(Boolean).join(', ')
+  const subject = (text.split('\n').find((l) => l.trim()) ?? fileNames || '(file attachment)').slice(0, 80)
+
+  // Include file names in body so they're visible in the detail panel
+  const bodyText = [text, fileNames ? `Files: ${fileNames}` : ''].filter(Boolean).join('\n')
 
   // Construct Slack permalink (no extra API call needed)
   const externalUrl = `https://slack.com/archives/${channelId}/p${msgTs.replace('.', '')}`
@@ -126,7 +133,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
       receivedAt:          new Date(Number(msgTs) * 1000).toISOString(),
       fromEmail:           userId,
       subject,
-      bodyText:            text,
+      bodyText:            bodyText,
       bodyHtml:            '',
       externalSource:      'slack',
       externalId,
