@@ -13,23 +13,25 @@
  */
 
 import { useState, useRef, useCallback, useMemo } from 'react'
-import { GripVertical, X } from 'lucide-react'
+import { GripVertical, X, Plus, Pencil, CheckCircle, Circle } from 'lucide-react'
 import { addDays, formatDayHeader, formatTime, formatDateShort } from '@/lib/date'
 import { getColor, UNASSIGNED_COLOR, COLOR_MAP } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { cn } from '@/lib/utils'
-import type { Load, Driver, ColorKey } from '@/types'
+import type { Load, Driver, ColorKey, ApptType } from '@/types'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { slot: 22, color: 20, aljex: 60, tms: 60, pu: 72, puAppt: 72, deAppt: 72, driver: 96 } as const
+const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 210, driver: 160, notes: 200, rate: 68 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
-// ── Color palette ─────────────────────────────────────────────────────────────
+// ── Color palette (greens excluded — reserved for ready-to-invoice indicator) ──
+const GREEN_KEYS = new Set<ColorKey>(['driver-2', 'driver-11'])
 const PALETTE: { key: ColorKey; hex: string }[] = (
   Object.entries(COLOR_MAP) as [ColorKey, { border: string }][]
-).map(([key, v]) => ({ key, hex: v.border }))
+).filter(([key]) => !GREEN_KEYS.has(key as ColorKey))
+ .map(([key, v]) => ({ key, hex: v.border }))
 
 // ── Day entry type ────────────────────────────────────────────────────────────
 type Role = 'pickup' | 'delivery' | 'same-day'
@@ -53,15 +55,16 @@ function chicagoDateStr(iso: string | null | undefined): string | null {
 }
 
 // ── Appt cell (date + time stacked) ──────────────────────────────────────────
-function ApptCell({ iso, type, colorCls, yard }: {
-  iso?: string; type?: string; colorCls: string; yard?: boolean
+function ApptCell({ iso, type, colorCls, yard, city }: {
+  iso?: string; type?: string; colorCls: string; yard?: boolean; city?: string
 }) {
   const w = COL.puAppt
 
   if (yard) {
     return (
-      <div className="flex flex-col justify-center px-1.5 leading-tight text-slate-400" style={{ width: w }}>
-        <span className="text-[11px] font-medium italic">Yard</span>
+      <div className="flex items-center px-1.5 gap-1 leading-tight text-slate-400" style={{ width: w }}>
+        <span className="text-[11px] font-medium shrink-0">Yard</span>
+        {city && <span className="text-[10px] italic truncate">{city}</span>}
       </div>
     )
   }
@@ -69,11 +72,12 @@ function ApptCell({ iso, type, colorCls, yard }: {
   if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width: w }}>—</div>
 
   const isSpecial = type === 'fcfs' || type === 'tbd'
+  const specialLabel = type === 'tbd' ? 'NEED' : type!.toUpperCase()
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
       <span className="text-[11px] font-medium truncate">
-        {isSpecial ? type!.toUpperCase() : formatTime(iso)}
+        {isSpecial ? specialLabel : formatTime(iso)}
       </span>
     </div>
   )
@@ -166,6 +170,202 @@ function DriverPicker({ loadId, currentId, drivers, onClose }: {
   )
 }
 
+// ── Editable text cell (TMS, PU#) ────────────────────────────────────────────
+function EditableTextCell({ load, field, width, dimmed }: {
+  load: Load; field: 'tmsId' | 'pickupNumber'; width: number; dimmed?: boolean
+}) {
+  const { updateLoad } = useLoads()
+  const [editing, setEditing] = useState(false)
+  const [val, setVal]         = useState('')
+  const current               = load[field]
+
+  const commit = () => {
+    const trimmed = val.trim()
+    updateLoad(load.id, { [field]: trimmed || null })
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="shrink-0 flex items-center px-1" style={{ width }}>
+        <input
+          autoFocus
+          type="text"
+          className="w-full h-5 px-1 text-[11px] rounded border border-blue-400 focus:outline-none"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className={cn('group/cell shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded', dimmed ? 'text-slate-300' : 'text-slate-600')}
+      style={{ width }}
+      onClick={() => { setVal(current ?? ''); setEditing(true) }}
+    >
+      <span className="text-[11px] truncate flex-1">{dimmed ? '↳' : (current || '—')}</span>
+      {!dimmed && <Pencil className="size-2 text-slate-300 opacity-0 group-hover/cell:opacity-100 shrink-0" />}
+    </div>
+  )
+}
+
+// ── Appt edit popover ─────────────────────────────────────────────────────────
+function ApptEditPopover({ load, apptField, typeField, onClose }: {
+  load: Load
+  apptField: 'pickupAppt' | 'deliveryAppt'
+  typeField: 'pickupApptType' | 'deliveryApptType'
+  onClose: () => void
+}) {
+  const { updateLoad } = useLoads()
+
+  const toInputVal = (iso: string | undefined | null) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ''
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  const [dateVal, setDateVal] = useState(toInputVal(load[apptField]))
+  const [typeVal, setTypeVal] = useState<ApptType>(load[typeField] ?? 'exact')
+  const [saving,  setSaving]  = useState(false)
+
+  const commit = async () => {
+    setSaving(true)
+    const patch: Partial<Load> = { [typeField]: typeVal }
+    if (dateVal) patch[apptField] = new Date(dateVal).toISOString()
+    try { await updateLoad(load.id, patch) } finally { setSaving(false) }
+    onClose()
+  }
+
+  return (
+    <div
+      className="absolute z-50 top-full left-0 mt-1 p-2.5 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
+      style={{ width: 215 }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <input
+        autoFocus
+        type="datetime-local"
+        className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        value={dateVal}
+        onChange={(e) => setDateVal(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+      />
+      <select
+        className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        value={typeVal}
+        onChange={(e) => setTypeVal(e.target.value as ApptType)}
+      >
+        <option value="exact">Exact Time</option>
+        <option value="fcfs">FCFS</option>
+        <option value="tbd">NEED (TBD)</option>
+      </select>
+      <div className="flex gap-1.5">
+        <button
+          disabled={saving}
+          className="flex-1 h-6 text-[11px] font-medium rounded bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 transition-colors"
+          onClick={commit}
+        >Save</button>
+        <button
+          className="flex-1 h-6 text-[11px] rounded border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors"
+          onClick={onClose}
+        >Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// ── Notes cell (inline edit) ──────────────────────────────────────────────────
+function NotesCell({ load }: { load: Load }) {
+  const { updateLoad } = useLoads()
+  const [editing, setEditing] = useState(false)
+  const [val, setVal]         = useState('')
+
+  const commit = () => {
+    updateLoad(load.id, { notes: val.trim() || null })
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="shrink-0 flex items-center px-1" style={{ width: COL.notes }}>
+        <input
+          autoFocus
+          type="text"
+          className="w-full h-5 px-1 text-[11px] rounded border border-blue-400 focus:outline-none"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="group/notes shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded"
+      style={{ width: COL.notes }}
+      onClick={() => { setVal(load.notes ?? ''); setEditing(true) }}
+    >
+      <span className="text-[11px] text-slate-500 truncate flex-1 italic">{load.notes || ''}</span>
+      <Pencil className="size-2 text-slate-300 opacity-0 group-hover/notes:opacity-100 shrink-0" />
+    </div>
+  )
+}
+
+// ── Rate cell (inline edit) ───────────────────────────────────────────────────
+function RateCell({ load }: { load: Load }) {
+  const { updateLoad } = useLoads()
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+
+  const display = load.rate != null
+    ? `$${(load.rate / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
+    : '—'
+
+  const commit = () => {
+    const dollars = parseFloat(val.replace(/[^0-9.]/g, ''))
+    if (!isNaN(dollars) && dollars >= 0) updateLoad(load.id, { rate: Math.round(dollars * 100) })
+    else if (val.trim() === '') updateLoad(load.id, { rate: null })
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div className="shrink-0 flex items-center px-1" style={{ width: COL.rate }}>
+        <input
+          autoFocus
+          type="text"
+          className="w-full h-5 px-1 text-[11px] rounded border border-blue-400 focus:outline-none"
+          value={val}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="shrink-0 flex items-center px-1.5 text-[11px] cursor-pointer hover:bg-black/5 rounded truncate"
+      style={{ width: COL.rate, color: load.rate ? '#15803d' : '#94a3b8' }}
+      onClick={() => { setVal(load.rate != null ? String(load.rate / 100) : ''); setEditing(true) }}
+    >
+      {display}
+    </div>
+  )
+}
+
 // ── Planner row ───────────────────────────────────────────────────────────────
 interface PlannerRowProps {
   entry:       DayEntry
@@ -180,9 +380,10 @@ interface PlannerRowProps {
 function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnter, onDragEnd }: PlannerRowProps) {
   const { load, role } = entry
   const { updateLoad } = useLoads()
-  const [showColor,  setShowColor]  = useState(false)
-  const [showSlot,   setShowSlot]   = useState(false)
-  const [showDriver, setShowDriver] = useState(false)
+  const [showColor,   setShowColor]   = useState(false)
+  const [showSlot,    setShowSlot]    = useState(false)
+  const [showDriver,  setShowDriver]  = useState(false)
+  const [editingAppt, setEditingAppt] = useState<'pu' | 'de' | null>(null)
 
   const color    = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
   const puDriver = drivers.find((d) => d.id === load.pickupDriverId)
@@ -194,6 +395,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
 
   const slotNum = load.daySlot ?? null
   const isDeliveryDay = role === 'delivery'
+  const isFinalDest   = role !== 'pickup'  // delivery or same-day — load ends here
 
   // Route text
   const route = (() => {
@@ -202,23 +404,29 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
     return [load.originCity, load.destinationCity].filter(Boolean).join(' → ') || '—'
   })()
 
-  const closeOnBlur = (fn: () => void) => () => setTimeout(fn, 150)
+  // Only close if focus left the container entirely (not moved to a child element)
+  const closeOnBlur = (fn: () => void) => (e: React.FocusEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setTimeout(fn, 150)
+  }
 
   return (
     <div
       className={cn(
         'group flex items-center border-b border-slate-100 transition-colors',
-        dragging      && 'opacity-40',
-        dragOver      && 'ring-1 ring-inset ring-blue-400',
-        isDeliveryDay && !dragOver && !dragging && 'opacity-75',
+        dragging && 'opacity-40',
+        dragOver && 'ring-1 ring-inset ring-blue-400',
       )}
       style={{
         height: ROW_H,
-        // Full-row background tint — hex alpha suffix, universally supported
-        background: dragOver
-          ? `${color.border}44`
-          : `${color.border}${isDeliveryDay ? '18' : '30'}`,
-        borderLeft: `3px solid ${color.border}${isDeliveryDay ? '80' : 'ff'}`,
+        // Ready-to-invoice overrides all color tints with bright green
+        background: load.readyToInvoice
+          ? dragOver ? '#16a34a' : '#22c55e'
+          : dragOver
+            ? `${color.border}44`
+            : `${color.border}${isDeliveryDay ? '18' : '30'}`,
+        borderLeft: load.readyToInvoice
+          ? '3px solid #15803d'
+          : `3px solid ${color.border}${isDeliveryDay ? '80' : 'ff'}`,
       }}
       draggable
       onDragStart={() => onDragStart(entry.key)}
@@ -227,44 +435,9 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
       onDragOver={(e) => e.preventDefault()}
     >
 
-      {/* Slot badge — always editable */}
-      <div
-        className="relative flex items-center justify-center shrink-0"
-        style={{ width: COL.slot }}
-        tabIndex={0}
-        onClick={() => setShowSlot((v) => !v)}
-        onBlur={closeOnBlur(() => setShowSlot(false))}
-      >
-        <span
-          className="text-[9px] font-black rounded-full flex items-center justify-center leading-none cursor-pointer hover:opacity-75"
-          style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px' }}
-        >
-          {slotNum ?? '·'}
-        </span>
-        {showSlot && (
-          <div
-            className="absolute z-50 top-full left-0 mt-0.5 flex gap-1 p-1.5 rounded-lg border border-slate-200 bg-white shadow-xl"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            {[1, 2, 3, 4, 5].map((n) => (
-              <button
-                key={n}
-                className="size-5 text-[10px] font-black rounded-full flex items-center justify-center hover:opacity-80"
-                style={{ background: n === slotNum ? color.border : '#94a3b8', color: '#fff' }}
-                onClick={() => { updateLoad(load.id, { daySlot: n }); setShowSlot(false) }}
-              >
-                {n}
-              </button>
-            ))}
-            <button
-              className="size-5 text-[10px] rounded-full flex items-center justify-center hover:opacity-80 bg-slate-200"
-              title="Clear"
-              onClick={() => { updateLoad(load.id, { daySlot: null }); setShowSlot(false) }}
-            >
-              <X className="size-2.5 text-slate-500" />
-            </button>
-          </div>
-        )}
+      {/* Drag handle — first column */}
+      <div className="flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing" style={{ width: DRAG_HANDLE_W }}>
+        <GripVertical className="size-3 text-slate-400" />
       </div>
 
       {/* Color swatch — always editable */}
@@ -273,7 +446,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
         style={{ width: COL.color }}
         tabIndex={0}
         onClick={() => setShowColor((v) => !v)}
-        onBlur={closeOnBlur(() => setShowColor(false))}
+        onBlur={(e) => closeOnBlur(() => setShowColor(false))(e)}
       >
         <span
           className="size-3 rounded-full transition-all cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300"
@@ -284,53 +457,110 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
         )}
       </div>
 
-      {/* Drag handle */}
-      <div className="flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing" style={{ width: DRAG_HANDLE_W }}>
-        <GripVertical className="size-3 text-slate-400" />
-      </div>
-
-      {/* ALJEX */}
+      {/* Pro # */}
       <Cell width={COL.aljex} bold onClick={() => useAppStore.getState().setSelectedLoad(load.id, 'edit')}>
         {load.aljexId || '—'}
       </Cell>
 
-      {/* TMS + PU# — only on pickup day to avoid clutter on delivery continuation */}
-      <Cell width={COL.tms} className={isDeliveryDay ? 'text-slate-300' : undefined}>
-        {isDeliveryDay ? '↳' : (load.tmsId || '—')}
-      </Cell>
-      <Cell width={COL.pu} className={isDeliveryDay ? 'text-slate-300' : undefined}>
-        {isDeliveryDay ? '' : (load.pickupNumber || '—')}
-      </Cell>
+      {/* TMS + PU# — editable inline */}
+      <EditableTextCell load={load} field="tmsId"        width={COL.tms} dimmed={isDeliveryDay} />
+      <EditableTextCell load={load} field="pickupNumber" width={COL.pu}  dimmed={isDeliveryDay} />
 
       {/* PU Appt */}
-      <ApptCell
-        iso={load.pickupAppt}
-        type={load.pickupApptType}
-        colorCls="text-blue-600"
-        yard={isDeliveryDay}
-      />
+      <div className="relative group/appt shrink-0">
+        <ApptCell
+          iso={load.pickupAppt}
+          type={load.pickupApptType}
+          colorCls="text-blue-600"
+          yard={isDeliveryDay}
+          city={isDeliveryDay ? load.destinationCity : undefined}
+        />
+        <button
+          className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setEditingAppt('pu') }}
+        >
+          <Pencil className="size-2" />
+        </button>
+        {editingAppt === 'pu' && (
+          <ApptEditPopover load={load} apptField="pickupAppt" typeField="pickupApptType" onClose={() => setEditingAppt(null)} />
+        )}
+      </div>
 
       {/* DE Appt */}
-      <ApptCell
-        iso={load.deliveryAppt}
-        type={load.deliveryApptType}
-        colorCls="text-violet-600"
-        yard={role === 'pickup'}
-      />
+      <div className="relative group/appt shrink-0">
+        <ApptCell
+          iso={load.deliveryAppt}
+          type={load.deliveryApptType}
+          colorCls="text-violet-600"
+          yard={role === 'pickup'}
+          city={role === 'pickup' ? load.destinationCity : undefined}
+        />
+        <button
+          className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setEditingAppt('de') }}
+        >
+          <Pencil className="size-2" />
+        </button>
+        {editingAppt === 'de' && (
+          <ApptEditPopover load={load} apptField="deliveryAppt" typeField="deliveryApptType" onClose={() => setEditingAppt(null)} />
+        )}
+      </div>
 
-      {/* Route */}
-      <Cell flex className="text-slate-500">{route}</Cell>
+      {/* Route — bold when this is the final destination day */}
+      <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
 
-      {/* Driver — editable on pickup/same-day, read-only label on delivery day */}
+      {/* Driver (with slot badge) */}
       <div
-        className="relative shrink-0 flex items-center"
+        className="relative shrink-0 flex items-center gap-1 px-1"
         style={{ width: COL.driver }}
         tabIndex={isDeliveryDay ? -1 : 0}
         onClick={() => !isDeliveryDay && setShowDriver((v) => !v)}
-        onBlur={closeOnBlur(() => setShowDriver(false))}
+        onBlur={(e) => closeOnBlur(() => setShowDriver(false))(e)}
       >
+        {/* Slot badge */}
+        <div
+          className="relative flex items-center justify-center shrink-0"
+          onClick={(e) => { e.stopPropagation(); setShowSlot((v) => !v) }}
+          onBlur={(e) => closeOnBlur(() => setShowSlot(false))(e)}
+          tabIndex={0}
+        >
+          <span
+            className="text-[9px] font-black rounded-full flex items-center justify-center leading-none cursor-pointer hover:opacity-75"
+            style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px' }}
+          >
+            {slotNum ?? '·'}
+          </span>
+          {showSlot && (
+            <div
+              className="absolute z-50 top-full left-0 mt-0.5 flex gap-1 p-1.5 rounded-lg border border-slate-200 bg-white shadow-xl"
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  className="size-5 text-[10px] font-black rounded-full flex items-center justify-center hover:opacity-80"
+                  style={{ background: n === slotNum ? color.border : '#94a3b8', color: '#fff' }}
+                  onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { daySlot: n }); setShowSlot(false) }}
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                className="size-5 text-[10px] rounded-full flex items-center justify-center hover:opacity-80 bg-slate-200"
+                title="Clear"
+                onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { daySlot: null }); setShowSlot(false) }}
+              >
+                <X className="size-2.5 text-slate-500" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Driver name */}
         <div className={cn(
-          'w-full h-full flex items-center px-1.5 text-[11px] font-medium truncate rounded',
+          'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded',
           isDeliveryDay ? 'text-slate-400' : 'text-slate-800 cursor-pointer hover:bg-black/5',
           showDriver && 'ring-1 ring-blue-400 bg-blue-50',
         )}>
@@ -345,6 +575,28 @@ function PlannerRow({ entry, drivers, dragging, dragOver, onDragStart, onDragEnt
           />
         )}
       </div>
+
+      {/* Notes */}
+      <NotesCell load={load} />
+
+      {/* Rate — only for loads delivering to a real destination (not ending at yard) */}
+      {role !== 'pickup' ? <RateCell load={load} /> : <div style={{ width: COL.rate }} className="shrink-0" />}
+
+      {/* Ready-to-invoice checkmark — only on final-destination rows */}
+      {isFinalDest ? (
+        <button
+          className="shrink-0 flex items-center justify-center px-2 hover:opacity-75 transition-opacity"
+          title={load.readyToInvoice ? 'Mark as not ready' : 'Mark as ready to invoice'}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { readyToInvoice: !load.readyToInvoice }) }}
+        >
+          {load.readyToInvoice
+            ? <CheckCircle className="size-4 text-green-600" />
+            : <Circle className="size-4 text-slate-300" />}
+        </button>
+      ) : (
+        <div className="shrink-0 px-2" style={{ width: 32 }} />
+      )}
     </div>
   )
 }
@@ -458,7 +710,8 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
     return order.map((k) => byKey.get(k)).filter(Boolean) as DayEntry[]
   }
 
-  const headerPad = 3 + COL.slot + COL.color + DRAG_HANDLE_W
+  const headerPad = 3 + COL.color + DRAG_HANDLE_W
+  const todayStr  = chicagoDateStr(new Date().toISOString())
 
   return (
     <div className="flex flex-col h-full overflow-auto bg-slate-50 select-none">
@@ -468,21 +721,32 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
         className="flex items-center border-b-2 border-slate-300 bg-white sticky top-0 z-20 shrink-0"
         style={{ height: ROW_H, paddingLeft: headerPad }}
       >
-        <ColHeader width={COL.aljex}>#</ColHeader>
+        <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>
         <ColHeader width={COL.deAppt}>DE Appt</ColHeader>
-        <ColHeader flex>Route</ColHeader>
+        <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.driver}>Driver</ColHeader>
+        <ColHeader width={COL.notes}>Notes</ColHeader>
+        <ColHeader width={COL.rate}>Rate</ColHeader>
+        <ColHeader width={32}>RTI</ColHeader>
       </div>
 
       {/* Day sections */}
       {days.map((day, di) => {
         const dayStr = chicagoDateStr(day.toISOString())
+        const isPast = !!dayStr && !!todayStr && dayStr < todayStr
         const { weekday, date } = formatDayHeader(day.toISOString())
-        const entries = orderedEntries(dayStr)
+        const entries = orderedEntries(dayStr ?? '')
         const loadCount = entries.filter((e) => e.role !== 'delivery').length
+        const tbdCount = entries.filter((e) => {
+          if (e.role === 'delivery') return e.load.deliveryApptType === 'tbd'
+          return e.load.pickupApptType === 'tbd'
+        }).length
+        const needsInvoiceCount = isPast
+          ? entries.filter((e) => e.role !== 'pickup' && !e.load.readyToInvoice).length
+          : 0
 
         return (
           <div key={di} className="border-b border-slate-200 shrink-0">
@@ -495,6 +759,23 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
               {loadCount > 0 && (
                 <span className="text-[10px] text-slate-400">· {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
               )}
+              {tbdCount > 0 && (
+                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-px leading-none">
+                  {tbdCount} NEED appt{tbdCount !== 1 ? 's' : ''}
+                </span>
+              )}
+              {needsInvoiceCount > 0 && (
+                <span className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded px-1.5 py-px leading-none">
+                  {needsInvoiceCount} uninvoiced
+                </span>
+              )}
+              <button
+                className="ml-auto flex items-center justify-center size-4 rounded bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                title={`Add load for ${weekday}`}
+                onClick={() => useAppStore.getState().setSelectedLoad(null, 'create', { driverId: null, dateStr: dayStr! })}
+              >
+                <Plus className="size-3" />
+              </button>
             </div>
 
             {entries.length === 0 ? (
@@ -509,8 +790,8 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
                   drivers={drivers}
                   dragging={dragKey.current === entry.key}
                   dragOver={dragOverKey === entry.key}
-                  onDragStart={(k) => handleDragStart(dayStr, k)}
-                  onDragEnter={(k) => handleDragEnter(dayStr, k)}
+                  onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
+                  onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
                   onDragEnd={handleDragEnd}
                 />
               ))

@@ -28,6 +28,7 @@ const FC_VIEWS: Record<ViewMode, string> = {
   'day':      'resourceTimelineDay',
   'week':     'resourceTimelineWorkWeek',
   'compact':  'resourceTimelineDay',   // SchedulerView is never shown in compact mode; fallback only
+  'planner':  'resourceTimelineDay',   // SchedulerView is never shown in planner mode; fallback only
   'two-week': 'resourceTimeline2Weeks',
   'month':    'resourceTimelineMonth',
 }

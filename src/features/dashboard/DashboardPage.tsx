@@ -4,8 +4,8 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts'
 import {
-  TrendingUp, Truck, Package, Users, CheckCircle2, DollarSign,
-  ArrowUp, ArrowDown, Minus,
+  TrendingUp, Truck, Package, DollarSign,
+  ArrowUp, ArrowDown, Minus, AlertCircle, CalendarClock,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -146,20 +146,20 @@ export function DashboardPage() {
             sub={`vs. previous ${RANGE_OPTIONS.find((o) => o.value === rangeKey)?.label.toLowerCase()}`}
           />
           <KpiCard
-            label="Active Drivers"
-            value={metrics.activeDrivers}
-            icon={Users}
-            iconBg="bg-violet-50"
-            iconColor="text-violet-600"
-            sub="with at least 1 load"
+            label="Needs Invoice"
+            value={metrics.needsInvoice}
+            icon={AlertCircle}
+            iconBg={metrics.needsInvoice > 0 ? 'bg-red-50' : 'bg-slate-50'}
+            iconColor={metrics.needsInvoice > 0 ? 'text-red-500' : 'text-slate-400'}
+            sub={metrics.needsInvoice > 0 ? 'Past deliveries not invoiced' : 'All caught up'}
           />
           <KpiCard
-            label="Ready to Invoice"
-            value={metrics.readyToInvoice}
-            icon={CheckCircle2}
-            iconBg="bg-emerald-50"
-            iconColor="text-emerald-600"
-            sub={metrics.totalLoads > 0 ? `${Math.round((metrics.readyToInvoice / metrics.totalLoads) * 100)}% of loads` : undefined}
+            label="Appts to Book"
+            value={metrics.needsAppt}
+            icon={CalendarClock}
+            iconBg={metrics.needsAppt > 0 ? 'bg-amber-50' : 'bg-slate-50'}
+            iconColor={metrics.needsAppt > 0 ? 'text-amber-500' : 'text-slate-400'}
+            sub={metrics.needsAppt > 0 ? 'Loads with NEED status' : 'All booked'}
           />
           <KpiCard
             label="Revenue"
