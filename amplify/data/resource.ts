@@ -1,5 +1,6 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
 import { userManagement } from '../functions/userManagement/resource'
+import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
 
 const schema = a.schema({
   Load: a
@@ -133,6 +134,20 @@ const schema = a.schema({
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.
   // Client-side: isAdminEmail() in AuthContext gates the UI and the nav link.
+  // Notify Slack when an IntakeItem status changes.
+  // Called fire-and-forget from the frontend after a successful updateIntakeItem.
+  notifySlackStatusChange: a
+    .mutation()
+    .arguments({
+      intakeItemId: a.id().required(),
+      oldStatus:    a.string(),
+      newStatus:    a.string().required(),
+      actorName:    a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(slackStatusNotifier)),
+
   manageUsers: a
     .query()
     .arguments({

@@ -1,8 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, StartingPosition } from 'aws-cdk-lib/aws-lambda'
-import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources'
-import { CfnTable } from 'aws-cdk-lib/aws-dynamodb'
+import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda'
 import { CfnOutput } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
@@ -51,10 +49,6 @@ backend.userManagement.resources.lambda.addToRolePolicy(
 
 const intakeTable = backend.data.resources.tables['IntakeItem']
 
-// Enable DynamoDB Streams so the notifier Lambda can react to status changes
-const cfnIntakeTable = intakeTable.node.defaultChild as CfnTable
-cfnIntakeTable.streamSpecification = { streamViewType: 'NEW_AND_OLD_IMAGES' }
-
 // ── slackIntakeWebhook Lambda ──────────────────────────────────────────────
 
 const webhookFn = backend.slackIntakeWebhook.resources.lambda as LambdaFunction
@@ -68,7 +62,7 @@ backend.slackIntakeWebhook.resources.lambda.addToRolePolicy(
 )
 
 webhookFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
-// SLACK_CHANNEL_MAPPING: override this in Amplify Console → Environment variables
+// SLACK_CHANNEL_MAPPING: set this in Amplify Console → Environment variables after deploy
 // Format: '{"C12345678":"IVAN_CARTAGE","C87654321":"BCAT_LOGISTICS"}'
 webhookFn.addEnvironment('SLACK_CHANNEL_MAPPING', '{}')
 
@@ -83,16 +77,19 @@ new CfnOutput(webhookFn.stack, 'SlackIntakeWebhookFunctionUrl', {
   description: 'Paste into Slack App → Event Subscriptions → Request URL',
 })
 
-// ── slackStatusNotifier Lambda (DynamoDB stream consumer) ─────────────────
+// ── slackStatusNotifier Lambda (custom AppSync mutation handler) ───────────
 
 const notifierFn = backend.slackStatusNotifier.resources.lambda as LambdaFunction
 
-// Attach DynamoDB stream as event source (grants stream read permissions automatically)
-notifierFn.addEventSource(new DynamoEventSource(intakeTable, {
-  startingPosition:   StartingPosition.LATEST,
-  batchSize:          10,
-  bisectBatchOnError: true,
-}))
+// DynamoDB: read IntakeItem to get Slack thread context before posting reply
+backend.slackStatusNotifier.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [intakeTable.tableArn],
+  })
+)
+
+notifierFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
 
 // ── fuelImport Lambda ──────────────────────────────────────────────────────
 

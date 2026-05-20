@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
-import { listIntakeItems, updateIntakeItem, deleteIntakeItem } from '@/lib/apiClient'
+import { listIntakeItems, updateIntakeItem, deleteIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const POLL_MS = 30_000
@@ -49,10 +49,21 @@ export function useIntakeItems(filter?: { assignedTo?: string; source?: string }
     notes?: string
     builtLoadId?: string | null
   }) => {
+    const prev = items.find((i) => i.id === id)
     const updated = await updateIntakeItem(id, patch)
-    setItems((prev) => prev.map((i) => (i.id === id ? updated : i)))
+    setItems((all) => all.map((i) => (i.id === id ? updated : i)))
+
+    // Notify Slack if status changed — fire-and-forget
+    if (patch.status && prev && patch.status !== prev.status) {
+      notifySlackStatusChange({
+        intakeItemId: id,
+        oldStatus:    prev.status,
+        newStatus:    patch.status,
+      })
+    }
+
     return updated
-  }, [])
+  }, [items])
 
   const deleteItem = useCallback(async (id: string) => {
     await deleteIntakeItem(id)

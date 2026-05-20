@@ -280,6 +280,25 @@ export async function deleteIntakeItem(id: string): Promise<void> {
   })
 }
 
+export async function notifySlackStatusChange(args: {
+  intakeItemId: string
+  oldStatus?: string | null
+  newStatus: string
+  actorName?: string | null
+}): Promise<void> {
+  try {
+    await client.graphql({
+      query: `mutation NotifySlack($intakeItemId: ID!, $oldStatus: String, $newStatus: String!, $actorName: String) {
+        notifySlackStatusChange(intakeItemId: $intakeItemId, oldStatus: $oldStatus, newStatus: $newStatus, actorName: $actorName)
+      }`,
+      variables: args,
+    })
+  } catch (err) {
+    // Fire-and-forget — log but don't surface to the user
+    console.error('[notifySlackStatusChange] failed', err)
+  }
+}
+
 export async function getIntakePdfUrl(s3Key: string): Promise<string> {
   return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
 }
