@@ -18,6 +18,8 @@ interface MutationArgs {
   oldStatus?: string | null
   newStatus: string
   actorName?: string | null
+  proNumber?: string | null      // BCAT DONE message: Pro# built in Aljex
+  reassignedTo?: string | null   // reassignment reply: display name of new assignee
 }
 
 // AppSync Lambda direct resolver event shape
@@ -42,7 +44,7 @@ async function postSlackReply(channel: string, threadTs: string, text: string) {
 }
 
 export const handler = async (event: AppSyncEvent) => {
-  const { intakeItemId, oldStatus, newStatus, actorName } = event.arguments
+  const { intakeItemId, oldStatus, newStatus, actorName, proNumber, reassignedTo } = event.arguments
 
   // Fetch the item to get Slack thread context
   const result = await dynamo.send(new GetItemCommand({
@@ -62,13 +64,40 @@ export const handler = async (event: AppSyncEvent) => {
     return { ok: true, skipped: true }
   }
 
-  const newLabel = STATUS_LABELS[newStatus] ?? newStatus
-  const oldLabel = oldStatus ? (STATUS_LABELS[oldStatus] ?? oldStatus) : null
+  let text: string
 
-  let text = `Status updated: *${newLabel}*`
-  if (oldLabel) text += `  (was: ${oldLabel})`
-  if (actorName) text += `  •  by ${actorName}`
-  if (item.builtLoadId && newStatus === 'BUILT') text += `  •  Load ID: \`${item.builtLoadId}\``
+  if (reassignedTo) {
+    // Reassignment message — status is unchanged
+    const actor = actorName ?? 'Someone'
+    text = `👤 ${actor} reassigned this to *${reassignedTo}*`
+  } else {
+    // Status-change message
+    switch (newStatus) {
+      case 'IN_PROGRESS':
+        text = `🔄 ${actorName ?? 'Someone'} is working on this`
+        break
+      case 'BUILT': {
+        const loadRef = item.builtLoadId ? `  •  Load ID: \`${item.builtLoadId}\`` : ''
+        text = `✅ ${actorName ?? 'Someone'} built this load in BCAT Ops${loadRef}`
+        break
+      }
+      case 'DONE': {
+        const proRef = proNumber ? `  •  Pro# \`${proNumber}\`` : ''
+        text = `✅ ${actorName ?? 'Someone'} marked this done — built in Aljex${proRef}`
+        break
+      }
+      case 'ARCHIVED':
+        text = `🗄️ ${actorName ?? 'Someone'} archived this`
+        break
+      default: {
+        const newLabel = STATUS_LABELS[newStatus] ?? newStatus
+        const oldLabel = oldStatus ? (STATUS_LABELS[oldStatus] ?? oldStatus) : null
+        text = `Status updated: *${newLabel}*`
+        if (oldLabel) text += `  (was: ${oldLabel})`
+        if (actorName) text += `  •  by ${actorName}`
+      }
+    }
+  }
 
   await postSlackReply(item.slackChannelId as string, item.slackMessageTs as string, text)
 

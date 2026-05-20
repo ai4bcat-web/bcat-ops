@@ -101,6 +101,7 @@ export interface IntakeItem {
   gmailMessageId?: string | null    // legacy
   extractedMetadata?: Record<string, unknown> | null
   builtLoadId?: string | null
+  proNumber?: string | null
   notes?: string | null
   createdAt: string
   updatedAt: string

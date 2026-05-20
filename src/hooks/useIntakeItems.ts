@@ -43,22 +43,44 @@ export function useIntakeItems(filter?: { assignedTo?: string; source?: string }
     return () => clearInterval(id)
   }, [load])
 
-  const updateItem = useCallback(async (id: string, patch: {
-    status?: IntakeStatus
-    assignedTo?: string
-    notes?: string
-    builtLoadId?: string | null
-  }) => {
+  const updateItem = useCallback(async (
+    id: string,
+    patch: {
+      status?: IntakeStatus
+      assignedTo?: string
+      notes?: string
+      builtLoadId?: string | null
+      proNumber?: string | null
+    },
+    slackExtras?: {
+      actorName?: string | null
+      proNumber?: string | null       // included in DONE Slack reply
+      reassignedTo?: string | null    // display name — triggers reassignment reply
+    },
+  ) => {
     const prev = items.find((i) => i.id === id)
     const updated = await updateIntakeItem(id, patch)
     setItems((all) => all.map((i) => (i.id === id ? updated : i)))
 
-    // Notify Slack if status changed — fire-and-forget
+    // Status change notification
     if (patch.status && prev && patch.status !== prev.status) {
       notifySlackStatusChange({
         intakeItemId: id,
         oldStatus:    prev.status,
         newStatus:    patch.status,
+        actorName:    slackExtras?.actorName ?? null,
+        proNumber:    slackExtras?.proNumber ?? null,
+      })
+    }
+
+    // Reassignment notification
+    if (patch.assignedTo && prev && patch.assignedTo !== prev.assignedTo && slackExtras?.reassignedTo) {
+      notifySlackStatusChange({
+        intakeItemId: id,
+        oldStatus:    prev.status,
+        newStatus:    prev.status, // status unchanged — notifier uses reassignedTo branch
+        actorName:    slackExtras?.actorName ?? null,
+        reassignedTo: slackExtras.reassignedTo,
       })
     }
 

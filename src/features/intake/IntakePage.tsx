@@ -1,27 +1,35 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import {
   RefreshCw, ExternalLink, Paperclip, MessageSquare, User,
-  ChevronDown, Inbox, Clock, CheckCircle2, Archive, Loader2,
+  ChevronDown, Inbox, Clock, CheckCircle2, Archive, Loader2, Hash,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
-import { notifySlackStatusChange } from '@/lib/apiClient'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
+// ── Team members ──────────────────────────────────────────────────────────────
+
+export const TEAM_MEMBERS = [
+  { email: 'dennis@bcatcorp.com', name: 'Dennis' },
+  { email: 'arcie@bcatcorp.com',  name: 'Arcie'  },
+  { email: 'ryne@bcatcorp.com',   name: 'Ryne'   },
+  { email: 'jenny@bcatcorp.com',  name: 'Jenny'  },
+  { email: 'ruben@bcatcorp.com',  name: 'Ruben'  },
+] as const
+
+export function assigneeLabel(email: string) {
+  return TEAM_MEMBERS.find((m) => m.email === email)?.name ?? email.split('@')[0]
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const ASSIGNEE_LABELS: Record<string, string> = {
-  'dennis@bcatcorp.com': 'Dennis',
-  'arcie@bcatcorp.com':  'Arcie',
-}
-
-function assigneeLabel(email: string) {
-  return ASSIGNEE_LABELS[email] ?? email.split('@')[0]
-}
 
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
@@ -39,7 +47,7 @@ function formatDate(iso: string) {
   })
 }
 
-const STATUS_BADGE: Record<IntakeStatus, { label: string; className: string }> = {
+export const STATUS_BADGE: Record<IntakeStatus, { label: string; className: string }> = {
   NEW:         { label: 'New',         className: 'bg-sky-50 text-sky-700 border-sky-200' },
   IN_PROGRESS: { label: 'In Progress', className: 'bg-amber-50 text-amber-700 border-amber-200' },
   BUILT:       { label: 'Built',       className: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
@@ -47,23 +55,137 @@ const STATUS_BADGE: Record<IntakeStatus, { label: string; className: string }> =
   ARCHIVED:    { label: 'Archived',    className: 'bg-slate-50 text-slate-400 border-slate-200' },
 }
 
-const SOURCE_LABEL: Record<string, string> = {
+export const SOURCE_LABEL: Record<string, string> = {
   IVAN_CARTAGE:   'Ivan Cartage',
   BCAT_LOGISTICS: 'BCAT Logistics',
 }
 
 const ACTIVE_STATUSES = new Set<IntakeStatus>(['NEW', 'IN_PROGRESS'])
 
+// ── Pro# modal ────────────────────────────────────────────────────────────────
+
+function ProNumberModal({
+  item,
+  onConfirm,
+  onClose,
+}: {
+  item: IntakeItem
+  onConfirm: (proNumber: string) => Promise<void>
+  onClose: () => void
+}) {
+  const [proNumber, setProNumber] = useState('')
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    // Auto-focus the input when modal opens
+    setTimeout(() => inputRef.current?.focus(), 50)
+  }, [])
+
+  const handleConfirm = async () => {
+    const trimmed = proNumber.trim()
+    if (!trimmed) return
+    setSaving(true)
+    try {
+      await onConfirm(trimmed)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Mark as Done</DialogTitle>
+          <DialogDescription>
+            Enter the Pro# from Aljex for this BCAT Logistics load. Required before marking done.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Subject
+          </p>
+          <p className="text-sm text-foreground font-medium leading-snug">
+            {item.subject || '(no subject)'}
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+            <Hash className="size-3" /> Pro# <span className="text-destructive">*</span>
+          </label>
+          <Input
+            ref={inputRef}
+            value={proNumber}
+            onChange={(e) => setProNumber(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleConfirm()}
+            placeholder="e.g. A-2847391"
+            className="h-9"
+          />
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" className="flex-1" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+            onClick={handleConfirm}
+            disabled={!proNumber.trim() || saving}
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : <CheckCircle2 className="size-3.5 mr-1.5" />}
+            Mark as Done
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Assignee select ───────────────────────────────────────────────────────────
+
+function AssigneeSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: string
+  onChange: (email: string) => void
+  className?: string
+}) {
+  return (
+    <div className={cn('relative', className)}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-6 pl-1.5 pr-5 text-[11px] rounded border border-slate-200 bg-white appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary text-foreground font-medium w-full"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {TEAM_MEMBERS.map((m) => (
+          <option key={m.email} value={m.email}>{m.name}</option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 size-2.5 text-muted-foreground" />
+    </div>
+  )
+}
+
 // ── Queue card ────────────────────────────────────────────────────────────────
 
 function QueueCard({
   item,
   onBuildLoad,
+  onMarkDone,
   onStatusChange,
+  onAssigneeChange,
 }: {
   item: IntakeItem
   onBuildLoad: (item: IntakeItem) => void
+  onMarkDone: (item: IntakeItem) => void
   onStatusChange: (id: string, status: IntakeStatus) => void
+  onAssigneeChange: (id: string, email: string) => void
 }) {
   const isIvan  = item.source === 'IVAN_CARTAGE'
   const hasPdfs = (item.s3KeyPdfAttachments?.length ?? 0) > 0
@@ -90,12 +212,13 @@ function QueueCard({
           <Clock className="size-3" />
           {relativeTime(item.receivedAt)}
         </span>
-        {item.assignedTo && (
-          <span className="flex items-center gap-1">
-            <User className="size-3" />
-            {assigneeLabel(item.assignedTo)}
-          </span>
-        )}
+        <span className="flex items-center gap-1 shrink-0">
+          <User className="size-3" />
+          <AssigneeSelect
+            value={item.assignedTo ?? 'dennis@bcatcorp.com'}
+            onChange={(email) => onAssigneeChange(item.id, email)}
+          />
+        </span>
         {hasPdfs && (
           <span className="flex items-center gap-1">
             <Paperclip className="size-3" />
@@ -142,7 +265,7 @@ function QueueCard({
           <Button
             size="sm"
             className="h-7 text-xs gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-            onClick={() => onStatusChange(item.id, 'DONE')}
+            onClick={() => onMarkDone(item)}
           >
             <CheckCircle2 className="size-3" />
             Mark as Done
@@ -176,7 +299,15 @@ function QueueCard({
 
 // ── History row ───────────────────────────────────────────────────────────────
 
-function HistoryRow({ item, loads }: { item: IntakeItem; loads: { id: string; aljexId: string }[] }) {
+function HistoryRow({
+  item,
+  loads,
+  onAssigneeChange,
+}: {
+  item: IntakeItem
+  loads: { id: string; aljexId: string }[]
+  onAssigneeChange: (id: string, email: string) => void
+}) {
   const badge = STATUS_BADGE[item.status] ?? { label: item.status, className: 'bg-slate-100 text-slate-600 border-slate-200' }
   const builtLoad = item.builtLoadId ? loads.find((l) => l.id === item.builtLoadId) : null
 
@@ -197,7 +328,7 @@ function HistoryRow({ item, loads }: { item: IntakeItem; loads: { id: string; al
       </td>
       <td className="px-4 py-2.5">
         <div className="flex items-center gap-2">
-          <p className="text-xs font-medium text-foreground truncate max-w-[240px]">
+          <p className="text-xs font-medium text-foreground truncate max-w-[220px]">
             {item.subject || '(no subject)'}
           </p>
           {(item.s3KeyPdfAttachments?.length ?? 0) > 0 && (
@@ -207,11 +338,14 @@ function HistoryRow({ item, loads }: { item: IntakeItem; loads: { id: string; al
           )}
         </div>
         {item.fromEmail && (
-          <p className="text-[11px] text-muted-foreground truncate max-w-[240px] mt-0.5">{item.fromEmail}</p>
+          <p className="text-[11px] text-muted-foreground truncate max-w-[220px] mt-0.5">{item.fromEmail}</p>
         )}
       </td>
-      <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-        {item.assignedTo ? assigneeLabel(item.assignedTo) : '—'}
+      <td className="px-4 py-2.5">
+        <AssigneeSelect
+          value={item.assignedTo ?? 'dennis@bcatcorp.com'}
+          onChange={(email) => onAssigneeChange(item.id, email)}
+        />
       </td>
       <td className="px-4 py-2.5">
         <span className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded border', badge.className)}>
@@ -219,8 +353,13 @@ function HistoryRow({ item, loads }: { item: IntakeItem; loads: { id: string; al
         </span>
       </td>
       <td className="px-4 py-2.5 text-xs">
+        {/* Ivan → built load link; BCAT → pro number */}
         {builtLoad ? (
           <span className="font-medium text-emerald-700">{builtLoad.aljexId || builtLoad.id.slice(0, 8)}</span>
+        ) : item.proNumber ? (
+          <span className="font-medium text-slate-700 flex items-center gap-0.5">
+            <Hash className="size-3" />{item.proNumber}
+          </span>
         ) : (
           <span className="text-muted-foreground">—</span>
         )}
@@ -257,12 +396,17 @@ export function IntakePage() {
   const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
   const loads                = useAppStore((s) => s.loads)
 
+  const actorEmail = user?.email ?? 'dispatch'
+
   // Active queue tab
   const [activeTab, setActiveTab] = useState<'IVAN_CARTAGE' | 'BCAT_LOGISTICS'>('IVAN_CARTAGE')
 
   // History filters
   const [historySource, setHistorySource] = useState<string>('ALL')
   const [historyStatus, setHistoryStatus] = useState<string>('ALL')
+
+  // Pro# modal state
+  const [proModalItem, setProModalItem] = useState<IntakeItem | null>(null)
 
   // Active queue items
   const activeItems = useMemo(() =>
@@ -272,11 +416,9 @@ export function IntakePage() {
     [items, activeTab],
   )
 
-  // Count badges for tabs
   const ivanCount = useMemo(() => items.filter((i) => i.source === 'IVAN_CARTAGE' && ACTIVE_STATUSES.has(i.status)).length, [items])
   const bcatCount = useMemo(() => items.filter((i) => i.source === 'BCAT_LOGISTICS' && ACTIVE_STATUSES.has(i.status)).length, [items])
 
-  // History items (all, with optional filter)
   const historyItems = useMemo(() => {
     let list = [...items]
     if (historySource !== 'ALL') list = list.filter((i) => i.source === historySource)
@@ -285,28 +427,40 @@ export function IntakePage() {
   }, [items, historySource, historyStatus])
 
   const handleStatusChange = async (id: string, status: IntakeStatus) => {
-    const prev = items.find((i) => i.id === id)
-    await updateItem(id, { status })
-    if (prev && prev.status !== status) {
-      notifySlackStatusChange({
-        intakeItemId: id,
-        oldStatus:    prev.status,
-        newStatus:    status,
-        actorName:    user?.email ?? undefined,
-      })
-    }
+    await updateItem(id, { status }, { actorName: actorEmail })
   }
 
   const handleBuildLoad = (item: IntakeItem) => {
-    // Ensure item is IN_PROGRESS so Slack thread shows activity, then open load modal
     if (item.status === 'NEW') {
-      updateItem(item.id, { status: 'IN_PROGRESS' }).catch(() => {})
+      updateItem(item.id, { status: 'IN_PROGRESS' }, { actorName: actorEmail }).catch(() => {})
     }
     setPendingIntakeItem(item.id)
     setSelectedLoad(null, 'create')
   }
 
-  // Slim load list for history table (just id + aljexId)
+  const handleMarkDone = (item: IntakeItem) => {
+    setProModalItem(item)
+  }
+
+  const handleProConfirm = async (proNumber: string) => {
+    if (!proModalItem) return
+    await updateItem(
+      proModalItem.id,
+      { status: 'DONE', proNumber },
+      { actorName: actorEmail, proNumber },
+    )
+    setProModalItem(null)
+  }
+
+  const handleAssigneeChange = async (id: string, email: string) => {
+    const displayName = assigneeLabel(email)
+    await updateItem(
+      id,
+      { assignedTo: email },
+      { actorName: actorEmail, reassignedTo: displayName },
+    )
+  }
+
   const loadIndex = useMemo(() =>
     loads.map((l) => ({ id: l.id, aljexId: l.aljexId })),
     [loads],
@@ -336,7 +490,7 @@ export function IntakePage() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
-        {/* ── Section 1: Active Queue ─────────────────────────────────────── */}
+        {/* ── Section 1: Active Queue ───────────────────────────────────── */}
         <section className="px-8 pt-6 pb-4">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
@@ -368,9 +522,7 @@ export function IntakePage() {
                   {count > 0 && (
                     <span className={cn(
                       'text-[10px] font-bold rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center',
-                      activeTab === key
-                        ? 'bg-primary text-white'
-                        : 'bg-slate-200 text-slate-600',
+                      activeTab === key ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600',
                     )}>
                       {count}
                     </span>
@@ -393,14 +545,16 @@ export function IntakePage() {
                   key={item.id}
                   item={item}
                   onBuildLoad={handleBuildLoad}
+                  onMarkDone={handleMarkDone}
                   onStatusChange={handleStatusChange}
+                  onAssigneeChange={handleAssigneeChange}
                 />
               ))}
             </div>
           )}
         </section>
 
-        {/* ── Section 2: History Table ────────────────────────────────────── */}
+        {/* ── Section 2: History Table ──────────────────────────────────── */}
         <section className="px-8 pt-2 pb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-semibold text-foreground uppercase tracking-wider">
@@ -410,7 +564,6 @@ export function IntakePage() {
               </span>
             </h2>
 
-            {/* Filters */}
             <div className="flex items-center gap-2">
               <div className="relative">
                 <select
@@ -453,32 +606,21 @@ export function IntakePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 bg-slate-50">
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
-                        Received
-                      </th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Source
-                      </th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Subject
-                      </th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Assignee
-                      </th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Status
-                      </th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Load
-                      </th>
-                      <th className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Link
-                      </th>
+                      {['Received', 'Source', 'Subject', 'Assignee', 'Status', 'Pro# / Load', 'Link'].map((col) => (
+                        <th key={col} className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+                          {col}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
                     {historyItems.map((item) => (
-                      <HistoryRow key={item.id} item={item} loads={loadIndex} />
+                      <HistoryRow
+                        key={item.id}
+                        item={item}
+                        loads={loadIndex}
+                        onAssigneeChange={handleAssigneeChange}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -488,7 +630,16 @@ export function IntakePage() {
         </section>
       </div>
 
-      {/* LoadDrawer rendered here so it's available on this page */}
+      {/* Pro# modal */}
+      {proModalItem && (
+        <ProNumberModal
+          item={proModalItem}
+          onConfirm={handleProConfirm}
+          onClose={() => setProModalItem(null)}
+        />
+      )}
+
+      {/* LoadDrawer — must be present for "Build Load" to work */}
       <LoadDrawer />
     </div>
   )

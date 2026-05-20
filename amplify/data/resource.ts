@@ -76,6 +76,7 @@ const schema = a.schema({
       gmailMessageId:       a.string(),        // legacy — kept for backward compat
       extractedMetadata:    a.json(),
       builtLoadId:          a.id(),
+      proNumber:            a.string(),   // BCAT Logistics: Pro# entered on Mark as Done
       notes:                a.string(),
     })
     .secondaryIndexes((index) => [
@@ -143,6 +144,8 @@ const schema = a.schema({
       oldStatus:    a.string(),
       newStatus:    a.string().required(),
       actorName:    a.string(),
+      proNumber:    a.string(),     // included in DONE message for BCAT items
+      reassignedTo: a.string(),     // set (display name) when posting a reassignment reply
     })
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])

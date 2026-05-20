@@ -235,7 +235,7 @@ const INTAKE_FIELDS = `
   id source status assignedTo receivedAt fromEmail subject
   bodyText bodyHtml s3KeyPdfAttachments
   externalSource externalId externalUrl slackChannelId slackMessageTs
-  gmailMessageId extractedMetadata builtLoadId notes createdAt updatedAt
+  gmailMessageId extractedMetadata builtLoadId proNumber notes createdAt updatedAt
 `
 
 export async function listIntakeItems(filter?: { assignedTo?: string; source?: string }): Promise<IntakeItem[]> {
@@ -276,6 +276,7 @@ export async function updateIntakeItem(id: string, patch: {
   assignedTo?: string
   notes?: string
   builtLoadId?: string | null
+  proNumber?: string | null
 }): Promise<IntakeItem> {
   const result = await client.graphql({
     query: `mutation UpdateIntakeItem($input: UpdateIntakeItemInput!) { updateIntakeItem(input: $input) { ${INTAKE_FIELDS} } }`,
@@ -296,11 +297,19 @@ export async function notifySlackStatusChange(args: {
   oldStatus?: string | null
   newStatus: string
   actorName?: string | null
+  proNumber?: string | null
+  reassignedTo?: string | null
 }): Promise<void> {
   try {
     await client.graphql({
-      query: `mutation NotifySlack($intakeItemId: ID!, $oldStatus: String, $newStatus: String!, $actorName: String) {
-        notifySlackStatusChange(intakeItemId: $intakeItemId, oldStatus: $oldStatus, newStatus: $newStatus, actorName: $actorName)
+      query: `mutation NotifySlack(
+        $intakeItemId: ID!, $oldStatus: String, $newStatus: String!,
+        $actorName: String, $proNumber: String, $reassignedTo: String
+      ) {
+        notifySlackStatusChange(
+          intakeItemId: $intakeItemId, oldStatus: $oldStatus, newStatus: $newStatus,
+          actorName: $actorName, proNumber: $proNumber, reassignedTo: $reassignedTo
+        )
       }`,
       variables: args,
     })
