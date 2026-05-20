@@ -9,7 +9,8 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard',  icon: LayoutDashboard, pageKey: 'dashboard' },
   { to: '/calendar',  label: 'Calendar',   icon: CalendarDays,    pageKey: 'calendar'  },
   { to: '/loads',     label: 'Loads',      icon: Table2,          pageKey: 'loads'     },
-  { to: '/intake',    label: 'Intake',     icon: Inbox,           pageKey: 'intake'    },
+  // intake is visible to all authenticated users — assignedTo is a label, not a filter
+  { to: '/intake',    label: 'Intake',     icon: Inbox,           pageKey: 'intake',   alwaysVisible: true },
   { to: '/drivers',   label: 'Drivers',    icon: Users,           pageKey: 'drivers'   },
   { to: '/trucks',      label: 'Fleet',       icon: Truck,      pageKey: 'trucks'       },
   { to: '/maintenance', label: 'Maintenance', icon: Wrench,     pageKey: 'maintenance'  },
@@ -29,7 +30,7 @@ export function NavBar() {
       </div>
 
       <nav className="sidebar-nav">
-        {NAV_ITEMS.filter(({ pageKey }) => hasPageAccess(pageKey)).map(({ to, label, icon: Icon }) => (
+        {NAV_ITEMS.filter(({ pageKey, alwaysVisible }) => alwaysVisible || hasPageAccess(pageKey)).map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}

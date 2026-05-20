@@ -18,6 +18,15 @@ const STATUS_LABELS: Record<IntakeStatus, string> = {
   ARCHIVED:    'Archived',
 }
 
+const ASSIGNEE_LABELS: Record<string, string> = {
+  'dennis@bcatcorp.com': 'Dennis',
+  'arcie@bcatcorp.com':  'Arcie',
+}
+
+function assigneeLabel(email: string) {
+  return ASSIGNEE_LABELS[email] ?? email.split('@')[0]
+}
+
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60_000)
@@ -61,6 +70,11 @@ export function IntakeCard({ item, selected, onClick }: IntakeCardProps) {
         <span className="text-[11px] text-muted-foreground">
           {relativeTime(item.receivedAt)}
         </span>
+        {item.assignedTo && (
+          <span className="text-[11px] text-slate-500 font-medium">
+            {assigneeLabel(item.assignedTo)}
+          </span>
+        )}
         {isSlack && (
           <span className="flex items-center gap-0.5 text-[11px] text-sky-600">
             <MessageSquare className="size-2.5" /> Slack
