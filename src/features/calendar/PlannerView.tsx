@@ -460,6 +460,9 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       <EditableTextCell load={load} field="tmsId"        width={COL.tms} dimmed={isDeliveryDay} />
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu}  dimmed={isDeliveryDay} />
 
+      {/* Route — bold when this is the final destination day */}
+      <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
+
       {/* PU Appt */}
       <div className="relative group/appt shrink-0">
         <ApptCell
@@ -501,9 +504,6 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
           <ApptEditPopover load={load} apptField="deliveryAppt" typeField="deliveryApptType" onClose={() => setEditingAppt(null)} />
         )}
       </div>
-
-      {/* Route — bold when this is the final destination day */}
-      <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
 
       {/* Driver (with slot badge) */}
       <div
@@ -687,9 +687,9 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
+        <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>
         <ColHeader width={COL.deAppt}>DE Appt</ColHeader>
-        <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.driver}>Driver</ColHeader>
         <ColHeader width={COL.notes}>Notes</ColHeader>
         <ColHeader width={COL.rate}>Rate</ColHeader>
