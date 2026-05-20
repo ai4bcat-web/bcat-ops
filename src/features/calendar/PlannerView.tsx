@@ -460,6 +460,16 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       <EditableTextCell load={load} field="tmsId"        width={COL.tms} dimmed={isDeliveryDay} />
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu}  dimmed={isDeliveryDay} />
 
+      {/* PU / DE location names */}
+      <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
+        {load.originName && (
+          <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
+        )}
+        {load.destinationName && (
+          <span className="text-[10px] text-slate-400 truncate" title={load.destinationName}>{load.destinationName}</span>
+        )}
+      </div>
+
       {/* Route — bold when this is the final destination day */}
       <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
 
@@ -561,15 +571,6 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         <div className="shrink-0 px-2" style={{ width: 32 }} />
       )}
 
-      {/* PU / DE location names */}
-      <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
-        {load.originName && (
-          <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
-        )}
-        {load.destinationName && (
-          <span className="text-[10px] text-slate-400 truncate" title={load.destinationName}>{load.destinationName}</span>
-        )}
-      </div>
     </div>
   )
 }
@@ -697,6 +698,7 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
+        <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
         <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>
         <ColHeader width={COL.deAppt}>DE Appt</ColHeader>
@@ -704,7 +706,6 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
         <ColHeader width={COL.notes}>Notes</ColHeader>
         <ColHeader width={COL.rate}>Rate</ColHeader>
         <ColHeader width={32}>RTI</ColHeader>
-        <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
       </div>
 
       {/* Day sections */}
