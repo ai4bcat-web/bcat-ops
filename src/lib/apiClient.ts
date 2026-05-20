@@ -245,11 +245,22 @@ export async function listIntakeItems(filter?: { assignedTo?: string; source?: s
   else if (filter?.source) { filterArg = '(filter: { source: { eq: $source } })'; vars['source'] = filter.source }
 
   const varDef = filter?.assignedTo ? '($assignedTo: String)' : filter?.source ? '($source: String)' : ''
-  const result = await client.graphql({
-    query: `query ListIntakeItems${varDef} { listIntakeItems${filterArg}(limit: 200) { items { ${INTAKE_FIELDS} } } }`,
-    variables: vars,
-  }) as { data: { listIntakeItems: { items: IntakeItem[] } } }
-  return result.data.listIntakeItems.items ?? []
+  try {
+    const result = await client.graphql({
+      query: `query ListIntakeItems${varDef} { listIntakeItems${filterArg}(limit: 200) { items { ${INTAKE_FIELDS} } } }`,
+      variables: vars,
+    }) as { data: { listIntakeItems: { items: IntakeItem[] } } }
+    return result.data.listIntakeItems.items ?? []
+  } catch (err: unknown) {
+    // AppSync returns partial errors (e.g. invalid enum on stale records) as a thrown object
+    // with both .data and .errors — extract whatever valid items came back rather than blanking the UI
+    const partial = (err as { data?: { listIntakeItems?: { items?: IntakeItem[] } } }).data
+    if (partial?.listIntakeItems?.items) {
+      console.warn('[listIntakeItems] partial errors (stale records?) — showing valid items', err)
+      return partial.listIntakeItems.items.filter(Boolean) as IntakeItem[]
+    }
+    throw err
+  }
 }
 
 export async function getIntakeItem(id: string): Promise<IntakeItem | null> {

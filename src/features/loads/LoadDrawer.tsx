@@ -17,6 +17,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
+import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
 import { loadSchema, type LoadFormValues } from '@/lib/schemas'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
@@ -166,10 +167,12 @@ function ApptFields({
 // ── Drawer ────────────────────────────────────────────────────────────────────
 
 export function LoadDrawer() {
-  const selectedLoadId  = useAppStore((s) => s.selectedLoadId)
-  const drawerMode      = useAppStore((s) => s.drawerMode)
-  const createPreFill   = useAppStore((s) => s.createPreFill)
-  const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const selectedLoadId        = useAppStore((s) => s.selectedLoadId)
+  const drawerMode            = useAppStore((s) => s.drawerMode)
+  const createPreFill         = useAppStore((s) => s.createPreFill)
+  const setSelectedLoad       = useAppStore((s) => s.setSelectedLoad)
+  const pendingIntakeItemId   = useAppStore((s) => s.pendingIntakeItemId)
+  const setPendingIntakeItem  = useAppStore((s) => s.setPendingIntakeItem)
   const { loads, addLoad, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
   const { user } = useAuth()
@@ -301,7 +304,22 @@ export function LoadDrawer() {
     }
     try {
       if (isCreate) {
-        await addLoad(payload)
+        const newLoad = await addLoad(payload)
+        // If opened from intake, link the built load back to the intake item
+        if (pendingIntakeItemId) {
+          setPendingIntakeItem(null)
+          try {
+            await updateIntakeItem(pendingIntakeItemId, { builtLoadId: newLoad.id, status: 'BUILT' })
+            notifySlackStatusChange({
+              intakeItemId: pendingIntakeItemId,
+              oldStatus:    'IN_PROGRESS',
+              newStatus:    'BUILT',
+              actorName:    userEmail,
+            })
+          } catch (linkErr) {
+            console.error('[LoadDrawer] failed to link intake item', linkErr)
+          }
+        }
         toast.success('Load created')
       } else if (load) {
         await updateLoad(load.id, payload)

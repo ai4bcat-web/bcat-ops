@@ -353,6 +353,7 @@ interface AppState {
   selectedLoadId: string | null
   drawerMode: 'view' | 'edit' | 'create' | null
   createPreFill: { driverId: string | null; dateStr: string } | null
+  pendingIntakeItemId: string | null
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean }
@@ -367,7 +368,7 @@ interface AppState {
   deleteDriver: (id: string) => Promise<void>
 
   // ── Load actions ───────────────────────────────────────────────────────────
-  addLoad: (l: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
+  addLoad: (l: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Load>
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
   deleteLoad: (id: string) => Promise<void>
 
@@ -397,6 +398,7 @@ interface AppState {
     mode?: 'view' | 'edit' | 'create',
     preFill?: { driverId: string | null; dateStr: string }
   ) => void
+  setPendingIntakeItem: (id: string | null) => void
   setFilterDriver: (id: string | null) => void
   setSearchQuery: (q: string) => void
   toggleFilter: (f: keyof AppState['filters']) => void
@@ -438,6 +440,7 @@ export const useAppStore = create<AppState>()(
       selectedLoadId: null,
       drawerMode: null,
       createPreFill: null,
+      pendingIntakeItemId: null,
       filterDriverId: null,
       searchQuery: '',
       filters: { readyToInvoice: false, split: false, unassigned: false },
@@ -497,6 +500,7 @@ export const useAppStore = create<AppState>()(
         writeAudit(get().currentUserEmail, 'Load', load.id, 'create', {
           _snapshot: { from: null, to: load },
         })
+        return load
       },
 
       updateLoad: async (id, patch) => {
@@ -583,6 +587,7 @@ export const useAppStore = create<AppState>()(
           drawerMode: id === null && mode !== 'create' ? null : mode,
           createPreFill: preFill ?? null,
         }),
+      setPendingIntakeItem: (id) => set({ pendingIntakeItemId: id }),
       setFilterDriver: (id) => set({ filterDriverId: id }),
       setSearchQuery: (q) => set({ searchQuery: q }),
       toggleFilter: (f) =>
