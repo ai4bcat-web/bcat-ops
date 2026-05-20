@@ -1,87 +1,52 @@
-import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
-import FullCalendar from '@fullcalendar/react'
-import type { DatesSetArg } from '@fullcalendar/core'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
-import { useConflictDetection } from '@/hooks/useConflictDetection'
 import { CalendarToolbar } from './CalendarToolbar'
-import { SchedulerView } from './SchedulerView'
 import { PlannerView } from './PlannerView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
-type FCViewMode = Exclude<ViewMode, 'planner'>
-
-const FC_VIEW_NAMES: Record<FCViewMode, string> = {
-  'day':      'resourceTimelineDay',
-  'week':     'resourceTimelineWorkWeek',
-  'two-week': 'resourceTimeline2Weeks',
+const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
+  'planner':  { numDays: 7,  navDays: 7  },
+  'week':     { numDays: 7,  navDays: 7  },
+  'day':      { numDays: 1,  navDays: 1  },
+  'two-week': { numDays: 14, navDays: 14 },
 }
 
 export function CalendarPage() {
-  const weekStart = useAppStore((s) => s.weekStart)
-  const viewMode = useAppStore((s) => s.viewMode)
-  const filterDriverId = useAppStore((s) => s.filterDriverId)
   const searchQuery = useAppStore((s) => s.searchQuery)
-  const filters = useAppStore((s) => s.filters)
+  const filters     = useAppStore((s) => s.filters)
 
-  const { loads } = useLoads()
+  const { loads }   = useLoads()
   const { drivers } = useDrivers()
 
-  const calendarRef = useRef<FullCalendar>(null)
-
-  // Local state for toolbar — FC is the source of truth for dates/view after init
   const [currentView, setCurrentView] = useState<ViewMode>('planner')
-  const [dateLabel, setDateLabel] = useState('')
+  const [startDate, setStartDate]     = useState<Date>(() => getMondayOf(new Date()))
 
-  // Compact view has its own week state (not driven by FullCalendar)
-  const [compactWeek, setCompactWeek] = useState<Date>(() => getMondayOf(new Date()))
+  const { numDays, navDays } = VIEW_CONFIG[currentView]
 
-  const compactDateLabel = useMemo(() => {
-    const end = addDays(compactWeek, 6)
-    return `${formatDateShort(compactWeek.toISOString())} – ${formatDateShort(end.toISOString())}`
-  }, [compactWeek])
+  const dateLabel = useMemo(() => {
+    const end = addDays(startDate, numDays - 1)
+    return numDays === 1
+      ? formatDateShort(startDate.toISOString())
+      : `${formatDateShort(startDate.toISOString())} – ${formatDateShort(end.toISOString())}`
+  }, [startDate, numDays])
 
-  const isCustomView = currentView === 'planner'
-  const effectiveDateLabel = isCustomView ? compactDateLabel : dateLabel
-
-  // ── Calendar API helpers ──────────────────────────────────────────────────
-
-  const getApi = useCallback(() => calendarRef.current?.getApi(), [])
-
-  const onPrev = useCallback(() => {
-    if (isCustomView) setCompactWeek((w) => addDays(w, -7))
-    else getApi()?.prev()
-  }, [isCustomView, getApi])
-
-  const onNext = useCallback(() => {
-    if (isCustomView) setCompactWeek((w) => addDays(w, 7))
-    else getApi()?.next()
-  }, [isCustomView, getApi])
-
+  const onPrev  = useCallback(() => setStartDate((d) => addDays(d, -navDays)), [navDays])
+  const onNext  = useCallback(() => setStartDate((d) => addDays(d, navDays)),  [navDays])
   const onToday = useCallback(() => {
-    if (isCustomView) setCompactWeek(getMondayOf(new Date()))
-    else getApi()?.today()
-  }, [isCustomView, getApi])
+    const today = new Date()
+    setStartDate(currentView === 'day' ? today : getMondayOf(today))
+  }, [currentView])
 
   const onViewChange = useCallback((view: ViewMode) => {
     setCurrentView(view)
-    if (view !== 'planner') {
-      getApi()?.changeView(FC_VIEW_NAMES[view as FCViewMode])
-    }
-  }, [getApi])
-
-  const onDatesSet = useCallback((info: DatesSetArg) => {
-    const start = info.start
-    const end = new Date(info.end)
-    end.setDate(end.getDate() - 1) // FC's end is exclusive
-    const label = start.toDateString() === end.toDateString()
-      ? formatDateShort(start.toISOString())
-      : `${formatDateShort(start.toISOString())} – ${formatDateShort(end.toISOString())}`
-    setDateLabel(label)
+    const today = new Date()
+    // Reset to today's week (or today for day view) on view switch
+    setStartDate(view === 'day' ? today : getMondayOf(today))
   }, [])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
@@ -90,18 +55,14 @@ export function CalendarPage() {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-
-      if (e.key === 'n' || e.key === 'N') {
-        e.preventDefault()
-        useAppStore.getState().setSelectedLoad(null, 'create')
-      }
-      if (e.key === 'ArrowLeft') { e.preventDefault(); getApi()?.prev() }
-      if (e.key === 'ArrowRight') { e.preventDefault(); getApi()?.next() }
-      if (e.key === 'Escape') { useAppStore.getState().setFilterDriver(null) }
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); useAppStore.getState().setSelectedLoad(null, 'create') }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); setStartDate((d) => addDays(d, -navDays)) }
+      if (e.key === 'ArrowRight') { e.preventDefault(); setStartDate((d) => addDays(d, navDays))  }
+      if (e.key === 'Escape')     { useAppStore.getState().setFilterDriver(null) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [getApi])
+  }, [navDays])
 
   // ── Filter loads ──────────────────────────────────────────────────────────
 
@@ -120,15 +81,13 @@ export function CalendarPage() {
     return true
   })
 
-  const conflictIds = useConflictDetection(visibleLoads, drivers)
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <CalendarToolbar
         currentView={currentView}
-        dateLabel={effectiveDateLabel}
+        dateLabel={dateLabel}
         onPrev={onPrev}
         onNext={onNext}
         onToday={onToday}
@@ -137,20 +96,12 @@ export function CalendarPage() {
 
       <div className="flex-1 overflow-hidden mx-4 mb-4 mt-3 rounded-xl border border-slate-200 shadow-sm">
         <CalendarErrorBoundary>
-          {currentView === 'planner' ? (
-            <PlannerView loads={visibleLoads} drivers={drivers} weekStart={compactWeek} />
-          ) : (
-            <SchedulerView
-              calendarRef={calendarRef}
-              loads={visibleLoads}
-              drivers={drivers}
-              conflictIds={conflictIds}
-              filterDriverId={filterDriverId}
-              viewMode={viewMode}
-              weekStart={weekStart}
-              onDatesSet={onDatesSet}
-            />
-          )}
+          <PlannerView
+            loads={visibleLoads}
+            drivers={drivers}
+            weekStart={startDate}
+            numDays={numDays}
+          />
         </CalendarErrorBoundary>
       </div>
 

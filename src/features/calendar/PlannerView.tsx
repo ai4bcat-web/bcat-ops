@@ -608,10 +608,11 @@ interface PlannerViewProps {
   loads:     Load[]
   drivers:   Driver[]
   weekStart: Date
+  numDays?:  number
 }
 
-export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart])
+export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerViewProps) {
+  const days = useMemo(() => Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)), [weekStart, numDays])
 
   // Group loads into day entries — multi-day loads appear on BOTH pickup and delivery day
   const entriesByDay = useMemo(() => {
