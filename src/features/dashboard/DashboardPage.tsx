@@ -95,15 +95,13 @@ function ComingSoonCard({ icon: Icon, title, description }: { icon: React.Elemen
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 const RANGE_OPTIONS: { value: DateRangeKey; label: string }[] = [
-  { value: 'today',        label: 'Today'        },
-  { value: 'this-week',    label: 'This Week'    },
   { value: 'this-month',   label: 'This Month'   },
   { value: 'this-quarter', label: 'This Quarter' },
   { value: 'this-year',    label: 'This Year'    },
 ]
 
 export function DashboardPage() {
-  const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-week')
+  const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-year')
   const metrics = useDashboardMetrics(rangeKey)
   const { transactions: fuelTxs, loading: fuelLoading } = useFuelTransactions()
 
