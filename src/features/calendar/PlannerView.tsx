@@ -357,10 +357,10 @@ function RateCell({ load }: { load: Load }) {
   return (
     <div
       className="shrink-0 flex items-center px-1.5 text-[11px] cursor-pointer hover:bg-black/5 rounded truncate"
-      style={{ width: COL.rate, color: load.rate ? '#15803d' : '#94a3b8' }}
+      style={{ width: COL.rate, color: load.rate ? '#15803d' : '#2563eb' }}
       onClick={() => { setVal(load.rate != null ? String(load.rate / 100) : ''); setEditing(true) }}
     >
-      {display}
+      {load.rate != null ? display : <span className="underline underline-offset-2">Add Rate</span>}
     </div>
   )
 }
@@ -533,10 +533,13 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         {/* Driver name */}
         <div className={cn(
           'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded',
-          isDeliveryDay ? 'text-slate-400' : 'text-slate-800 cursor-pointer hover:bg-black/5',
+          isDeliveryDay ? 'text-slate-400' : 'cursor-pointer hover:bg-black/5',
+          !isDeliveryDay && !load.pickupDriverId ? 'text-blue-600' : 'text-slate-800',
           showDriver && 'ring-1 ring-blue-400 bg-blue-50',
         )}>
-          {driverName}
+          {!isDeliveryDay && !load.pickupDriverId
+            ? <span className="underline underline-offset-2">Assign Driver</span>
+            : driverName}
         </div>
         {showDriver && !isDeliveryDay && (
           <DriverPicker
