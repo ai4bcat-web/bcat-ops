@@ -18,11 +18,9 @@ interface CalendarToolbarProps {
 
 const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
   { value: 'planner',  label: 'Planner'  },
-  { value: 'compact',  label: 'List'     },
-  { value: 'day',      label: 'Day'      },
   { value: 'week',     label: 'Week'     },
+  { value: 'day',      label: 'Day'      },
   { value: 'two-week', label: '2 Weeks'  },
-  { value: 'month',    label: 'Month'    },
 ]
 
 const FILTER_CHIPS = [

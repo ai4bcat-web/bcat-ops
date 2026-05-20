@@ -7,20 +7,18 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useConflictDetection } from '@/hooks/useConflictDetection'
 import { CalendarToolbar } from './CalendarToolbar'
 import { SchedulerView } from './SchedulerView'
-import { CompactWeekView } from './CompactWeekView'
 import { PlannerView } from './PlannerView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
-type FCViewMode = Exclude<ViewMode, 'compact' | 'planner'>
+type FCViewMode = Exclude<ViewMode, 'planner'>
 
 const FC_VIEW_NAMES: Record<FCViewMode, string> = {
   'day':      'resourceTimelineDay',
   'week':     'resourceTimelineWorkWeek',
   'two-week': 'resourceTimeline2Weeks',
-  'month':    'resourceTimelineMonth',
 }
 
 export function CalendarPage() {
@@ -47,7 +45,7 @@ export function CalendarPage() {
     return `${formatDateShort(compactWeek.toISOString())} – ${formatDateShort(end.toISOString())}`
   }, [compactWeek])
 
-  const isCustomView = currentView === 'compact' || currentView === 'planner'
+  const isCustomView = currentView === 'planner'
   const effectiveDateLabel = isCustomView ? compactDateLabel : dateLabel
 
   // ── Calendar API helpers ──────────────────────────────────────────────────
@@ -71,7 +69,7 @@ export function CalendarPage() {
 
   const onViewChange = useCallback((view: ViewMode) => {
     setCurrentView(view)
-    if (view !== 'compact' && view !== 'planner') {
+    if (view !== 'planner') {
       getApi()?.changeView(FC_VIEW_NAMES[view as FCViewMode])
     }
   }, [getApi])
@@ -139,14 +137,7 @@ export function CalendarPage() {
 
       <div className="flex-1 overflow-hidden mx-4 mb-4 mt-3 rounded-xl border border-slate-200 shadow-sm">
         <CalendarErrorBoundary>
-          {currentView === 'compact' ? (
-            <CompactWeekView
-              loads={visibleLoads}
-              drivers={drivers}
-              conflictIds={conflictIds}
-              weekStart={compactWeek}
-            />
-          ) : currentView === 'planner' ? (
+          {currentView === 'planner' ? (
             <PlannerView loads={visibleLoads} drivers={drivers} weekStart={compactWeek} />
           ) : (
             <SchedulerView
