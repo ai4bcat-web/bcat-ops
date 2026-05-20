@@ -52,7 +52,7 @@ export const loadSchema = z
     readyToInvoice: z.boolean(),
   })
   .refine(
-    (d) => d.pickupApptType === 'tbd' || d.deliveryApptType === 'tbd' || d.deliveryAppt >= d.pickupAppt,
+    (d) => d.pickupApptType === 'tbd' || d.deliveryApptType === 'tbd' || d.pickupApptType === 'fcfs' || d.deliveryApptType === 'fcfs' || d.deliveryAppt >= d.pickupAppt,
     { message: 'Delivery must be on or after pickup', path: ['deliveryAppt'] }
   )
   .refine(

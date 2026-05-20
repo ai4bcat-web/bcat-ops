@@ -585,7 +585,7 @@ function Cell({ children, width, flex, bold, className, onClick }: {
   return (
     <div
       className={cn('px-1.5 text-[11px] truncate', bold ? 'font-medium text-slate-800' : 'text-slate-600', onClick && 'cursor-pointer hover:underline', className)}
-      style={flex ? { flex: 1 } : { width }}
+      style={flex ? { flex: 1, minWidth: 0 } : { width, flexShrink: 0 }}
       onClick={onClick}
     >
       {children}
@@ -598,7 +598,7 @@ function ColHeader({ children, width, flex }: { children: React.ReactNode; width
   return (
     <div
       className="px-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wide truncate"
-      style={flex ? { flex: 1 } : { width }}
+      style={flex ? { flex: 1, minWidth: 0 } : { width, flexShrink: 0 }}
     >
       {children}
     </div>

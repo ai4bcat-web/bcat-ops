@@ -8,7 +8,7 @@
  *  1. Verify shared webhook secret
  *  2. Extract download URL(s) from email body
  *  3. Fetch the .txt report file
- *  4. Parse with embedded EFS parser
+ *  4. Parse with EFS parser (efsParser.ts)
  *  5. Batch-dedup against existing DynamoDB records
  *  6. Insert new FuelTransaction items
  */
@@ -16,198 +16,20 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
 import { randomUUID } from 'crypto'
+import { parseEfsReport, dedupKey, type ParsedFuelTransaction } from './efsParser'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
 const TABLE_NAME = process.env.FUEL_TX_TABLE_NAME!
 const SECRET     = process.env.FUEL_IMPORT_SECRET!
 
-// ── Card number → Equipment ID mapping (mirrors SEED_EQUIPMENT in useAppStore) ──
+// ── Card → Equipment ID mapping (mirrors SEED_EQUIPMENT in useAppStore) ─────
 const CARD_MAP: Record<string, string> = {
   '00049': 'eq-mnmpi9jxwd12', // truck 009
   '00056': 'eq-mnevxuyoxpd8', // truck 299
   '00031': 'eq-mnevuhxgs5jf', // truck 530
   '00007': 'eq-mnevvq8q6tcx', // truck 685
   '00023': 'eq-mnevwst30vwt', // truck 780
-}
-
-// ── Embedded EFS parser (mirrors src/lib/parsers/efsTransactionReport.ts) ────
-
-type ItemCategory = 'FUEL' | 'SCALE' | 'CASH_ADVANCE' | 'OTHER'
-
-interface ParsedFuelTransaction {
-  cardNumber:       string
-  transactionDate:  string
-  invoiceNumber:    string
-  unitNumber:       string
-  driverName:       string
-  odometer:         number | null
-  locationName:     string
-  city:             string
-  state:            string
-  fees:             number
-  fuelType:         string
-  itemCategory:     ItemCategory
-  pricePerUnit:     number
-  quantity:         number
-  amount:           number
-  currency:         string
-  sourceLineNumber: number
-}
-
-function parseNum(s: string): number {
-  return parseFloat(s.replace(/,/g, ''))
-}
-
-const FUEL_ITEM_TYPES = new Set(['ULSD', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
-
-function categorize(itemType: string): ItemCategory {
-  const u = itemType.toUpperCase().trim()
-  if (FUEL_ITEM_TYPES.has(u)) return 'FUEL'
-  if (u === 'SCLE') return 'SCALE'
-  if (u === 'CASH') return 'CASH_ADVANCE'
-  return 'OTHER'
-}
-
-const TX_LINE_RE = /[A-Z]\s{2}USD\/Gallon\s*$/
-const RIGHT_RE   = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallon/
-const CARD_RE    = /^\s{4,8}(\d{5})\s/
-const DATE_RE    = /(\d{4}-\d{2}-\d{2})/
-
-function parseEfsReport(text: string): ParsedFuelTransaction[] {
-  const lines = text.split('\n')
-  const transactions: ParsedFuelTransaction[] = []
-
-  let prevCard = '', prevDate = '', prevInvoice = '', prevUnit = '', prevDriver = ''
-  let prevOdo: number | null = null
-  let prevLocation = '', prevCity = '', prevState = ''
-
-  // Grand totals for validation
-  const grandTotals: Record<string, { amount: number; quantity: number }> = {}
-  let grandFees = 0
-  let inGrandTotals = false
-
-  for (let i = 0; i < lines.length; i++) {
-    const line    = lines[i]
-    const lineNum = i + 1
-
-    if (/Grand Totals/i.test(line)) { inGrandTotals = true; continue }
-
-    if (inGrandTotals) {
-      const fuelM  = line.match(/^\s+(\S+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/)
-      if (fuelM && !line.includes('Total Fuel')) {
-        grandTotals[fuelM[1]] = { amount: parseNum(fuelM[2]), quantity: parseNum(fuelM[3]) }
-      }
-      const feesM = line.match(/^\s+Fees\s+([\d,]+\.?\d*)/)
-      if (feesM) grandFees = parseNum(feesM[1])
-      continue
-    }
-
-    if (!TX_LINE_RE.test(line)) continue
-    const rightM = line.match(RIGHT_RE)
-    if (!rightM) continue
-
-    const fuelType     = rightM[1]
-    const pricePerUnit = rightM[2] !== undefined ? parseNum(rightM[2]) : 0
-    const quantity     = parseNum(rightM[3])
-    const amount       = parseNum(rightM[4])
-    const itemCategory = categorize(fuelType)
-
-    const cardM = line.match(CARD_RE)
-    const dateM = line.match(DATE_RE)
-
-    let cardNumber: string, transactionDate: string, invoiceNumber: string
-    let unitNumber: string, driverName: string, odometer: number | null
-    let locationName: string, city: string, state: string
-    let fees = 0
-
-    if (cardM && dateM) {
-      cardNumber      = cardM[1]
-      transactionDate = dateM[1]
-
-      const dateEnd   = line.indexOf(transactionDate) + transactionDate.length
-      const fuelStart = line.indexOf(rightM[0])
-      const middle    = line.slice(dateEnd, fuelStart)
-      const tokens    = middle.split(/\s{2,}/).map((t) => t.trim()).filter(Boolean)
-
-      invoiceNumber = tokens[0] ?? ''
-      unitNumber    = tokens[1] ?? ''
-
-      let idx = 2
-      if (tokens[idx] !== undefined && /^\d+$/.test(tokens[idx])) {
-        driverName = ''
-        odometer   = parseInt(tokens[idx], 10)
-        idx++
-      } else {
-        driverName = tokens[idx] ?? ''
-        idx++
-        odometer   = tokens[idx] ? parseInt(tokens[idx].replace(/,/g, ''), 10) : null
-        idx++
-      }
-
-      locationName = tokens[idx] ?? ''; idx++
-      city         = tokens[idx] ?? ''; idx++
-      state        = tokens[idx] ?? ''; idx++
-
-      if (tokens[idx] !== undefined && /^[\d,]+\.\d+$/.test(tokens[idx])) {
-        fees = parseNum(tokens[idx])
-      }
-
-      prevCard = cardNumber; prevDate = transactionDate; prevInvoice = invoiceNumber
-      prevUnit = unitNumber; prevDriver = driverName; prevOdo = odometer
-      prevLocation = locationName; prevCity = city; prevState = state
-    } else {
-      cardNumber = prevCard; transactionDate = prevDate; invoiceNumber = prevInvoice
-      unitNumber = prevUnit; driverName = prevDriver; odometer = prevOdo
-      locationName = prevLocation; city = prevCity; state = prevState
-      fees = 0
-    }
-
-    transactions.push({
-      cardNumber, transactionDate, invoiceNumber, unitNumber, driverName, odometer,
-      locationName, city, state, fees,
-      fuelType, itemCategory, pricePerUnit, quantity, amount,
-      currency: 'USD', sourceLineNumber: lineNum,
-    })
-  }
-
-  // Validate amounts against grand totals
-  const summedByType: Record<string, { amount: number; quantity: number }> = {}
-  let summedFees = 0
-  for (const tx of transactions) {
-    if (!summedByType[tx.fuelType]) summedByType[tx.fuelType] = { amount: 0, quantity: 0 }
-    summedByType[tx.fuelType].amount   = Math.round((summedByType[tx.fuelType].amount + tx.amount) * 100) / 100
-    summedByType[tx.fuelType].quantity = Math.round((summedByType[tx.fuelType].quantity + tx.quantity) * 100) / 100
-    summedFees = Math.round((summedFees + tx.fees) * 100) / 100
-  }
-
-  const errors: string[] = []
-  for (const [type, reported] of Object.entries(grandTotals)) {
-    const parsed    = summedByType[type]
-    const parsedAmt = parsed?.amount ?? 0
-    const amtDiff   = Math.abs(parsedAmt - reported.amount)
-    if (amtDiff > 0.02) {
-      errors.push(`${type} amount mismatch: parsed $${parsedAmt.toFixed(2)} vs reported $${reported.amount.toFixed(2)}`)
-    }
-    if (FUEL_ITEM_TYPES.has(type.toUpperCase())) {
-      const parsedQty = parsed?.quantity ?? 0
-      const qtyDiff   = Math.abs(parsedQty - reported.quantity)
-      if (qtyDiff > 0.02) {
-        errors.push(`${type} quantity mismatch: parsed ${parsedQty.toFixed(3)} vs reported ${reported.quantity.toFixed(3)}`)
-      }
-    }
-  }
-  if (grandFees > 0 && Math.abs(summedFees - grandFees) > 0.02) {
-    errors.push(`Fees mismatch: parsed $${summedFees.toFixed(2)} vs reported $${grandFees.toFixed(2)}`)
-  }
-
-  if (errors.length > 0) throw new Error(`EFS parse validation failed:\n${errors.join('\n')}`)
-
-  return transactions
-}
-
-function dedupKey(tx: ParsedFuelTransaction): string {
-  return `${tx.transactionDate}|${tx.cardNumber}|${tx.invoiceNumber}|${tx.fuelType}`
 }
 
 // ── URL extraction ────────────────────────────────────────────────────────────
