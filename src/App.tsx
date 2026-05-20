@@ -15,6 +15,7 @@ import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
+import { TasksPage } from '@/features/tasks/TasksPage'
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/audit-log" element={<AuditPage />} />
               <Route path="/intake"   element={<IntakePage />} />
+              <Route path="/tasks"   element={<TasksPage />} />
               <Route path="/users" element={<UsersPage />} />
               {/* legacy redirects */}
               <Route path="/grid" element={<Navigate to="/loads" replace />} />

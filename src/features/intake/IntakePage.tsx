@@ -60,11 +60,11 @@ export const SOURCE_LABEL: Record<string, string> = {
   BCAT_LOGISTICS: 'BCAT Logistics',
 }
 
-const ACTIVE_STATUSES = new Set<IntakeStatus>(['NEW', 'IN_PROGRESS'])
+export const ACTIVE_STATUSES = new Set<IntakeStatus>(['NEW', 'IN_PROGRESS'])
 
 // ── Pro# modal ────────────────────────────────────────────────────────────────
 
-function ProNumberModal({
+export function ProNumberModal({
   item,
   onConfirm,
   onClose,
@@ -146,7 +146,7 @@ function ProNumberModal({
 
 // ── Assignee select ───────────────────────────────────────────────────────────
 
-function AssigneeSelect({
+export function AssigneeSelect({
   value,
   onChange,
   className,
@@ -174,7 +174,7 @@ function AssigneeSelect({
 
 // ── Queue card ────────────────────────────────────────────────────────────────
 
-function QueueCard({
+export function QueueCard({
   item,
   onBuildLoad,
   onMarkDone,

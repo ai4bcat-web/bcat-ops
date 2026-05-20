@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Truck, CalendarDays, Table2, Users, History, MessageSquare, LogOut, UserCog,
-  LayoutDashboard, DollarSign, Wrench, Inbox,
+  LayoutDashboard, DollarSign, Wrench, Inbox, ClipboardList,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/loads',     label: 'Loads',      icon: Table2,          pageKey: 'loads'     },
   // intake is visible to all authenticated users — assignedTo is a label, not a filter
   { to: '/intake',    label: 'Intake',     icon: Inbox,           pageKey: 'intake',   alwaysVisible: true },
+  { to: '/tasks',     label: 'Tasks',      icon: ClipboardList,   pageKey: 'tasks',    alwaysVisible: true },
   { to: '/drivers',   label: 'Drivers',    icon: Users,           pageKey: 'drivers'   },
   { to: '/trucks',      label: 'Fleet',       icon: Truck,      pageKey: 'trucks'       },
   { to: '/maintenance', label: 'Maintenance', icon: Wrench,     pageKey: 'maintenance'  },

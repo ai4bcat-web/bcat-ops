@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, Cell,
 } from 'recharts'
 import {
-  TrendingUp, Truck, Package, DollarSign,
+  TrendingUp, Package, DollarSign,
   ArrowUp, ArrowDown, Minus, AlertCircle, CalendarClock,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +18,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { FuelWidget } from './FuelWidget'
+import { OpenTasksWidget } from './OpenTasksWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -307,18 +308,14 @@ export function DashboardPage() {
           </Table>
         </div>
 
-        {/* ── Fuel widget + Coming soon ────────────────────────────────── */}
+        {/* ── Fuel + Open Tasks + Coming soon ─────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
+          <OpenTasksWidget />
           <ComingSoonCard
             icon={TrendingUp}
             title="Profitability"
             description="Track revenue minus expenses per truck, driver, and time period."
-          />
-          <ComingSoonCard
-            icon={Truck}
-            title="Truck Utilization"
-            description="See miles, hours, and idle time per truck per day."
           />
         </div>
 
