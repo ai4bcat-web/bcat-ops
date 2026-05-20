@@ -53,11 +53,11 @@ const intakeTable = backend.data.resources.tables['IntakeItem']
 
 const webhookFn = backend.slackIntakeWebhook.resources.lambda as LambdaFunction
 
-// DynamoDB: write new items + query externalId GSI for dedup
+// DynamoDB: write new items (dedup handled via conditional put, no GSI query needed)
 backend.slackIntakeWebhook.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:PutItem', 'dynamodb:Query'],
-    resources: [intakeTable.tableArn, `${intakeTable.tableArn}/index/*`],
+    actions:   ['dynamodb:PutItem'],
+    resources: [intakeTable.tableArn],
   })
 )
 

@@ -1,5 +1,5 @@
-import { createHmac, timingSafeEqual } from 'crypto'
-import { DynamoDBClient, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb'
+import { createHmac, createHash, timingSafeEqual } from 'crypto'
+import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 const dynamo          = new DynamoDBClient({})
@@ -107,18 +107,9 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   // Dedup key: channelId + message timestamp uniquely identifies a Slack message
   const externalId = `${channelId}:${msgTs}`
 
-  // Check for existing record via GSI before inserting
-  const dedup = await dynamo.send(new QueryCommand({
-    TableName:                 TABLE_NAME,
-    IndexName:                 'externalId-index',
-    KeyConditionExpression:    'externalId = :eid',
-    ExpressionAttributeValues: marshall({ ':eid': externalId }),
-    Limit:                     1,
-  }))
-  if ((dedup.Items?.length ?? 0) > 0) {
-    console.log('[intake] skipped: duplicate', externalId)
-    return { statusCode: 200, body: 'Duplicate' }
-  }
+  // Derive a deterministic item ID from externalId so DynamoDB's own
+  // attribute_not_exists(id) condition handles dedup atomically — no GSI query needed.
+  const id = `slack-${createHash('sha256').update(externalId).digest('hex').slice(0, 20)}`
 
   // Build subject: prefer message text, fall back to uploaded file names
   const files = (ev.files as Array<{ name?: string }> | undefined) ?? []
@@ -132,34 +123,41 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   const externalUrl = `https://slack.com/archives/${channelId}/p${msgTs.replace('.', '')}`
 
   const now = new Date().toISOString()
-  const id  = `slack-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
   console.log('[intake] creating item', { id, source, externalId, subject })
 
-  await dynamo.send(new PutItemCommand({
-    TableName:           TABLE_NAME,
-    ConditionExpression: 'attribute_not_exists(id)',
-    Item: marshall({
-      id,
-      __typename:          'IntakeItem',
-      source,
-      status:              'NEW',
-      assignedTo:          'dennis@bcatcorp.com',
-      receivedAt:          new Date(Number(msgTs) * 1000).toISOString(),
-      fromEmail:           userId,
-      subject,
-      bodyText:            bodyText,
-      bodyHtml:            '',
-      externalSource:      'slack',
-      externalId,
-      externalUrl,
-      slackChannelId:      channelId,
-      slackMessageTs:      msgTs,
-      s3KeyPdfAttachments: [],
-      createdAt:           now,
-      updatedAt:           now,
-    }, { removeUndefinedValues: true }),
-  }))
+  try {
+    await dynamo.send(new PutItemCommand({
+      TableName:           TABLE_NAME,
+      ConditionExpression: 'attribute_not_exists(id)',
+      Item: marshall({
+        id,
+        __typename:          'IntakeItem',
+        source,
+        status:              'NEW',
+        assignedTo:          'dennis@bcatcorp.com',
+        receivedAt:          new Date(Number(msgTs) * 1000).toISOString(),
+        fromEmail:           userId,
+        subject,
+        bodyText:            bodyText,
+        bodyHtml:            '',
+        externalSource:      'slack',
+        externalId,
+        externalUrl,
+        slackChannelId:      channelId,
+        slackMessageTs:      msgTs,
+        s3KeyPdfAttachments: [],
+        createdAt:           now,
+        updatedAt:           now,
+      }, { removeUndefinedValues: true }),
+    }))
+  } catch (err: unknown) {
+    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+      console.log('[intake] skipped: duplicate', externalId)
+      return { statusCode: 200, body: 'Duplicate' }
+    }
+    throw err
+  }
 
   console.log('[intake] done, item created:', id)
   return { statusCode: 200, body: 'ok' }
