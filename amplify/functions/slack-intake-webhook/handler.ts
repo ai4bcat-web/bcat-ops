@@ -76,25 +76,34 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   const ev = payload.event as Record<string, unknown>
 
-  console.log('[intake] event type:', ev.type, 'subtype:', ev.subtype ?? '(none)', 'bot_id:', ev.bot_id ?? '(none)', 'thread_ts:', ev.thread_ts ?? '(none)')
+  const isEmail = ev.subtype === 'email'
 
-  // Skip edits, deletes, and other non-content subtypes.
-  // file_share is intentionally allowed — that's how PDF pastes arrive.
-  const SKIP_SUBTYPES = new Set(['message_changed', 'message_deleted', 'channel_join', 'channel_leave', 'bot_message'])
+  console.log('[intake] event type:', ev.type, 'subtype:', ev.subtype ?? '(none)', 'bot_id:', ev.bot_id ?? '(none)', 'thread_ts:', ev.thread_ts ?? '(none)', 'isEmail:', isEmail)
+
+  // Full payload logging for email-subtype events — temporary, for CloudWatch diagnosis
+  if (isEmail) {
+    console.log('[intake] EMAIL full event payload:', JSON.stringify(ev))
+  }
+
+  // Skip edits, deletes, and other noise subtypes.
+  // email and file_share are intentionally allowed.
+  const SKIP_SUBTYPES = new Set(['message_changed', 'message_deleted', 'channel_join', 'channel_leave', 'bot_message', 'thread_broadcast'])
+  const isThreadReply = !!(ev.thread_ts && ev.thread_ts !== ev.ts)
+
   if (
-    ev.type !== 'message' ||
-    ev.bot_id            ||
-    SKIP_SUBTYPES.has(ev.subtype as string) ||
-    ev.thread_ts         // skip thread replies to avoid reply loops
+    ev.type !== 'message'                          ||
+    SKIP_SUBTYPES.has(ev.subtype as string)        ||
+    (!isEmail && ev.bot_id)                        || // allow email-integration bot; skip other bots
+    (!isEmail && isThreadReply)                       // allow email thread-parents; skip typed replies
   ) {
     console.log('[intake] skipped: filtered event')
     return { statusCode: 200, body: 'ok' }
   }
 
-  const channelId = ev.channel   as string
-  const msgTs     = ev.ts        as string
-  const text      = (ev.text     as string) ?? ''
-  const userId    = (ev.user     as string) ?? ''
+  const channelId = ev.channel as string
+  const msgTs     = ev.ts      as string
+  const text      = (ev.text   as string) ?? ''
+  const userId    = (ev.user   as string) ?? ''
 
   console.log('[intake] channel:', channelId, 'mapped to:', CHANNEL_MAP[channelId] ?? '(not mapped)')
 
@@ -111,13 +120,49 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   // attribute_not_exists(id) condition handles dedup atomically — no GSI query needed.
   const id = `slack-${createHash('sha256').update(externalId).digest('hex').slice(0, 20)}`
 
-  // Build subject: prefer message text, fall back to uploaded file names
-  const files = (ev.files as Array<{ name?: string }> | undefined) ?? []
-  const fileNames = files.map((f) => f.name).filter(Boolean).join(', ')
-  const subject = ((text.split('\n').find((l) => l.trim()) ?? fileNames) || '(file attachment)').slice(0, 80)
+  // ── Subject + body extraction (email vs typed message) ──────────────────────
+  interface SlackFile {
+    name?: string
+    title?: string
+    mimetype?: string
+    filetype?: string
+    plain_text?: string
+    url_private?: string
+    permalink?: string
+  }
 
-  // Include file names in body so they're visible in the detail panel
-  const bodyText = [text, fileNames ? `Files: ${fileNames}` : ''].filter(Boolean).join('\n')
+  const files = (ev.files as SlackFile[] | undefined) ?? []
+  let subject: string
+  let bodyText: string
+
+  if (isEmail) {
+    // Email messages: one file is the email itself (filetype 'email' or mimetype containing 'email'),
+    // remaining files are attachments (PDFs, etc.).
+    // Field names here are best-guess from Slack docs — verify in CloudWatch after first live event.
+    const emailFile = files.find(
+      (f) => f.filetype === 'email' || (f.mimetype ?? '').includes('email'),
+    )
+    const attachments = files.filter((f) => f !== emailFile)
+
+    const emailSubject = emailFile?.title
+      ?? text.split('\n').find((l) => l.trim())
+      ?? ''
+    const emailBody = emailFile?.plain_text ?? text
+
+    const attachmentParts = attachments.map((f) => {
+      const link = f.permalink ?? f.url_private ?? ''
+      return link ? `${f.name ?? 'attachment'} — ${link}` : (f.name ?? 'attachment')
+    }).filter(Boolean)
+
+    subject  = (emailSubject || attachmentParts[0] || '(forwarded email)').slice(0, 80)
+    bodyText = [emailBody, attachmentParts.length ? `Attachments:\n${attachmentParts.join('\n')}` : '']
+      .filter(Boolean).join('\n\n')
+  } else {
+    // Typed message or file_share
+    const fileNames = files.map((f) => f.name).filter(Boolean).join(', ')
+    subject  = ((text.split('\n').find((l) => l.trim()) ?? fileNames) || '(file attachment)').slice(0, 80)
+    bodyText = [text, fileNames ? `Files: ${fileNames}` : ''].filter(Boolean).join('\n')
+  }
 
   // Construct Slack permalink (no extra API call needed)
   const externalUrl = `https://slack.com/archives/${channelId}/p${msgTs.replace('.', '')}`
