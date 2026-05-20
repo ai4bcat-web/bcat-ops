@@ -431,24 +431,28 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
             ))}
 
             {/* Load cards — spanning across their full day range */}
-            {segments.map(({ load, track, startCol, endCol, isContinuation }) => (
-              <div
-                key={load.id}
-                className="px-1 py-0.5 relative z-10"
-                style={{
-                  gridColumn: `${startCol + 1} / ${endCol + 2}`,
-                  gridRow: track + 1,
-                }}
-              >
-                <CompactCard
-                  load={load}
-                  drivers={drivers}
-                  conflictIds={conflictIds}
-                  slotLabel={track + 1}
-                  isContinuation={isContinuation}
-                />
-              </div>
-            ))}
+            {segments.map(({ load, track, startCol, endCol, isContinuation }) => {
+              const driverId = load.pickupDriverId
+              const slotLabel = segments.filter((s) => s.load.pickupDriverId === driverId && s.track < track).length + 1
+              return (
+                <div
+                  key={load.id}
+                  className="px-1 py-0.5 relative z-10"
+                  style={{
+                    gridColumn: `${startCol + 1} / ${endCol + 2}`,
+                    gridRow: track + 1,
+                  }}
+                >
+                  <CompactCard
+                    load={load}
+                    drivers={drivers}
+                    conflictIds={conflictIds}
+                    slotLabel={slotLabel}
+                    isContinuation={isContinuation}
+                  />
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

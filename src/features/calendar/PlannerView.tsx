@@ -746,19 +746,23 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
                 No loads
               </div>
             ) : (
-              entries.map((entry, idx) => (
+              entries.map((entry) => {
+                const driverId = entry.load.pickupDriverId
+                const sameDriver = entries.filter((e) => e.load.pickupDriverId === driverId)
+                const slotNum = sameDriver.indexOf(entry) + 1
+                return (
                 <PlannerRow
                   key={entry.key}
                   entry={entry}
                   drivers={drivers}
-                  slotNum={idx + 1}
+                  slotNum={slotNum}
                   dragging={dragKey.current === entry.key}
                   dragOver={dragOverKey === entry.key}
                   onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
                   onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
                   onDragEnd={handleDragEnd}
                 />
-              ))
+                )})
             )}
           </div>
         )
