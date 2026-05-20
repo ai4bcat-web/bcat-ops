@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType } from '@/types'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 260, driver: 160, notes: 200, rate: 68 } as const
+const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
@@ -560,6 +560,16 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       ) : (
         <div className="shrink-0 px-2" style={{ width: 32 }} />
       )}
+
+      {/* PU / DE location names */}
+      <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
+        {load.originName && (
+          <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
+        )}
+        {load.destinationName && (
+          <span className="text-[10px] text-slate-400 truncate" title={load.destinationName}>{load.destinationName}</span>
+        )}
+      </div>
     </div>
   )
 }
@@ -694,6 +704,7 @@ export function PlannerView({ loads, drivers, weekStart }: PlannerViewProps) {
         <ColHeader width={COL.notes}>Notes</ColHeader>
         <ColHeader width={COL.rate}>Rate</ColHeader>
         <ColHeader width={32}>RTI</ColHeader>
+        <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
       </div>
 
       {/* Day sections */}
