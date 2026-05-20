@@ -28,10 +28,10 @@ export function FuelWidget({ transactions, loading }: Props) {
   const trucks = useMemo(() => equipment.filter((e) => e.type === 'truck' && e.active), [equipment])
 
   const now = new Date()
-  const thisWeekStart = startOfWeek(now, { weekStartsOn: 1 })
-  const thisWeekEnd   = endOfWeek(now,   { weekStartsOn: 1 })
-  const lastWeekStart = startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 })
-  const lastWeekEnd   = endOfWeek(subWeeks(now, 1),   { weekStartsOn: 1 })
+  const thisWeekStart = startOfWeek(now, { weekStartsOn: 0 })
+  const thisWeekEnd   = endOfWeek(now,   { weekStartsOn: 0 })
+  const lastWeekStart = startOfWeek(subWeeks(now, 1), { weekStartsOn: 0 })
+  const lastWeekEnd   = endOfWeek(subWeeks(now, 1),   { weekStartsOn: 0 })
 
   const thisWeekTxs = useMemo(() => filterByRange(transactions, thisWeekStart, thisWeekEnd), [transactions, thisWeekStart, thisWeekEnd])
   const lastWeekTxs = useMemo(() => filterByRange(transactions, lastWeekStart, lastWeekEnd), [transactions, lastWeekStart, lastWeekEnd])

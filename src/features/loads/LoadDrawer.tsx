@@ -342,7 +342,7 @@ export function LoadDrawer() {
           {isEdit ? (
             <form id="load-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <Field label="ALJEX ID" error={errors.aljexId?.message}>
+                <Field label="Pro #" error={errors.aljexId?.message}>
                   <Input {...register('aljexId')} placeholder="A-2847391" className="h-9" />
                 </Field>
                 <Field label="TMS ID / PO" error={errors.tmsId?.message}>
@@ -494,7 +494,7 @@ export function LoadDrawer() {
             </form>
           ) : load ? (
             <div className="space-y-0">
-              <ReadonlyField label="ALJEX ID"   value={load.aljexId} />
+              <ReadonlyField label="Pro #"       value={load.aljexId} />
               <ReadonlyField label="TMS / PO"   value={load.tmsId} />
               <ReadonlyField label="PU #"       value={load.pickupNumber} />
               {(load.originName || load.originCity) && (

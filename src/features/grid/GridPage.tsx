@@ -79,7 +79,7 @@ export function GridPage() {
       accessorKey: 'aljexId',
       header: ({ column }) => (
         <button className="flex items-center font-semibold" onClick={() => column.toggleSorting()}>
-          ALJEX ID <SortIcon col={column} />
+          Pro # <SortIcon col={column} />
         </button>
       ),
       cell: ({ getValue }) => <span className="font-mono text-xs">{getValue() as string}</span>,
@@ -220,7 +220,7 @@ export function GridPage() {
   }
 
   const allColNames: Record<string, string> = {
-    aljexId: 'ALJEX ID', tmsId: 'TMS ID / PO', pickupNumber: 'PU#',
+    aljexId: 'Pro #', tmsId: 'TMS ID / PO', pickupNumber: 'PU#',
     pickupAppt: 'PU Appt', deliveryAppt: 'DE Appt',
     pickupDriver: 'Pickup Driver', deliveryDriver: 'Delivery Driver', readyToInvoice: 'RTI',
   }
@@ -404,7 +404,7 @@ function GridRow({
       onClick={onRowClick}
       className={cn(
         'border-b border-border/50 cursor-pointer transition-colors',
-        isRTI        ? 'bg-emerald-50 hover:bg-emerald-100/70' :
+        isRTI        ? 'bg-green-500 hover:bg-green-600 text-white' :
         isUnassigned ? 'bg-amber-50 hover:bg-amber-100/70' :
                        'hover:bg-slate-50',
         row.getIsSelected() && 'bg-primary/10 hover:bg-primary/15',

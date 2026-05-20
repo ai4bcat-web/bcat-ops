@@ -54,6 +54,7 @@ export interface Load {
   customer?: string | null  // customer/broker name
   colorKey?: ColorKey | null  // load's own color swatch
   daySlot?: number | null     // display order badge 1-5 within pickup day
+  notes?: string | null       // short free-text notes
   createdAt: string
   updatedAt: string
   createdBy: string

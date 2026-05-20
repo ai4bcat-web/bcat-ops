@@ -144,7 +144,7 @@ export function CalendarToolbar({
       <div className="relative w-72 shrink-0">
         <input
           type="text"
-          placeholder="Search by ALJEX, TMS, or PU#"
+          placeholder="Search by Pro #, TMS, or PU#"
           className="h-10 w-full pl-3 pr-4 rounded-lg border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-shadow"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}

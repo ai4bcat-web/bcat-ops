@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils'
 const APPT_TYPE_CONFIG: Record<string, { label: string; cls: string }> = {
   exact: { label: 'APPT',  cls: 'bg-blue-50 text-blue-600 border-blue-200' },
   fcfs:  { label: 'FCFS',  cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  tbd:   { label: 'TBD',   cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  tbd:   { label: 'NEED',  cls: 'bg-slate-100 text-slate-500 border-slate-200' },
   range: { label: 'RANGE', cls: 'bg-violet-50 text-violet-600 border-violet-200' },
 }
 
@@ -82,11 +82,11 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
   const color         = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
   const deliveryColor = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
 
-  const borderColor = isConflict ? '#ef4444' : isRTI ? '#16a34a' : color.border
+  const borderColor = isConflict ? '#ef4444' : isRTI ? '#15803d' : color.border
   const bgColor     = isContinuation
     ? 'rgba(0,0,0,0.015)'
-    : isConflict ? 'rgba(239,68,68,0.06)' : isRTI ? 'rgba(22,163,74,0.06)' : color.bg
-  const textColor   = isRTI ? '#15803d' : color.text
+    : isConflict ? 'rgba(239,68,68,0.06)' : isRTI ? '#22c55e' : color.bg
+  const textColor   = isRTI ? '#fff' : color.text
 
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
   const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
@@ -97,7 +97,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
       style={{
         borderColor:     isContinuation
           ? 'rgba(0,0,0,0.07)'
-          : isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e7eb',
+          : isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#e5e7eb',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         opacity: isContinuation ? 0.72 : 1,
@@ -112,7 +112,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
             <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
               {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
             </span>
-            {isRTI && <CheckCircle2 className="size-2.5 text-emerald-600 shrink-0" />}
+            {isRTI && <CheckCircle2 className="size-2.5 shrink-0" style={{ color: '#fff' }} />}
           </div>
         </div>
 
@@ -228,40 +228,24 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
         </div>
       </div>
 
-      {/* Row 2: appt info — PU only on pickup day, DE only on delivery day, both for single-day */}
-      {(() => {
-        const pickupDay   = chicagoDateStr(load.pickupAppt)
-        const deliveryDay = load.deliveryAppt ? chicagoDateStr(load.deliveryAppt) : pickupDay
-        const isMultiDay  = pickupDay !== deliveryDay
-        return (
-          <div className="flex items-center gap-0.5 min-w-0 mt-0.5 flex-wrap">
-            {isContinuation ? (
-              // Delivery day of a multi-day load — show DE only
-              <>
-                <span className="text-[9px] text-slate-400 shrink-0 leading-none">DE:</span>
-                <ApptBadge type={load.deliveryApptType ?? 'exact'} />
-                <span className="text-[9px] tabular-nums text-slate-500 shrink-0 leading-none">{deTime}</span>
-              </>
-            ) : isMultiDay ? (
-              // Pickup day of a multi-day load — show PU only
-              <>
-                <span className="text-[9px] text-slate-400 shrink-0 leading-none">PU:</span>
-                <ApptBadge type={load.pickupApptType ?? 'exact'} />
-                <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
-              </>
-            ) : (
-              // Single-day load — show both
-              <>
-                <ApptBadge type={load.pickupApptType ?? 'exact'} />
-                <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
-                <ArrowRight className="size-2 shrink-0 text-slate-300" />
-                <ApptBadge type={load.deliveryApptType ?? 'exact'} />
-                <span className="text-[9px] tabular-nums text-slate-500 leading-none">{deTime}</span>
-              </>
-            )}
-          </div>
-        )
-      })()}
+      {/* Row 2: appt info — DE only for carry-overs, PU→DE for everything else */}
+      <div className="flex items-center gap-0.5 min-w-0 mt-0.5 flex-wrap">
+        {isContinuation ? (
+          <>
+            <span className="text-[9px] text-slate-400 shrink-0 leading-none">DE:</span>
+            <ApptBadge type={load.deliveryApptType ?? 'exact'} />
+            <span className="text-[9px] tabular-nums text-slate-500 shrink-0 leading-none">{deTime}</span>
+          </>
+        ) : (
+          <>
+            <ApptBadge type={load.pickupApptType ?? 'exact'} />
+            <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
+            <ArrowRight className="size-2 shrink-0 text-slate-300" />
+            <ApptBadge type={load.deliveryApptType ?? 'exact'} />
+            <span className="text-[9px] tabular-nums text-slate-500 leading-none">{deTime}</span>
+          </>
+        )}
+      </div>
 
       {/* Row 3: origin → destination */}
       {(load.originCity || load.destinationCity) && (
@@ -332,6 +316,7 @@ function groupKey(load: Load): string {
 
 export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: CompactWeekViewProps) {
   const days = getFullWeek(weekStart) // [Mon … Sun]
+  const dayStrs = useMemo(() => days.map((d) => chicagoDateStr(d.toISOString())), [days])
 
   const { updateLoad } = useLoads()
   const handleSetSlot = useCallback((loadId: string, slot: number) => {
@@ -339,14 +324,10 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
   }, [updateLoad])
 
   // ── Track assignment ───────────────────────────────────────────────────────
-  // Each load gets a row index (track). Multi-day loads hold the same track
-  // across all columns they appear in. New loads fill the lowest free track.
   const trackMap = useMemo<Map<string, number>>(() => {
-    const dayStrs = days.map((d) => chicagoDateStr(d.toISOString()))
     const map = new Map<string, number>()
 
     for (const dayStr of dayStrs) {
-      // Tracks occupied by continuations through this day
       const occupied = new Set<number>()
       for (const [id, track] of map) {
         const l = loads.find((x) => x.id === id)
@@ -356,7 +337,6 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
         if (pDay < dayStr && dDay >= dayStr) occupied.add(track)
       }
 
-      // New loads starting today, sorted for stable assignment
       const newToday = loads
         .filter((l) => l.pickupAppt && chicagoDateStr(l.pickupAppt) === dayStr)
         .sort((a, b) => {
@@ -374,99 +354,135 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
     }
 
     return map
-  }, [loads, days])
+  }, [loads, dayStrs])
 
   const maxTrack = useMemo(() => {
     if (trackMap.size === 0) return -1
     return Math.max(...trackMap.values())
   }, [trackMap])
 
-  // ── Build per-day slot arrays ──────────────────────────────────────────────
-  const daySlots = useMemo(() => {
-    return days.map((day) => {
-      const dayStr = chicagoDateStr(day.toISOString())
-      const slots = new Map<number, { load: Load; isContinuation: boolean }>()
+  // ── Build grid segments — one entry per load, with column span ─────────────
+  const segments = useMemo(() => {
+    const result: {
+      load: Load; track: number
+      startCol: number; endCol: number
+      isContinuation: boolean
+    }[] = []
 
-      for (const [loadId, track] of trackMap) {
-        const load = loads.find((l) => l.id === loadId)
-        if (!load?.pickupAppt) continue
-        const pDay = chicagoDateStr(load.pickupAppt)
-        const dDay = load.deliveryAppt ? chicagoDateStr(load.deliveryAppt) : pDay
-        if (dayStr >= pDay && dayStr <= dDay) {
-          slots.set(track, { load, isContinuation: pDay !== dayStr })
+    for (const [loadId, track] of trackMap) {
+      const load = loads.find((l) => l.id === loadId)
+      if (!load?.pickupAppt) continue
+
+      const pDay = chicagoDateStr(load.pickupAppt)
+      const dDay = load.deliveryAppt ? chicagoDateStr(load.deliveryAppt) : pDay
+
+      let startCol = -1, endCol = -1
+      for (let i = 0; i < dayStrs.length; i++) {
+        if (dayStrs[i] >= pDay && dayStrs[i] <= dDay) {
+          if (startCol === -1) startCol = i
+          endCol = i
         }
       }
+      if (startCol === -1) continue // not visible this week
 
-      return { day, slots }
-    })
-  }, [days, loads, trackMap])
+      result.push({
+        load, track,
+        startCol, endCol,
+        isContinuation: pDay < dayStrs[0], // carried over from a previous week
+      })
+    }
 
-  const SLOT_HEIGHT = 72 // px — fixed height per track row for cross-column alignment
+    return result
+  }, [trackMap, loads, dayStrs])
+
+  // Load count per column (for header badge — only count loads starting that day)
+  const primaryCounts = useMemo(() =>
+    dayStrs.map((d) =>
+      segments.filter((s) => dayStrs[s.startCol] === d && !s.isContinuation).length
+    ),
+    [segments, dayStrs],
+  )
+
+  const SLOT_HEIGHT = 72
 
   return (
-    <div className="flex h-full overflow-hidden bg-white rounded-xl">
-      {daySlots.map(({ day, slots }, colIdx) => {
-        const { weekday, date } = formatDayHeader(day.toISOString())
-        const isWeekend = colIdx >= 5
-        const primaryCount = [...slots.values()].filter((e) => !e.isContinuation).length
+    <div className="flex flex-col h-full overflow-hidden bg-white rounded-xl">
 
-        return (
-          <div
-            key={colIdx}
-            className={cn(
-              'flex flex-col flex-1 min-w-0 border-r border-slate-200 last:border-r-0',
-              isWeekend && 'bg-slate-50/40',
-            )}
-          >
-            {/* Column header */}
-            <div className={cn(
-              'sticky top-0 z-10 border-b border-slate-200 px-2 py-2 shrink-0',
-              isWeekend ? 'bg-slate-50' : 'bg-white',
-            )}>
+      {/* ── Sticky column headers ─────────────────────────────────────────── */}
+      <div className="grid shrink-0 border-b border-slate-200 sticky top-0 z-10" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+        {days.map((day, colIdx) => {
+          const { weekday, date } = formatDayHeader(day.toISOString())
+          const isWeekend = colIdx >= 5
+          return (
+            <div
+              key={colIdx}
+              className={cn(
+                'px-2 py-2 border-r border-slate-200 last:border-r-0',
+                isWeekend ? 'bg-slate-50' : 'bg-white',
+              )}
+            >
               <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide leading-none">{weekday}</div>
               <div className="text-[10px] text-slate-400 tabular-nums mt-0.5">{date}</div>
-              {primaryCount > 0 && (
+              {primaryCounts[colIdx] > 0 && (
                 <div className="text-[9px] font-semibold text-slate-400 mt-0.5">
-                  {primaryCount} load{primaryCount !== 1 ? 's' : ''}
+                  {primaryCounts[colIdx]} load{primaryCounts[colIdx] !== 1 ? 's' : ''}
                 </div>
               )}
             </div>
+          )
+        })}
+      </div>
 
-            {/* Track rows — fixed height for cross-column alignment */}
-            <div className="flex-1 overflow-y-auto">
-              {maxTrack < 0 ? (
-                <div className="text-center text-[10px] text-slate-300 pt-6 select-none">—</div>
-              ) : (
-                Array.from({ length: maxTrack + 1 }, (_, track) => {
-                  const entry = slots.get(track)
-                  return (
-                    <div
-                      key={track}
-                      className="px-1 border-b border-slate-50 last:border-b-0"
-                      style={{ height: SLOT_HEIGHT }}
-                    >
-                      {entry ? (
-                        <div className="h-full py-0.5">
-                          <CompactCard
-                            load={entry.load}
-                            drivers={drivers}
-                            conflictIds={conflictIds}
-                            slotLabel={entry.load.daySlot ?? (track + 1)}
-                            isContinuation={entry.isContinuation}
-                            onSetSlot={handleSetSlot}
-                          />
-                        </div>
-                      ) : (
-                        <div className="h-full" />
-                      )}
-                    </div>
-                  )
-                })
-              )}
-            </div>
+      {/* ── Body grid ─────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto">
+        {maxTrack < 0 ? (
+          <div className="text-center text-[10px] text-slate-300 pt-6 select-none">—</div>
+        ) : (
+          <div
+            className="relative grid"
+            style={{
+              gridTemplateColumns: 'repeat(7, 1fr)',
+              gridTemplateRows: `repeat(${maxTrack + 1}, ${SLOT_HEIGHT}px)`,
+            }}
+          >
+            {/* Column background tints + right borders */}
+            {days.map((_, colIdx) => (
+              <div
+                key={`col-bg-${colIdx}`}
+                className={cn(
+                  'border-r border-slate-100 last:border-r-0',
+                  colIdx >= 5 && 'bg-slate-50/40',
+                )}
+                style={{
+                  gridColumn: colIdx + 1,
+                  gridRow: `1 / ${maxTrack + 2}`,
+                }}
+              />
+            ))}
+
+            {/* Load cards — spanning across their full day range */}
+            {segments.map(({ load, track, startCol, endCol, isContinuation }) => (
+              <div
+                key={load.id}
+                className="px-1 py-0.5 relative z-10"
+                style={{
+                  gridColumn: `${startCol + 1} / ${endCol + 2}`,
+                  gridRow: track + 1,
+                }}
+              >
+                <CompactCard
+                  load={load}
+                  drivers={drivers}
+                  conflictIds={conflictIds}
+                  slotLabel={load.daySlot ?? (track + 1)}
+                  isContinuation={isContinuation}
+                  onSetSlot={handleSetSlot}
+                />
+              </div>
+            ))}
           </div>
-        )
-      })}
+        )}
+      </div>
     </div>
   )
 }

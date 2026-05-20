@@ -17,6 +17,8 @@ export interface DashboardMetrics {
   totalLoadsDelta: number
   activeDrivers: number
   readyToInvoice: number
+  needsInvoice: number     // past-delivered loads not yet marked ready to invoice (all time)
+  needsAppt: number        // loads with at least one TBD appointment (all time)
   revenue: number          // sum of load.rate in cents
   revenueConnected: boolean // false when all rates are null
   loadsPerDriver: { driverId: string; name: string; count: number; colorKey: string }[]
@@ -102,6 +104,17 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
     const totalLoadsDelta = totalLoads - previous.length
     const readyToInvoice  = current.filter((l) => l.readyToInvoice).length
 
+    // Uninvoiced backlog — all loads whose delivery date is in the past and not yet invoiced
+    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0)
+    const needsInvoice = loads.filter(
+      (l) => new Date(l.deliveryAppt) < todayMidnight && !l.readyToInvoice
+    ).length
+
+    // Appt booking backlog — all loads with at least one TBD appointment
+    const needsAppt = loads.filter(
+      (l) => l.pickupApptType === 'tbd' || l.deliveryApptType === 'tbd'
+    ).length
+
     const activeDriverSet = new Set<string>()
     current.forEach((l) => {
       if (l.pickupDriverId)   activeDriverSet.add(l.pickupDriverId)
@@ -159,6 +172,8 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       totalLoadsDelta,
       activeDrivers,
       readyToInvoice,
+      needsInvoice,
+      needsAppt,
       revenue,
       revenueConnected,
       loadsPerDriver,

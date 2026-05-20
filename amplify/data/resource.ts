@@ -27,6 +27,7 @@ const schema = a.schema({
       customer:        a.string(),
       colorKey:        a.string(),   // load color swatch (driver-1…driver-12, broker)
       daySlot:         a.integer(),  // display order badge 1-5 within pickup day
+      notes:           a.string(),   // short free-text notes
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })

@@ -29,9 +29,9 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
   const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
 
-  const borderColor = isConflict ? '#ef4444' : isRTI ? '#16a34a' : color.border
-  const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? 'rgba(22,163,74,0.08)' : color.bg
-  const textColor   = isRTI ? '#15803d' : color.text
+  const borderColor = isConflict ? '#ef4444' : isRTI ? '#15803d' : color.border
+  const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? '#22c55e' : color.bg
+  const textColor   = isRTI ? '#fff' : color.text
 
   const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
 
@@ -44,7 +44,7 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
         isConflict && 'animate-pulse-once',
       )}
       style={{
-        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? 'rgba(22,163,74,0.3)' : '#e5e5e2',
+        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#e5e5e2',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         ...(isSplit ? { borderRightColor: deliveryColor.border, borderRightWidth: 3 } : {}),
@@ -110,7 +110,7 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           <span className="text-[10px] shrink-0 tabular-nums" style={{ color: '#6b7280' }}>{puTime}</span>
           <div className="flex items-center gap-1 min-w-0 overflow-hidden"
             title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}>
-            {isRTI && <CheckCircle2 className="size-3 text-emerald-600 shrink-0" />}
+            {isRTI && <CheckCircle2 className="size-3 shrink-0" style={{ color: '#fff' }} />}
             {load.pickupDriverId ? (
               <>
                 <Avatar
