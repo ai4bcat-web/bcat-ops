@@ -26,11 +26,10 @@ const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, r
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
-// ── Color palette (greens excluded — reserved for ready-to-invoice indicator) ──
-const GREEN_KEYS = new Set<ColorKey>(['driver-2', 'driver-11'])
+// ── Color palette (all non-broker colors available) ──────────────────────────
 const PALETTE: { key: ColorKey; hex: string }[] = (
   Object.entries(COLOR_MAP) as [ColorKey, { border: string }][]
-).filter(([key]) => !GREEN_KEYS.has(key as ColorKey))
+).filter(([key]) => key !== 'broker')
  .map(([key, v]) => ({ key, hex: v.border }))
 
 // ── Day entry type ────────────────────────────────────────────────────────────
