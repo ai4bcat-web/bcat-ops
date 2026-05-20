@@ -62,9 +62,6 @@ backend.slackIntakeWebhook.resources.lambda.addToRolePolicy(
 )
 
 webhookFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
-// SLACK_CHANNEL_MAPPING: set this in Amplify Console → Environment variables after deploy
-// Format: '{"C12345678":"IVAN_CARTAGE","C87654321":"BCAT_LOGISTICS"}'
-webhookFn.addEnvironment('SLACK_CHANNEL_MAPPING', '{}')
 
 // Function URL — Slack posts to this endpoint
 const slackWebhookUrl = new FunctionUrl(webhookFn.stack, 'SlackIntakeWebhookUrl', {

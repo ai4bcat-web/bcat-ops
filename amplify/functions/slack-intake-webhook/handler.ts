@@ -20,6 +20,9 @@ interface LambdaFunctionUrlEvent {
 }
 
 export const handler = async (event: LambdaFunctionUrlEvent) => {
+  console.log('[intake] invoked, headers:', JSON.stringify(Object.keys(event.headers)))
+  console.log('[intake] CHANNEL_MAP keys:', Object.keys(CHANNEL_MAP))
+
   const rawBody = event.isBase64Encoded
     ? Buffer.from(event.body ?? '', 'base64').toString('utf-8')
     : (event.body ?? '')
@@ -31,6 +34,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   // Reject stale requests (replay protection, >5 min old)
   if (Math.abs(Date.now() / 1000 - Number(slackTs)) > 300) {
+    console.log('[intake] rejected: stale timestamp', slackTs)
     return { statusCode: 403, body: 'Stale request' }
   }
 
@@ -42,6 +46,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   const sigBuf = Buffer.from(slackSig.padEnd(expected.length))
   const expBuf = Buffer.from(expected)
   if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) {
+    console.log('[intake] rejected: invalid signature')
     return { statusCode: 403, body: 'Invalid signature' }
   }
 
@@ -62,12 +67,16 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     }
   }
 
+  console.log('[intake] payload type:', payload.type)
+
   // Only handle event callbacks
   if (payload.type !== 'event_callback') {
     return { statusCode: 200, body: 'ok' }
   }
 
   const ev = payload.event as Record<string, unknown>
+
+  console.log('[intake] event type:', ev.type, 'subtype:', ev.subtype ?? '(none)', 'bot_id:', ev.bot_id ?? '(none)', 'thread_ts:', ev.thread_ts ?? '(none)')
 
   // Skip edits, deletes, and other non-content subtypes.
   // file_share is intentionally allowed — that's how PDF pastes arrive.
@@ -78,6 +87,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     SKIP_SUBTYPES.has(ev.subtype as string) ||
     ev.thread_ts         // skip thread replies to avoid reply loops
   ) {
+    console.log('[intake] skipped: filtered event')
     return { statusCode: 200, body: 'ok' }
   }
 
@@ -86,9 +96,11 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   const text      = (ev.text     as string) ?? ''
   const userId    = (ev.user     as string) ?? ''
 
+  console.log('[intake] channel:', channelId, 'mapped to:', CHANNEL_MAP[channelId] ?? '(not mapped)')
+
   const source = CHANNEL_MAP[channelId]
   if (!source) {
-    // Channel not configured — ignore silently
+    console.log('[intake] skipped: channel not mapped')
     return { statusCode: 200, body: 'ok' }
   }
 
@@ -104,6 +116,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     Limit:                     1,
   }))
   if ((dedup.Items?.length ?? 0) > 0) {
+    console.log('[intake] skipped: duplicate', externalId)
     return { statusCode: 200, body: 'Duplicate' }
   }
 
@@ -120,6 +133,8 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   const now = new Date().toISOString()
   const id  = `slack-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+  console.log('[intake] creating item', { id, source, externalId, subject })
 
   await dynamo.send(new PutItemCommand({
     TableName:           TABLE_NAME,
@@ -146,5 +161,6 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     }, { removeUndefinedValues: true }),
   }))
 
+  console.log('[intake] done, item created:', id)
   return { statusCode: 200, body: 'ok' }
 }

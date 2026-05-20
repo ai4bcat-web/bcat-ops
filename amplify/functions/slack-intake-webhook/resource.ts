@@ -5,8 +5,11 @@ export const slackIntakeWebhook = defineFunction({
   entry: './handler.ts',
   resourceGroupName: 'data',
   environment: {
-    // Set SLACK_SIGNING_SECRET in Amplify Console → Secrets before deploying
-    SLACK_SIGNING_SECRET: secret('SLACK_SIGNING_SECRET'),
+    SLACK_SIGNING_SECRET:  secret('SLACK_SIGNING_SECRET'),
+    // JSON mapping Slack channel IDs → source enum
+    // e.g. '{"C12345678":"IVAN_CARTAGE","C87654321":"BCAT_LOGISTICS"}'
+    // Set via: npx ampx secret set SLACK_CHANNEL_MAPPING  (or Amplify Console → Secrets)
+    SLACK_CHANNEL_MAPPING: secret('SLACK_CHANNEL_MAPPING'),
   },
-  // TABLE_NAME and SLACK_CHANNEL_MAPPING added via addEnvironment() in backend.ts
+  // TABLE_NAME added via addEnvironment() in backend.ts
 })
