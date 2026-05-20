@@ -435,6 +435,185 @@ export async function deleteDriverPhoto(key: string): Promise<void> {
   await remove({ path: key })
 }
 
+// ── Expense types ─────────────────────────────────────────────────────────────
+
+export type ExpenseCategory = 'FUEL' | 'INSURANCE' | 'FINANCING' | 'LEASE' | 'MAINTENANCE' | 'PERMITS' | 'TOLLS' | 'OTHER'
+export type EntryMethod = 'FIXED' | 'MANUAL' | 'AUTO_INGESTED'
+
+export interface ExpenseTypeData {
+  id: string
+  name: string
+  category: ExpenseCategory
+  defaultEntryMethod: EntryMethod
+  active: boolean
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TruckExpenseAllocationData {
+  id: string
+  expenseTypeId: string
+  allocationMethod: 'DIRECT' | 'SPLIT_EVEN'
+  truckIds?: string[]
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ExpenseRecordData {
+  id: string
+  expenseTypeId: string
+  allocationId?: string | null
+  amount: number
+  periodMonth?: string | null    // "2026-05"
+  transactionDate?: string | null
+  entryMethod?: EntryMethod | null
+  directTruckId?: string | null
+  notes?: string | null
+  source?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RecurringExpenseData {
+  id: string
+  expenseTypeId: string
+  allocationId: string
+  monthlyAmount: number
+  startMonth: string
+  endMonth?: string | null
+  active: boolean
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const EXPENSE_TYPE_FIELDS = `id name category defaultEntryMethod active notes createdAt updatedAt`
+const ALLOCATION_FIELDS   = `id expenseTypeId allocationMethod truckIds notes createdAt updatedAt`
+const EXPENSE_REC_FIELDS  = `id expenseTypeId allocationId amount periodMonth transactionDate entryMethod directTruckId notes source createdAt updatedAt`
+const RECURRING_FIELDS    = `id expenseTypeId allocationId monthlyAmount startMonth endMonth active notes createdAt updatedAt`
+
+export async function listExpenseTypes(): Promise<ExpenseTypeData[]> {
+  const result = await client.graphql({
+    query: `query ListExpenseTypes { listExpenseTypes(limit: 1000) { items { ${EXPENSE_TYPE_FIELDS} } } }`,
+  }) as { data: { listExpenseTypes: { items: ExpenseTypeData[] } } }
+  return result.data.listExpenseTypes.items ?? []
+}
+
+export async function createExpenseType(input: Omit<ExpenseTypeData, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseTypeData> {
+  const result = await client.graphql({
+    query: `mutation CreateExpenseType($input: CreateExpenseTypeInput!) { createExpenseType(input: $input) { ${EXPENSE_TYPE_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createExpenseType: ExpenseTypeData } }
+  return result.data.createExpenseType
+}
+
+export async function updateExpenseType(id: string, patch: Partial<Omit<ExpenseTypeData, 'id' | 'createdAt'>>): Promise<ExpenseTypeData> {
+  const result = await client.graphql({
+    query: `mutation UpdateExpenseType($input: UpdateExpenseTypeInput!) { updateExpenseType(input: $input) { ${EXPENSE_TYPE_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateExpenseType: ExpenseTypeData } }
+  return result.data.updateExpenseType
+}
+
+export async function deleteExpenseType(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteExpenseType($input: DeleteExpenseTypeInput!) { deleteExpenseType(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+export async function listAllocations(): Promise<TruckExpenseAllocationData[]> {
+  const result = await client.graphql({
+    query: `query ListTruckExpenseAllocations { listTruckExpenseAllocations(limit: 1000) { items { ${ALLOCATION_FIELDS} } } }`,
+  }) as { data: { listTruckExpenseAllocations: { items: TruckExpenseAllocationData[] } } }
+  return result.data.listTruckExpenseAllocations.items ?? []
+}
+
+export async function createAllocation(input: Omit<TruckExpenseAllocationData, 'id' | 'createdAt' | 'updatedAt'>): Promise<TruckExpenseAllocationData> {
+  const result = await client.graphql({
+    query: `mutation CreateTruckExpenseAllocation($input: CreateTruckExpenseAllocationInput!) { createTruckExpenseAllocation(input: $input) { ${ALLOCATION_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createTruckExpenseAllocation: TruckExpenseAllocationData } }
+  return result.data.createTruckExpenseAllocation
+}
+
+export async function updateAllocation(id: string, patch: Partial<Omit<TruckExpenseAllocationData, 'id' | 'createdAt'>>): Promise<TruckExpenseAllocationData> {
+  const result = await client.graphql({
+    query: `mutation UpdateTruckExpenseAllocation($input: UpdateTruckExpenseAllocationInput!) { updateTruckExpenseAllocation(input: $input) { ${ALLOCATION_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateTruckExpenseAllocation: TruckExpenseAllocationData } }
+  return result.data.updateTruckExpenseAllocation
+}
+
+export async function deleteAllocation(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteTruckExpenseAllocation($input: DeleteTruckExpenseAllocationInput!) { deleteTruckExpenseAllocation(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+export async function listExpenseRecords(): Promise<ExpenseRecordData[]> {
+  const result = await client.graphql({
+    query: `query ListExpenseRecords { listExpenseRecords(limit: 10000) { items { ${EXPENSE_REC_FIELDS} } } }`,
+  }) as { data: { listExpenseRecords: { items: ExpenseRecordData[] } } }
+  return result.data.listExpenseRecords.items ?? []
+}
+
+export async function createExpenseRecord(input: Omit<ExpenseRecordData, 'id' | 'createdAt' | 'updatedAt'>): Promise<ExpenseRecordData> {
+  const result = await client.graphql({
+    query: `mutation CreateExpenseRecord($input: CreateExpenseRecordInput!) { createExpenseRecord(input: $input) { ${EXPENSE_REC_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createExpenseRecord: ExpenseRecordData } }
+  return result.data.createExpenseRecord
+}
+
+export async function updateExpenseRecord(id: string, patch: Partial<Omit<ExpenseRecordData, 'id' | 'createdAt'>>): Promise<ExpenseRecordData> {
+  const result = await client.graphql({
+    query: `mutation UpdateExpenseRecord($input: UpdateExpenseRecordInput!) { updateExpenseRecord(input: $input) { ${EXPENSE_REC_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateExpenseRecord: ExpenseRecordData } }
+  return result.data.updateExpenseRecord
+}
+
+export async function deleteExpenseRecord(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteExpenseRecord($input: DeleteExpenseRecordInput!) { deleteExpenseRecord(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+export async function listRecurringExpenses(): Promise<RecurringExpenseData[]> {
+  const result = await client.graphql({
+    query: `query ListRecurringExpenses { listRecurringExpenses(limit: 1000) { items { ${RECURRING_FIELDS} } } }`,
+  }) as { data: { listRecurringExpenses: { items: RecurringExpenseData[] } } }
+  return result.data.listRecurringExpenses.items ?? []
+}
+
+export async function createRecurringExpense(input: Omit<RecurringExpenseData, 'id' | 'createdAt' | 'updatedAt'>): Promise<RecurringExpenseData> {
+  const result = await client.graphql({
+    query: `mutation CreateRecurringExpense($input: CreateRecurringExpenseInput!) { createRecurringExpense(input: $input) { ${RECURRING_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createRecurringExpense: RecurringExpenseData } }
+  return result.data.createRecurringExpense
+}
+
+export async function updateRecurringExpense(id: string, patch: Partial<Omit<RecurringExpenseData, 'id' | 'createdAt'>>): Promise<RecurringExpenseData> {
+  const result = await client.graphql({
+    query: `mutation UpdateRecurringExpense($input: UpdateRecurringExpenseInput!) { updateRecurringExpense(input: $input) { ${RECURRING_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateRecurringExpense: RecurringExpenseData } }
+  return result.data.updateRecurringExpense
+}
+
+export async function deleteRecurringExpense(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteRecurringExpense($input: DeleteRecurringExpenseInput!) { deleteRecurringExpense(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 async function resolveDriverPhotoUrl(driver: Driver): Promise<Driver> {

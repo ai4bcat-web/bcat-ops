@@ -13,9 +13,13 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
+import { useExpenseData } from '@/hooks/useExpenseData'
+import { getExpensesByTruck } from '@/lib/expenseAllocation'
 import { FuelUploadModal } from './FuelUploadModal'
+import { ExpenseManageView } from './ExpenseManageView'
 import type { FuelTransaction } from '@/hooks/useFuelTransactions'
 import type { Equipment } from '@/types/equipment'
+import type { TruckExpenseSummary } from '@/lib/expenseAllocation'
 
 // ── Date range ────────────────────────────────────────────────────────────────
 
@@ -44,7 +48,7 @@ function getRange(key: RangeKey, customStart: Date, customEnd: Date): [Date, Dat
   }
 }
 
-// ── Week buckets (Sun–Sat) ────────────────────────────────────────────────────
+// ── Week buckets ──────────────────────────────────────────────────────────────
 
 interface WeekBucket { wStart: Date; wEnd: Date; label: string }
 
@@ -53,8 +57,6 @@ function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
   let wStart = startOfWeek(start, { weekStartsOn: 0 })
   while (!isAfter(wStart, end)) {
     const wEnd = endOfWeek(wStart, { weekStartsOn: 0 })
-    // Clip the display label to the selected range so "Yesterday" shows
-    // "5/19" rather than the full "5/18–5/24" week span.
     const labelFrom = wStart < start ? start : wStart
     const labelTo   = wEnd > end ? end : wEnd
     const fromStr   = format(labelFrom, 'M/d')
@@ -66,25 +68,21 @@ function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
   return weeks
 }
 
-// ── Category helpers ──────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const FUEL_TYPES_SET = new Set(['ULSD', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
 
 function isFuel(tx: FuelTransaction): boolean {
-  // Prefer explicit itemCategory (set on new records); fall back to fuelType lookup
   if (tx.itemCategory) return tx.itemCategory === 'FUEL'
   return FUEL_TYPES_SET.has((tx.fuelType ?? '').toUpperCase())
 }
 
 function categoryLabel(tx: FuelTransaction): string {
-  const cat = tx.itemCategory
-  if (cat === 'SCALE') return 'Scale Fee'
-  if (cat === 'CASH_ADVANCE') return 'Cash Advance'
-  if (cat === 'OTHER') return 'Other'
+  if (tx.itemCategory === 'SCALE') return 'Scale Fee'
+  if (tx.itemCategory === 'CASH_ADVANCE') return 'Cash Advance'
+  if (tx.itemCategory === 'OTHER') return 'Other'
   return tx.fuelType
 }
-
-// ── Colors / formatters ───────────────────────────────────────────────────────
 
 const TRUCK_COLORS = [
   '#1ea8f3', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444',
@@ -99,8 +97,6 @@ function fmtGal(n: number) {
   return `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} gal`
 }
 
-// ── Aggregation helpers ───────────────────────────────────────────────────────
-
 function filterByDate(txs: FuelTransaction[], start: Date, end: Date): FuelTransaction[] {
   return txs.filter((t) => {
     const d = new Date(`${t.transactionDate}T12:00:00`)
@@ -110,6 +106,19 @@ function filterByDate(txs: FuelTransaction[], start: Date, end: Date): FuelTrans
 
 function sumAmt(txs: FuelTransaction[]) { return txs.reduce((s, t) => s + t.amount, 0) }
 function sumQty(txs: FuelTransaction[]) { return txs.reduce((s, t) => s + t.quantity, 0) }
+
+// ── Category display config ───────────────────────────────────────────────────
+
+const CATEGORIES: { key: keyof Omit<TruckExpenseSummary, 'total'>; label: string; color: string }[] = [
+  { key: 'fuel',        label: 'Fuel',        color: '#1ea8f3' },
+  { key: 'insurance',   label: 'Insurance',   color: '#8b5cf6' },
+  { key: 'financing',   label: 'Financing',   color: '#f59e0b' },
+  { key: 'lease',       label: 'Lease',       color: '#06b6d4' },
+  { key: 'maintenance', label: 'Maintenance', color: '#ef4444' },
+  { key: 'permits',     label: 'Permits',     color: '#10b981' },
+  { key: 'tolls',       label: 'Tolls',       color: '#f97316' },
+  { key: 'other',       label: 'Other',       color: '#84cc16' },
+]
 
 // ── KPI card ──────────────────────────────────────────────────────────────────
 
@@ -123,7 +132,7 @@ function KpiCard({ label, value, sub, title }: { label: string; value: string; s
   )
 }
 
-// ── Transaction detail ────────────────────────────────────────────────────────
+// ── Fuel transaction detail ───────────────────────────────────────────────────
 
 function TxDetail({
   truck, txs, rangeLabel, onBack,
@@ -199,54 +208,203 @@ function TxDetail({
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Overview tab — per-truck × category matrix ────────────────────────────────
 
-export function ExpensesPage() {
-  const equipment = useAppStore((s) => s.equipment)
-  const trucks = useMemo(
-    () => equipment.filter((e) => e.type === 'truck' && e.active && (e.fuelCardNumbers ?? []).length > 0),
-    [equipment],
+function OverviewTab({
+  trucks, fuelTxs, expenseData, rangeStart, rangeEnd,
+}: {
+  trucks: Equipment[]
+  fuelTxs: FuelTransaction[]
+  expenseData: ReturnType<typeof useExpenseData>
+  rangeStart: Date
+  rangeEnd: Date
+}) {
+  const startStr = format(rangeStart, 'yyyy-MM-dd')
+  const endStr   = format(rangeEnd, 'yyyy-MM-dd')
+
+  // Build inputs for allocation engine
+  const fuelInputs = useMemo(() =>
+    fuelTxs.map((t) => ({
+      truckId:         t.truckId,
+      transactionDate: t.transactionDate,
+      amount:          t.amount,
+      itemCategory:    t.itemCategory ?? (isFuel(t) ? 'FUEL' : 'OTHER'),
+    })),
+    [fuelTxs],
   )
 
-  const { transactions, loading, refresh, addTransactions } = useFuelTransactions()
-  const [showUpload, setShowUpload]   = useState(false)
-  const [rangeKey, setRangeKey]       = useState<RangeKey>('last-4-weeks')
-  const [customStart, setCustomStart] = useState(new Date())
-  const [customEnd, setCustomEnd]     = useState(new Date())
-  const [drillTruck, setDrillTruck]   = useState<Equipment | null>(null)
-  const [drillWeek, setDrillWeek]     = useState<WeekBucket | null>(null)
-  const [chartMode, setChartMode]     = useState<'$' | 'gal'>('$')
+  const recordInputs = useMemo(() =>
+    expenseData.records.map((r) => ({
+      expenseTypeId:   r.expenseTypeId,
+      allocationId:    r.allocationId,
+      amount:          r.amount,
+      periodMonth:     r.periodMonth,
+      transactionDate: r.transactionDate,
+      directTruckId:   r.directTruckId,
+    })),
+    [expenseData.records],
+  )
+
+  const allocInputs = useMemo(() =>
+    expenseData.allocations.map((a) => ({
+      id:               a.id,
+      expenseTypeId:    a.expenseTypeId,
+      allocationMethod: a.allocationMethod,
+      truckIds:         a.truckIds ?? [],
+    })),
+    [expenseData.allocations],
+  )
+
+  const typeInputs = useMemo(() =>
+    expenseData.expenseTypes.map((t) => ({
+      id:       t.id,
+      category: t.category,
+    })),
+    [expenseData.expenseTypes],
+  )
+
+  const matrix = useMemo(
+    () => getExpensesByTruck(startStr, endStr, fuelInputs, recordInputs, allocInputs, typeInputs),
+    [startStr, endStr, fuelInputs, recordInputs, allocInputs, typeInputs],
+  )
+
+  // KPIs
+  const fleetTotals = useMemo((): Record<string, number> => {
+    const agg: Record<string, number> = {}
+    let grand = 0
+    for (const truckId of Object.keys(matrix)) {
+      const summary = matrix[truckId]
+      for (const { key } of CATEGORIES) {
+        agg[key] = (agg[key] ?? 0) + summary[key]
+      }
+      grand += summary.total
+    }
+    return { ...agg, total: grand }
+  }, [matrix])
+
+  // Sort trucks by total descending, only those with any expense
+  const matrixRows = useMemo(() => {
+    return trucks
+      .map((truck) => ({ truck, summary: matrix[truck.id] }))
+      .filter((r) => r.summary && r.summary.total > 0)
+      .sort((a, b) => b.summary.total - a.summary.total)
+  }, [trucks, matrix])
+
+  const allTrucks = trucks.filter((t) => t.type === 'truck' && t.active)
+
+  const loading = expenseData.loading
+  const hasData = matrixRows.length > 0
+
+  return (
+    <div className="space-y-5">
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard label="Total Fleet Cost" value={fmtMoney(fleetTotals.total || 0)} sub={`${matrixRows.length} truck${matrixRows.length !== 1 ? 's' : ''} with expenses`} />
+        <KpiCard label="Fuel"             value={fmtMoney(fleetTotals['fuel'] || 0)} />
+        <KpiCard label="Insurance"        value={fmtMoney(fleetTotals['insurance'] || 0)} />
+        <KpiCard label="Other"            value={fmtMoney(((fleetTotals.total || 0) - (fleetTotals['fuel'] || 0) - (fleetTotals['insurance'] || 0)))} />
+      </div>
+
+      {/* Matrix */}
+      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h2 className="text-sm font-semibold text-foreground">Per-Truck Cost Matrix</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">All expense categories · fuel from EFS · other from expense records</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
+                {CATEGORIES.map(({ label }) => (
+                  <th key={label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{label}</th>
+                ))}
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && !hasData ? (
+                <tr>
+                  <td colSpan={CATEGORIES.length + 2} className="py-12 text-center text-sm text-muted-foreground">
+                    <RefreshCw className="size-4 animate-spin inline mr-2" />Loading…
+                  </td>
+                </tr>
+              ) : !hasData ? (
+                <tr>
+                  <td colSpan={CATEGORIES.length + 2} className="py-12 text-center">
+                    <p className="text-sm text-muted-foreground">No expense data for this period.</p>
+                    <p className="text-xs text-muted-foreground/60 mt-1">Upload fuel reports and add expense records in the Manage tab.</p>
+                  </td>
+                </tr>
+              ) : (
+                matrixRows.map(({ truck, summary }) => (
+                  <tr key={truck.id} className="border-t border-slate-100 hover:bg-slate-50/60">
+                    <td className="sticky left-0 bg-white z-10 px-4 py-3 font-bold whitespace-nowrap" style={{ color: truckColor(allTrucks.findIndex((t) => t.id === truck.id)) }}>
+                      #{truck.unitNumber}
+                    </td>
+                    {CATEGORIES.map(({ key }) => (
+                      <td key={key} className="px-4 py-3 tabular-nums text-right">
+                        {summary[key] > 0 ? fmtMoney(summary[key]) : <span className="text-muted-foreground/25">—</span>}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3 tabular-nums text-right font-semibold">{fmtMoney(summary.total)}</td>
+                  </tr>
+                ))
+              )}
+
+              {hasData && (
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+                  <td className="sticky left-0 bg-slate-50 z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
+                  {CATEGORIES.map(({ key }) => (
+                    <td key={key} className="px-4 py-3 tabular-nums text-right">
+                      {(fleetTotals[key] ?? 0) > 0 ? fmtMoney(fleetTotals[key]) : <span className="text-muted-foreground/25">—</span>}
+                    </td>
+                  ))}
+                  <td className="px-4 py-3 tabular-nums text-right">{fmtMoney(fleetTotals.total || 0)}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Fuel tab — weekly pivot + chart ───────────────────────────────────────────
+
+function FuelTab({
+  trucks, transactions, loading, refresh, addTransactions, rangeStart, rangeEnd, rangeKey, equipment,
+}: {
+  trucks: Equipment[]
+  transactions: FuelTransaction[]
+  loading: boolean
+  refresh: () => void
+  addTransactions: (added: FuelTransaction[]) => void
+  rangeStart: Date
+  rangeEnd: Date
+  rangeKey: RangeKey
+  equipment: Equipment[]
+}) {
+  const [showUpload,    setShowUpload]    = useState(false)
+  const [drillTruck,   setDrillTruck]    = useState<Equipment | null>(null)
+  const [drillWeek,    setDrillWeek]     = useState<WeekBucket | null>(null)
+  const [chartMode,    setChartMode]     = useState<'$' | 'gal'>('$')
   const [breakdownOpen, setBreakdownOpen] = useState(false)
 
-  const [rangeStart, rangeEnd] = getRange(rangeKey, customStart, customEnd)
+  const filteredTxs = useMemo(() => filterByDate(transactions, rangeStart, rangeEnd), [transactions, rangeStart, rangeEnd])
+  const fuelTxs     = useMemo(() => filteredTxs.filter(isFuel), [filteredTxs])
+  const otherTxs    = useMemo(() => filteredTxs.filter((t) => !isFuel(t)), [filteredTxs])
 
-  // All txs in date range (all categories)
-  const filteredTxs = useMemo(
-    () => filterByDate(transactions, rangeStart, rangeEnd),
-    [transactions, rangeStart, rangeEnd],
-  )
-
-  // Fuel-only txs for pivot, chart, KPIs
-  const fuelTxs = useMemo(() => filteredTxs.filter(isFuel), [filteredTxs])
-
-  // Non-fuel txs (scale fees, cash, other)
-  const otherTxs = useMemo(() => filteredTxs.filter((t) => !isFuel(t)), [filteredTxs])
-
-  // ── Summary KPIs ──────────────────────────────────────────────────────────
-  // Restrict KPIs to the same trucks shown in the pivot table so the card
-  // total and the table grand total are always identical.
   const pivotTruckIds = useMemo(() => new Set(trucks.map((t) => t.id)), [trucks])
-  const pivotFuelTxs  = useMemo(
-    () => fuelTxs.filter((t) => t.truckId && pivotTruckIds.has(t.truckId)),
-    [fuelTxs, pivotTruckIds],
-  )
+  const pivotFuelTxs  = useMemo(() => fuelTxs.filter((t) => t.truckId && pivotTruckIds.has(t.truckId)), [fuelTxs, pivotTruckIds])
 
   const totalFuelSpend = sumAmt(pivotFuelTxs)
   const totalGal       = sumQty(pivotFuelTxs)
   const avgPpg         = totalGal > 0 ? totalFuelSpend / totalGal : 0
   const fuelTxCount    = pivotFuelTxs.length
+  const otherSpend     = sumAmt(otherTxs)
 
-  const otherSpend = sumAmt(otherTxs)
   const otherBreakdownTitle = useMemo(() => {
     if (otherTxs.length === 0) return undefined
     const bycat: Record<string, number> = {}
@@ -254,20 +412,15 @@ export function ExpensesPage() {
       const cat = tx.itemCategory ?? 'Other'
       bycat[cat] = (bycat[cat] ?? 0) + tx.amount
     }
-    return Object.entries(bycat)
-      .map(([k, v]) => `${k}: ${fmtMoney(v)}`)
-      .join(' · ')
+    return Object.entries(bycat).map(([k, v]) => `${k}: ${fmtMoney(v)}`).join(' · ')
   }, [otherTxs])
 
-  // ── Weekly pivot ──────────────────────────────────────────────────────────
   const weeks = useMemo(() => getWeeksInRange(rangeStart, rangeEnd), [rangeStart, rangeEnd])
 
   const pivotRows = useMemo(() => {
     return trucks.map((truck) => {
       const truckFuelTxs = fuelTxs.filter((t) => t.truckId === truck.id)
-      const weekAmts = weeks.map(({ wStart, wEnd }) =>
-        sumAmt(filterByDate(truckFuelTxs, wStart, wEnd)),
-      )
+      const weekAmts = weeks.map(({ wStart, wEnd }) => sumAmt(filterByDate(truckFuelTxs, wStart, wEnd)))
       const total = sumAmt(truckFuelTxs)
       return { truck, label: `#${truck.unitNumber}`, weekAmts, total }
     }).sort((a, b) => b.total - a.total)
@@ -276,20 +429,17 @@ export function ExpensesPage() {
   const weekTotals = weeks.map((_, wi) => pivotRows.reduce((s, r) => s + r.weekAmts[wi], 0))
   const grandTotal = pivotRows.reduce((s, r) => s + r.total, 0)
 
-  // ── Fuel type breakdown (ULSD vs DEF) ─────────────────────────────────────
-  const fuelBreakdown = useMemo(() => {
-    return pivotRows
-      .filter((r) => r.total > 0)
-      .map(({ truck, label, total }) => {
-        const truckTxs = fuelTxs.filter((t) => t.truckId === truck.id)
-        const ulsd = truckTxs.filter((t) => t.fuelType === 'ULSD').reduce((s, t) => s + t.amount, 0)
-        const defd = truckTxs.filter((t) => t.fuelType === 'DEFD').reduce((s, t) => s + t.amount, 0)
-        return { label, ulsd, defd, total }
-      })
-  }, [pivotRows, fuelTxs])
+  const fuelBreakdown = useMemo(() =>
+    pivotRows.filter((r) => r.total > 0).map(({ truck, label, total }) => {
+      const truckTxs = fuelTxs.filter((t) => t.truckId === truck.id)
+      const ulsd = truckTxs.filter((t) => t.fuelType === 'ULSD').reduce((s, t) => s + t.amount, 0)
+      const defd = truckTxs.filter((t) => t.fuelType === 'DEFD').reduce((s, t) => s + t.amount, 0)
+      return { label, ulsd, defd, total }
+    }),
+    [pivotRows, fuelTxs],
+  )
 
-  // ── Chart (fuel-only, weekly or daily) ───────────────────────────────────
-  const rangeDays  = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000)
+  const rangeDays   = Math.ceil((rangeEnd.getTime() - rangeStart.getTime()) / 86_400_000)
   const groupByWeek = rangeDays > 14
 
   const chartData = useMemo(() => {
@@ -299,310 +449,215 @@ export function ExpensesPage() {
       if (!truck) continue
       const label = `#${truck.unitNumber}`
       const d     = new Date(`${tx.transactionDate}T12:00:00`)
-      const key   = groupByWeek
-        ? format(startOfWeek(d, { weekStartsOn: 0 }), 'yyyy-MM-dd')
-        : tx.transactionDate
+      const key   = groupByWeek ? format(startOfWeek(d, { weekStartsOn: 0 }), 'yyyy-MM-dd') : tx.transactionDate
       if (!buckets[key]) buckets[key] = {}
       buckets[key][label] = (buckets[key][label] ?? 0) + (chartMode === '$' ? tx.amount : tx.quantity)
     }
-    return Object.entries(buckets)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, vals]) => ({ date, ...vals }))
+    return Object.entries(buckets).sort(([a], [b]) => a.localeCompare(b)).map(([date, vals]) => ({ date, ...vals }))
   }, [fuelTxs, trucks, groupByWeek, chartMode])
 
   const truckLabels = useMemo(() => trucks.map((t) => `#${t.unitNumber}`), [trucks])
 
-  // ── Drill-down (shows ALL transaction types) ──────────────────────────────
   const drillTxs = useMemo(() => {
     if (!drillTruck) return []
     const base = transactions.filter((t) => t.truckId === drillTruck.id)
-    return drillWeek
-      ? filterByDate(base, drillWeek.wStart, drillWeek.wEnd)
-      : filterByDate(base, rangeStart, rangeEnd)
+    return drillWeek ? filterByDate(base, drillWeek.wStart, drillWeek.wEnd) : filterByDate(base, rangeStart, rangeEnd)
   }, [drillTruck, drillWeek, transactions, rangeStart, rangeEnd])
 
-  const drillLabel = drillWeek
-    ? drillWeek.label
-    : (RANGE_OPTIONS.find((o) => o.value === rangeKey)?.label ?? 'Selected Range')
+  const drillLabel = drillWeek ? drillWeek.label : (RANGE_OPTIONS.find((o) => o.value === rangeKey)?.label ?? 'Selected Range')
+
+  if (drillTruck) {
+    return (
+      <TxDetail
+        truck={drillTruck}
+        txs={drillTxs}
+        rangeLabel={drillLabel}
+        onBack={() => { setDrillTruck(null); setDrillWeek(null) }}
+      />
+    )
+  }
 
   return (
-    <div className="h-full overflow-y-auto">
-      {/* ── Header ── */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="flex items-center justify-between px-8 pt-5 pb-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-foreground tracking-tight">Fuel Expenses</h1>
-            <p className="text-sm text-slate-500 mt-0.5">EFS transaction data by truck</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refresh} disabled={loading}>
-              <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Refresh
-            </Button>
-            <Button size="sm" className="h-8 gap-1.5" onClick={() => setShowUpload(true)}>
-              <Upload className="size-3.5" /> Upload Report
-            </Button>
-          </div>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">EFS Fuel Transactions</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Weekly fuel spend by truck · click a cell to drill down</p>
         </div>
-
-        {/* Range presets */}
-        <div className="flex items-center gap-3 px-8 pb-4 flex-wrap">
-          <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
-            {RANGE_OPTIONS.map((o) => (
-              <button
-                key={o.value}
-                onClick={() => setRangeKey(o.value)}
-                className={cn('px-4 py-2 text-xs font-medium transition-colors',
-                  rangeKey === o.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
-                )}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-
-          {rangeKey === 'custom' && (
-            <div className="flex items-center gap-1.5 text-xs">
-              <input type="date" value={format(customStart, 'yyyy-MM-dd')}
-                onChange={(e) => setCustomStart(new Date(e.target.value + 'T00:00:00'))}
-                className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
-              <span className="text-muted-foreground">to</span>
-              <input type="date" value={format(customEnd, 'yyyy-MM-dd')}
-                onChange={(e) => setCustomEnd(new Date(e.target.value + 'T00:00:00'))}
-                className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
-            </div>
-          )}
-
-          <span className="text-xs text-muted-foreground">
-            Showing {format(rangeStart, 'MMM d, yyyy')} – {format(rangeEnd, 'MMM d, yyyy')}
-          </span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={refresh} disabled={loading}>
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} /> Refresh
+          </Button>
+          <Button size="sm" className="h-8 gap-1.5" onClick={() => setShowUpload(true)}>
+            <Upload className="size-3.5" /> Upload Report
+          </Button>
         </div>
       </div>
 
-      {drillTruck ? (
-        <TxDetail
-          truck={drillTruck}
-          txs={drillTxs}
-          rangeLabel={drillLabel}
-          onBack={() => { setDrillTruck(null); setDrillWeek(null) }}
-        />
-      ) : (
-        <div className="p-8 space-y-6">
+      {/* KPI strip */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <KpiCard label="Total Fuel Spend"    value={fmtMoney(totalFuelSpend)} sub={`${fuelTxCount} fuel transaction${fuelTxCount !== 1 ? 's' : ''}`} />
+        <KpiCard label="Total Gallons"       value={fmtGal(totalGal)} />
+        <KpiCard label="Avg $/Gallon"        value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
+        <KpiCard label="Fuel Transactions"   value={fuelTxCount.toLocaleString()} />
+        <KpiCard label="Other Charges"       value={otherSpend > 0 ? fmtMoney(otherSpend) : '—'} sub={otherTxs.length > 0 ? `${otherTxs.length} non-fuel item${otherTxs.length !== 1 ? 's' : ''}` : undefined} title={otherBreakdownTitle} />
+      </div>
 
-          {/* ── KPI strip ── */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <KpiCard label="Total Fuel Spend"  value={fmtMoney(totalFuelSpend)} sub={`${fuelTxCount} fuel transaction${fuelTxCount !== 1 ? 's' : ''}`} />
-            <KpiCard label="Total Gallons" value={fmtGal(totalGal)} />
-            <KpiCard label="Avg $/Gallon"  value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
-            <KpiCard label="Fuel Transactions" value={fuelTxCount.toLocaleString()} />
-            <KpiCard
-              label="Other Charges"
-              value={otherSpend > 0 ? fmtMoney(otherSpend) : '—'}
-              sub={otherTxs.length > 0 ? `${otherTxs.length} non-fuel item${otherTxs.length !== 1 ? 's' : ''}` : undefined}
-              title={otherBreakdownTitle}
-            />
-          </div>
+      {/* Weekly pivot */}
+      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h2 className="text-sm font-semibold text-foreground">Weekly Fuel Spend by Truck</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · fuel only</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
+                {weeks.map((w) => (
+                  <th key={w.label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{w.label}</th>
+                ))}
+                <th className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && transactions.length === 0 ? (
+                <tr>
+                  <td colSpan={weeks.length + 2} className="py-12 text-center text-sm text-muted-foreground">
+                    <RefreshCw className="size-4 animate-spin inline mr-2" />Loading…
+                  </td>
+                </tr>
+              ) : pivotRows.length === 0 ? (
+                <tr>
+                  <td colSpan={weeks.length + 2} className="py-12 text-center">
+                    <Fuel className="size-8 text-muted-foreground/20 mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No fuel data. Upload an EFS report to get started.</p>
+                  </td>
+                </tr>
+              ) : pivotRows.map((row, i) => (
+                <tr key={row.truck.id} className="border-t border-slate-100">
+                  <td
+                    className="sticky left-0 bg-white z-10 px-4 py-3 font-bold whitespace-nowrap cursor-pointer hover:underline"
+                    style={{ color: truckColor(i) }}
+                    onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
+                  >
+                    {row.label}
+                  </td>
+                  {row.weekAmts.map((amt, wi) => (
+                    <td
+                      key={wi}
+                      className={cn('px-4 py-3 tabular-nums text-right', amt > 0 ? 'cursor-pointer hover:bg-sky-50/60' : 'text-muted-foreground/30')}
+                      onClick={() => { if (amt > 0) { setDrillTruck(row.truck); setDrillWeek(weeks[wi]) } }}
+                    >
+                      {amt > 0 ? fmtMoney(amt) : '—'}
+                    </td>
+                  ))}
+                  <td
+                    className="px-4 py-3 tabular-nums text-right font-semibold cursor-pointer hover:bg-sky-50/60"
+                    onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
+                  >
+                    {row.total > 0 ? fmtMoney(row.total) : '—'}
+                  </td>
+                </tr>
+              ))}
+              {!loading && pivotRows.length > 0 && (
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
+                  <td className="sticky left-0 bg-slate-50 z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
+                  {weekTotals.map((v, wi) => (
+                    <td key={wi} className="px-4 py-3 tabular-nums text-right">{v > 0 ? fmtMoney(v) : '—'}</td>
+                  ))}
+                  <td className="px-4 py-3 tabular-nums text-right">{grandTotal > 0 ? fmtMoney(grandTotal) : '—'}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-          {/* ── Weekly Spend by Truck (fuel only) ── */}
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
-            <div className="px-6 py-4 border-b border-slate-100">
-              <h2 className="text-sm font-semibold text-foreground">Weekly Fuel Spend by Truck</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · fuel only · click a cell to see transactions</p>
-            </div>
-            <div className="overflow-x-auto">
+      {/* Fuel type breakdown */}
+      {fuelBreakdown.length > 0 && (
+        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+          <button
+            className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-slate-50/60 transition-colors"
+            onClick={() => setBreakdownOpen((o) => !o)}
+          >
+            {breakdownOpen ? <ChevronDown className="size-4 text-muted-foreground shrink-0" /> : <ChevronRight className="size-4 text-muted-foreground shrink-0" />}
+            <span className="text-sm font-semibold text-foreground">Breakdown by Fuel Type</span>
+            <span className="text-xs text-muted-foreground">(ULSD vs DEF per truck)</span>
+          </button>
+          {breakdownOpen && (
+            <div className="border-t border-slate-100 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="bg-slate-50">
                   <tr>
-                    <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
-                      Truck
-                    </th>
-                    {weeks.map((w) => (
-                      <th key={w.label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
-                        {w.label}
-                      </th>
-                    ))}
-                    <th className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Truck</th>
+                    <th className="text-right px-4 py-3 font-medium text-sky-600">ULSD $</th>
+                    <th className="text-right px-4 py-3 font-medium text-violet-600">DEF $</th>
+                    <th className="text-right px-4 py-3 font-medium text-muted-foreground">Total $</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {loading && transactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={weeks.length + 2} className="py-12 text-center text-sm text-muted-foreground">
-                        <RefreshCw className="size-4 animate-spin inline mr-2" />Loading…
-                      </td>
-                    </tr>
-                  ) : pivotRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={weeks.length + 2} className="py-12 text-center">
-                        <Fuel className="size-8 text-muted-foreground/20 mx-auto mb-2" />
-                        <p className="text-sm text-muted-foreground">No fuel data yet. Upload an EFS report to get started.</p>
-                      </td>
-                    </tr>
-                  ) : pivotRows.map((row, i) => (
-                    <tr key={row.truck.id} className="border-t border-slate-100">
-                      <td
-                        className="sticky left-0 bg-white z-10 px-4 py-3 font-bold whitespace-nowrap cursor-pointer hover:underline"
-                        style={{ color: truckColor(i) }}
-                        onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
-                      >
-                        {row.label}
-                      </td>
-                      {row.weekAmts.map((amt, wi) => (
-                        <td
-                          key={wi}
-                          className={cn(
-                            'px-4 py-3 tabular-nums text-right',
-                            amt > 0 ? 'cursor-pointer hover:bg-sky-50/60' : 'text-muted-foreground/30',
-                          )}
-                          onClick={() => {
-                            if (amt > 0) { setDrillTruck(row.truck); setDrillWeek(weeks[wi]) }
-                          }}
-                        >
-                          {amt > 0 ? fmtMoney(amt) : '—'}
-                        </td>
-                      ))}
-                      <td
-                        className="px-4 py-3 tabular-nums text-right font-semibold cursor-pointer hover:bg-sky-50/60"
-                        onClick={() => { setDrillTruck(row.truck); setDrillWeek(null) }}
-                      >
-                        {row.total > 0 ? fmtMoney(row.total) : '—'}
-                      </td>
+                  {fuelBreakdown.map((r) => (
+                    <tr key={r.label} className="border-t border-slate-100">
+                      <td className="px-4 py-3 font-medium">{r.label}</td>
+                      <td className="px-4 py-3 tabular-nums text-right">{r.ulsd > 0 ? fmtMoney(r.ulsd) : <span className="text-muted-foreground/30">—</span>}</td>
+                      <td className="px-4 py-3 tabular-nums text-right">{r.defd > 0 ? fmtMoney(r.defd) : <span className="text-muted-foreground/30">—</span>}</td>
+                      <td className="px-4 py-3 tabular-nums text-right font-semibold">{fmtMoney(r.total)}</td>
                     </tr>
                   ))}
-
-                  {!loading && pivotRows.length > 0 && (
-                    <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
-                      <td className="sticky left-0 bg-slate-50 z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">
-                        Total
-                      </td>
-                      {weekTotals.map((v, wi) => (
-                        <td key={wi} className="px-4 py-3 tabular-nums text-right">
-                          {v > 0 ? fmtMoney(v) : '—'}
-                        </td>
-                      ))}
-                      <td className="px-4 py-3 tabular-nums text-right">{grandTotal > 0 ? fmtMoney(grandTotal) : '—'}</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Chart */}
+      {chartData.length > 0 && (
+        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-foreground">Fuel Over Time</h2>
+            <div className="flex rounded-lg border border-slate-200 overflow-hidden">
+              {(['$', 'gal'] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setChartMode(m)}
+                  className={cn('px-3 py-1 text-xs font-medium transition-colors', chartMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50')}
+                >
+                  {m === '$' ? '$ Spend' : 'Gallons'}
+                </button>
+              ))}
+            </div>
           </div>
-
-          {/* ── Breakdown by Fuel Type (collapsible) ── */}
-          {fuelBreakdown.length > 0 && (
-            <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
-              <button
-                className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-slate-50/60 transition-colors"
-                onClick={() => setBreakdownOpen((o) => !o)}
-              >
-                {breakdownOpen
-                  ? <ChevronDown className="size-4 text-muted-foreground shrink-0" />
-                  : <ChevronRight className="size-4 text-muted-foreground shrink-0" />}
-                <span className="text-sm font-semibold text-foreground">Breakdown by Fuel Type</span>
-                <span className="text-xs text-muted-foreground">(ULSD vs DEF per truck)</span>
-              </button>
-              {breakdownOpen && (
-                <div className="border-t border-slate-100 overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        <th className="text-left px-4 py-3 font-medium text-muted-foreground">Truck</th>
-                        <th className="text-right px-4 py-3 font-medium text-sky-600">ULSD $</th>
-                        <th className="text-right px-4 py-3 font-medium text-violet-600">DEF $</th>
-                        <th className="text-right px-4 py-3 font-medium text-muted-foreground">Total $</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fuelBreakdown.map((r) => (
-                        <tr key={r.label} className="border-t border-slate-100">
-                          <td className="px-4 py-3 font-medium">{r.label}</td>
-                          <td className="px-4 py-3 tabular-nums text-right">
-                            {r.ulsd > 0 ? fmtMoney(r.ulsd) : <span className="text-muted-foreground/30">—</span>}
-                          </td>
-                          <td className="px-4 py-3 tabular-nums text-right">
-                            {r.defd > 0 ? fmtMoney(r.defd) : <span className="text-muted-foreground/30">—</span>}
-                          </td>
-                          <td className="px-4 py-3 tabular-nums text-right font-semibold">{fmtMoney(r.total)}</td>
-                        </tr>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={chartData} margin={{ left: 0, right: 8, top: 4, bottom: 4 }}>
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} tickLine={false} axisLine={false}
+                tickFormatter={(v) => format(new Date(`${v}T12:00:00`), groupByWeek ? 'M/d' : 'MMM d')}
+                interval="preserveStartEnd" />
+              <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={48}
+                tickFormatter={(v) => chartMode === '$' ? `$${v}` : `${v}`} />
+              <RTooltip
+                content={({ active, payload, label }) =>
+                  active && payload?.length ? (
+                    <div className="rounded-lg border border-slate-200 bg-white shadow-md px-3 py-2 text-xs space-y-1">
+                      <p className="font-medium">
+                        {groupByWeek ? `Week of ${format(new Date(`${label}T12:00:00`), 'M/d/yyyy')}` : format(new Date(`${label}T12:00:00`), 'MMM d, yyyy')}
+                      </p>
+                      {payload.map((p) => (
+                        <p key={String(p.dataKey)} style={{ color: p.color }}>
+                          {String(p.dataKey)}: {chartMode === '$' ? fmtMoney(p.value as number) : `${(p.value as number).toFixed(2)} gal`}
+                        </p>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Fuel Over Time chart (fuel-only) ── */}
-          {chartData.length > 0 && (
-            <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-foreground">Fuel Over Time</h2>
-                <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-                  {(['$', 'gal'] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setChartMode(m)}
-                      className={cn('px-3 py-1 text-xs font-medium transition-colors',
-                        chartMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
-                      )}
-                    >
-                      {m === '$' ? '$ Spend' : 'Gallons'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={chartData} margin={{ left: 0, right: 8, top: 4, bottom: 4 }}>
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(v) => format(new Date(`${v}T12:00:00`), groupByWeek ? 'M/d' : 'MMM d')}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    tick={{ fontSize: 11 }}
-                    tickLine={false}
-                    axisLine={false}
-                    width={48}
-                    tickFormatter={(v) => chartMode === '$' ? `$${v}` : `${v}`}
-                  />
-                  <RTooltip
-                    content={({ active, payload, label }) =>
-                      active && payload?.length ? (
-                        <div className="rounded-lg border border-slate-200 bg-white shadow-md px-3 py-2 text-xs space-y-1">
-                          <p className="font-medium">
-                            {groupByWeek
-                              ? `Week of ${format(new Date(`${label}T12:00:00`), 'M/d/yyyy')}`
-                              : format(new Date(`${label}T12:00:00`), 'MMM d, yyyy')
-                            }
-                          </p>
-                          {payload.map((p) => (
-                            <p key={String(p.dataKey)} style={{ color: p.color }}>
-                              {String(p.dataKey)}: {chartMode === '$' ? fmtMoney(p.value as number) : `${(p.value as number).toFixed(2)} gal`}
-                            </p>
-                          ))}
-                        </div>
-                      ) : null
-                    }
-                  />
-                  <Legend />
-                  {truckLabels.map((label, i) => (
-                    <Line
-                      key={label}
-                      type="monotone"
-                      dataKey={label}
-                      stroke={truckColor(i)}
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                      connectNulls
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
+                    </div>
+                  ) : null
+                }
+              />
+              <Legend />
+              {truckLabels.map((label, i) => (
+                <Line key={label} type="monotone" dataKey={label} stroke={truckColor(i)} strokeWidth={2} dot={{ r: 3 }} connectNulls />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       )}
 
@@ -613,6 +668,138 @@ export function ExpensesPage() {
           onClose={() => setShowUpload(false)}
         />
       )}
+    </div>
+  )
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+type PageTab = 'overview' | 'fuel' | 'manage'
+
+const PAGE_TABS: { value: PageTab; label: string }[] = [
+  { value: 'overview', label: 'Overview'  },
+  { value: 'fuel',     label: 'Fuel'      },
+  { value: 'manage',   label: 'Manage'    },
+]
+
+export function ExpensesPage() {
+  const equipment = useAppStore((s) => s.equipment)
+  const trucks = useMemo(
+    () => equipment.filter((e) => e.type === 'truck' && e.active && (e.fuelCardNumbers ?? []).length > 0),
+    [equipment],
+  )
+
+  const { transactions, loading, refresh, addTransactions } = useFuelTransactions()
+  const expenseData = useExpenseData()
+
+  const [tab,         setTab]         = useState<PageTab>('overview')
+  const [rangeKey,    setRangeKey]    = useState<RangeKey>('this-month')
+  const [customStart, setCustomStart] = useState(new Date())
+  const [customEnd,   setCustomEnd]   = useState(new Date())
+
+  const [rangeStart, rangeEnd] = getRange(rangeKey, customStart, customEnd)
+
+  // All fuel txs in range (for Overview matrix + FuelTab)
+  const filteredFuelTxs = useMemo(
+    () => filterByDate(transactions, rangeStart, rangeEnd).filter(isFuel),
+    [transactions, rangeStart, rangeEnd],
+  )
+
+  return (
+    <div className="h-full overflow-y-auto">
+      {/* Header */}
+      <div className="sticky top-0 z-10 bg-white border-b border-slate-200">
+        <div className="flex items-center justify-between px-8 pt-5 pb-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground tracking-tight">Expenses</h1>
+            <p className="text-sm text-slate-500 mt-0.5">Per-truck cost tracking across all categories</p>
+          </div>
+        </div>
+
+        {/* Tab bar + range presets on same row */}
+        <div className="flex items-center gap-4 px-8 pb-4 flex-wrap">
+          {/* Page tabs */}
+          <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
+            {PAGE_TABS.map((t) => (
+              <button
+                key={t.value}
+                onClick={() => setTab(t.value)}
+                className={cn('px-5 py-2 text-xs font-medium transition-colors',
+                  tab === t.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab !== 'manage' && (
+            <>
+              {/* Date range presets */}
+              <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
+                {RANGE_OPTIONS.map((o) => (
+                  <button
+                    key={o.value}
+                    onClick={() => setRangeKey(o.value)}
+                    className={cn('px-3 py-2 text-xs font-medium transition-colors',
+                      rangeKey === o.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
+                    )}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+
+              {rangeKey === 'custom' && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <input type="date" value={format(customStart, 'yyyy-MM-dd')}
+                    onChange={(e) => setCustomStart(new Date(e.target.value + 'T00:00:00'))}
+                    className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
+                  <span className="text-muted-foreground">to</span>
+                  <input type="date" value={format(customEnd, 'yyyy-MM-dd')}
+                    onChange={(e) => setCustomEnd(new Date(e.target.value + 'T00:00:00'))}
+                    className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
+                </div>
+              )}
+
+              <span className="text-xs text-muted-foreground">
+                {format(rangeStart, 'MMM d, yyyy')} – {format(rangeEnd, 'MMM d, yyyy')}
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div className="p-8">
+        {tab === 'overview' && (
+          <OverviewTab
+            trucks={trucks}
+            fuelTxs={filteredFuelTxs}
+            expenseData={expenseData}
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
+          />
+        )}
+
+        {tab === 'fuel' && (
+          <FuelTab
+            trucks={trucks}
+            transactions={transactions}
+            loading={loading}
+            refresh={refresh}
+            addTransactions={addTransactions}
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
+            rangeKey={rangeKey}
+            equipment={equipment}
+          />
+        )}
+
+        {tab === 'manage' && (
+          <ExpenseManageView data={expenseData} trucks={equipment} />
+        )}
+      </div>
     </div>
   )
 }
