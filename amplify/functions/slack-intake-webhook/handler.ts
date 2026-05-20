@@ -123,7 +123,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   // Build subject: prefer message text, fall back to uploaded file names
   const files = (ev.files as Array<{ name?: string }> | undefined) ?? []
   const fileNames = files.map((f) => f.name).filter(Boolean).join(', ')
-  const subject = (text.split('\n').find((l) => l.trim()) ?? fileNames || '(file attachment)').slice(0, 80)
+  const subject = ((text.split('\n').find((l) => l.trim()) ?? fileNames) || '(file attachment)').slice(0, 80)
 
   // Include file names in body so they're visible in the detail panel
   const bodyText = [text, fileNames ? `Files: ${fileNames}` : ''].filter(Boolean).join('\n')
