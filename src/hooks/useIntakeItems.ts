@@ -47,7 +47,7 @@ export function useIntakeItems(filter?: { assignedTo?: string; source?: string }
     status?: IntakeStatus
     assignedTo?: string
     notes?: string
-    builtLoadId?: string
+    builtLoadId?: string | null
   }) => {
     const updated = await updateIntakeItem(id, patch)
     setItems((prev) => prev.map((i) => (i.id === id ? updated : i)))

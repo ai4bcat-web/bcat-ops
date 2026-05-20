@@ -79,7 +79,8 @@ export type ViewMode = 'day' | 'planner' | 'two-week'
 // ── Intake queue ───────────────────────────────────────────────────────────
 
 export type IntakeSource = 'IVAN_CARTAGE' | 'BCAT_LOGISTICS'
-export type IntakeStatus = 'NEED_TO_BUILD' | 'BUILT'
+export type IntakeStatus = 'NEW' | 'IN_PROGRESS' | 'BUILT' | 'DONE' | 'ARCHIVED'
+export type ExternalSource = 'gmail' | 'slack'
 
 export interface IntakeItem {
   id: string
@@ -92,7 +93,12 @@ export interface IntakeItem {
   bodyText: string
   bodyHtml: string
   s3KeyPdfAttachments: string[]
-  gmailMessageId: string
+  externalSource?: ExternalSource | null
+  externalId?: string | null        // dedup key: "channelId:ts" or gmailMessageId
+  externalUrl?: string | null       // Slack permalink or Gmail link
+  slackChannelId?: string | null
+  slackMessageTs?: string | null
+  gmailMessageId?: string | null    // legacy
   extractedMetadata?: Record<string, unknown> | null
   builtLoadId?: string | null
   notes?: string | null

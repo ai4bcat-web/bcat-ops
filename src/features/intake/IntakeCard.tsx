@@ -1,15 +1,21 @@
-import { Paperclip } from 'lucide-react'
+import { Paperclip, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const STATUS_STYLES: Record<IntakeStatus, string> = {
-  NEED_TO_BUILD: 'bg-amber-50 text-amber-700 border-amber-200',
-  BUILT:         'bg-emerald-50 text-emerald-700 border-emerald-200',
+  NEW:         'bg-sky-50 text-sky-700 border-sky-200',
+  IN_PROGRESS: 'bg-amber-50 text-amber-700 border-amber-200',
+  BUILT:       'bg-emerald-50 text-emerald-700 border-emerald-200',
+  DONE:        'bg-slate-100 text-slate-600 border-slate-200',
+  ARCHIVED:    'bg-slate-50 text-slate-400 border-slate-200',
 }
 
 const STATUS_LABELS: Record<IntakeStatus, string> = {
-  NEED_TO_BUILD: 'Need to Build',
-  BUILT:         'Built',
+  NEW:         'New',
+  IN_PROGRESS: 'In Progress',
+  BUILT:       'Built',
+  DONE:        'Done',
+  ARCHIVED:    'Archived',
 }
 
 function relativeTime(iso: string) {
@@ -28,7 +34,8 @@ interface IntakeCardProps {
 }
 
 export function IntakeCard({ item, selected, onClick }: IntakeCardProps) {
-  const hasPdfs = (item.s3KeyPdfAttachments?.length ?? 0) > 0
+  const hasPdfs   = (item.s3KeyPdfAttachments?.length ?? 0) > 0
+  const isSlack   = item.externalSource === 'slack'
 
   return (
     <button
@@ -54,6 +61,11 @@ export function IntakeCard({ item, selected, onClick }: IntakeCardProps) {
         <span className="text-[11px] text-muted-foreground">
           {relativeTime(item.receivedAt)}
         </span>
+        {isSlack && (
+          <span className="flex items-center gap-0.5 text-[11px] text-sky-600">
+            <MessageSquare className="size-2.5" /> Slack
+          </span>
+        )}
         {hasPdfs && (
           <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground">
             <Paperclip className="size-2.5" />

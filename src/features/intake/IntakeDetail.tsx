@@ -7,8 +7,11 @@ import { cn } from '@/lib/utils'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 const STATUS_OPTIONS: { value: IntakeStatus; label: string }[] = [
-  { value: 'NEED_TO_BUILD', label: 'Need to Build' },
-  { value: 'BUILT',         label: 'Built'         },
+  { value: 'NEW',         label: 'New'         },
+  { value: 'IN_PROGRESS', label: 'In Progress'  },
+  { value: 'BUILT',       label: 'Built'        },
+  { value: 'DONE',        label: 'Done'         },
+  { value: 'ARCHIVED',    label: 'Archived'     },
 ]
 
 const ASSIGNEE_OPTIONS = [
@@ -18,7 +21,7 @@ const ASSIGNEE_OPTIONS = [
 
 interface IntakeDetailProps {
   item: IntakeItem
-  onUpdate: (id: string, patch: { status?: IntakeStatus; assignedTo?: string; notes?: string; builtLoadId?: string }) => Promise<IntakeItem>
+  onUpdate: (id: string, patch: { status?: IntakeStatus; assignedTo?: string; notes?: string; builtLoadId?: string | null }) => Promise<IntakeItem>
   onDelete: (id: string) => Promise<void>
   onClose: () => void
 }
@@ -27,14 +30,18 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   // Notes — autosave with 800 ms debounce
-  const [notes, setNotes]         = useState(item.notes ?? '')
+  const [notes, setNotes]           = useState(item.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // PDF previews
-  const [pdfUrls, setPdfUrls]     = useState<string[]>([])
+  const [pdfUrls, setPdfUrls]       = useState<string[]>([])
   const [pdfLoading, setPdfLoading] = useState(false)
-  const [activePdf, setActivePdf] = useState(0)
+  const [activePdf, setActivePdf]   = useState(0)
+
+  const isSlack   = item.externalSource === 'slack'
+  const isIvan    = item.source === 'IVAN_CARTAGE'
+  const isActive  = item.status === 'NEW' || item.status === 'IN_PROGRESS'
 
   // Sync notes when item changes
   useEffect(() => { setNotes(item.notes ?? '') }, [item.id, item.notes])
@@ -67,9 +74,15 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
     await onUpdate(item.id, { assignedTo })
   }
 
+  // Ivan Cartage: open load builder and mark as BUILT
   const handleBuildLoad = async () => {
     await onUpdate(item.id, { status: 'BUILT' })
     setSelectedLoad(null, 'create')
+  }
+
+  // BCAT Logistics: mark as DONE (no load building needed)
+  const handleMarkDone = async () => {
+    await onUpdate(item.id, { status: 'DONE' })
   }
 
   const handleDelete = async () => {
@@ -91,9 +104,23 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
             {new Date(item.receivedAt).toLocaleString()}
           </p>
         </div>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground shrink-0 mt-0.5">
-          <X className="size-4" />
-        </button>
+        <div className="flex items-center gap-2 shrink-0 mt-0.5">
+          {/* Open in Slack / Gmail */}
+          {item.externalUrl && (
+            <a
+              href={item.externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 text-xs text-sky-600 hover:text-sky-700 font-medium"
+            >
+              {isSlack ? 'Open in Slack' : 'Open in Gmail'}
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="size-4" />
+          </button>
+        </div>
       </div>
 
       {/* Controls row */}
@@ -137,14 +164,25 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
           <Trash2 className="size-3.5" />
         </button>
 
-        {/* Build Load */}
-        {item.status !== 'BUILT' && (
+        {/* Primary action — source-aware */}
+        {isIvan && isActive && (
           <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={handleBuildLoad}>
             Build Load
           </Button>
         )}
+        {!isIvan && isActive && (
+          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={handleMarkDone}>
+            Mark as Done
+          </Button>
+        )}
         {item.status === 'BUILT' && (
-          <span className="text-xs text-emerald-700 font-medium">Built ✓</span>
+          <span className="text-xs text-emerald-700 font-medium">Built</span>
+        )}
+        {item.status === 'DONE' && (
+          <span className="text-xs text-slate-500 font-medium">Done</span>
+        )}
+        {item.status === 'ARCHIVED' && (
+          <span className="text-xs text-slate-400 font-medium">Archived</span>
         )}
       </div>
 
@@ -153,7 +191,6 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
         {/* PDF preview */}
         {item.s3KeyPdfAttachments?.length > 0 && (
           <div className="border-b border-slate-100">
-            {/* PDF tab strip if multiple */}
             {item.s3KeyPdfAttachments.length > 1 && (
               <div className="flex gap-1 px-4 pt-2 overflow-x-auto">
                 {item.s3KeyPdfAttachments.map((key, i) => (
@@ -201,12 +238,12 @@ export function IntakeDetail({ item, onUpdate, onDelete, onClose }: IntakeDetail
           </div>
         )}
 
-        {/* Email body */}
+        {/* Message body */}
         <div className="px-6 py-5 space-y-4">
           {item.bodyText && (
             <div>
               <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                Email Body
+                {isSlack ? 'Slack Message' : 'Email Body'}
               </p>
               <pre className="text-xs text-foreground whitespace-pre-wrap font-sans leading-relaxed bg-slate-50 rounded-lg border border-slate-100 p-4 max-h-48 overflow-y-auto">
                 {item.bodyText}

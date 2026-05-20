@@ -1,15 +1,26 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda'
+import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, StartingPosition } from 'aws-cdk-lib/aws-lambda'
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources'
+import { CfnTable } from 'aws-cdk-lib/aws-dynamodb'
 import { CfnOutput } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
-import { intakeWebhook } from './functions/intake-webhook/resource'
+import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
+import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 
-const backend = defineBackend({ auth, data, storage, userManagement, intakeWebhook, fuelImport })
+const backend = defineBackend({
+  auth,
+  data,
+  storage,
+  userManagement,
+  slackIntakeWebhook,
+  slackStatusNotifier,
+  fuelImport,
+})
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
 
@@ -36,66 +47,73 @@ backend.userManagement.resources.lambda.addToRolePolicy(
   backend.auth.resources.userPool.userPoolId
 )
 
-// ── intakeWebhook Lambda ───────────────────────────────────────────────────
+// ── IntakeItem table (shared by webhook + notifier) ────────────────────────
 
-const webhookFn = backend.intakeWebhook.resources.lambda as LambdaFunction
-
-// DynamoDB: read + write to the IntakeItem table (for dedup scan and PutItem)
 const intakeTable = backend.data.resources.tables['IntakeItem']
-backend.intakeWebhook.resources.lambda.addToRolePolicy(
+
+// Enable DynamoDB Streams so the notifier Lambda can react to status changes
+const cfnIntakeTable = intakeTable.node.defaultChild as CfnTable
+cfnIntakeTable.streamSpecification = { streamViewType: 'NEW_AND_OLD_IMAGES' }
+
+// ── slackIntakeWebhook Lambda ──────────────────────────────────────────────
+
+const webhookFn = backend.slackIntakeWebhook.resources.lambda as LambdaFunction
+
+// DynamoDB: write new items + query externalId GSI for dedup
+backend.slackIntakeWebhook.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions: ['dynamodb:PutItem', 'dynamodb:Query'],
-    resources: [intakeTable.tableArn],
+    actions:   ['dynamodb:PutItem', 'dynamodb:Query'],
+    resources: [intakeTable.tableArn, `${intakeTable.tableArn}/index/*`],
   })
 )
 
-// S3: write intake PDFs to the existing rate-confirms bucket
-const bucketArn = backend.storage.resources.bucket.bucketArn
-backend.intakeWebhook.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions: ['s3:PutObject'],
-    resources: [`${bucketArn}/intake-pdfs/*`],
-  })
-)
+webhookFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
+// SLACK_CHANNEL_MAPPING: override this in Amplify Console → Environment variables
+// Format: '{"C12345678":"IVAN_CARTAGE","C87654321":"BCAT_LOGISTICS"}'
+webhookFn.addEnvironment('SLACK_CHANNEL_MAPPING', '{}')
 
-// Environment variables (CDK tokens resolve at synthesis time)
-webhookFn.addEnvironment('TABLE_NAME',  intakeTable.tableName)
-webhookFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
-
-// Function URL — auth NONE, secret enforced in handler
-const fnUrl = new FunctionUrl(webhookFn.stack, 'IntakeWebhookUrl', {
+// Function URL — Slack posts to this endpoint
+const slackWebhookUrl = new FunctionUrl(webhookFn.stack, 'SlackIntakeWebhookUrl', {
   function: webhookFn,
   authType: FunctionUrlAuthType.NONE,
 })
 
-// Expose URL in CloudFormation outputs so it's easy to find after deploy
-new CfnOutput(webhookFn.stack, 'IntakeWebhookFunctionUrl', {
-  value: fnUrl.url,
-  description: 'Paste into SETUP.md → WEBHOOK_URL and Apps Script WEBHOOK_URL',
+new CfnOutput(webhookFn.stack, 'SlackIntakeWebhookFunctionUrl', {
+  value:       slackWebhookUrl.url,
+  description: 'Paste into Slack App → Event Subscriptions → Request URL',
 })
+
+// ── slackStatusNotifier Lambda (DynamoDB stream consumer) ─────────────────
+
+const notifierFn = backend.slackStatusNotifier.resources.lambda as LambdaFunction
+
+// Attach DynamoDB stream as event source (grants stream read permissions automatically)
+notifierFn.addEventSource(new DynamoEventSource(intakeTable, {
+  startingPosition:   StartingPosition.LATEST,
+  batchSize:          10,
+  bisectBatchOnError: true,
+}))
 
 // ── fuelImport Lambda ──────────────────────────────────────────────────────
 
 const fuelImportFn = backend.fuelImport.resources.lambda as LambdaFunction
 
-// DynamoDB: read + write FuelTransaction table
 const fuelTxTable = backend.data.resources.tables['FuelTransaction']
 backend.fuelImport.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions: ['dynamodb:Scan', 'dynamodb:PutItem'],
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
     resources: [fuelTxTable.tableArn],
   })
 )
 
 fuelImportFn.addEnvironment('FUEL_TX_TABLE_NAME', fuelTxTable.tableName)
 
-// Function URL — same auth pattern as intake-webhook (secret enforced in handler)
 const fuelImportUrl = new FunctionUrl(fuelImportFn.stack, 'FuelImportFunctionUrl', {
   function: fuelImportFn,
   authType: FunctionUrlAuthType.NONE,
 })
 
 new CfnOutput(fuelImportFn.stack, 'FuelImportFunctionUrlOutput', {
-  value: fuelImportUrl.url,
-  description: 'Paste into SETUP.md → FUEL_IMPORT_WEBHOOK_URL and Apps Script FUEL_IMPORT_WEBHOOK_URL',
+  value:       fuelImportUrl.url,
+  description: 'Paste into SETUP.md → FUEL_IMPORT_WEBHOOK_URL',
 })

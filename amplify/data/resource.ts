@@ -55,19 +55,24 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Intake queue ──────────────────────────────────────────────────────────
-  // Records created by the intake-webhook Lambda when Gmail forwards load emails.
+  // Records created by the slack-intake-webhook Lambda when Slack messages arrive.
   IntakeItem: a
     .model({
       source:               a.enum(['IVAN_CARTAGE', 'BCAT_LOGISTICS']),
-      status:               a.enum(['NEED_TO_BUILD', 'BUILT']),
+      status:               a.enum(['NEW', 'IN_PROGRESS', 'BUILT', 'DONE', 'ARCHIVED']),
       assignedTo:           a.string(),        // email of the team member responsible
       receivedAt:           a.datetime(),
-      fromEmail:            a.string(),
-      subject:              a.string(),
+      fromEmail:            a.string(),        // Slack user ID or legacy email
+      subject:              a.string(),        // first line of message or legacy subject
       bodyText:             a.string(),
       bodyHtml:             a.string(),
       s3KeyPdfAttachments:  a.string().array(),
-      gmailMessageId:       a.string(),        // deduplication key
+      externalSource:       a.enum(['gmail', 'slack']),   // platform origin
+      externalId:           a.string(),        // dedup key: "channelId:ts" or legacy gmailMessageId
+      externalUrl:          a.string(),        // Slack permalink or Gmail link
+      slackChannelId:       a.string(),        // Slack channel ID (slack only)
+      slackMessageTs:       a.string(),        // Slack message timestamp (slack only)
+      gmailMessageId:       a.string(),        // legacy — kept for backward compat
       extractedMetadata:    a.json(),
       builtLoadId:          a.id(),
       notes:                a.string(),
@@ -75,6 +80,7 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('assignedTo').sortKeys(['receivedAt']),
       index('source').sortKeys(['receivedAt']),
+      index('externalId'),
       index('gmailMessageId'),
     ])
     .authorization((allow) => [allow.authenticated()]),

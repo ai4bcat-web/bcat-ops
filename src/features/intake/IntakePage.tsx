@@ -12,7 +12,16 @@ const FOLDERS = [
   { label: 'BCAT Logistics', source: 'BCAT_LOGISTICS'  },
 ] as const
 
-const STATUS_ORDER = { NEED_TO_BUILD: 0, BUILT: 1 }
+// Active statuses shown in the queue; BUILT/DONE/ARCHIVED drop out
+const ACTIVE_STATUSES = new Set(['NEW', 'IN_PROGRESS'])
+
+const STATUS_ORDER: Record<string, number> = {
+  NEW:         0,
+  IN_PROGRESS: 1,
+  BUILT:       2,
+  DONE:        3,
+  ARCHIVED:    4,
+}
 
 function FolderSection({
   label,
@@ -29,16 +38,16 @@ function FolderSection({
 }) {
   const folderItems = useMemo(() =>
     items
-      .filter((i) => i.source === source)
+      .filter((i) => i.source === source && ACTIVE_STATUSES.has(i.status))
       .sort((a, b) => {
-        const sd = STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
+        const sd = (STATUS_ORDER[a.status] ?? 99) - (STATUS_ORDER[b.status] ?? 99)
         if (sd !== 0) return sd
         return new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime()
       }),
     [items, source],
   )
 
-  const unbuilt = folderItems.filter((i) => i.status !== 'BUILT').length
+  const unbuilt = folderItems.length
 
   return (
     <details open className="group/folder">

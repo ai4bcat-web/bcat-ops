@@ -14,7 +14,7 @@ const LOAD_FIELDS = `
   deliveryAppt deliveryApptEnd deliveryApptType
   pickupDriverId deliveryDriverId
   readyToInvoice rateConfirmKey
-  colorKey daySlot rate notes
+  colorKey daySlot rate miles customer truckId notes
   createdBy updatedBy createdAt updatedAt
 `
 
@@ -233,8 +233,9 @@ import type { IntakeItem, IntakeStatus } from '@/types'
 
 const INTAKE_FIELDS = `
   id source status assignedTo receivedAt fromEmail subject
-  bodyText bodyHtml s3KeyPdfAttachments gmailMessageId
-  extractedMetadata builtLoadId notes createdAt updatedAt
+  bodyText bodyHtml s3KeyPdfAttachments
+  externalSource externalId externalUrl slackChannelId slackMessageTs
+  gmailMessageId extractedMetadata builtLoadId notes createdAt updatedAt
 `
 
 export async function listIntakeItems(filter?: { assignedTo?: string; source?: string }): Promise<IntakeItem[]> {
@@ -263,7 +264,7 @@ export async function updateIntakeItem(id: string, patch: {
   status?: IntakeStatus
   assignedTo?: string
   notes?: string
-  builtLoadId?: string
+  builtLoadId?: string | null
 }): Promise<IntakeItem> {
   const result = await client.graphql({
     query: `mutation UpdateIntakeItem($input: UpdateIntakeItemInput!) { updateIntakeItem(input: $input) { ${INTAKE_FIELDS} } }`,
