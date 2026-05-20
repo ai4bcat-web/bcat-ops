@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect, useRef } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import type { Load, Driver } from '@/types'
 import {
   getFullWeek, chicagoDateStr, formatApptTime, formatDateTime, formatDayHeader,
@@ -37,17 +37,15 @@ interface CompactCardProps {
   conflictIds: Set<string>
   slotLabel: number
   isContinuation: boolean
-  onSetSlot: (loadId: string, slot: number) => void
 }
 
 function initials(name: string) {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
 }
 
-function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, onSetSlot }: CompactCardProps) {
+function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { updateLoad } = useLoads()
-  const [pickingSlot, setPickingSlot] = useState(false)
   const [pickingDriver, setPickingDriver] = useState(false)
   const driverPickerRef = useRef<HTMLDivElement>(null)
 
@@ -102,7 +100,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
         backgroundColor: bgColor,
         opacity: isContinuation ? 0.72 : 1,
       }}
-      onClick={() => { if (!pickingSlot && !pickingDriver) setSelectedLoad(load.id, 'view') }}
+      onClick={() => { if (!pickingDriver) setSelectedLoad(load.id, 'view') }}
     >
       {/* Row 1: ID + RTI + slot badge + avatar */}
       <div className="flex items-start gap-1 min-w-0">
@@ -116,46 +114,20 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
           </div>
         </div>
 
-        {/* Slot badge (right side top) */}
+        {/* Slot badge — auto-numbered by display position */}
         <div className="flex flex-col items-center gap-0.5 shrink-0">
-          {pickingSlot ? (
-            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button
-                  key={n}
-                  className="text-[9px] font-black rounded-full flex items-center justify-center leading-none hover:opacity-80"
-                  style={{
-                    background: n === slotLabel ? '#94a3b8' : borderColor,
-                    color: '#fff',
-                    minWidth: '14px',
-                    minHeight: '14px',
-                    padding: '0 2px',
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onSetSlot(load.id, n)
-                    setPickingSlot(false)
-                  }}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <span
-              className="text-[9px] font-black rounded-full flex items-center justify-center leading-none hover:opacity-75 cursor-pointer"
-              style={{
-                background: borderColor,
-                color: '#fff',
-                minWidth: '14px',
-                minHeight: '14px',
-                padding: '0 2px',
-              }}
-              onClick={(e) => { e.stopPropagation(); setPickingSlot(true) }}
-            >
-              {slotLabel}
-            </span>
-          )}
+          <span
+            className="text-[9px] font-black rounded-full flex items-center justify-center leading-none"
+            style={{
+              background: borderColor,
+              color: '#fff',
+              minWidth: '14px',
+              minHeight: '14px',
+              padding: '0 2px',
+            }}
+          >
+            {slotLabel}
+          </span>
 
           {/* Avatar(s) */}
           <div className="relative" ref={driverPickerRef}>
@@ -258,7 +230,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, on
     </div>
   )
 
-  if (pickingSlot || pickingDriver) return <div className="h-full">{card}</div>
+  if (pickingDriver) return <div className="h-full">{card}</div>
 
   return (
     <Tooltip delayDuration={400}>
@@ -320,11 +292,6 @@ function groupKey(load: Load): string {
 export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: CompactWeekViewProps) {
   const days = getFullWeek(weekStart) // [Mon … Sun]
   const dayStrs = useMemo(() => days.map((d) => chicagoDateStr(d.toISOString())), [days])
-
-  const { updateLoad } = useLoads()
-  const handleSetSlot = useCallback((loadId: string, slot: number) => {
-    updateLoad(loadId, { daySlot: slot })
-  }, [updateLoad])
 
   // ── Track assignment ───────────────────────────────────────────────────────
   const trackMap = useMemo<Map<string, number>>(() => {
@@ -477,9 +444,8 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
                   load={load}
                   drivers={drivers}
                   conflictIds={conflictIds}
-                  slotLabel={load.daySlot ?? (track + 1)}
+                  slotLabel={track + 1}
                   isContinuation={isContinuation}
-                  onSetSlot={handleSetSlot}
                 />
               </div>
             ))}
