@@ -19,10 +19,10 @@ import type { Equipment } from '@/types/equipment'
 
 // ── Date range ────────────────────────────────────────────────────────────────
 
-type RangeKey = 'today' | 'this-week' | 'this-month' | 'last-30' | 'last-4-weeks' | 'this-year' | 'custom'
+type RangeKey = 'yesterday' | 'this-week' | 'this-month' | 'last-30' | 'last-4-weeks' | 'this-year' | 'custom'
 
 const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
-  { value: 'today',        label: 'Today'        },
+  { value: 'yesterday',    label: 'Yesterday'    },
   { value: 'this-week',    label: 'This Week'    },
   { value: 'this-month',   label: 'This Month'   },
   { value: 'last-30',      label: 'Last 30 Days' },
@@ -34,7 +34,7 @@ const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
 function getRange(key: RangeKey, customStart: Date, customEnd: Date): [Date, Date] {
   const now = new Date()
   switch (key) {
-    case 'today':        return [startOfDay(now), endOfDay(now)]
+    case 'yesterday':    return [startOfDay(subDays(now, 1)), endOfDay(subDays(now, 1))]
     case 'this-week':    return [startOfWeek(now, { weekStartsOn: 0 }), endOfWeek(now, { weekStartsOn: 0 })]
     case 'this-month':   return [startOfMonth(now), endOfMonth(now)]
     case 'last-30':      return [startOfDay(subDays(now, 30)), endOfDay(now)]
