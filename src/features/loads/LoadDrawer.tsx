@@ -315,6 +315,7 @@ export function LoadDrawer() {
               oldStatus:    'IN_PROGRESS',
               newStatus:    'BUILT',
               actorName:    userEmail,
+              proNumber:    newLoad.aljexId || null,
             })
           } catch (linkErr) {
             console.error('[LoadDrawer] failed to link intake item', linkErr)

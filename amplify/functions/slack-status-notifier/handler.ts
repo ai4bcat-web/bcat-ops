@@ -77,8 +77,8 @@ export const handler = async (event: AppSyncEvent) => {
         text = `🔄 ${actorName ?? 'Someone'} is working on this`
         break
       case 'BUILT': {
-        const loadRef = item.builtLoadId ? `  •  Load ID: \`${item.builtLoadId}\`` : ''
-        text = `✅ ${actorName ?? 'Someone'} built this load in BCAT Ops${loadRef}`
+        const proRef = proNumber ? `  •  Pro# \`${proNumber}\`` : (item.builtLoadId ? `  •  Load ID: \`${item.builtLoadId}\`` : '')
+        text = `✅ ${actorName ?? 'Someone'} built this load in BCAT Ops${proRef}`
         break
       }
       case 'DONE': {

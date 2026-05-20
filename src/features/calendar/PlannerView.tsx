@@ -113,8 +113,8 @@ function ColorPicker({ loadId, current, onClose }: { loadId: string; current?: C
 }
 
 // ── Driver picker popover ─────────────────────────────────────────────────────
-function DriverPicker({ loadId, currentId, drivers, onClose }: {
-  loadId: string; currentId: string | null; drivers: Driver[]; onClose: () => void
+function DriverPicker({ loadId, currentId, field, drivers, onClose }: {
+  loadId: string; currentId: string | null; field: 'pickupDriverId' | 'deliveryDriverId'; drivers: Driver[]; onClose: () => void
 }) {
   const { updateLoad } = useLoads()
   const [query, setQuery]   = useState('')
@@ -123,9 +123,9 @@ function DriverPicker({ loadId, currentId, drivers, onClose }: {
 
   const pick = useCallback(async (driverId: string | null) => {
     setSaving(true)
-    try { await updateLoad(loadId, { pickupDriverId: driverId, deliveryDriverId: driverId }) } finally { setSaving(false) }
+    try { await updateLoad(loadId, { [field]: driverId }) } finally { setSaving(false) }
     onClose()
-  }, [updateLoad, loadId, onClose])
+  }, [updateLoad, loadId, field, onClose])
 
   return (
     <div
@@ -385,8 +385,10 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
   const [editingAppt, setEditingAppt] = useState<'pu' | 'de' | null>(null)
 
   const color    = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
-  const puDriver   = drivers.find((d) => d.id === load.pickupDriverId)
-  const driverName = puDriver?.name ?? '—'
+  const driverField  = role === 'delivery' ? 'deliveryDriverId' : 'pickupDriverId'
+  const relevantDriverId = load[driverField] as string | null
+  const relevantDriver   = drivers.find((d) => d.id === relevantDriverId)
+  const driverName       = relevantDriver?.name ?? '—'
   const isDeliveryDay = role === 'delivery'
   const isFinalDest   = role !== 'pickup'  // delivery or same-day — load ends here
 
@@ -514,12 +516,12 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         )}
       </div>
 
-      {/* Driver (with slot badge) */}
+      {/* Driver (with slot badge) — pickup row sets pickupDriverId, delivery row sets deliveryDriverId */}
       <div
         className="relative shrink-0 flex items-center gap-1 px-1"
         style={{ width: COL.driver }}
-        tabIndex={isDeliveryDay ? -1 : 0}
-        onClick={() => !isDeliveryDay && setShowDriver((v) => !v)}
+        tabIndex={0}
+        onClick={() => setShowDriver((v) => !v)}
         onBlur={(e) => closeOnBlur(() => setShowDriver(false))(e)}
       >
         {/* Slot badge — auto-numbered by display position */}
@@ -532,19 +534,19 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
 
         {/* Driver name */}
         <div className={cn(
-          'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded',
-          isDeliveryDay ? 'text-slate-400' : 'cursor-pointer hover:bg-black/5',
-          !isDeliveryDay && !load.pickupDriverId ? 'text-blue-600' : 'text-slate-800',
+          'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded cursor-pointer hover:bg-black/5',
+          !relevantDriverId ? 'text-blue-600' : isDeliveryDay ? 'text-slate-500' : 'text-slate-800',
           showDriver && 'ring-1 ring-blue-400 bg-blue-50',
         )}>
-          {!isDeliveryDay && !load.pickupDriverId
-            ? <span className="underline underline-offset-2">Assign Driver</span>
+          {!relevantDriverId
+            ? <span className="underline underline-offset-2">{isDeliveryDay ? 'DE Driver' : 'Assign Driver'}</span>
             : driverName}
         </div>
-        {showDriver && !isDeliveryDay && (
+        {showDriver && (
           <DriverPicker
             loadId={load.id}
-            currentId={load.pickupDriverId}
+            currentId={relevantDriverId}
+            field={driverField}
             drivers={drivers}
             onClose={() => setShowDriver(false)}
           />
