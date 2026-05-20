@@ -76,11 +76,13 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   const ev = payload.event as Record<string, unknown>
 
-  const isEmail = ev.subtype === 'email'
+  // Slack email integration posts via bot with subtype 'email' or 'file_share'.
+  // Human file_shares don't have bot_id, so bot_id+file_share == email forward.
+  const isEmail = ev.subtype === 'email' || (ev.subtype === 'file_share' && !!ev.bot_id)
 
   console.log('[intake] event type:', ev.type, 'subtype:', ev.subtype ?? '(none)', 'bot_id:', ev.bot_id ?? '(none)', 'thread_ts:', ev.thread_ts ?? '(none)', 'isEmail:', isEmail)
 
-  // Full payload logging for email-subtype events — temporary, for CloudWatch diagnosis
+  // Full payload logging for email events — temporary, for CloudWatch field verification
   if (isEmail) {
     console.log('[intake] EMAIL full event payload:', JSON.stringify(ev))
   }
