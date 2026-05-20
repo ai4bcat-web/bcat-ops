@@ -53,7 +53,14 @@ function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
   let wStart = startOfWeek(start, { weekStartsOn: 0 })
   while (!isAfter(wStart, end)) {
     const wEnd = endOfWeek(wStart, { weekStartsOn: 0 })
-    weeks.push({ wStart, wEnd, label: `${format(wStart, 'M/d')}–${format(wEnd, 'M/d')}` })
+    // Clip the display label to the selected range so "Yesterday" shows
+    // "5/19" rather than the full "5/18–5/24" week span.
+    const labelFrom = wStart < start ? start : wStart
+    const labelTo   = wEnd > end ? end : wEnd
+    const fromStr   = format(labelFrom, 'M/d')
+    const toStr     = format(labelTo, 'M/d')
+    const label     = fromStr === toStr ? fromStr : `${fromStr}–${toStr}`
+    weeks.push({ wStart, wEnd, label })
     wStart = addWeeks(wStart, 1)
   }
   return weeks
