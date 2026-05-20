@@ -5,11 +5,8 @@
  *   Pickup day  : PU Appt = real time,  DE Appt = "Yard",  Route = Origin → Yard
  *   Delivery day: PU Appt = "Yard",     DE Appt = real time, Route = Yard → Destination
  *
- * Editable per row:
- *   • Color  — dot → palette popover → saves load.colorKey to DB
- *   • Slot   — badge → 1-5 picker   → saves load.daySlot to DB
- *   • Driver — driver cell → search → saves load.pickupDriverId to DB
- *   • Order  — drag handle → reorders within day (session state)
+ * Column widths are computed dynamically from the widest value in each column
+ * across all visible loads, with per-column min/max bounds.
  */
 
 import { useState, useRef, useCallback, useMemo } from 'react'
@@ -21,10 +18,30 @@ import { useLoads } from '@/hooks/useLoads'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType } from '@/types'
 
-// ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
-const ROW_H = 28
-const DRAG_HANDLE_W = 16
+// ── Fixed-size UI elements ────────────────────────────────────────────────────
+const ROW_H       = 28
+const DRAG_W      = 16
+const COLOR_W     = 20
+const RTI_W       = 32
+
+// ── Dynamic column sizing ─────────────────────────────────────────────────────
+// Approx px per character at text-[11px] sans-serif + column padding
+const CHAR_W = 7.0
+const PAD    = 14   // px-1.5 each side = 12 + 2 buffer
+
+const MIN_COL = { aljex: 52, tms: 56, pu: 52, loc: 120, route: 100, appt: 110, driver: 90, notes: 60, rate: 52 } as const
+const MAX_COL = { aljex: 120, tms: 150, pu: 120, loc: 300, route: 320, appt: 155, driver: 200, notes: 260, rate: 92 } as const
+
+type ColKey = keyof typeof MIN_COL
+
+function clamp(n: number, key: ColKey) {
+  return Math.min(MAX_COL[key], Math.max(MIN_COL[key], Math.ceil(n)))
+}
+
+export interface ColWidths {
+  aljex: number; tms: number; pu: number; loc: number
+  route: number; appt: number; driver: number; notes: number; rate: number
+}
 
 // ── Color palette (all non-broker colors available) ──────────────────────────
 const PALETTE: { key: ColorKey; hex: string }[] = (
@@ -54,26 +71,24 @@ function chicagoDateStr(iso: string | null | undefined): string | null {
 }
 
 // ── Appt cell (date + time stacked) ──────────────────────────────────────────
-function ApptCell({ iso, type, colorCls, yard, city }: {
-  iso?: string; type?: string; colorCls: string; yard?: boolean; city?: string
+function ApptCell({ iso, type, colorCls, yard, city, width }: {
+  iso?: string; type?: string; colorCls: string; yard?: boolean; city?: string; width: number
 }) {
-  const w = COL.puAppt
-
   if (yard) {
     return (
-      <div className="flex items-center px-1.5 gap-1 leading-tight text-slate-400" style={{ width: w }}>
+      <div className="flex items-center px-1.5 gap-1 leading-tight text-slate-400" style={{ width }}>
         <span className="text-[11px] font-medium shrink-0">Yard</span>
         {city && <span className="text-[10px] italic truncate">{city}</span>}
       </div>
     )
   }
 
-  if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width: w }}>—</div>
+  if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width }}>—</div>
 
   const isSpecial = type === 'fcfs' || type === 'tbd'
   const specialLabel = type === 'tbd' ? 'NEED' : type!.toUpperCase()
   return (
-    <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
+    <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
       <span className="text-[11px] font-medium truncate">
         {isSpecial ? specialLabel : formatTime(iso)}
@@ -281,7 +296,7 @@ function ApptEditPopover({ load, apptField, typeField, onClose }: {
 }
 
 // ── Notes cell (inline edit) ──────────────────────────────────────────────────
-function NotesCell({ load }: { load: Load }) {
+function NotesCell({ load, width }: { load: Load; width: number }) {
   const { updateLoad } = useLoads()
   const [editing, setEditing] = useState(false)
   const [val, setVal]         = useState('')
@@ -293,7 +308,7 @@ function NotesCell({ load }: { load: Load }) {
 
   if (editing) {
     return (
-      <div className="shrink-0 flex items-center px-1" style={{ width: COL.notes }}>
+      <div className="shrink-0 flex items-center px-1" style={{ width }}>
         <input
           autoFocus
           type="text"
@@ -311,7 +326,7 @@ function NotesCell({ load }: { load: Load }) {
   return (
     <div
       className="group/notes shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded"
-      style={{ width: COL.notes }}
+      style={{ width }}
       onClick={() => { setVal(load.notes ?? ''); setEditing(true) }}
     >
       <span className="text-[11px] text-slate-500 truncate flex-1 italic">{load.notes || ''}</span>
@@ -321,7 +336,7 @@ function NotesCell({ load }: { load: Load }) {
 }
 
 // ── Rate cell (inline edit) ───────────────────────────────────────────────────
-function RateCell({ load }: { load: Load }) {
+function RateCell({ load, width }: { load: Load; width: number }) {
   const { updateLoad } = useLoads()
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
@@ -339,7 +354,7 @@ function RateCell({ load }: { load: Load }) {
 
   if (editing) {
     return (
-      <div className="shrink-0 flex items-center px-1" style={{ width: COL.rate }}>
+      <div className="shrink-0 flex items-center px-1" style={{ width }}>
         <input
           autoFocus
           type="text"
@@ -357,7 +372,7 @@ function RateCell({ load }: { load: Load }) {
   return (
     <div
       className="shrink-0 flex items-center px-1.5 text-[11px] cursor-pointer hover:bg-black/5 rounded truncate"
-      style={{ width: COL.rate, color: load.rate ? '#15803d' : '#2563eb' }}
+      style={{ width, color: load.rate ? '#15803d' : '#2563eb' }}
       onClick={() => { setVal(load.rate != null ? String(load.rate / 100) : ''); setEditing(true) }}
     >
       {load.rate != null ? display : <span className="underline underline-offset-2">Add Rate</span>}
@@ -369,6 +384,7 @@ function RateCell({ load }: { load: Load }) {
 interface PlannerRowProps {
   entry:       DayEntry
   drivers:     Driver[]
+  colW:        ColWidths
   slotNum:     number
   dragging:    boolean
   dragOver:    boolean
@@ -377,7 +393,7 @@ interface PlannerRowProps {
   onDragEnd:   () => void
 }
 
-function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, onDragEnter, onDragEnd }: PlannerRowProps) {
+function PlannerRow({ entry, drivers, colW, slotNum, dragging, dragOver, onDragStart, onDragEnter, onDragEnd }: PlannerRowProps) {
   const { load, role } = entry
   const { updateLoad } = useLoads()
   const [showColor,   setShowColor]   = useState(false)
@@ -388,16 +404,14 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
   const puDriver   = drivers.find((d) => d.id === load.pickupDriverId)
   const driverName = puDriver?.name ?? '—'
   const isDeliveryDay = role === 'delivery'
-  const isFinalDest   = role !== 'pickup'  // delivery or same-day — load ends here
+  const isFinalDest   = role !== 'pickup'
 
-  // Route text
   const route = (() => {
     if (role === 'pickup')   return [load.originCity, 'Yard'].filter(Boolean).join(' → ') || '—'
     if (role === 'delivery') return ['Yard', load.destinationCity].filter(Boolean).join(' → ') || '—'
     return [load.originCity, load.destinationCity].filter(Boolean).join(' → ') || '—'
   })()
 
-  // Only close if focus left the container entirely (not moved to a child element)
   const closeOnBlur = (fn: () => void) => (e: React.FocusEvent) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node)) setTimeout(fn, 150)
   }
@@ -411,7 +425,6 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       )}
       style={{
         height: ROW_H,
-        // Ready-to-invoice overrides all color tints with bright green
         background: load.readyToInvoice
           ? dragOver ? '#16a34a' : '#22c55e'
           : dragOver
@@ -427,16 +440,15 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
     >
-
-      {/* Drag handle — first column */}
-      <div className="flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing" style={{ width: DRAG_HANDLE_W }}>
+      {/* Drag handle */}
+      <div className="flex items-center justify-center shrink-0 opacity-0 group-hover:opacity-40 cursor-grab active:cursor-grabbing" style={{ width: DRAG_W }}>
         <GripVertical className="size-3 text-slate-400" />
       </div>
 
-      {/* Color swatch — always editable */}
+      {/* Color swatch */}
       <div
         className="relative flex items-center justify-center shrink-0"
-        style={{ width: COL.color }}
+        style={{ width: COLOR_W }}
         tabIndex={0}
         onClick={() => setShowColor((v) => !v)}
         onBlur={(e) => closeOnBlur(() => setShowColor(false))(e)}
@@ -451,16 +463,16 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       </div>
 
       {/* Pro # */}
-      <Cell width={COL.aljex} bold onClick={() => useAppStore.getState().setSelectedLoad(load.id, 'edit')}>
+      <Cell width={colW.aljex} bold onClick={() => useAppStore.getState().setSelectedLoad(load.id, 'edit')}>
         {load.aljexId || '—'}
       </Cell>
 
-      {/* TMS + PU# — editable inline */}
-      <EditableTextCell load={load} field="tmsId"        width={COL.tms} dimmed={isDeliveryDay} />
-      <EditableTextCell load={load} field="pickupNumber" width={COL.pu}  dimmed={isDeliveryDay} />
+      {/* TMS + PU# */}
+      <EditableTextCell load={load} field="tmsId"        width={colW.tms} dimmed={isDeliveryDay} />
+      <EditableTextCell load={load} field="pickupNumber" width={colW.pu}  dimmed={isDeliveryDay} />
 
       {/* PU / DE location names */}
-      <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
+      <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: colW.loc }}>
         {load.originName && (
           <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
         )}
@@ -469,8 +481,8 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         )}
       </div>
 
-      {/* Route — bold when this is the final destination day */}
-      <Cell width={COL.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
+      {/* Route */}
+      <Cell width={colW.route} bold={isFinalDest} className={isFinalDest ? 'text-slate-800' : 'text-slate-500'}>{route}</Cell>
 
       {/* PU Appt */}
       <div className="relative group/appt shrink-0">
@@ -480,6 +492,7 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
           colorCls="text-blue-600"
           yard={isDeliveryDay}
           city={isDeliveryDay ? load.destinationCity : undefined}
+          width={colW.appt}
         />
         <button
           className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
@@ -501,6 +514,7 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
           colorCls="text-violet-600"
           yard={role === 'pickup'}
           city={role === 'pickup' ? load.destinationCity : undefined}
+          width={colW.appt}
         />
         <button
           className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
@@ -514,23 +528,20 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         )}
       </div>
 
-      {/* Driver (with slot badge) */}
+      {/* Driver */}
       <div
         className="relative shrink-0 flex items-center gap-1 px-1"
-        style={{ width: COL.driver }}
+        style={{ width: colW.driver }}
         tabIndex={isDeliveryDay ? -1 : 0}
         onClick={() => !isDeliveryDay && setShowDriver((v) => !v)}
         onBlur={(e) => closeOnBlur(() => setShowDriver(false))(e)}
       >
-        {/* Slot badge — auto-numbered by display position */}
         <span
           className="text-[9px] font-black rounded-full flex items-center justify-center leading-none shrink-0"
           style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px' }}
         >
           {slotNum}
         </span>
-
-        {/* Driver name */}
         <div className={cn(
           'flex-1 h-full flex items-center text-[11px] font-medium truncate rounded',
           isDeliveryDay ? 'text-slate-400' : 'cursor-pointer hover:bg-black/5',
@@ -552,12 +563,12 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
       </div>
 
       {/* Notes */}
-      <NotesCell load={load} />
+      <NotesCell load={load} width={colW.notes} />
 
-      {/* Rate — only for loads delivering to a real destination (not ending at yard) */}
-      {role !== 'pickup' ? <RateCell load={load} /> : <div style={{ width: COL.rate }} className="shrink-0" />}
+      {/* Rate */}
+      {role !== 'pickup' ? <RateCell load={load} width={colW.rate} /> : <div style={{ width: colW.rate }} className="shrink-0" />}
 
-      {/* Ready-to-invoice checkmark — only on final-destination rows */}
+      {/* RTI */}
       {isFinalDest ? (
         <button
           className="shrink-0 flex items-center justify-center px-2 hover:opacity-75 transition-opacity"
@@ -570,9 +581,8 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
             : <Circle className="size-4 text-slate-300" />}
         </button>
       ) : (
-        <div className="shrink-0 px-2" style={{ width: 32 }} />
+        <div className="shrink-0 px-2" style={{ width: RTI_W }} />
       )}
-
     </div>
   )
 }
@@ -605,6 +615,58 @@ function ColHeader({ children, width, flex }: { children: React.ReactNode; width
   )
 }
 
+// ── Width computation ─────────────────────────────────────────────────────────
+function computeColWidths(loads: Load[], drivers: Driver[]): ColWidths {
+  const len = (s: string | null | undefined) => (s ?? '').length
+
+  // Measure the widest content in each column, seeded with the header label length
+  let maxAljex  = len('Pro #')
+  let maxTms    = len('TMS')
+  let maxPu     = len('PU #')
+  let maxLoc    = len('PU / DE Location')
+  let maxRoute  = len('Route')
+  let maxAppt   = 13  // "May 20, 2026" ≈ 13 chars — nearly uniform; time below is shorter
+  let maxDriver = len('Driver')
+  let maxNotes  = len('Notes')
+  let maxRate   = len('Rate')
+
+  for (const l of loads) {
+    maxAljex  = Math.max(maxAljex,  len(l.aljexId))
+    maxTms    = Math.max(maxTms,    len(l.tmsId))
+    maxPu     = Math.max(maxPu,     len(l.pickupNumber))
+    maxLoc    = Math.max(maxLoc,    len(l.originName), len(l.destinationName))
+    // Route shows "City → Yard" or "City → City"
+    const r1  = len(l.originCity) + 4 + 4            // "Org → Yard"
+    const r2  = len(l.destinationCity) + 4 + 4        // "Yard → Dst"
+    const r3  = len(l.originCity) + 4 + len(l.destinationCity)
+    maxRoute  = Math.max(maxRoute,  r1, r2, r3)
+    maxNotes  = Math.max(maxNotes,  len(l.notes))
+    if (l.rate != null) {
+      // "$1,234" format: dollar sign + commas
+      const rateStr = '$' + Math.round(l.rate / 100).toLocaleString()
+      maxRate = Math.max(maxRate, len(rateStr))
+    }
+  }
+
+  for (const d of drivers) {
+    maxDriver = Math.max(maxDriver, len(d.name))
+  }
+
+  const w = (chars: number, key: ColKey) => clamp(chars * CHAR_W + PAD, key)
+
+  return {
+    aljex:  w(maxAljex,  'aljex'),
+    tms:    w(maxTms,    'tms'),
+    pu:     w(maxPu,     'pu'),
+    loc:    w(maxLoc,    'loc'),
+    route:  w(maxRoute,  'route'),
+    appt:   w(maxAppt,   'appt'),
+    driver: w(maxDriver + 2, 'driver'),   // +2 for slot badge
+    notes:  w(maxNotes,  'notes'),
+    rate:   w(maxRate,   'rate'),
+  }
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 interface PlannerViewProps {
   loads:     Load[]
@@ -614,12 +676,12 @@ interface PlannerViewProps {
 }
 
 export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerViewProps) {
-  const days = useMemo(() => Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)), [weekStart, numDays])
+  const days   = useMemo(() => Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)), [weekStart, numDays])
+  const colW   = useMemo(() => computeColWidths(loads, drivers), [loads, drivers])
 
   // Group loads into day entries — multi-day loads appear on BOTH pickup and delivery day
   const entriesByDay = useMemo(() => {
     const map = new Map<string, DayEntry[]>()
-
     const add = (dayStr: string, entry: DayEntry) => {
       if (!map.has(dayStr)) map.set(dayStr, [])
       map.get(dayStr)!.push(entry)
@@ -627,7 +689,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
 
     for (const l of loads) {
       const puDay = chicagoDateStr(l.pickupAppt)
-      if (!puDay) continue  // skip loads with invalid pickup date
+      if (!puDay) continue
       const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
       const isMultiDay = puDay !== deDay
 
@@ -639,7 +701,6 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
       }
     }
 
-    // Sort each day: same-day and pickup entries by pickupAppt, delivery entries at the end by deliveryAppt
     for (const arr of map.values()) {
       arr.sort((a, b) => {
         const aTime = a.role === 'delivery' ? (a.load.deliveryAppt ?? a.load.pickupAppt ?? '') : (a.load.pickupAppt ?? '')
@@ -651,8 +712,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
     return map
   }, [loads])
 
-  // Per-day local drag-to-reorder (session state, keys are DayEntry.key)
-  const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
+  const [dayOrder, setDayOrder]       = useState<Map<string, string[]>>(new Map())
   const dragKey  = useRef<string | null>(null)
   const dragDay  = useRef<string | null>(null)
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
@@ -687,7 +747,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
     return order.map((k) => byKey.get(k)).filter(Boolean) as DayEntry[]
   }
 
-  const headerPad = 3 + COL.color + DRAG_HANDLE_W
+  const headerPad = 3 + COLOR_W + DRAG_W
   const todayStr  = chicagoDateStr(new Date().toISOString())
 
   return (
@@ -698,17 +758,17 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
         className="flex items-center border-b-2 border-slate-300 bg-white sticky top-0 z-20 shrink-0"
         style={{ height: ROW_H, paddingLeft: headerPad }}
       >
-        <ColHeader width={COL.aljex}>Pro #</ColHeader>
-        <ColHeader width={COL.tms}>TMS</ColHeader>
-        <ColHeader width={COL.pu}>PU #</ColHeader>
-        <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
-        <ColHeader width={COL.route}>Route</ColHeader>
-        <ColHeader width={COL.puAppt}>PU Appt</ColHeader>
-        <ColHeader width={COL.deAppt}>DE Appt</ColHeader>
-        <ColHeader width={COL.driver}>Driver</ColHeader>
-        <ColHeader width={COL.notes}>Notes</ColHeader>
-        <ColHeader width={COL.rate}>Rate</ColHeader>
-        <ColHeader width={32}>RTI</ColHeader>
+        <ColHeader width={colW.aljex}>Pro #</ColHeader>
+        <ColHeader width={colW.tms}>TMS</ColHeader>
+        <ColHeader width={colW.pu}>PU #</ColHeader>
+        <ColHeader width={colW.loc}>PU / DE Location</ColHeader>
+        <ColHeader width={colW.route}>Route</ColHeader>
+        <ColHeader width={colW.appt}>PU Appt</ColHeader>
+        <ColHeader width={colW.appt}>DE Appt</ColHeader>
+        <ColHeader width={colW.driver}>Driver</ColHeader>
+        <ColHeader width={colW.notes}>Notes</ColHeader>
+        <ColHeader width={colW.rate}>Rate</ColHeader>
+        <ColHeader width={RTI_W}>RTI</ColHeader>
       </div>
 
       {/* Day sections */}
@@ -762,22 +822,24 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
               </div>
             ) : (
               entries.map((entry) => {
-                const driverId = entry.load.pickupDriverId
+                const driverId  = entry.load.pickupDriverId
                 const sameDriver = entries.filter((e) => e.load.pickupDriverId === driverId)
-                const slotNum = sameDriver.indexOf(entry) + 1
+                const slotNum   = sameDriver.indexOf(entry) + 1
                 return (
-                <PlannerRow
-                  key={entry.key}
-                  entry={entry}
-                  drivers={drivers}
-                  slotNum={slotNum}
-                  dragging={dragKey.current === entry.key}
-                  dragOver={dragOverKey === entry.key}
-                  onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
-                  onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
-                  onDragEnd={handleDragEnd}
-                />
-                )})
+                  <PlannerRow
+                    key={entry.key}
+                    entry={entry}
+                    drivers={drivers}
+                    colW={colW}
+                    slotNum={slotNum}
+                    dragging={dragKey.current === entry.key}
+                    dragOver={dragOverKey === entry.key}
+                    onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
+                    onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
+                    onDragEnd={handleDragEnd}
+                  />
+                )
+              })
             )}
           </div>
         )
