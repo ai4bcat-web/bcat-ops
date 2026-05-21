@@ -165,7 +165,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
 
             {/* Driver picker dropdown */}
             {pickingDriver && (
-              <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-lg shadow-xl border border-slate-200 py-1 min-w-[150px] max-h-52 overflow-y-auto">
+              <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 50, background: 'var(--ds-surface)', borderRadius: 8, boxShadow: 'var(--sh-lg)', border: '1px solid var(--ds-border)', padding: '4px 0', minWidth: 150, maxHeight: 208, overflowY: 'auto' }}>
                 <button
                   className="w-full text-left px-3 py-1.5 text-[11px] text-slate-500 hover:bg-slate-50 flex items-center gap-2"
                   onClick={(e) => { e.stopPropagation(); assignDriver(null) }}
@@ -376,25 +376,25 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
   const SLOT_HEIGHT = 72
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-white rounded-xl">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-surface)', borderRadius: 12 }}>
 
       {/* ── Sticky column headers ─────────────────────────────────────────── */}
-      <div className="grid shrink-0 border-b border-slate-200 sticky top-0 z-10" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+      <div className="grid shrink-0" style={{ gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid var(--ds-border)', position: 'sticky', top: 0, zIndex: 10 }}>
         {days.map((day, colIdx) => {
           const { weekday, date } = formatDayHeader(day.toISOString())
           const isWeekend = colIdx >= 5
           return (
             <div
               key={colIdx}
-              className={cn(
-                'px-2 py-2 border-r border-slate-200 last:border-r-0',
-                isWeekend ? 'bg-slate-50' : 'bg-white',
-              )}
+              style={{
+                padding: '8px', borderRight: colIdx < 6 ? '1px solid var(--ds-border)' : 'none',
+                background: isWeekend ? 'var(--ds-bg)' : 'var(--ds-surface)',
+              }}
             >
-              <div className="text-[11px] font-bold text-slate-700 uppercase tracking-wide leading-none">{weekday}</div>
-              <div className="text-[10px] text-slate-400 tabular-nums mt-0.5">{date}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t1)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>{weekday}</div>
+              <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{date}</div>
               {primaryCounts[colIdx] > 0 && (
-                <div className="text-[9px] font-semibold text-slate-400 mt-0.5">
+                <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--ds-t3)', marginTop: 2 }}>
                   {primaryCounts[colIdx]} load{primaryCounts[colIdx] !== 1 ? 's' : ''}
                 </div>
               )}
@@ -419,13 +419,12 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
             {days.map((_, colIdx) => (
               <div
                 key={`col-bg-${colIdx}`}
-                className={cn(
-                  'border-r border-slate-100 last:border-r-0',
-                  colIdx >= 5 && 'bg-slate-50/40',
-                )}
                 style={{
                   gridColumn: colIdx + 1,
                   gridRow: `1 / ${maxTrack + 2}`,
+                  borderRight: colIdx < 6 ? '1px solid var(--ds-border)' : 'none',
+                  background: colIdx >= 5 ? 'var(--ds-bg)' : 'transparent',
+                  opacity: colIdx >= 5 ? 0.6 : 1,
                 }}
               />
             ))}

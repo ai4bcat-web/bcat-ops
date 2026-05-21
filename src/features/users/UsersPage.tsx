@@ -115,7 +115,7 @@ function UserRow({
   }
 
   return (
-    <div className={cn(index !== 0 && 'border-t border-slate-100')}>
+    <div style={index !== 0 ? { borderTop: '1px solid var(--ds-border)' } : {}}>
       {/* Main row */}
       <div className="flex items-center gap-3 px-6 py-4">
         <div className="min-w-0 flex-1">
@@ -207,7 +207,7 @@ function UserRow({
 
       {/* Permissions panel */}
       {expanded && (
-        <div className="px-6 pb-4 bg-slate-50/60 border-t border-slate-100">
+        <div style={{ padding: '0 24px 16px', background: 'var(--ds-bg)', borderTop: '1px solid var(--ds-border)' }}>
           <div className="pt-3">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -238,12 +238,13 @@ function UserRow({
                       key={key}
                       onClick={() => togglePage(key)}
                       disabled={savingGroups}
-                      className={cn(
-                        'h-7 px-3 text-xs font-semibold rounded-full border transition-all',
-                        active
-                          ? 'bg-sky-50 border-sky-200 text-sky-700'
-                          : 'bg-white border-slate-200 text-slate-500 hover:text-slate-800 hover:border-slate-300',
-                      )}
+                      style={{
+                        height: 28, padding: '0 12px', fontSize: 12, fontWeight: 600,
+                        borderRadius: 999, border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                        background: active ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+                        color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                        cursor: 'pointer', transition: 'all 0.15s',
+                      }}
                     >
                       {label}
                     </button>
@@ -371,9 +372,9 @@ export function UsersPage() {
   const disabledCount = users.filter((u) => !u.enabled).length
 
   return (
-    <div className="h-full overflow-auto">
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-200">
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
         <div className="flex items-center justify-between px-8 pt-5 pb-3">
           <h1 className="text-2xl font-semibold text-foreground tracking-tight">User Management</h1>
           <Button
@@ -409,10 +410,10 @@ export function UsersPage() {
         </div>
       </div>
 
-      <div className="p-8 space-y-6 max-w-3xl">
+      <div className="space-y-6 max-w-3xl" style={{ padding: 32 }}>
 
         {/* Invite form */}
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6 space-y-4">
+        <div className="space-y-4" style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', padding: 24 }}>
           <div>
             <h2 className="text-base font-semibold text-foreground">Invite New User</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -482,7 +483,7 @@ export function UsersPage() {
               <p className="text-sm">No users found.</p>
             </div>
           ) : !error ? (
-            <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+            <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
               {users.map((u, i) => (
                 <UserRow
                   key={u.username ?? i}

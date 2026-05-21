@@ -15,19 +15,19 @@ export function AuditPage() {
   const { entries } = useAuditLog()
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="px-8 py-5 border-b border-border sticky top-0 z-10 bg-white">
-        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Audit Log</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">{entries.length} entries · most recent first</p>
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+      <div style={{ padding: '20px 32px', borderBottom: '1px solid var(--ds-border)', position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)' }}>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Audit Log</h1>
+        <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{entries.length} entries · most recent first</p>
       </div>
 
-      <div className="p-8">
+      <div style={{ padding: 32 }}>
         {entries.length === 0 ? (
-          <div className="text-center py-16 text-muted-foreground text-sm">
+          <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--ds-t3)', fontSize: 14 }}>
             No audit entries yet. Make a change to see it here.
           </div>
         ) : (
-          <div className="rounded-xl border border-slate-200/60 overflow-hidden bg-white shadow-sm">
+          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -60,7 +60,7 @@ export function AuditPage() {
                         <summary className="text-xs text-muted-foreground hover:text-foreground transition-colors">
                           {Object.keys(entry.changes).length} field(s)
                         </summary>
-                        <pre className="mt-1.5 text-[10px] text-muted-foreground rounded-md p-2 max-w-xs overflow-auto border border-border bg-slate-100">
+                        <pre className="mt-1.5 text-[10px] text-muted-foreground rounded-md p-2 max-w-xs overflow-auto border border-border" style={{ background: 'var(--ds-bg)' }}>
                           {JSON.stringify(entry.changes, null, 2)}
                         </pre>
                       </details>

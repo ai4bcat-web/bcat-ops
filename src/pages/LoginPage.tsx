@@ -45,14 +45,8 @@ export function LoginPage() {
   }
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center"
-      style={{ background: '#f7f7f5' }}
-    >
-      <div
-        className="w-full max-w-sm rounded-xl border border-border p-8 space-y-6"
-        style={{ background: '#ffffff' }}
-      >
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ds-bg)' }}>
+      <div className="space-y-6" style={{ width: '100%', maxWidth: 384, borderRadius: 16, border: '1px solid var(--ds-border)', padding: 32, background: 'var(--ds-surface)', boxShadow: 'var(--sh-md)' }}>
         {/* Logo */}
         <div className="flex items-center gap-3">
           <div className="ds-logo-pill">
