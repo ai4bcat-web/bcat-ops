@@ -693,12 +693,12 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
   const todayStr  = chicagoDateStr(new Date().toISOString())
 
   return (
-    <div className="flex flex-col h-full overflow-auto bg-slate-50 select-none">
+    <div className="flex flex-col h-full overflow-auto select-none" style={{ background: 'var(--ds-bg)' }}>
 
       {/* Sticky column header */}
       <div
-        className="flex items-center border-b-2 border-slate-300 bg-white sticky top-0 z-20 shrink-0"
-        style={{ height: ROW_H, paddingLeft: headerPad }}
+        className="flex items-center sticky top-0 z-20 shrink-0"
+        style={{ height: ROW_H, paddingLeft: headerPad, background: 'var(--ds-surface)', borderBottom: '2px solid var(--ds-border-strong)' }}
       >
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
@@ -728,29 +728,38 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
           ? entries.filter((e) => e.role !== 'pickup' && !e.load.readyToInvoice).length
           : 0
 
+        const isToday = dayStr === todayStr
         return (
-          <div key={di} className="border-b border-slate-200 shrink-0">
+          <div key={di} className="shrink-0" style={{ borderBottom: '1px solid var(--ds-border)' }}>
             <div
-              className="flex items-center gap-2 px-2 bg-slate-100 border-b border-slate-200 sticky z-10"
-              style={{ top: ROW_H, height: 22 }}
+              className="flex items-center gap-2 px-2 sticky z-10"
+              style={{
+                top: ROW_H, height: 22,
+                background: isToday ? 'var(--ds-blue-bg)' : 'var(--ds-bg-2)',
+                borderBottom: '1px solid var(--ds-border)',
+              }}
             >
-              <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">{weekday}</span>
-              <span className="text-[11px] text-slate-500">{date}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: isToday ? 'var(--ds-blue-dark)' : 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>{weekday}</span>
+              <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{date}</span>
+              {isToday && (
+                <span style={{ fontSize: 10, fontWeight: 600, background: 'var(--ds-blue)', color: '#fff', padding: '1px 6px', borderRadius: 4 }}>Today</span>
+              )}
               {loadCount > 0 && (
-                <span className="text-[10px] text-slate-400">· {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
+                <span style={{ fontSize: 10, color: 'var(--ds-t3)' }}>· {loadCount} load{loadCount !== 1 ? 's' : ''}</span>
               )}
               {tbdCount > 0 && (
-                <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-px leading-none">
+                <span style={{ fontSize: 10, fontWeight: 600, color: '#b45309', background: 'var(--ds-amber-bg)', border: '1px solid rgba(217,119,6,0.25)', borderRadius: 4, padding: '1px 6px', lineHeight: 1 }}>
                   {tbdCount} NEED appt{tbdCount !== 1 ? 's' : ''}
                 </span>
               )}
               {needsInvoiceCount > 0 && (
-                <span className="text-[10px] font-semibold text-red-600 bg-red-50 border border-red-200 rounded px-1.5 py-px leading-none">
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-red)', background: 'var(--ds-red-bg)', border: '1px solid rgba(185,28,28,0.2)', borderRadius: 4, padding: '1px 6px', lineHeight: 1 }}>
                   {needsInvoiceCount} uninvoiced
                 </span>
               )}
               <button
-                className="ml-auto flex items-center justify-center size-4 rounded bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                className="ml-auto flex items-center justify-center size-4 rounded text-white transition-colors"
+                style={{ background: 'var(--ds-blue)', border: 'none', cursor: 'pointer' }}
                 title={`Add load for ${weekday}`}
                 onClick={() => useAppStore.getState().setSelectedLoad(null, 'create', { driverId: null, dateStr: dayStr! })}
               >
@@ -759,7 +768,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
             </div>
 
             {entries.length === 0 ? (
-              <div className="flex items-center px-6 text-[11px] text-slate-300 italic" style={{ height: ROW_H }}>
+              <div className="flex items-center px-6 italic" style={{ height: ROW_H, fontSize: 11, color: 'var(--ds-t3)' }}>
                 No loads
               </div>
             ) : (

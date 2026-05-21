@@ -15,6 +15,12 @@ const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
   'two-week': { numDays: 14, navDays: 14 },
 }
 
+const STATUS_LEGEND = [
+  { label: 'Ready',       color: '#22c55e' },
+  { label: 'In Progress', color: '#1ea8f3' },
+  { label: 'Needs Action',color: '#f59e0b' },
+]
+
 export function CalendarPage() {
   const searchQuery = useAppStore((s) => s.searchQuery)
   const filters     = useAppStore((s) => s.filters)
@@ -44,7 +50,6 @@ export function CalendarPage() {
   const onViewChange = useCallback((view: ViewMode) => {
     setCurrentView(view)
     const today = new Date()
-    // Reset to today's week (or today for day view) on view switch
     setStartDate(view === 'day' ? today : getMondayOf(today))
   }, [])
 
@@ -83,7 +88,35 @@ export function CalendarPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+
+      {/* ── Page header ────────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 24px', borderBottom: '1px solid var(--ds-border)',
+        background: 'var(--ds-surface)', flexShrink: 0, gap: 16, flexWrap: 'wrap',
+      }}>
+        <div>
+          <h1 style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>
+            Calendar
+          </h1>
+          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+            {dateLabel} · BCAT freight movements
+          </p>
+        </div>
+
+        {/* Status legend */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {STATUS_LEGEND.map(({ label, color }) => (
+            <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)' }}>
+              <span style={{ width: 8, height: 8, background: color, borderRadius: 2, display: 'inline-block', flexShrink: 0 }} />
+              {label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Toolbar ─────────────────────────────────────────────────────────── */}
       <CalendarToolbar
         currentView={currentView}
         dateLabel={dateLabel}
@@ -93,7 +126,15 @@ export function CalendarPage() {
         onViewChange={onViewChange}
       />
 
-      <div className="flex-1 overflow-hidden mx-4 mb-4 mt-3 rounded-xl border border-slate-200 shadow-sm">
+      {/* ── Planner ─────────────────────────────────────────────────────────── */}
+      <div style={{
+        flex: 1, overflow: 'hidden',
+        margin: '12px 16px 16px',
+        borderRadius: 12,
+        border: '1px solid var(--ds-border)',
+        boxShadow: 'var(--sh-sm)',
+        background: 'var(--ds-surface)',
+      }}>
         <CalendarErrorBoundary>
           <PlannerView
             loads={visibleLoads}

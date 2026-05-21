@@ -1,11 +1,7 @@
-import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal, Search } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
 import type { ViewMode } from '@/types'
-import { cn } from '@/lib/utils'
 
 interface CalendarToolbarProps {
   currentView: ViewMode
@@ -17,33 +13,15 @@ interface CalendarToolbarProps {
 }
 
 const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: 'planner',  label: 'Week'    },
+  { value: 'planner',  label: 'Planner' },
   { value: 'day',      label: 'Day'     },
   { value: 'two-week', label: '2 Weeks' },
 ]
 
 const FILTER_CHIPS = [
-  {
-    key: 'readyToInvoice' as const,
-    label: 'Ready to Invoice',
-    Icon: CheckCircle2,
-    active:   'bg-emerald-50 border-emerald-300 text-emerald-700',
-    inactive: 'border-slate-300 text-slate-600 bg-white hover:bg-slate-50',
-  },
-  {
-    key: 'split' as const,
-    label: 'Split Assignment',
-    Icon: SplitSquareHorizontal,
-    active:   'bg-violet-50 border-violet-300 text-violet-700',
-    inactive: 'border-slate-300 text-slate-600 bg-white hover:bg-slate-50',
-  },
-  {
-    key: 'unassigned' as const,
-    label: 'Unassigned',
-    Icon: HelpCircle,
-    active:   'bg-amber-50 border-amber-300 text-amber-700',
-    inactive: 'border-slate-300 text-slate-600 bg-white hover:bg-slate-50',
-  },
+  { key: 'readyToInvoice' as const, label: 'Ready to Invoice', Icon: CheckCircle2, activeColor: '#16a34a', activeBg: 'var(--ds-green-bg)' },
+  { key: 'split'          as const, label: 'Split Assignment',  Icon: SplitSquareHorizontal, activeColor: '#7c3aed', activeBg: 'var(--ds-violet-bg)' },
+  { key: 'unassigned'     as const, label: 'Unassigned',        Icon: HelpCircle, activeColor: '#b45309', activeBg: 'var(--ds-amber-bg)' },
 ] as const
 
 export function CalendarToolbar({
@@ -56,117 +34,146 @@ export function CalendarToolbar({
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   return (
-    <div className="flex items-center h-16 px-8 border-b border-slate-200 bg-white shrink-0 gap-3">
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      height: 56, padding: '0 20px',
+      background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)',
+      flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto',
+    }}>
 
-      {/* ── Date navigation ──────────────────────────────────────────────── */}
-      <div className="flex items-center gap-1 shrink-0">
+      {/* ── View tabs ────────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, flexShrink: 0 }}>
+        {VIEW_OPTIONS.map(({ value, label }) => {
+          const active = currentView === value
+          return (
+            <button
+              key={value}
+              onClick={() => onViewChange(value)}
+              style={{
+                padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
+                background: active ? '#fff' : 'transparent',
+                color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                boxShadow: active ? 'var(--sh-sm)' : 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* ── Nav ──────────────────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={onPrev} aria-label="Previous period">
-              <ChevronLeft className="size-4" />
-            </Button>
+            <button onClick={onPrev} aria-label="Previous" style={navBtnStyle}>
+              <ChevronLeft size={15} />
+            </button>
           </TooltipTrigger>
           <TooltipContent>Previous</TooltipContent>
         </Tooltip>
 
-        <Button variant="outline" size="sm" className="h-9 px-3 font-medium" onClick={onToday}>
+        <button onClick={onToday} style={{ ...navBtnStyle, padding: '4px 10px', fontSize: 12.5, fontWeight: 500 }}>
           Today
-        </Button>
+        </button>
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={onNext} aria-label="Next period">
-              <ChevronRight className="size-4" />
-            </Button>
+            <button onClick={onNext} aria-label="Next" style={navBtnStyle}>
+              <ChevronRight size={15} />
+            </button>
           </TooltipTrigger>
           <TooltipContent>Next</TooltipContent>
         </Tooltip>
       </div>
 
-      {/* Date label */}
-      <span className="text-sm font-semibold text-foreground shrink-0 tabular-nums min-w-[160px]" aria-live="polite">
+      {/* ── Date label ───────────────────────────────────────────────────── */}
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap', minWidth: 160, flexShrink: 0 }} aria-live="polite">
         {dateLabel}
       </span>
 
-      <Separator orientation="vertical" className="h-8 mx-3 shrink-0" />
-
-      {/* ── View switcher ────────────────────────────────────────────────── */}
-      <ToggleGroup
-        type="single"
-        value={currentView}
-        onValueChange={(v) => v && onViewChange(v as ViewMode)}
-        className="shrink-0 rounded-lg border border-slate-200 bg-white p-1 gap-1"
-      >
-        {VIEW_OPTIONS.map(({ value, label }) => (
-          <ToggleGroupItem
-            key={value}
-            value={value}
-            aria-label={`${label} view`}
-            className="h-8 px-3 text-sm font-medium rounded-md"
-          >
-            {label}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-
-      <Separator orientation="vertical" className="h-8 mx-3 shrink-0" />
+      <div style={{ width: 1, height: 24, background: 'var(--ds-border)', flexShrink: 0 }} />
 
       {/* ── Filter chips ─────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 flex-1 overflow-x-auto min-w-0">
-        {FILTER_CHIPS.map(({ key, label, Icon, active, inactive }) => (
-          <button
-            key={key}
-            onClick={() => toggleFilter(key)}
-            aria-pressed={filters[key]}
-            className={cn(
-              'h-9 px-4 text-sm font-medium rounded-full border transition-all whitespace-nowrap flex items-center gap-2 shrink-0',
-              filters[key] ? active : inactive,
-            )}
-          >
-            <Icon className="size-3.5 shrink-0" />
-            {label}
-            {filters[key] && (
-              <span
-                className="ml-0.5 flex items-center justify-center size-5 rounded-full bg-black/10 hover:bg-black/20 transition-colors"
-                onClick={(e) => { e.stopPropagation(); toggleFilter(key) }}
-              >
-                <X className="size-3" />
-              </span>
-            )}
-          </button>
-        ))}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden', minWidth: 0 }}>
+        {FILTER_CHIPS.map(({ key, label, Icon, activeColor, activeBg }) => {
+          const on = filters[key]
+          return (
+            <button
+              key={key}
+              onClick={() => toggleFilter(key)}
+              aria-pressed={on}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                height: 30, padding: '0 10px', borderRadius: 20, border: '1px solid',
+                fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                whiteSpace: 'nowrap', flexShrink: 0,
+                background: on ? activeBg : 'var(--ds-bg)',
+                borderColor: on ? activeColor : 'var(--ds-border)',
+                color: on ? activeColor : 'var(--ds-t2)',
+              }}
+            >
+              <Icon size={12} />
+              {label}
+              {on && (
+                <span
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, borderRadius: '50%', background: 'rgba(0,0,0,0.12)', marginLeft: 2 }}
+                  onClick={(e) => { e.stopPropagation(); toggleFilter(key) }}
+                >
+                  <X size={9} />
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
 
       {/* ── Search ───────────────────────────────────────────────────────── */}
-      <div className="relative w-72 shrink-0">
+      <div style={{ position: 'relative', width: 240, flexShrink: 0 }}>
+        <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
         <input
           type="text"
-          placeholder="Search by Pro #, TMS, or PU#"
-          className="h-10 w-full pl-3 pr-4 rounded-lg border border-slate-300 bg-white text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-shadow"
+          placeholder="Search Pro #, TMS, or PU#"
+          style={{
+            width: '100%', height: 34, paddingLeft: 30, paddingRight: searchQuery ? 28 : 10,
+            background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 7,
+            fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+          }}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          onFocus={() => setSearchQuery('')}
           aria-label="Search loads"
         />
         {searchQuery && (
           <button
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', display: 'flex', alignItems: 'center' }}
             onClick={() => setSearchQuery('')}
             aria-label="Clear search"
           >
-            <X className="size-3.5" />
+            <X size={13} />
           </button>
         )}
       </div>
 
       {/* ── New Load ─────────────────────────────────────────────────────── */}
-      <Button
-        className="h-10 px-6 gap-2 font-medium shrink-0 whitespace-nowrap"
+      <button
         onClick={() => setSelectedLoad(null, 'create')}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8,
+          background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
+          fontSize: 13, fontWeight: 600, fontFamily: 'inherit', flexShrink: 0,
+        }}
       >
-        <Plus className="size-4" />
-        New Load
-      </Button>
+        <Plus size={14} /> New Load
+      </button>
     </div>
   )
+}
+
+const navBtnStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  width: 30, height: 30, borderRadius: 7,
+  background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
+  color: 'var(--ds-t2)', cursor: 'pointer',
 }
