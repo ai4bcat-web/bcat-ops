@@ -11,10 +11,10 @@ export interface DriverColor {
 export const COLOR_MAP: Record<ColorKey, DriverColor> = {
   // Row 1
   'driver-1':  { border: '#1d4ed8', bg: 'rgba(29,78,216,0.10)',    text: '#1e3a8a', dot: '#1d4ed8', avatarBg: '#3b82f6'  }, // blue
-  'driver-2':  { border: '#dc2626', bg: 'rgba(220,38,38,0.10)',    text: '#991b1b', dot: '#dc2626', avatarBg: '#ef4444'  }, // red
+  'driver-2':  { border: '#ca8a04', bg: 'rgba(202,138,4,0.10)',    text: '#713f12', dot: '#ca8a04', avatarBg: '#eab308'  }, // yellow
   'driver-3':  { border: '#d97706', bg: 'rgba(217,119,6,0.10)',    text: '#92400e', dot: '#d97706', avatarBg: '#f59e0b'  }, // amber
   'driver-4':  { border: '#7c3aed', bg: 'rgba(124,58,237,0.10)',   text: '#4c1d95', dot: '#7c3aed', avatarBg: '#8b5cf6'  }, // violet
-  'driver-5':  { border: '#e11d48', bg: 'rgba(225,29,72,0.10)',    text: '#881337', dot: '#e11d48', avatarBg: '#f43f5e'  }, // rose
+  'driver-5':  { border: '#0284c7', bg: 'rgba(2,132,199,0.10)',    text: '#0c4a6e', dot: '#0284c7', avatarBg: '#0ea5e9'  }, // sky
   'driver-6':  { border: '#0891b2', bg: 'rgba(8,145,178,0.10)',    text: '#164e63', dot: '#0891b2', avatarBg: '#06b6d4'  }, // cyan
   // Row 2
   'driver-7':  { border: '#4338ca', bg: 'rgba(67,56,202,0.10)',    text: '#312e81', dot: '#4338ca', avatarBg: '#6366f1'  }, // indigo
@@ -38,4 +38,26 @@ export const UNASSIGNED_COLOR: DriverColor = {
 export function getColor(colorKey?: ColorKey | null): DriverColor {
   if (!colorKey) return UNASSIGNED_COLOR
   return COLOR_MAP[colorKey] ?? UNASSIGNED_COLOR
+}
+
+// ── Load highlight palette — highlighter-marker style ─────────────────────────
+// Used for load.colorKey planning colors. Deliberately distinct from driver identity colors.
+export const LOAD_HIGHLIGHT_PALETTE: { key: ColorKey; hex: string; label: string }[] = [
+  { key: 'driver-1',  hex: '#FDE047', label: 'Yellow'  },
+  { key: 'driver-2',  hex: '#FDBA74', label: 'Orange'  },
+  { key: 'driver-3',  hex: '#F9A8D4', label: 'Pink'    },
+  { key: 'driver-4',  hex: '#F0ABFC', label: 'Fuchsia' },
+  { key: 'driver-5',  hex: '#C4B5FD', label: 'Violet'  },
+  { key: 'driver-6',  hex: '#93C5FD', label: 'Blue'    },
+  { key: 'driver-7',  hex: '#67E8F9', label: 'Cyan'    },
+  { key: 'driver-8',  hex: '#5EEAD4', label: 'Teal'    },
+  { key: 'driver-9',  hex: '#BEF264', label: 'Lime'    },
+  { key: 'driver-10', hex: '#A5B4FC', label: 'Indigo'  },
+  { key: 'driver-11', hex: '#7DD3FC', label: 'Sky'     },
+  { key: 'driver-12', hex: '#FDA4AF', label: 'Rose'    },
+]
+
+export function getHighlightHex(colorKey?: ColorKey | null): string | null {
+  if (!colorKey || colorKey === 'broker') return null
+  return LOAD_HIGHLIGHT_PALETTE.find((p) => p.key === colorKey)?.hex ?? null
 }

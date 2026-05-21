@@ -13,9 +13,9 @@
  */
 
 import { useState, useRef, useCallback, useMemo } from 'react'
-import { GripVertical, X, Plus, Pencil, CheckCircle, Circle } from 'lucide-react'
+import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
 import { addDays, formatDayHeader, formatTime, formatDateShort } from '@/lib/date'
-import { getColor, UNASSIGNED_COLOR, COLOR_MAP } from '@/lib/driverColors'
+import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { cn } from '@/lib/utils'
@@ -26,11 +26,13 @@ const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, r
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
-// ── Color palette (all non-broker colors available) ──────────────────────────
-const PALETTE: { key: ColorKey; hex: string }[] = (
-  Object.entries(COLOR_MAP) as [ColorKey, { border: string }][]
-).filter(([key]) => key !== 'broker')
- .map(([key, v]) => ({ key, hex: v.border }))
+// ── Hex bg helper ─────────────────────────────────────────────────────────────
+function hexBg(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
 
 // ── Day entry type ────────────────────────────────────────────────────────────
 type Role = 'pickup' | 'delivery' | 'same-day'
@@ -83,31 +85,50 @@ function ApptCell({ iso, type, colorCls, yard, city }: {
 }
 
 // ── Color picker popover ──────────────────────────────────────────────────────
-function ColorPicker({ loadId, current, onClose }: { loadId: string; current?: ColorKey | null; onClose: () => void }) {
+function ColorPicker({
+  loadId, current, onClose, extraIds,
+}: {
+  loadId: string; current?: ColorKey | null; onClose: () => void
+  extraIds?: string[]
+}) {
   const { updateLoad } = useLoads()
-  const pick = async (key: ColorKey | null) => { await updateLoad(loadId, { colorKey: key }); onClose() }
+  const pick = async (key: ColorKey | null) => {
+    const ids = [loadId, ...(extraIds ?? [])]
+    await Promise.all(ids.map((id) => updateLoad(id, { colorKey: key })))
+    onClose()
+  }
+  const multiCount = (extraIds?.length ?? 0) + 1
   return (
     <div
-      className="absolute z-50 top-full left-0 mt-1 p-2 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-wrap gap-1.5"
-      style={{ width: 160 }}
+      className="absolute z-50 top-full left-0 mt-1 rounded-xl border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
+      style={{ width: 196, padding: '10px 10px 8px' }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <button
-        className="size-5 rounded-full border-2 border-slate-200 flex items-center justify-center hover:bg-slate-100"
-        title="No color"
-        onClick={() => pick(null)}
-      >
-        <X className="size-2.5 text-slate-400" />
-      </button>
-      {PALETTE.map(({ key, hex }) => (
+      {multiCount > 1 && (
+        <div className="text-[10px] font-semibold text-slate-400">Apply to {multiCount} loads</div>
+      )}
+      <div className="flex flex-wrap gap-2">
         <button
-          key={key}
-          className={cn('size-5 rounded-full transition-transform hover:scale-110', key === current && 'ring-2 ring-offset-1 ring-slate-400')}
-          style={{ background: hex }}
-          title={key}
-          onClick={() => pick(key)}
-        />
-      ))}
+          className="rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center hover:bg-slate-50 transition-colors"
+          style={{ width: 26, height: 26 }}
+          title="Remove color"
+          onClick={() => pick(null)}
+        >
+          <X className="size-3 text-slate-400" />
+        </button>
+        {LOAD_HIGHLIGHT_PALETTE.map(({ key, hex, label }) => (
+          <button
+            key={key}
+            className={cn(
+              'rounded-lg transition-transform hover:scale-110 hover:shadow-md',
+              key === current && 'ring-2 ring-offset-1 ring-slate-500 scale-110',
+            )}
+            style={{ width: 26, height: 26, background: hex, border: '1px solid rgba(0,0,0,0.08)' }}
+            title={label}
+            onClick={() => pick(key)}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -365,32 +386,79 @@ function RateCell({ load }: { load: Load }) {
   )
 }
 
+// ── Editable slot badge ───────────────────────────────────────────────────────
+function EditableSlotBadge({ load, hex, readOnly }: { load: Load; hex: string; readOnly?: boolean }) {
+  const { updateLoad } = useLoads()
+  const [editing, setEditing] = useState(false)
+  const [val, setVal]         = useState('')
+
+  const commit = () => {
+    const n = parseInt(val, 10)
+    if (!isNaN(n) && n > 0) updateLoad(load.id, { daySlot: n })
+    else if (val.trim() === '') updateLoad(load.id, { daySlot: null })
+    setEditing(false)
+  }
+
+  const display = load.daySlot != null ? String(load.daySlot) : '–'
+
+  if (editing && !readOnly) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        inputMode="numeric"
+        className="text-[9px] font-black rounded-full text-center leading-none shrink-0 border border-blue-400 focus:outline-none"
+        style={{ background: hex, color: '#000', width: 18, height: 18, padding: 0 }}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+        onMouseDown={(e) => e.stopPropagation()}
+      />
+    )
+  }
+
+  return (
+    <span
+      className="text-[9px] font-black rounded-full flex items-center justify-center leading-none shrink-0"
+      style={{ background: hex, color: '#000', minWidth: 14, minHeight: 14, padding: '0 2px', cursor: readOnly ? 'default' : 'pointer' }}
+      onClick={readOnly ? undefined : (e) => { e.stopPropagation(); setVal(load.daySlot != null ? String(load.daySlot) : ''); setEditing(true) }}
+      title={readOnly ? undefined : 'Click to set slot number'}
+    >
+      {display}
+    </span>
+  )
+}
+
 // ── Planner row ───────────────────────────────────────────────────────────────
 interface PlannerRowProps {
   entry:       DayEntry
   drivers:     Driver[]
-  slotNum:     number
   dragging:    boolean
   dragOver:    boolean
+  selected:    boolean
   onDragStart: (key: string) => void
   onDragEnter: (key: string) => void
   onDragEnd:   () => void
+  onSelect:    (loadId: string, e: React.MouseEvent) => void
+  selectedIds: string[]
 }
 
-function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, onDragEnter, onDragEnd }: PlannerRowProps) {
+function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart, onDragEnter, onDragEnd, onSelect, selectedIds }: PlannerRowProps) {
   const { load, role } = entry
   const { updateLoad } = useLoads()
   const [showColor,   setShowColor]   = useState(false)
   const [showDriver,  setShowDriver]  = useState(false)
   const [editingAppt, setEditingAppt] = useState<'pu' | 'de' | null>(null)
 
-  const color    = load.colorKey ? getColor(load.colorKey) : UNASSIGNED_COLOR
-  const driverField  = role === 'delivery' ? 'deliveryDriverId' : 'pickupDriverId'
+  const highlightHex  = getHighlightHex(load.colorKey)
+  const driverField   = role === 'delivery' ? 'deliveryDriverId' : 'pickupDriverId'
   const relevantDriverId = load[driverField] as string | null
   const relevantDriver   = drivers.find((d) => d.id === relevantDriverId)
   const driverName       = relevantDriver?.name ?? '—'
   const isDeliveryDay = role === 'delivery'
   const isFinalDest   = role !== 'pickup'  // delivery or same-day — load ends here
+  const isNeed = load.pickupApptType === 'tbd' || load.deliveryApptType === 'tbd'
 
   // Route text
   const route = (() => {
@@ -410,24 +478,30 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         'group flex items-center border-b border-slate-100 transition-colors',
         dragging && 'opacity-40',
         dragOver && 'ring-1 ring-inset ring-blue-400',
+        selected && 'ring-1 ring-inset ring-violet-400',
       )}
       style={{
         height: ROW_H,
-        // Ready-to-invoice overrides all color tints with bright green
         background: load.readyToInvoice
-          ? dragOver ? '#16a34a' : '#22c55e'
-          : dragOver
-            ? `${color.border}44`
-            : `${color.border}${isDeliveryDay ? '18' : '30'}`,
+          ? (dragOver ? '#16a34a' : '#22c55e')
+          : dragOver    ? hexBg(highlightHex ?? '#94a3b8', 0.30)
+          : selected    ? hexBg(highlightHex ?? '#8b5cf6', 0.28)
+          : highlightHex
+            ? hexBg(highlightHex, isDeliveryDay ? 0.14 : 0.28)
+            : undefined,
         borderLeft: load.readyToInvoice
           ? '3px solid #15803d'
-          : `3px solid ${color.border}${isDeliveryDay ? '80' : 'ff'}`,
+          : highlightHex
+            ? `3px solid ${highlightHex}${isDeliveryDay ? 'aa' : ''}`
+            : '3px solid #e2e8f0',
+        borderRight: isNeed ? '3px solid #dc2626' : undefined,
       }}
       draggable
       onDragStart={() => onDragStart(entry.key)}
       onDragEnter={() => onDragEnter(entry.key)}
       onDragEnd={onDragEnd}
       onDragOver={(e) => e.preventDefault()}
+      onClick={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) onSelect(load.id, e) }}
     >
 
       {/* Drag handle — first column */}
@@ -440,15 +514,20 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         className="relative flex items-center justify-center shrink-0"
         style={{ width: COL.color }}
         tabIndex={0}
-        onClick={() => setShowColor((v) => !v)}
+        onClick={(e) => { if (!e.shiftKey && !e.ctrlKey && !e.metaKey) setShowColor((v) => !v) }}
         onBlur={(e) => closeOnBlur(() => setShowColor(false))(e)}
       >
         <span
-          className="size-3 rounded-full transition-all cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300"
-          style={{ background: color.border }}
+          className="size-3 rounded transition-all cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-slate-300"
+          style={{ background: highlightHex ?? '#e2e8f0', border: '1px solid rgba(0,0,0,0.1)' }}
         />
         {showColor && (
-          <ColorPicker loadId={load.id} current={load.colorKey} onClose={() => setShowColor(false)} />
+          <ColorPicker
+            loadId={load.id}
+            current={load.colorKey}
+            onClose={() => setShowColor(false)}
+            extraIds={selectedIds.filter((id) => id !== load.id)}
+          />
         )}
       </div>
 
@@ -524,13 +603,8 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
         onClick={() => setShowDriver((v) => !v)}
         onBlur={(e) => closeOnBlur(() => setShowDriver(false))(e)}
       >
-        {/* Slot badge — auto-numbered by display position */}
-        <span
-          className="text-[9px] font-black rounded-full flex items-center justify-center leading-none shrink-0"
-          style={{ background: color.border, color: '#fff', minWidth: 14, minHeight: 14, padding: '0 2px' }}
-        >
-          {slotNum}
-        </span>
+        {/* Slot badge — manually set, editable on pickup/same-day row */}
+        <EditableSlotBadge load={load} hex={highlightHex ?? '#cbd5e1'} readOnly={isDeliveryDay} />
 
         {/* Driver name */}
         <div className={cn(
@@ -552,6 +626,14 @@ function PlannerRow({ entry, drivers, slotNum, dragging, dragOver, onDragStart, 
           />
         )}
       </div>
+
+      {/* NEED indicator icon */}
+      {isNeed && (
+        <div className="shrink-0 flex items-center justify-center" style={{ width: 16 }} title="Needs appointment">
+          <AlertCircle className="size-3 text-red-500" />
+        </div>
+      )}
+      {!isNeed && <div className="shrink-0" style={{ width: 16 }} />}
 
       {/* Notes */}
       <NotesCell load={load} />
@@ -617,6 +699,16 @@ interface PlannerViewProps {
 
 export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerViewProps) {
   const days = useMemo(() => Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)), [weekStart, numDays])
+
+  // Multi-select state — shift/ctrl-click to toggle load selection
+  const [selectedLoadIds, setSelectedLoadIds] = useState<string[]>([])
+
+  const handleSelect = useCallback((loadId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setSelectedLoadIds((prev) =>
+      prev.includes(loadId) ? prev.filter((id) => id !== loadId) : [...prev, loadId]
+    )
+  }, [])
 
   // Group loads into day entries — multi-day loads appear on BOTH pickup and delivery day
   const entriesByDay = useMemo(() => {
@@ -708,6 +800,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>
         <ColHeader width={COL.deAppt}>DE Appt</ColHeader>
         <ColHeader width={COL.driver}>Driver</ColHeader>
+        <ColHeader width={16} />
         <ColHeader width={COL.notes}>Notes</ColHeader>
         <ColHeader width={COL.rate}>Rate</ColHeader>
         <ColHeader width={32}>RTI</ColHeader>
@@ -772,23 +865,21 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
                 No loads
               </div>
             ) : (
-              entries.map((entry) => {
-                const driverId = entry.load.pickupDriverId
-                const sameDriver = entries.filter((e) => e.load.pickupDriverId === driverId)
-                const slotNum = sameDriver.indexOf(entry) + 1
-                return (
+              entries.map((entry) => (
                 <PlannerRow
                   key={entry.key}
                   entry={entry}
                   drivers={drivers}
-                  slotNum={slotNum}
                   dragging={dragKey.current === entry.key}
                   dragOver={dragOverKey === entry.key}
+                  selected={selectedLoadIds.includes(entry.load.id)}
+                  selectedIds={selectedLoadIds}
                   onDragStart={(k) => handleDragStart(dayStr ?? '', k)}
                   onDragEnter={(k) => handleDragEnter(dayStr ?? '', k)}
                   onDragEnd={handleDragEnd}
+                  onSelect={handleSelect}
                 />
-                )})
+              ))
             )}
           </div>
         )

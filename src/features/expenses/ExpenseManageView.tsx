@@ -437,11 +437,11 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
           <Field label="Monthly Amount ($)">
             <Input type="number" min="0" step="0.01" value={form.monthlyAmount} onChange={(e) => setForm((f) => ({ ...f, monthlyAmount: e.target.value }))} placeholder="0.00" />
           </Field>
-          <Field label="Start Month (YYYY-MM)">
-            <Input value={form.startMonth} onChange={(e) => setForm((f) => ({ ...f, startMonth: e.target.value }))} placeholder="2026-01" />
+          <Field label="Start Month">
+            <Input type="month" value={form.startMonth} onChange={(e) => setForm((f) => ({ ...f, startMonth: e.target.value }))} />
           </Field>
-          <Field label="End Month (YYYY-MM, optional)">
-            <Input value={form.endMonth} onChange={(e) => setForm((f) => ({ ...f, endMonth: e.target.value }))} placeholder="ongoing" />
+          <Field label="End Month (optional)">
+            <Input type="month" value={form.endMonth} onChange={(e) => setForm((f) => ({ ...f, endMonth: e.target.value }))} />
           </Field>
           <Field label="Notes">
             <Input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} placeholder="optional" />
@@ -525,6 +525,13 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
       alert('Select an allocation or a direct truck.')
       return
     }
+    if (form.allocationId) {
+      const alloc = data.allocations.find((a) => a.id === form.allocationId)
+      if (!alloc || (alloc.truckIds ?? []).length === 0) {
+        alert('The selected allocation has no trucks attached. Add trucks to the allocation first, or choose a direct truck instead.')
+        return
+      }
+    }
     if (!form.periodMonth && !form.transactionDate) {
       alert('Enter either a Period Month or a Transaction Date — otherwise the expense will not appear in any date range view.')
       return
@@ -582,7 +589,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
           </Select>
         </Field>
         <Field label="Period Month — required if no date">
-          <Input value={form.periodMonth} onChange={(e) => setForm((f) => ({ ...f, periodMonth: e.target.value }))} placeholder="2026-05" />
+          <Input type="month" value={form.periodMonth} onChange={(e) => setForm((f) => ({ ...f, periodMonth: e.target.value }))} />
         </Field>
         <Field label="Transaction Date — required if no month">
           <Input type="date" value={form.transactionDate} onChange={(e) => setForm((f) => ({ ...f, transactionDate: e.target.value }))} />

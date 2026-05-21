@@ -259,9 +259,12 @@ function OverviewTab({
 
     for (const r of expenseData.recurring) {
       if (!r.active) continue
+      // Normalize YYYY-M → YYYY-MM so string comparisons work correctly
+      const rStart = r.startMonth.replace(/^(\d{4})-(\d)$/, '$1-0$2')
+      const rEnd   = r.endMonth ? r.endMonth.replace(/^(\d{4})-(\d)$/, '$1-0$2') : null
       // clamp to the date range
-      const lo = r.startMonth > startMonth ? r.startMonth : startMonth
-      const hi = r.endMonth && r.endMonth < endMonth ? r.endMonth : endMonth
+      const lo = rStart > startMonth ? rStart : startMonth
+      const hi = rEnd && rEnd < endMonth ? rEnd : endMonth
       let month = lo
       while (month <= hi) {
         virtual.push({

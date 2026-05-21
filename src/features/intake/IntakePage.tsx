@@ -243,11 +243,21 @@ export function QueueCard({
         )}
       </div>
 
-      {/* Body snippet */}
+      {/* Body text */}
       {item.bodyText && (
-        <p style={{ fontSize: 11, color: 'var(--ds-t3)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', background: 'var(--ds-bg)', borderRadius: 6, padding: '6px 8px', border: '1px solid var(--ds-border)' }}>
-          {item.bodyText}
-        </p>
+        <textarea
+          readOnly
+          value={item.bodyText}
+          style={{
+            fontSize: 11, color: 'var(--ds-t3)',
+            background: 'var(--ds-bg)', borderRadius: 6,
+            padding: '6px 8px', border: '1px solid var(--ds-border)',
+            width: '100%', height: 120, resize: 'vertical',
+            fontFamily: 'inherit', lineHeight: 1.5,
+            outline: 'none', whiteSpace: 'pre-wrap',
+            boxSizing: 'border-box',
+          }}
+        />
       )}
 
       {/* Actions */}

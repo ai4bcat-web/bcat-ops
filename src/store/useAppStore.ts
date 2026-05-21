@@ -356,7 +356,7 @@ interface AppState {
   pendingIntakeItemId: string | null
   filterDriverId: string | null
   searchQuery: string
-  filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean }
+  filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
 
   // ── Initialization ─────────────────────────────────────────────────────────
   initializeData: (userEmail: string) => Promise<void>
@@ -443,7 +443,7 @@ export const useAppStore = create<AppState>()(
       pendingIntakeItemId: null,
       filterDriverId: null,
       searchQuery: '',
-      filters: { readyToInvoice: false, split: false, unassigned: false },
+      filters: { readyToInvoice: false, split: false, unassigned: false, needsAppt: false },
 
       // ── Init ───────────────────────────────────────────────────────────────
       setCurrentUser: (email) => set({ currentUserEmail: email }),

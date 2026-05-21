@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal, Search, AlertCircle } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
 import type { ViewMode } from '@/types'
@@ -13,15 +13,17 @@ interface CalendarToolbarProps {
 }
 
 const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
-  { value: 'planner',  label: 'Planner' },
   { value: 'day',      label: 'Day'     },
   { value: 'two-week', label: '2 Weeks' },
+  { value: 'month',    label: 'Month'   },
+  { value: 'planner',  label: 'Planner' },
 ]
 
 const FILTER_CHIPS = [
-  { key: 'readyToInvoice' as const, label: 'Ready to Invoice', Icon: CheckCircle2, activeColor: '#16a34a', activeBg: 'var(--ds-green-bg)' },
+  { key: 'readyToInvoice' as const, label: 'Ready to Invoice', Icon: CheckCircle2,          activeColor: '#16a34a', activeBg: 'var(--ds-green-bg)'  },
   { key: 'split'          as const, label: 'Split Assignment',  Icon: SplitSquareHorizontal, activeColor: '#7c3aed', activeBg: 'var(--ds-violet-bg)' },
-  { key: 'unassigned'     as const, label: 'Unassigned',        Icon: HelpCircle, activeColor: '#b45309', activeBg: 'var(--ds-amber-bg)' },
+  { key: 'unassigned'     as const, label: 'Unassigned',        Icon: HelpCircle,            activeColor: '#b45309', activeBg: 'var(--ds-amber-bg)'  },
+  { key: 'needsAppt'      as const, label: 'Needs Appt',        Icon: AlertCircle,           activeColor: '#dc2626', activeBg: 'var(--ds-red-bg)'    },
 ] as const
 
 export function CalendarToolbar({

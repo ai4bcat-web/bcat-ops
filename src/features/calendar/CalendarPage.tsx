@@ -4,6 +4,7 @@ import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { CalendarToolbar } from './CalendarToolbar'
 import { PlannerView } from './PlannerView'
+import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
@@ -13,6 +14,7 @@ const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
   'planner':  { numDays: 7,  navDays: 7  },
   'day':      { numDays: 1,  navDays: 1  },
   'two-week': { numDays: 14, navDays: 14 },
+  'month':    { numDays: -1, navDays: -1 }, // numDays computed dynamically
 }
 
 const STATUS_LEGEND = [
@@ -28,29 +30,58 @@ export function CalendarPage() {
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
 
-  const [currentView, setCurrentView] = useState<ViewMode>('planner')
+  const [currentView, setCurrentView] = useState<ViewMode>('two-week')
   const [startDate, setStartDate]     = useState<Date>(() => getMondayOf(new Date()))
 
-  const { numDays, navDays } = VIEW_CONFIG[currentView]
+  const { navDays } = VIEW_CONFIG[currentView]
+
+  // For month view, numDays = days in the displayed month
+  const numDays = useMemo(() => {
+    if (currentView === 'month') {
+      return new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
+    }
+    return VIEW_CONFIG[currentView].numDays
+  }, [currentView, startDate])
 
   const dateLabel = useMemo(() => {
+    if (currentView === 'month') {
+      return startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    }
     const end = addDays(startDate, numDays - 1)
     return numDays === 1
       ? formatDateShort(startDate.toISOString())
       : `${formatDateShort(startDate.toISOString())} – ${formatDateShort(end.toISOString())}`
-  }, [startDate, numDays])
+  }, [startDate, numDays, currentView])
 
-  const onPrev  = useCallback(() => setStartDate((d) => addDays(d, -navDays)), [navDays])
-  const onNext  = useCallback(() => setStartDate((d) => addDays(d, navDays)),  [navDays])
+  const onPrev  = useCallback(() => {
+    if (currentView === 'month') {
+      setStartDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))
+    } else {
+      setStartDate((d) => addDays(d, -navDays))
+    }
+  }, [currentView, navDays])
+
+  const onNext  = useCallback(() => {
+    if (currentView === 'month') {
+      setStartDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))
+    } else {
+      setStartDate((d) => addDays(d, navDays))
+    }
+  }, [currentView, navDays])
+
   const onToday = useCallback(() => {
     const today = new Date()
-    setStartDate(currentView === 'day' ? today : getMondayOf(today))
+    if (currentView === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
+    else if (currentView === 'day') setStartDate(today)
+    else setStartDate(getMondayOf(today))
   }, [currentView])
 
   const onViewChange = useCallback((view: ViewMode) => {
     setCurrentView(view)
     const today = new Date()
-    setStartDate(view === 'day' ? today : getMondayOf(today))
+    if (view === 'month') setStartDate(new Date(today.getFullYear(), today.getMonth(), 1))
+    else if (view === 'day') setStartDate(today)
+    else setStartDate(getMondayOf(today))
   }, [])
 
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
@@ -74,6 +105,7 @@ export function CalendarPage() {
     if (filters.readyToInvoice && !l.readyToInvoice) return false
     if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
     if (filters.unassigned && l.pickupDriverId !== null) return false
+    if (filters.needsAppt && l.pickupApptType !== 'tbd' && l.deliveryApptType !== 'tbd') return false
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
       if (
@@ -136,12 +168,21 @@ export function CalendarPage() {
         background: 'var(--ds-surface)',
       }}>
         <CalendarErrorBoundary>
-          <PlannerView
-            loads={visibleLoads}
-            drivers={drivers}
-            weekStart={startDate}
-            numDays={numDays}
-          />
+          {(currentView === 'two-week' || currentView === 'month') ? (
+            <GridCalendarView
+              loads={visibleLoads}
+              drivers={drivers}
+              startDate={startDate}
+              viewMode={currentView}
+            />
+          ) : (
+            <PlannerView
+              loads={visibleLoads}
+              drivers={drivers}
+              weekStart={startDate}
+              numDays={numDays}
+            />
+          )}
         </CalendarErrorBoundary>
       </div>
 
