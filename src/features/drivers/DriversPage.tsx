@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock } from 'lucide-react'
+import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock, Search } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -449,10 +449,10 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 export function DriversPage() {
   const { drivers, updateDriver } = useDrivers()
   const equipment = useAppStore((s) => s.equipment)
-  const [drawerOpen, setDrawerOpen]     = useState(false)
+  const [drawerOpen, setDrawerOpen]       = useState(false)
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null)
-  const [search, setSearch] = useState('')
-  const [typeFilter, setTypeFilter] = useState<'all' | 'driver' | 'broker'>('all')
+  const [search, setSearch]               = useState('')
+  const [typeFilter, setTypeFilter]       = useState<'all' | 'driver' | 'broker'>('all')
 
   const sorted = [...drivers]
     .filter((d) => {
@@ -468,72 +468,94 @@ export function DriversPage() {
       return a.name.localeCompare(b.name)
     })
 
-  const openCreate = () => { setEditingDriver(null); setDrawerOpen(true) }
-  const openEdit   = (d: Driver) => { setEditingDriver(d); setDrawerOpen(true) }
+  const openCreate  = () => { setEditingDriver(null); setDrawerOpen(true) }
+  const openEdit    = (d: Driver) => { setEditingDriver(d); setDrawerOpen(true) }
   const closeDrawer = () => setDrawerOpen(false)
 
-  const activeCount  = drivers.filter((d) => d.active).length
-  const brokerCount  = drivers.filter((d) => d.type === 'broker').length
-  const ownCount     = drivers.filter((d) => d.active && d.type !== 'broker').length
+  const activeCount = drivers.filter((d) => d.active).length
+  const brokerCount = drivers.filter((d) => d.type === 'broker').length
+  const ownCount    = drivers.filter((d) => d.active && d.type !== 'broker').length
+
+  const TABS = [
+    { key: 'all' as const,    label: 'All' },
+    { key: 'driver' as const, label: 'Company Drivers' },
+    { key: 'broker' as const, label: 'Brokers / 3PL' },
+  ]
 
   return (
-    <div className="h-full overflow-auto">
-      {/* KPI + header */}
-      <div className="sticky top-0 z-10 border-b border-border bg-white">
-        <div className="flex items-center justify-between px-8 pt-5 pb-3">
-          <h1 className="text-2xl font-semibold text-foreground tracking-tight">Drivers &amp; Brokers</h1>
-          <Button size="lg" className="gap-1.5" onClick={openCreate}>
-            <Plus className="size-4" /> Add Driver
-          </Button>
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Drivers &amp; Brokers</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Roster · compliance · contact</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
+              Export
+            </button>
+            <button onClick={openCreate} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <Plus size={14} /> Add Driver
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3 px-8 pb-4 overflow-x-auto">
-          <div className="ds-kpi">
-            <div className="ds-kpi-label">Total</div>
-            <div className="ds-kpi-value">{drivers.length}</div>
-          </div>
-          <div className="ds-kpi">
-            <div className="ds-kpi-label">Active Drivers</div>
-            <div className="ds-kpi-value green">{ownCount}</div>
-          </div>
-          <div className="ds-kpi">
-            <div className="ds-kpi-label">Brokers / 3PL</div>
-            <div className="ds-kpi-value blue">{brokerCount}</div>
-          </div>
-          <div className="ds-kpi">
-            <div className="ds-kpi-label">Inactive</div>
-            <div className="ds-kpi-value amber">{drivers.length - activeCount}</div>
-          </div>
+
+        {/* KPI strip */}
+        <div style={{ display: 'flex', gap: 12, padding: '0 32px 16px', overflowX: 'auto' }}>
+          <div className="ds-kpi"><div className="ds-kpi-label">Total</div><div className="ds-kpi-value">{drivers.length}</div></div>
+          <div className="ds-kpi"><div className="ds-kpi-label">Active Drivers</div><div className="ds-kpi-value green">{ownCount}</div></div>
+          <div className="ds-kpi"><div className="ds-kpi-label">Brokers / 3PL</div><div className="ds-kpi-value blue">{brokerCount}</div></div>
+          <div className="ds-kpi"><div className="ds-kpi-label">Inactive</div><div className="ds-kpi-value amber">{drivers.length - activeCount}</div></div>
         </div>
       </div>
 
-      {/* Filters + Table */}
-      <div className="p-8">
-        {/* Filter bar */}
-        <div className="flex items-center gap-3 mb-4 flex-wrap">
-          <div className="flex rounded-lg border border-border overflow-hidden text-sm">
-            {(['all', 'driver', 'broker'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setTypeFilter(f)}
-                className={cn(
-                  'px-4 py-2 font-medium transition-colors',
-                  typeFilter === f ? 'bg-foreground text-white' : 'bg-white text-muted-foreground hover:bg-slate-50'
-                )}
-              >
-                {f === 'all' ? 'All' : f === 'driver' ? 'Company Drivers' : 'Brokers / 3PL'}
-              </button>
-            ))}
+      {/* ── Filters + Table ───────────────────────────────────────────────── */}
+      <div style={{ padding: '24px 32px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          {/* Tab pills */}
+          <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+            {TABS.map(({ key, label }) => {
+              const active = typeFilter === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setTypeFilter(key)}
+                  style={{
+                    padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                    fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
+                    background: active ? '#fff' : 'transparent',
+                    color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                    boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, phone, notes…"
-            className="h-9 px-3 text-sm rounded-lg border border-border bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 w-60"
-          />
+
+          {/* Search */}
+          <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, phone, notes…"
+              style={{
+                width: '100%', height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box',
+                background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
+                fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+              }}
+            />
+          </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200/60 overflow-x-auto bg-white shadow-sm">
+        {/* Table */}
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">

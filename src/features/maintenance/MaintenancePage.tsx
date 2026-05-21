@@ -7,7 +7,7 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
 import {
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Trash2, Pencil, X,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Trash2, Pencil, X, Plus, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MaintenanceTask, TaskPriority, TaskStatus } from '@/types/equipment'
@@ -135,23 +135,22 @@ export function MaintenancePage() {
   const equipment            = useAppStore((s) => s.equipment)
   const maintenanceTasks     = useAppStore((s) => s.maintenanceTasks)
   const maintenanceInvoices  = useAppStore((s) => s.maintenanceInvoices)
-  const updateMaintenanceTask   = useAppStore((s) => s.updateMaintenanceTask)
-  const deleteMaintenanceTask   = useAppStore((s) => s.deleteMaintenanceTask)
+  const updateMaintenanceTask    = useAppStore((s) => s.updateMaintenanceTask)
+  const deleteMaintenanceTask    = useAppStore((s) => s.deleteMaintenanceTask)
   const deleteMaintenanceInvoice = useAppStore((s) => s.deleteMaintenanceInvoice)
 
-  const [tab, setTab]               = useState<Tab>('tasks')
-  const [statusFilter, setStatus]   = useState<'all' | 'upcoming' | 'complete'>('upcoming')
+  const [tab, setTab]                 = useState<Tab>('tasks')
+  const [statusFilter, setStatus]     = useState<'all' | 'upcoming' | 'complete'>('upcoming')
   const [priorityFilter, setPriority] = useState<'all' | TaskPriority>('all')
   const [equipFilter, setEquipFilter] = useState('')
-  const [search, setSearch]         = useState('')
-  const [editTask, setEditTask]     = useState<MaintenanceTask | null>(null)
+  const [search, setSearch]           = useState('')
+  const [editTask, setEditTask]       = useState<MaintenanceTask | null>(null)
 
   function equipName(id: string) {
     const e = equipment.find((eq) => eq.id === id)
     return e ? `#${e.unitNumber}${e.nickname ? ` · ${e.nickname}` : ''}` : id
   }
 
-  // Tasks filtering
   const filteredTasks = maintenanceTasks.filter((t) => {
     if (statusFilter !== 'all' && t.status !== statusFilter) return false
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
@@ -166,7 +165,6 @@ export function MaintenancePage() {
     return (a.dueDate ?? '') < (b.dueDate ?? '') ? -1 : 1
   })
 
-  // Invoices filtering
   const filteredInvoices = maintenanceInvoices.filter((inv) => {
     if (equipFilter && inv.equipmentId !== equipFilter) return false
     if (search) {
@@ -180,62 +178,102 @@ export function MaintenancePage() {
     return true
   }).sort((a, b) => ((b.date ?? '') < (a.date ?? '') ? -1 : 1))
 
-  const overdueCount  = maintenanceTasks.filter((t) => t.status === 'upcoming' && dueState(t.dueDate) === 'overdue').length
-  const upcomingCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length
-  const totalSpend    = maintenanceInvoices.reduce((s, i) => s + i.amount, 0)
+  const overdueCount   = maintenanceTasks.filter((t) => t.status === 'upcoming' && dueState(t.dueDate) === 'overdue').length
+  const upcomingCount  = maintenanceTasks.filter((t) => t.status === 'upcoming').length
+  const completedCount = maintenanceTasks.filter((t) => t.status === 'complete').length
+  const totalSpend     = maintenanceInvoices.reduce((s, i) => s + i.amount, 0)
+
+  const MAINT_KPIS = [
+    { label: 'Open Tasks',    value: upcomingCount,           color: '#1ea8f3' },
+    { label: 'Overdue',       value: overdueCount,            color: '#ef4444' },
+    { label: 'Completed',     value: completedCount,          color: '#22c55e' },
+    { label: 'Invoice Total', value: formatCents(totalSpend), color: '#a78bfa' },
+  ]
+
+  const TABS_LIST = [
+    { key: 'tasks' as const,    label: 'Tasks',           Icon: Wrench },
+    { key: 'invoices' as const, label: 'Invoice History', Icon: FileText },
+  ]
+
+  const selectStyle: React.CSSProperties = {
+    height: 34, padding: '0 10px', background: 'var(--ds-surface)',
+    border: '1px solid var(--ds-border)', borderRadius: 7,
+    fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+  }
 
   return (
-    <div className="h-full overflow-auto">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="flex items-center justify-between px-8 pt-5 pb-3">
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
           <div>
-            <h1 className="text-2xl font-semibold text-foreground tracking-tight">Maintenance</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Tasks, compliance & repair history</p>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Maintenance</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Tasks, compliance &amp; repair history</p>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
+              Export
+            </button>
+            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <Plus size={14} /> New Task
+            </button>
           </div>
         </div>
 
-        {/* KPIs */}
-        <div className="flex items-center gap-3 px-8 pb-4 overflow-x-auto">
-          <div className="ds-kpi"><div className="ds-kpi-label">Open Tasks</div><div className="ds-kpi-value">{upcomingCount}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Overdue</div><div className="ds-kpi-value red">{overdueCount}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Completed</div><div className="ds-kpi-value green">{maintenanceTasks.filter((t) => t.status === 'complete').length}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Invoice Total</div><div className="ds-kpi-value">{formatCents(totalSpend)}</div></div>
+        {/* KPI strip — left-border accent */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '0 32px 12px' }}>
+          {MAINT_KPIS.map((k) => (
+            <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
+              <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.03em', textTransform: 'uppercase', marginLeft: 4 }}>{k.label}</div>
+              <div style={{ fontSize: 28, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 4, marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
+            </div>
+          ))}
         </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-slate-200 px-8 gap-0">
-          {([['tasks', 'Tasks', Wrench], ['invoices', 'Invoice History', FileText]] as [Tab, string, React.ElementType][]).map(([key, label, Icon]) => (
-            <button
-              key={key}
-              onClick={() => setTab(key)}
-              className={cn(
-                'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-                tab === key
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              <Icon className="size-3.5" />{label}
-            </button>
-          ))}
+        {/* Tab bar */}
+        <div style={{ display: 'flex', padding: '0 32px', gap: 0 }}>
+          {TABS_LIST.map(({ key, label, Icon }) => {
+            const active = tab === key
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '10px 16px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  background: 'none', border: 'none', fontFamily: 'inherit',
+                  borderBottom: `2px solid ${active ? 'var(--ds-blue)' : 'transparent'}`,
+                  color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                  marginBottom: -1,
+                }}
+              >
+                <Icon size={13} />{label}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      <div className="p-8 max-w-5xl space-y-5">
+      <div style={{ padding: '24px 32px', maxWidth: 1100 }}>
         {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Input
-            placeholder="Search…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-9 w-52"
-          />
-          <select
-            className="h-9 rounded-md border border-slate-200 px-3 text-sm bg-white"
-            value={equipFilter}
-            onChange={(e) => setEquipFilter(e.target.value)}
-          >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              placeholder="Search…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                width: 200, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box',
+                background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
+                fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+              }}
+            />
+          </div>
+          <select value={equipFilter} onChange={(e) => setEquipFilter(e.target.value)} style={selectStyle}>
             <option value="">All Equipment</option>
             {equipment.map((e) => (
               <option key={e.id} value={e.id}>#{e.unitNumber}{e.nickname ? ` · ${e.nickname}` : ''}</option>
@@ -243,12 +281,12 @@ export function MaintenancePage() {
           </select>
           {tab === 'tasks' && (
             <>
-              <select className="h-9 rounded-md border border-slate-200 px-3 text-sm bg-white" value={statusFilter} onChange={(e) => setStatus(e.target.value as typeof statusFilter)}>
+              <select value={statusFilter} onChange={(e) => setStatus(e.target.value as typeof statusFilter)} style={selectStyle}>
                 <option value="all">All Statuses</option>
                 <option value="upcoming">Upcoming</option>
                 <option value="complete">Complete</option>
               </select>
-              <select className="h-9 rounded-md border border-slate-200 px-3 text-sm bg-white" value={priorityFilter} onChange={(e) => setPriority(e.target.value as typeof priorityFilter)}>
+              <select value={priorityFilter} onChange={(e) => setPriority(e.target.value as typeof priorityFilter)} style={selectStyle}>
                 <option value="all">All Priorities</option>
                 <option value="high">High</option>
                 <option value="med">Medium</option>
@@ -260,7 +298,7 @@ export function MaintenancePage() {
 
         {/* Tasks Tab */}
         {tab === 'tasks' && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
             {filteredTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
                 <Wrench className="size-8 opacity-20" />
@@ -325,7 +363,7 @@ export function MaintenancePage() {
 
         {/* Invoices Tab */}
         {tab === 'invoices' && (
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
             {filteredInvoices.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
                 <FileText className="size-8 opacity-20" />

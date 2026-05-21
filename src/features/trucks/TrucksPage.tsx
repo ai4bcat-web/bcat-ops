@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Check,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Check, Search,
 } from 'lucide-react'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
@@ -781,13 +781,13 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, onEdit, onDelet
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export function TrucksPage() {
-  const equipment          = useAppStore((s) => s.equipment)
-  const maintenanceTasks   = useAppStore((s) => s.maintenanceTasks)
+  const equipment           = useAppStore((s) => s.equipment)
+  const maintenanceTasks    = useAppStore((s) => s.maintenanceTasks)
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
-  const drivers            = useAppStore((s) => s.drivers)
-  const addEquipment       = useAppStore((s) => s.addEquipment)
-  const updateEquipment    = useAppStore((s) => s.updateEquipment)
-  const deleteEquipment    = useAppStore((s) => s.deleteEquipment)
+  const drivers             = useAppStore((s) => s.drivers)
+  const addEquipment        = useAppStore((s) => s.addEquipment)
+  const updateEquipment     = useAppStore((s) => s.updateEquipment)
+  const deleteEquipment     = useAppStore((s) => s.deleteEquipment)
 
   const [typeFilter, setTypeFilter] = useState<'all' | 'truck' | 'trailer'>('all')
   const [search, setSearch]         = useState('')
@@ -808,13 +808,28 @@ export function TrucksPage() {
     return true
   })
 
-  const trucks   = equipment.filter((e) => e.type === 'truck')
-  const trailers = equipment.filter((e) => e.type === 'trailer')
-  const alertCount = equipment.filter((e) =>
+  const trucks        = equipment.filter((e) => e.type === 'truck')
+  const trailers      = equipment.filter((e) => e.type === 'trailer')
+  const alertCount    = equipment.filter((e) =>
     ['overdue', 'expiring'].includes(dotInspectionState(e.dotInspectionDate)) ||
     [e.insuranceExpirationDate, e.iftaExpirationDate, e.irpExpirationDate, e.bobtailInsuranceDate]
       .some((d) => expiryState(d) === 'overdue' || expiryState(d) === 'expiring')
   ).length
+  const openTaskCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length
+
+  const FLEET_KPIS = [
+    { label: 'Total Units',       value: equipment.length, color: '#1ea8f3', icon: <Truck size={14} /> },
+    { label: 'Trucks',            value: trucks.length,    color: '#0369a1', icon: <Truck size={14} /> },
+    { label: 'Trailers',          value: trailers.length,  color: '#a78bfa', icon: <Container size={14} /> },
+    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} /> },
+    { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} /> },
+  ]
+
+  const TABS = [
+    { key: 'all' as const,     label: 'All' },
+    { key: 'truck' as const,   label: 'Trucks' },
+    { key: 'trailer' as const, label: 'Trailers' },
+  ]
 
   function handleSave(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) {
     if (showForm && showForm !== 'new') {
@@ -831,55 +846,83 @@ export function TrucksPage() {
   }
 
   return (
-    <div className="h-full overflow-auto">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="flex items-center justify-between px-8 pt-5 pb-3">
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
           <div>
-            <h1 className="text-2xl font-semibold text-foreground tracking-tight">Fleet</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Equipment, compliance & maintenance</p>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Fleet</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Equipment, compliance &amp; maintenance</p>
           </div>
-          <Button className="h-9 gap-2" onClick={() => setShowForm('new')}>
-            <Plus className="size-4" /> Add Equipment
-          </Button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
+              Export
+            </button>
+            <button onClick={() => setShowForm('new')} style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
+              <Plus size={14} /> Add Equipment
+            </button>
+          </div>
         </div>
 
-        {/* KPIs */}
-        <div className="flex items-center gap-3 px-8 pb-4 overflow-x-auto">
-          <div className="ds-kpi"><div className="ds-kpi-label">Total Units</div><div className="ds-kpi-value">{equipment.length}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Trucks</div><div className="ds-kpi-value">{trucks.length}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Trailers</div><div className="ds-kpi-value">{trailers.length}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Compliance Alerts</div><div className="ds-kpi-value amber">{alertCount}</div></div>
-          <div className="ds-kpi"><div className="ds-kpi-label">Open Tasks</div><div className="ds-kpi-value">{maintenanceTasks.filter((t) => t.status === 'upcoming').length}</div></div>
+        {/* KPI strip — icon cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, padding: '0 32px 16px' }}>
+          {FLEET_KPIS.map((k) => (
+            <div key={k.label} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
+              <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--ds-bg)', color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {k.icon}
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.03em', textTransform: 'uppercase' }}>{k.label}</div>
+                <div style={{ fontSize: 22, fontWeight: 600, color: k.color, letterSpacing: '-0.02em', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{k.value}</div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="p-8 space-y-4">
+      <div style={{ padding: '24px 32px' }}>
         {/* Toolbar */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
-            {(['all', 'truck', 'trailer'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setTypeFilter(f)}
-                className={cn('px-4 py-2 text-sm font-medium transition-colors',
-                  typeFilter === f ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50'
-                )}
-              >
-                {f === 'all' ? 'All' : f === 'truck' ? 'Trucks' : 'Trailers'}
-              </button>
-            ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+            {TABS.map(({ key, label }) => {
+              const active = typeFilter === key
+              return (
+                <button
+                  key={key}
+                  onClick={() => setTypeFilter(key)}
+                  style={{
+                    padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                    fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
+                    background: active ? '#fff' : 'transparent',
+                    color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                    boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
-          <Input
-            placeholder="Search equipment…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-9 w-64"
-          />
+          <div style={{ position: 'relative' }}>
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              placeholder="Search equipment…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                width: 240, height: 34, paddingLeft: 30, paddingRight: 10, boxSizing: 'border-box',
+                background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 7,
+                fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+              }}
+            />
+          </div>
         </div>
 
         {/* Equipment table */}
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-x-auto">
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <Truck className="size-8 opacity-20" />
