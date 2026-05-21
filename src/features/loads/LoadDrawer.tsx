@@ -351,7 +351,10 @@ export function LoadDrawer() {
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent>
+      <SheetContent
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
         <SheetHeader>
           <SheetTitle className="text-base font-semibold">
             {isCreate ? 'New Load' : isEdit ? `Edit — ${load?.aljexId}` : (load?.aljexId ?? 'Load Detail')}
