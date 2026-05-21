@@ -148,9 +148,9 @@ export function DashboardPage() {
 
   // Load status counts from store (for donut)
   const statusCounts = useMemo(() => {
-    const ready      = loads.filter((l) => l.status === 'ready_to_invoice').length
-    const inProgress = loads.filter((l) => l.status === 'in_transit' || l.status === 'open').length
-    const unassigned = loads.filter((l) => !l.driverId).length
+    const ready      = loads.filter((l) => l.readyToInvoice).length
+    const inProgress = loads.filter((l) => !l.readyToInvoice && !!l.pickupDriverId).length
+    const unassigned = loads.filter((l) => !l.pickupDriverId).length
     return { ready, inProgress, unassigned, total: loads.length }
   }, [loads])
 
