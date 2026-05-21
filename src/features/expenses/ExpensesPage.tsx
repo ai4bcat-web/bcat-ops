@@ -245,6 +245,41 @@ function OverviewTab({
     [expenseData.records],
   )
 
+  // Expand recurring expenses into one virtual record per month in the date range.
+  // RecurringExpense rows are never stored as ExpenseRecords — they must be projected
+  // here before being passed to the allocation engine.
+  const recurringInputs = useMemo(() => {
+    const startMonth = startStr.slice(0, 7)   // "2026-05"
+    const endMonth   = endStr.slice(0, 7)
+    const virtual: Array<{
+      expenseTypeId: string; allocationId: string | null
+      amount: number; periodMonth: string
+      transactionDate: null; directTruckId: null
+    }> = []
+
+    for (const r of expenseData.recurring) {
+      if (!r.active) continue
+      // clamp to the date range
+      const lo = r.startMonth > startMonth ? r.startMonth : startMonth
+      const hi = r.endMonth && r.endMonth < endMonth ? r.endMonth : endMonth
+      let month = lo
+      while (month <= hi) {
+        virtual.push({
+          expenseTypeId: r.expenseTypeId,
+          allocationId:  r.allocationId,
+          amount:        r.monthlyAmount,
+          periodMonth:   month,
+          transactionDate: null,
+          directTruckId:   null,
+        })
+        // advance by one month
+        const [y, m] = month.split('-').map(Number)
+        month = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
+      }
+    }
+    return virtual
+  }, [expenseData.recurring, startStr, endStr])
+
   const allocInputs = useMemo(() =>
     expenseData.allocations.map((a) => ({
       id:               a.id,
@@ -264,8 +299,8 @@ function OverviewTab({
   )
 
   const matrix = useMemo(
-    () => getExpensesByTruck(startStr, endStr, fuelInputs, recordInputs, allocInputs, typeInputs),
-    [startStr, endStr, fuelInputs, recordInputs, allocInputs, typeInputs],
+    () => getExpensesByTruck(startStr, endStr, fuelInputs, [...recordInputs, ...recurringInputs], allocInputs, typeInputs),
+    [startStr, endStr, fuelInputs, recordInputs, recurringInputs, allocInputs, typeInputs],
   )
 
   // KPIs
