@@ -693,6 +693,12 @@ const PAGE_TABS: { value: PageTab; label: string }[] = [
 
 export function ExpensesPage() {
   const equipment = useAppStore((s) => s.equipment)
+  // All active trucks — used by Overview (non-fuel expenses may be on any truck)
+  const allActiveTrucks = useMemo(
+    () => equipment.filter((e) => e.type === 'truck' && e.active),
+    [equipment],
+  )
+  // Fuel-tab trucks — only those with EFS cards (needed for fuel pivot/chart)
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active && (e.fuelCardNumbers ?? []).length > 0),
     [equipment],
@@ -800,7 +806,7 @@ export function ExpensesPage() {
       <div style={{ padding: '24px 32px' }}>
         {tab === 'overview' && (
           <OverviewTab
-            trucks={trucks}
+            trucks={allActiveTrucks}
             fuelTxs={filteredFuelTxs}
             expenseData={expenseData}
             rangeStart={rangeStart}

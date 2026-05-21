@@ -525,6 +525,10 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
       alert('Select an allocation or a direct truck.')
       return
     }
+    if (!form.periodMonth && !form.transactionDate) {
+      alert('Enter either a Period Month or a Transaction Date — otherwise the expense will not appear in any date range view.')
+      return
+    }
     setSaving(true)
     try {
       await data.createRecord({
@@ -577,10 +581,10 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
             {trucks.filter((t) => t.type === 'truck' && t.active).map((t) => <option key={t.id} value={t.id}>#{t.unitNumber}</option>)}
           </Select>
         </Field>
-        <Field label="Period Month (for recurring-style)">
+        <Field label="Period Month — required if no date">
           <Input value={form.periodMonth} onChange={(e) => setForm((f) => ({ ...f, periodMonth: e.target.value }))} placeholder="2026-05" />
         </Field>
-        <Field label="Transaction Date (for one-off)">
+        <Field label="Transaction Date — required if no month">
           <Input type="date" value={form.transactionDate} onChange={(e) => setForm((f) => ({ ...f, transactionDate: e.target.value }))} />
         </Field>
         <Field label="Notes">
