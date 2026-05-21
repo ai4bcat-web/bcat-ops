@@ -66,12 +66,19 @@ export function extractUrls(text: string): string[] {
 // ── Lambda handler ────────────────────────────────────────────────────────────
 
 interface WebhookPayload {
-  secret:         string
-  gmailMessageId: string
-  bodyText:       string
-  bodyHtml?:      string
-  subject?:       string
-  receivedAt?:    string
+  secret:          string
+  gmailMessageId:  string
+  bodyText:        string
+  bodyHtml?:       string
+  subject?:        string
+  receivedAt?:     string
+  attachmentText?: string  // content of TransactionReport-*.txt attachment (DAILY FUEL REPORT TEXT emails)
+}
+
+// Detect whether a text blob IS an EFS Transaction Report (vs a notification email
+// that only links to one). Both the inline body and attached .txt use the same format.
+export function isEfsTransactionReport(text: string): boolean {
+  return text.includes('Transaction Report') && text.includes('USD/Gallon')
 }
 
 interface LambdaEvent {
@@ -129,9 +136,27 @@ export const handler = async (event: LambdaEvent) => {
     }
   }
 
+  // ── Inline / attachment fallback (DAILY FUEL REPORT TEXT emails) ────────────
+  // These emails contain the report as text directly — no download URL is present.
+  // Check the .txt attachment content first, then the email body itself.
   if (!reportText) {
-    console.error('[fuel-import] no EFS report found in email body')
-    return respond(422, { error: 'no EFS report URL found in email body', gmailMessageId })
+    const candidates: Array<{ label: string; text: string }> = []
+    if (payload.attachmentText) candidates.push({ label: 'attachment', text: payload.attachmentText })
+    if (payload.bodyText)       candidates.push({ label: 'bodyText',   text: payload.bodyText })
+
+    for (const { label, text } of candidates) {
+      if (isEfsTransactionReport(text)) {
+        reportText = text
+        reportFileName = 'TransactionReport-inline.txt'
+        console.log('[fuel-import] using inline report text from', label)
+        break
+      }
+    }
+  }
+
+  if (!reportText) {
+    console.error('[fuel-import] no EFS report found — no URL, no inline text, no attachment')
+    return respond(422, { error: 'no EFS report found in email body or attachment', gmailMessageId })
   }
 
   // ── Parse report ──────────────────────────────────────────────────────────

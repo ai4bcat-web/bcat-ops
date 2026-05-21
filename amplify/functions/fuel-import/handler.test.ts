@@ -1,7 +1,7 @@
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { describe, it, expect } from 'vitest'
-import { extractUrls } from './handler'
+import { extractUrls, isEfsTransactionReport } from './handler'
 import { parseEfsReport } from './efsParser'
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -13,6 +13,11 @@ const SAMPLE_5DAY = readFileSync(
 
 const SAMPLE_DAILY = readFileSync(
   resolve(__dirname, '../../../tests/fixtures/fuel-2026-05-19.txt'),
+  'utf-8',
+)
+
+const SAMPLE_TEXT_FORMAT = readFileSync(
+  resolve(__dirname, '../../../tests/fixtures/fuel-2026-05-20-text.txt'),
   'utf-8',
 )
 
@@ -227,5 +232,104 @@ describe('parseEfsReport — 2026-05-19 daily fixture', () => {
     expect(cards.has('00023')).toBe(true)
     expect(cards.has('00031')).toBe(true)
     expect(cards.has('00056')).toBe(true)
+  })
+})
+
+// ── isEfsTransactionReport ─────────────────────────────────────────────────────
+
+describe('isEfsTransactionReport', () => {
+  it('returns true for the TEXT format fixture', () => {
+    expect(isEfsTransactionReport(SAMPLE_TEXT_FORMAT)).toBe(true)
+  })
+
+  it('returns true for the URL-download format fixture', () => {
+    expect(isEfsTransactionReport(SAMPLE_DAILY)).toBe(true)
+  })
+
+  it('returns false for a plain notification email body', () => {
+    const notificationBody =
+      "Job: 'DAILY FUEL REPORT' completed. Download at: " +
+      'https://manage.fleetone.com/cards/CardsJob.action?getJobFile&fileId=abc.jobdata' +
+      'Please do not reply to this email.'
+    expect(isEfsTransactionReport(notificationBody)).toBe(false)
+  })
+
+  it('returns false for an empty string', () => {
+    expect(isEfsTransactionReport('')).toBe(false)
+  })
+})
+
+// ── parseEfsReport — 2026-05-20 TEXT format fixture ───────────────────────────
+// This is the "DAILY FUEL REPORT TEXT" email format: 2-space indent, 3 spaces
+// before USD/Gallon, group section totals only (no Grand Totals section).
+// Report states: Total Records: 2, card 00031, truck 530, all ULSD,
+// total $1,161.68 / 182.68 gal on 2026-05-20.
+
+describe('parseEfsReport — DAILY FUEL REPORT TEXT format (2026-05-20)', () => {
+  const txs = parseEfsReport(SAMPLE_TEXT_FORMAT)
+
+  it('parses exactly 2 transactions (no aggregate lines counted)', () => {
+    expect(txs).toHaveLength(2)
+  })
+
+  it('grand-total + Total Records validation passes without throwing', () => {
+    expect(() => parseEfsReport(SAMPLE_TEXT_FORMAT)).not.toThrow()
+  })
+
+  it('both transactions are for card 00031', () => {
+    expect(txs.every((t) => t.cardNumber === '00031')).toBe(true)
+  })
+
+  it('both transactions are dated 2026-05-20', () => {
+    expect(txs.every((t) => t.transactionDate === '2026-05-20')).toBe(true)
+  })
+
+  it('both transactions are ULSD', () => {
+    expect(txs.every((t) => t.fuelType === 'ULSD')).toBe(true)
+    expect(txs.every((t) => t.itemCategory === 'FUEL')).toBe(true)
+  })
+
+  it('both transactions have blank driver name (empty driver column)', () => {
+    expect(txs.every((t) => t.driverName === '')).toBe(true)
+  })
+
+  it('both transactions have unit number 0530', () => {
+    expect(txs.every((t) => t.unitNumber === '0530')).toBe(true)
+  })
+
+  it('transaction 1: invoice 19445, qty 77.06, amount $490.04', () => {
+    const tx = txs.find((t) => t.invoiceNumber === '19445')
+    expect(tx).toBeDefined()
+    expect(tx!.quantity).toBeCloseTo(77.06, 2)
+    expect(tx!.amount).toBeCloseTo(490.04, 2)
+    expect(tx!.pricePerUnit).toBeCloseTo(6.359, 3)
+    expect(tx!.odometer).toBe(365368)
+  })
+
+  it('transaction 2: invoice 0773056287, qty 105.62, amount $671.64', () => {
+    const tx = txs.find((t) => t.invoiceNumber === '0773056287')
+    expect(tx).toBeDefined()
+    expect(tx!.quantity).toBeCloseTo(105.62, 2)
+    expect(tx!.amount).toBeCloseTo(671.64, 2)
+    expect(tx!.pricePerUnit).toBeCloseTo(6.359, 3)
+    expect(tx!.odometer).toBe(365884)
+  })
+
+  it('ULSD total amount matches report stated $1,161.68', () => {
+    const sum = txs.reduce((s, t) => s + t.amount, 0)
+    expect(sum).toBeCloseTo(1161.68, 2)
+  })
+
+  it('ULSD total quantity matches report stated 182.68 gal', () => {
+    const sum = txs.reduce((s, t) => s + t.quantity, 0)
+    expect(sum).toBeCloseTo(182.68, 2)
+  })
+
+  it('fees are zero for both transactions', () => {
+    expect(txs.every((t) => t.fees === 0)).toBe(true)
+  })
+
+  it('currency is USD for both transactions', () => {
+    expect(txs.every((t) => t.currency === 'USD')).toBe(true)
   })
 })

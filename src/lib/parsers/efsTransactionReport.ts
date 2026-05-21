@@ -60,8 +60,9 @@ function categorize(itemType: string): ItemCategory {
   return 'OTHER'
 }
 
-// Transaction line: ends with a single letter (N/C debit indicator), 2 spaces, "USD/Gallon"
-const TX_LINE_RE = /[A-Z]\s{2}USD\/Gallon\s*$/
+// Transaction line: ends with a single letter (N/C debit indicator), 2–4 spaces, "USD/Gallon"
+// The URL-download format uses 2 spaces; the DAILY FUEL REPORT TEXT format uses 3 spaces.
+const TX_LINE_RE = /[A-Z]\s{2,4}USD\/Gallon\s*$/
 
 // Right-side fields.  Price is OPTIONAL for flat-rate items (e.g. SCLE scale fees).
 //   Fuel format:  itemType price  qty  amount  DB  USD/Gallon
@@ -69,11 +70,15 @@ const TX_LINE_RE = /[A-Z]\s{2}USD\/Gallon\s*$/
 // The optional group (?:(price)\s+)? backtracks gracefully when price is absent.
 const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallon/
 
-// Card number at the very start of the line (4–8 leading spaces, then 5 digits)
-const CARD_RE = /^\s{4,8}(\d{5})\s/
+// Card number at the very start of the line (2–8 leading spaces, then 5 digits).
+// URL-download format uses 6 spaces; DAILY FUEL REPORT TEXT format uses 2 spaces.
+const CARD_RE = /^\s{2,8}(\d{5})\s/
 
 // ISO date anywhere in the line
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/
+
+// Total Records in the report header line
+const TOTAL_RECORDS_RE = /Total Records:\s*(\d+)/i
 
 // ── Main parser ───────────────────────────────────────────────────────────────
 
@@ -95,12 +100,26 @@ export function parseEfsTransactionReport(text: string): ParsedReport {
   const grandTotals: ParsedTotals = { byFuelType: {}, fees: 0, totalFuel: 0, totalAmount: 0 }
   let inGrandTotals = false
 
+  // Group-section accumulators — used when the report has no Grand Totals section
+  const groupSumByFuelType: Record<string, { amount: number; quantity: number }> = {}
+  let groupSumFees = 0
+  let inGroupSection = false
+
+  // Total Records stated in the report header (used for count validation)
+  let totalRecords: number | null = null
+
   for (let i = 0; i < lines.length; i++) {
     const line    = lines[i]
     const lineNum = i + 1
 
+    // Parse "Total Records: N" from header
+    if (!inGrandTotals && !inGroupSection && totalRecords === null) {
+      const trM = line.match(TOTAL_RECORDS_RE)
+      if (trM) totalRecords = parseInt(trM[1], 10)
+    }
+
     // ── Grand totals section ──────────────────────────────────────────────────
-    if (/Grand Totals/i.test(line)) { inGrandTotals = true; continue }
+    if (/Grand Totals/i.test(line)) { inGrandTotals = true; inGroupSection = false; continue }
 
     if (inGrandTotals) {
       // "  ULSD   3,757.82   681.01"  or  "  SCLE   19.75   2"
@@ -118,6 +137,26 @@ export function parseEfsTransactionReport(text: string): ParsedReport {
       if (tfM) grandTotals.totalFuel = parseNum(tfM[1])
       continue
     }
+
+    // ── Group section subtotals ───────────────────────────────────────────────
+    if (/^\s+Group:/i.test(line)) { inGroupSection = true; continue }
+
+    if (inGroupSection && !TX_LINE_RE.test(line)) {
+      const fuelM = line.match(/^\s+(\S+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/)
+      if (fuelM) {
+        const type = fuelM[1]
+        if (type !== 'Fees' && type !== 'Totals' && !line.includes('Total Fuel')) {
+          if (!groupSumByFuelType[type]) groupSumByFuelType[type] = { amount: 0, quantity: 0 }
+          groupSumByFuelType[type].amount   = round2(groupSumByFuelType[type].amount   + parseNum(fuelM[2]))
+          groupSumByFuelType[type].quantity = round2(groupSumByFuelType[type].quantity + parseNum(fuelM[3]))
+        }
+      }
+      const feesM = line.match(/^\s+Fees\s+([\d,]+\.?\d*)/)
+      if (feesM) groupSumFees = round2(groupSumFees + parseNum(feesM[1]))
+      continue
+    }
+
+    if (inGroupSection) inGroupSection = false
 
     // ── Transaction lines ─────────────────────────────────────────────────────
     if (!TX_LINE_RE.test(line)) continue
@@ -197,8 +236,13 @@ export function parseEfsTransactionReport(text: string): ParsedReport {
   }
 
   // ── Grand-total validation ────────────────────────────────────────────────
-  // Sum parsed transactions by item type and compare to report-stated totals.
-  // Gives specific diff info when a mismatch occurs.
+  // If no Grand Totals section was present (DAILY FUEL REPORT TEXT format),
+  // fall back to the accumulated per-group subtotals.
+  if (Object.keys(grandTotals.byFuelType).length === 0 && Object.keys(groupSumByFuelType).length > 0) {
+    Object.assign(grandTotals.byFuelType, groupSumByFuelType)
+    if (grandTotals.fees === 0 && groupSumFees > 0) grandTotals.fees = groupSumFees
+  }
+
   const summedByType: Record<string, { amount: number; quantity: number }> = {}
   let summedFees = 0
 
@@ -210,6 +254,12 @@ export function parseEfsTransactionReport(text: string): ParsedReport {
   }
 
   const errors: string[] = []
+
+  // Count validation from "Total Records: N" header
+  if (totalRecords !== null && transactions.length !== totalRecords) {
+    errors.push(`Transaction count mismatch: parsed ${transactions.length}, header says ${totalRecords}`)
+  }
+
   for (const [type, reported] of Object.entries(grandTotals.byFuelType)) {
     const parsed    = summedByType[type]
     const parsedAmt = parsed?.amount ?? 0

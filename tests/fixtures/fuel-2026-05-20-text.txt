@@ -1,0 +1,13 @@
+                         Transaction Report
+                                               2026-05-21 01:04
+  Carrier:  IVAN CARTAGE CO     Start Date: 2026-05-20  End Date: 2026-05-20  Carrier Id 677334  Contract Id: All
+  Group by: Card Number         Sort by: Transaction Date                     Total Records: 2
+  Card #      Tran Date    Invoice      Unit    Driver Name    Odometer   Location Name    City      State/Prov   Fees   Item   Unit Price   Qty      Amt    DB  Currency
+  00031       2026-05-20   19445        0530                   365368     TA CHICAGO NORTH RUSSELL   IL                  ULSD   6.359        77.06    490.04  N   USD/Gallon
+  00031       2026-05-20   0773056287   0530                   365884     PILOT 1412       ZION      IL                  ULSD   6.359        105.62   671.64  N   USD/Gallon
+
+  Group: 1  00031                        Amount      Quantity    Avg PPU
+                             ULSD         1,161.68    182.68      6.359
+                             Fees         0.00                    0.000
+                             Totals       1,161.68                0.000
+                             Total Fuel   1,161.68    182.68

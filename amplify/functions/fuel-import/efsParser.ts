@@ -49,19 +49,24 @@ function categorize(itemType: string): ItemCategory {
   return 'OTHER'
 }
 
-// Transaction line: ends with a single letter (N/C debit indicator), 2 spaces, "USD/Gallon"
-const TX_LINE_RE = /[A-Z]\s{2}USD\/Gallon\s*$/
+// Transaction line: ends with a single letter (N/C debit indicator), 2–4 spaces, "USD/Gallon"
+// The URL-download format uses 2 spaces; the DAILY FUEL REPORT TEXT format uses 3 spaces.
+const TX_LINE_RE = /[A-Z]\s{2,4}USD\/Gallon\s*$/
 
 // Right-side fields. Price is OPTIONAL for flat-rate items (e.g. SCLE scale fees).
 //   Fuel:  itemType price  qty  amount  DB  USD/Gallon
 //   Flat:  itemType        qty  amount  DB  USD/Gallon
 const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallon/
 
-// Card number at the very start of the line (4–8 leading spaces, then 5 digits)
-const CARD_RE = /^\s{4,8}(\d{5})\s/
+// Card number at the very start of the line (2–8 leading spaces, then 5 digits).
+// URL-download format uses 6 spaces; DAILY FUEL REPORT TEXT format uses 2 spaces.
+const CARD_RE = /^\s{2,8}(\d{5})\s/
 
 // ISO date anywhere in the line
 const DATE_RE = /(\d{4}-\d{2}-\d{2})/
+
+// Total Records in the report header line
+const TOTAL_RECORDS_RE = /Total Records:\s*(\d+)/i
 
 // ── Main parser ───────────────────────────────────────────────────────────────
 
@@ -83,11 +88,26 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
   let grandFees = 0
   let inGrandTotals = false
 
+  // Group-section accumulators — used when the report has no Grand Totals section
+  // (e.g. the DAILY FUEL REPORT TEXT email format).
+  const groupSumTotals: Record<string, { amount: number; quantity: number }> = {}
+  let groupSumFees = 0
+  let inGroupSection = false
+
+  // Total Records stated in the report header (used for count validation)
+  let totalRecords: number | null = null
+
   for (let i = 0; i < lines.length; i++) {
     const line    = lines[i]
     const lineNum = i + 1
 
-    if (/Grand Totals/i.test(line)) { inGrandTotals = true; continue }
+    // Parse "Total Records: N" from header (only look once, before section flags)
+    if (!inGrandTotals && !inGroupSection && totalRecords === null) {
+      const trM = line.match(TOTAL_RECORDS_RE)
+      if (trM) totalRecords = parseInt(trM[1], 10)
+    }
+
+    if (/Grand Totals/i.test(line)) { inGrandTotals = true; inGroupSection = false; continue }
 
     if (inGrandTotals) {
       // "  ULSD   3,757.82   681.01   5.435"  or  "  SCLE   19.75   2"
@@ -99,6 +119,28 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
       if (feesM) grandFees = parseNum(feesM[1])
       continue
     }
+
+    // Detect start of a Group section (e.g. "  Group: 1  00031 ...")
+    if (/^\s+Group:/i.test(line)) { inGroupSection = true; continue }
+
+    // Accumulate per-group subtotals; skip non-transaction group summary lines
+    if (inGroupSection && !TX_LINE_RE.test(line)) {
+      const fuelM = line.match(/^\s+(\S+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/)
+      if (fuelM) {
+        const type = fuelM[1]
+        if (type !== 'Fees' && type !== 'Totals' && !line.includes('Total Fuel')) {
+          if (!groupSumTotals[type]) groupSumTotals[type] = { amount: 0, quantity: 0 }
+          groupSumTotals[type].amount   = round2(groupSumTotals[type].amount   + parseNum(fuelM[2]))
+          groupSumTotals[type].quantity = round2(groupSumTotals[type].quantity + parseNum(fuelM[3]))
+        }
+      }
+      const feesM = line.match(/^\s+Fees\s+([\d,]+\.?\d*)/)
+      if (feesM) groupSumFees = round2(groupSumFees + parseNum(feesM[1]))
+      continue
+    }
+
+    // A transaction line after group summary means we're back to data rows
+    if (inGroupSection) inGroupSection = false
 
     if (!TX_LINE_RE.test(line)) continue
     const rightM = line.match(RIGHT_RE)
@@ -171,6 +213,11 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
   }
 
   // ── Grand-total validation ────────────────────────────────────────────────
+  // If the report had no Grand Totals section (e.g. DAILY FUEL REPORT TEXT format),
+  // fall back to the accumulated per-group subtotals for validation.
+  const validationTotals = Object.keys(grandTotals).length > 0 ? grandTotals : groupSumTotals
+  const validationFees   = grandFees > 0 ? grandFees : groupSumFees
+
   const summedByType: Record<string, { amount: number; quantity: number }> = {}
   let summedFees = 0
 
@@ -182,7 +229,13 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
   }
 
   const errors: string[] = []
-  for (const [type, reported] of Object.entries(grandTotals)) {
+
+  // Count validation (from "Total Records: N" header)
+  if (totalRecords !== null && transactions.length !== totalRecords) {
+    errors.push(`Transaction count mismatch: parsed ${transactions.length}, header says ${totalRecords}`)
+  }
+
+  for (const [type, reported] of Object.entries(validationTotals)) {
     const parsed    = summedByType[type]
     const parsedAmt = parsed?.amount ?? 0
     const amtDiff   = Math.abs(parsedAmt - reported.amount)
@@ -197,8 +250,8 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
       }
     }
   }
-  if (grandFees > 0 && Math.abs(summedFees - grandFees) > 0.02) {
-    errors.push(`Fees mismatch: parsed $${summedFees.toFixed(2)} vs reported $${grandFees.toFixed(2)}`)
+  if (validationFees > 0 && Math.abs(summedFees - validationFees) > 0.02) {
+    errors.push(`Fees mismatch: parsed $${summedFees.toFixed(2)} vs reported $${validationFees.toFixed(2)}`)
   }
 
   if (errors.length > 0) throw new Error(`EFS parse validation failed:\n${errors.join('\n')}`)
