@@ -1,16 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage } from 'lucide-react'
+import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
 } from '@/components/ui/sheet'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAppStore } from '@/store/useAppStore'
@@ -46,6 +46,19 @@ function ReadonlyField({ label, value }: { label: string; value?: string | null 
     <div className="flex justify-between items-start py-3 border-b border-border last:border-b-0">
       <span className="text-xs text-muted-foreground uppercase tracking-wider font-medium">{label}</span>
       <span className="text-sm font-medium text-foreground text-right max-w-[60%]">{value || '—'}</span>
+    </div>
+  )
+}
+
+// ── Section heading ───────────────────────────────────────────────────────────
+
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+        {children}
+      </span>
+      <div style={{ flex: 1, height: 1, background: 'var(--ds-border)' }} />
     </div>
   )
 }
@@ -164,7 +177,409 @@ function ApptFields({
   )
 }
 
-// ── Drawer ────────────────────────────────────────────────────────────────────
+// ── Driver picker ─────────────────────────────────────────────────────────────
+
+function DriverPicker({
+  value,
+  onChange,
+  drivers,
+  placeholder = 'Unassigned',
+}: {
+  value: string | null
+  onChange: (v: string | null) => void
+  drivers: Array<{ id: string; name: string }>
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const selected = value ? drivers.find((d) => d.id === value) : null
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          width: '100%', height: 36, display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', padding: '0 10px',
+          border: '1px solid var(--ds-border)', borderRadius: 6,
+          background: 'var(--ds-surface)', cursor: 'pointer',
+          fontSize: 14, color: selected ? 'var(--ds-t1)' : 'var(--ds-t3)',
+        }}
+      >
+        <span>{selected?.name ?? placeholder}</span>
+        <ChevronDown style={{ width: 14, height: 14, opacity: 0.5 }} />
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
+          background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
+          borderRadius: 8, boxShadow: 'var(--sh-lg)', overflow: 'hidden',
+        }}>
+          <button
+            type="button"
+            onClick={() => { onChange(null); setOpen(false) }}
+            style={{
+              width: '100%', padding: '8px 12px', textAlign: 'left',
+              fontSize: 13, color: 'var(--ds-t2)', background: 'transparent',
+              cursor: 'pointer', border: 'none',
+              borderBottom: '1px solid var(--ds-border)',
+            }}
+          >
+            Unassigned
+          </button>
+          {drivers.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => { onChange(d.id); setOpen(false) }}
+              style={{
+                width: '100%', padding: '8px 12px', textAlign: 'left',
+                fontSize: 13, cursor: 'pointer', border: 'none',
+                background: value === d.id ? 'var(--ds-blue-bg)' : 'transparent',
+                color: value === d.id ? 'var(--ds-blue)' : 'var(--ds-t1)',
+                fontWeight: value === d.id ? 500 : 400,
+              }}
+            >
+              {d.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── New Load Dialog (create mode) ─────────────────────────────────────────────
+
+function NewLoadDialog({
+  isOpen,
+  onClose,
+  handleSubmit,
+  activeDrivers,
+  onSubmit,
+  errors,
+  control,
+  register,
+  watch,
+  setValue,
+}: {
+  isOpen: boolean
+  onClose: () => void
+  handleSubmit: ReturnType<typeof useForm<LoadFormValues>>['handleSubmit']
+  activeDrivers: Array<{ id: string; name: string }>
+  onSubmit: (values: LoadFormValues) => Promise<void>
+  errors: ReturnType<typeof useForm<LoadFormValues>>['formState']['errors']
+  control: ReturnType<typeof useForm<LoadFormValues>>['control']
+  register: ReturnType<typeof useForm<LoadFormValues>>['register']
+  watch: ReturnType<typeof useForm<LoadFormValues>>['watch']
+  setValue: ReturnType<typeof useForm<LoadFormValues>>['setValue']
+}) {
+  const [splitLoad, setSplitLoad] = useState(false)
+
+  const pickupDriverId = watch('pickupDriverId')
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent
+        className="p-0 gap-0 flex flex-col overflow-hidden"
+        style={{ maxWidth: 640, maxHeight: '85vh', width: '100%' }}
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        {/* Fixed header */}
+        <div style={{
+          padding: '16px 52px 16px 24px', borderBottom: '1px solid var(--ds-border)',
+          flexShrink: 0,
+        }}>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>New Load</h2>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
+          <form id="new-load-form" onSubmit={handleSubmit(onSubmit)}>
+
+            {/* ── Section 1: Identifiers ─────────────────────────────── */}
+            <div style={{ marginBottom: 24 }}>
+              <SectionHeading>Identifiers</SectionHeading>
+              <div className="grid grid-cols-3 gap-3" style={{ marginBottom: 12 }}>
+                <Field label="Pro #" error={errors.aljexId?.message}>
+                  <Input {...register('aljexId')} placeholder="A-2847391" className="h-9" />
+                </Field>
+                <Field label="TMS ID / PO" error={errors.tmsId?.message}>
+                  <Input {...register('tmsId')} placeholder="TMS-44201" className="h-9" />
+                </Field>
+                <Field label="Pickup #" error={errors.pickupNumber?.message}>
+                  <Input {...register('pickupNumber')} placeholder="PU-8812" className="h-9" />
+                </Field>
+              </div>
+              <Field label="Customer / Broker">
+                <Input {...register('customer')} placeholder="Arrive Logistics, Echo Global…" className="h-9" />
+              </Field>
+            </div>
+
+            {/* ── Section 2: Route ───────────────────────────────────── */}
+            <div style={{ marginBottom: 24 }}>
+              <SectionHeading>Route</SectionHeading>
+              <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
+                <Field label="Origin Name">
+                  <Input {...register('originName')} placeholder="Shipper / Facility" className="h-9" />
+                </Field>
+                <Field label="Origin City">
+                  <Input {...register('originCity')} placeholder="Chicago, IL" className="h-9" />
+                </Field>
+              </div>
+              <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
+                <Field label="Destination Name">
+                  <Input {...register('destinationName')} placeholder="Consignee / Facility" className="h-9" />
+                </Field>
+                <Field label="Destination City">
+                  <Input {...register('destinationCity')} placeholder="Indianapolis, IN" className="h-9" />
+                </Field>
+              </div>
+              <div style={{ maxWidth: 160 }}>
+                <Field label="Miles">
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    {...register('miles', { valueAsNumber: true })}
+                    placeholder="420"
+                    className="h-9"
+                  />
+                </Field>
+              </div>
+            </div>
+
+            {/* ── Section 3: Schedule ────────────────────────────────── */}
+            <div style={{ marginBottom: 24 }}>
+              <SectionHeading>Schedule</SectionHeading>
+              <div style={{ marginBottom: 12 }}>
+                <Controller
+                  name="pickupApptType"
+                  control={control}
+                  render={({ field: tf }) => (
+                    <Controller name="pickupAppt" control={control} render={({ field: sf }) => (
+                      <Controller name="pickupApptEnd" control={control} render={({ field: ef }) => (
+                        <ApptFields
+                          label="Pickup"
+                          typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
+                          startField={{ value: sf.value ?? '', onChange: sf.onChange }}
+                          endField={{ value: ef.value ?? '', onChange: ef.onChange }}
+                          startError={errors.pickupAppt?.message}
+                          endError={errors.pickupApptEnd?.message}
+                        />
+                      )} />
+                    )} />
+                  )}
+                />
+              </div>
+              <Controller
+                name="deliveryApptType"
+                control={control}
+                render={({ field: tf }) => (
+                  <Controller name="deliveryAppt" control={control} render={({ field: sf }) => (
+                    <Controller name="deliveryApptEnd" control={control} render={({ field: ef }) => (
+                      <ApptFields
+                        label="Delivery"
+                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
+                        startField={{ value: sf.value ?? '', onChange: sf.onChange }}
+                        endField={{ value: ef.value ?? '', onChange: ef.onChange }}
+                        startError={errors.deliveryAppt?.message}
+                        endError={errors.deliveryApptEnd?.message}
+                      />
+                    )} />
+                  )} />
+                )}
+              />
+            </div>
+
+            {/* ── Section 4: Assignment ──────────────────────────────── */}
+            <div style={{ marginBottom: 24 }}>
+              <SectionHeading>Assignment</SectionHeading>
+              <div style={{ marginBottom: 12 }}>
+                <Field label="Pickup Driver" error={errors.pickupDriverId?.message}>
+                  <Controller
+                    name="pickupDriverId"
+                    control={control}
+                    render={({ field }) => (
+                      <DriverPicker
+                        value={field.value}
+                        onChange={(v) => {
+                          field.onChange(v)
+                          if (!splitLoad) setValue('deliveryDriverId', v)
+                        }}
+                        drivers={activeDrivers}
+                      />
+                    )}
+                  />
+                </Field>
+              </div>
+
+              {/* Split-load toggle */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !splitLoad
+                  setSplitLoad(next)
+                  if (!next) setValue('deliveryDriverId', pickupDriverId)
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                  border: '1px solid var(--ds-border)', marginBottom: 12,
+                  background: splitLoad ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+                  color: splitLoad ? 'var(--ds-blue)' : 'var(--ds-t2)',
+                  fontSize: 13, fontWeight: 500,
+                }}
+              >
+                <div style={{
+                  width: 32, height: 18, borderRadius: 9,
+                  background: splitLoad ? 'var(--ds-blue)' : 'var(--ds-border)',
+                  position: 'relative', flexShrink: 0, transition: 'background 0.15s',
+                }}>
+                  <div style={{
+                    position: 'absolute', top: 2, left: splitLoad ? 14 : 2,
+                    width: 14, height: 14, borderRadius: '50%', background: 'white',
+                    transition: 'left 0.15s',
+                  }} />
+                </div>
+                Split load — different delivery driver
+              </button>
+
+              {splitLoad && (
+                <Field label="Delivery Driver" error={errors.deliveryDriverId?.message}>
+                  <Controller
+                    name="deliveryDriverId"
+                    control={control}
+                    render={({ field }) => (
+                      <DriverPicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        drivers={activeDrivers}
+                        placeholder="Delivery driver"
+                      />
+                    )}
+                  />
+                </Field>
+              )}
+            </div>
+
+            {/* ── Section 5: Financials ──────────────────────────────── */}
+            <div style={{ marginBottom: 16 }}>
+              <SectionHeading>Financials</SectionHeading>
+
+              {/* Rate */}
+              <div style={{ maxWidth: 200, marginBottom: 16 }}>
+                <Field label="Rate ($)">
+                  <div style={{ position: 'relative' }}>
+                    <span style={{
+                      position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+                      fontSize: 14, color: 'var(--ds-t3)', pointerEvents: 'none',
+                    }}>$</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      {...register('rate', { valueAsNumber: true })}
+                      placeholder="0.00"
+                      className="h-9"
+                      style={{ paddingLeft: 22 }}
+                    />
+                  </div>
+                </Field>
+              </div>
+
+              {/* Notes */}
+              <Field label="Notes">
+                <textarea
+                  {...register('notes')}
+                  placeholder="Any relevant notes…"
+                  rows={2}
+                  style={{
+                    width: '100%', padding: '8px 10px', fontSize: 14,
+                    border: '1px solid var(--ds-border)', borderRadius: 6,
+                    background: 'var(--ds-surface)', color: 'var(--ds-t1)',
+                    resize: 'vertical', fontFamily: 'inherit',
+                    outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+              </Field>
+
+              {/* RTI toggle card */}
+              <div style={{ marginTop: 16 }}>
+                <Controller
+                  name="readyToInvoice"
+                  control={control}
+                  render={({ field }) => (
+                    <button
+                      type="button"
+                      onClick={() => field.onChange(!field.value)}
+                      style={{
+                        width: '100%', padding: '14px 16px',
+                        borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                        border: field.value ? '2px solid #34d399' : '2px solid var(--ds-border)',
+                        background: field.value ? '#f0fdf4' : 'var(--ds-surface)',
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        transition: 'border-color 0.15s, background 0.15s',
+                      }}
+                    >
+                      {field.value
+                        ? <CheckCircle2 style={{ width: 20, height: 20, color: '#16a34a', flexShrink: 0 }} />
+                        : <Circle style={{ width: 20, height: 20, color: 'var(--ds-t3)', flexShrink: 0 }} />
+                      }
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: field.value ? '#15803d' : 'var(--ds-t1)' }}>
+                          {field.value ? 'Ready to Invoice' : 'Mark as Ready to Invoice'}
+                        </div>
+                        <div style={{ fontSize: 12, color: field.value ? '#16a34a' : 'var(--ds-t3)', marginTop: 2 }}>
+                          {field.value ? 'Click to undo' : 'All paperwork received and load is invoiceable'}
+                        </div>
+                      </div>
+                    </button>
+                  )}
+                />
+              </div>
+            </div>
+
+          </form>
+        </div>
+
+        {/* Fixed footer */}
+        <div style={{
+          padding: '12px 24px', borderTop: '1px solid var(--ds-border)',
+          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+          background: 'var(--ds-surface)',
+        }}>
+          {Object.keys(errors).length > 0 && (
+            <span style={{ flex: 1, fontSize: 12, color: 'var(--ds-red, #dc2626)' }}>
+              Please fill in the required fields above.
+            </span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10 }}>
+            <Button variant="outline" className="h-9 px-5" onClick={onClose} type="button">
+              Cancel
+            </Button>
+            <Button type="submit" form="new-load-form" className="h-9 px-5">
+              Create Load
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Drawer (view / edit modes) ────────────────────────────────────────────────
 
 export function LoadDrawer() {
   const selectedLoadId        = useAppStore((s) => s.selectedLoadId)
@@ -194,6 +609,7 @@ export function LoadDrawer() {
       pickupApptType: 'exact', pickupAppt: '', pickupApptEnd: '',
       deliveryApptType: 'exact', deliveryAppt: '', deliveryApptEnd: '',
       pickupDriverId: null, deliveryDriverId: null, readyToInvoice: false,
+      customer: '', miles: null, rate: null, notes: '',
     },
   })
 
@@ -217,6 +633,10 @@ export function LoadDrawer() {
         pickupDriverId:   load.pickupDriverId,
         deliveryDriverId: load.deliveryDriverId,
         readyToInvoice:   load.readyToInvoice,
+        customer: load.customer ?? '',
+        miles: load.miles ?? null,
+        rate: load.rate != null ? load.rate / 100 : null,
+        notes: load.notes ?? '',
       })
     } else {
       const preDate = createPreFill?.dateStr
@@ -232,6 +652,7 @@ export function LoadDrawer() {
         pickupDriverId:  createPreFill?.driverId ?? null,
         deliveryDriverId: createPreFill?.driverId ?? null,
         readyToInvoice: false,
+        customer: '', miles: null, rate: null, notes: '',
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -267,14 +688,14 @@ export function LoadDrawer() {
     }
   }
 
-  // Auto-sync delivery driver when pickup changes, unless they were already different
+  // Auto-sync delivery driver when pickup changes (Sheet edit mode)
   const watchPickupDriver  = watch('pickupDriverId')
   const watchDeliveryDriver = watch('deliveryDriverId')
   const prevPickupDriver = useRef(watchPickupDriver)
   useEffect(() => {
+    if (isCreate) return // create mode handles this via DriverPicker + splitLoad
     const prev = prevPickupDriver.current
     prevPickupDriver.current = watchPickupDriver
-    // Only mirror if delivery was tracking the same driver as pickup (or unset)
     if (watchDeliveryDriver === prev || watchDeliveryDriver === null) {
       setValue('deliveryDriverId', watchPickupDriver)
     }
@@ -299,13 +720,15 @@ export function LoadDrawer() {
       pickupApptEnd:   values.pickupApptType === 'range' && values.pickupApptEnd ? fromDateTimeInput(values.pickupApptEnd) : undefined,
       deliveryAppt:    toIso(values.deliveryAppt, values.deliveryApptType),
       deliveryApptEnd: values.deliveryApptType === 'range' && values.deliveryApptEnd ? fromDateTimeInput(values.deliveryApptEnd) : undefined,
+      rate: values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined,
+      customer: values.customer || undefined,
+      notes: values.notes || undefined,
       createdBy: userEmail,
       updatedBy: userEmail,
     }
     try {
       if (isCreate) {
         const newLoad = await addLoad(payload)
-        // If opened from intake, link the built load back to the intake item
         if (pendingIntakeItemId) {
           setPendingIntakeItem(null)
           try {
@@ -349,6 +772,25 @@ export function LoadDrawer() {
     return formatDateTime(appt)
   }
 
+  // ── Create mode → centered Dialog ─────────────────────────────────────────
+  if (isCreate) {
+    return (
+      <NewLoadDialog
+        isOpen={isCreate}
+        onClose={onClose}
+        handleSubmit={handleSubmit}
+        activeDrivers={activeDrivers}
+        onSubmit={onSubmit}
+        errors={errors}
+        control={control}
+        register={register}
+        watch={watch}
+        setValue={setValue}
+      />
+    )
+  }
+
+  // ── View / edit mode → Sheet ───────────────────────────────────────────────
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
@@ -357,10 +799,10 @@ export function LoadDrawer() {
       >
         <SheetHeader>
           <SheetTitle className="text-base font-semibold">
-            {isCreate ? 'New Load' : isEdit ? `Edit — ${load?.aljexId}` : (load?.aljexId ?? 'Load Detail')}
+            {isEdit ? `Edit — ${load?.aljexId}` : (load?.aljexId ?? 'Load Detail')}
           </SheetTitle>
           <div className="flex items-center gap-2">
-            {!isCreate && !isEdit && load && (
+            {!isEdit && load && (
               load.readyToInvoice ? (
                 <Badge variant="green" className="gap-1 text-xs">
                   <CheckCircle2 className="size-3" /> Ready to Invoice
@@ -393,7 +835,6 @@ export function LoadDrawer() {
 
               <Separator />
 
-              {/* Origin / Destination */}
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Origin Name">
                   <Input {...register('originName')} placeholder="Shipper / Facility" className="h-9" />
@@ -413,7 +854,6 @@ export function LoadDrawer() {
 
               <Separator />
 
-              {/* Pickup appointment */}
               <Controller
                 name="pickupApptType"
                 control={control}
@@ -433,7 +873,6 @@ export function LoadDrawer() {
                 )}
               />
 
-              {/* Delivery appointment */}
               <Controller
                 name="deliveryApptType"
                 control={control}
@@ -458,31 +897,18 @@ export function LoadDrawer() {
               <div className="grid grid-cols-2 gap-3">
                 <Field label="PU Driver" error={errors.pickupDriverId?.message}>
                   <Controller name="pickupDriverId" control={control} render={({ field }) => (
-                    <Select value={field.value ?? '__none__'} onValueChange={(v) => field.onChange(v === '__none__' ? null : v)}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Unassigned</SelectItem>
-                        {activeDrivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <DriverPicker value={field.value} onChange={field.onChange} drivers={activeDrivers} />
                   )} />
                 </Field>
                 <Field label="DE Driver" error={errors.deliveryDriverId?.message}>
                   <Controller name="deliveryDriverId" control={control} render={({ field }) => (
-                    <Select value={field.value ?? '__none__'} onValueChange={(v) => field.onChange(v === '__none__' ? null : v)}>
-                      <SelectTrigger className="h-9"><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">Unassigned</SelectItem>
-                        {activeDrivers.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <DriverPicker value={field.value} onChange={field.onChange} drivers={activeDrivers} placeholder="Delivery driver" />
                   )} />
                 </Field>
               </div>
 
               <Separator />
 
-              {/* RTI — toggleable */}
               <Controller
                 name="readyToInvoice"
                 control={control}
@@ -511,7 +937,6 @@ export function LoadDrawer() {
                 )}
               />
 
-              {/* Rate confirmation upload (edit mode — only for existing loads) */}
               {!isCreate && load?.rateConfirmUrl && (
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Rate Confirmation</Label>
@@ -529,24 +954,29 @@ export function LoadDrawer() {
               <ReadonlyField label="Pro #"       value={load.aljexId} />
               <ReadonlyField label="TMS / PO"   value={load.tmsId} />
               <ReadonlyField label="PU #"       value={load.pickupNumber} />
+              {load.customer && <ReadonlyField label="Customer" value={load.customer} />}
               {(load.originName || load.originCity) && (
                 <ReadonlyField label="Origin" value={[load.originName, load.originCity].filter(Boolean).join(' · ')} />
               )}
               {(load.destinationName || load.destinationCity) && (
                 <ReadonlyField label="Destination" value={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')} />
               )}
+              {load.miles && <ReadonlyField label="Miles" value={String(load.miles)} />}
               <ReadonlyField label="Pickup"     value={apptLabel(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)} />
               <ReadonlyField label="Delivery"   value={apptLabel(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)} />
               <ReadonlyField label="PU Driver"  value={driverName(load.pickupDriverId)} />
               {load.deliveryDriverId !== load.pickupDriverId && (
                 <ReadonlyField label="DE Driver" value={driverName(load.deliveryDriverId)} />
               )}
+              {load.rate != null && (
+                <ReadonlyField label="Rate" value={`$${(load.rate / 100).toFixed(2)}`} />
+              )}
               <ReadonlyField label="Status"     value={load.readyToInvoice ? 'Ready to Invoice' : 'Pending'} />
+              {load.notes && <ReadonlyField label="Notes" value={load.notes} />}
               <ReadonlyField label="Created"    value={formatDateTime(load.createdAt)} />
               <ReadonlyField label="Updated"    value={formatDateTime(load.updatedAt)} />
               <ReadonlyField label="Created by" value={load.createdBy} />
 
-              {/* Rate confirmation */}
               <div className="pt-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Rate Confirmation</Label>
@@ -603,9 +1033,7 @@ export function LoadDrawer() {
                 <p className="w-full text-xs text-destructive mb-1">Please fill in the required fields above.</p>
               )}
               <Button variant="outline" className="flex-1 h-9" onClick={onClose}>Cancel</Button>
-              <Button type="submit" form="load-form" className="flex-1 h-9">
-                {isCreate ? 'Create Load' : 'Save Changes'}
-              </Button>
+              <Button type="submit" form="load-form" className="flex-1 h-9">Save Changes</Button>
             </>
           ) : (
             <>

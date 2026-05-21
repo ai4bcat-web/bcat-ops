@@ -50,6 +50,12 @@ export const loadSchema = z
     pickupDriverId: z.string().nullable(),
     deliveryDriverId: z.string().nullable(),
     readyToInvoice: z.boolean(),
+
+    // Extended fields (optional)
+    customer: z.string().optional().nullable(),
+    miles: z.number().min(0).optional().nullable(),
+    rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
+    notes: z.string().optional().nullable(),
   })
   .refine(
     (d) => d.pickupApptType === 'tbd' || d.deliveryApptType === 'tbd' || d.pickupApptType === 'fcfs' || d.deliveryApptType === 'fcfs' || d.deliveryAppt >= d.pickupAppt,
