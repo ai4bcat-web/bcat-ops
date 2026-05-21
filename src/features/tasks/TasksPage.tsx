@@ -90,12 +90,12 @@ export function TasksPage() {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#f8fafc]">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-4 border-b border-slate-200 bg-white shrink-0">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
         <div>
-          <h1 className="text-xl font-semibold text-foreground tracking-tight">Tasks</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Tasks</h1>
+          <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
             Open intake items requiring action · grouped by assignee
           </p>
         </div>
@@ -122,7 +122,7 @@ export function TasksPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
+      <div className="space-y-8" style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
             <Loader2 className="size-4 animate-spin" /> Loading tasks…
@@ -139,15 +139,15 @@ export function TasksPage() {
         ) : (
           grouped.map(({ key, label, items: groupItems }) => (
             <section key={key}>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="size-7 rounded-full bg-slate-200 flex items-center justify-center">
-                  <Users className="size-3.5 text-slate-500" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Users style={{ width: 14, height: 14, color: 'var(--ds-t3)' }} />
                 </div>
-                <h2 className="text-sm font-semibold text-foreground">{label}</h2>
-                <span className="text-[11px] font-bold bg-slate-200 text-slate-600 rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center">
+                <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>{label}</h2>
+                <span style={{ fontSize: 11, fontWeight: 700, background: 'var(--ds-border)', color: 'var(--ds-t2)', borderRadius: 999, padding: '2px 6px', minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {groupItems.length}
                 </span>
-                <div className="flex-1 h-px bg-slate-200" />
+                <div style={{ flex: 1, height: 1, background: 'var(--ds-border)' }} />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">

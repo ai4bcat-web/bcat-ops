@@ -192,7 +192,7 @@ export function QueueCard({
   const badge   = STATUS_BADGE[item.status]
 
   return (
-    <div className="bg-white rounded-lg border border-slate-200 shadow-sm hover:shadow-md transition-shadow p-4 flex flex-col gap-3">
+    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', boxShadow: 'var(--sh-sm)', padding: 16, display: 'flex', flexDirection: 'column', gap: 12, transition: 'box-shadow 0.15s' }}>
       {/* Top row: subject + status badge */}
       <div className="flex items-start gap-2">
         <p className="flex-1 text-sm font-semibold text-foreground leading-snug line-clamp-2">
@@ -245,7 +245,7 @@ export function QueueCard({
 
       {/* Body snippet */}
       {item.bodyText && (
-        <p className="text-[11px] text-muted-foreground line-clamp-2 bg-slate-50 rounded px-2 py-1.5 border border-slate-100">
+        <p style={{ fontSize: 11, color: 'var(--ds-t3)', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', background: 'var(--ds-bg)', borderRadius: 6, padding: '6px 8px', border: '1px solid var(--ds-border)' }}>
           {item.bodyText}
         </p>
       )}
@@ -286,7 +286,7 @@ export function QueueCard({
         )}
 
         <button
-          className="h-7 w-7 flex items-center justify-center rounded border border-slate-200 text-muted-foreground hover:text-slate-600 hover:bg-slate-50 transition-colors"
+          style={{ height: 28, width: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: '1px solid var(--ds-border)', color: 'var(--ds-t3)', background: 'transparent', cursor: 'pointer', transition: 'background 0.15s' }}
           title="Archive"
           onClick={() => onStatusChange(item.id, 'ARCHIVED')}
         >
@@ -467,12 +467,12 @@ export function IntakePage() {
   )
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-[#f8fafc]">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
       {/* Page header */}
-      <div className="flex items-center justify-between px-8 py-4 border-b border-slate-200 bg-white shrink-0">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
         <div>
-          <h1 className="text-xl font-semibold text-foreground tracking-tight">Load Intake</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
+          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Load Intake</h1>
+          <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
             Incoming loads from Ivan Cartage and BCAT Logistics
           </p>
         </div>
@@ -504,26 +504,33 @@ export function IntakePage() {
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center gap-1 mb-4 border-b border-slate-200">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--ds-border)' }}>
             {TABS.map(({ key, label }) => {
               const count = key === 'IVAN_CARTAGE' ? ivanCount : bcatCount
+              const isActive = activeTab === key
               return (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key)}
-                  className={cn(
-                    'flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px',
-                    activeTab === key
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-muted-foreground hover:text-foreground hover:border-slate-300',
-                  )}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '10px 16px', fontSize: 14, fontWeight: 500,
+                    borderLeft: 'none', borderRight: 'none', borderTop: 'none',
+                    borderBottom: `2px solid ${isActive ? 'var(--ds-blue)' : 'transparent'}`,
+                    color: isActive ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                    background: 'transparent',
+                    marginBottom: -1, cursor: 'pointer', transition: 'color 0.15s',
+                  }}
                 >
                   {label}
                   {count > 0 && (
-                    <span className={cn(
-                      'text-[10px] font-bold rounded-full px-1.5 min-w-[18px] h-[18px] flex items-center justify-center',
-                      activeTab === key ? 'bg-primary text-white' : 'bg-slate-200 text-slate-600',
-                    )}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, borderRadius: 999,
+                      padding: '2px 6px', minWidth: 18, height: 18,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: isActive ? 'var(--ds-blue)' : 'var(--ds-border)',
+                      color: isActive ? '#fff' : 'var(--ds-t2)',
+                    }}>
                       {count}
                     </span>
                   )}
@@ -534,7 +541,7 @@ export function IntakePage() {
 
           {/* Cards grid */}
           {activeItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2 bg-white rounded-lg border border-slate-200">
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', gap: 8, background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', color: 'var(--ds-t3)' }}>
               <Inbox className="size-8 opacity-20" />
               <p className="text-sm">No active items — all clear</p>
             </div>
@@ -565,11 +572,11 @@ export function IntakePage() {
             </h2>
 
             <div className="flex items-center gap-2">
-              <div className="relative">
+              <div style={{ position: 'relative' }}>
                 <select
                   value={historySource}
                   onChange={(e) => setHistorySource(e.target.value)}
-                  className="h-8 pl-2.5 pr-7 text-xs rounded border border-slate-200 bg-white appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+                  style={{ height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 12, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
                 >
                   <option value="ALL">All Sources</option>
                   <option value="IVAN_CARTAGE">Ivan Cartage</option>
@@ -577,11 +584,11 @@ export function IntakePage() {
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
               </div>
-              <div className="relative">
+              <div style={{ position: 'relative' }}>
                 <select
                   value={historyStatus}
                   onChange={(e) => setHistoryStatus(e.target.value)}
-                  className="h-8 pl-2.5 pr-7 text-xs rounded border border-slate-200 bg-white appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary text-foreground"
+                  style={{ height: 32, paddingLeft: 10, paddingRight: 28, fontSize: 12, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', appearance: 'none', cursor: 'pointer', outline: 'none' }}
                 >
                   <option value="ALL">All Statuses</option>
                   <option value="NEW">New</option>
@@ -595,9 +602,9 @@ export function IntakePage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+          <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)' }}>
             {historyItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 0', gap: 8, color: 'var(--ds-t3)' }}>
                 <Inbox className="size-8 opacity-20" />
                 <p className="text-sm">No records match the current filters</p>
               </div>
@@ -605,9 +612,9 @@ export function IntakePage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-slate-200 bg-slate-50">
+                    <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
                       {['Received', 'Source', 'Subject', 'Assignee', 'Status', 'Pro# / Load', 'Link'].map((col) => (
-                        <th key={col} className="px-4 py-2.5 text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">
+                        <th key={col} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
                           {col}
                         </th>
                       ))}

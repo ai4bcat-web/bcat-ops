@@ -94,9 +94,9 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
   const isBroker = driver.type === 'broker'
 
   return (
-    <div className="rounded-xl border border-slate-200/60 overflow-hidden shadow-sm bg-white">
+    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-slate-50/60">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm text-foreground truncate">{driver.name}</span>
@@ -153,7 +153,7 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
       )}
 
       {/* SMS preview */}
-      <div className="border-t border-slate-100 px-4 py-3 bg-slate-50/40">
+      <div style={{ borderTop: '1px solid var(--ds-border)', padding: '12px 16px', background: 'var(--ds-bg)' }}>
         <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
           SMS Preview
         </p>
@@ -197,9 +197,9 @@ export function SchedulePage() {
     .join('\n\n' + '─'.repeat(40) + '\n\n')
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
       {/* Toolbar */}
-      <div className="flex items-center gap-2 px-4 min-h-[64px] border-b border-border bg-white shrink-0 overflow-x-auto">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px', minHeight: 64, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0, overflowX: 'auto' }}>
         <MessageSquare className="size-4 text-muted-foreground shrink-0" />
         <span className="text-sm font-semibold text-foreground shrink-0">Driver Schedules</span>
 

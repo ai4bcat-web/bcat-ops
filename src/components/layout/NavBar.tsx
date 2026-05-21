@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
+import { useIntakeItems } from '@/hooks/useIntakeItems'
+import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
 
 const NAV_GROUPS = [
   [
@@ -47,15 +49,18 @@ export function NavBar() {
   const { user, logout, isAdmin, hasPageAccess } = useAuth()
   const loads = useAppStore(s => s.loads)
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
+  const { items: intakeItems } = useIntakeItems()
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
+  const activeIntakeCount = intakeItems.filter(i => ACTIVE_STATUSES.has(i.status)).length
 
   function getBadgeCount(key?: string): number | null {
     if (!key) return null
     if (key === 'loads') return loadsCount || null
     if (key === 'maintenance') return maintenanceCount || null
-    // intake/tasks badges deferred to Slice 7
+    if (key === 'intake') return activeIntakeCount || null
+    if (key === 'tasks') return activeIntakeCount || null
     return null
   }
 
