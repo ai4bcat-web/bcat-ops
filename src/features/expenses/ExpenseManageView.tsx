@@ -134,7 +134,7 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -272,11 +272,16 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
             <p className="text-xs text-muted-foreground font-medium mb-1.5">Trucks</p>
             <div className="flex flex-wrap gap-2">
               {trucks.filter((t) => t.type === 'truck' && t.active).map((t) => (
-                <label key={t.id} className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs cursor-pointer select-none transition-colors',
-                  form.truckIds.includes(t.id)
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                )}>
+                <label
+                key={t.id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px',
+                  borderRadius: 20, border: '1px solid', fontSize: 12, cursor: 'pointer', userSelect: 'none',
+                  background: form.truckIds.includes(t.id) ? 'var(--ds-blue)' : 'var(--ds-bg)',
+                  borderColor: form.truckIds.includes(t.id) ? 'var(--ds-blue)' : 'var(--ds-border)',
+                  color: form.truckIds.includes(t.id) ? '#fff' : 'var(--ds-t2)',
+                }}
+              >
                   <input type="checkbox" className="sr-only" checked={form.truckIds.includes(t.id)} onChange={() => toggleTruck(t.id)} />
                   #{t.unitNumber}
                 </label>
@@ -292,7 +297,7 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -456,7 +461,7 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -593,7 +598,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
       {data.records.filter((r) => r.source === 'manual-entry').length > 0 && (
         <div>
           <p className="text-xs text-muted-foreground font-medium mb-2">Recent manual entries</p>
-          <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-hidden">
+          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
             <table className="w-full text-xs">
               <thead className="bg-slate-50">
                 <tr>
@@ -650,18 +655,26 @@ export function ExpenseManageView({ data, trucks }: { data: ExpenseDataState; tr
   return (
     <div className="space-y-5">
       {/* Sub-tab bar */}
-      <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit">
-        {MANAGE_TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setTab(t.value)}
-            className={cn('px-4 py-2 text-xs font-medium transition-colors',
-              tab === t.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+        {MANAGE_TABS.map((t) => {
+          const active = tab === t.value
+          return (
+            <button
+              key={t.value}
+              onClick={() => setTab(t.value)}
+              style={{
+                padding: '4px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
+                background: active ? '#fff' : 'transparent',
+                color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                boxShadow: active ? 'var(--sh-sm)' : 'none',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {t.label}
+            </button>
+          )
+        })}
       </div>
 
       {tab === 'types'       && <ExpenseTypesTab  data={data} />}

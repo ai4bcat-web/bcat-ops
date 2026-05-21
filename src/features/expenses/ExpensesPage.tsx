@@ -124,10 +124,10 @@ const CATEGORIES: { key: keyof Omit<TruckExpenseSummary, 'total'>; label: string
 
 function KpiCard({ label, value, sub, title }: { label: string; value: string; sub?: string; title?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm px-6 py-5" title={title}>
-      <div className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-1">{label}</div>
-      <div className="text-2xl font-semibold text-foreground">{value}</div>
-      {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
+    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, padding: '16px 20px', boxShadow: 'var(--sh-sm)' }} title={title}>
+      <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.03em', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>{sub}</div>}
     </div>
   )
 }
@@ -153,7 +153,7 @@ function TxDetail({
           Unit #{truck.unitNumber} · {rangeLabel} · {txs.length} transaction{txs.length !== 1 ? 's' : ''}
         </span>
       </div>
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm overflow-x-auto">
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -298,7 +298,7 @@ function OverviewTab({
   return (
     <div className="space-y-5">
       {/* KPI strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
         <KpiCard label="Total Fleet Cost" value={fmtMoney(fleetTotals.total || 0)} sub={`${matrixRows.length} truck${matrixRows.length !== 1 ? 's' : ''} with expenses`} />
         <KpiCard label="Fuel"             value={fmtMoney(fleetTotals['fuel'] || 0)} />
         <KpiCard label="Insurance"        value={fmtMoney(fleetTotals['insurance'] || 0)} />
@@ -306,7 +306,7 @@ function OverviewTab({
       </div>
 
       {/* Matrix */}
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
         <div className="px-6 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-foreground">Per-Truck Cost Matrix</h2>
           <p className="text-xs text-muted-foreground mt-0.5">All expense categories · fuel from EFS · other from expense records</p>
@@ -495,7 +495,7 @@ function FuelTab({
       </div>
 
       {/* KPI strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
         <KpiCard label="Total Fuel Spend"    value={fmtMoney(totalFuelSpend)} sub={`${fuelTxCount} fuel transaction${fuelTxCount !== 1 ? 's' : ''}`} />
         <KpiCard label="Total Gallons"       value={fmtGal(totalGal)} />
         <KpiCard label="Avg $/Gallon"        value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
@@ -504,7 +504,7 @@ function FuelTab({
       </div>
 
       {/* Weekly pivot */}
-      <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
         <div className="px-6 py-4 border-b border-slate-100">
           <h2 className="text-sm font-semibold text-foreground">Weekly Fuel Spend by Truck</h2>
           <p className="text-xs text-muted-foreground mt-0.5">Sunday–Saturday weeks · fuel only</p>
@@ -576,7 +576,7 @@ function FuelTab({
 
       {/* Fuel type breakdown */}
       {fuelBreakdown.length > 0 && (
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm">
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
           <button
             className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-slate-50/60 transition-colors"
             onClick={() => setBreakdownOpen((o) => !o)}
@@ -614,19 +614,28 @@ function FuelTab({
 
       {/* Chart */}
       {chartData.length > 0 && (
-        <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-foreground">Fuel Over Time</h2>
-            <div className="flex rounded-lg border border-slate-200 overflow-hidden">
-              {(['$', 'gal'] as const).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setChartMode(m)}
-                  className={cn('px-3 py-1 text-xs font-medium transition-colors', chartMode === m ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50')}
-                >
-                  {m === '$' ? '$ Spend' : 'Gallons'}
-                </button>
-              ))}
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', padding: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Fuel Over Time</h2>
+            <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
+              {(['$', 'gal'] as const).map((m) => {
+                const active = chartMode === m
+                return (
+                  <button
+                    key={m}
+                    onClick={() => setChartMode(m)}
+                    style={{
+                      padding: '3px 10px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                      fontSize: 12, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
+                      background: active ? '#fff' : 'transparent',
+                      color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                      boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    }}
+                  >
+                    {m === '$' ? '$ Spend' : 'Gallons'}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <ResponsiveContainer width="100%" height={220}>
@@ -706,63 +715,80 @@ export function ExpensesPage() {
   )
 
   return (
-    <div className="h-full overflow-y-auto">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="flex items-center justify-between px-8 pt-5 pb-3">
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
           <div>
-            <h1 className="text-2xl font-semibold text-foreground tracking-tight">Expenses</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Per-truck cost tracking across all categories</p>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Expenses</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Fuel, insurance, financing, maintenance — per truck</p>
           </div>
         </div>
 
-        {/* Tab bar + range presets on same row */}
-        <div className="flex items-center gap-4 px-8 pb-4 flex-wrap">
-          {/* Page tabs */}
-          <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
-            {PAGE_TABS.map((t) => (
-              <button
-                key={t.value}
-                onClick={() => setTab(t.value)}
-                className={cn('px-5 py-2 text-xs font-medium transition-colors',
-                  tab === t.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
+        {/* Tab bar + range presets */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 32px 16px', flexWrap: 'wrap' }}>
+          {/* Page tabs — pill group */}
+          <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2, flexShrink: 0 }}>
+            {PAGE_TABS.map((t) => {
+              const active = tab === t.value
+              return (
+                <button
+                  key={t.value}
+                  onClick={() => setTab(t.value)}
+                  style={{
+                    padding: '4px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                    fontSize: 12.5, fontWeight: active ? 600 : 500, fontFamily: 'inherit',
+                    background: active ? '#fff' : 'transparent',
+                    color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                    boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t.label}
+                </button>
+              )
+            })}
           </div>
 
           {tab !== 'manage' && (
             <>
-              {/* Date range presets */}
-              <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden shrink-0">
-                {RANGE_OPTIONS.map((o) => (
-                  <button
-                    key={o.value}
-                    onClick={() => setRangeKey(o.value)}
-                    className={cn('px-3 py-2 text-xs font-medium transition-colors',
-                      rangeKey === o.value ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-50',
-                    )}
-                  >
-                    {o.label}
-                  </button>
-                ))}
+              {/* Date range chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {RANGE_OPTIONS.map((o) => {
+                  const active = rangeKey === o.value
+                  return (
+                    <button
+                      key={o.value}
+                      onClick={() => setRangeKey(o.value)}
+                      style={{
+                        height: 28, padding: '0 10px', borderRadius: 20, border: '1px solid',
+                        fontSize: 11.5, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+                        background: active ? 'var(--ds-blue-bg)' : 'var(--ds-bg)',
+                        borderColor: active ? 'var(--ds-blue)' : 'var(--ds-border)',
+                        color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {o.label}
+                    </button>
+                  )
+                })}
               </div>
 
               {rangeKey === 'custom' && (
-                <div className="flex items-center gap-1.5 text-xs">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <input type="date" value={format(customStart, 'yyyy-MM-dd')}
                     onChange={(e) => setCustomStart(new Date(e.target.value + 'T00:00:00'))}
-                    className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
-                  <span className="text-muted-foreground">to</span>
+                    style={{ height: 32, borderRadius: 7, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12, background: 'var(--ds-surface)', outline: 'none' }} />
+                  <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>to</span>
                   <input type="date" value={format(customEnd, 'yyyy-MM-dd')}
                     onChange={(e) => setCustomEnd(new Date(e.target.value + 'T00:00:00'))}
-                    className="h-8 rounded-md border border-slate-200 px-2 text-xs" />
+                    style={{ height: 32, borderRadius: 7, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12, background: 'var(--ds-surface)', outline: 'none' }} />
                 </div>
               )}
 
-              <span className="text-xs text-muted-foreground">
+              <span style={{ fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
                 {format(rangeStart, 'MMM d, yyyy')} – {format(rangeEnd, 'MMM d, yyyy')}
               </span>
             </>
@@ -771,7 +797,7 @@ export function ExpensesPage() {
       </div>
 
       {/* Tab content */}
-      <div className="p-8">
+      <div style={{ padding: '24px 32px' }}>
         {tab === 'overview' && (
           <OverviewTab
             trucks={trucks}
