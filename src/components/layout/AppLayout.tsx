@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { NavBar } from './NavBar'
+import { Topbar } from './Topbar'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 
@@ -18,7 +19,10 @@ export function AppLayout() {
     <div className="app">
       <NavBar />
       <div className="app-main">
-        <Outlet />
+        <Topbar />
+        <div className="page-content">
+          <Outlet />
+        </div>
       </div>
     </div>
   )
