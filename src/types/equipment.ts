@@ -1,5 +1,6 @@
 export type EquipmentType = 'truck' | 'trailer'
 export type Ownership = 'owned' | 'leased' | 'rented' | 'financed'
+export type OwnershipType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TaskPriority = 'high' | 'med' | 'low'
 export type TaskStatus = 'upcoming' | 'complete'
 

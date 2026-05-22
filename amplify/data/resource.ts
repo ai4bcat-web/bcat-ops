@@ -205,6 +205,41 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Truck ownership + Motive vehicle mapping ──────────────────────────────
+  // One record per truck (truckId = Equipment.id as primary key).
+  // ownershipType drives which trucks appear in efficiency metrics and get synced.
+  // motiveVehicleId is discovered on first sync by matching unitNumber → Motive number.
+  TruckConfig: a
+    .model({
+      truckId:             a.string().required(),   // Equipment.id — used as PK
+      unitNumber:          a.string().required(),   // e.g. "009"
+      ownershipType:       a.enum(['COMPANY', 'OWNER_OPERATOR']),
+      motiveVehicleId:     a.integer(),             // Motive integer vehicle ID
+      motiveVehicleNumber: a.string(),              // Motive 'number' field (should = unitNumber)
+    })
+    .identifier(['truckId'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Per-truck mileage from Motive ELD ─────────────────────────────────────
+  // Stored per truck per period (WEEK or MONTH). Idempotent: re-syncing the
+  // same (truckId, periodStart, periodType) overwrites the existing record.
+  // Lambda writes directly via DynamoDB SDK; frontend reads via AppSync.
+  TruckMileage: a
+    .model({
+      truckId:     a.string().required(),   // Equipment.id
+      unitNumber:  a.string().required(),   // denormalised for display
+      periodStart: a.string().required(),   // YYYY-MM-DD — week Monday or month 1st
+      periodType:  a.string().required(),   // 'WEEK' | 'MONTH'
+      miles:       a.float().required(),
+      source:      a.string().required(),   // 'motive'
+      syncedAt:    a.datetime().required(),
+    })
+    .identifier(['truckId', 'periodStart', 'periodType'])
+    .secondaryIndexes((index) => [
+      index('truckId').sortKeys(['periodStart']),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.

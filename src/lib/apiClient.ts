@@ -681,3 +681,77 @@ async function resolveRateConfirmUrl(
     return load
   }
 }
+
+// ── TruckConfig ───────────────────────────────────────────────────────────────
+
+export interface TruckConfig {
+  truckId:             string
+  unitNumber:          string
+  ownershipType?:      'COMPANY' | 'OWNER_OPERATOR'
+  motiveVehicleId?:    number | null
+  motiveVehicleNumber?: string | null
+  createdAt:           string
+  updatedAt:           string
+}
+
+const TRUCK_CONFIG_FIELDS = `truckId unitNumber ownershipType motiveVehicleId motiveVehicleNumber createdAt updatedAt`
+
+export async function listTruckConfigs(): Promise<TruckConfig[]> {
+  const result = await client.graphql({
+    query: `query ListTruckConfigs { listTruckConfigs(limit: 100) { items { ${TRUCK_CONFIG_FIELDS} } } }`,
+  }) as { data: { listTruckConfigs: { items: TruckConfig[] } } }
+  return result.data.listTruckConfigs.items ?? []
+}
+
+export async function upsertTruckConfig(
+  input: Pick<TruckConfig, 'truckId' | 'unitNumber'> & Partial<Omit<TruckConfig, 'truckId' | 'unitNumber' | 'createdAt' | 'updatedAt'>>,
+): Promise<TruckConfig> {
+  // Try update first; if it doesn't exist, create it
+  try {
+    const result = await client.graphql({
+      query: `mutation UpdateTruckConfig($input: UpdateTruckConfigInput!) { updateTruckConfig(input: $input) { ${TRUCK_CONFIG_FIELDS} } }`,
+      variables: { input },
+    }) as { data: { updateTruckConfig: TruckConfig } }
+    return result.data.updateTruckConfig
+  } catch {
+    const result = await client.graphql({
+      query: `mutation CreateTruckConfig($input: CreateTruckConfigInput!) { createTruckConfig(input: $input) { ${TRUCK_CONFIG_FIELDS} } }`,
+      variables: { input },
+    }) as { data: { createTruckConfig: TruckConfig } }
+    return result.data.createTruckConfig
+  }
+}
+
+// ── TruckMileage ──────────────────────────────────────────────────────────────
+
+export interface TruckMileage {
+  truckId:     string
+  unitNumber:  string
+  periodStart: string   // YYYY-MM-DD
+  periodType:  string   // 'WEEK' | 'MONTH'
+  miles:       number
+  source:      string
+  syncedAt:    string
+  createdAt:   string
+  updatedAt:   string
+}
+
+const TRUCK_MILEAGE_FIELDS = `truckId unitNumber periodStart periodType miles source syncedAt createdAt updatedAt`
+
+export async function listTruckMileages(truckId?: string): Promise<TruckMileage[]> {
+  if (truckId) {
+    const result = await client.graphql({
+      query: `query ListByTruck($truckId: String!) {
+        listTruckMileageByTruckIdAndPeriodStart(truckId: $truckId, limit: 500) {
+          items { ${TRUCK_MILEAGE_FIELDS} }
+        }
+      }`,
+      variables: { truckId },
+    }) as { data: { listTruckMileageByTruckIdAndPeriodStart: { items: TruckMileage[] } } }
+    return result.data.listTruckMileageByTruckIdAndPeriodStart.items ?? []
+  }
+  const result = await client.graphql({
+    query: `query ListTruckMileages { listTruckMileages(limit: 5000) { items { ${TRUCK_MILEAGE_FIELDS} } } }`,
+  }) as { data: { listTruckMileages: { items: TruckMileage[] } } }
+  return result.data.listTruckMileages.items ?? []
+}

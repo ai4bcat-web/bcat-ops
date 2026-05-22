@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAppStore } from '@/store/useAppStore'
+import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
+import type { TruckConfig } from '@/lib/apiClient'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -631,16 +633,39 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
 // ── Equipment Table Row ────────────────────────────────────────────────────────
 
 interface EquipRowProps {
-  equip: Equipment
-  tasks: MaintenanceTask[]
-  invoices: MaintenanceInvoice[]
-  driverName?: string
-  colSpan: number
-  onEdit: (e: Equipment) => void
-  onDelete: (id: string) => void
+  equip:             Equipment
+  tasks:             MaintenanceTask[]
+  invoices:          MaintenanceInvoice[]
+  driverName?:       string
+  colSpan:           number
+  ownershipType?:    'COMPANY' | 'OWNER_OPERATOR'
+  onOwnershipChange: (truckId: string, unitNumber: string, type: 'COMPANY' | 'OWNER_OPERATOR') => void
+  onEdit:            (e: Equipment) => void
+  onDelete:          (id: string) => void
 }
 
-function EquipRow({ equip, tasks, invoices, driverName, colSpan, onEdit, onDelete }: EquipRowProps) {
+function OwnershipBadge({
+  type, onClick,
+}: { type?: 'COMPANY' | 'OWNER_OPERATOR'; onClick: (next: 'COMPANY' | 'OWNER_OPERATOR') => void }) {
+  const next = type === 'COMPANY' ? 'OWNER_OPERATOR' : 'COMPANY'
+  const label = type === 'COMPANY' ? 'CO' : type === 'OWNER_OPERATOR' ? 'O/O' : '?'
+  const cls = type === 'COMPANY'
+    ? 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100'
+    : type === 'OWNER_OPERATOR'
+      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
+      : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100'
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(next) }}
+      title={type ? `Click to set ${next === 'COMPANY' ? 'Company' : 'Owner-Operator'}` : 'Click to set ownership type'}
+      className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer ${cls}`}
+    >
+      {label}
+    </button>
+  )
+}
+
+function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete }: EquipRowProps) {
   const [expanded, setExpanded] = useState(false)
 
   const upcomingTasks = tasks.filter((t) => t.status === 'upcoming')
@@ -662,6 +687,13 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, onEdit, onDelet
             {isTruck ? <Truck className="size-3" /> : <Container className="size-3" />}
             {isTruck ? 'Truck' : 'Trailer'}
           </span>
+        </TableCell>
+
+        {/* Ownership */}
+        <TableCell className="py-3">
+          {isTruck
+            ? <OwnershipBadge type={ownershipType} onClick={(next) => onOwnershipChange(equip.id, equip.unitNumber, next)} />
+            : <span className="text-muted-foreground/40 text-xs">—</span>}
         </TableCell>
 
         {/* Unit # */}
@@ -789,9 +821,33 @@ export function TrucksPage() {
   const updateEquipment     = useAppStore((s) => s.updateEquipment)
   const deleteEquipment     = useAppStore((s) => s.deleteEquipment)
 
-  const [typeFilter, setTypeFilter] = useState<'all' | 'truck' | 'trailer'>('all')
-  const [search, setSearch]         = useState('')
-  const [showForm, setShowForm]     = useState<Equipment | 'new' | null>(null)
+  const [typeFilter, setTypeFilter]       = useState<'all' | 'truck' | 'trailer'>('all')
+  const [search, setSearch]               = useState('')
+  const [showForm, setShowForm]           = useState<Equipment | 'new' | null>(null)
+  const [truckConfigs, setTruckConfigs]   = useState<Map<string, TruckConfig>>(new Map())
+
+  useEffect(() => {
+    listTruckConfigs()
+      .then((configs) => {
+        setTruckConfigs(new Map(configs.map((c) => [c.truckId, c])))
+      })
+      .catch((err) => console.warn('[TrucksPage] failed to load TruckConfigs:', err))
+  }, [])
+
+  async function handleOwnershipChange(truckId: string, unitNumber: string, type: 'COMPANY' | 'OWNER_OPERATOR') {
+    // Optimistic update
+    setTruckConfigs((prev) => {
+      const next = new Map(prev)
+      next.set(truckId, { ...(prev.get(truckId) ?? { truckId, unitNumber, createdAt: '', updatedAt: '' }), ownershipType: type })
+      return next
+    })
+    try {
+      const saved = await upsertTruckConfig({ truckId, unitNumber, ownershipType: type })
+      setTruckConfigs((prev) => new Map(prev).set(truckId, saved))
+    } catch (err) {
+      console.error('[TrucksPage] upsertTruckConfig failed:', err)
+    }
+  }
 
   const filtered = equipment.filter((e) => {
     if (typeFilter !== 'all' && e.type !== typeFilter) return false
@@ -933,6 +989,7 @@ export function TrucksPage() {
               <TableHeader>
                 <TableRow className="hover:bg-transparent bg-slate-50/60">
                   <TableHead className="py-3 text-xs">Type</TableHead>
+                  <TableHead className="py-3 text-xs">Ownership</TableHead>
                   <TableHead className="py-3 text-xs">Unit #</TableHead>
                   <TableHead className="py-3 text-xs min-w-[160px]">Year / Make / Model</TableHead>
                   <TableHead className="py-3 text-xs">Plate</TableHead>
@@ -961,7 +1018,9 @@ export function TrucksPage() {
                       tasks={tasks}
                       invoices={invs}
                       driverName={driver?.name}
-                      colSpan={15}
+                      colSpan={16}
+                      ownershipType={truckConfigs.get(e.id)?.ownershipType}
+                      onOwnershipChange={handleOwnershipChange}
                       onEdit={setShowForm}
                       onDelete={handleDelete}
                     />

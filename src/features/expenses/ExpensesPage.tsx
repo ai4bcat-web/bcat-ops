@@ -16,7 +16,14 @@ import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { getExpensesByTruck } from '@/lib/expenseAllocation'
-import { cleanupDuplicateFuelTransactions } from '@/lib/apiClient'
+import {
+  cleanupDuplicateFuelTransactions,
+  listTruckConfigs,
+  listTruckMileages,
+  listLoads,
+} from '@/lib/apiClient'
+import type { TruckConfig, TruckMileage } from '@/lib/apiClient'
+import type { Load } from '@/types'
 import { FuelUploadModal } from './FuelUploadModal'
 import { ExpenseManageView } from './ExpenseManageView'
 import type { FuelTransaction } from '@/hooks/useFuelTransactions'
@@ -772,12 +779,223 @@ function FuelTab({
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type PageTab = 'overview' | 'fuel' | 'manage'
+// ── Efficiency tab — per-truck MPG / rev-per-mile / cost-per-mile ─────────────
+
+function fmt(n: number, decimals = 2): string {
+  return n.toFixed(decimals)
+}
+
+function dash(val: number | null, prefix = '', suffix = '', decimals = 2): string {
+  if (val === null) return '—'
+  return `${prefix}${fmt(val, decimals)}${suffix}`
+}
+
+interface EfficiencyRowData {
+  truckId:    string
+  unitNumber: string
+  miles:      number
+  gallons:    number
+  fuelAmt:    number   // dollars
+  revenue:    number   // dollars
+  mpg:        number | null
+  revPerMile: number | null
+  costPerMile: number | null
+  profitPerMile: number | null
+}
+
+function EfficiencyTab({
+  trucks,
+  filteredFuelTxs,
+  rangeStart,
+  rangeEnd,
+}: {
+  trucks:          Equipment[]
+  filteredFuelTxs: FuelTransaction[]
+  rangeStart:      Date
+  rangeEnd:        Date
+}) {
+  const [truckConfigs, setTruckConfigs] = useState<TruckConfig[]>([])
+  const [mileages,     setMileages]     = useState<TruckMileage[]>([])
+  const [loads,        setLoads]        = useState<Load[]>([])
+  const [dataLoading,  setDataLoading]  = useState(true)
+
+  useEffect(() => {
+    setDataLoading(true)
+    Promise.all([listTruckConfigs(), listTruckMileages(), listLoads()])
+      .then(([configs, miles, ls]) => {
+        setTruckConfigs(configs)
+        setMileages(miles)
+        setLoads(ls)
+      })
+      .catch((err) => console.error('[EfficiencyTab] load failed:', err))
+      .finally(() => setDataLoading(false))
+  }, [])
+
+  const rangeStartMs = rangeStart.getTime()
+  const rangeEndMs   = rangeEnd.getTime()
+  const MS_PER_DAY   = 86400000
+
+  // Company trucks only
+  const companyTruckIds = useMemo(
+    () => new Set(truckConfigs.filter((c) => c.ownershipType === 'COMPANY').map((c) => c.truckId)),
+    [truckConfigs],
+  )
+
+  const companyTrucks = useMemo(
+    () => trucks.filter((t) => companyTruckIds.has(t.id)),
+    [trucks, companyTruckIds],
+  )
+
+  // Mileage: WEEK records whose week overlaps [rangeStart, rangeEnd]
+  const weekMilesByTruck = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const m of mileages) {
+      if (m.periodType !== 'WEEK') continue
+      const weekStart = new Date(m.periodStart + 'T12:00:00Z').getTime()
+      const weekEnd   = weekStart + 6 * MS_PER_DAY
+      if (weekStart > rangeEndMs || weekEnd < rangeStartMs) continue
+      map.set(m.truckId, (map.get(m.truckId) ?? 0) + m.miles)
+    }
+    return map
+  }, [mileages, rangeStartMs, rangeEndMs, MS_PER_DAY])
+
+  // Fuel: already filtered by date + isFuel
+  const fuelByTruck = useMemo(() => {
+    const amt = new Map<string, number>()
+    const gal = new Map<string, number>()
+    for (const tx of filteredFuelTxs) {
+      if (!tx.truckId) continue
+      amt.set(tx.truckId, (amt.get(tx.truckId) ?? 0) + tx.amount)
+      gal.set(tx.truckId, (gal.get(tx.truckId) ?? 0) + tx.quantity)
+    }
+    return { amt, gal }
+  }, [filteredFuelTxs])
+
+  // Revenue: loads whose pickupAppt falls in range
+  const revenueByTruck = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const load of loads) {
+      if (!load.truckId || !load.rate) continue
+      const d = new Date(load.pickupAppt).getTime()
+      if (d < rangeStartMs || d > rangeEndMs) continue
+      map.set(load.truckId, (map.get(load.truckId) ?? 0) + load.rate / 100)
+    }
+    return map
+  }, [loads, rangeStartMs, rangeEndMs])
+
+  const rows: EfficiencyRowData[] = useMemo(() =>
+    companyTrucks.map((t) => {
+      const miles   = weekMilesByTruck.get(t.id) ?? 0
+      const gallons = fuelByTruck.gal.get(t.id) ?? 0
+      const fuelAmt = fuelByTruck.amt.get(t.id) ?? 0
+      const revenue = revenueByTruck.get(t.id) ?? 0
+      return {
+        truckId:      t.id,
+        unitNumber:   t.unitNumber,
+        miles,
+        gallons,
+        fuelAmt,
+        revenue,
+        mpg:          miles > 0 && gallons > 0 ? miles / gallons : null,
+        revPerMile:   miles > 0 ? revenue / miles : null,
+        costPerMile:  miles > 0 ? fuelAmt / miles : null,
+        profitPerMile: miles > 0 ? (revenue - fuelAmt) / miles : null,
+      }
+    }),
+    [companyTrucks, weekMilesByTruck, fuelByTruck, revenueByTruck],
+  )
+
+  if (dataLoading) {
+    return (
+      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+        Loading efficiency data…
+      </div>
+    )
+  }
+
+  if (companyTrucks.length === 0) {
+    return (
+      <div style={{ padding: '60px 0', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+        No COMPANY trucks configured. Go to <strong>Fleet</strong> and set ownership type on your trucks.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+        <thead>
+          <tr style={{ background: 'var(--ds-bg)', borderBottom: '1px solid var(--ds-border)' }}>
+            <th style={{ textAlign: 'left',  padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Truck</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Miles</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Gallons</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>MPG</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Fuel $</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Revenue</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Rev/Mile</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Cost/Mile</th>
+            <th style={{ textAlign: 'right', padding: '10px 16px', fontWeight: 600, color: 'var(--ds-t2)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Profit/Mile</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.truckId} style={{ borderTop: i > 0 ? '1px solid var(--ds-border)' : undefined }}>
+              <td style={{ padding: '12px 16px', fontWeight: 700, color: 'var(--ds-t1)' }}>#{r.unitNumber}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.miles > 0 ? r.miles.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.gallons > 0 ? fmt(r.gallons, 0) : '—'}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: r.mpg !== null ? 600 : 400, color: r.mpg !== null ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{dash(r.mpg, '', '', 2)}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.fuelAmt > 0 ? `$${r.fuelAmt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.revenue > 0 ? `$${r.revenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{dash(r.revPerMile, '$', '', 2)}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{dash(r.costPerMile, '$', '', 2)}</td>
+              <td style={{ padding: '12px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+                color: r.profitPerMile === null ? 'var(--ds-t3)' : r.profitPerMile >= 0 ? '#16a34a' : '#dc2626',
+                fontWeight: r.profitPerMile !== null ? 600 : 400,
+              }}>{dash(r.profitPerMile, '$', '', 2)}</td>
+            </tr>
+          ))}
+        </tbody>
+        {rows.length > 1 && (() => {
+          const totMiles   = rows.reduce((s, r) => s + r.miles, 0)
+          const totGal     = rows.reduce((s, r) => s + r.gallons, 0)
+          const totFuel    = rows.reduce((s, r) => s + r.fuelAmt, 0)
+          const totRev     = rows.reduce((s, r) => s + r.revenue, 0)
+          const totMpg     = totMiles > 0 && totGal > 0 ? totMiles / totGal : null
+          const totRevMi   = totMiles > 0 ? totRev / totMiles : null
+          const totCostMi  = totMiles > 0 ? totFuel / totMiles : null
+          const totProfMi  = totMiles > 0 ? (totRev - totFuel) / totMiles : null
+          return (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+                <td style={{ padding: '10px 16px', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ds-t2)' }}>Fleet Total</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{totMiles > 0 ? totMiles.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '—'}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{totGal > 0 ? fmt(totGal, 0) : '—'}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{dash(totMpg, '', '', 2)}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{totFuel > 0 ? `$${totFuel.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{totRev > 0 ? `$${totRev.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{dash(totRevMi, '$', '', 2)}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{dash(totCostMi, '$', '', 2)}</td>
+                <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums',
+                  color: totProfMi === null ? 'var(--ds-t3)' : totProfMi >= 0 ? '#16a34a' : '#dc2626',
+                }}>{dash(totProfMi, '$', '', 2)}</td>
+              </tr>
+            </tfoot>
+          )
+        })()}
+      </table>
+    </div>
+  )
+}
+
+// ── Page tabs ─────────────────────────────────────────────────────────────────
+
+type PageTab = 'overview' | 'fuel' | 'efficiency' | 'manage'
 
 const PAGE_TABS: { value: PageTab; label: string }[] = [
-  { value: 'overview', label: 'Overview'  },
-  { value: 'fuel',     label: 'Fuel'      },
-  { value: 'manage',   label: 'Manage'    },
+  { value: 'overview',   label: 'Overview'    },
+  { value: 'fuel',       label: 'Fuel'        },
+  { value: 'efficiency', label: 'Efficiency'  },
+  { value: 'manage',     label: 'Manage'      },
 ]
 
 export function ExpensesPage() {
@@ -929,6 +1147,15 @@ export function ExpensesPage() {
             rangeEnd={rangeEnd}
             rangeKey={rangeKey}
             equipment={equipment}
+          />
+        )}
+
+        {tab === 'efficiency' && (
+          <EfficiencyTab
+            trucks={allActiveTrucks}
+            filteredFuelTxs={filteredFuelTxs}
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
           />
         )}
 

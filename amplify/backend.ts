@@ -12,6 +12,7 @@ import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
+import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
 
 const backend = defineBackend({
   auth,
@@ -22,6 +23,7 @@ const backend = defineBackend({
   slackStatusNotifier,
   fuelImport,
   generateRecurringExpenses,
+  motiveMileageSync,
 })
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
@@ -149,3 +151,30 @@ const monthlyRule = new Rule(recurringFn.stack, 'RecurringExpensesMonthlyRule', 
   description: 'Generate recurring expense records on the 1st of each month',
 })
 monthlyRule.addTarget(new EventsLambdaTarget(recurringFn))
+
+// ── motiveMileageSync Lambda ───────────────────────────────────────────────
+
+const motiveFn = backend.motiveMileageSync.resources.lambda as LambdaFunction
+
+const truckConfigTable  = backend.data.resources.tables['TruckConfig']
+const truckMileageTable = backend.data.resources.tables['TruckMileage']
+
+backend.motiveMileageSync.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    resources: [
+      truckConfigTable.tableArn,
+      truckMileageTable.tableArn,
+    ],
+  })
+)
+
+motiveFn.addEnvironment('TRUCK_CONFIG_TABLE_NAME',  truckConfigTable.tableName)
+motiveFn.addEnvironment('TRUCK_MILEAGE_TABLE_NAME', truckMileageTable.tableName)
+
+// EventBridge daily cron — 02:05 UTC every day
+const dailyMileageRule = new Rule(motiveFn.stack, 'MotiveMileageDailySyncRule', {
+  schedule:    Schedule.cron({ minute: '5', hour: '2', day: '*', month: '*' }),
+  description: 'Sync Motive ELD mileage for COMPANY trucks daily',
+})
+dailyMileageRule.addTarget(new EventsLambdaTarget(motiveFn))
