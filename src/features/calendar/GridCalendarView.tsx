@@ -430,7 +430,7 @@ function LoadCard({
 function DayColumn({
   day, dayStr, entries, drivers, isToday, isCurrentMonth, selectedIds, onSelect,
   dragOverKey, dropTargetDay, onDragStart, onDragEnter, onDragEnd,
-  onColumnDragEnter, onColumnDragLeave,
+  onColumnDragEnter, onColumnDragLeave, onColumnDrop,
 }: {
   day: Date; dayStr: string; entries: DayEntry[]; drivers: Driver[]
   isToday: boolean; isCurrentMonth: boolean; selectedIds: string[]
@@ -442,6 +442,7 @@ function DayColumn({
   onDragEnd: () => void
   onColumnDragEnter: (dayStr: string) => void
   onColumnDragLeave: (dayStr: string) => void
+  onColumnDrop: (dayStr: string) => void
 }) {
   const { weekday, date } = formatDayHeader(day.toISOString())
   const loadCount = entries.filter((e) => e.role !== 'delivery').length
@@ -458,6 +459,7 @@ function DayColumn({
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
       onDragEnter={() => onColumnDragEnter(dayStr)}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) onColumnDragLeave(dayStr) }}
+      onDrop={(e) => { e.preventDefault(); onColumnDrop(dayStr) }}
     >
 
       {/* Sticky day header */}
@@ -550,9 +552,10 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
   const [dayOrder,      setDayOrder]      = useState<Map<string, string[]>>(new Map())
   const [dragOverKey,   setDragOverKey]   = useState<string | null>(null)
   const [dropTargetDay, setDropTargetDay] = useState<string | null>(null)
-  const dragKey          = useRef<string | null>(null)
-  const dragDay          = useRef<string | null>(null)
-  const dropTargetDayRef = useRef<string | null>(null)  // ref mirror for use in dragend handler
+  const dragKey            = useRef<string | null>(null)
+  const dragDay            = useRef<string | null>(null)
+  const dropTargetDayRef   = useRef<string | null>(null)  // hover highlight tracking
+  const dropCommittedDay   = useRef<string | null>(null)  // set by onDrop — survives dragLeave
   const loadsRef = useRef(loads)
   loadsRef.current = loads
 
@@ -595,10 +598,15 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
     }
   }, [])
 
-  // Cross-column move fires in onDragEnd (always fires on the source card,
-  // unlike onDrop which can be swallowed when the user drops onto a child element).
+  // onDrop on the column fires before dragEnd and is immune to the dragLeave-clears-ref race.
+  const handleColumnDrop = useCallback((dayStr: string) => {
+    dropCommittedDay.current = dayStr
+  }, [])
+
+  // Cross-column move: read from dropCommittedDay (set by onDrop), not dropTargetDayRef
+  // (which can be cleared by dragLeave firing during the drop sequence).
   const handleDragEnd = useCallback(() => {
-    const targetDay = dropTargetDayRef.current
+    const targetDay = dropCommittedDay.current
     if (targetDay && dragKey.current && dragDay.current && dragDay.current !== targetDay) {
       const [loadId, role] = dragKey.current.split(':') as [string, Role]
       const load = loadsRef.current.find((l) => l.id === loadId)
@@ -610,6 +618,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
     dragKey.current          = null
     dragDay.current          = null
     dropTargetDayRef.current = null
+    dropCommittedDay.current = null
     setDragOverKey(null)
     setDropTargetDay(null)
   }, [updateLoad])
@@ -686,6 +695,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
               onDragEnd={handleDragEnd}
               onColumnDragEnter={handleColumnDragEnter}
               onColumnDragLeave={handleColumnDragLeave}
+              onColumnDrop={handleColumnDrop}
             />
           )
         })}
