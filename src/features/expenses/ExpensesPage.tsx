@@ -442,13 +442,29 @@ function FuelTab({
   const otherTxs    = useMemo(() => filteredTxs.filter((t) => !isFuel(t)), [filteredTxs])
 
   const pivotTruckIds = useMemo(() => new Set(trucks.map((t) => t.id)), [trucks])
-  const pivotFuelTxs  = useMemo(() => fuelTxs.filter((t) => t.truckId && pivotTruckIds.has(t.truckId)), [fuelTxs, pivotTruckIds])
 
-  const totalFuelSpend = sumAmt(pivotFuelTxs)
-  const totalGal       = sumQty(pivotFuelTxs)
-  const avgPpg         = totalGal > 0 ? totalFuelSpend / totalGal : 0
-  const fuelTxCount    = pivotFuelTxs.length
-  const otherSpend     = sumAmt(otherTxs)
+  // KPIs reflect ALL fuel txs in range, not just pivot-truck-assigned ones
+  const totalFuelSpend    = sumAmt(fuelTxs)
+  const totalGal          = sumQty(fuelTxs)
+  const avgPpg            = totalGal > 0 ? totalFuelSpend / totalGal : 0
+  const fuelTxCount       = fuelTxs.length
+  const unassignedFuelAmt = sumAmt(fuelTxs.filter((t) => !t.truckId || !pivotTruckIds.has(t.truckId!)))
+  const otherSpend        = sumAmt(otherTxs)
+
+  // Diagnostic: log fuel breakdown by fuelType/itemCategory so discrepancies are visible
+  useEffect(() => {
+    if (fuelTxs.length === 0) return
+    const byType: Record<string, number> = {}
+    for (const tx of fuelTxs) {
+      const k = tx.fuelType ?? '(null)'
+      byType[k] = (byType[k] ?? 0) + tx.amount
+    }
+    const unassigned = fuelTxs.filter((t) => !t.truckId).length
+    console.log(
+      `[fuel diag] range=${rangeStart}–${rangeEnd} total=${totalFuelSpend.toFixed(2)} txs=${fuelTxs.length} unassigned=${unassigned}`,
+      '\n  by fuelType:', byType,
+    )
+  }, [fuelTxs, rangeStart, rangeEnd, totalFuelSpend])
 
   const otherBreakdownTitle = useMemo(() => {
     if (otherTxs.length === 0) return undefined
@@ -569,7 +585,7 @@ function FuelTab({
 
       {/* KPI strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
-        <KpiCard label="Total Fuel Spend"    value={fmtMoney(totalFuelSpend)} sub={`${fuelTxCount} fuel transaction${fuelTxCount !== 1 ? 's' : ''}`} />
+        <KpiCard label="Total Fuel Spend"    value={fmtMoney(totalFuelSpend)} sub={unassignedFuelAmt > 0 ? `${fmtMoney(unassignedFuelAmt)} unassigned` : `${fuelTxCount} transactions`} />
         <KpiCard label="Total Gallons"       value={fmtGal(totalGal)} />
         <KpiCard label="Avg $/Gallon"        value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
         <KpiCard label="Fuel Transactions"   value={fuelTxCount.toLocaleString()} />
