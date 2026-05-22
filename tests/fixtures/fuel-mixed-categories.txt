@@ -1,0 +1,20 @@
+                         Transaction Report
+                                               2026-01-15 10:00
+  Carrier:  TEST CARRIER     Start Date: 2026-01-15  End Date: 2026-01-15  Carrier Id 000001  Contract Id: All
+  Group by: Card Number         Sort by: Transaction Date                     Total Records: 5
+  Card #      Tran Date    Invoice      Unit    Driver Name    Odometer   Location Name    City      State/Prov   Fees   Item   Unit Price   Qty      Amt    DB  Currency
+  00031       2026-01-15   INV001       0530    JOHN DOE       123456     LOVES #1         DALLAS    TX                  ULSD   3.899        50.000   194.95  N   USD/Gallon
+                                                                                                                         FUEL   3.750        30.000   112.50  N   USD/Gallon
+                                                                                                                         DEFD   0.850        10.000   8.50   N   USD/Gallon
+                                                                                                                         SCLE              1        10.00   N   USD/Gallon
+                                                                                                                         CDSL   3.500        20.000   70.00   N   USD/Gallon
+
+  Group: 1  00031                        Amount      Quantity    Avg PPU
+                             ULSD         194.95       50.000      3.899
+                             FUEL         112.50       30.000      3.750
+                             DEFD         8.50         10.000      0.850
+                             SCLE         10.00        1
+                             CDSL         70.00        20.000      3.500
+                             Fees         0.00                     0.000
+                             Totals       396.95                   0.000
+                             Total Fuel   315.95       90.000

@@ -604,6 +604,15 @@ export const useAppStore = create<AppState>()(
         maintenanceTasks: s.maintenanceTasks,
         maintenanceInvoices: s.maintenanceInvoices,
       }),
+      // Backfill fields added to SEED_EQUIPMENT after the user's first load
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        state.equipment = state.equipment.map((eq) => {
+          if (eq.fuelCardNumbers !== undefined) return eq
+          const seed = SEED_EQUIPMENT.find((s) => s.id === eq.id)
+          return seed ? { ...eq, fuelCardNumbers: seed.fuelCardNumbers } : eq
+        })
+      },
     }
   )
 )

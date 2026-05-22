@@ -49,13 +49,16 @@ function parseNum(s: string): number {
   return parseFloat(s.replace(/,/g, ''))
 }
 
-const FUEL_ITEM_TYPES = new Set(['ULSD', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
+// Fuel definition: ULSD, FUEL (generic diesel code), DEF/DEFD, and bio-diesel blends.
+// Confirmed permanent — all three (ULSD + FUEL + DEFD) count as fuel everywhere in the app.
+const FUEL_ITEM_TYPES = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
 
 function categorize(itemType: string): ItemCategory {
   const u = itemType.toUpperCase().trim()
   if (FUEL_ITEM_TYPES.has(u)) return 'FUEL'
   if (u === 'SCLE') return 'SCALE'
   if (u === 'CASH') return 'CASH_ADVANCE'
+  if (u === 'CDSL') return 'OTHER'  // cardlock/discount diesel — excluded from fuel totals
   console.warn(`[EFS parser] Unknown item type encountered: ${u} — stored as OTHER`)
   return 'OTHER'
 }
@@ -141,22 +144,28 @@ export function parseEfsTransactionReport(text: string): ParsedReport {
     // ── Group section subtotals ───────────────────────────────────────────────
     if (/^\s+Group:/i.test(line)) { inGroupSection = true; continue }
 
-    if (inGroupSection && !TX_LINE_RE.test(line)) {
-      const fuelM = line.match(/^\s+(\S+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/)
-      if (fuelM) {
-        const type = fuelM[1]
-        if (type !== 'Fees' && type !== 'Totals' && !line.includes('Total Fuel')) {
-          if (!groupSumByFuelType[type]) groupSumByFuelType[type] = { amount: 0, quantity: 0 }
-          groupSumByFuelType[type].amount   = round2(groupSumByFuelType[type].amount   + parseNum(fuelM[2]))
-          groupSumByFuelType[type].quantity = round2(groupSumByFuelType[type].quantity + parseNum(fuelM[3]))
+    if (inGroupSection) {
+      if (!TX_LINE_RE.test(line)) {
+        // Non-transaction line inside group section — accumulate subtotals
+        const fuelM = line.match(/^\s+(\S+)\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)/)
+        if (fuelM) {
+          const type = fuelM[1]
+          if (type !== 'Fees' && type !== 'Totals' && !line.includes('Total Fuel')) {
+            if (!groupSumByFuelType[type]) groupSumByFuelType[type] = { amount: 0, quantity: 0 }
+            groupSumByFuelType[type].amount   = round2(groupSumByFuelType[type].amount   + parseNum(fuelM[2]))
+            groupSumByFuelType[type].quantity = round2(groupSumByFuelType[type].quantity + parseNum(fuelM[3]))
+          }
         }
+        const feesM = line.match(/^\s+Fees\s+([\d,]+\.?\d*)/)
+        if (feesM) groupSumFees = round2(groupSumFees + parseNum(feesM[1]))
+        continue
       }
-      const feesM = line.match(/^\s+Fees\s+([\d,]+\.?\d*)/)
-      if (feesM) groupSumFees = round2(groupSumFees + parseNum(feesM[1]))
-      continue
+      // TX_LINE_RE match inside group section: only exit group mode for a real
+      // transaction (has card# + date). A match without both is a malformed
+      // summary line — skip it rather than treating it as a continuation row.
+      if (!line.match(CARD_RE) || !line.match(DATE_RE)) continue
+      inGroupSection = false
     }
-
-    if (inGroupSection) inGroupSection = false
 
     // ── Transaction lines ─────────────────────────────────────────────────────
     if (!TX_LINE_RE.test(line)) continue

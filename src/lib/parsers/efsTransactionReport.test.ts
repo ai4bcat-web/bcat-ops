@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { parseEfsTransactionReport, fuelTxDedupKey } from './efsTransactionReport'
 
 const SAMPLE = readFileSync(
@@ -170,6 +170,85 @@ describe('SCLE (scale fee) transactions', () => {
 
   it('grand-total validation passes (no errors thrown)', () => {
     expect(() => parseEfsTransactionReport(SCLE_REPORT)).not.toThrow()
+  })
+})
+
+// ── Mixed categories (ULSD, FUEL, DEFD, SCLE, CDSL) ──────────────────────────
+
+const MIXED = readFileSync(
+  resolve(__dirname, '../../../tests/fixtures/fuel-mixed-categories.txt'),
+  'utf-8',
+)
+
+describe('mixed-categories report (ULSD + FUEL + DEFD + SCLE + CDSL)', () => {
+  let result: ReturnType<typeof parseEfsTransactionReport>
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    result = parseEfsTransactionReport(MIXED)
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('parses exactly 5 transactions (group subtotals not counted)', () => {
+    expect(result.transactions).toHaveLength(5)
+  })
+
+  it('FUEL item type is categorized as FUEL', () => {
+    const fuel = result.transactions.find((t) => t.fuelType === 'FUEL')
+    expect(fuel).toBeDefined()
+    expect(fuel!.itemCategory).toBe('FUEL')
+  })
+
+  it('DEFD item type is categorized as FUEL', () => {
+    const defd = result.transactions.find((t) => t.fuelType === 'DEFD')
+    expect(defd).toBeDefined()
+    expect(defd!.itemCategory).toBe('FUEL')
+  })
+
+  it('ULSD item type is categorized as FUEL', () => {
+    const ulsd = result.transactions.find((t) => t.fuelType === 'ULSD')
+    expect(ulsd).toBeDefined()
+    expect(ulsd!.itemCategory).toBe('FUEL')
+  })
+
+  it('SCLE item type is categorized as SCALE', () => {
+    const scle = result.transactions.find((t) => t.fuelType === 'SCLE')
+    expect(scle).toBeDefined()
+    expect(scle!.itemCategory).toBe('SCALE')
+  })
+
+  it('CDSL item type is categorized as OTHER without a console.warn', () => {
+    const cdsl = result.transactions.find((t) => t.fuelType === 'CDSL')
+    expect(cdsl).toBeDefined()
+    expect(cdsl!.itemCategory).toBe('OTHER')
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('fuel total (ULSD + FUEL + DEFD) equals $315.95', () => {
+    const fuelTotal = result.transactions
+      .filter((t) => t.itemCategory === 'FUEL')
+      .reduce((s, t) => s + t.amount, 0)
+    expect(fuelTotal).toBeCloseTo(315.95, 2)
+  })
+
+  it('non-fuel charges (SCLE + CDSL) are excluded from fuel total', () => {
+    const nonFuel = result.transactions
+      .filter((t) => t.itemCategory !== 'FUEL')
+      .reduce((s, t) => s + t.amount, 0)
+    expect(nonFuel).toBeCloseTo(80.00, 2)
+  })
+
+  it('grand-total validation passes without errors', () => {
+    expect(() => parseEfsTransactionReport(MIXED)).not.toThrow()
+  })
+
+  it('continuation rows inherit card number and date from primary row', () => {
+    expect(result.transactions.every((t) => t.cardNumber === '00031')).toBe(true)
+    expect(result.transactions.every((t) => t.transactionDate === '2026-01-15')).toBe(true)
   })
 })
 

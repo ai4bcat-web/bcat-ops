@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   startOfDay, endOfDay, startOfWeek, endOfWeek,
   startOfMonth, endOfMonth, startOfYear, endOfYear,
@@ -8,13 +8,15 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip as RTooltip,
   ResponsiveContainer, Legend,
 } from 'recharts'
-import { Upload, RefreshCw, ArrowLeft, Fuel, ChevronRight, ChevronDown } from 'lucide-react'
+import { Upload, RefreshCw, ArrowLeft, Fuel, ChevronRight, ChevronDown, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { getExpensesByTruck } from '@/lib/expenseAllocation'
+import { cleanupDuplicateFuelTransactions } from '@/lib/apiClient'
 import { FuelUploadModal } from './FuelUploadModal'
 import { ExpenseManageView } from './ExpenseManageView'
 import type { FuelTransaction } from '@/hooks/useFuelTransactions'
@@ -70,10 +72,12 @@ function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const FUEL_TYPES_SET = new Set(['ULSD', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
+// Fuel = ULSD + FUEL (generic diesel) + DEFD (DEF) everywhere in the app — permanent definition.
+const FUEL_TYPES_SET = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
 
 function isFuel(tx: FuelTransaction): boolean {
   if (tx.itemCategory) return tx.itemCategory === 'FUEL'
+  // Fallback for records imported before itemCategory was stored
   return FUEL_TYPES_SET.has((tx.fuelType ?? '').toUpperCase())
 }
 
@@ -424,11 +428,12 @@ function FuelTab({
   rangeKey: RangeKey
   equipment: Equipment[]
 }) {
-  const [showUpload,    setShowUpload]    = useState(false)
-  const [drillTruck,   setDrillTruck]    = useState<Equipment | null>(null)
-  const [drillWeek,    setDrillWeek]     = useState<WeekBucket | null>(null)
-  const [chartMode,    setChartMode]     = useState<'$' | 'gal'>('$')
+  const [showUpload,     setShowUpload]     = useState(false)
+  const [drillTruck,    setDrillTruck]    = useState<Equipment | null>(null)
+  const [drillWeek,     setDrillWeek]     = useState<WeekBucket | null>(null)
+  const [chartMode,     setChartMode]     = useState<'$' | 'gal'>('$')
   const [breakdownOpen, setBreakdownOpen] = useState(false)
+  const [deduping,      setDeduping]      = useState(false)
 
   const filteredTxs = useMemo(() => filterByDate(transactions, rangeStart, rangeEnd), [transactions, rangeStart, rangeEnd])
   const fuelTxs     = useMemo(() => filteredTxs.filter(isFuel), [filteredTxs])
@@ -456,12 +461,15 @@ function FuelTab({
   const weeks = useMemo(() => getWeeksInRange(rangeStart, rangeEnd), [rangeStart, rangeEnd])
 
   const pivotRows = useMemo(() => {
-    return trucks.map((truck) => {
-      const truckFuelTxs = fuelTxs.filter((t) => t.truckId === truck.id)
-      const weekAmts = weeks.map(({ wStart, wEnd }) => sumAmt(filterByDate(truckFuelTxs, wStart, wEnd)))
-      const total = sumAmt(truckFuelTxs)
-      return { truck, label: `#${truck.unitNumber}`, weekAmts, total }
-    }).sort((a, b) => b.total - a.total)
+    return trucks
+      .map((truck) => {
+        const truckFuelTxs = fuelTxs.filter((t) => t.truckId === truck.id)
+        const weekAmts = weeks.map(({ wStart, wEnd }) => sumAmt(filterByDate(truckFuelTxs, wStart, wEnd)))
+        const total = sumAmt(truckFuelTxs)
+        return { truck, label: `#${truck.unitNumber}`, weekAmts, total }
+      })
+      .filter((r) => r.total > 0)
+      .sort((a, b) => b.total - a.total)
   }, [trucks, fuelTxs, weeks])
 
   const weekTotals = weeks.map((_, wi) => pivotRows.reduce((s, r) => s + r.weekAmts[wi], 0))
@@ -528,6 +536,31 @@ function FuelTab({
           </Button>
           <Button size="sm" className="h-8 gap-1.5" onClick={() => setShowUpload(true)}>
             <Upload className="size-3.5" /> Upload Report
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            disabled={deduping}
+            onClick={async () => {
+              setDeduping(true)
+              try {
+                const result = await cleanupDuplicateFuelTransactions()
+                if (result.removed > 0) {
+                  toast.success(`Removed ${result.removed} duplicate transaction${result.removed !== 1 ? 's' : ''}`)
+                  refresh()
+                } else {
+                  toast.success('No duplicates found')
+                }
+              } catch (e) {
+                toast.error('Cleanup failed: ' + (e instanceof Error ? e.message : String(e)))
+              } finally {
+                setDeduping(false)
+              }
+            }}
+          >
+            <Trash2 className={cn('size-3.5', deduping && 'animate-pulse')} />
+            {deduping ? 'Cleaning…' : 'Clean Duplicates'}
           </Button>
         </div>
       </div>
@@ -731,19 +764,34 @@ const PAGE_TABS: { value: PageTab; label: string }[] = [
 
 export function ExpensesPage() {
   const equipment = useAppStore((s) => s.equipment)
-  // All active trucks — used by Overview (non-fuel expenses may be on any truck)
+  // All active trucks — used by both Overview and Fuel tab
   const allActiveTrucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active),
     [equipment],
   )
-  // Fuel-tab trucks — only those with EFS cards (needed for fuel pivot/chart)
-  const trucks = useMemo(
-    () => equipment.filter((e) => e.type === 'truck' && e.active && (e.fuelCardNumbers ?? []).length > 0),
-    [equipment],
-  )
 
-  const { transactions, loading, refresh, addTransactions } = useFuelTransactions()
+  const { transactions, loading, refresh, addTransactions, patchTransaction } = useFuelTransactions()
   const expenseData = useExpenseData()
+
+  // Auto-repair transactions that were uploaded without a truckId (e.g. due to stale
+  // localStorage equipment lacking fuelCardNumbers — see onRehydrateStorage in store).
+  // Use a ref to track which IDs are already being patched so each record is only
+  // sent once even if the effect re-fires while async patches are in flight.
+  const repairingIds = useRef(new Set<string>())
+  useEffect(() => {
+    if (loading || transactions.length === 0 || allActiveTrucks.length === 0) return
+    const unmapped = transactions.filter((t) => !t.truckId && !repairingIds.current.has(t.id))
+    if (unmapped.length === 0) return
+    for (const tx of unmapped) {
+      const truck = allActiveTrucks.find((e) => (e.fuelCardNumbers ?? []).includes(tx.cardNumber))
+      if (truck) {
+        repairingIds.current.add(tx.id)
+        void patchTransaction(tx.id, { truckId: truck.id }).finally(() => {
+          repairingIds.current.delete(tx.id)
+        })
+      }
+    }
+  }, [loading, transactions, allActiveTrucks, patchTransaction])
 
   const [tab,         setTab]         = useState<PageTab>('overview')
   const [rangeKey,    setRangeKey]    = useState<RangeKey>('this-month')
@@ -854,7 +902,7 @@ export function ExpensesPage() {
 
         {tab === 'fuel' && (
           <FuelTab
-            trucks={trucks}
+            trucks={allActiveTrucks}
             transactions={transactions}
             loading={loading}
             refresh={refresh}

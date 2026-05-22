@@ -15,8 +15,16 @@ function fmtMoney(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 }
 
+// Fuel = ULSD + FUEL (generic diesel) + DEFD (DEF) — same definition as ExpensesPage.
+const FUEL_TYPES_WIDGET = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
+function isFuelTx(t: FuelTransaction): boolean {
+  if (t.itemCategory) return t.itemCategory === 'FUEL'
+  return FUEL_TYPES_WIDGET.has((t.fuelType ?? '').toUpperCase())
+}
+
 function filterByRange(txs: FuelTransaction[], start: Date, end: Date) {
   return txs.filter((t) => {
+    if (!isFuelTx(t)) return false
     const d = new Date(`${t.transactionDate}T12:00:00`)
     return d >= start && d <= end
   })

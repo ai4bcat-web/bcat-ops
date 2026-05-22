@@ -197,11 +197,55 @@ export async function createFuelTransaction(
   return result.data.createFuelTransaction
 }
 
+export async function updateFuelTransaction(
+  id: string,
+  patch: Partial<Omit<FuelTransaction, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<FuelTransaction> {
+  const result = await client.graphql({
+    query: `mutation UpdateFuelTransaction($input: UpdateFuelTransactionInput!) { updateFuelTransaction(input: $input) { ${FUEL_TX_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateFuelTransaction: FuelTransaction } }
+  return result.data.updateFuelTransaction
+}
+
 export async function deleteFuelTransaction(id: string): Promise<void> {
   await client.graphql({
     query: `mutation DeleteFuelTransaction($input: DeleteFuelTransactionInput!) { deleteFuelTransaction(input: $input) { id } }`,
     variables: { input: { id } },
   })
+}
+
+/**
+ * One-time cleanup: finds and deletes duplicate FuelTransaction records.
+ * Keeps the oldest record (smallest createdAt) for each dedup key.
+ * Dedup key: transactionDate|cardNumber|invoiceNumber|fuelType|amount
+ *
+ * Returns counts of removed vs kept records.
+ */
+export async function cleanupDuplicateFuelTransactions(): Promise<{ removed: number; kept: number }> {
+  const all = await listFuelTransactions()
+  const seen = new Map<string, FuelTransaction>()
+  const toDelete: string[] = []
+
+  // Sort oldest-first so we always keep the original import
+  const sorted = [...all].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+
+  for (const tx of sorted) {
+    const key = `${tx.transactionDate}|${tx.cardNumber}|${tx.invoiceNumber ?? ''}|${tx.fuelType}|${tx.amount}`
+    if (seen.has(key)) {
+      toDelete.push(tx.id)
+    } else {
+      seen.set(key, tx)
+    }
+  }
+
+  console.log(`[cleanupDuplicates] ${all.length} total, ${toDelete.length} duplicates to remove`)
+  for (const id of toDelete) {
+    await deleteFuelTransaction(id)
+    console.log(`[cleanupDuplicates] deleted ${id}`)
+  }
+
+  return { removed: toDelete.length, kept: seen.size }
 }
 
 /** Check for existing transactions matching the dedup key to skip duplicates */
