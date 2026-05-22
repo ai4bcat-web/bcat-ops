@@ -76,8 +76,10 @@ function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
 const FUEL_TYPES_SET = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
 
 function isFuel(tx: FuelTransaction): boolean {
-  if (tx.itemCategory) return tx.itemCategory === 'FUEL'
-  // Fallback for records imported before itemCategory was stored
+  if (tx.itemCategory === 'FUEL') return true
+  if (tx.itemCategory === 'SCALE' || tx.itemCategory === 'CASH_ADVANCE') return false
+  // itemCategory absent OR 'OTHER' (legacy records stored before FUEL type was in FUEL_ITEM_TYPES):
+  // fall back to fuelType. CDSL/SCLE are NOT in the set so they stay excluded.
   return FUEL_TYPES_SET.has((tx.fuelType ?? '').toUpperCase())
 }
 
@@ -232,7 +234,7 @@ function OverviewTab({
       truckId:         t.truckId,
       transactionDate: t.transactionDate,
       amount:          t.amount,
-      itemCategory:    t.itemCategory ?? (isFuel(t) ? 'FUEL' : 'OTHER'),
+      itemCategory:    isFuel(t) ? 'FUEL' : (t.itemCategory ?? 'OTHER'),
     })),
     [fuelTxs],
   )

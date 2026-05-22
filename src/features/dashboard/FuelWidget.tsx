@@ -18,7 +18,8 @@ function fmtMoney(n: number) {
 // Fuel = ULSD + FUEL (generic diesel) + DEFD (DEF) — same definition as ExpensesPage.
 const FUEL_TYPES_WIDGET = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
 function isFuelTx(t: FuelTransaction): boolean {
-  if (t.itemCategory) return t.itemCategory === 'FUEL'
+  if (t.itemCategory === 'FUEL') return true
+  if (t.itemCategory === 'SCALE' || t.itemCategory === 'CASH_ADVANCE') return false
   return FUEL_TYPES_WIDGET.has((t.fuelType ?? '').toUpperCase())
 }
 
