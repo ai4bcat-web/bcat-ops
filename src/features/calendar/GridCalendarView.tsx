@@ -6,7 +6,7 @@
 
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Plus, CheckCircle, Circle, AlertCircle, GripVertical, PaintBucket } from 'lucide-react'
-import { formatTime, formatDateShort, formatDayHeader, addDays } from '@/lib/date'
+import { formatTime, formatDateShort, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -61,6 +61,47 @@ function apptDate(iso: string | undefined | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+// ── Card-move date helpers ────────────────────────────────────────────────────
+
+// Shift an appointment to a new Chicago calendar day, preserving the original time-of-day.
+function shiftApptToDay(isoAppt: string | null | undefined, newDayStr: string): string {
+  const fallback = fromDateTimeInput(`${newDayStr}T08:00`)
+  if (!isoAppt) return fallback
+  const timeStr = formatDateTimeInput(isoAppt).slice(11) // "HH:mm" in Chicago time
+  return fromDateTimeInput(`${newDayStr}T${timeStr}`)
+}
+
+// Add/subtract days from a "YYYY-MM-DD" string, returns "YYYY-MM-DD".
+function offsetDay(dayStr: string, n: number): string {
+  const [y, m, d] = dayStr.split('-').map(Number)
+  const date = new Date(y, m - 1, d + n)
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+// Compute the new pickupAppt + deliveryAppt for a card being moved to targetDayStr.
+// same-day: both shift to targetDay
+// pickup card: pickup = targetDay, delivery = targetDay+1 (next-day-delivery pattern)
+// delivery card: delivery = targetDay, pickup = targetDay-1
+function computeMoveDates(load: Load, role: Role, targetDayStr: string) {
+  if (role === 'same-day') {
+    return {
+      pickupAppt:   shiftApptToDay(load.pickupAppt,   targetDayStr),
+      deliveryAppt: shiftApptToDay(load.deliveryAppt, targetDayStr),
+    }
+  }
+  if (role === 'pickup') {
+    return {
+      pickupAppt:   shiftApptToDay(load.pickupAppt,   targetDayStr),
+      deliveryAppt: shiftApptToDay(load.deliveryAppt, offsetDay(targetDayStr, 1)),
+    }
+  }
+  // delivery card
+  return {
+    pickupAppt:   shiftApptToDay(load.pickupAppt,   offsetDay(targetDayStr, -1)),
+    deliveryAppt: shiftApptToDay(load.deliveryAppt, targetDayStr),
+  }
 }
 
 // ── Full-detail load card ─────────────────────────────────────────────────────
@@ -388,21 +429,36 @@ function LoadCard({
 
 function DayColumn({
   day, dayStr, entries, drivers, isToday, isCurrentMonth, selectedIds, onSelect,
-  dragOverKey, onDragStart, onDragEnter, onDragEnd,
+  dragOverKey, dropTargetDay, onDragStart, onDragEnter, onDragEnd,
+  onColumnDragEnter, onColumnDragLeave,
 }: {
   day: Date; dayStr: string; entries: DayEntry[]; drivers: Driver[]
   isToday: boolean; isCurrentMonth: boolean; selectedIds: string[]
   onSelect: (loadId: string, e: React.MouseEvent) => void
   dragOverKey: string | null
+  dropTargetDay: string | null
   onDragStart: (dayStr: string, key: string) => void
   onDragEnter: (dayStr: string, key: string) => void
   onDragEnd: () => void
+  onColumnDragEnter: (dayStr: string) => void
+  onColumnDragLeave: (dayStr: string) => void
 }) {
   const { weekday, date } = formatDayHeader(day.toISOString())
   const loadCount = entries.filter((e) => e.role !== 'delivery').length
+  const isDropTarget = dropTargetDay === dayStr
 
   return (
-    <div style={{ width: DAY_COL_W, flexShrink: 0, borderRight: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column' }}>
+    <div
+      style={{ width: DAY_COL_W, flexShrink: 0, borderRight: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column',
+        outline: isDropTarget ? '2px solid var(--ds-blue)' : undefined,
+        outlineOffset: -2,
+        background: isDropTarget ? 'rgba(59,130,246,0.06)' : undefined,
+        transition: 'background 0.1s',
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+      onDragEnter={() => onColumnDragEnter(dayStr)}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) onColumnDragLeave(dayStr) }}
+    >
 
       {/* Sticky day header */}
       <div style={{
@@ -478,27 +534,34 @@ interface GridCalendarViewProps {
   loads:     Load[]
   drivers:   Driver[]
   startDate: Date
-  viewMode:  Extract<ViewMode, 'two-week' | 'month'>
+  viewMode:  ViewMode
 }
 
 export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCalendarViewProps) {
+  const { updateLoad } = useLoads()
+
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const onSelect = useCallback((loadId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     setSelectedIds((prev) => prev.includes(loadId) ? prev.filter((id) => id !== loadId) : [...prev, loadId])
   }, [])
 
-  // ── Drag-to-reorder state ──────────────────────────────────────────────────
-  const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
-  const [dragOverKey, setDragOverKey] = useState<string | null>(null)
-  const dragKey = useRef<string | null>(null)
-  const dragDay = useRef<string | null>(null)
+  // ── Drag state (within-day reorder + cross-column move) ───────────────────
+  const [dayOrder,      setDayOrder]      = useState<Map<string, string[]>>(new Map())
+  const [dragOverKey,   setDragOverKey]   = useState<string | null>(null)
+  const [dropTargetDay, setDropTargetDay] = useState<string | null>(null)
+  const dragKey          = useRef<string | null>(null)
+  const dragDay          = useRef<string | null>(null)
+  const dropTargetDayRef = useRef<string | null>(null)  // ref mirror for use in dragend handler
+  const loadsRef = useRef(loads)
+  loadsRef.current = loads
 
   const handleDragStart = useCallback((dayStr: string, key: string) => {
     dragKey.current = key
     dragDay.current = dayStr
   }, [])
 
+  // Within-day reorder
   const handleDragEnter = useCallback((dayStr: string, key: string) => {
     if (!dragKey.current || dragKey.current === key || dragDay.current !== dayStr) return
     setDragOverKey(key)
@@ -517,18 +580,46 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
     })
   }, [])
 
-  const handleDragEnd = useCallback(() => {
-    dragKey.current  = null
-    dragDay.current  = null
+  // Cross-column: track which column the card is hovering over
+  const handleColumnDragEnter = useCallback((dayStr: string) => {
+    if (!dragKey.current || dragDay.current === dayStr) return
+    dropTargetDayRef.current = dayStr
+    setDropTargetDay(dayStr)
     setDragOverKey(null)
   }, [])
+
+  const handleColumnDragLeave = useCallback((dayStr: string) => {
+    if (dropTargetDayRef.current === dayStr) {
+      dropTargetDayRef.current = null
+      setDropTargetDay(null)
+    }
+  }, [])
+
+  // Cross-column move fires in onDragEnd (always fires on the source card,
+  // unlike onDrop which can be swallowed when the user drops onto a child element).
+  const handleDragEnd = useCallback(() => {
+    const targetDay = dropTargetDayRef.current
+    if (targetDay && dragKey.current && dragDay.current && dragDay.current !== targetDay) {
+      const [loadId, role] = dragKey.current.split(':') as [string, Role]
+      const load = loadsRef.current.find((l) => l.id === loadId)
+      if (load) {
+        updateLoad(loadId, computeMoveDates(load, role, targetDay))
+        setDayOrder(new Map())
+      }
+    }
+    dragKey.current          = null
+    dragDay.current          = null
+    dropTargetDayRef.current = null
+    setDragOverKey(null)
+    setDropTargetDay(null)
+  }, [updateLoad])
 
   const todayStr = useMemo(() => chicagoDateStr(new Date().toISOString()) ?? '', [])
 
   const gridDays = useMemo<Date[]>(() => {
-    if (viewMode === 'two-week') {
-      return Array.from({ length: 14 }, (_, i) => addDays(startDate, i))
-    }
+    if (viewMode === 'day')      return [startDate]
+    if (viewMode === 'two-week') return Array.from({ length: 14 }, (_, i) => addDays(startDate, i))
+    // month
     const daysInMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
     return Array.from({ length: daysInMonth }, (_, i) =>
       addDaysLocal(new Date(startDate.getFullYear(), startDate.getMonth(), 1), i)
@@ -589,9 +680,12 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
               selectedIds={selectedIds}
               onSelect={onSelect}
               dragOverKey={dragOverKey}
+              dropTargetDay={dropTargetDay}
               onDragStart={handleDragStart}
               onDragEnter={handleDragEnter}
               onDragEnd={handleDragEnd}
+              onColumnDragEnter={handleColumnDragEnter}
+              onColumnDragLeave={handleColumnDragLeave}
             />
           )
         })}
