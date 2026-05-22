@@ -235,6 +235,117 @@ describe('parseEfsReport — 2026-05-19 daily fixture', () => {
   })
 })
 
+// ── parseEfsReport — 2026-05-21 URL-download fixture ─────────────────────────
+// Report from "DAILY FUEL REPORT TEXT" job delivered via URL on 2026-05-22 00:33.
+// 3 ULSD transactions for card 00049 / truck 009.
+// Total: $353.95 / 63.19 gal on 2026-05-21.
+
+const SAMPLE_2026_05_21 = readFileSync(
+  resolve(__dirname, '../../../tests/fixtures/fuel-2026-05-21-url.txt'),
+  'utf-8',
+)
+
+describe('parseEfsReport — 2026-05-21 URL-download fixture (card 00049)', () => {
+  const txs = parseEfsReport(SAMPLE_2026_05_21)
+
+  it('grand-total + Total Records validation passes without throwing', () => {
+    expect(() => parseEfsReport(SAMPLE_2026_05_21)).not.toThrow()
+  })
+
+  it('parses exactly 3 transactions', () => {
+    expect(txs).toHaveLength(3)
+  })
+
+  it('all transactions are for card 00049', () => {
+    expect(txs.every((t) => t.cardNumber === '00049')).toBe(true)
+  })
+
+  it('all transactions are dated 2026-05-21', () => {
+    expect(txs.every((t) => t.transactionDate === '2026-05-21')).toBe(true)
+  })
+
+  it('all transactions are ULSD with itemCategory FUEL', () => {
+    expect(txs.every((t) => t.fuelType === 'ULSD')).toBe(true)
+    expect(txs.every((t) => t.itemCategory === 'FUEL')).toBe(true)
+  })
+
+  it('all transactions have unit number 009', () => {
+    expect(txs.every((t) => t.unitNumber === '009')).toBe(true)
+  })
+
+  it('all transactions have blank driver name', () => {
+    expect(txs.every((t) => t.driverName === '')).toBe(true)
+  })
+
+  it('ULSD total amount matches report stated $353.95', () => {
+    const sum = txs.reduce((s, t) => s + t.amount, 0)
+    expect(sum).toBeCloseTo(353.95, 2)
+  })
+
+  it('ULSD total quantity matches report stated 63.19 gal', () => {
+    const sum = txs.reduce((s, t) => s + t.quantity, 0)
+    expect(sum).toBeCloseTo(63.19, 2)
+  })
+
+  it('fees are zero for all transactions', () => {
+    expect(txs.every((t) => t.fees === 0)).toBe(true)
+  })
+
+  it('invoice numbers are distinct across the 3 transactions', () => {
+    const invoices = new Set(txs.map((t) => t.invoiceNumber))
+    expect(invoices.size).toBe(3)
+  })
+
+  it('currency is USD for all transactions', () => {
+    expect(txs.every((t) => t.currency === 'USD')).toBe(true)
+  })
+})
+
+describe('extractUrls — 2026-05-22 DAILY FUEL REPORT TEXT email', () => {
+  // The exact URL from the missed report, verifying the regex handles the
+  // long numeric segment (1779427981054) and the .jobdata anchor correctly.
+  const MISSED_URL =
+    'https://manage.fleetone.com/cards/CardsJob.action?getJobFile&fileId=68a98c53-1cb8-4bfc-8adb-80b07a211f08.1779427981054.jobdata'
+
+  it('extracts URL when body uses newline between URL and disclaimer', () => {
+    const body =
+      "Job: 'DAILY FUEL REPORT TEXT' completed. Download at: " +
+      MISSED_URL +
+      '\nPlease do not reply to this email.'
+    expect(extractUrls(body)).toContain(MISSED_URL)
+  })
+
+  it('extracts URL when disclaimer is on the same line (no whitespace)', () => {
+    const body =
+      "Job: 'DAILY FUEL REPORT TEXT' completed. Download at: " +
+      MISSED_URL +
+      'Please do not reply to this email.'
+    expect(extractUrls(body)).toContain(MISSED_URL)
+  })
+
+  it('does not include trailing text after .jobdata in the URL', () => {
+    const body = MISSED_URL + 'Please do not reply.'
+    const [url] = extractUrls(body)
+    expect(url).toBe(MISSED_URL)
+  })
+})
+
+describe('isEfsTransactionReport — URL-download content', () => {
+  it('returns true for the 2026-05-21 URL-download fixture', () => {
+    expect(isEfsTransactionReport(SAMPLE_2026_05_21)).toBe(true)
+  })
+
+  it('returns false for a DAILY FUEL REPORT TEXT notification email body', () => {
+    // This email BODY is just the notification — not the downloaded report.
+    // The handler must NOT mistake it for a report and must go fetch the URL.
+    const notificationBody =
+      "Job: 'DAILY FUEL REPORT TEXT' completed. Download at: " +
+      'https://manage.fleetone.com/cards/CardsJob.action?getJobFile&fileId=68a98c53-1cb8-4bfc-8adb-80b07a211f08.1779427981054.jobdata' +
+      '\nPlease do not reply to this email.'
+    expect(isEfsTransactionReport(notificationBody)).toBe(false)
+  })
+})
+
 // ── isEfsTransactionReport ─────────────────────────────────────────────────────
 
 describe('isEfsTransactionReport', () => {

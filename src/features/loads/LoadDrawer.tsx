@@ -10,7 +10,6 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useAppStore } from '@/store/useAppStore'
@@ -272,6 +271,9 @@ function NewLoadDialog({
   register,
   watch,
   setValue,
+  mode = 'create',
+  aljexId,
+  onDelete,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -283,6 +285,9 @@ function NewLoadDialog({
   register: ReturnType<typeof useForm<LoadFormValues>>['register']
   watch: ReturnType<typeof useForm<LoadFormValues>>['watch']
   setValue: ReturnType<typeof useForm<LoadFormValues>>['setValue']
+  mode?: 'create' | 'edit'
+  aljexId?: string
+  onDelete?: () => void
 }) {
   const [splitLoad, setSplitLoad] = useState(false)
 
@@ -301,7 +306,9 @@ function NewLoadDialog({
           padding: '16px 52px 16px 24px', borderBottom: '1px solid var(--ds-border)',
           flexShrink: 0,
         }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>New Load</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>
+            {mode === 'edit' ? `Edit — ${aljexId ?? 'Load'}` : 'New Load'}
+          </h2>
         </div>
 
         {/* Scrollable body */}
@@ -372,7 +379,7 @@ function NewLoadDialog({
                       <Controller name="pickupApptEnd" control={control} render={({ field: ef }) => (
                         <ApptFields
                           label="Pickup"
-                          typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
+                          typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd' && v !== 'fcfs') sf.onChange('') } }}
                           startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                           endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                           startError={errors.pickupAppt?.message}
@@ -391,7 +398,7 @@ function NewLoadDialog({
                     <Controller name="deliveryApptEnd" control={control} render={({ field: ef }) => (
                       <ApptFields
                         label="Delivery"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
+                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd' && v !== 'fcfs') sf.onChange('') } }}
                         startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                         endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                         startError={errors.deliveryAppt?.message}
@@ -560,6 +567,16 @@ function NewLoadDialog({
           display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
           background: 'var(--ds-surface)',
         }}>
+          {mode === 'edit' && onDelete && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 px-4 text-destructive border-destructive/30 hover:bg-destructive/5"
+              onClick={onDelete}
+            >
+              <Trash2 className="size-4 mr-1" /> Delete
+            </Button>
+          )}
           {Object.keys(errors).length > 0 && (
             <span style={{ flex: 1, fontSize: 12, color: 'var(--ds-red, #dc2626)' }}>
               Please fill in the required fields above.
@@ -570,7 +587,7 @@ function NewLoadDialog({
               Cancel
             </Button>
             <Button type="submit" form="new-load-form" className="h-9 px-5">
-              Create Load
+              {mode === 'edit' ? 'Save Changes' : 'Create Load'}
             </Button>
           </div>
         </div>
@@ -772,11 +789,11 @@ export function LoadDrawer() {
     return formatDateTime(appt)
   }
 
-  // ── Create mode → centered Dialog ─────────────────────────────────────────
-  if (isCreate) {
+  // ── Create / Edit mode → centered Dialog ─────────────────────────────────
+  if (isCreate || drawerMode === 'edit') {
     return (
       <NewLoadDialog
-        isOpen={isCreate}
+        isOpen={isOpen}
         onClose={onClose}
         handleSubmit={handleSubmit}
         activeDrivers={activeDrivers}
@@ -786,6 +803,9 @@ export function LoadDrawer() {
         register={register}
         watch={watch}
         setValue={setValue}
+        mode={isCreate ? 'create' : 'edit'}
+        aljexId={load?.aljexId}
+        onDelete={!isCreate ? handleDelete : undefined}
       />
     )
   }
@@ -818,138 +838,7 @@ export function LoadDrawer() {
         </SheetHeader>
 
         <SheetBody>
-          {isEdit ? (
-            <form id="load-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Pro #" error={errors.aljexId?.message}>
-                  <Input {...register('aljexId')} placeholder="A-2847391" className="h-9" />
-                </Field>
-                <Field label="TMS ID / PO" error={errors.tmsId?.message}>
-                  <Input {...register('tmsId')} placeholder="TMS-44201" className="h-9" />
-                </Field>
-              </div>
-
-              <Field label="Pickup Number" error={errors.pickupNumber?.message}>
-                <Input {...register('pickupNumber')} placeholder="PU-8812" className="h-9" />
-              </Field>
-
-              <Separator />
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Origin Name">
-                  <Input {...register('originName')} placeholder="Shipper / Facility" className="h-9" />
-                </Field>
-                <Field label="Origin City">
-                  <Input {...register('originCity')} placeholder="Chicago, IL" className="h-9" />
-                </Field>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Destination Name">
-                  <Input {...register('destinationName')} placeholder="Consignee / Facility" className="h-9" />
-                </Field>
-                <Field label="Destination City">
-                  <Input {...register('destinationCity')} placeholder="Indianapolis, IN" className="h-9" />
-                </Field>
-              </div>
-
-              <Separator />
-
-              <Controller
-                name="pickupApptType"
-                control={control}
-                render={({ field: tf }) => (
-                  <Controller name="pickupAppt" control={control} render={({ field: sf }) => (
-                    <Controller name="pickupApptEnd" control={control} render={({ field: ef }) => (
-                      <ApptFields
-                        label="Pickup"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
-                        startField={{ value: sf.value ?? '', onChange: sf.onChange }}
-                        endField={{ value: ef.value ?? '', onChange: ef.onChange }}
-                        startError={errors.pickupAppt?.message}
-                        endError={errors.pickupApptEnd?.message}
-                      />
-                    )} />
-                  )} />
-                )}
-              />
-
-              <Controller
-                name="deliveryApptType"
-                control={control}
-                render={({ field: tf }) => (
-                  <Controller name="deliveryAppt" control={control} render={({ field: sf }) => (
-                    <Controller name="deliveryApptEnd" control={control} render={({ field: ef }) => (
-                      <ApptFields
-                        label="Delivery"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd') sf.onChange('') } }}
-                        startField={{ value: sf.value ?? '', onChange: sf.onChange }}
-                        endField={{ value: ef.value ?? '', onChange: ef.onChange }}
-                        startError={errors.deliveryAppt?.message}
-                        endError={errors.deliveryApptEnd?.message}
-                      />
-                    )} />
-                  )} />
-                )}
-              />
-
-              <Separator />
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="PU Driver" error={errors.pickupDriverId?.message}>
-                  <Controller name="pickupDriverId" control={control} render={({ field }) => (
-                    <DriverPicker value={field.value} onChange={field.onChange} drivers={activeDrivers} />
-                  )} />
-                </Field>
-                <Field label="DE Driver" error={errors.deliveryDriverId?.message}>
-                  <Controller name="deliveryDriverId" control={control} render={({ field }) => (
-                    <DriverPicker value={field.value} onChange={field.onChange} drivers={activeDrivers} placeholder="Delivery driver" />
-                  )} />
-                </Field>
-              </div>
-
-              <Separator />
-
-              <Controller
-                name="readyToInvoice"
-                control={control}
-                render={({ field }) => (
-                  field.value ? (
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 h-9 text-emerald-700 text-sm font-medium w-full hover:bg-emerald-100 transition-colors"
-                      onClick={() => field.onChange(false)}
-                    >
-                      <CheckCircle2 className="size-4 text-emerald-600 shrink-0" />
-                      Ready to Invoice
-                      <span className="ml-auto text-[10px] text-emerald-500 font-normal">click to undo</span>
-                    </button>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full h-9 gap-2 justify-start font-medium text-muted-foreground"
-                      onClick={() => field.onChange(true)}
-                    >
-                      <Circle className="size-4" />
-                      Mark as Ready to Invoice
-                    </Button>
-                  )
-                )}
-              />
-
-              {!isCreate && load?.rateConfirmUrl && (
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Rate Confirmation</Label>
-                  <img
-                    src={load.rateConfirmUrl}
-                    alt="Rate confirmation"
-                    className="w-full rounded-md border border-border object-contain max-h-48"
-                  />
-                  <p className="text-xs text-muted-foreground">Open the load detail view to replace or remove.</p>
-                </div>
-              )}
-            </form>
-          ) : load ? (
+          {load ? (
             <div className="space-y-0">
               <ReadonlyField label="Pro #"       value={load.aljexId} />
               <ReadonlyField label="TMS / PO"   value={load.tmsId} />
@@ -1027,31 +916,19 @@ export function LoadDrawer() {
         </SheetBody>
 
         <SheetFooter>
-          {isEdit ? (
-            <>
-              {Object.keys(errors).length > 0 && (
-                <p className="w-full text-xs text-destructive mb-1">Please fill in the required fields above.</p>
-              )}
-              <Button variant="outline" className="flex-1 h-9" onClick={onClose}>Cancel</Button>
-              <Button type="submit" form="load-form" className="flex-1 h-9">Save Changes</Button>
-            </>
-          ) : (
-            <>
-              {load && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 text-destructive border-destructive/30 hover:bg-destructive/5"
-                  onClick={handleDelete}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              )}
-              <Button variant="outline" className="flex-1 h-9" onClick={() => setSelectedLoad(selectedLoadId, 'edit')}>
-                <Edit2 className="size-4 mr-2" /> Edit Load
-              </Button>
-            </>
+          {load && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-destructive border-destructive/30 hover:bg-destructive/5"
+              onClick={handleDelete}
+            >
+              <Trash2 className="size-4" />
+            </Button>
           )}
+          <Button variant="outline" className="flex-1 h-9" onClick={() => setSelectedLoad(selectedLoadId, 'edit')}>
+            <Edit2 className="size-4 mr-2" /> Edit Load
+          </Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>

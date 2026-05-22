@@ -6,7 +6,7 @@
 
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Plus, CheckCircle, Circle, AlertCircle, GripVertical, PaintBucket } from 'lucide-react'
-import { formatTime, formatDateShort, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
+import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'

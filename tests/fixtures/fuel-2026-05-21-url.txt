@@ -1,0 +1,14 @@
+                         Transaction Report
+                                               2026-05-22 00:33
+  Carrier:  IVAN CARTAGE CO     Start Date: 2026-05-21  End Date: 2026-05-21  Carrier Id 677334  Contract Id: All
+  Group by: Card Number         Sort by: Transaction Date                     Total Records: 3
+  Card #      Tran Date    Invoice      Unit    Driver Name    Odometer   Location Name    City      State/Prov   Fees   Item   Unit Price   Qty      Amt    DB  Currency
+  00049       2026-05-21   0097841      009                    412500     KWIK TRIP #234   BROOKFIELD   WI                  ULSD   5.601        20.00    112.02  N   USD/Gallon
+  00049       2026-05-21   0097956      009                    413100     TA EXPRESS 482   BELOIT       WI                  ULSD   5.601        20.00    112.02  N   USD/Gallon
+  00049       2026-05-21   58832        009                    413780     PILOT 0877       ROCKFORD     IL                  ULSD   5.601        23.19    129.91  N   USD/Gallon
+
+  Group: 1  00049                        Amount      Quantity    Avg PPU
+                             ULSD         353.95      63.19       5.601
+                             Fees         0.00                    0.000
+                             Totals       353.95                  0.000
+                             Total Fuel   353.95      63.19

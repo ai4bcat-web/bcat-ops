@@ -121,7 +121,10 @@ export const handler = async (event: LambdaEvent) => {
   for (const url of allUrls) {
     try {
       const res = await fetch(url, { redirect: 'follow' })
-      if (!res.ok) continue
+      if (!res.ok) {
+        console.warn('[fuel-import] URL fetch HTTP error', { url, status: res.status, statusText: res.statusText })
+        continue
+      }
       const text = await res.text()
       if (text.includes('USD/Gallon')) {
         reportText = text
@@ -131,6 +134,13 @@ export const handler = async (event: LambdaEvent) => {
         console.log('[fuel-import] found report at', url, 'filename:', reportFileName)
         break
       }
+      // URL fetched OK but content is not an EFS report (e.g. HTML login page or error page)
+      console.warn('[fuel-import] URL fetched but content is not an EFS report', {
+        url,
+        status: res.status,
+        contentType: res.headers.get('content-type'),
+        preview: text.slice(0, 300),
+      })
     } catch (err) {
       console.warn('[fuel-import] failed to fetch URL', url, err)
     }
@@ -244,7 +254,7 @@ export const handler = async (event: LambdaEvent) => {
     }
   }
 
-  console.log('[fuel-import] done — added:', added, 'skipped:', skipped, 'errors:', errors)
+  console.log('[fuel-import] done', { added, skipped, errors, parsed: transactions.length, reportFile: reportFileName })
   return respond(200, {
     status: 'ok',
     gmailMessageId,
