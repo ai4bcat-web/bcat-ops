@@ -11,7 +11,6 @@ import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
 const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
-  'planner':  { numDays: 7,  navDays: 7  },
   'day':      { numDays: 1,  navDays: 1  },
   'two-week': { numDays: 14, navDays: 14 },
   'month':    { numDays: -1, navDays: -1 }, // numDays computed dynamically
@@ -168,19 +167,19 @@ export function CalendarPage() {
         background: 'var(--ds-surface)',
       }}>
         <CalendarErrorBoundary>
-          {(currentView === 'two-week' || currentView === 'month') ? (
+          {currentView === 'day' ? (
+            <PlannerView
+              loads={visibleLoads}
+              drivers={drivers}
+              weekStart={startDate}
+              numDays={1}
+            />
+          ) : (
             <GridCalendarView
               loads={visibleLoads}
               drivers={drivers}
               startDate={startDate}
               viewMode={currentView}
-            />
-          ) : (
-            <PlannerView
-              loads={visibleLoads}
-              drivers={drivers}
-              weekStart={startDate}
-              numDays={numDays}
             />
           )}
         </CalendarErrorBoundary>

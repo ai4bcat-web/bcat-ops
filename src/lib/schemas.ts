@@ -44,7 +44,7 @@ export const loadSchema = z
     pickupApptEnd: z.string().optional(),
 
     deliveryApptType: apptTypeEnum,
-    deliveryAppt: z.string().min(1, 'Delivery appointment is required'),
+    deliveryAppt: z.string(),
     deliveryApptEnd: z.string().optional(),
 
     pickupDriverId: z.string().nullable(),
@@ -57,6 +57,10 @@ export const loadSchema = z
     rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
     notes: z.string().optional().nullable(),
   })
+  .refine(
+    (d) => d.deliveryApptType === 'fcfs' || d.deliveryAppt.length > 0,
+    { message: 'Delivery appointment is required', path: ['deliveryAppt'] }
+  )
   .refine(
     (d) => d.pickupApptType === 'tbd' || d.deliveryApptType === 'tbd' || d.pickupApptType === 'fcfs' || d.deliveryApptType === 'fcfs' || d.deliveryAppt >= d.pickupAppt,
     { message: 'Delivery must be on or after pickup', path: ['deliveryAppt'] }
