@@ -94,14 +94,39 @@ function respond(statusCode: number, body: Record<string, unknown>) {
 }
 
 export const handler = async (event: LambdaEvent) => {
-  console.log('[fuel-import] invoked')
+  // ── DIAGNOSTIC: log raw event shape before any processing ────────────────
+  const rawBody = event.body ?? ''
+  console.log('[fuel-import] RAW EVENT body length:', rawBody.length)
 
   let payload: WebhookPayload
   try {
-    payload = JSON.parse(event.body ?? '{}') as WebhookPayload
+    payload = JSON.parse(rawBody || '{}') as WebhookPayload
   } catch {
+    console.error('[fuel-import] JSON parse failed, raw body preview:', rawBody.slice(0, 500))
     return respond(400, { error: 'invalid JSON body' })
   }
+
+  // ── DIAGNOSTIC: log full payload shape ───────────────────────────────────
+  console.log('[fuel-import] PAYLOAD SHAPE', {
+    gmailMessageId:      payload.gmailMessageId,
+    subject:             payload.subject,
+    bodyTextLength:      payload.bodyText?.length ?? 0,
+    bodyHtmlLength:      payload.bodyHtml?.length ?? 0,
+    attachmentTextLength: payload.attachmentText?.length ?? 0,
+    hasBodyText:         !!payload.bodyText,
+    hasBodyHtml:         !!payload.bodyHtml,
+    hasAttachmentText:   !!payload.attachmentText,
+  })
+  if (payload.bodyText) {
+    console.log('[fuel-import] BODY_TEXT PREVIEW (first 1500):', payload.bodyText.slice(0, 1500))
+  }
+  if (payload.bodyHtml) {
+    console.log('[fuel-import] BODY_HTML PREVIEW (first 500):', payload.bodyHtml.slice(0, 500))
+  }
+  if (payload.attachmentText) {
+    console.log('[fuel-import] ATTACHMENT_TEXT PREVIEW (first 1500):', payload.attachmentText.slice(0, 1500))
+  }
+  // ── END DIAGNOSTIC ────────────────────────────────────────────────────────
 
   if (!SECRET || payload.secret !== SECRET) {
     console.warn('[fuel-import] 401 — bad secret')

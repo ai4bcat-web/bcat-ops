@@ -275,27 +275,65 @@ const EFS_PROCESSED_LABEL     = 'efs-processed';
 **Add this function to the script:**
 ```javascript
 function processFuelReportEmails() {
-  const efsLabel       = GmailApp.getUserLabelByName(EFS_LABEL);
+  const efsLabel = GmailApp.getUserLabelByName(EFS_LABEL);
   if (!efsLabel) { console.log('Label efs-report not found — skipping'); return; }
 
   const processedLabel = GmailApp.getUserLabelByName(EFS_PROCESSED_LABEL)
     || GmailApp.createLabel(EFS_PROCESSED_LABEL);
 
   const threads = efsLabel.getThreads(0, 10);
-  threads.forEach(thread => {
-    const threadLabels = thread.getLabels().map(l => l.getName());
+  threads.forEach(function(thread) {
+    const threadLabels = thread.getLabels().map(function(l) { return l.getName(); });
     if (threadLabels.includes(EFS_PROCESSED_LABEL)) return;
 
-    thread.getMessages().forEach(message => {
+    thread.getMessages().forEach(function(message) {
+      const msgId   = message.getId();
+      const subject = message.getSubject();
+      const bodyText = message.getPlainBody() || '';
+      const bodyHtml = message.getBody() || '';
+
+      // ── DIAGNOSTIC: log body ──────────────────────────────────────────
+      console.log('[EFS] Processing message id=' + msgId + ' subject=' + subject);
+      console.log('[EFS] bodyText length=' + bodyText.length + ' bodyHtml length=' + bodyHtml.length);
+      console.log('[EFS] bodyText preview (first 1500):', bodyText.slice(0, 1500));
+
+      // ── Read attachments ──────────────────────────────────────────────
+      const attachments = message.getAttachments();
+      console.log('[EFS] attachment count:', attachments.length);
+
+      let attachmentText = '';
+      attachments.forEach(function(att) {
+        const name     = att.getName();
+        const mimeType = att.getContentType();
+        const size     = att.getSize();
+        console.log('[EFS] attachment: name=' + name + ' mimeType=' + mimeType + ' size=' + size);
+
+        // Read text-like attachments (EFS reports are .txt or plain text)
+        if (!attachmentText && (name.endsWith('.txt') || mimeType.startsWith('text/'))) {
+          try {
+            const content = att.getDataAsString();
+            console.log('[EFS] attachment content preview (first 1500):', content.slice(0, 1500));
+            attachmentText = content;
+          } catch (e) {
+            console.error('[EFS] failed to read attachment ' + name + ':', e);
+          }
+        }
+      });
+
+      // ── Build payload ─────────────────────────────────────────────────
       const payload = {
         secret:         WEBHOOK_SECRET,
-        gmailMessageId: message.getId(),
-        subject:        message.getSubject(),
-        bodyText:       message.getPlainBody(),
-        bodyHtml:       message.getBody(),
+        gmailMessageId: msgId,
+        subject:        subject,
+        bodyText:       bodyText,
+        bodyHtml:       bodyHtml,
+        attachmentText: attachmentText,
         receivedAt:     message.getDate().toISOString(),
       };
+      console.log('[EFS] Sending payload — bodyTextLen=' + bodyText.length
+        + ' attachmentTextLen=' + attachmentText.length);
 
+      // ── POST to Lambda ────────────────────────────────────────────────
       try {
         const response = UrlFetchApp.fetch(FUEL_IMPORT_WEBHOOK_URL, {
           method:             'post',
@@ -304,14 +342,17 @@ function processFuelReportEmails() {
           muteHttpExceptions: true,
         });
         const code = response.getResponseCode();
-        console.log('Fuel import response:', code, response.getContentText());
+        const body = response.getContentText();
+        console.log('[EFS] Lambda response:', code, body);
+        // Only mark processed on HTTP 200
         if (code === 200) {
           thread.addLabel(processedLabel);
+          console.log('[EFS] Thread marked efs-processed');
         } else {
-          console.error('Fuel import webhook failed:', code, response.getContentText());
+          console.error('[EFS] Fuel webhook failed [' + code + ']:', body);
         }
       } catch (e) {
-        console.error('Error processing EFS email:', e);
+        console.error('[EFS] fetch error:', e);
       }
     });
   });
