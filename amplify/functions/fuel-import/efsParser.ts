@@ -65,8 +65,14 @@ const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\
 // URL-download format uses 6 spaces; DAILY FUEL REPORT TEXT format uses 2 spaces.
 const CARD_RE = /^\s{2,8}(\d{5})\s/
 
-// ISO date anywhere in the line
-const DATE_RE = /(\d{4}-\d{2}-\d{2})/
+// ISO date (YYYY-MM-DD) or US date (M/D/YYYY) anywhere in the line
+const DATE_RE = /(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4})/
+
+function normalizeDate(s: string): string {
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`
+  return s
+}
 
 // Total Records in the report header line
 const TOTAL_RECORDS_RE = /Total Records:\s*(\d+)/i
@@ -74,7 +80,7 @@ const TOTAL_RECORDS_RE = /Total Records:\s*(\d+)/i
 // ── Main parser ───────────────────────────────────────────────────────────────
 
 export function parseEfsReport(text: string): ParsedFuelTransaction[] {
-  const lines = text.split('\n')
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
   const transactions: ParsedFuelTransaction[] = []
 
   let prevCard     = ''
@@ -169,9 +175,10 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
 
     if (cardM && dateM) {
       cardNumber      = cardM[1]
-      transactionDate = dateM[1]
+      const rawDate   = dateM[1]
+      transactionDate = normalizeDate(rawDate)
 
-      const dateEnd   = line.indexOf(transactionDate) + transactionDate.length
+      const dateEnd   = line.indexOf(rawDate) + rawDate.length
       const fuelStart = line.indexOf(rightM[0])
       const middle    = line.slice(dateEnd, fuelStart)
       const tokens    = middle.split(/\s{2,}/).map((t) => t.trim()).filter(Boolean)

@@ -252,6 +252,84 @@ describe('mixed-categories report (ULSD + FUEL + DEFD + SCLE + CDSL)', () => {
   })
 })
 
+// ── Ivan Cartage — US-format dates (MM/DD/YYYY) ───────────────────────────────
+
+const IVAN = readFileSync(
+  resolve(__dirname, '../../../tests/fixtures/fuel-ivan-2026-05-22.txt'),
+  'utf-8',
+)
+
+describe('ivan-cartage US-format dates report', () => {
+  const result = parseEfsTransactionReport(IVAN)
+  const { transactions, grandTotals } = result
+
+  it('parses exactly 8 transactions', () => {
+    expect(transactions).toHaveLength(8)
+  })
+
+  it('grand total ULSD amount matches $3,603.14', () => {
+    expect(grandTotals.byFuelType['ULSD'].amount).toBeCloseTo(3603.14, 1)
+  })
+
+  it('grand total ULSD quantity matches 677.34 gal', () => {
+    expect(grandTotals.byFuelType['ULSD'].quantity).toBeCloseTo(677.34, 2)
+  })
+
+  it('grand total fees matches $6.00', () => {
+    expect(grandTotals.fees).toBeCloseTo(6.00, 2)
+  })
+
+  it('all dates are stored in ISO format (YYYY-MM-DD)', () => {
+    const ISO_RE = /^\d{4}-\d{2}-\d{2}$/
+    expect(transactions.every((t) => ISO_RE.test(t.transactionDate))).toBe(true)
+  })
+
+  it('transactions span 05/22 – 05/25 (2026)', () => {
+    const dates = [...new Set(transactions.map((t) => t.transactionDate))].sort()
+    expect(dates).toContain('2026-05-22')
+    expect(dates).toContain('2026-05-23')
+    expect(dates).toContain('2026-05-24')
+    expect(dates).toContain('2026-05-25')
+  })
+
+  it('fees $2.00 on card 00023 (05/22 stop)', () => {
+    const tx = transactions.find((t) => t.cardNumber === '00023' && t.transactionDate === '2026-05-22')
+    expect(tx).toBeDefined()
+    expect(tx!.fees).toBeCloseTo(2.00, 2)
+  })
+
+  it('card 00031 has blank driver name', () => {
+    const txs = transactions.filter((t) => t.cardNumber === '00031')
+    expect(txs).toHaveLength(2)
+    expect(txs.every((t) => t.driverName === '')).toBe(true)
+  })
+
+  it('card 00049 has 2 transactions both ULSD', () => {
+    const txs = transactions.filter((t) => t.cardNumber === '00049')
+    expect(txs).toHaveLength(2)
+    expect(txs.every((t) => t.fuelType === 'ULSD')).toBe(true)
+  })
+
+  it('all transactions have itemCategory FUEL', () => {
+    expect(transactions.every((t) => t.itemCategory === 'FUEL')).toBe(true)
+  })
+
+  it('parsed ULSD sum matches grand total (validator passes)', () => {
+    const sum = transactions.reduce((s, t) => s + t.amount, 0)
+    expect(sum).toBeCloseTo(3603.14, 1)
+  })
+
+  it('parsed fees sum matches grand total', () => {
+    const sum = transactions.reduce((s, t) => s + t.fees, 0)
+    expect(sum).toBeCloseTo(6.00, 2)
+  })
+
+  it('dedup keys are unique per transaction', () => {
+    const keys = transactions.map(fuelTxDedupKey)
+    expect(new Set(keys).size).toBe(transactions.length)
+  })
+})
+
 // ── Unknown item type ──────────────────────────────────────────────────────────
 
 const UNKNOWN_TYPE_REPORT = [
