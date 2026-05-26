@@ -191,10 +191,14 @@ interface BackfillEvent {
   endDate:   string   // YYYY-MM-DD
 }
 
-function isBackfillEvent(e: Record<string, unknown>): e is BackfillEvent {
-  return e.mode === 'backfill'
-    && typeof e.startDate === 'string'
-    && typeof e.endDate   === 'string'
+function isBackfillEvent(e: unknown): e is BackfillEvent {
+  return (
+    typeof e === 'object' &&
+    e !== null &&
+    (e as Record<string, unknown>).mode === 'backfill' &&
+    typeof (e as Record<string, unknown>).startDate === 'string' &&
+    typeof (e as Record<string, unknown>).endDate   === 'string'
+  )
 }
 
 export const handler = async (event: Record<string, unknown> = {}): Promise<void> => {
