@@ -67,6 +67,54 @@ export async function deleteLoad(id: string): Promise<void> {
   })
 }
 
+// ── Real-time subscriptions ───────────────────────────────────────────────────
+
+interface SubscriptionHandle { unsubscribe(): void }
+interface Subscribable<T> {
+  subscribe(opts: { next(v: { data: T }): void; error(e: unknown): void }): SubscriptionHandle
+}
+
+export function subscribeToLoadChanges(callbacks: {
+  onCreate?: (load: Load) => void
+  onUpdate?: (load: Load) => void
+  onDelete?: (id: string) => void
+}): () => void {
+  const handles: SubscriptionHandle[] = []
+
+  function wire<T>(query: string, pick: (data: T) => void) {
+    const handle = (client.graphql({ query }) as unknown as Subscribable<T>)
+      .subscribe({
+        next:  ({ data }) => pick(data),
+        error: (e) => console.warn('[subscription] error:', e),
+      })
+    handles.push(handle)
+  }
+
+  if (callbacks.onCreate) {
+    const cb = callbacks.onCreate
+    wire<{ onCreateLoad: Load }>(
+      `subscription OnCreateLoad { onCreateLoad { ${LOAD_FIELDS} } }`,
+      (d) => { if (d.onCreateLoad) cb(d.onCreateLoad) },
+    )
+  }
+  if (callbacks.onUpdate) {
+    const cb = callbacks.onUpdate
+    wire<{ onUpdateLoad: Load }>(
+      `subscription OnUpdateLoad { onUpdateLoad { ${LOAD_FIELDS} } }`,
+      (d) => { if (d.onUpdateLoad) cb(d.onUpdateLoad) },
+    )
+  }
+  if (callbacks.onDelete) {
+    const cb = callbacks.onDelete
+    wire<{ onDeleteLoad: { id: string } }>(
+      `subscription OnDeleteLoad { onDeleteLoad { id } }`,
+      (d) => { if (d.onDeleteLoad?.id) cb(d.onDeleteLoad.id) },
+    )
+  }
+
+  return () => handles.forEach((h) => h.unsubscribe())
+}
+
 // ── Drivers ───────────────────────────────────────────────────────────────────
 
 export async function listDrivers(): Promise<Driver[]> {

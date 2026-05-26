@@ -460,7 +460,25 @@ export const useAppStore = create<AppState>()(
         } catch (err) {
           console.error('[store] initializeData failed', err)
           set({ isLoading: false, error: errorMessage(err) })
+          return
         }
+
+        // ── Real-time subscriptions — keep all clients in sync ──────────────
+        api.subscribeToLoadChanges({
+          // Upsert: if another client created a load we don't have yet, add it;
+          // if we already have it (our own optimistic create), replace with server copy.
+          onCreate: (load) => set((s) => ({
+            loads: s.loads.some((l) => l.id === load.id)
+              ? s.loads.map((l) => l.id === load.id ? load : l)
+              : [...s.loads, load],
+          })),
+          onUpdate: (load) => set((s) => ({
+            loads: s.loads.map((l) => l.id === load.id ? load : l),
+          })),
+          onDelete: (id) => set((s) => ({
+            loads: s.loads.filter((l) => l.id !== id),
+          })),
+        })
       },
 
       // ── Drivers ────────────────────────────────────────────────────────────
