@@ -268,7 +268,7 @@ function LoadCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span style={{ fontSize: 9.5, fontWeight: 600, color: puYard ? 'var(--ds-t3)' : 'var(--ds-blue)', width: 18, flexShrink: 0 }}>PU</span>
         {puDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{puDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: 500, color: puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 10.5, fontWeight: puTime === 'NEED' ? 700 : 500, color: puTime === 'NEED' ? '#dc2626' : puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {puTime}
         </span>
       </div>
@@ -277,7 +277,7 @@ function LoadCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span style={{ fontSize: 9.5, fontWeight: 600, color: deYard ? 'var(--ds-t3)' : '#7c3aed', width: 18, flexShrink: 0 }}>DE</span>
         {deDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{deDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: 500, color: deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 10.5, fontWeight: deTime === 'NEED' ? 700 : 500, color: deTime === 'NEED' ? '#dc2626' : deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {deTime}
         </span>
       </div>
