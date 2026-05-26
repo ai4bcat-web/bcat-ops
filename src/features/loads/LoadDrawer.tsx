@@ -77,36 +77,36 @@ function ReadonlyField({ label, value }: { label: string; value?: string | null 
 // Splits "YYYY-MM-DDTHH:mm" into date + time inputs so the time always
 // renders in 24-hour format regardless of browser locale.
 function DateTimeInput({
-  value, onChange, className, autoFocus, onKeyDown,
+  value, onChange, autoFocus, onKeyDown,
 }: {
   value: string
   onChange: (v: string) => void
-  className?: string
   autoFocus?: boolean
   onKeyDown?: React.KeyboardEventHandler
 }) {
   const date = value.slice(0, 10)
   const time = value.slice(11, 16) || ''
   const combine = (d: string, t: string) => (d && t ? `${d}T${t}` : d || '')
+  const inputCls = 'h-8 border border-input bg-background text-sm focus:outline-none focus:ring-1 focus:ring-ring px-2'
   return (
-    <div className="flex gap-1.5">
+    <div className="flex" style={{ width: 'fit-content' }}>
       <input
         type="date"
         autoFocus={autoFocus}
-        className={className}
+        className={inputCls}
         value={date}
         onChange={(e) => onChange(combine(e.target.value, time))}
         onKeyDown={onKeyDown}
-        style={{ flex: '1 1 0', minWidth: 0 }}
+        style={{ width: 136, borderRadius: '6px 0 0 6px', borderRight: 'none' }}
       />
       <input
         type="text"
         placeholder="14:30"
-        className={className}
+        className={inputCls}
         value={time}
         onChange={(e) => onChange(combine(date, e.target.value))}
         onKeyDown={onKeyDown}
-        style={{ width: 72, flexShrink: 0 }}
+        style={{ width: 58, borderRadius: '0 6px 6px 0', textAlign: 'center' }}
       />
     </div>
   )
@@ -170,7 +170,7 @@ function ApptFields({
       {type === 'exact' && (
         <div>
           <DateTimeInput
-            className="h-9 text-sm rounded-md border border-input bg-background px-3 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+
             value={startField.value}
             onChange={startField.onChange}
           />
@@ -183,7 +183,7 @@ function ApptFields({
           <div>
             <p className="text-xs text-muted-foreground mb-1">From</p>
             <DateTimeInput
-              className="h-9 text-sm rounded-md border border-input bg-background px-3 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+  
               value={startField.value}
               onChange={startField.onChange}
             />
@@ -192,7 +192,7 @@ function ApptFields({
           <div>
             <p className="text-xs text-muted-foreground mb-1">To</p>
             <DateTimeInput
-              className="h-9 text-sm rounded-md border border-input bg-background px-3 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
+  
               value={endField.value}
               onChange={endField.onChange}
             />
