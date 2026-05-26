@@ -338,6 +338,14 @@ function LoadCard({
             {load.daySlot ?? ''}
           </span>
         )}
+        <span style={{
+          fontSize: 12, flex: 1,
+          color: driverId ? 'var(--ds-t1)' : 'var(--ds-blue)',
+          fontWeight: 600,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {driver?.name ?? 'Unassigned'}
+        </span>
         {/* Driver avatar */}
         <span style={{
           width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
@@ -349,14 +357,6 @@ function LoadCard({
             ? <img src={driver.photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
             : driverInitials(driver?.name ?? '')
           }
-        </span>
-        <span style={{
-          fontSize: 12, flex: 1,
-          color: driverId ? 'var(--ds-t1)' : 'var(--ds-blue)',
-          fontWeight: 600,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {driver?.name ?? 'Unassigned'}
         </span>
         {rateStr && (
           <span style={{ fontSize: 10.5, fontWeight: 600, color: '#15803d', flexShrink: 0 }}>{rateStr}</span>
