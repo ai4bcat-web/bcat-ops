@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAuthenticator } from '@aws-amplify/ui-react'
+import { useAuth } from '@/hooks/useAuth'
 import type { Driver } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 
@@ -20,8 +20,8 @@ interface Props {
 }
 
 export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCreate, onDelete }: Props) {
-  const { user } = useAuthenticator()
-  const currentUser = user?.signInDetails?.loginId ?? 'unknown'
+  const { user } = useAuth()
+  const currentUser = user?.email ?? 'dispatch'
 
   const [driverId,  setDriverId]  = useState('')
   const [type,      setType]      = useState<AvailType>('FULL_DAY_OFF')
