@@ -40,6 +40,10 @@ function addDaysLocal(d: Date, n: number): Date {
   const r = new Date(d); r.setDate(r.getDate() + n); return r
 }
 
+function driverInitials(name: string): string {
+  return name.split(' ').slice(0, 2).map((w) => w[0] ?? '').join('').toUpperCase()
+}
+
 function hexBg(hex: string, alpha: number): string {
   const r = parseInt(hex.slice(1, 3), 16)
   const g = parseInt(hex.slice(3, 5), 16)
@@ -334,11 +338,22 @@ function LoadCard({
             {load.daySlot ?? ''}
           </span>
         )}
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: driverId ? driverColor.border : '#cbd5e1', flexShrink: 0 }} />
+        {/* Driver avatar */}
         <span style={{
-          fontSize: 10.5, flex: 1,
+          width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
+          background: driverId ? driverColor.avatarBg : '#e2e8f0',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 8, fontWeight: 700, color: '#fff', overflow: 'hidden',
+        }}>
+          {driver?.photoUrl
+            ? <img src={driver.photoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" />
+            : driverInitials(driver?.name ?? '')
+          }
+        </span>
+        <span style={{
+          fontSize: 12, flex: 1,
           color: driverId ? 'var(--ds-t1)' : 'var(--ds-blue)',
-          fontWeight: driverId ? 500 : 600,
+          fontWeight: 600,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {driver?.name ?? 'Unassigned'}
