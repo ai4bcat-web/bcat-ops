@@ -14,7 +14,7 @@
 
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
-import { addDays, formatDayHeader, formatTime, formatDateShort } from '@/lib/date'
+import { addDays, formatDayHeader, formatTime, formatDateShort, formatDateTimeInput } from '@/lib/date'
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -243,17 +243,15 @@ function ApptEditPopover({ load, apptField, typeField, onClose }: {
 }) {
   const { updateLoad } = useLoads()
 
-  const toInputVal = (iso: string | undefined | null) => {
-    if (!iso) return ''
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return ''
-    const pad = (n: number) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
+  const initVal = load[apptField] ? formatDateTimeInput(load[apptField]!) : ''
 
-  const [dateVal, setDateVal] = useState(toInputVal(load[apptField]))
+  const [dateVal, setDateVal] = useState(initVal)
   const [typeVal, setTypeVal] = useState<ApptType>(load[typeField] ?? 'exact')
   const [saving,  setSaving]  = useState(false)
+
+  const datePart = dateVal.slice(0, 10)
+  const timePart = dateVal.slice(11, 16)
+  const combineDateTime = (d: string, t: string) => (d && t ? `${d}T${t}` : d || '')
 
   const commit = async () => {
     setSaving(true)
@@ -263,20 +261,33 @@ function ApptEditPopover({ load, apptField, typeField, onClose }: {
     onClose()
   }
 
+  const inputCls = "h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+
   return (
     <div
       className="absolute z-50 top-full left-0 mt-1 p-2.5 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
       style={{ width: 215 }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      <input
-        autoFocus
-        type="datetime-local"
-        className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
-        value={dateVal}
-        onChange={(e) => setDateVal(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
-      />
+      <div className="flex gap-1">
+        <input
+          autoFocus
+          type="date"
+          className={inputCls}
+          style={{ flex: '1 1 0', minWidth: 0 }}
+          value={datePart}
+          onChange={(e) => setDateVal(combineDateTime(e.target.value, timePart))}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+        />
+        <input
+          type="time"
+          className={inputCls}
+          style={{ width: 70, flexShrink: 0 }}
+          value={timePart}
+          onChange={(e) => setDateVal(combineDateTime(datePart, e.target.value))}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+        />
+      </div>
       <select
         className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
         value={typeVal}

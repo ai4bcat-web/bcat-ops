@@ -74,6 +74,43 @@ function ReadonlyField({ label, value }: { label: string; value?: string | null 
 
 // ── Section heading ───────────────────────────────────────────────────────────
 
+// Splits "YYYY-MM-DDTHH:mm" into date + time inputs so the time always
+// renders in 24-hour format regardless of browser locale.
+function DateTimeInput({
+  value, onChange, className, autoFocus, onKeyDown,
+}: {
+  value: string
+  onChange: (v: string) => void
+  className?: string
+  autoFocus?: boolean
+  onKeyDown?: React.KeyboardEventHandler
+}) {
+  const date = value.slice(0, 10)
+  const time = value.slice(11, 16) || ''
+  const combine = (d: string, t: string) => (d && t ? `${d}T${t}` : d || '')
+  return (
+    <div className="flex gap-1.5">
+      <input
+        type="date"
+        autoFocus={autoFocus}
+        className={className}
+        value={date}
+        onChange={(e) => onChange(combine(e.target.value, time))}
+        onKeyDown={onKeyDown}
+        style={{ flex: '1 1 0', minWidth: 0 }}
+      />
+      <input
+        type="time"
+        className={className}
+        value={time}
+        onChange={(e) => onChange(combine(date, e.target.value))}
+        onKeyDown={onKeyDown}
+        style={{ width: 80, flexShrink: 0 }}
+      />
+    </div>
+  )
+}
+
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -131,11 +168,10 @@ function ApptFields({
 
       {type === 'exact' && (
         <div>
-          <Input
-            type="datetime-local"
-            className="h-9 text-sm"
+          <DateTimeInput
+            className="h-9 text-sm rounded-md border border-input bg-background px-3 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
             value={startField.value}
-            onChange={(e) => startField.onChange(e.target.value)}
+            onChange={startField.onChange}
           />
           {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
         </div>
@@ -145,21 +181,19 @@ function ApptFields({
         <div className="grid grid-cols-2 gap-2">
           <div>
             <p className="text-xs text-muted-foreground mb-1">From</p>
-            <Input
-              type="datetime-local"
-              className="h-9 text-sm"
+            <DateTimeInput
+              className="h-9 text-sm rounded-md border border-input bg-background px-3 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
               value={startField.value}
-              onChange={(e) => startField.onChange(e.target.value)}
+              onChange={startField.onChange}
             />
             {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
           </div>
           <div>
             <p className="text-xs text-muted-foreground mb-1">To</p>
-            <Input
-              type="datetime-local"
-              className="h-9 text-sm"
+            <DateTimeInput
+              className="h-9 text-sm rounded-md border border-input bg-background px-3 py-1 focus:outline-none focus:ring-1 focus:ring-ring"
               value={endField.value}
-              onChange={(e) => endField.onChange(e.target.value)}
+              onChange={endField.onChange}
             />
             {endError && <p className="text-xs text-destructive mt-1">{endError}</p>}
           </div>
