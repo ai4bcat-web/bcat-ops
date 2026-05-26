@@ -191,6 +191,12 @@ interface BackfillEvent {
   endDate:   string   // YYYY-MM-DD
 }
 
+function isBackfillEvent(e: Record<string, unknown>): e is BackfillEvent {
+  return e.mode === 'backfill'
+    && typeof e.startDate === 'string'
+    && typeof e.endDate   === 'string'
+}
+
 export const handler = async (event: Record<string, unknown> = {}): Promise<void> => {
   console.log('[motive-mileage-sync] start', JSON.stringify(event))
 
@@ -209,8 +215,8 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
 
   // Determine periods to sync
   let periods: Period[]
-  if ((event as BackfillEvent).mode === 'backfill') {
-    const { startDate, endDate } = event as BackfillEvent
+  if (isBackfillEvent(event)) {
+    const { startDate, endDate } = event
     const weekPeriods  = weeksInRange(startDate, endDate).map((w) => ({ ...w, type: 'WEEK'  as const }))
     const monthPeriods = monthsInRange(startDate, endDate).map((m) => ({ ...m, type: 'MONTH' as const }))
     periods = [...weekPeriods, ...monthPeriods]
