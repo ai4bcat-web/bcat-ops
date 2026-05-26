@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown } from 'lucide-react'
+import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
 } from '@/components/ui/sheet'
@@ -24,6 +24,29 @@ import {
 } from '@/lib/date'
 import { toast } from 'sonner'
 import type { ApptType, Load } from '@/types'
+
+// ── Miles calculator (Nominatim geocoding + OSRM routing) ────────────────────
+
+async function geocode(query: string): Promise<[number, number] | null> {
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1&countrycodes=us,ca`
+  const res = await fetch(url, { headers: { 'Accept-Language': 'en', 'User-Agent': 'bcat-ops/1.0' } })
+  if (!res.ok) return null
+  const data = await res.json() as Array<{ lat: string; lon: string }>
+  if (!data[0]) return null
+  return [parseFloat(data[0].lon), parseFloat(data[0].lat)]
+}
+
+async function calculateDrivingMiles(origin: string, destination: string): Promise<number> {
+  const [from, to] = await Promise.all([geocode(origin), geocode(destination)])
+  if (!from || !to) throw new Error('Could not find one or both locations')
+  const url = `https://router.project-osrm.org/route/v1/driving/${from[0]},${from[1]};${to[0]},${to[1]}?overview=false`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Routing service unavailable')
+  const data = await res.json() as { routes?: Array<{ distance: number }> }
+  const meters = data.routes?.[0]?.distance
+  if (!meters) throw new Error('No route found')
+  return Math.round(meters * 0.000621371)
+}
 
 // ── Field wrappers ────────────────────────────────────────────────────────────
 
@@ -289,9 +312,25 @@ function NewLoadDialog({
   aljexId?: string
   onDelete?: () => void
 }) {
-  const [splitLoad, setSplitLoad] = useState(false)
+  const [splitLoad, setSplitLoad]       = useState(false)
+  const [milesLoading, setMilesLoading] = useState(false)
 
   const pickupDriverId = watch('pickupDriverId')
+
+  async function calcMiles(origin?: string, destination?: string) {
+    const o = (origin      ?? watch('originCity')      ?? '').trim()
+    const d = (destination ?? watch('destinationCity') ?? '').trim()
+    if (!o || !d) return
+    setMilesLoading(true)
+    try {
+      const miles = await calculateDrivingMiles(o, d)
+      setValue('miles', miles, { shouldDirty: true })
+    } catch (err) {
+      toast.error(`Miles calculation failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally {
+      setMilesLoading(false)
+    }
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -342,7 +381,15 @@ function NewLoadDialog({
                   <Input {...register('originName')} placeholder="Shipper / Facility" className="h-9" />
                 </Field>
                 <Field label="Origin City">
-                  <Input {...register('originCity')} placeholder="Chicago, IL" className="h-9" />
+                  <Input
+                    {...register('originCity')}
+                    placeholder="Chicago, IL"
+                    className="h-9"
+                    onBlur={(e) => {
+                      register('originCity').onBlur(e)
+                      calcMiles(e.target.value, undefined)
+                    }}
+                  />
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
@@ -350,20 +397,42 @@ function NewLoadDialog({
                   <Input {...register('destinationName')} placeholder="Consignee / Facility" className="h-9" />
                 </Field>
                 <Field label="Destination City">
-                  <Input {...register('destinationCity')} placeholder="Indianapolis, IN" className="h-9" />
-                </Field>
-              </div>
-              <div style={{ maxWidth: 160 }}>
-                <Field label="Miles">
                   <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    {...register('miles', { valueAsNumber: true })}
-                    placeholder="420"
+                    {...register('destinationCity')}
+                    placeholder="Indianapolis, IN"
                     className="h-9"
+                    onBlur={(e) => {
+                      register('destinationCity').onBlur(e)
+                      calcMiles(undefined, e.target.value)
+                    }}
                   />
                 </Field>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, maxWidth: 240 }}>
+                <div style={{ flex: 1 }}>
+                  <Field label="Miles">
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      {...register('miles', { valueAsNumber: true })}
+                      placeholder="Auto-calculated"
+                      className="h-9"
+                      disabled={milesLoading}
+                    />
+                  </Field>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 px-3 shrink-0"
+                  disabled={milesLoading}
+                  title="Recalculate miles from city fields"
+                  onClick={() => calcMiles()}
+                >
+                  <RotateCw className={`size-3.5 ${milesLoading ? 'animate-spin' : ''}`} />
+                </Button>
               </div>
             </div>
 
@@ -614,6 +683,7 @@ export function LoadDrawer() {
   const isCreate     = drawerMode === 'create'
   const isEdit       = drawerMode === 'edit' || isCreate
   const activeDrivers = drivers.filter((d) => d.active)
+
 
   const {
     register, control, handleSubmit, reset, watch, setValue,
