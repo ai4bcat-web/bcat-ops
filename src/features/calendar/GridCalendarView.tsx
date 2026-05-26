@@ -5,7 +5,7 @@
  */
 
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
-import { Plus, CheckCircle, Circle, AlertCircle, GripVertical, PaintBucket } from 'lucide-react'
+import { Plus, CheckCircle, Circle, GripVertical, PaintBucket } from 'lucide-react'
 import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
@@ -132,6 +132,10 @@ function LoadCard({
   const [slotEditing, setSlotEditing] = useState(false)
   const [slotDraft, setSlotDraft]     = useState('')
 
+  // Inline notes editing
+  const [notesEditing, setNotesEditing] = useState(false)
+  const [notesDraft, setNotesDraft]     = useState('')
+
   useEffect(() => {
     if (!pickerOpen) return
     const close = () => setPickerOpen(false)
@@ -141,7 +145,6 @@ function LoadCard({
 
   const isDelivery  = role === 'delivery'
   const isFinalDest = role !== 'pickup'
-  const isNeed      = load.pickupApptType === 'tbd' || load.deliveryApptType === 'tbd'
   const rti         = load.readyToInvoice
   const highlightHex = getHighlightHex(load.colorKey)
 
@@ -170,22 +173,20 @@ function LoadCard({
     ? `$${(load.rate / 100).toLocaleString('en-US', { minimumFractionDigits: 0 })}`
     : null
 
-  // TBD (isNeed) → red card. RTI takes priority over TBD; highlight color is suppressed when TBD.
-  const borderHex   = rti ? '#16a34a' : isNeed ? '#ef4444' : (highlightHex ?? '#e2e8f0')
+  const borderHex   = rti ? '#16a34a' : (highlightHex ?? '#e2e8f0')
   const borderAlpha = isDelivery ? 'aa' : ''
   const bg = rti
     ? hexBg('#16a34a', isDelivery ? 0.10 : 0.18)
-    : isNeed
-      ? hexBg('#ef4444', selected ? 0.20 : 0.10)
-      : highlightHex
-        ? hexBg(highlightHex, selected ? 0.40 : isDelivery ? 0.14 : 0.26)
-        : selected ? 'rgba(139,92,246,0.12)' : undefined
+    : highlightHex
+      ? hexBg(highlightHex, selected ? 0.40 : isDelivery ? 0.14 : 0.26)
+      : selected ? 'rgba(139,92,246,0.12)' : undefined
 
   const cardKey = `${load.id}:${role}`
 
   return (
     <div
       draggable
+      className="group/card"
       style={{
         marginBottom: 4,
         borderLeft: `3px solid ${borderHex}${borderAlpha}`,
@@ -265,7 +266,7 @@ function LoadCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span style={{ fontSize: 9.5, fontWeight: 600, color: puYard ? 'var(--ds-t3)' : 'var(--ds-blue)', width: 18, flexShrink: 0 }}>PU</span>
         {puDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{puDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: puTime === 'NEED' ? 700 : 500, color: puTime === 'NEED' ? '#dc2626' : puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 10.5, fontWeight: 500, color: puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {puTime}
         </span>
       </div>
@@ -274,7 +275,7 @@ function LoadCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span style={{ fontSize: 9.5, fontWeight: 600, color: deYard ? 'var(--ds-t3)' : '#7c3aed', width: 18, flexShrink: 0 }}>DE</span>
         {deDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{deDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: deTime === 'NEED' ? 700 : 500, color: deTime === 'NEED' ? '#dc2626' : deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 10.5, fontWeight: 500, color: deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {deTime}
         </span>
       </div>
@@ -349,7 +350,6 @@ function LoadCard({
               : <Circle     style={{ width: 13, height: 13, color: '#cbd5e1' }} />}
           </button>
         )}
-        {isNeed && <AlertCircle style={{ width: 11, height: 11, color: '#dc2626', flexShrink: 0 }} />}
         {/* Paint bucket — card highlight color picker */}
         <button
           ref={paintBtnRef}
@@ -366,10 +366,45 @@ function LoadCard({
         </button>
       </div>
 
-      {/* Row 7: notes */}
-      {load.notes && (
-        <div style={{ fontSize: 9.5, color: 'var(--ds-t3)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-          {load.notes}
+      {/* Row 7: notes — click to edit inline */}
+      {notesEditing ? (
+        <input
+          autoFocus
+          type="text"
+          placeholder="Add note…"
+          value={notesDraft}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            border: '1px solid var(--ds-border)', borderRadius: 3,
+            background: 'var(--ds-surface)',
+            fontSize: 9.5, padding: '2px 4px', outline: 'none',
+            color: 'var(--ds-t1)', fontFamily: 'inherit',
+          }}
+          onChange={(e) => setNotesDraft(e.target.value)}
+          onBlur={() => {
+            updateLoad(load.id, { notes: notesDraft.trim() || null })
+            setNotesEditing(false)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur()
+            e.stopPropagation()
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <div
+          title="Click to edit note"
+          onClick={(e) => { e.stopPropagation(); setNotesDraft(load.notes ?? ''); setNotesEditing(true) }}
+          style={{
+            fontSize: 9.5, fontStyle: load.notes ? 'italic' : 'normal',
+            color: load.notes ? 'var(--ds-t3)' : 'var(--ds-t3)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            marginTop: 1, cursor: 'text', minHeight: 14,
+            opacity: load.notes ? 1 : 0,
+          }}
+          className="group-hover/card:opacity-100"
+        >
+          {load.notes || 'add note…'}
         </div>
       )}
 
