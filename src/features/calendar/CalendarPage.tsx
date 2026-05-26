@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { CalendarToolbar } from './CalendarToolbar'
 import { PlannerView } from './PlannerView'
 import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
+import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
@@ -28,6 +30,9 @@ export function CalendarPage() {
 
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
+  const { availabilities, createAvailability, deleteAvailability } = useDriverAvailability()
+
+  const [showAvailModal, setShowAvailModal] = useState(false)
 
   const [currentView, setCurrentView] = useState<ViewMode>('two-week')
   const [startDate, setStartDate]     = useState<Date>(() => getMondayOf(new Date()))
@@ -136,7 +141,7 @@ export function CalendarPage() {
           </p>
         </div>
 
-        {/* Status legend */}
+        {/* Status legend + availability button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           {STATUS_LEGEND.map(({ label, color }) => (
             <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)' }}>
@@ -144,6 +149,12 @@ export function CalendarPage() {
               {label}
             </span>
           ))}
+          <button
+            onClick={() => setShowAvailModal(true)}
+            style={{ height: 30, padding: '0 12px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 500, cursor: 'pointer', flexShrink: 0 }}
+          >
+            Driver Availability
+          </button>
         </div>
       </div>
 
@@ -173,6 +184,7 @@ export function CalendarPage() {
               drivers={drivers}
               weekStart={startDate}
               numDays={1}
+              availabilities={availabilities}
             />
           ) : (
             <GridCalendarView
@@ -180,12 +192,23 @@ export function CalendarPage() {
               drivers={drivers}
               startDate={startDate}
               viewMode={currentView}
+              availabilities={availabilities}
             />
           )}
         </CalendarErrorBoundary>
       </div>
 
       <LoadDrawer />
+
+      {showAvailModal && (
+        <DriverAvailabilityModal
+          drivers={drivers}
+          availabilities={availabilities}
+          onClose={() => setShowAvailModal(false)}
+          onCreate={createAvailability}
+          onDelete={deleteAvailability}
+        />
+      )}
     </div>
   )
 }

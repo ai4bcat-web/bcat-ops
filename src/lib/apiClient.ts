@@ -491,6 +491,47 @@ export async function setUserAdmin(username: string, isAdmin: boolean): Promise<
   })
 }
 
+// ── Driver availability ────────────────────────────────────────────────────────
+
+export interface DriverAvailability {
+  id: string
+  driverId: string
+  type: 'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
+  startDate: string
+  endDate: string
+  time?: string | null
+  note?: string | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+const DA_FIELDS = `id driverId type startDate endDate time note createdBy createdAt updatedAt`
+
+export async function listDriverAvailabilities(): Promise<DriverAvailability[]> {
+  const result = await client.graphql({
+    query: `query ListDriverAvailabilities { listDriverAvailabilities(limit: 2000) { items { ${DA_FIELDS} } } }`,
+  }) as { data: { listDriverAvailabilities: { items: DriverAvailability[] } } }
+  return result.data.listDriverAvailabilities.items ?? []
+}
+
+export async function createDriverAvailability(
+  input: Omit<DriverAvailability, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<DriverAvailability> {
+  const result = await client.graphql({
+    query: `mutation CreateDriverAvailability($input: CreateDriverAvailabilityInput!) { createDriverAvailability(input: $input) { ${DA_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createDriverAvailability: DriverAvailability } }
+  return result.data.createDriverAvailability
+}
+
+export async function deleteDriverAvailability(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteDriverAvailability($input: DeleteDriverAvailabilityInput!) { deleteDriverAvailability(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
 // ── S3 rate confirmations ─────────────────────────────────────────────────────
 
 export async function uploadRateConfirm(loadId: string, file: File): Promise<string> {

@@ -240,6 +240,24 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Driver availability (dispatch-entered, calendar display only) ─────────────
+  // Covers full days off and partial availability (early/late start).
+  // Multi-day ranges supported via startDate/endDate pair.
+  DriverAvailability: a
+    .model({
+      driverId:  a.string().required(),
+      type:      a.enum(['FULL_DAY_OFF', 'EARLY_START', 'LATE_START']),
+      startDate: a.string().required(),   // YYYY-MM-DD
+      endDate:   a.string().required(),   // YYYY-MM-DD (= startDate for single day)
+      time:      a.string(),              // "HH:MM" for EARLY_START / LATE_START
+      note:      a.string(),
+      createdBy: a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('driverId').sortKeys(['startDate']),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.

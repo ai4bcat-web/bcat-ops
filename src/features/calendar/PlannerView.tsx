@@ -20,6 +20,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType } from '@/types'
+import type { DriverAvailability } from '@/lib/apiClient'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
 const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
@@ -703,14 +704,34 @@ function ColHeader({ children, width, flex }: { children: React.ReactNode; width
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 interface PlannerViewProps {
-  loads:     Load[]
-  drivers:   Driver[]
-  weekStart: Date
-  numDays?:  number
+  loads:           Load[]
+  drivers:         Driver[]
+  weekStart:       Date
+  numDays?:        number
+  availabilities?: DriverAvailability[]
 }
 
-export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerViewProps) {
+export function PlannerView({ loads, drivers, weekStart, numDays = 7, availabilities = [] }: PlannerViewProps) {
   const days = useMemo(() => Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)), [weekStart, numDays])
+
+  // Pre-compute availability strips per calendar day
+  const availStripsByDay = useMemo(() => {
+    const map = new Map<string, { driverName: string; type: DriverAvailability['type']; time?: string | null }[]>()
+    for (const a of availabilities) {
+      const driver = drivers.find((d) => d.id === a.driverId)
+      const driverName = driver?.name ?? 'Unknown'
+      let cursor = a.startDate
+      while (cursor <= a.endDate) {
+        const arr = map.get(cursor) ?? []
+        arr.push({ driverName, type: a.type, time: a.time })
+        map.set(cursor, arr)
+        const d = new Date(cursor + 'T12:00:00Z')
+        d.setUTCDate(d.getUTCDate() + 1)
+        cursor = d.toISOString().slice(0, 10)
+      }
+    }
+    return map
+  }, [availabilities, drivers])
 
   // Multi-select state — shift/ctrl-click to toggle load selection
   const [selectedLoadIds, setSelectedLoadIds] = useState<string[]>([])
@@ -833,7 +854,8 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
           ? entries.filter((e) => e.role !== 'pickup' && !e.load.readyToInvoice).length
           : 0
 
-        const isToday = dayStr === todayStr
+        const isToday   = dayStr === todayStr
+        const dayStrips = availStripsByDay.get(dayStr ?? '') ?? []
         return (
           <div key={di} className="shrink-0" style={{ borderBottom: '1px solid var(--ds-border)' }}>
             <div
@@ -871,6 +893,23 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7 }: PlannerV
                 <Plus className="size-3" />
               </button>
             </div>
+
+            {/* Availability strips for this day */}
+            {dayStrips.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '3px 8px 4px', borderBottom: '1px solid var(--ds-border)' }}>
+                {dayStrips.map((strip, i) => {
+                  const isOff  = strip.type === 'FULL_DAY_OFF'
+                  const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `Early ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
+                  return (
+                    <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 4, background: isOff ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.10)', fontSize: 10.5 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? '#dc2626' : '#d97706', flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, color: isOff ? '#dc2626' : '#b45309' }}>{strip.driverName}</span>
+                      <span style={{ color: '#6b7280' }}>{label}</span>
+                    </span>
+                  )
+                })}
+              </div>
+            )}
 
             {entries.length === 0 ? (
               <div className="flex items-center px-6 italic" style={{ height: ROW_H, fontSize: 11, color: 'var(--ds-t3)' }}>

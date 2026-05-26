@@ -11,6 +11,7 @@ import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import type { Load, Driver, ViewMode } from '@/types'
+import type { DriverAvailability } from '@/lib/apiClient'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 const DAY_COL_W = 252   // px per day column
@@ -48,6 +49,13 @@ function hexBg(hex: string, alpha: number): string {
 
 type Role = 'pickup' | 'delivery' | 'same-day'
 interface DayEntry { load: Load; role: Role }
+
+interface AvailabilityStrip {
+  driverId:   string
+  driverName: string
+  type:       'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
+  time?:      string | null
+}
 
 function apptDisplay(iso: string | undefined | null, type: string | undefined | null, yard: boolean): string {
   if (yard) return 'Yard'
@@ -469,7 +477,7 @@ function LoadCard({
 function DayColumn({
   day, dayStr, entries, drivers, isToday, isCurrentMonth, selectedIds, onSelect,
   dragOverKey, dropTargetDay, onDragStart, onDragEnter, onDragEnd,
-  onColumnDragEnter, onColumnDragLeave, onColumnDrop,
+  onColumnDragEnter, onColumnDragLeave, onColumnDrop, availabilityStrips,
 }: {
   day: Date; dayStr: string; entries: DayEntry[]; drivers: Driver[]
   isToday: boolean; isCurrentMonth: boolean; selectedIds: string[]
@@ -482,6 +490,7 @@ function DayColumn({
   onColumnDragEnter: (dayStr: string) => void
   onColumnDragLeave: (dayStr: string) => void
   onColumnDrop: (dayStr: string) => void
+  availabilityStrips: AvailabilityStrip[]
 }) {
   const { weekday, date } = formatDayHeader(day.toISOString())
   const loadCount = entries.filter((e) => e.role !== 'delivery').length
@@ -551,6 +560,25 @@ function DayColumn({
         </button>
       </div>
 
+      {/* Availability strips */}
+      {availabilityStrips.length > 0 && (
+        <div style={{ padding: '3px 6px 4px', borderBottom: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+          {availabilityStrips.map((strip, i) => {
+            const isOff  = strip.type === 'FULL_DAY_OFF'
+            const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `Early ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
+            return (
+              <div key={`${strip.driverId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 3, background: isOff ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.10)' }}>
+                <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? '#dc2626' : '#d97706', flexShrink: 0 }} />
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: isOff ? '#dc2626' : '#b45309', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {strip.driverName}
+                </span>
+                <span style={{ fontSize: 10, color: '#6b7280', flexShrink: 0 }}>{label}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
       {/* Cards */}
       <div style={{ flex: 1, padding: `${COL_PAD}px ${COL_PAD}px 8px`, background: isToday ? 'rgba(59,130,246,0.03)' : undefined }}>
         {entries.length === 0 ? (
@@ -583,13 +611,14 @@ function DayColumn({
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 interface GridCalendarViewProps {
-  loads:     Load[]
-  drivers:   Driver[]
-  startDate: Date
-  viewMode:  ViewMode
+  loads:          Load[]
+  drivers:        Driver[]
+  startDate:      Date
+  viewMode:       ViewMode
+  availabilities: DriverAvailability[]
 }
 
-export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCalendarViewProps) {
+export function GridCalendarView({ loads, drivers, startDate, viewMode, availabilities }: GridCalendarViewProps) {
   const { updateLoad } = useLoads()
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -685,6 +714,24 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
     )
   }, [startDate, viewMode])
 
+  const stripsByDay = useMemo(() => {
+    const map = new Map<string, AvailabilityStrip[]>()
+    for (const a of availabilities) {
+      const driver = drivers.find((d) => d.id === a.driverId)
+      const driverName = driver?.name ?? 'Unknown'
+      let cursor = a.startDate
+      while (cursor <= a.endDate) {
+        const arr = map.get(cursor) ?? []
+        arr.push({ driverId: a.driverId, driverName, type: a.type, time: a.time })
+        map.set(cursor, arr)
+        const d = new Date(cursor + 'T12:00:00Z')
+        d.setUTCDate(d.getUTCDate() + 1)
+        cursor = d.toISOString().slice(0, 10)
+      }
+    }
+    return map
+  }, [availabilities, drivers])
+
   const entriesByDayRef = useRef<Map<string, DayEntry[]>>(new Map())
 
   const entriesByDay = useMemo(() => {
@@ -746,6 +793,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode }: GridCa
               onColumnDragEnter={handleColumnDragEnter}
               onColumnDragLeave={handleColumnDragLeave}
               onColumnDrop={handleColumnDrop}
+              availabilityStrips={stripsByDay.get(dayStr) ?? []}
             />
           )
         })}
