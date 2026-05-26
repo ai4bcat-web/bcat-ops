@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   startOfDay, endOfDay, startOfWeek, endOfWeek,
   startOfMonth, endOfMonth, startOfYear, endOfYear,
-  subDays, addWeeks, format, isAfter,
+  subDays, format,
 } from 'date-fns'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip as RTooltip,
@@ -16,6 +16,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { getExpensesByTruck } from '@/lib/expenseAllocation'
+import { filterByDate, getWeeksInRange } from '@/lib/fuelDateUtils'
+import type { WeekBucket } from '@/lib/fuelDateUtils'
 import {
   cleanupDuplicateFuelTransactions,
   listTruckConfigs,
@@ -57,26 +59,6 @@ function getRange(key: RangeKey, customStart: Date, customEnd: Date): [Date, Dat
   }
 }
 
-// ── Week buckets ──────────────────────────────────────────────────────────────
-
-interface WeekBucket { wStart: Date; wEnd: Date; label: string }
-
-function getWeeksInRange(start: Date, end: Date): WeekBucket[] {
-  const weeks: WeekBucket[] = []
-  let wStart = startOfWeek(start, { weekStartsOn: 0 })
-  while (!isAfter(wStart, end)) {
-    const wEnd = endOfWeek(wStart, { weekStartsOn: 0 })
-    const labelFrom = wStart < start ? start : wStart
-    const labelTo   = wEnd > end ? end : wEnd
-    const fromStr   = format(labelFrom, 'M/d')
-    const toStr     = format(labelTo, 'M/d')
-    const label     = fromStr === toStr ? fromStr : `${fromStr}–${toStr}`
-    weeks.push({ wStart, wEnd, label })
-    wStart = addWeeks(wStart, 1)
-  }
-  return weeks
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Fuel = ULSD + FUEL (generic diesel) + DEFD (DEF) everywhere in the app — permanent definition.
@@ -108,13 +90,6 @@ function fmtMoney(n: number) {
 }
 function fmtGal(n: number) {
   return `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} gal`
-}
-
-function filterByDate(txs: FuelTransaction[], start: Date, end: Date): FuelTransaction[] {
-  return txs.filter((t) => {
-    const d = new Date(`${t.transactionDate}T12:00:00`)
-    return d >= start && d <= end
-  })
 }
 
 function sumAmt(txs: FuelTransaction[]) { return txs.reduce((s, t) => s + t.amount, 0) }
