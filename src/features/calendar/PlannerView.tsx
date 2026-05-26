@@ -280,9 +280,10 @@ function ApptEditPopover({ load, apptField, typeField, onClose }: {
           onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
         />
         <input
-          type="time"
+          type="text"
+          placeholder="14:30"
           className={inputCls}
-          style={{ width: 70, flexShrink: 0 }}
+          style={{ width: 60, flexShrink: 0 }}
           value={timePart}
           onChange={(e) => setDateVal(combineDateTime(datePart, e.target.value))}
           onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}

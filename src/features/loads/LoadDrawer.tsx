@@ -100,12 +100,13 @@ function DateTimeInput({
         style={{ flex: '1 1 0', minWidth: 0 }}
       />
       <input
-        type="time"
+        type="text"
+        placeholder="14:30"
         className={className}
         value={time}
         onChange={(e) => onChange(combine(date, e.target.value))}
         onKeyDown={onKeyDown}
-        style={{ width: 80, flexShrink: 0 }}
+        style={{ width: 72, flexShrink: 0 }}
       />
     </div>
   )
