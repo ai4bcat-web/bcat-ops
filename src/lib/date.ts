@@ -7,9 +7,9 @@ export function formatTime(iso: string): string {
   if (isNaN(d.getTime())) return iso  // return raw string (e.g. 'TBD') if not a valid date
   return new Intl.DateTimeFormat('en-US', {
     timeZone: TZ,
-    hour: 'numeric',
+    hour: '2-digit',
     minute: '2-digit',
-    hour12: true,
+    hour12: false,
   }).format(d)
 }
 
@@ -38,9 +38,9 @@ export function formatDelivery(iso: string): string {
   return new Intl.DateTimeFormat('en-US', {
     timeZone: TZ,
     weekday: 'short',
-    hour: 'numeric',
+    hour: '2-digit',
     minute: '2-digit',
-    hour12: true,
+    hour12: false,
   }).format(d)
 }
 
@@ -55,9 +55,9 @@ export function formatDateTime(iso: string | null | undefined): string {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
-      hour: 'numeric',
+      hour: '2-digit',
       minute: '2-digit',
-      hour12: true,
+      hour12: false,
     }).format(d)
   } catch {
     return '—'
