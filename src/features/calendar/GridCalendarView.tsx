@@ -115,13 +115,12 @@ function computeMoveDates(load: Load, role: Role, targetDayStr: string) {
 // ── Full-detail load card ─────────────────────────────────────────────────────
 
 function LoadCard({
-  entry, drivers, selected, conflictedDriverIds, onSelect,
+  entry, drivers, selected, onSelect,
   dragging, dragOver, onDragStart, onDragEnter, onDragEnd,
 }: {
   entry: DayEntry
   drivers: Driver[]
   selected: boolean
-  conflictedDriverIds: Set<string>
   onSelect: (loadId: string, e: React.MouseEvent) => void
   dragging: boolean
   dragOver: boolean
@@ -161,7 +160,7 @@ function LoadCard({
   const driverId    = isDelivery ? load.deliveryDriverId : load.pickupDriverId
   const driver      = drivers.find((d) => d.id === driverId)
   const driverColor = getColor(driver?.colorKey)
-  const driverConflict = !!(driverId && conflictedDriverIds.has(driverId))
+
 
   // Appt display — yard on the "other" side
   const puYard    = isDelivery
@@ -335,17 +334,14 @@ function LoadCard({
             {load.daySlot ?? ''}
           </span>
         )}
-        {/* Driver dot — amber when double-booked */}
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: driverConflict ? '#f59e0b' : driverId ? driverColor.border : '#cbd5e1', flexShrink: 0 }} />
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: driverId ? driverColor.border : '#cbd5e1', flexShrink: 0 }} />
         <span style={{
           fontSize: 10.5, flex: 1,
-          color: driverConflict ? '#b45309' : driverId ? 'var(--ds-t1)' : 'var(--ds-blue)',
+          color: driverId ? 'var(--ds-t1)' : 'var(--ds-blue)',
           fontWeight: driverId ? 500 : 600,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}
-          title={driverConflict ? `${driver?.name ?? ''} is on multiple loads today` : undefined}
-        >
-          {driver?.name ?? 'Unassigned'}{driverConflict ? ' ⚠' : ''}
+        }}>
+          {driver?.name ?? 'Unassigned'}
         </span>
         {rateStr && (
           <span style={{ fontSize: 10.5, fontWeight: 600, color: '#15803d', flexShrink: 0 }}>{rateStr}</span>
@@ -496,15 +492,6 @@ function DayColumn({
   const loadCount = entries.filter((e) => e.role !== 'delivery').length
   const isDropTarget = dropTargetDay === dayStr
 
-  // Driver IDs that appear on more than one load this day (double-booked)
-  const conflictedDriverIds = useMemo(() => {
-    const seen = new Map<string, number>()
-    for (const e of entries) {
-      const ids = [e.load.pickupDriverId, e.load.deliveryDriverId].filter(Boolean) as string[]
-      for (const id of ids) seen.set(id, (seen.get(id) ?? 0) + 1)
-    }
-    return new Set([...seen.entries()].filter(([, n]) => n > 1).map(([id]) => id))
-  }, [entries])
 
   return (
     <div
@@ -592,7 +579,6 @@ function DayColumn({
                 entry={entry}
                 drivers={drivers}
                 selected={selectedIds.includes(entry.load.id)}
-                conflictedDriverIds={conflictedDriverIds}
                 onSelect={onSelect}
                 dragging={false}
                 dragOver={dragOverKey === cardKey}
