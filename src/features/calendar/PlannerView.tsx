@@ -499,13 +499,13 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           ? (dragOver ? '#16a34a' : '#22c55e')
           : dragOver    ? hexBg(highlightHex ?? '#94a3b8', 0.30)
           : selected    ? hexBg(highlightHex ?? '#8b5cf6', 0.28)
-          : highlightHex
-            ? hexBg(highlightHex, isDeliveryDay ? 0.14 : 0.28)
+          : (!isDeliveryDay && highlightHex)
+            ? hexBg(highlightHex, 0.28)
             : undefined,
         borderLeft: load.readyToInvoice
           ? '3px solid #15803d'
-          : highlightHex
-            ? `3px solid ${highlightHex}${isDeliveryDay ? 'aa' : ''}`
+          : (!isDeliveryDay && highlightHex)
+            ? `3px solid ${highlightHex}`
             : '3px solid #e2e8f0',
         borderRight: isNeed ? '3px solid #dc2626' : undefined,
       }}
