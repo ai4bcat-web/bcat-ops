@@ -49,6 +49,8 @@ export type CreateTaskInput = {
   proNumber?: string;
   notes?: string;
   receivedAt?: string;
+  externalSource?: string;
+  externalId?: string;
 };
 
 export type TaskPatch = {
