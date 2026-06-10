@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { RefreshCw, Inbox, Loader2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -7,14 +7,44 @@ import {
   TEAM_MEMBERS, ACTIVE_STATUSES, assigneeLabel,
   ProNumberModal, QueueCard,
 } from '@/features/intake/IntakePage'
-import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
-import type { IntakeItem, IntakeStatus } from '@/types'
+import {
+  listTasks, updateTask,
+  type CommandCenterTask,
+} from '@/lib/commandCenterClient'
+import type { IntakeItem, IntakeStatus, IntakeSource } from '@/types'
+
+const POLL_MS = 30_000
+
+// Map command center Task → IntakeItem-shaped object that QueueCard/ProNumberModal expect.
+// QueueCard reads: subject, source, status, assignedTo, s3KeyPdfAttachments, externalUrl, ...
+function taskToIntakeShape(t: CommandCenterTask): IntakeItem {
+  const status = (t.status as IntakeStatus | undefined) ?? 'NEW'
+  // bcat-ops UI distinguishes IVAN_CARTAGE vs BCAT_LOGISTICS for styling only.
+  // The command center API uses business="bcat", which maps to BCAT_LOGISTICS.
+  const source: IntakeSource = t.business === 'ivan' ? 'IVAN_CARTAGE' : 'BCAT_LOGISTICS'
+  return {
+    id: t.id,
+    source,
+    status,
+    assignedTo: t.assignedTo ?? '',
+    receivedAt: t.receivedAt ?? t.createdAt ?? new Date().toISOString(),
+    fromEmail: '',
+    subject: t.subject ?? t.title,
+    bodyText: t.bodyText ?? t.description ?? '',
+    bodyHtml: t.bodyHtml ?? '',
+    s3KeyPdfAttachments: [],
+    externalUrl: t.externalUrl ?? null,
+    proNumber: t.proNumber ?? null,
+    notes: t.notes ?? null,
+    createdAt: t.createdAt ?? '',
+    updatedAt: t.updatedAt ?? '',
+  }
+}
 
 export function TasksPage() {
-  const { items, loading, refresh, updateItem } = useIntakeItems()
   const { user } = useAuth()
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
   const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
@@ -22,9 +52,32 @@ export function TasksPage() {
   const [searchParams] = useSearchParams()
   const filterAssignee = searchParams.get('assignee') ?? 'ALL'
 
+  const [tasks, setTasks] = useState<CommandCenterTask[]>([])
+  const [loading, setLoading] = useState(true)
   const [proModalItem, setProModalItem] = useState<IntakeItem | null>(null)
 
   const actorEmail = user?.email ?? 'dispatch'
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await listTasks({ business: 'bcat' })
+      setTasks(next)
+    } catch (err) {
+      console.error('[TasksPage] listTasks failed', err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    setLoading(true)
+    refresh()
+    const id = setInterval(refresh, POLL_MS)
+    return () => clearInterval(id)
+  }, [refresh])
+
+  // Adapt to IntakeItem shape for the existing card UI
+  const items = useMemo(() => tasks.map(taskToIntakeShape), [tasks])
 
   // All open tasks (NEW / IN_PROGRESS), optionally filtered by assignee
   const openTasks = useMemo(() => {
@@ -37,11 +90,10 @@ export function TasksPage() {
   const grouped = useMemo(() => {
     const byAssignee: Record<string, IntakeItem[]> = {}
     for (const item of openTasks) {
-      const key = item.assignedTo ?? '__unassigned__'
+      const key = item.assignedTo || '__unassigned__'
       ;(byAssignee[key] ??= []).push(item)
     }
 
-    // Order: TEAM_MEMBERS first (in order), then Unassigned
     const groups: { key: string; label: string; items: IntakeItem[] }[] = []
     for (const member of TEAM_MEMBERS) {
       if (byAssignee[member.email]?.length) {
@@ -54,13 +106,24 @@ export function TasksPage() {
     return groups
   }, [openTasks])
 
+  const applyLocalPatch = (id: string, patch: Partial<CommandCenterTask>) => {
+    setTasks((all) => all.map((t) => (t.id === id ? { ...t, ...patch } : t)))
+  }
+
   const handleStatusChange = async (id: string, status: IntakeStatus) => {
-    await updateItem(id, { status }, { actorName: actorEmail })
+    try {
+      const updated = await updateTask(id, { status, actorName: actorEmail })
+      applyLocalPatch(id, updated)
+    } catch (err) {
+      console.error('[TasksPage] updateTask status failed', err)
+    }
   }
 
   const handleBuildLoad = (item: IntakeItem) => {
     if (item.status === 'NEW') {
-      updateItem(item.id, { status: 'IN_PROGRESS' }, { actorName: actorEmail }).catch(() => {})
+      updateTask(item.id, { status: 'IN_PROGRESS', actorName: actorEmail })
+        .then((updated) => applyLocalPatch(item.id, updated))
+        .catch(() => {})
     }
     setPendingIntakeItem(item.id)
     setSelectedLoad(null, 'create')
@@ -72,21 +135,32 @@ export function TasksPage() {
 
   const handleProConfirm = async (proNumber: string) => {
     if (!proModalItem) return
-    await updateItem(
-      proModalItem.id,
-      { status: 'DONE', proNumber },
-      { actorName: actorEmail, proNumber },
-    )
-    setProModalItem(null)
+    try {
+      const updated = await updateTask(proModalItem.id, {
+        status: 'DONE',
+        proNumber,
+        actorName: actorEmail,
+      })
+      applyLocalPatch(proModalItem.id, updated)
+    } catch (err) {
+      console.error('[TasksPage] markDone failed', err)
+    } finally {
+      setProModalItem(null)
+    }
   }
 
   const handleAssigneeChange = async (id: string, email: string) => {
     const displayName = assigneeLabel(email)
-    await updateItem(
-      id,
-      { assignedTo: email },
-      { actorName: actorEmail, reassignedTo: displayName },
-    )
+    try {
+      const updated = await updateTask(id, {
+        assignedTo: email,
+        actorName: actorEmail,
+        reassignedTo: displayName,
+      })
+      applyLocalPatch(id, updated)
+    } catch (err) {
+      console.error('[TasksPage] reassign failed', err)
+    }
   }
 
   return (
