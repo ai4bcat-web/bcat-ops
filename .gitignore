@@ -12,6 +12,9 @@ node_modules
 dist
 dist-ssr
 
+# npm cache dir used by the Amplify build (amplify.yml: npm ci --cache .npm)
+.npm/
+
 # Environment files — never commit real secrets
 .env
 .env.*
