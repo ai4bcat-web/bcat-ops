@@ -4,7 +4,9 @@
  * Invocation modes:
  *   EventBridge daily cron (2:05 AM UTC):
  *     Syncs the rolling 7-day window (Mon–Sun of current week) and current month
- *     for every COMPANY truck in TruckConfig.
+ *     for EVERY vehicle in Motive (no ownership filter). Each Motive vehicle is
+ *     matched to an Equipment record by unit number when one exists; otherwise it
+ *     is keyed by the Motive number so it is still tracked.
  *
  *   Manual / backfill:
  *     { "mode": "backfill", "startDate": "2026-01-01", "endDate": "2026-05-31" }
@@ -22,13 +24,12 @@ import {
   DynamoDBDocumentClient,
   ScanCommand,
   PutCommand,
-  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { fetchVehicleMap, fetchMilesForVehicle } from './motiveClient'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
-const TRUCK_CONFIG_TABLE   = process.env.TRUCK_CONFIG_TABLE_NAME!
+const EQUIPMENT_TABLE      = process.env.EQUIPMENT_TABLE_NAME!
 const TRUCK_MILEAGE_TABLE  = process.env.TRUCK_MILEAGE_TABLE_NAME!
 const MOTIVE_API_KEY       = process.env.MOTIVE_API_KEY!
 
@@ -66,7 +67,7 @@ function monthEnd(d: Date): Date {
 /** All Mondays covering [startDate, endDate] inclusive. */
 function weeksInRange(startDate: string, endDate: string): Array<{ start: string; end: string }> {
   const weeks: Array<{ start: string; end: string }> = []
-  let cursor = weekMonday(new Date(startDate + 'T12:00:00Z'))
+  const cursor = weekMonday(new Date(startDate + 'T12:00:00Z'))
   const last = new Date(endDate + 'T12:00:00Z')
   while (cursor <= last) {
     weeks.push({ start: toIso(cursor), end: toIso(weekSunday(cursor)) })
@@ -91,34 +92,33 @@ function monthsInRange(startDate: string, endDate: string): Array<{ start: strin
 
 // ── DynamoDB helpers ──────────────────────────────────────────────────────────
 
-interface TruckConfig {
-  truckId:             string
-  unitNumber:          string
-  ownershipType?:      string
-  motiveVehicleId?:    number
-  motiveVehicleNumber?: string
+// A vehicle to sync miles for. truckId links to an Equipment record when the
+// unit number matches one; otherwise it falls back to a Motive-keyed id so the
+// vehicle is still tracked even if it isn't set up in the truck registry.
+interface SyncTarget {
+  truckId:         string
+  unitNumber:      string
+  motiveVehicleId: number
 }
 
-async function listCompanyTrucks(): Promise<TruckConfig[]> {
-  const result = await dynamo.send(new ScanCommand({
-    TableName:        TRUCK_CONFIG_TABLE,
-    FilterExpression: 'ownershipType = :ot',
-    ExpressionAttributeValues: { ':ot': 'COMPANY' },
-  }))
-  return (result.Items ?? []) as TruckConfig[]
-}
-
-async function updateMotiveVehicleId(truckId: string, vehicleId: number, vehicleNumber: string) {
-  await dynamo.send(new UpdateCommand({
-    TableName: TRUCK_CONFIG_TABLE,
-    Key: { truckId },
-    UpdateExpression: 'SET motiveVehicleId = :vid, motiveVehicleNumber = :vnum, updatedAt = :ts',
-    ExpressionAttributeValues: {
-      ':vid':  vehicleId,
-      ':vnum': vehicleNumber,
-      ':ts':   new Date().toISOString(),
-    },
-  }))
+/** Map of Equipment unitNumber → Equipment.id, for trucks only. */
+async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  let token: Record<string, unknown> | undefined
+  do {
+    const result = await dynamo.send(new ScanCommand({
+      TableName:                 EQUIPMENT_TABLE,
+      FilterExpression:          '#t = :truck',
+      ExpressionAttributeNames:  { '#t': 'type' },
+      ExpressionAttributeValues: { ':truck': 'truck' },
+      ExclusiveStartKey:         token as Record<string, never> | undefined,
+    }))
+    for (const item of result.Items ?? []) {
+      if (item.unitNumber && item.id) map.set(String(item.unitNumber), String(item.id))
+    }
+    token = result.LastEvaluatedKey
+  } while (token)
+  return map
 }
 
 async function upsertMileage(
@@ -154,27 +154,10 @@ interface Period {
   type:  'WEEK' | 'MONTH'
 }
 
-async function syncTruck(
-  truck:      TruckConfig,
-  periods:    Period[],
-  vehicleMap: Map<string, { id: number; number: string }>,
-): Promise<void> {
-  // Resolve Motive vehicle ID if not yet stored
-  let vehicleId = truck.motiveVehicleId
-  if (!vehicleId) {
-    const v = vehicleMap.get(truck.unitNumber)
-    if (!v) {
-      console.warn(`[mileage] no Motive vehicle found for unit ${truck.unitNumber} — skipping`)
-      return
-    }
-    vehicleId = v.id
-    await updateMotiveVehicleId(truck.truckId, v.id, v.number)
-    console.log(`[mileage] resolved Motive vehicle ID ${v.id} for unit ${truck.unitNumber}`)
-  }
-
+async function syncTruck(truck: SyncTarget, periods: Period[]): Promise<void> {
   for (const period of periods) {
     try {
-      const miles = await fetchMilesForVehicle(MOTIVE_API_KEY, vehicleId, period.start, period.end)
+      const miles = await fetchMilesForVehicle(MOTIVE_API_KEY, truck.motiveVehicleId, period.start, period.end)
       await upsertMileage(truck.truckId, truck.unitNumber, period.start, period.type, miles)
     } catch (err) {
       // Log and continue — one period failing shouldn't abort the whole sync
@@ -206,16 +189,21 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
 
   if (!MOTIVE_API_KEY) throw new Error('MOTIVE_API_KEY secret not set')
 
-  const trucks = await listCompanyTrucks()
-  if (trucks.length === 0) {
-    console.log('[motive-mileage-sync] no COMPANY trucks configured — nothing to sync')
+  // Every vehicle in Motive is synced, regardless of ownership/config. Match each
+  // to an Equipment record by unit number when possible (so mileage attributes to
+  // the right truck for cost-per-mile); otherwise key it by the Motive number.
+  const vehicleMap = await fetchVehicleMap(MOTIVE_API_KEY)
+  if (vehicleMap.size === 0) {
+    console.log('[motive-mileage-sync] no vehicles returned by Motive — nothing to sync')
     return
   }
-  console.log(`[motive-mileage-sync] syncing ${trucks.length} COMPANY truck(s)`)
-
-  // Build vehicle map once (avoids N API calls to look up IDs)
-  const vehicleMap = await fetchVehicleMap(MOTIVE_API_KEY)
-  console.log(`[motive-mileage-sync] fetched ${vehicleMap.size} Motive vehicles`)
+  const equipmentByUnit = await fetchEquipmentByUnit()
+  const trucks: SyncTarget[] = [...vehicleMap.values()].map((v) => ({
+    truckId:         equipmentByUnit.get(v.number) ?? `motive:${v.number}`,
+    unitNumber:      v.number,
+    motiveVehicleId: v.id,
+  }))
+  console.log(`[motive-mileage-sync] syncing ${trucks.length} Motive vehicle(s) (${equipmentByUnit.size} matched to Equipment)`)
 
   // Determine periods to sync
   let periods: Period[]
@@ -238,7 +226,7 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
   }
 
   for (const truck of trucks) {
-    await syncTruck(truck, periods, vehicleMap)
+    await syncTruck(truck, periods)
   }
 
   console.log('[motive-mileage-sync] complete')
