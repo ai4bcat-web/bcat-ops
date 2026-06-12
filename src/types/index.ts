@@ -21,7 +21,164 @@ export interface Driver {
   medCardExpiration?: string // YYYY-MM-DD
   drugTestDate?: string  // YYYY-MM-DD — last test date
   hireDate?: string      // YYYY-MM-DD
-  driverType?: string    // 'company' | 'owner_op'
+  // DOT onboarding / compliance classification
+  driverType?: DriverType | null      // null = Unclassified
+  onboardingStatus?: DriverOnboardingStatus | null
+  complianceStatus?: ComplianceStatus | null   // cached, updated by scanner
+  createdAt: string
+  updatedAt: string
+}
+
+// ── DOT compliance & onboarding ──────────────────────────────────────────────
+
+export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
+export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
+export type ComplianceStatus = 'COMPLIANT' | 'EXPIRING_SOON' | 'NON_COMPLIANT' | 'UNKNOWN'
+export type DriverOnboardingStatus =
+  | 'NOT_STARTED' | 'INVITED' | 'IN_PROGRESS' | 'PENDING_REVIEW' | 'COMPLETE'
+export type TruckOnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE'
+export type ComplianceEntityType = 'DRIVER' | 'TRUCK'
+
+export type OnboardingInviteStatus =
+  | 'SENT' | 'OPENED' | 'IN_PROGRESS' | 'SUBMITTED' | 'EXPIRED' | 'REVOKED'
+
+export interface OnboardingInvite {
+  id: string
+  driverId: string
+  email: string
+  driverType?: DriverType | null
+  token: string
+  status: OnboardingInviteStatus
+  expiresAt: string
+  sentAt?: string | null
+  openedAt?: string | null
+  lastActivityAt?: string | null
+  requestCount?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type DriverApplicationStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
+
+export interface DriverApplicationRecord {
+  id: string
+  driverId: string
+  legalName?: string | null
+  dob?: string | null
+  ssnLast4?: string | null
+  phone?: string | null
+  currentAddress?: string | null
+  addressHistory?: unknown        // JSON
+  cdlNumber?: string | null
+  cdlState?: string | null
+  cdlClass?: string | null
+  endorsements?: string[] | null
+  cdlExpiration?: string | null
+  priorLicenses?: unknown         // JSON
+  employmentHistory?: unknown     // JSON
+  accidents?: unknown             // JSON
+  violations?: unknown            // JSON
+  cdlIssuedAfterFeb2022?: boolean | null
+  eldtProviderName?: string | null
+  signatureName?: string | null
+  signedAt?: string | null
+  ipAddress?: string | null
+  status: DriverApplicationStatus
+  reviewedBy?: string | null
+  reviewedAt?: string | null
+  rejectionReason?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type ComplianceDocumentStatus =
+  | 'PENDING_REVIEW' | 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'REJECTED' | 'MISSING' | 'WAIVED'
+export type DocumentSource = 'DRIVER_PORTAL' | 'INTERNAL'
+
+export interface ComplianceDocument {
+  id: string
+  entityType: ComplianceEntityType
+  entityId: string
+  documentType: string
+  title: string
+  s3Key?: string | null
+  issueDate?: string | null
+  expirationDate?: string | null
+  status: ComplianceDocumentStatus
+  uploadedBy: DocumentSource
+  rejectionReason?: string | null
+  waivedReason?: string | null
+  notes?: string | null
+  verifiedBy?: string | null
+  verifiedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type OnboardingTaskStatus =
+  | 'PENDING' | 'AWAITING_DRIVER' | 'PENDING_REVIEW' | 'COMPLETE' | 'WAIVED' | 'NOT_APPLICABLE'
+
+export interface OnboardingTask {
+  id: string
+  entityType: ComplianceEntityType
+  entityId: string
+  requirementKey: string
+  label: string
+  category: string
+  required: boolean
+  requiresDocument: boolean
+  requiresExpiration: boolean
+  driverVisible: boolean
+  driverActionable: boolean
+  status: OnboardingTaskStatus
+  completedBy?: string | null
+  completedAt?: string | null
+  complianceDocumentId?: string | null
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type AlertSeverity = 'UPCOMING' | 'URGENT' | 'CRITICAL' | 'EXPIRED'
+
+export interface ComplianceAlert {
+  id: string
+  entityType: ComplianceEntityType
+  entityId: string
+  entityName?: string | null
+  documentType: string
+  documentTitle?: string | null
+  complianceDocumentId?: string | null
+  expirationDate?: string | null
+  severity: AlertSeverity
+  acknowledged: boolean
+  acknowledgedBy?: string | null
+  acknowledgedAt?: string | null
+  emailSentAt?: string | null
+  resolvedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type EscalationRecipients = 'DRIVER' | 'MANAGER' | 'BOTH'
+
+export interface EscalationRule {
+  id: string
+  documentType: string
+  daysBeforeExpiration: number
+  recipients: EscalationRecipients
+  templateKey: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ComplianceSettings {
+  id: string
+  settingsKey: string
+  portalEmailsPaused: boolean
+  escalationEmailsPaused: boolean
+  managerEmails?: string[] | null
   createdAt: string
   updatedAt: string
 }
@@ -55,6 +212,7 @@ export interface Load {
   colorKey?: ColorKey | null  // load's own color swatch
   daySlot?: number | null     // display order badge 1-5 within pickup day
   notes?: string | null       // short free-text notes
+  hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   createdAt: string
   updatedAt: string
   createdBy: string

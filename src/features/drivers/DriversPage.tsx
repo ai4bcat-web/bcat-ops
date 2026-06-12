@@ -106,7 +106,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
             email: driver.email ?? '', cdl: driver.cdl ?? '',
             cdlExpiration: driver.cdlExpiration ?? '', medCardExpiration: driver.medCardExpiration ?? '',
             drugTestDate: driver.drugTestDate ?? '', hireDate: driver.hireDate ?? '',
-            driverType: (driver.driverType || undefined) as 'company' | 'owner_op' | undefined,
+            driverType: (driver.driverType || undefined) as 'COMPANY' | 'OWNER_OPERATOR' | undefined,
           }
         : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined })
       setPhotoFile(null)
@@ -371,8 +371,8 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                       className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                     >
                       <option value="">Select…</option>
-                      <option value="company">Company Driver</option>
-                      <option value="owner_op">Owner Operator</option>
+                      <option value="COMPANY">Company Driver</option>
+                      <option value="OWNER_OPERATOR">Owner Operator</option>
                     </select>
                   )}
                 />

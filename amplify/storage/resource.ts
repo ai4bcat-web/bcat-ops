@@ -13,5 +13,11 @@ export const storage = defineStorage({
     'intake-pdfs/*': [
       allow.authenticated.to(['read']),
     ],
+    // DOT compliance documents (driver + truck). Internal staff read/write/delete.
+    // The driver portal uploads via a presigned PUT from the onboarding-portal-api
+    // Lambda (Phase 3) using the bucket's IAM grant, so no guest access is exposed here.
+    'compliance/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+    ],
   }),
 })

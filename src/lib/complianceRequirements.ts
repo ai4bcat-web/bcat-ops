@@ -1,0 +1,582 @@
+// DOT compliance requirement catalog — typed, version-controlled, NOT in the database.
+// The onboarding flow reads this to generate OnboardingTask records per classification.
+// Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
+
+export const CATALOG_VERSION = '2026-06-12.1'
+
+export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
+export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
+
+// How a smart expiration default is computed in the onboarding wizard.
+//  - PLUS_N_MONTHS: issue/inspection date + defaultExpirationMonths
+//  - DEC_31:        December 31 of the current year (IFTA decals)
+//  - AUG_31:        August 31 of the current year (Form 2290 HVUT)
+export type DefaultExpirationRule = 'PLUS_N_MONTHS' | 'DEC_31' | 'AUG_31'
+
+export interface ComplianceRequirement {
+  key: string
+  label: string
+  category: string
+  /** Driver types (driver reqs) or truck ownership types (truck reqs) this applies to. */
+  appliesTo: readonly (DriverType | TruckOwnershipType)[]
+  required: boolean
+  requiresDocument: boolean
+  requiresExpiration: boolean
+  driverVisible: boolean
+  driverActionable: boolean
+  defaultExpirationMonths?: number
+  defaultExpirationRule?: DefaultExpirationRule
+  /** 1–2 plain-English sentences for the driver portal, citing the CFR section. */
+  helpText: string
+  /** Staff-only context, never shown in the portal. */
+  internalNotes?: string
+}
+
+const ALL_DRIVERS: readonly DriverType[] = ['COMPANY', 'OWNER_OPERATOR']
+const ALL_TRUCKS: readonly TruckOwnershipType[] = ['COMPANY', 'OWNER_OPERATOR', 'LEASED']
+
+// ── Driver requirements ───────────────────────────────────────────────────────
+
+export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
+  // All drivers
+  {
+    key: 'employment_application',
+    label: 'Employment application (3-yr history, 10-yr CDL)',
+    category: 'Application',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Complete the DOT employment application directly in this portal. Federal rule 49 CFR 391.21 requires at least 3 years of employment history (10 years if you hold a CDL).',
+    internalNotes: 'Filled in-portal; links to the DriverApplication record.',
+  },
+  {
+    key: 'cdl_copy',
+    label: 'CDL copy — front and back',
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Upload clear photos of the front and back of your commercial driver license. Enter the expiration date printed on the card.',
+  },
+  {
+    key: 'medical_card',
+    label: "Medical examiner's certificate",
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationMonths: 24,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      "Upload your DOT medical examiner's certificate (49 CFR 391.43). Enter the expiration date on the card — certificates are valid for at most 24 months.",
+  },
+  {
+    key: 'med_examiner_registry_check',
+    label: 'Examiner verified on National Registry',
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT verifies that your medical examiner is listed on the FMCSA National Registry.',
+    internalNotes: 'Internal verification step — confirm examiner NRC number on the registry.',
+  },
+  {
+    key: 'mvr_initial',
+    label: 'MVR pulled within 30 days of hire',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT pulls your Motor Vehicle Record from each licensing state (49 CFR 391.23).',
+  },
+  {
+    key: 'mvr_annual_review',
+    label: 'Annual MVR review',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationMonths: 12,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT reviews your driving record every 12 months (49 CFR 391.25).',
+  },
+  {
+    key: 'prev_employer_inquiry',
+    label: 'Previous employer safety history (3 yrs)',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT contacts your prior DOT employers for safety-performance history (49 CFR 391.23).',
+    internalNotes: 'Driver supplies employer contacts via the application; staff send inquiries.',
+  },
+  {
+    key: 'road_test_cert',
+    label: 'Road test certificate or CDL equivalency',
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT documents a road test, or accepts your CDL as equivalent (49 CFR 391.31/.33).',
+  },
+  {
+    key: 'pre_employment_drug_test',
+    label: 'Pre-employment drug test (negative on file)',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: false,
+    helpText:
+      'You must complete a pre-employment drug test with a negative result before driving (49 CFR 382.301). BCAT schedules this and records the result.',
+  },
+  {
+    key: 'clearinghouse_pre_employment',
+    label: 'Clearinghouse full query + driver consent',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Grant BCAT consent for a full FMCSA Drug & Alcohol Clearinghouse query (49 CFR 382.701). Log in to the Clearinghouse and approve our request — follow the on-screen instructions.',
+  },
+  {
+    key: 'clearinghouse_annual',
+    label: 'Clearinghouse annual limited query',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: true,
+    defaultExpirationMonths: 12,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT runs a limited Clearinghouse query every 12 months.',
+  },
+  {
+    key: 'random_testing_enrollment',
+    label: 'Enrolled in random D&A consortium',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'BCAT enrolls you in a random drug & alcohol testing consortium.',
+  },
+  {
+    key: 'eldt_verification',
+    label: 'ELDT verification (CDL issued after Feb 7, 2022)',
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: false,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'If your CDL was issued after February 7, 2022, upload your Entry-Level Driver Training (ELDT) certificate. Otherwise mark this not applicable.',
+  },
+  {
+    key: 'drug_alcohol_policy_receipt',
+    label: 'Signed receipt of D&A + company policies',
+    category: 'Policies',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Read and acknowledge BCAT’s Drug & Alcohol and company policies. You sign electronically by typing your name and checking the attestation box.',
+  },
+  {
+    key: 'voided_check_or_direct_deposit',
+    label: 'Direct deposit form / voided check',
+    category: 'Payroll',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Upload a voided check or completed direct-deposit form so payroll can pay you.',
+    internalNotes: 'Payroll requirement, not DOT.',
+  },
+  {
+    key: 'i9_w4',
+    label: 'I-9 + W-4',
+    category: 'Payroll',
+    appliesTo: ['COMPANY'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Company drivers: upload completed federal I-9 and W-4 employment forms.',
+    internalNotes: 'Company drivers only.',
+  },
+  {
+    key: 'hazmat_endorsement',
+    label: 'Hazmat endorsement',
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: false,
+    requiresDocument: true,
+    requiresExpiration: true,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'If you carry a Hazmat (H) endorsement, upload proof and enter its expiration date. Otherwise mark this not applicable.',
+  },
+
+  // Owner-operator additional
+  {
+    key: 'lease_agreement',
+    label: 'Written lease agreement (49 CFR Part 376)',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    driverVisible: true,
+    driverActionable: false,
+    helpText:
+      'A written lease between you and BCAT is required under 49 CFR Part 376. BCAT generates it; you sign. The expiration matches the lease term.',
+    internalNotes: 'BCAT generates the lease; driver signs. Internal upload of the executed copy.',
+  },
+  {
+    key: 'w9',
+    label: 'W-9',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Upload a completed IRS Form W-9 for your business or yourself.',
+  },
+  {
+    key: 'equipment_receipt',
+    label: 'Equipment receipt signed',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Sign and upload the receipt for any BCAT-issued equipment (ELD, transponder, etc.).',
+  },
+  {
+    key: 'escrow_terms',
+    label: 'Escrow terms documented (if applicable)',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: false,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'If an escrow/maintenance fund applies, BCAT documents the terms per 49 CFR 376.12(k).',
+    internalNotes: 'Internal — only when an escrow arrangement exists.',
+  },
+  {
+    key: 'oo_bobtail_insurance',
+    label: 'Non-trucking/bobtail liability cert',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Upload your non-trucking (bobtail) liability certificate and enter the policy expiration date.',
+  },
+  {
+    key: 'oo_physical_damage',
+    label: 'Physical damage insurance cert',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Upload your physical-damage insurance certificate and enter the policy expiration date.',
+  },
+  {
+    key: 'occ_acc_or_workers_comp',
+    label: 'Occupational accident or workers comp cert',
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Upload your occupational-accident or workers-compensation certificate and enter its expiration date.',
+  },
+  {
+    key: 'truck_title_registration',
+    label: "Their truck's title/registration",
+    category: 'Owner-Operator',
+    appliesTo: ['OWNER_OPERATOR'],
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Upload the title and registration for your truck. This links to your truck record once created.',
+    internalNotes: 'Links to the TruckConfig record once the truck is created.',
+  },
+] as const
+
+// ── Truck requirements (internal only — no portal) ────────────────────────────
+
+export const TRUCK_REQUIREMENTS: readonly ComplianceRequirement[] = [
+  {
+    key: 'title_or_lease_proof',
+    label: 'Title / proof of ownership or lease docs',
+    category: 'Ownership',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Title, proof of ownership, or lease documents for the truck.',
+  },
+  {
+    key: 'irp_cab_card',
+    label: 'IRP registration / cab card',
+    category: 'Registration',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    defaultExpirationMonths: 12,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'International Registration Plan apportioned registration / cab card.',
+  },
+  {
+    key: 'annual_dot_inspection',
+    label: 'Annual DOT inspection (49 CFR 396.17)',
+    category: 'Inspection',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationMonths: 12,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Annual DOT periodic inspection report, valid 12 months from the inspection date (49 CFR 396.17).',
+  },
+  {
+    key: 'ifta_decals',
+    label: 'IFTA decals affixed + license copy in cab',
+    category: 'Registration',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'DEC_31',
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'IFTA decals affixed and a copy of the IFTA license in the cab. Decals expire December 31 each year.',
+  },
+  {
+    key: 'insurance_cert',
+    label: 'Insurance certificate',
+    category: 'Insurance',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    defaultExpirationMonths: 12,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Carrier liability insurance certificate for the truck. Expires on the policy expiration date.',
+  },
+  {
+    key: 'hvut_2290',
+    label: 'Form 2290 HVUT proof of payment',
+    category: 'Tax',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'AUG_31',
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Stamped Schedule 1 proof of Heavy Vehicle Use Tax payment. The tax period renews August 31 annually.',
+  },
+  {
+    key: 'eld_installed',
+    label: 'ELD installed + registered in Motive',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'ELD installed and registered in Motive; instruction packet and blank logs placed in the cab.',
+  },
+  {
+    key: 'safety_equipment',
+    label: 'Fire extinguisher, triangles, spare fuses (393.95)',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Required emergency equipment in the cab: fire extinguisher, warning triangles, spare fuses (49 CFR 393.95).',
+  },
+  {
+    key: 'door_markings',
+    label: 'Company name + USDOT number displayed',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Company name and USDOT number displayed on both doors per 49 CFR 390.21.',
+  },
+  {
+    key: 'fuel_card_assigned',
+    label: 'EFS fuel card assigned (enter last 4)',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'EFS fuel card assigned to the truck. Record the last 4 digits only — never the full number.',
+  },
+  {
+    key: 'phone_assigned',
+    label: 'Phone assigned (if required)',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: false,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Company phone assigned to the truck, if applicable.',
+  },
+  {
+    key: 'tablet_assigned',
+    label: 'Tablet assigned (if required)',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: false,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Company tablet assigned to the truck, if applicable.',
+  },
+  {
+    key: 'dashcam_installed',
+    label: 'Dashcam installed (if applicable)',
+    category: 'Equipment',
+    appliesTo: ALL_TRUCKS,
+    required: false,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Dashcam installed, if applicable.',
+  },
+  {
+    key: 'state_permits',
+    label: 'NY HUT / KYU / NM / OR permits (as applicable)',
+    category: 'Registration',
+    appliesTo: ALL_TRUCKS,
+    required: false,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    defaultExpirationMonths: 12,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'State-specific permits (NY HUT, KYU, NM, OR) where the truck operates.',
+  },
+  {
+    key: 'maintenance_file',
+    label: 'Maintenance file initialized',
+    category: 'Maintenance',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Maintenance file initialized for the truck (see /maintenance).',
+  },
+] as const
+
+// ── Lookups ───────────────────────────────────────────────────────────────────
+
+export function getDriverRequirements(driverType: DriverType): ComplianceRequirement[] {
+  return DRIVER_REQUIREMENTS.filter((r) => r.appliesTo.includes(driverType))
+}
+
+export function getTruckRequirements(ownershipType: TruckOwnershipType): ComplianceRequirement[] {
+  return TRUCK_REQUIREMENTS.filter((r) => r.appliesTo.includes(ownershipType))
+}
+
+const BY_KEY: ReadonlyMap<string, ComplianceRequirement> = new Map(
+  [...DRIVER_REQUIREMENTS, ...TRUCK_REQUIREMENTS].map((r) => [r.key, r]),
+)
+
+export function getRequirement(key: string): ComplianceRequirement | undefined {
+  return BY_KEY.get(key)
+}

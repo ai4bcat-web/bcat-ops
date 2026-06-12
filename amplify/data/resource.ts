@@ -32,6 +32,7 @@ const schema = a.schema({
       colorKey:        a.string(),   // load color swatch (driver-1…driver-12, broker)
       daySlot:         a.integer(),  // display order badge 1-5 within pickup day
       notes:           a.string(),   // short free-text notes
+      hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -48,13 +49,18 @@ const schema = a.schema({
       photoKey:           a.string(),
       assignedTruckId:    a.string(),
       // Compliance & profile fields
-      email:              a.string(),
+      email:              a.string(),   // invite target; required for new drivers (enforced in Zod)
       cdl:                a.string(),   // CDL number e.g. "CDL-A IL-8823901"
       cdlExpiration:      a.string(),   // YYYY-MM-DD
       medCardExpiration:  a.string(),   // YYYY-MM-DD
       drugTestDate:       a.string(),   // YYYY-MM-DD — last test date
       hireDate:           a.string(),   // YYYY-MM-DD
-      driverType:         a.string(),   // 'company' | 'owner_op'
+      // DOT onboarding / compliance classification.
+      // driverType was previously a free-form string ('company'|'owner_op'); it is now an
+      // enum. Existing un-reclassified records read as null → shown as "Unclassified" in UI.
+      driverType:         a.enum(['COMPANY', 'OWNER_OPERATOR']),
+      onboardingStatus:   a.enum(['NOT_STARTED', 'INVITED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETE']),
+      complianceStatus:   a.enum(['COMPLIANT', 'EXPIRING_SOON', 'NON_COMPLIANT', 'UNKNOWN']), // cached, updated by scanner
     })
     .authorization((allow) => [allow.authenticated()]),
 
@@ -213,9 +219,20 @@ const schema = a.schema({
     .model({
       truckId:             a.string().required(),   // Equipment.id — used as PK
       unitNumber:          a.string().required(),   // e.g. "009"
-      ownershipType:       a.enum(['COMPANY', 'OWNER_OPERATOR']),
+      // ownershipType is load-bearing for Motive sync (filters 'COMPANY'). The DOT-compliance
+      // spec's "COMPANY_OWNED" maps onto the existing 'COMPANY' value; only 'LEASED' is added so
+      // existing records and the motive-mileage-sync filter keep working unchanged.
+      ownershipType:       a.enum(['COMPANY', 'OWNER_OPERATOR', 'LEASED']),
       motiveVehicleId:     a.integer(),             // Motive integer vehicle ID
       motiveVehicleNumber: a.string(),              // Motive 'number' field (should = unitNumber)
+      // ── DOT onboarding / compliance (internal only — trucks have no portal) ──
+      onboardingStatus:       a.enum(['NOT_STARTED', 'IN_PROGRESS', 'COMPLETE']),
+      complianceStatus:       a.enum(['COMPLIANT', 'EXPIRING_SOON', 'NON_COMPLIANT', 'UNKNOWN']), // cached, updated by scanner
+      assignedFuelCardNumber: a.string(),   // LAST 4 DIGITS ONLY — never store full card numbers
+      assignedPhone:          a.string(),
+      assignedTablet:         a.string(),
+      eldSerialNumber:        a.string(),
+      inServiceDate:          a.date(),
     })
     .identifier(['truckId'])
     .authorization((allow) => [allow.authenticated()]),
@@ -240,6 +257,48 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Current truck location from Motive ELD ────────────────────────────────
+  // One record per truck (truckId = Equipment.id as PK). Upserted every sync so
+  // it always holds the latest known position. Lambda writes via DynamoDB SDK;
+  // dashboard map reads via AppSync.
+  TruckLocation: a
+    .model({
+      truckId:     a.string().required(),   // Equipment.id — used as PK
+      unitNumber:  a.string().required(),   // denormalised for display, e.g. "009"
+      lat:         a.float().required(),
+      lon:         a.float().required(),
+      bearing:     a.float(),               // heading in degrees, may be absent
+      speed:       a.float(),               // mph (X-Metric-Units: false), may be null
+      locatedAt:   a.string().required(),   // ISO timestamp Motive reported the fix
+      description: a.string(),              // human-readable, e.g. "4.5 mi NE of Tucson, AZ"
+      source:      a.string().required(),   // 'motive'
+      syncedAt:    a.datetime().required(),
+    })
+    .identifier(['truckId'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Truck location breadcrumb history ─────────────────────────────────────
+  // One record per truck per fix (truckId + locatedAt). Powers the breadcrumb
+  // trail drawn when a truck marker is clicked on the dashboard map.
+  TruckLocationHistory: a
+    .model({
+      truckId:     a.string().required(),   // Equipment.id
+      locatedAt:   a.string().required(),   // ISO timestamp — sort key
+      unitNumber:  a.string().required(),
+      lat:         a.float().required(),
+      lon:         a.float().required(),
+      bearing:     a.float(),
+      speed:       a.float(),
+      description: a.string(),
+      source:      a.string().required(),   // 'motive'
+      syncedAt:    a.datetime().required(),
+    })
+    .identifier(['truckId', 'locatedAt'])
+    .secondaryIndexes((index) => [
+      index('truckId').sortKeys(['locatedAt']),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // ── Driver availability (dispatch-entered, calendar display only) ─────────────
   // Covers full days off and partial availability (early/late start).
   // Multi-day ranges supported via startDate/endDate pair.
@@ -255,6 +314,172 @@ const schema = a.schema({
     })
     .secondaryIndexes((index) => [
       index('driverId').sortKeys(['startDate']),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── DOT compliance & onboarding ────────────────────────────────────────────
+  // Internal models use allow.authenticated() like the rest of the schema.
+  // The driver portal does NOT get AppSync access — it goes through a dedicated
+  // Lambda (Phase 3) that validates the invite token server-side and reads/writes
+  // via the DynamoDB SDK, so no public auth modes are exposed on these models.
+
+  // Powers the driver onboarding portal. One active invite per driver at a time;
+  // resending revokes the old token and issues a new one.
+  OnboardingInvite: a
+    .model({
+      driverId:       a.string().required(),
+      email:          a.string().required(),
+      driverType:     a.enum(['COMPANY', 'OWNER_OPERATOR']),   // set at invite time — determines checklist
+      token:          a.string().required(),   // 32+ bytes crypto-random, URL-safe
+      status:         a.enum(['SENT', 'OPENED', 'IN_PROGRESS', 'SUBMITTED', 'EXPIRED', 'REVOKED']),
+      expiresAt:      a.datetime().required(),  // default 14 days, extendable
+      sentAt:         a.datetime(),
+      openedAt:       a.datetime(),
+      lastActivityAt: a.datetime(),
+      requestCount:   a.integer(),              // simple per-token rate limiting (Phase 3)
+    })
+    .secondaryIndexes((index) => [
+      index('driverId'),
+      index('token'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // The 49 CFR 391.21 employment application, filled by the driver in the portal.
+  // NEVER collect or store a full SSN here — last 4 only.
+  DriverApplication: a
+    .model({
+      driverId:        a.string().required(),
+      // Personal
+      legalName:       a.string(),
+      dob:             a.date(),
+      ssnLast4:        a.string(),    // LAST 4 ONLY
+      phone:           a.string(),
+      currentAddress:  a.string(),
+      addressHistory:  a.json(),      // 3 years of residences
+      // License
+      cdlNumber:       a.string(),
+      cdlState:        a.string(),
+      cdlClass:        a.string(),
+      endorsements:    a.string().array(),
+      cdlExpiration:   a.date(),
+      priorLicenses:   a.json(),
+      // Employment history — JSON array; ≥3yr coverage (10yr for CDL); gaps > 30d explained
+      employmentHistory: a.json(),
+      // Driving record
+      accidents:       a.json(),      // last 3 years
+      violations:      a.json(),      // last 3 years
+      // ELDT
+      cdlIssuedAfterFeb2022: a.boolean(),
+      eldtProviderName: a.string(),   // conditional
+      // Certification (electronic signature per FMCSA: typed name + timestamp + attestation)
+      signatureName:   a.string(),
+      signedAt:        a.datetime(),
+      ipAddress:       a.string(),
+      status:          a.enum(['DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED']),
+      reviewedBy:      a.string(),
+      reviewedAt:      a.datetime(),
+      rejectionReason: a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('driverId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // One generic document model for both drivers and trucks.
+  // Replacing a document creates a NEW record (history preserved for audits).
+  ComplianceDocument: a
+    .model({
+      entityType:      a.enum(['DRIVER', 'TRUCK']),
+      entityId:        a.string().required(),
+      documentType:    a.string().required(),   // key from the requirement catalog
+      title:           a.string().required(),
+      s3Key:           a.string(),              // optional — some items are confirmations, not files
+      issueDate:       a.date(),
+      expirationDate:  a.date(),                // null = non-expiring
+      status:          a.enum(['PENDING_REVIEW', 'VALID', 'EXPIRING_SOON', 'EXPIRED', 'REJECTED', 'MISSING', 'WAIVED']),
+      uploadedBy:      a.enum(['DRIVER_PORTAL', 'INTERNAL']),
+      rejectionReason: a.string(),              // shown to the driver in the portal
+      waivedReason:    a.string(),
+      notes:           a.string(),
+      verifiedBy:      a.string(),              // username
+      verifiedAt:      a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index('entityId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // A single checklist item generated from the requirement catalog per classification.
+  OnboardingTask: a
+    .model({
+      entityType:           a.enum(['DRIVER', 'TRUCK']),
+      entityId:             a.string().required(),
+      requirementKey:       a.string().required(),
+      label:                a.string().required(),
+      category:             a.string().required(),
+      required:             a.boolean().required(),
+      requiresDocument:     a.boolean().required(),
+      requiresExpiration:   a.boolean().required(),
+      driverVisible:        a.boolean().required(),   // appears in driver portal?
+      driverActionable:     a.boolean().required(),   // driver can upload vs view-only
+      status:               a.enum(['PENDING', 'AWAITING_DRIVER', 'PENDING_REVIEW', 'COMPLETE', 'WAIVED', 'NOT_APPLICABLE']),
+      completedBy:          a.string(),
+      completedAt:          a.datetime(),
+      complianceDocumentId: a.string(),               // optional link
+      sortOrder:            a.integer().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('entityId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Created by the Phase 2 compliance-scanner. Model defined now.
+  ComplianceAlert: a
+    .model({
+      entityType:     a.enum(['DRIVER', 'TRUCK']),
+      entityId:       a.string().required(),
+      entityName:     a.string(),               // denormalized
+      documentType:   a.string().required(),
+      documentTitle:  a.string(),
+      complianceDocumentId: a.string(),         // link back to the document
+      expirationDate: a.date(),
+      severity:       a.enum(['UPCOMING', 'URGENT', 'CRITICAL', 'EXPIRED']), // 31-60d / 8-30d / 0-7d / past
+      acknowledged:   a.boolean().required(),
+      acknowledgedBy: a.string(),
+      acknowledgedAt: a.datetime(),
+      emailSentAt:    a.datetime(),             // Phase 4
+      resolvedAt:     a.datetime(),             // set when the document is renewed/replaced
+    })
+    // NOTE: Amplify GSIs can't key on a boolean, so there is no index on `acknowledged`.
+    // The alert set is small; open-vs-acknowledged filtering is done client-side
+    // (consistent with FuelTransaction/IntakeItem in this schema).
+    .secondaryIndexes((index) => [
+      index('entityId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Phase 4: expiration escalation rules. Admin-editable via /compliance settings.
+  EscalationRule: a
+    .model({
+      documentType:         a.string().required(),   // a catalog key, or 'ALL'
+      daysBeforeExpiration: a.integer().required(),  // 30 / 14 / 7 / 0
+      recipients:           a.enum(['DRIVER', 'MANAGER', 'BOTH']),
+      templateKey:          a.string().required(),
+      active:               a.boolean().required(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Phase 3/4: single-row settings records (e.g. id 'GLOBAL') for kill switches and
+  // manager-recipient lists. Both email paths default to PAUSED.
+  ComplianceSettings: a
+    .model({
+      settingsKey:          a.string().required(),   // 'GLOBAL'
+      portalEmailsPaused:   a.boolean().required(),   // default true (PAUSED)
+      escalationEmailsPaused: a.boolean().required(), // default true (PAUSED)
+      managerEmails:        a.string().array(),       // escalation manager recipients
+    })
+    .secondaryIndexes((index) => [
+      index('settingsKey'),
     ])
     .authorization((allow) => [allow.authenticated()]),
 
