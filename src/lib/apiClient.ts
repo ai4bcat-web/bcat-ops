@@ -926,7 +926,8 @@ const EQUIPMENT_FIELDS = `
   id type unitNumber nickname vin plate make model year mileage
   ownership insured active
   dotInspectionDate iftaExpirationDate irpExpirationDate insuranceExpirationDate bobtailInsuranceDate
-  assignedDriverId fleetManagerAssignee onTollwayAccount fuelCardNumbers notes
+  assignedDriverId fleetManagerAssignee onTollwayAccount fuelCardNumbers
+  eldSource eldSerialNumber notes
   createdAt updatedAt
 `
 

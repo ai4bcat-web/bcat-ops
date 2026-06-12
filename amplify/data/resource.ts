@@ -91,6 +91,10 @@ const schema = a.schema({
       fleetManagerAssignee:    a.string(),
       onTollwayAccount:        a.boolean(),
       fuelCardNumbers:         a.string().array(),     // EFS card # prefixes
+      // ELD / telematics source: 'motive' = auto-synced by unit # (default);
+      // 'manual' = own ELD, excluded from Motive mileage sync. null = treated as motive.
+      eldSource:               a.string(),
+      eldSerialNumber:         a.string(),             // own-ELD device serial (manual trucks)
       notes:                   a.string(),
     })
     .authorization((allow) => [allow.authenticated()]),

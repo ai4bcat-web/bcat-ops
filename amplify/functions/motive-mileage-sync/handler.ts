@@ -114,6 +114,8 @@ async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
       ExclusiveStartKey:         token as Record<string, never> | undefined,
     }))
     for (const item of result.Items ?? []) {
+      // Skip trucks marked as using their own ELD — they are not Motive-synced.
+      if (item.eldSource && String(item.eldSource) === 'manual') continue
       if (item.unitNumber && item.id) map.set(String(item.unitNumber), String(item.id))
     }
     token = result.LastEvaluatedKey

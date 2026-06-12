@@ -16,7 +16,7 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, TaskPriority, TaskStatus } from '@/types/equipment'
+import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -156,6 +156,8 @@ function EquipmentForm({ initial, onSave, onClose }: EquipmentFormProps) {
     irpExpirationDate:       initial?.irpExpirationDate ?? '',
     bobtailInsuranceDate:    initial?.bobtailInsuranceDate ?? '',
     fleetManagerAssignee:    initial?.fleetManagerAssignee ?? '',
+    eldSource:               (initial?.eldSource ?? 'motive') as EldSource,
+    eldSerialNumber:         initial?.eldSerialNumber ?? '',
     notes:                   initial?.notes ?? '',
   })
 
@@ -184,6 +186,9 @@ function EquipmentForm({ initial, onSave, onClose }: EquipmentFormProps) {
       irpExpirationDate: isTruck ? (form.irpExpirationDate || undefined) : undefined,
       bobtailInsuranceDate: form.bobtailInsuranceDate || undefined,
       fleetManagerAssignee: form.fleetManagerAssignee || undefined,
+      // ELD source applies to trucks only; manual keeps an optional serial.
+      eldSource: isTruck ? form.eldSource : undefined,
+      eldSerialNumber: isTruck && form.eldSource === 'manual' ? (form.eldSerialNumber.trim() || undefined) : undefined,
       notes: form.notes.trim() || undefined,
     })
   }
@@ -267,6 +272,34 @@ function EquipmentForm({ initial, onSave, onClose }: EquipmentFormProps) {
               </select>
             </div>
           </div>
+
+          {/* ELD / Telematics (trucks only) */}
+          {isTruck && (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground uppercase tracking-wider">ELD / Telematics</Label>
+                <select
+                  className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white"
+                  value={form.eldSource}
+                  onChange={(e) => set('eldSource', e.target.value as EldSource)}
+                >
+                  <option value="motive">Motive — auto-connect by unit #</option>
+                  <option value="manual">Own ELD — manual</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  {form.eldSource === 'motive'
+                    ? 'Mileage auto-syncs from Motive matched on the unit number above.'
+                    : 'Excluded from Motive sync — this truck uses its own ELD.'}
+                </p>
+              </div>
+              {form.eldSource === 'manual' && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground uppercase tracking-wider">ELD Serial #</Label>
+                  <Input value={form.eldSerialNumber} onChange={(e) => set('eldSerialNumber', e.target.value)} placeholder="Device serial (optional)" className="h-9" />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Compliance dates */}
           <div>
