@@ -107,6 +107,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1 min-w-0">
             {isContinuation && <ArrowRight className="size-2.5 text-slate-300 shrink-0" />}
+            {load.hot && <span className="shrink-0 text-[10px] leading-none" title="Hot load">🔥</span>}
             <span className="flex-1 text-[11px] font-bold truncate leading-none" style={{ color: textColor }}>
               {load.aljexId || <em className="text-amber-600 not-italic font-semibold">Build</em>}
             </span>

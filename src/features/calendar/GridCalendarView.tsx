@@ -231,6 +231,7 @@ function LoadCard({
       {/* Row 1: grip + Pro# + TMS + PU# */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
         <GripVertical style={{ width: 10, height: 10, color: 'var(--ds-t3)', flexShrink: 0, opacity: 0.45 }} />
+        {load.hot && <span title="Hot load" style={{ flexShrink: 0, fontSize: 11, lineHeight: 1 }}>🔥</span>}
         {/* Pro# — flexShrink:0 guarantees it's always fully visible */}
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)', flexShrink: 0, whiteSpace: 'nowrap' }}>
           {load.aljexId || '—'}

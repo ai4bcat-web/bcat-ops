@@ -1,38 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import {
-  LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
-  Users, Truck, Wrench, DollarSign, MessageSquare, History, UserCog, LogOut, Plus,
-  ShieldCheck, ClipboardCheck,
-} from 'lucide-react'
+import { UserCog, LogOut, Plus } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
-
-const NAV_GROUPS = [
-  [
-    { to: '/dashboard',   label: 'Dashboard',   icon: LayoutDashboard, pageKey: 'dashboard' },
-    { to: '/calendar',    label: 'Calendar',     icon: CalendarDays,    pageKey: 'calendar' },
-    { to: '/loads',       label: 'Loads',        icon: Table2,          pageKey: 'loads',        badgeKey: 'loads' },
-    { to: '/intake',      label: 'Intake',       icon: Inbox,           pageKey: 'intake',       alwaysVisible: true, badgeKey: 'intake' },
-    { to: '/tasks',       label: 'Tasks',        icon: ClipboardList,   pageKey: 'tasks',        alwaysVisible: true, badgeKey: 'tasks' },
-  ],
-  [
-    { to: '/drivers',     label: 'Drivers',      icon: Users,           pageKey: 'drivers' },
-    { to: '/trucks',      label: 'Fleet',        icon: Truck,           pageKey: 'trucks' },
-    { to: '/maintenance', label: 'Maintenance',  icon: Wrench,          pageKey: 'maintenance',  badgeKey: 'maintenance' },
-    { to: '/expenses',    label: 'Expenses',     icon: DollarSign,      pageKey: 'expenses' },
-    { to: '/schedule',    label: 'Schedules',    icon: MessageSquare,   pageKey: 'schedule' },
-  ],
-  [
-    { to: '/compliance',        label: 'Compliance',   icon: ShieldCheck,     pageKey: 'compliance',       alwaysVisible: true },
-    { to: '/compliance/review', label: 'Review Queue', icon: ClipboardCheck,  pageKey: 'complianceReview', alwaysVisible: true, badgeKey: 'review' },
-  ],
-  [
-    { to: '/audit-log',   label: 'Audit Log',    icon: History,         pageKey: 'audit' },
-  ],
-]
+import { NAV_GROUPS } from '@/lib/navItems'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   loads:       { bg: 'rgba(15,23,42,0.06)',       color: 'var(--ds-t3)' },
@@ -127,7 +100,7 @@ export function NavBar() {
               <div style={{ height: 1, background: 'var(--ds-border)', margin: '8px 6px' }} />
             )}
             {group
-              .filter(({ pageKey, alwaysVisible }) => alwaysVisible || hasPageAccess(pageKey))
+              .filter(({ pageKey }) => hasPageAccess(pageKey))
               .map(({ to, label, icon: Icon, badgeKey }) => {
                 const badge = getBadgeCount(badgeKey)
                 return (

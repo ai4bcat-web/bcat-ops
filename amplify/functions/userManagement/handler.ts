@@ -17,11 +17,9 @@ const cognito = new CognitoIdentityProviderClient({})
 // `||` (not `??`) so an empty string also triggers the fallback.
 const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 
-// All controllable page groups (must match frontend PAGE_OPTIONS keys)
-const PAGE_GROUPS = [
-  'page-dashboard', 'page-calendar', 'page-loads',
-  'page-drivers', 'page-trucks', 'page-maintenance', 'page-expenses', 'page-schedule', 'page-audit',
-]
+// Page permissions are NOT hardcoded — any well-formed `page-*` group is accepted and
+// created on demand, so a new page added to the frontend nav works without redeploying.
+const PAGE_GROUP_RE = /^page-[A-Za-z0-9_-]+$/
 
 const ADMIN_GROUP = 'ADMIN'
 const DEFAULT_GROUP = 'DISPATCHER'  // auto-assigned to new invited users
@@ -105,16 +103,6 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         createdAt: u.UserCreateDate?.toISOString(),
       }))
       console.log('[list] returned', users.length, 'users from pool', USER_POOL_ID)
-      // TEMP DIAGNOSTIC: surface the queried pool id if the list is empty, so a
-      // pool/env mismatch (Lambda reading a different pool than the one you sign in
-      // to) is visible in the UI instead of looking like a legitimately empty pool.
-      if (users.length === 0) {
-        throw new Error(
-          `No users found in pool ${USER_POOL_ID} ` +
-          `(env USER_POOL_ID ${process.env.USER_POOL_ID ? '= ' + process.env.USER_POOL_ID : 'NOT set — using hardcoded fallback'}). ` +
-          `If you can sign in but this pool is empty, the Lambda is pointed at a different user pool than your login pool.`
-        )
-      }
       return JSON.stringify(users)
     }
     case 'create': {
@@ -161,13 +149,15 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
     case 'setPageGroups': {
       if (!username) throw new Error('username is required')
       // Frontend sends bare keys (e.g. "dashboard"); normalize to full group names
-      // ("page-dashboard") and drop anything not in the known controllable set.
+      // ("page-dashboard"). Any well-formed page-* key is accepted (no fixed list).
       const rawDesired: string[] = pages ? JSON.parse(pages) : []
-      const desired = rawDesired
-        .map((p) => (p.startsWith('page-') ? p : `page-${p}`))
-        .filter((g) => PAGE_GROUPS.includes(g))
-      // Ensure all page groups exist first
-      await Promise.all(PAGE_GROUPS.map(ensureGroup))
+      const desired = [...new Set(
+        rawDesired
+          .map((p) => (p.startsWith('page-') ? p : `page-${p}`))
+          .filter((g) => PAGE_GROUP_RE.test(g)),
+      )]
+      // Create any requested groups on demand.
+      await Promise.all(desired.map(ensureGroup))
       // Get current groups
       const current = await cognito.send(new AdminListGroupsForUserCommand({
         UserPoolId: USER_POOL_ID,
@@ -175,7 +165,7 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
       }))
       const currentPageGroups = (current.Groups ?? [])
         .map((g) => g.GroupName ?? '')
-        .filter((g) => PAGE_GROUPS.includes(g))
+        .filter((g) => PAGE_GROUP_RE.test(g))
       // Add missing
       const toAdd = desired.filter((g) => !currentPageGroups.includes(g))
       // Remove unwanted

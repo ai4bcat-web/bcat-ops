@@ -546,7 +546,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
 
       {/* Pro # */}
       <Cell width={COL.aljex} bold onClick={() => useAppStore.getState().setSelectedLoad(load.id, 'edit')}>
-        {load.aljexId || '—'}
+        {load.hot && <span title="Hot load">🔥 </span>}{load.aljexId || '—'}
       </Cell>
 
       {/* TMS + PU# — editable inline */}

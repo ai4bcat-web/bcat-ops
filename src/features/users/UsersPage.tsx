@@ -18,20 +18,11 @@ import {
 } from '@/lib/apiClient'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { PERMISSION_PAGES } from '@/lib/navItems'
 
-// Controllable pages — must mirror the gated (non-alwaysVisible) nav items in NavBar.tsx
-// and the Lambda's PAGE_GROUPS. Intake/Tasks/Compliance are always visible, so not listed.
-const PAGE_OPTIONS = [
-  { key: 'dashboard',   label: 'Dashboard'   },
-  { key: 'calendar',    label: 'Calendar'    },
-  { key: 'loads',       label: 'Loads'       },
-  { key: 'drivers',     label: 'Drivers'     },
-  { key: 'trucks',      label: 'Fleet'       },
-  { key: 'maintenance', label: 'Maintenance' },
-  { key: 'expenses',    label: 'Expenses'    },
-  { key: 'schedule',    label: 'Schedules'   },
-  { key: 'audit',       label: 'Audit Log'   },
-] as const
+// Controllable pages are derived from the shared nav source of truth (PERMISSION_PAGES),
+// so every sidebar page — including any new one added later — is grantable automatically.
+const PAGE_OPTIONS = PERMISSION_PAGES
 
 function StatusBadge({ user }: { user: CognitoUser }) {
   if (user.status === 'FORCE_CHANGE_PASSWORD') {
@@ -256,7 +247,7 @@ function UserRow({
             )}
             <div className="flex items-center justify-between mt-2.5">
               <p className="text-[11px] text-muted-foreground">
-                Click a page to toggle access. Changes save instantly.
+                No pages selected = full access. Select pages to restrict this user to only those. Saves instantly.
               </p>
               <button
                 onClick={handleAdminToggle}
@@ -506,8 +497,8 @@ export function UsersPage() {
                 {inviteAdmin
                   ? 'Full access to every page.'
                   : invitePages.length > 0
-                    ? `${invitePages.length} page${invitePages.length !== 1 ? 's' : ''} selected. Intake, Tasks & Compliance are visible to everyone.`
-                    : 'Pick the pages this user can see (you can also change this later from the list below).'}
+                    ? `Restricted to ${invitePages.length} page${invitePages.length !== 1 ? 's' : ''}. Leave empty for full access.`
+                    : 'Leave empty for full access, or pick specific pages to restrict this user. Changeable later from the list.'}
               </p>
             </div>
           </form>

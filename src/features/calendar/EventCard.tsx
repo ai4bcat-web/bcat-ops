@@ -55,18 +55,23 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
 
         {/* Row 1: ALJEX ID (primary) — or amber CTA if missing */}
         <div className="flex items-center justify-between gap-1 min-w-0">
-          {load.aljexId ? (
-            <span className="text-xs font-bold truncate leading-tight" style={{ color: textColor }} title={load.aljexId}>
-              {load.aljexId}
-            </span>
-          ) : (
-            <button
-              className="text-[11px] font-semibold italic truncate text-amber-600 underline underline-offset-2 hover:text-amber-700"
-              onClick={(e) => { e.stopPropagation(); onEdit() }}
-            >
-              Need to build
-            </button>
-          )}
+          <div className="flex items-center gap-1 min-w-0">
+            {load.hot && (
+              <span className="shrink-0 text-xs leading-none" title="Hot load">🔥</span>
+            )}
+            {load.aljexId ? (
+              <span className="text-xs font-bold truncate leading-tight" style={{ color: textColor }} title={load.aljexId}>
+                {load.aljexId}
+              </span>
+            ) : (
+              <button
+                className="text-[11px] font-semibold italic truncate text-amber-600 underline underline-offset-2 hover:text-amber-700"
+                onClick={(e) => { e.stopPropagation(); onEdit() }}
+              >
+                Need to build
+              </button>
+            )}
+          </div>
           <span
             className="text-[9px] font-black shrink-0 rounded-full flex items-center justify-center leading-none"
             style={{ background: borderColor, color: '#fff', minWidth: '14px', minHeight: '14px', padding: '0 2px' }}

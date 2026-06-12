@@ -91,8 +91,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       isAdmin,
       isOwner,
-      hasPageAccess: (pageKey: string) =>
-        isAdmin || (user?.groups.includes(`page-${pageKey}`) ?? false),
+      // Allowlist model: admins always have access; a user with NO page-groups is
+      // unrestricted (full access); granting any page restricts them to only those.
+      hasPageAccess: (pageKey: string) => {
+        if (isAdmin) return true
+        const pageGroups = (user?.groups ?? []).filter((g) => g.startsWith('page-'))
+        if (pageGroups.length === 0) return true
+        return pageGroups.includes(`page-${pageKey}`)
+      },
     }}>
       {children}
     </AuthContext.Provider>
