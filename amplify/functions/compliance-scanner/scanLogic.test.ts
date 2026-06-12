@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { planScan, type ScanDocument, type ScanTask, type ScanAlert, type ScanEntity } from './scanLogic'
+import {
+  planScan, planEscalations,
+  type ScanDocument, type ScanTask, type ScanAlert, type ScanEntity,
+  type FullAlert, type EscalationRuleInput,
+} from './scanLogic'
 
 // Local "mock event" verification for the compliance-scanner — runs the pure plan
 // against a representative dataset so we can trust the schedule before deploying.
@@ -70,5 +74,44 @@ describe('planScan (compliance-scanner mock invocation)', () => {
     const plan = planScan({ documents: [], tasks, alerts: [], entities, asOf: ASOF })
     const driver = plan.entityStatusUpdates.find((e) => e.entityId === 'drv-1')
     expect(driver?.complianceStatus).toBe('NON_COMPLIANT')
+  })
+})
+
+describe('planEscalations (Phase 4)', () => {
+  const ASOF = '2026-06-12'
+  const rules: EscalationRuleInput[] = [
+    { id: 'r30', documentType: 'ALL', daysBeforeExpiration: 30, recipients: 'BOTH', templateKey: 'notice_30', active: true },
+    { id: 'r7', documentType: 'ALL', daysBeforeExpiration: 7, recipients: 'BOTH', templateKey: 'final_warning_7', active: true },
+    { id: 'r0', documentType: 'ALL', daysBeforeExpiration: 0, recipients: 'BOTH', templateKey: 'out_of_service_0', active: true },
+    { id: 'rOff', documentType: 'ALL', daysBeforeExpiration: 14, recipients: 'DRIVER', templateKey: 'x', active: false },
+  ]
+  const alert = (over: Partial<FullAlert>): FullAlert => ({
+    id: 'a1', entityType: 'DRIVER', entityId: 'd1', documentType: 'medical_card',
+    expirationDate: '2026-06-25', severity: 'URGENT', acknowledged: false, resolvedAt: null, ...over,
+  })
+
+  it('fires only crossed thresholds and ignores inactive rules', () => {
+    // 13 days out → only the 30-day rule is crossed (13 <= 30); 7 and 0 not crossed.
+    const out = planEscalations({ alerts: [alert({ expirationDate: '2026-06-25' })], rules, sentKeys: new Set(), asOf: ASOF })
+    expect(out.map((o) => o.rule.id).sort()).toEqual(['r30'])
+  })
+
+  it('does not resend an already-logged (alert, rule) pair', () => {
+    const out = planEscalations({
+      alerts: [alert({ expirationDate: '2026-06-25' })],
+      rules, sentKeys: new Set(['a1#30']), asOf: ASOF,
+    })
+    expect(out).toHaveLength(0)
+  })
+
+  it('fires the out-of-service rule once a document is past due', () => {
+    const out = planEscalations({ alerts: [alert({ expirationDate: '2026-06-01', severity: 'EXPIRED' })], rules, sentKeys: new Set(), asOf: ASOF })
+    // 30, 7, and 0 are all crossed for an expired doc
+    expect(out.map((o) => o.rule.id).sort()).toEqual(['r0', 'r30', 'r7'])
+  })
+
+  it('skips resolved alerts', () => {
+    const out = planEscalations({ alerts: [alert({ resolvedAt: '2026-06-10' })], rules, sentKeys: new Set(), asOf: ASOF })
+    expect(out).toHaveLength(0)
   })
 })

@@ -13,6 +13,7 @@ import type {
   OnboardingTaskStatus,
   ComplianceAlert,
   EscalationRule,
+  EscalationEmailLog,
   ComplianceSettings,
 } from '@/types'
 
@@ -394,6 +395,39 @@ export async function deleteEscalationRule(id: string): Promise<void> {
   await gql(`mutation ($input: DeleteEscalationRuleInput!) { deleteEscalationRule(input: $input) { id } }`, {
     input: { id },
   })
+}
+
+/** Default escalation ladder, seeded once when no rules exist. */
+export const DEFAULT_ESCALATION_RULES: Omit<EscalationRule, 'id' | 'createdAt' | 'updatedAt'>[] = [
+  { documentType: 'ALL', daysBeforeExpiration: 30, recipients: 'BOTH', templateKey: 'notice_30', active: true },
+  { documentType: 'ALL', daysBeforeExpiration: 7, recipients: 'BOTH', templateKey: 'final_warning_7', active: true },
+  { documentType: 'ALL', daysBeforeExpiration: 0, recipients: 'BOTH', templateKey: 'out_of_service_0', active: true },
+]
+
+/** Create the default rules if the table is empty. Returns the rules in effect. */
+export async function seedDefaultEscalationRules(): Promise<EscalationRule[]> {
+  const existing = await listEscalationRules()
+  if (existing.length > 0) return existing
+  const created: EscalationRule[] = []
+  for (const r of DEFAULT_ESCALATION_RULES) created.push(await createEscalationRule(r))
+  return created
+}
+
+// ── EscalationEmailLog ──────────────────────────────────────────────────────────
+
+const ESCALATION_LOG_FIELDS = `
+  id alertId entityType entityName documentType daysBeforeExpiration templateKey
+  recipients sentAt createdAt updatedAt
+`
+
+export async function listEscalationEmailLogsByAlert(alertId: string): Promise<EscalationEmailLog[]> {
+  const data = await gql<{ listEscalationEmailLogByAlertId: { items: EscalationEmailLog[] } }>(
+    `query ($alertId: String!) {
+      listEscalationEmailLogByAlertId(alertId: $alertId, limit: 100) { items { ${ESCALATION_LOG_FIELDS} } }
+    }`,
+    { alertId },
+  )
+  return (data.listEscalationEmailLogByAlertId.items ?? []).sort((a, b) => b.sentAt.localeCompare(a.sentAt))
 }
 
 // ── ComplianceSettings (single GLOBAL row) ──────────────────────────────────────

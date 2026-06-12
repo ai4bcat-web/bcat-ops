@@ -23,20 +23,33 @@ import {
   PutCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
-import { randomUUID } from 'crypto'
+import { randomUUID, randomBytes } from 'crypto'
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import {
   planScan,
+  planEscalations,
   type ScanDocument,
   type ScanTask,
   type ScanAlert,
   type ScanEntity,
+  type FullAlert,
+  type EscalationRuleInput,
 } from './scanLogic'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
+const ses = new SESv2Client({})
 
 const DOC_TABLE = process.env.DOC_TABLE_NAME!
 const TASK_TABLE = process.env.TASK_TABLE_NAME!
 const ALERT_TABLE = process.env.ALERT_TABLE_NAME!
+// Phase 4 escalation env (optional — escalation is skipped if unset)
+const RULE_TABLE = process.env.RULE_TABLE_NAME
+const EMAILLOG_TABLE = process.env.EMAILLOG_TABLE_NAME
+const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME
+const INVITE_TABLE = process.env.INVITE_TABLE_NAME
+const AUDIT_TABLE_ESC = process.env.AUDIT_TABLE_NAME
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'onboarding@bcatcorp.com'
+const PORTAL_BASE_URL = process.env.PORTAL_BASE_URL ?? ''
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const TRUCK_CONFIG_TABLE = process.env.TRUCK_CONFIG_TABLE_NAME!
 
@@ -209,6 +222,204 @@ export const handler = async (event: ScannerEvent = {}) => {
     }
   }
 
-  console.log('[compliance-scanner] done', JSON.stringify(summary))
-  return summary
+  // ── Phase 4: expiration escalation emails ──
+  const escalation = await runEscalations(asOf, now, driverRows)
+
+  const finalSummary = { ...summary, escalationsSent: escalation.sent, escalationsPaused: escalation.paused }
+  console.log('[compliance-scanner] done', JSON.stringify(finalSummary))
+  return finalSummary
+}
+
+// ── Phase 4: escalation email sending ───────────────────────────────────────────
+
+interface EscalationResult { sent: number; paused: boolean }
+
+async function runEscalations(asOf: string, now: string, driverRows: Record<string, unknown>[]): Promise<EscalationResult> {
+  if (!RULE_TABLE || !EMAILLOG_TABLE || !SETTINGS_TABLE) {
+    console.log('[compliance-scanner] escalation tables not configured — skipping')
+    return { sent: 0, paused: false }
+  }
+
+  // Kill switch — default PAUSED when no settings row exists.
+  const settingsRows = await scanAll(SETTINGS_TABLE)
+  const settings = settingsRows.find((s) => s.settingsKey === 'GLOBAL')
+  const paused = !settings || settings.escalationEmailsPaused !== false
+  if (paused) {
+    console.log('[compliance-scanner] escalation emails PAUSED — skipping send')
+    return { sent: 0, paused: true }
+  }
+  const managerEmails: string[] = Array.isArray(settings?.managerEmails) ? (settings!.managerEmails as string[]) : []
+
+  const [ruleRows, logRows, alertRows] = await Promise.all([
+    scanAll(RULE_TABLE),
+    scanAll(EMAILLOG_TABLE),
+    scanAll(ALERT_TABLE),
+  ])
+
+  const rules: EscalationRuleInput[] = ruleRows.map((r) => ({
+    id: String(r.id),
+    documentType: String(r.documentType),
+    daysBeforeExpiration: Number(r.daysBeforeExpiration),
+    recipients: r.recipients as EscalationRuleInput['recipients'],
+    templateKey: String(r.templateKey ?? ''),
+    active: !!r.active,
+  }))
+
+  const alerts: FullAlert[] = alertRows.map((a) => ({
+    id: String(a.id),
+    entityType: a.entityType as FullAlert['entityType'],
+    entityId: String(a.entityId),
+    entityName: (a.entityName as string) ?? null,
+    documentType: String(a.documentType),
+    expirationDate: (a.expirationDate as string) ?? null,
+    severity: a.severity as FullAlert['severity'],
+    acknowledged: !!a.acknowledged,
+    resolvedAt: (a.resolvedAt as string) ?? null,
+  }))
+
+  const sentKeys = new Set(logRows.map((l) => `${l.alertId}#${Number(l.daysBeforeExpiration)}`))
+  const planned = planEscalations({ alerts, rules, sentKeys, asOf })
+
+  const driverEmailById = new Map<string, string>()
+  for (const d of driverRows) if (d.email) driverEmailById.set(String(d.id), String(d.email))
+
+  let sent = 0
+  for (const { alert, rule, daysRemaining } of planned) {
+    const recipients: string[] = []
+    const driverEmail = alert.entityType === 'DRIVER' ? driverEmailById.get(alert.entityId) : undefined
+    if ((rule.recipients === 'DRIVER' || rule.recipients === 'BOTH') && driverEmail) recipients.push(driverEmail)
+    if (rule.recipients === 'MANAGER' || rule.recipients === 'BOTH') recipients.push(...managerEmails)
+    const to = [...new Set(recipients)].filter(Boolean)
+    if (to.length === 0) continue
+
+    // For driver renewals, ensure an active invite + re-open the item so it flows
+    // back through the portal → review queue.
+    let portalLink = PORTAL_BASE_URL
+    if (alert.entityType === 'DRIVER') {
+      const token = await ensureInvite(alert.entityId, driverEmail ?? '')
+      if (token && PORTAL_BASE_URL) portalLink = `${PORTAL_BASE_URL}/onboard/${token}`
+      await reopenTask(alert.entityId, alert.documentType, now)
+    }
+
+    const { subject, body } = buildEscalationEmail(rule, alert, daysRemaining, portalLink)
+    try {
+      await ses.send(new SendEmailCommand({
+        FromEmailAddress: FROM_ADDRESS,
+        Destination: { ToAddresses: to },
+        Content: { Simple: { Subject: { Data: subject }, Body: { Text: { Data: body } } } },
+      }))
+    } catch (err) {
+      console.error('[compliance-scanner] SES send failed', alert.id, String(err))
+      continue
+    }
+
+    // Log + stamp + audit
+    await dynamo.send(new PutCommand({
+      TableName: EMAILLOG_TABLE!,
+      Item: {
+        id: randomUUID(), __typename: 'EscalationEmailLog',
+        alertId: alert.id, entityType: alert.entityType, entityName: alert.entityName,
+        documentType: alert.documentType, daysBeforeExpiration: rule.daysBeforeExpiration,
+        templateKey: rule.templateKey, recipients: to, sentAt: now,
+        createdAt: now, updatedAt: now,
+      },
+    }))
+    await dynamo.send(new UpdateCommand({
+      TableName: ALERT_TABLE, Key: { id: alert.id },
+      UpdateExpression: 'SET emailSentAt = :ts, updatedAt = :ts',
+      ExpressionAttributeValues: { ':ts': now },
+    }))
+    if (AUDIT_TABLE_ESC) {
+      await dynamo.send(new PutCommand({
+        TableName: AUDIT_TABLE_ESC,
+        Item: {
+          id: randomUUID(), __typename: 'AuditLog', entityType: alert.entityType, entityId: alert.entityId,
+          action: 'escalation_email_sent', user: 'compliance-scanner',
+          changes: JSON.stringify({ alertId: alert.id, documentType: alert.documentType, daysBeforeExpiration: rule.daysBeforeExpiration, to }),
+          createdAt: now, updatedAt: now,
+        },
+      }))
+    }
+    sent++
+  }
+
+  return { sent, paused: false }
+}
+
+/** Reuse an active invite token for a driver, or create a fresh one. */
+async function ensureInvite(driverId: string, email: string): Promise<string | null> {
+  if (!INVITE_TABLE) return null
+  const rows = await scanAll(INVITE_TABLE)
+  const active = rows.find((i) =>
+    i.driverId === driverId && i.status !== 'REVOKED' && i.status !== 'EXPIRED' &&
+    new Date(String(i.expiresAt)).getTime() > Date.now())
+  if (active) return String(active.token)
+
+  const token = randomBytes(32).toString('base64url')
+  const now = new Date().toISOString()
+  const expires = new Date(Date.now() + 14 * 86_400_000).toISOString()
+  await dynamo.send(new PutCommand({
+    TableName: INVITE_TABLE,
+    Item: {
+      id: randomUUID(), __typename: 'OnboardingInvite', driverId, email, token,
+      status: 'SENT', expiresAt: expires, sentAt: now, requestCount: 0, createdAt: now, updatedAt: now,
+    },
+  }))
+  return token
+}
+
+/** Re-open a driver's task for a given documentType so a renewal flows through review. */
+async function reopenTask(driverId: string, documentType: string, now: string): Promise<void> {
+  const tasks = await scanAll(TASK_TABLE)
+  const task = tasks.find((t) => t.entityType === 'DRIVER' && t.entityId === driverId && t.requirementKey === documentType)
+  if (task && task.driverActionable && task.status !== 'AWAITING_DRIVER') {
+    await dynamo.send(new UpdateCommand({
+      TableName: TASK_TABLE, Key: { id: String(task.id) },
+      UpdateExpression: 'SET #s = :s, updatedAt = :ts',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':s': 'AWAITING_DRIVER', ':ts': now },
+    }))
+  }
+}
+
+function buildEscalationEmail(rule: EscalationRuleInput, alert: FullAlert, daysRemaining: number, portalLink: string) {
+  const item = alert.documentType
+  const expDate = alert.expirationDate ?? 'soon'
+  const linkLine = portalLink ? `\nUpload the renewal here: ${portalLink}\n` : ''
+  const who = alert.entityName ? ` for ${alert.entityName}` : ''
+
+  // Day-0 / past → out-of-service
+  if (rule.daysBeforeExpiration <= 0 || daysRemaining <= 0) {
+    return {
+      subject: `OUT OF SERVICE: ${item} has expired${who}`,
+      body:
+`This is an out-of-service notice. The required document "${item}"${who} expired on ${expDate}.
+
+You are not eligible to drive for the company until this is resolved.
+${linkLine}
+— BCAT Logistics Safety & Compliance`,
+    }
+  }
+  // Final warning (≤ 7 days)
+  if (rule.daysBeforeExpiration <= 7) {
+    return {
+      subject: `FINAL WARNING: ${item} expires ${expDate}`,
+      body:
+`The required document "${item}"${who} expires on ${expDate} (${daysRemaining} day(s) away).
+
+If this is not updated by ${expDate}, you will not be eligible to drive for the company until it is resolved.
+${linkLine}
+— BCAT Logistics Safety & Compliance`,
+    }
+  }
+  // Standard reminder
+  return {
+    subject: `Renewal reminder: ${item} expires ${expDate}`,
+    body:
+`This is a reminder that the required document "${item}"${who} expires on ${expDate} (${daysRemaining} day(s) away).
+
+Please upload the renewal so you stay compliant.
+${linkLine}
+— BCAT Logistics Safety & Compliance`,
+  }
 }

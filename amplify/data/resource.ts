@@ -529,6 +529,24 @@ const schema = a.schema({
     })
     .authorization((allow) => [allow.authenticated()]),
 
+  // Phase 4: one record per escalation email sent. Powers per-(alert, rule) dedup in
+  // the scanner and the "Email history" sub-tab on the alert detail.
+  EscalationEmailLog: a
+    .model({
+      alertId:              a.string().required(),
+      entityType:           a.enum(['DRIVER', 'TRUCK']),
+      entityName:           a.string(),
+      documentType:         a.string(),
+      daysBeforeExpiration: a.integer().required(),  // the rule threshold that fired
+      templateKey:          a.string(),
+      recipients:           a.string().array(),      // actual addresses emailed
+      sentAt:               a.datetime().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('alertId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Phase 3/4: single-row settings records (e.g. id 'GLOBAL') for kill switches and
   // manager-recipient lists. Both email paths default to PAUSED.
   ComplianceSettings: a

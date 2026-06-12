@@ -235,6 +235,64 @@ export function planScan(input: {
   return plan
 }
 
+// ── Phase 4: escalation planning ────────────────────────────────────────────────
+
+export interface EscalationRuleInput {
+  id: string
+  documentType: string // catalog key or 'ALL'
+  daysBeforeExpiration: number
+  recipients: 'DRIVER' | 'MANAGER' | 'BOTH'
+  templateKey: string
+  active: boolean
+}
+
+export interface FullAlert {
+  id: string
+  entityType: EntityType
+  entityId: string
+  entityName?: string | null
+  documentType: string
+  expirationDate?: string | null
+  severity: Severity
+  acknowledged: boolean
+  resolvedAt?: string | null
+}
+
+export interface PlannedEscalation {
+  alert: FullAlert
+  rule: EscalationRuleInput
+  daysRemaining: number
+}
+
+/**
+ * For each unresolved alert with an expiration, emit one escalation per active rule
+ * whose threshold has been crossed and for which no email has been sent yet
+ * (dedup key = `${alertId}#${daysBeforeExpiration}`). Idempotent across runs.
+ */
+export function planEscalations(input: {
+  alerts: FullAlert[]
+  rules: EscalationRuleInput[]
+  sentKeys: Set<string>
+  asOf: string
+}): PlannedEscalation[] {
+  const { alerts, rules, sentKeys, asOf } = input
+  const active = rules.filter((r) => r.active)
+  const out: PlannedEscalation[] = []
+
+  for (const alert of alerts) {
+    if (alert.resolvedAt || !alert.expirationDate) continue
+    const daysRemaining = daysUntil(alert.expirationDate, asOf)
+    for (const rule of active) {
+      if (rule.documentType !== 'ALL' && rule.documentType !== alert.documentType) continue
+      if (daysRemaining > rule.daysBeforeExpiration) continue // threshold not crossed
+      const key = `${alert.id}#${rule.daysBeforeExpiration}`
+      if (sentKeys.has(key)) continue
+      out.push({ alert, rule, daysRemaining })
+    }
+  }
+  return out
+}
+
 function groupBy<T>(items: T[], keyFn: (t: T) => string): Map<string, T[]> {
   const m = new Map<string, T[]>()
   for (const it of items) {

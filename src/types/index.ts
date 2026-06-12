@@ -183,6 +183,20 @@ export interface ComplianceSettings {
   updatedAt: string
 }
 
+export interface EscalationEmailLog {
+  id: string
+  alertId: string
+  entityType?: ComplianceEntityType | null
+  entityName?: string | null
+  documentType?: string | null
+  daysBeforeExpiration: number
+  templateKey?: string | null
+  recipients?: string[] | null
+  sentAt: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type ApptType = 'exact' | 'range' | 'fcfs' | 'tbd'
 
 export interface Load {

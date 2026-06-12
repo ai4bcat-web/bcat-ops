@@ -349,3 +349,30 @@ new CfnOutput(emailerFn.stack, 'SesDkimRecord3', { value: `${sendingDomain.dkimD
 new CfnOutput(emailerFn.stack, 'SesMailFromNote', {
   value: 'Add the 3 DKIM CNAMEs above to bcatcorp.com DNS, plus an SPF TXT "v=spf1 include:amazonses.com ~all" on the MAIL FROM domain. Verify in the SES console.',
 })
+
+// ── complianceScanner: Phase 4 escalation wiring ────────────────────────────
+// Granted/env'd here (not in the scanner block above) because the escalation
+// tables are declared in the shared-compliance section.
+
+const escalationRuleTable     = backend.data.resources.tables['EscalationRule']
+const escalationEmailLogTable = backend.data.resources.tables['EscalationEmailLog']
+
+backend.complianceScanner.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    resources: [
+      escalationRuleTable.tableArn,
+      escalationEmailLogTable.tableArn,
+      complianceSettingsTable.tableArn,
+      onboardingInviteTable.tableArn,
+      auditLogTable.tableArn,
+    ],
+  })
+)
+complianceScannerFn.addEnvironment('RULE_TABLE_NAME',     escalationRuleTable.tableName)
+complianceScannerFn.addEnvironment('EMAILLOG_TABLE_NAME', escalationEmailLogTable.tableName)
+complianceScannerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTable.tableName)
+complianceScannerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.tableName)
+complianceScannerFn.addEnvironment('AUDIT_TABLE_NAME',    auditLogTable.tableName)
+complianceScannerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
+complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)

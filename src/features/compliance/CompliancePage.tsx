@@ -1,13 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, ExternalLink } from 'lucide-react'
+import { Check, ExternalLink, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet'
 import { useComplianceAlerts } from '@/hooks/useComplianceAlerts'
+import { listEscalationEmailLogsByAlert } from '@/lib/complianceClient'
 import { SeverityBadge, daysRemainingLabel, Card } from './components'
 import { EmailSettingsCard } from './EmailSettingsCard'
-import type { AlertSeverity, ComplianceAlert, ComplianceEntityType } from '@/types'
+import { EscalationRulesCard } from './EscalationRulesCard'
+import type { AlertSeverity, ComplianceAlert, ComplianceEntityType, EscalationEmailLog } from '@/types'
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = { EXPIRED: 0, CRITICAL: 1, URGENT: 2, UPCOMING: 3 }
 
@@ -18,6 +21,7 @@ export function CompliancePage() {
   const [entityType, setEntityType] = useState<ComplianceEntityType | 'ALL'>('ALL')
   const [showAcked, setShowAcked] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [historyAlert, setHistoryAlert] = useState<ComplianceAlert | null>(null)
 
   const visible = useMemo(() => {
     return alerts
@@ -116,6 +120,7 @@ export function CompliancePage() {
                       {a.expirationDate ?? '—'}<span style={{ marginLeft: 6, fontSize: 11.5, color: 'var(--ds-t3)' }}>({daysRemainingLabel(a.expirationDate)})</span>
                     </td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <Button size="sm" variant="ghost" onClick={() => setHistoryAlert(a)} title="Email history"><Mail size={14} /></Button>
                       <Button size="sm" variant="ghost" onClick={() => goToEntity(a)}><ExternalLink size={14} /> Open</Button>
                       {!a.acknowledged && <Button size="sm" variant="outline" disabled={busyId === a.id} onClick={() => ack(a)}><Check size={14} /> Acknowledge</Button>}
                     </td>
@@ -126,8 +131,57 @@ export function CompliancePage() {
           </div>
         </Card>
 
+        <EscalationRulesCard />
         <EmailSettingsCard />
       </div>
+
+      <AlertEmailHistorySheet alert={historyAlert} onClose={() => setHistoryAlert(null)} />
     </div>
+  )
+}
+
+function AlertEmailHistorySheet({ alert, onClose }: { alert: ComplianceAlert | null; onClose: () => void }) {
+  const [logs, setLogs] = useState<EscalationEmailLog[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!alert) return
+    setLoading(true)
+    listEscalationEmailLogsByAlert(alert.id)
+      .then(setLogs)
+      .catch((e) => console.error('[email history]', e))
+      .finally(() => setLoading(false))
+  }, [alert])
+
+  return (
+    <Sheet open={!!alert} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent style={{ width: 'min(520px, 92vw)' }}>
+        <SheetHeader>
+          <SheetTitle>Email history — {alert?.documentTitle ?? alert?.documentType}</SheetTitle>
+        </SheetHeader>
+        <SheetBody>
+          {loading ? (
+            <div style={{ color: 'var(--ds-t3)', fontSize: 13 }}>Loading…</div>
+          ) : logs.length === 0 ? (
+            <div style={{ color: 'var(--ds-t3)', fontSize: 13 }}>No escalation emails sent for this alert yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {logs.map((l) => (
+                <div key={l.id} style={{ border: '1px solid var(--ds-border)', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--ds-t1)' }}>
+                      {l.daysBeforeExpiration === 0 ? 'Out-of-service notice' : `${l.daysBeforeExpiration}-day notice`}
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{new Date(l.sentAt).toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', marginTop: 2 }}>To: {(l.recipients ?? []).join(', ') || '—'}</div>
+                  {l.templateKey && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 2 }}>Template: {l.templateKey}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </SheetBody>
+      </SheetContent>
+    </Sheet>
   )
 }
