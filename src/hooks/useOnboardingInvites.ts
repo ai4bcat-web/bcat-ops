@@ -6,6 +6,7 @@ import {
   generateInviteToken,
   inviteExpiry,
   writeComplianceAudit,
+  sendOnboardingEmail,
 } from '@/lib/complianceClient'
 import { useAuth } from '@/hooks/useAuth'
 import type { OnboardingInvite, DriverType } from '@/types'
@@ -61,6 +62,8 @@ export function useOnboardingInvites(driverId: string | null) {
         user: user?.email ?? 'unknown',
         changes: { inviteId: invite.id, email },
       })
+      // Sends the invite email if portal emails are enabled (paused by default → no-op).
+      void sendOnboardingEmail({ type: 'invite', inviteId: invite.id })
       setInvites((prev) => [invite, ...prev])
       return invite
     },
@@ -107,6 +110,7 @@ export function useOnboardingInvites(driverId: string | null) {
         user: user?.email ?? 'unknown',
         changes: { oldInviteId: old.id, newInviteId: invite.id },
       })
+      void sendOnboardingEmail({ type: 'invite', inviteId: invite.id })
       await load()
       return invite
     },

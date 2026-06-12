@@ -1,6 +1,7 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
 import { userManagement } from '../functions/userManagement/resource'
 import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
+import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -574,6 +575,22 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(userManagement)),
+
+  // Send a driver-facing onboarding email via SES (invite / rejected / complete).
+  // Honors the portalEmailsPaused kill switch (default PAUSED) inside the Lambda.
+  sendOnboardingEmail: a
+    .mutation()
+    .arguments({
+      type:          a.string().required(),   // 'invite' | 'rejected' | 'complete'
+      driverId:      a.string(),
+      inviteId:      a.string(),
+      itemLabel:     a.string(),
+      reason:        a.string(),
+      portalBaseUrl: a.string(),               // caller's origin → correct portal link in the email
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(onboardingEmailer)),
 })
 
 export type Schema = ClientSchema<typeof schema>

@@ -20,15 +20,20 @@ import { CompliancePage } from '@/features/compliance/CompliancePage'
 import { ReviewQueuePage } from '@/features/compliance-review/ReviewQueuePage'
 import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplianceDetailPage'
 import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
+import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
       <TooltipProvider>
-        <AuthGuard>
-          <Routes>
-            <Route element={<AppLayout />}>
+        <Routes>
+          {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
+          <Route path="/onboard/:token" element={<DriverPortalPage />} />
+          <Route path="/*" element={
+            <AuthGuard>
+              <Routes>
+                <Route element={<AppLayout />}>
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/calendar" element={<CalendarPage />} />
@@ -50,9 +55,11 @@ export default function App() {
               {/* legacy redirects */}
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
               <Route path="/audit" element={<Navigate to="/audit-log" replace />} />
-            </Route>
-          </Routes>
-        </AuthGuard>
+                </Route>
+              </Routes>
+            </AuthGuard>
+          } />
+        </Routes>
         <Toaster position="bottom-right" richColors />
       </TooltipProvider>
       </AuthProvider>

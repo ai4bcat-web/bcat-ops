@@ -9,6 +9,7 @@ import {
   setTaskStatus,
   updateOnboardingTask,
   writeComplianceAudit,
+  sendOnboardingEmail,
 } from '@/lib/complianceClient'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
@@ -106,6 +107,7 @@ export function useReviewQueue() {
           user: user?.email ?? 'unknown',
           changes: { required: required.length },
         })
+        void sendOnboardingEmail({ type: 'complete', driverId })
         toast.success(`🎉 ${driverName(driverId)} is fully onboarded`)
       }
     },
@@ -159,6 +161,7 @@ export function useReviewQueue() {
         user: user?.email ?? 'unknown',
         changes: { documentId: doc.id, reason },
       })
+      if (doc.entityType === 'DRIVER') void sendOnboardingEmail({ type: 'rejected', driverId: doc.entityId, itemLabel: doc.title, reason })
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
     },
     [findLinkedTask, user?.email],
@@ -201,6 +204,7 @@ export function useReviewQueue() {
         user: user?.email ?? 'unknown',
         changes: { applicationId: app.id, reason },
       })
+      void sendOnboardingEmail({ type: 'rejected', driverId: app.driverId, itemLabel: 'Employment application', reason })
       setApplications((prev) => prev.filter((a) => a.id !== app.id))
     },
     [user?.email],

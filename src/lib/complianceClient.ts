@@ -475,6 +475,31 @@ export async function writeComplianceAudit(entry: {
   }
 }
 
+// ── Onboarding emails (SES via custom mutation) ─────────────────────────────────
+
+/**
+ * Fire-and-forget driver-facing email. The backend honors the portalEmailsPaused
+ * kill switch (default PAUSED) and no-ops while paused, so callers always succeed.
+ */
+export async function sendOnboardingEmail(args: {
+  type: 'invite' | 'rejected' | 'complete'
+  driverId?: string
+  inviteId?: string
+  itemLabel?: string
+  reason?: string
+}): Promise<void> {
+  try {
+    await gql(
+      `mutation ($type: String!, $driverId: String, $inviteId: String, $itemLabel: String, $reason: String, $portalBaseUrl: String) {
+        sendOnboardingEmail(type: $type, driverId: $driverId, inviteId: $inviteId, itemLabel: $itemLabel, reason: $reason, portalBaseUrl: $portalBaseUrl)
+      }`,
+      { ...args, portalBaseUrl: typeof window !== 'undefined' ? window.location.origin : '' },
+    )
+  } catch (err) {
+    console.error('[sendOnboardingEmail] failed', err)
+  }
+}
+
 // ── S3 document storage ─────────────────────────────────────────────────────────
 
 export const ACCEPTED_DOC_MIME = [

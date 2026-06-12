@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useComplianceAlerts } from '@/hooks/useComplianceAlerts'
 import { SeverityBadge, daysRemainingLabel, Card } from './components'
+import { EmailSettingsCard } from './EmailSettingsCard'
 import type { AlertSeverity, ComplianceAlert, ComplianceEntityType } from '@/types'
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = { EXPIRED: 0, CRITICAL: 1, URGENT: 2, UPCOMING: 3 }
@@ -124,6 +125,8 @@ export function CompliancePage() {
             </table>
           </div>
         </Card>
+
+        <EmailSettingsCard />
       </div>
     </div>
   )

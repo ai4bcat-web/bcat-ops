@@ -1,8 +1,9 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda'
+import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod } from 'aws-cdk-lib/aws-lambda'
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
+import { EmailIdentity, Identity } from 'aws-cdk-lib/aws-ses'
 import { CfnOutput, Duration } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
@@ -15,6 +16,8 @@ import { generateRecurringExpenses } from './functions/generate-recurring-expens
 import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
 import { motiveLocationSync } from './functions/motive-location-sync/resource'
 import { complianceScanner } from './functions/compliance-scanner/resource'
+import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
+import { onboardingEmailer } from './functions/onboarding-emailer/resource'
 
 const backend = defineBackend({
   auth,
@@ -28,6 +31,8 @@ const backend = defineBackend({
   motiveMileageSync,
   motiveLocationSync,
   complianceScanner,
+  onboardingPortalApi,
+  onboardingEmailer,
 })
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
@@ -250,3 +255,97 @@ const complianceScanRule = new Rule(complianceScannerFn.stack, 'ComplianceScanne
   description: 'Daily DOT compliance expiration scan (6:00 AM America/Chicago)',
 })
 complianceScanRule.addTarget(new EventsLambdaTarget(complianceScannerFn))
+
+// ── Shared compliance tables ───────────────────────────────────────────────
+
+const onboardingInviteTable    = backend.data.resources.tables['OnboardingInvite']
+const driverApplicationTable   = backend.data.resources.tables['DriverApplication']
+const auditLogTable            = backend.data.resources.tables['AuditLog']
+const complianceSettingsTable  = backend.data.resources.tables['ComplianceSettings']
+
+// Allowed portal origins. The prod domain is set via the PORTAL_PROD_ORIGIN env var
+// in the Amplify Console (e.g. https://ops.bcatcorp.com); localhost is for dev.
+const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com'
+const PORTAL_ORIGINS = ['http://localhost:5173', PORTAL_PROD_ORIGIN]
+
+// ── onboardingPortalApi Lambda (public, token-validated Function URL) ───────
+
+const portalApiFn = backend.onboardingPortalApi.resources.lambda as LambdaFunction
+
+backend.onboardingPortalApi.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:GetItem'],
+    resources: [
+      onboardingInviteTable.tableArn,
+      driverTable.tableArn,
+      onboardingTaskTable.tableArn,
+      complianceDocTable.tableArn,
+      driverApplicationTable.tableArn,
+      auditLogTable.tableArn,
+    ],
+  })
+)
+// Presigned PUT uploads land under compliance/* in the documents bucket.
+backend.storage.resources.bucket.grantPut(portalApiFn, 'compliance/*')
+
+portalApiFn.addEnvironment('INVITE_TABLE_NAME', onboardingInviteTable.tableName)
+portalApiFn.addEnvironment('DRIVER_TABLE_NAME', driverTable.tableName)
+portalApiFn.addEnvironment('TASK_TABLE_NAME',   onboardingTaskTable.tableName)
+portalApiFn.addEnvironment('DOC_TABLE_NAME',    complianceDocTable.tableName)
+portalApiFn.addEnvironment('APP_TABLE_NAME',    driverApplicationTable.tableName)
+portalApiFn.addEnvironment('AUDIT_TABLE_NAME',  auditLogTable.tableName)
+portalApiFn.addEnvironment('BUCKET_NAME',       backend.storage.resources.bucket.bucketName)
+portalApiFn.addEnvironment('ALLOWED_ORIGINS',   PORTAL_ORIGINS.join(','))
+
+// Function URL — CORS locked to the prod domain + localhost:5173.
+const portalApiUrl = new FunctionUrl(portalApiFn.stack, 'OnboardingPortalApiUrl', {
+  function: portalApiFn,
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    allowedOrigins: PORTAL_ORIGINS,
+    allowedMethods: [HttpMethod.POST],
+    allowedHeaders: ['content-type'],
+  },
+})
+
+new CfnOutput(portalApiFn.stack, 'OnboardingPortalApiFunctionUrl', {
+  value:       portalApiUrl.url,
+  description: 'Set as VITE_ONBOARDING_API_URL in the frontend env (driver portal API)',
+})
+
+// ── onboardingEmailer Lambda (SES, custom AppSync mutation) ─────────────────
+
+const emailerFn = backend.onboardingEmailer.resources.lambda as LambdaFunction
+
+backend.onboardingEmailer.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan'],
+    resources: [onboardingInviteTable.tableArn, driverTable.tableArn, complianceSettingsTable.tableArn],
+  })
+)
+backend.onboardingEmailer.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })
+)
+emailerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.tableName)
+emailerFn.addEnvironment('DRIVER_TABLE_NAME',   driverTable.tableName)
+emailerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTable.tableName)
+emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
+
+// ── SES sending domain (bcatcorp.com) ──────────────────────────────────────
+// Creates the domain identity with Easy DKIM. After deploy, add the emitted DNS
+// records below to bcatcorp.com's DNS to verify the domain (do NOT assume they
+// already exist). The compliance-scanner is also granted ses:SendEmail for Phase 4.
+const sendingDomain = new EmailIdentity(emailerFn.stack, 'BcatSendingDomain', {
+  identity: Identity.domain('bcatcorp.com'),
+})
+backend.complianceScanner.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })
+)
+
+// Emit the DNS records the user must add to verify the domain + DKIM.
+new CfnOutput(emailerFn.stack, 'SesDkimRecord1', { value: `${sendingDomain.dkimDnsTokenName1} CNAME ${sendingDomain.dkimDnsTokenValue1}` })
+new CfnOutput(emailerFn.stack, 'SesDkimRecord2', { value: `${sendingDomain.dkimDnsTokenName2} CNAME ${sendingDomain.dkimDnsTokenValue2}` })
+new CfnOutput(emailerFn.stack, 'SesDkimRecord3', { value: `${sendingDomain.dkimDnsTokenName3} CNAME ${sendingDomain.dkimDnsTokenValue3}` })
+new CfnOutput(emailerFn.stack, 'SesMailFromNote', {
+  value: 'Add the 3 DKIM CNAMEs above to bcatcorp.com DNS, plus an SPF TXT "v=spf1 include:amazonses.com ~all" on the MAIL FROM domain. Verify in the SES console.',
+})
