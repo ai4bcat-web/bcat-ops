@@ -757,6 +757,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
     }
 
     for (const l of loads) {
+      if (l.unscheduled) continue  // orphans live in the Unscheduled section, not on a day
       const puDay = chicagoDateStr(l.pickupAppt)
       if (!puDay) continue  // skip loads with invalid pickup date
       const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
@@ -781,6 +782,12 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
 
     return map
   }, [loads])
+
+  // Orphan / unscheduled loads — shown in their own section so they're visible here too.
+  const unscheduledEntries = useMemo<DayEntry[]>(
+    () => loads.filter((l) => l.unscheduled).map((l) => ({ load: l, role: 'same-day', key: `${l.id}:same-day` })),
+    [loads],
+  )
 
   // Per-day local drag-to-reorder (session state, keys are DayEntry.key)
   const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
@@ -842,6 +849,34 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         <ColHeader width={COL.rate}>Rate</ColHeader>
         <ColHeader width={32}>RTI</ColHeader>
       </div>
+
+      {/* Unscheduled (orphan) section — loads with no firm date */}
+      {unscheduledEntries.length > 0 && (
+        <div className="shrink-0" style={{ borderBottom: '1px solid var(--ds-border)' }}>
+          <div
+            className="flex items-center gap-2 px-2 sticky z-10"
+            style={{ top: ROW_H, height: 22, background: '#fef3c7', borderBottom: '1px solid var(--ds-border)' }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Unscheduled</span>
+            <span style={{ fontSize: 10, color: '#b45309' }}>· {unscheduledEntries.length} load{unscheduledEntries.length !== 1 ? 's' : ''} with no firm date</span>
+          </div>
+          {unscheduledEntries.map((entry) => (
+            <PlannerRow
+              key={entry.key}
+              entry={entry}
+              drivers={drivers}
+              dragging={false}
+              dragOver={false}
+              selected={selectedLoadIds.includes(entry.load.id)}
+              selectedIds={selectedLoadIds}
+              onDragStart={() => {}}
+              onDragEnter={() => {}}
+              onDragEnd={() => {}}
+              onSelect={handleSelect}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Day sections */}
       {days.map((day, di) => {
