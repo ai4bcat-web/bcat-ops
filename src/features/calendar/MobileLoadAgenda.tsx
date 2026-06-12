@@ -29,15 +29,17 @@ export function MobileLoadAgenda({ loads, drivers }: { loads: Load[]; drivers: D
   const driverName = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers])
 
   const groups = useMemo(() => {
+    const ORPHAN = 'Unscheduled'
     const sorted = [...loads].sort((a, b) => (a.pickupAppt ?? '').localeCompare(b.pickupAppt ?? ''))
     const m = new Map<string, Load[]>()
     for (const l of sorted) {
-      const k = dayKey(l.pickupAppt)
+      const k = l.unscheduled ? ORPHAN : dayKey(l.pickupAppt)
       const arr = m.get(k)
       if (arr) arr.push(l)
       else m.set(k, [l])
     }
-    return [...m.entries()]
+    // Unscheduled group always first.
+    return [...m.entries()].sort((a, b) => (a[0] === ORPHAN ? -1 : b[0] === ORPHAN ? 1 : 0))
   }, [loads])
 
   if (loads.length === 0) {

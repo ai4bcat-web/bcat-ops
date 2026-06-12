@@ -23,8 +23,10 @@ const LOAD_FIELDS = `
   createdBy updatedBy createdAt updatedAt
 `
 
+// `hot` and `unscheduled` are newer fields; both ship in the same backend deploy, so
+// one flag gates them together (self-heals if the API predates them — see below).
 let loadsHaveHot = true
-const loadFields = () => (loadsHaveHot ? `${LOAD_FIELDS} hot` : LOAD_FIELDS)
+const loadFields = () => (loadsHaveHot ? `${LOAD_FIELDS} hot unscheduled` : LOAD_FIELDS)
 
 // Base selection set. onboardingStatus/complianceStatus are newer compliance fields;
 // appended via driverFields() only while the backend supports them (self-heals like
@@ -49,10 +51,10 @@ const AUDIT_FIELDS = `
 
 // ── Loads ─────────────────────────────────────────────────────────────────────
 
-// True if the error is the backend rejecting our `hot` selection (field not deployed yet).
+// True if the error is the backend rejecting our `hot`/`unscheduled` selection (fields not deployed yet).
 function isHotFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
-  return Array.isArray(errs) && errs.some((e) => /Field 'hot'|'hot'.*undefined|undefined.*'hot'/i.test(e?.message ?? ''))
+  return Array.isArray(errs) && errs.some((e) => /'(hot|unscheduled)'.*undefined|undefined.*'(hot|unscheduled)'|Field '(hot|unscheduled)'/i.test(e?.message ?? ''))
 }
 
 export async function listLoads(): Promise<Load[]> {

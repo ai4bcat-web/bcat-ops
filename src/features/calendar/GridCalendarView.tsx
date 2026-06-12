@@ -611,6 +611,74 @@ function DayColumn({
   )
 }
 
+// ── Unscheduled (orphan) lane ──────────────────────────────────────────────────
+// A sticky left column for loads with no firm date. Drag a load here to "unschedule"
+// it; drag it back onto a day to schedule it. Uses the same drag wiring as DayColumn
+// with a sentinel day key.
+const ORPHAN_KEY = '__unscheduled__'
+
+function UnscheduledColumn({
+  loads, drivers, selectedIds, onSelect,
+  dragOverKey, dropTargetDay, onDragStart, onDragEnter, onDragEnd,
+  onColumnDragEnter, onColumnDragLeave, onColumnDrop,
+}: {
+  loads: Load[]; drivers: Driver[]; selectedIds: string[]
+  onSelect: (loadId: string, e: React.MouseEvent) => void
+  dragOverKey: string | null; dropTargetDay: string | null
+  onDragStart: (dayStr: string, key: string) => void
+  onDragEnter: (dayStr: string, key: string) => void
+  onDragEnd: () => void
+  onColumnDragEnter: (dayStr: string) => void
+  onColumnDragLeave: (dayStr: string) => void
+  onColumnDrop: (dayStr: string) => void
+}) {
+  const isDropTarget = dropTargetDay === ORPHAN_KEY
+  return (
+    <div
+      style={{ width: DAY_COL_W, flexShrink: 0, position: 'sticky', left: 0, zIndex: 20,
+        borderRight: '2px solid var(--ds-border)', display: 'flex', flexDirection: 'column',
+        background: isDropTarget ? 'rgba(245,158,11,0.10)' : 'var(--ds-bg)',
+        outline: isDropTarget ? '2px solid #f59e0b' : undefined, outlineOffset: -2, transition: 'background 0.1s',
+      }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+      onDragEnter={() => onColumnDragEnter(ORPHAN_KEY)}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) onColumnDragLeave(ORPHAN_KEY) }}
+      onDrop={(e) => { e.preventDefault(); onColumnDrop(ORPHAN_KEY) }}
+    >
+      <div style={{ height: HEADER_H, position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: 6, padding: `0 ${COL_PAD + 2}px`, borderBottom: '2px solid #f59e0b', background: '#fef3c7', flexShrink: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#b45309' }}>Unscheduled</span>
+        {loads.length > 0 && <span style={{ fontSize: 10, color: '#b45309', marginLeft: 'auto' }}>{loads.length}</span>}
+      </div>
+      <div style={{ flex: 1, padding: `${COL_PAD}px ${COL_PAD}px 8px`, overflowY: 'auto' }}>
+        {loads.length === 0 ? (
+          <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontStyle: 'italic', padding: '6px 2px', lineHeight: 1.5 }}>
+            Drag loads here when the date isn&apos;t set yet.
+          </div>
+        ) : (
+          loads.map((load) => {
+            const entry: DayEntry = { load, role: 'same-day' }
+            const cardKey = `${load.id}:same-day`
+            return (
+              <LoadCard
+                key={cardKey}
+                entry={entry}
+                drivers={drivers}
+                selected={selectedIds.includes(load.id)}
+                onSelect={onSelect}
+                dragging={false}
+                dragOver={dragOverKey === cardKey}
+                onDragStart={(key) => onDragStart(ORPHAN_KEY, key)}
+                onDragEnter={(key) => onDragEnter(ORPHAN_KEY, key)}
+                onDragEnd={onDragEnd}
+              />
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 interface GridCalendarViewProps {
@@ -693,7 +761,13 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
       const [loadId, role] = dragKey.current.split(':') as [string, Role]
       const load = loadsRef.current.find((l) => l.id === loadId)
       if (load) {
-        updateLoad(loadId, computeMoveDates(load, role, targetDay))
+        if (targetDay === ORPHAN_KEY) {
+          // Dropped onto the Unscheduled lane → park it (keep its appt as a placeholder).
+          updateLoad(loadId, { unscheduled: true })
+        } else {
+          // Dropped onto a day → schedule it there (also rescues an orphan).
+          updateLoad(loadId, { unscheduled: false, ...computeMoveDates(load, role, targetDay) })
+        }
         setDayOrder(new Map())
       }
     }
@@ -742,6 +816,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     const map = new Map<string, DayEntry[]>()
     const add = (key: string, e: DayEntry) => { if (!map.has(key)) map.set(key, []); map.get(key)!.push(e) }
     for (const l of loads) {
+      if (l.unscheduled) continue   // orphans live in the Unscheduled lane, not on a day
       const puDay = chicagoDateStr(l.pickupAppt)
       if (!puDay) continue
       const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
@@ -773,9 +848,25 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
 
   const currentMonth = viewMode === 'month' ? startDate.getMonth() : -1
 
+  const unscheduledLoads = useMemo(() => loads.filter((l) => l.unscheduled), [loads])
+
   return (
     <div style={{ height: '100%', overflow: 'auto' }}>
       <div style={{ display: 'flex', minHeight: '100%', alignItems: 'flex-start' }}>
+        <UnscheduledColumn
+          loads={unscheduledLoads}
+          drivers={drivers}
+          selectedIds={selectedIds}
+          onSelect={onSelect}
+          dragOverKey={dragOverKey}
+          dropTargetDay={dropTargetDay}
+          onDragStart={handleDragStart}
+          onDragEnter={handleDragEnter}
+          onDragEnd={handleDragEnd}
+          onColumnDragEnter={handleColumnDragEnter}
+          onColumnDragLeave={handleColumnDragLeave}
+          onColumnDrop={handleColumnDrop}
+        />
         {gridDays.map((day) => {
           const dayStr = chicagoDateStr(day.toISOString()) ?? ''
           return (

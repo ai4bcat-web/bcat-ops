@@ -227,6 +227,7 @@ export interface Load {
   daySlot?: number | null     // display order badge 1-5 within pickup day
   notes?: string | null       // short free-text notes
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
+  unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane
   createdAt: string
   updatedAt: string
   createdBy: string

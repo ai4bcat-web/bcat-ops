@@ -59,6 +59,7 @@ export const loadSchema = z
     rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
     notes: z.string().optional().nullable(),
     hot: z.boolean().optional(),                      // urgent/"hot" load — 🔥 in schedule
+    unscheduled: z.boolean().optional(),              // orphan — no firm date, parked in Unscheduled lane
   })
   .refine(
     (d) => d.deliveryApptType === 'fcfs' || d.deliveryAppt.length > 0,

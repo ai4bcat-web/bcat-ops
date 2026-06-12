@@ -34,6 +34,7 @@ const schema = a.schema({
       daySlot:         a.integer(),  // display order badge 1-5 within pickup day
       notes:           a.string(),   // short free-text notes
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
+      unscheduled:     a.boolean(),  // true = orphan (no firm date) → parked in the calendar's Unscheduled lane
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
