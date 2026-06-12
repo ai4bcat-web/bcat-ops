@@ -6,8 +6,10 @@ import { ApplicationForm } from './ApplicationForm'
 import { getRequirement } from '@/lib/complianceRequirements'
 import type { DriverApplicationDraft } from '@/lib/schemas'
 
-const BCAT_PHONE = '(630) 555-0100'
-const BCAT_EMAIL = 'onboarding@bcatcorp.com'
+// Driver-facing contact info shown on the expired/error page.
+// NOTE: the phone number is a placeholder — replace with the real dispatch/office line.
+const CONTACT_PHONE = '(630) 555-0100'
+const CONTACT_EMAIL = 'onboarding@bcatcorp.com'
 
 function statusChip(item: ChecklistItem) {
   if (item.status === 'COMPLETE' || item.status === 'WAIVED')
@@ -38,6 +40,12 @@ export function DriverPortalPage() {
 
   useEffect(() => { load() }, [load])
 
+  // The SPA's index.html title is "BCAT OPS" (internal app) — override for drivers.
+  useEffect(() => {
+    document.title = 'Ivan Cartage — Driver Onboarding'
+    return () => { document.title = 'BCAT OPS' }
+  }, [])
+
   // ── Error / expired page ──
   if (loadError) {
     return (
@@ -46,8 +54,8 @@ export function DriverPortalPage() {
           <AlertTriangle className="mx-auto mb-4 text-amber-500" size={40} />
           <h1 className="mb-2 text-xl font-semibold text-slate-800">{loadError}</h1>
           <p className="text-slate-500">
-            Please contact BCAT to get a new link:<br />
-            <span className="font-medium text-slate-700">{BCAT_PHONE}</span> · {BCAT_EMAIL}
+            Please contact Ivan Cartage to get a new link:<br />
+            <span className="font-medium text-slate-700">{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
           </p>
         </div>
       </Shell>
@@ -213,7 +221,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, #1ea8f3 0%, #0b8fd9 100%)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
           </div>
-          <div className="text-sm font-bold text-slate-800">BCAT <span className="text-sky-500">LOGISTICS</span></div>
+          <div className="text-sm font-bold text-slate-800">IVAN <span className="text-sky-500">CARTAGE</span></div>
           <div className="ml-auto text-xs text-slate-400">Driver onboarding</div>
         </div>
       </header>
