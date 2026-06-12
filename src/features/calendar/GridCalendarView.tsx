@@ -1,5 +1,5 @@
 /**
- * GridCalendarView — horizontal day-column layout for 2-Week and Month views.
+ * GridCalendarView — horizontal day-column card layout for Week and Month views.
  * Days are columns left→right. Each load is a full-detail card.
  * Scroll right for more days; scroll down for more loads.
  */
@@ -783,7 +783,8 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
 
   const gridDays = useMemo<Date[]>(() => {
     if (viewMode === 'day')  return [startDate]
-    if (viewMode === 'week') return Array.from({ length: 7 }, (_, i) => addDays(startDate, i))
+    // Week = Monday through the following Monday inclusive (8 days, weekends included).
+    if (viewMode === 'week') return Array.from({ length: 8 }, (_, i) => addDays(startDate, i))
     // month
     const daysInMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
     return Array.from({ length: daysInMonth }, (_, i) =>
