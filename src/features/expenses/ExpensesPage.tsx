@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useExpenseData } from '@/hooks/useExpenseData'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { getExpensesByTruck } from '@/lib/expenseAllocation'
 import { filterByDate, getWeeksInRange } from '@/lib/fuelDateUtils'
 import type { WeekBucket } from '@/lib/fuelDateUtils'
@@ -324,7 +325,7 @@ function OverviewTab({
   return (
     <div className="space-y-5">
       {/* KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         <KpiCard label="Total Fleet Cost" value={fmtMoney(fleetTotals.total || 0)} sub={`${matrixRows.length} truck${matrixRows.length !== 1 ? 's' : ''} with expenses`} />
         <KpiCard label="Fuel"             value={fmtMoney(fleetTotals['fuel'] || 0)} />
         <KpiCard label="Insurance"        value={fmtMoney(fleetTotals['insurance'] || 0)} />
@@ -579,7 +580,7 @@ function FuelTab({
       </div>
 
       {/* KPI strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
         <KpiCard label="Total Fuel Spend"    value={fmtMoney(totalFuelSpend)} sub={unassignedFuelAmt > 0 ? `${fmtMoney(unassignedFuelAmt)} unassigned` : `${fuelTxCount} transactions`} />
         <KpiCard label="Total Gallons"       value={fmtGal(totalGal)} />
         <KpiCard label="Avg $/Gallon"        value={avgPpg > 0 ? fmtMoney(avgPpg) : '—'} />
@@ -987,6 +988,7 @@ const PAGE_TABS: { value: PageTab; label: string }[] = [
 ]
 
 export function ExpensesPage() {
+  const isMobile = useIsMobile()
   const equipment = useAppStore((s) => s.equipment)
   // All active trucks — used by both Overview and Fuel tab
   const allActiveTrucks = useMemo(
@@ -1113,7 +1115,7 @@ export function ExpensesPage() {
       </div>
 
       {/* Tab content */}
-      <div style={{ padding: '24px 32px' }}>
+      <div style={{ padding: isMobile ? '16px 12px' : '24px 32px' }}>
         {tab === 'overview' && (
           <OverviewTab
             trucks={allActiveTrucks}

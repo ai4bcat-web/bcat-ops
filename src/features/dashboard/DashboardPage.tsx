@@ -20,6 +20,7 @@ import { TruckMapWidget } from './TruckMapWidget'
 import { TruckMilesWidget } from './TruckMilesWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -140,6 +141,8 @@ export function DashboardPage() {
   const { transactions: fuelTxs, loading: fuelLoading } = useFuelTransactions()
   const loads = useAppStore((s) => s.loads)
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
+  const col1 = isMobile ? '1fr' : undefined   // stack any multi-col row on mobile
 
   const chartColors = useMemo(
     () => metrics.loadsPerDriver.map((d) => getColor(d.colorKey as never).border),
@@ -162,7 +165,7 @@ export function DashboardPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '16px 12px' : '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {/* ── Page header ──────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
@@ -209,7 +212,7 @@ export function DashboardPage() {
         </div>
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
           <KpiCard
             label="Total Loads"
             value={metrics.totalLoads}
@@ -248,13 +251,13 @@ export function DashboardPage() {
         </div>
 
         {/* ── Fleet tracking (Motive ELD) ──────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1.6fr 1fr', gap: 16 }}>
           <TruckMapWidget />
           <TruckMilesWidget />
         </div>
 
         {/* ── Charts row ───────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1.4fr', gap: 16 }}>
 
           {/* Loads per driver */}
           <Card
@@ -352,7 +355,7 @@ export function DashboardPage() {
         </div>
 
         {/* ── Mid row: Driver Performance + Donut cards ─────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1.6fr 1fr 1fr', gap: 16 }}>
 
           {/* Driver Performance */}
           <Card
@@ -481,7 +484,7 @@ export function DashboardPage() {
         </div>
 
         {/* ── Bottom row: Fuel · Open Tasks · Profitability ─────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
           <ComplianceAlertsWidget />
           <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
           <OpenTasksWidget />
