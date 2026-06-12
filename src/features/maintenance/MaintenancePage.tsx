@@ -10,7 +10,7 @@ import {
   CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Trash2, Pencil, X, Plus, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { MaintenanceTask, TaskPriority, TaskStatus } from '@/types/equipment'
+import type { Equipment, MaintenanceTask, MaintenanceInvoice, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -65,27 +65,56 @@ function DueBadge({ date }: { date?: string }) {
   )
 }
 
-// ── Quick Edit Task Modal ──────────────────────────────────────────────────────
+// ── Task Modal (create + edit) ──────────────────────────────────────────────────
 
-function EditTaskModal({ task, onSave, onClose }: { task: MaintenanceTask; onSave: (patch: Partial<MaintenanceTask>) => void; onClose: () => void }) {
+type TaskData = Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>
+
+function TaskModal({ task, equipment, onSave, onClose }: { task: MaintenanceTask | null; equipment: Equipment[]; onSave: (data: TaskData) => void; onClose: () => void }) {
+  const isEdit = task !== null
   const [form, setForm] = useState({
-    title:    task.title,
-    dueDate:  task.dueDate ?? '',
-    priority: task.priority as TaskPriority,
-    status:   task.status as TaskStatus,
-    assignee: task.assignee ?? '',
-    notes:    task.notes ?? '',
+    equipmentId: task?.equipmentId ?? (equipment[0]?.id ?? ''),
+    title:    task?.title ?? '',
+    dueDate:  task?.dueDate ?? '',
+    priority: (task?.priority ?? 'med') as TaskPriority,
+    status:   (task?.status ?? 'upcoming') as TaskStatus,
+    assignee: task?.assignee ?? '',
+    notes:    task?.notes ?? '',
   })
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.equipmentId) return
+    onSave({
+      equipmentId: form.equipmentId,
+      title: form.title.trim(),
+      dueDate: form.dueDate || undefined,
+      priority: form.priority,
+      status: form.status,
+      assignee: form.assignee || undefined,
+      notes: form.notes || undefined,
+      autoDot: task?.autoDot ?? false,
+    })
+    onClose()
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold">Edit Task</h2>
+          <h2 className="text-base font-semibold">{isEdit ? 'Edit Task' : 'New Task'}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); onSave({ ...form, dueDate: form.dueDate || undefined, notes: form.notes || undefined, assignee: form.assignee || undefined }); onClose() }} className="px-6 py-5 space-y-4">
+        <form onSubmit={submit} className="px-6 py-5 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Equipment</label>
+            <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.equipmentId} onChange={(e) => set('equipmentId', e.target.value)} disabled={isEdit} required>
+              <option value="" disabled>Select equipment…</option>
+              {equipment.map((eq) => (
+                <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
+              ))}
+            </select>
+          </div>
           <div className="space-y-1.5">
             <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Task</label>
             <Input value={form.title} onChange={(e) => set('title', e.target.value)} required className="h-9" />
@@ -131,6 +160,90 @@ function EditTaskModal({ task, onSave, onClose }: { task: MaintenanceTask; onSav
   )
 }
 
+// ── Invoice Modal (create) ──────────────────────────────────────────────────────
+
+type InvoiceData = Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>
+
+function InvoiceModal({ equipment, onSave, onClose }: { equipment: Equipment[]; onSave: (data: InvoiceData) => void; onClose: () => void }) {
+  const [form, setForm] = useState({
+    equipmentId: equipment[0]?.id ?? '',
+    date: '', vendor: '', description: '', amount: '',
+    invoiceNumber: '', paymentMethod: '', paymentDate: '', assignee: '',
+  })
+  const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.equipmentId) return
+    onSave({
+      equipmentId: form.equipmentId,
+      date: form.date || undefined,
+      vendor: form.vendor.trim() || undefined,
+      description: form.description.trim() || undefined,
+      amount: Math.round(parseFloat(form.amount || '0') * 100),
+      invoiceNumber: form.invoiceNumber.trim() || undefined,
+      paymentMethod: form.paymentMethod || undefined,
+      paymentDate: form.paymentDate || undefined,
+      assignee: form.assignee || undefined,
+    })
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
+          <h2 className="text-base font-semibold">New Invoice</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
+        </div>
+        <form onSubmit={submit} className="px-6 py-5 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Equipment</label>
+            <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.equipmentId} onChange={(e) => set('equipmentId', e.target.value)} required>
+              <option value="" disabled>Select equipment…</option>
+              {equipment.map((eq) => (
+                <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Date</label>
+              <Input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} className="h-9" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Amount ($)</label>
+              <Input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0.00" required className="h-9" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Vendor</label>
+            <Input value={form.vendor} onChange={(e) => set('vendor', e.target.value)} placeholder="Shop / vendor name" className="h-9" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Description</label>
+            <Input value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="What was done" className="h-9" />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Invoice #</label>
+              <Input value={form.invoiceNumber} onChange={(e) => set('invoiceNumber', e.target.value)} className="h-9" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Payment Method</label>
+              <Input value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)} placeholder="Card / check / cash" className="h-9" />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-4">
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit">Save</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 type Tab = 'tasks' | 'invoices'
@@ -139,8 +252,10 @@ export function MaintenancePage() {
   const equipment            = useAppStore((s) => s.equipment)
   const maintenanceTasks     = useAppStore((s) => s.maintenanceTasks)
   const maintenanceInvoices  = useAppStore((s) => s.maintenanceInvoices)
+  const addMaintenanceTask       = useAppStore((s) => s.addMaintenanceTask)
   const updateMaintenanceTask    = useAppStore((s) => s.updateMaintenanceTask)
   const deleteMaintenanceTask    = useAppStore((s) => s.deleteMaintenanceTask)
+  const addMaintenanceInvoice    = useAppStore((s) => s.addMaintenanceInvoice)
   const deleteMaintenanceInvoice = useAppStore((s) => s.deleteMaintenanceInvoice)
 
   const [tab, setTab]                 = useState<Tab>('tasks')
@@ -149,6 +264,8 @@ export function MaintenancePage() {
   const [equipFilter, setEquipFilter] = useState('')
   const [search, setSearch]           = useState('')
   const [editTask, setEditTask]       = useState<MaintenanceTask | null>(null)
+  const [newTaskOpen, setNewTaskOpen] = useState(false)
+  const [newInvoiceOpen, setNewInvoiceOpen] = useState(false)
 
   function equipName(id: string) {
     const e = equipment.find((eq) => eq.id === id)
@@ -219,8 +336,13 @@ export function MaintenancePage() {
             <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
               Export
             </button>
-            <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: 'pointer', fontFamily: 'inherit' }}>
-              <Plus size={14} /> New Task
+            <button
+              onClick={() => (tab === 'tasks' ? setNewTaskOpen(true) : setNewInvoiceOpen(true))}
+              disabled={equipment.length === 0}
+              title={equipment.length === 0 ? 'Add equipment in Fleet first' : undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, color: '#fff', cursor: equipment.length === 0 ? 'not-allowed' : 'pointer', opacity: equipment.length === 0 ? 0.5 : 1, fontFamily: 'inherit' }}
+            >
+              <Plus size={14} /> {tab === 'tasks' ? 'New Task' : 'New Invoice'}
             </button>
           </div>
         </div>
@@ -444,10 +566,26 @@ export function MaintenancePage() {
       </div>
 
       {editTask && (
-        <EditTaskModal
+        <TaskModal
           task={editTask}
-          onSave={(patch) => updateMaintenanceTask(editTask.id, patch)}
+          equipment={equipment}
+          onSave={(data) => updateMaintenanceTask(editTask.id, data)}
           onClose={() => setEditTask(null)}
+        />
+      )}
+      {newTaskOpen && (
+        <TaskModal
+          task={null}
+          equipment={equipment}
+          onSave={(data) => addMaintenanceTask(data)}
+          onClose={() => setNewTaskOpen(false)}
+        />
+      )}
+      {newInvoiceOpen && (
+        <InvoiceModal
+          equipment={equipment}
+          onSave={(data) => addMaintenanceInvoice(data)}
+          onClose={() => setNewInvoiceOpen(false)}
         />
       )}
     </div>
