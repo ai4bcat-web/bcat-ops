@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, Edit2, Trash2, Building2, Truck, Package, Camera, X, Check, AlertTriangle, Search, ShieldCheck } from 'lucide-react'
+import { Plus, Phone, Edit2, Trash2, Building2, Truck, Package, Camera, Check, AlertTriangle, Search, ShieldCheck, User } from 'lucide-react'
+import { FormSection, Field } from '@/components/ui/form-section'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -12,11 +13,9 @@ import { COLOR_MAP, getColor } from '@/lib/driverColors'
 import type { ColorKey } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Avatar } from '@/components/ui/avatar'
@@ -221,250 +220,141 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
         </SheetHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
-          <SheetBody className="space-y-4">
+          <SheetBody>
+            <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
 
-            {/* Photo upload */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Photo</Label>
-              <div className="flex items-center gap-4">
-                {/* Avatar preview */}
-                <div
-                  className="relative group cursor-pointer shrink-0"
-                  onClick={() => photoInputRef.current?.click()}
-                  title="Click to upload photo"
-                >
-                  {photoPreview ? (
-                    <img src={photoPreview} alt="Driver" className="size-16 rounded-full object-cover border-2 border-border" />
-                  ) : (
-                    <div className="size-16 rounded-full bg-muted flex items-center justify-center text-xl font-bold text-muted-foreground border-2 border-dashed border-border select-none">
-                      {getInitials(watchName || driver?.name || '?') || '?'}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+
+              {/* ── Driver Details ─────────────────────────────────────────── */}
+              <FormSection icon={<User size={15} />} title="Driver Details" subtitle="Identity, type & calendar color">
+                {/* Photo column beside stacked Name + Phone */}
+                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                    <div
+                      className="relative group cursor-pointer"
+                      onClick={() => photoInputRef.current?.click()}
+                      title="Click to upload photo"
+                    >
+                      {photoPreview ? (
+                        <img src={photoPreview} alt="Driver" className="size-16 rounded-full object-cover border-2 border-border" />
+                      ) : (
+                        <div className="size-16 rounded-full bg-muted flex items-center justify-center text-xl font-bold text-muted-foreground border-2 border-dashed border-border select-none">
+                          {getInitials(watchName || driver?.name || '?') || '?'}
+                        </div>
+                      )}
+                      <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Camera className="size-6 text-white" />
+                      </div>
                     </div>
-                  )}
-                  <div className="absolute inset-0 rounded-full flex items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Camera className="size-6 text-white" />
+                    <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5 text-xs px-2.5" onClick={() => photoInputRef.current?.click()}>
+                      <Camera className="size-3" /> {photoPreview ? 'Change' : 'Photo'}
+                    </Button>
+                    {photoPreview && (
+                      <button type="button" onClick={handleRemovePhoto} className="text-xs text-destructive hover:underline">Remove</button>
+                    )}
+                  </div>
+
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+                    <Field label="Full Name *">
+                      <Input {...register('name')} placeholder="Full name" className={cn('h-9', errors.name && 'border-destructive')} />
+                      {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
+                    </Field>
+                    <Field label="Phone *" hint="10-digit US">
+                      <Input {...register('phone')} placeholder="(312) 555-0100" type="tel" className={cn('h-9', errors.phone && 'border-destructive')} />
+                      {errors.phone && <p className="text-xs text-destructive mt-1">{errors.phone.message}</p>}
+                    </Field>
                   </div>
                 </div>
 
-                {/* Buttons */}
-                <div className="flex flex-col gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 gap-1.5 text-xs"
-                    onClick={() => photoInputRef.current?.click()}
-                  >
-                    <Camera className="size-3.5" />
-                    {photoPreview ? 'Change Photo' : 'Upload Photo'}
-                  </Button>
-                  {photoPreview && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={handleRemovePhoto}
-                    >
-                      <X className="size-3.5" /> Remove
-                    </Button>
-                  )}
-                </div>
-              </div>
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handlePhotoSelect}
-              />
-            </div>
+                {/* Type toggle */}
+                <Field label="Type">
+                  <Controller
+                    name="type"
+                    control={control}
+                    render={({ field }) => (
+                      <ToggleGroup type="single" className="w-full grid grid-cols-2" value={field.value} onValueChange={(v) => v && field.onChange(v)}>
+                        <ToggleGroupItem value="driver" className="gap-2"><Truck className="size-3.5" /> Own Driver</ToggleGroupItem>
+                        <ToggleGroupItem value="broker" className="gap-2"><Building2 className="size-3.5" /> Broker / 3PL</ToggleGroupItem>
+                      </ToggleGroup>
+                    )}
+                  />
+                  {watchType === 'broker' && <p className="text-xs text-muted-foreground mt-1.5">Broker entries appear at the bottom of the calendar.</p>}
+                </Field>
 
-            <Separator />
-
-            {/* Name */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name *</Label>
-              <Input
-                {...register('name')}
-                placeholder="Full name"
-                className={cn('h-9', errors.name && 'border-destructive')}
-              />
-              {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
-            </div>
-
-            {/* Phone */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Phone *</Label>
-              <Input
-                {...register('phone')}
-                placeholder="(312) 555-0100"
-                type="tel"
-                className={cn('h-9', errors.phone && 'border-destructive')}
-              />
-              {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
-              <p className="text-xs text-muted-foreground">10-digit US number, any format accepted</p>
-            </div>
-
-            <Separator />
-
-            {/* Type toggle */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Type</Label>
-              <Controller
-                name="type"
-                control={control}
-                render={({ field }) => (
-                  <ToggleGroup
-                    type="single"
-                    value={field.value}
-                    onValueChange={(v) => v && field.onChange(v)}
-                  >
-                    <ToggleGroupItem value="driver" className="gap-2">
-                      <Truck className="size-3.5" /> Own Driver
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="broker" className="gap-2">
-                      <Building2 className="size-3.5" /> Broker / 3PL
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                )}
-              />
-              {watchType === 'broker' && (
-                <p className="text-xs text-muted-foreground">
-                  Broker entries appear at the bottom of the calendar.
-                </p>
-              )}
-            </div>
-
-            {/* Assigned truck (own drivers only) */}
-            {watchType === 'driver' && (
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assigned Truck</Label>
-                <Controller
-                  name="assignedTruckId"
-                  control={control}
-                  render={({ field }) => (
-                    <select
-                      value={field.value ?? ''}
-                      onChange={(e) => field.onChange(e.target.value || null)}
-                      className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
-                      <option value="">— No truck assigned —</option>
-                      {trucks.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          #{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}{(t.make || t.model) ? ` — ${[t.make, t.model].filter(Boolean).join(' ')}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Trucks come from Fleet — both Motive-connected and manually-added trucks appear here.
-                </p>
-              </div>
-            )}
-
-            {/* Color picker */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Calendar Color</Label>
-              <div className="flex items-center gap-2 flex-wrap">
-                {(Object.entries(COLOR_MAP) as [ColorKey, typeof COLOR_MAP[ColorKey]][])
-                  .filter(([key]) => key !== 'broker')
-                  .map(([key, c]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      title={key}
-                      onClick={() => setValue('colorKey', key, { shouldDirty: true })}
-                      className="relative size-7 rounded-full transition-transform hover:scale-110 focus:outline-none"
-                      style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px #fff, 0 0 0 5px ${c.border}` : undefined }}
-                    >
-                      {watchColorKey === key && (
-                        <Check className="absolute inset-0 m-auto size-3.5 text-white" strokeWidth={3} />
+                {/* Assigned truck (own drivers only) */}
+                {watchType === 'driver' && (
+                  <Field label="Assigned Truck" hint="from Fleet">
+                    <Controller
+                      name="assignedTruckId"
+                      control={control}
+                      render={({ field }) => (
+                        <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                          <option value="">— No truck assigned —</option>
+                          {trucks.map((t) => (
+                            <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}{(t.make || t.model) ? ` — ${[t.make, t.model].filter(Boolean).join(' ')}` : ''}</option>
+                          ))}
+                        </select>
                       )}
-                    </button>
-                  ))}
-              </div>
-              {!watchColorKey && (
-                <p className="text-xs text-muted-foreground">A color will be auto-assigned if none is picked.</p>
-              )}
-            </div>
+                    />
+                  </Field>
+                )}
 
-            {/* Notes */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Notes</Label>
-              <Textarea
-                {...register('notes')}
-                placeholder="CDL class, preferred lanes, equipment…"
-                rows={3}
-              />
-            </div>
+                {/* Calendar color */}
+                <Field label="Calendar Color" hint={!watchColorKey ? 'auto if none' : undefined}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {(Object.entries(COLOR_MAP) as [ColorKey, typeof COLOR_MAP[ColorKey]][])
+                      .filter(([key]) => key !== 'broker')
+                      .map(([key, c]) => (
+                        <button key={key} type="button" title={key} onClick={() => setValue('colorKey', key, { shouldDirty: true })}
+                          className="relative size-7 rounded-full transition-transform hover:scale-110 focus:outline-none"
+                          style={{ background: c.border, boxShadow: watchColorKey === key ? `0 0 0 3px #fff, 0 0 0 5px ${c.border}` : undefined }}>
+                          {watchColorKey === key && <Check className="absolute inset-0 m-auto size-3.5 text-white" strokeWidth={3} />}
+                        </button>
+                      ))}
+                  </div>
+                </Field>
 
-            <Separator />
+                <Field label="Notes">
+                  <Textarea {...register('notes')} placeholder="CDL class, preferred lanes, equipment…" rows={2} />
+                </Field>
+              </FormSection>
 
-            {/* Compliance */}
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Compliance &amp; Profile</p>
+              {/* ── Compliance & Documents (collapsed) ─────────────────────── */}
+              <FormSection icon={<ShieldCheck size={15} />} title="Compliance & Documents" subtitle="CDL, med card, drug test" collapsible defaultOpen={false}>
+                <Field label="Email">
+                  <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
+                </Field>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field label="CDL Number"><Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" /></Field>
+                  <Field label="CDL Class">
+                    <Controller name="driverType" control={control} render={({ field }) => (
+                      <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || undefined)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                        <option value="">Select…</option>
+                        <option value="COMPANY">Company Driver</option>
+                        <option value="OWNER_OPERATOR">Owner Operator</option>
+                      </select>
+                    )} />
+                  </Field>
+                  <Field label="CDL Expiration"><Input {...register('cdlExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
+                  <Field label="Med Card Expiration"><Input {...register('medCardExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
+                  <Field label="Last Drug Test"><Input {...register('drugTestDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
+                  <Field label="Hire Date"><Input {...register('hireDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
+                </div>
+              </FormSection>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5 col-span-2">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email</Label>
-                <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">CDL Number</Label>
-                <Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Driver Type</Label>
-                <Controller
-                  name="driverType"
-                  control={control}
-                  render={({ field }) => (
-                    <select
-                      value={field.value ?? ''}
-                      onChange={(e) => field.onChange(e.target.value || undefined)}
-                      className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
-                      <option value="">Select…</option>
-                      <option value="COMPANY">Company Driver</option>
-                      <option value="OWNER_OPERATOR">Owner Operator</option>
-                    </select>
-                  )}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">CDL Expiration</Label>
-                <Input {...register('cdlExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Med Card Expiration</Label>
-                <Input {...register('medCardExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Last Drug Test</Label>
-                <Input {...register('drugTestDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Hire Date</Label>
-                <Input {...register('hireDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" />
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Active switch */}
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">Active driver</p>
-                <p className="text-xs text-muted-foreground">Inactive drivers won't appear on the calendar</p>
-              </div>
+              {/* ── Active toggle card ─────────────────────────────────────── */}
               <Controller
                 name="active"
                 control={control}
                 render={({ field }) => (
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
+                  <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 14px', borderRadius: 10, cursor: 'pointer',
+                    border: `1.5px solid ${field.value ? '#86efac' : 'var(--ds-border)'}`, background: field.value ? '#f0fdf4' : 'var(--ds-surface)' }}>
+                    <div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: field.value ? '#15803d' : 'var(--ds-t1)' }}>Active driver</div>
+                      <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>Inactive drivers won't appear on the calendar</div>
+                    </div>
+                    <Switch checked={field.value} onCheckedChange={field.onChange} />
+                  </label>
                 )}
               />
             </div>
