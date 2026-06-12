@@ -105,6 +105,16 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         createdAt: u.UserCreateDate?.toISOString(),
       }))
       console.log('[list] returned', users.length, 'users from pool', USER_POOL_ID)
+      // TEMP DIAGNOSTIC: surface the queried pool id if the list is empty, so a
+      // pool/env mismatch (Lambda reading a different pool than the one you sign in
+      // to) is visible in the UI instead of looking like a legitimately empty pool.
+      if (users.length === 0) {
+        throw new Error(
+          `No users found in pool ${USER_POOL_ID} ` +
+          `(env USER_POOL_ID ${process.env.USER_POOL_ID ? '= ' + process.env.USER_POOL_ID : 'NOT set — using hardcoded fallback'}). ` +
+          `If you can sign in but this pool is empty, the Lambda is pointed at a different user pool than your login pool.`
+        )
+      }
       return JSON.stringify(users)
     }
     case 'create': {
