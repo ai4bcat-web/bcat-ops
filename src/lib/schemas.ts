@@ -25,6 +25,7 @@ export const driverSchema = z.object({
   drugTestDate: z.string().optional(),
   hireDate: z.string().optional(),
   driverType: z.enum(['COMPANY', 'OWNER_OPERATOR']).optional(),
+  assignedTruckId: z.string().nullable().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])

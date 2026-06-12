@@ -110,8 +110,11 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, assignedTruckId: null },
   })
+
+  // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
+  const trucks = useAppStore((s) => s.equipment).filter((e) => e.type === 'truck' && e.active)
 
   const watchType = watch('type')
   const watchName = watch('name')
@@ -128,8 +131,9 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
             cdlExpiration: driver.cdlExpiration ?? '', medCardExpiration: driver.medCardExpiration ?? '',
             drugTestDate: driver.drugTestDate ?? '', hireDate: driver.hireDate ?? '',
             driverType: (driver.driverType || undefined) as 'COMPANY' | 'OWNER_OPERATOR' | undefined,
+            assignedTruckId: driver.assignedTruckId ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, assignedTruckId: null })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -329,6 +333,34 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                 </p>
               )}
             </div>
+
+            {/* Assigned truck (own drivers only) */}
+            {watchType === 'driver' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Assigned Truck</Label>
+                <Controller
+                  name="assignedTruckId"
+                  control={control}
+                  render={({ field }) => (
+                    <select
+                      value={field.value ?? ''}
+                      onChange={(e) => field.onChange(e.target.value || null)}
+                      className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="">— No truck assigned —</option>
+                      {trucks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          #{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}{(t.make || t.model) ? ` — ${[t.make, t.model].filter(Boolean).join(' ')}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Trucks come from Fleet — both Motive-connected and manually-added trucks appear here.
+                </p>
+              </div>
+            )}
 
             {/* Color picker */}
             <div className="space-y-1.5">

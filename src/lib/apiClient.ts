@@ -185,14 +185,29 @@ export async function listDrivers(): Promise<Driver[]> {
   }
 }
 
+// Stale/unset enum fields (e.g. legacy lowercase driverType, or an onboardingStatus that
+// was never classified) make AppSync return field errors *alongside* the valid written
+// data — the mutation still persisted. Surface the partial driver instead of throwing, so
+// saving a driver that has legacy data doesn't look like it failed (matches listDrivers).
+function driverFromPartial(err: unknown, key: 'createDriver' | 'updateDriver'): Driver | null {
+  const data = (err as { data?: Record<string, Driver | null> }).data
+  return data?.[key] ?? null
+}
+
 export async function createDriver(
   input: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<Driver> {
-  const result = await client.graphql({
-    query: `mutation CreateDriver($input: CreateDriverInput!) { createDriver(input: $input) { ${driverFields()} } }`,
-    variables: { input },
-  }) as { data: { createDriver: Driver } }
-  return result.data.createDriver
+  try {
+    const result = await client.graphql({
+      query: `mutation CreateDriver($input: CreateDriverInput!) { createDriver(input: $input) { ${driverFields()} } }`,
+      variables: { input },
+    }) as { data: { createDriver: Driver } }
+    return result.data.createDriver
+  } catch (err: unknown) {
+    const partial = driverFromPartial(err, 'createDriver')
+    if (partial) return partial
+    throw err
+  }
 }
 
 export async function updateDriver(
@@ -200,11 +215,17 @@ export async function updateDriver(
   patch: Partial<Omit<Driver, 'id' | 'createdAt'>>
 ): Promise<Driver> {
   const { photoUrl: _skip, ...rest } = patch as typeof patch & { photoUrl?: string }
-  const result = await client.graphql({
-    query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
-    variables: { input: { id, ...rest } },
-  }) as { data: { updateDriver: Driver } }
-  return resolveDriverPhotoUrl(result.data.updateDriver)
+  try {
+    const result = await client.graphql({
+      query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
+      variables: { input: { id, ...rest } },
+    }) as { data: { updateDriver: Driver } }
+    return resolveDriverPhotoUrl(result.data.updateDriver)
+  } catch (err: unknown) {
+    const partial = driverFromPartial(err, 'updateDriver')
+    if (partial) return resolveDriverPhotoUrl(partial)
+    throw err
+  }
 }
 
 export async function deleteDriver(id: string): Promise<void> {
