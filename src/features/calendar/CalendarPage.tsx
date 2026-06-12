@@ -9,6 +9,8 @@ import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
+import { MobileLoadAgenda } from './MobileLoadAgenda'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
@@ -31,6 +33,7 @@ export function CalendarPage() {
 
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
+  const isMobile = useIsMobile()
   const { availabilities, createAvailability, deleteAvailability } = useDriverAvailability()
 
   const [showAvailModal, setShowAvailModal] = useState(false)
@@ -179,7 +182,9 @@ export function CalendarPage() {
         background: 'var(--ds-surface)',
       }}>
         <CalendarErrorBoundary>
-          {currentView === 'day' ? (
+          {isMobile ? (
+            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} />
+          ) : currentView === 'day' ? (
             <PlannerView
               loads={visibleLoads}
               drivers={drivers}
