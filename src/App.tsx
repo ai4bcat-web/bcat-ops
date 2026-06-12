@@ -16,6 +16,10 @@ import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
 import { TasksPage } from '@/features/tasks/TasksPage'
+import { CompliancePage } from '@/features/compliance/CompliancePage'
+import { ReviewQueuePage } from '@/features/compliance-review/ReviewQueuePage'
+import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplianceDetailPage'
+import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 
 export default function App() {
   return (
@@ -38,6 +42,11 @@ export default function App() {
               <Route path="/intake"   element={<IntakePage />} />
               <Route path="/tasks"   element={<TasksPage />} />
               <Route path="/users" element={<UsersPage />} />
+              {/* Compliance & onboarding */}
+              <Route path="/compliance" element={<CompliancePage />} />
+              <Route path="/compliance/review" element={<ReviewQueuePage />} />
+              <Route path="/compliance/driver/:driverId" element={<DriverComplianceDetailPage />} />
+              <Route path="/compliance/truck/:truckId" element={<TruckOnboardingWizardPage />} />
               {/* legacy redirects */}
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
               <Route path="/audit" element={<Navigate to="/audit-log" replace />} />

@@ -2,10 +2,12 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, DollarSign, MessageSquare, History, UserCog, LogOut, Plus,
+  ShieldCheck, ClipboardCheck,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
+import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
 
 const NAV_GROUPS = [
@@ -24,6 +26,10 @@ const NAV_GROUPS = [
     { to: '/schedule',    label: 'Schedules',    icon: MessageSquare,   pageKey: 'schedule' },
   ],
   [
+    { to: '/compliance',        label: 'Compliance',   icon: ShieldCheck,     pageKey: 'compliance',       alwaysVisible: true },
+    { to: '/compliance/review', label: 'Review Queue', icon: ClipboardCheck,  pageKey: 'complianceReview', alwaysVisible: true, badgeKey: 'review' },
+  ],
+  [
     { to: '/audit-log',   label: 'Audit Log',    icon: History,         pageKey: 'audit' },
   ],
 ]
@@ -33,6 +39,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   intake:      { bg: 'var(--ds-blue-soft)',        color: '#0369a1' },
   tasks:       { bg: 'var(--ds-amber-soft)',       color: '#b45309' },
   maintenance: { bg: 'var(--ds-red-soft)',         color: '#dc2626' },
+  review:      { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
@@ -50,6 +57,7 @@ export function NavBar() {
   const loads = useAppStore(s => s.loads)
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
   const { items: intakeItems } = useIntakeItems()
+  const { pendingCount: reviewCount } = useReviewQueue()
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
@@ -61,6 +69,7 @@ export function NavBar() {
     if (key === 'maintenance') return maintenanceCount || null
     if (key === 'intake') return activeIntakeCount || null
     if (key === 'tasks') return activeIntakeCount || null
+    if (key === 'review') return reviewCount || null
     return null
   }
 

@@ -64,6 +64,65 @@ const schema = a.schema({
     })
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Fleet (trucks & trailers) ──────────────────────────────────────────────
+  // Enum-like fields are stored as plain strings to match the frontend types
+  // verbatim (e.g. 'truck'|'trailer', 'owned'|'leased') — no case conversion.
+  Equipment: a
+    .model({
+      type:                    a.string().required(),  // 'truck' | 'trailer'
+      unitNumber:              a.string().required(),
+      nickname:                a.string(),
+      vin:                     a.string(),
+      plate:                   a.string(),
+      make:                    a.string(),
+      model:                   a.string(),
+      year:                    a.integer(),
+      mileage:                 a.integer(),
+      ownership:               a.string(),             // 'owned' | 'leased' | 'rented' | 'financed'
+      insured:                 a.boolean(),
+      active:                  a.boolean(),
+      dotInspectionDate:       a.string(),             // YYYY-MM-DD
+      iftaExpirationDate:      a.string(),
+      irpExpirationDate:       a.string(),
+      insuranceExpirationDate: a.string(),
+      bobtailInsuranceDate:    a.string(),
+      assignedDriverId:        a.string(),
+      fleetManagerAssignee:    a.string(),
+      onTollwayAccount:        a.boolean(),
+      fuelCardNumbers:         a.string().array(),     // EFS card # prefixes
+      notes:                   a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
+  MaintenanceTask: a
+    .model({
+      equipmentId: a.string().required(),
+      title:       a.string().required(),
+      dueDate:     a.string(),                         // YYYY-MM-DD
+      priority:    a.string(),                         // 'high' | 'med' | 'low'
+      status:      a.string(),                         // 'upcoming' | 'complete'
+      notes:       a.string(),
+      autoDot:     a.boolean(),
+      assignee:    a.string(),
+    })
+    .secondaryIndexes((index) => [index('equipmentId')])
+    .authorization((allow) => [allow.authenticated()]),
+
+  MaintenanceInvoice: a
+    .model({
+      equipmentId:   a.string().required(),
+      date:          a.string(),                       // YYYY-MM-DD
+      vendor:        a.string(),
+      description:   a.string(),
+      amount:        a.integer(),                      // cents
+      invoiceNumber: a.string(),
+      paymentMethod: a.string(),
+      paymentDate:   a.string(),
+      assignee:      a.string(),
+    })
+    .secondaryIndexes((index) => [index('equipmentId')])
+    .authorization((allow) => [allow.authenticated()]),
+
   // ── Intake queue ──────────────────────────────────────────────────────────
   // Records created by the slack-intake-webhook Lambda when Slack messages arrive.
   IntakeItem: a

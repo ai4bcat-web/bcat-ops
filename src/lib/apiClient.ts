@@ -1,12 +1,17 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction } from '@/types'
+import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
 
 // ── GraphQL fragments ─────────────────────────────────────────────────────────
 
+// Base selection set, minus `hot`. `hot` is a newer field; it is appended via
+// loadFields() only while the backend supports it. If a deploy hasn't added `hot`
+// yet, listLoads detects the FieldUndefined error and drops it (see below) so the
+// app keeps working against an older API. Self-heals to include `hot` post-deploy.
 const LOAD_FIELDS = `
   id aljexId tmsId pickupNumber
   originName originCity destinationName destinationCity
@@ -18,10 +23,25 @@ const LOAD_FIELDS = `
   createdBy updatedBy createdAt updatedAt
 `
 
-const DRIVER_FIELDS = `
+let loadsHaveHot = true
+const loadFields = () => (loadsHaveHot ? `${LOAD_FIELDS} hot` : LOAD_FIELDS)
+
+// Base selection set. onboardingStatus/complianceStatus are newer compliance fields;
+// appended via driverFields() only while the backend supports them (self-heals like
+// LOAD_FIELDS' `hot`), so the roster keeps working against a pre-deploy API.
+const DRIVER_BASE_FIELDS = `
   id name phone active type colorKey notes photoKey assignedTruckId
+  email cdl cdlExpiration medCardExpiration drugTestDate hireDate driverType
   createdAt updatedAt
 `
+let driversHaveCompliance = true
+const driverFields = () =>
+  driversHaveCompliance ? `${DRIVER_BASE_FIELDS} onboardingStatus complianceStatus` : DRIVER_BASE_FIELDS
+
+function isComplianceFieldUndefined(err: unknown): boolean {
+  const errs = (err as { errors?: { message?: string }[] })?.errors
+  return Array.isArray(errs) && errs.some((e) => /'(onboardingStatus|complianceStatus)'/.test(e?.message ?? ''))
+}
 
 const AUDIT_FIELDS = `
   id entityType entityId action user changes createdAt
@@ -29,10 +49,30 @@ const AUDIT_FIELDS = `
 
 // ── Loads ─────────────────────────────────────────────────────────────────────
 
+// True if the error is the backend rejecting our `hot` selection (field not deployed yet).
+function isHotFieldUndefined(err: unknown): boolean {
+  const errs = (err as { errors?: { message?: string }[] })?.errors
+  return Array.isArray(errs) && errs.some((e) => /Field 'hot'|'hot'.*undefined|undefined.*'hot'/i.test(e?.message ?? ''))
+}
+
 export async function listLoads(): Promise<Load[]> {
-  const result = await client.graphql({
-    query: `query ListLoads { listLoads(limit: 10000) { items { ${LOAD_FIELDS} } } }`,
-  }) as { data: { listLoads: { items: (Load & { rateConfirmKey?: string })[] } } }
+  const run = async () => client.graphql({
+    query: `query ListLoads { listLoads(limit: 10000) { items { ${loadFields()} } } }`,
+  }) as Promise<{ data: { listLoads: { items: (Load & { rateConfirmKey?: string })[] } } }>
+
+  let result
+  try {
+    result = await run()
+  } catch (err) {
+    if (loadsHaveHot && isHotFieldUndefined(err)) {
+      // Backend doesn't have `hot` yet (pre-deploy) — drop it and retry once.
+      console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
+      loadsHaveHot = false
+      result = await run()
+    } else {
+      throw err
+    }
+  }
   const items = result.data.listLoads.items ?? []
   return Promise.all(items.map(resolveRateConfirmUrl))
 }
@@ -42,7 +82,7 @@ export async function createLoad(
 ): Promise<Load> {
   const { rateConfirmUrl: _skip, ...rest } = input as Load & { rateConfirmUrl?: string }
   const result = await client.graphql({
-    query: `mutation CreateLoad($input: CreateLoadInput!) { createLoad(input: $input) { ${LOAD_FIELDS} } }`,
+    query: `mutation CreateLoad($input: CreateLoadInput!) { createLoad(input: $input) { ${loadFields()} } }`,
     variables: { input: rest },
   }) as { data: { createLoad: Load } }
   return result.data.createLoad
@@ -54,7 +94,7 @@ export async function updateLoad(
 ): Promise<Load> {
   const { rateConfirmUrl: _skip, ...rest } = patch as typeof patch & { rateConfirmUrl?: string }
   const result = await client.graphql({
-    query: `mutation UpdateLoad($input: UpdateLoadInput!) { updateLoad(input: $input) { ${LOAD_FIELDS} } }`,
+    query: `mutation UpdateLoad($input: UpdateLoadInput!) { updateLoad(input: $input) { ${loadFields()} } }`,
     variables: { input: { id, ...rest } },
   }) as { data: { updateLoad: Load } }
   return resolveRateConfirmUrl(result.data.updateLoad)
@@ -93,14 +133,14 @@ export function subscribeToLoadChanges(callbacks: {
   if (callbacks.onCreate) {
     const cb = callbacks.onCreate
     wire<{ onCreateLoad: Load }>(
-      `subscription OnCreateLoad { onCreateLoad { ${LOAD_FIELDS} } }`,
+      `subscription OnCreateLoad { onCreateLoad { ${loadFields()} } }`,
       (d) => { if (d.onCreateLoad) cb(d.onCreateLoad) },
     )
   }
   if (callbacks.onUpdate) {
     const cb = callbacks.onUpdate
     wire<{ onUpdateLoad: Load }>(
-      `subscription OnUpdateLoad { onUpdateLoad { ${LOAD_FIELDS} } }`,
+      `subscription OnUpdateLoad { onUpdateLoad { ${loadFields()} } }`,
       (d) => { if (d.onUpdateLoad) cb(d.onUpdateLoad) },
     )
   }
@@ -118,18 +158,38 @@ export function subscribeToLoadChanges(callbacks: {
 // ── Drivers ───────────────────────────────────────────────────────────────────
 
 export async function listDrivers(): Promise<Driver[]> {
-  const result = await client.graphql({
-    query: `query ListDrivers { listDrivers(limit: 1000) { items { ${DRIVER_FIELDS} } } }`,
-  }) as { data: { listDrivers: { items: Driver[] } } }
-  const items = result.data.listDrivers.items ?? []
-  return Promise.all(items.map(resolveDriverPhotoUrl))
+  const run = async () => client.graphql({
+    query: `query ListDrivers { listDrivers(limit: 1000) { items { ${driverFields()} } } }`,
+  }) as Promise<{ data: { listDrivers: { items: Driver[] } } }>
+  try {
+    const result = await run()
+    const items = result.data.listDrivers.items ?? []
+    return Promise.all(items.map(resolveDriverPhotoUrl))
+  } catch (err: unknown) {
+    // Backend doesn't have the compliance fields yet (pre-deploy) — drop them and retry.
+    if (driversHaveCompliance && isComplianceFieldUndefined(err)) {
+      console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
+      driversHaveCompliance = false
+      const result = await run()
+      return Promise.all((result.data.listDrivers.items ?? []).map(resolveDriverPhotoUrl))
+    }
+    // Stale records (e.g. legacy lowercase driverType before the enum migration) make
+    // AppSync return partial errors with valid data alongside. Surface what we can
+    // rather than blanking the roster — invalid enum fields come back null (Unclassified).
+    const partial = (err as { data?: { listDrivers?: { items?: Driver[] } } }).data
+    if (partial?.listDrivers?.items) {
+      console.warn('[listDrivers] partial errors (stale records?) — showing valid items', err)
+      return Promise.all(partial.listDrivers.items.filter(Boolean).map(resolveDriverPhotoUrl))
+    }
+    throw err
+  }
 }
 
 export async function createDriver(
   input: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<Driver> {
   const result = await client.graphql({
-    query: `mutation CreateDriver($input: CreateDriverInput!) { createDriver(input: $input) { ${DRIVER_FIELDS} } }`,
+    query: `mutation CreateDriver($input: CreateDriverInput!) { createDriver(input: $input) { ${driverFields()} } }`,
     variables: { input },
   }) as { data: { createDriver: Driver } }
   return result.data.createDriver
@@ -141,7 +201,7 @@ export async function updateDriver(
 ): Promise<Driver> {
   const { photoUrl: _skip, ...rest } = patch as typeof patch & { photoUrl?: string }
   const result = await client.graphql({
-    query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${DRIVER_FIELDS} } }`,
+    query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
     variables: { input: { id, ...rest } },
   }) as { data: { updateDriver: Driver } }
   return resolveDriverPhotoUrl(result.data.updateDriver)
@@ -776,14 +836,22 @@ async function resolveRateConfirmUrl(
 export interface TruckConfig {
   truckId:             string
   unitNumber:          string
-  ownershipType?:      'COMPANY' | 'OWNER_OPERATOR'
+  ownershipType?:      'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
   motiveVehicleId?:    number | null
   motiveVehicleNumber?: string | null
+  // DOT onboarding / compliance (internal only)
+  onboardingStatus?:      'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE' | null
+  complianceStatus?:      'COMPLIANT' | 'EXPIRING_SOON' | 'NON_COMPLIANT' | 'UNKNOWN' | null
+  assignedFuelCardNumber?: string | null   // LAST 4 ONLY
+  assignedPhone?:         string | null
+  assignedTablet?:        string | null
+  eldSerialNumber?:       string | null
+  inServiceDate?:         string | null
   createdAt:           string
   updatedAt:           string
 }
 
-const TRUCK_CONFIG_FIELDS = `truckId unitNumber ownershipType motiveVehicleId motiveVehicleNumber createdAt updatedAt`
+const TRUCK_CONFIG_FIELDS = `truckId unitNumber ownershipType motiveVehicleId motiveVehicleNumber onboardingStatus complianceStatus assignedFuelCardNumber assignedPhone assignedTablet eldSerialNumber inServiceDate createdAt updatedAt`
 
 export async function listTruckConfigs(): Promise<TruckConfig[]> {
   const result = await client.graphql({
@@ -809,6 +877,136 @@ export async function upsertTruckConfig(
     }) as { data: { createTruckConfig: TruckConfig } }
     return result.data.createTruckConfig
   }
+}
+
+// ── Equipment (Fleet) ───────────────────────────────────────────────────────────
+// Stored field-for-field; the client supplies `id` on create so local/server ids stay aligned.
+
+// Amplify manages createdAt/updatedAt — strip them from create inputs (id is kept).
+function withoutTimestamps<T extends object>(o: T): Omit<T, 'createdAt' | 'updatedAt'> {
+  const rest = { ...o } as Record<string, unknown>
+  delete rest.createdAt
+  delete rest.updatedAt
+  return rest as Omit<T, 'createdAt' | 'updatedAt'>
+}
+
+const EQUIPMENT_FIELDS = `
+  id type unitNumber nickname vin plate make model year mileage
+  ownership insured active
+  dotInspectionDate iftaExpirationDate irpExpirationDate insuranceExpirationDate bobtailInsuranceDate
+  assignedDriverId fleetManagerAssignee onTollwayAccount fuelCardNumbers notes
+  createdAt updatedAt
+`
+
+export async function listEquipment(): Promise<Equipment[]> {
+  const result = await client.graphql({
+    query: `query ListEquipment { listEquipment(limit: 1000) { items { ${EQUIPMENT_FIELDS} } } }`,
+  }) as { data: { listEquipment: { items: Equipment[] } } }
+  return result.data.listEquipment.items ?? []
+}
+
+export async function createEquipment(input: Equipment): Promise<Equipment> {
+  const result = await client.graphql({
+    query: `mutation CreateEquipment($input: CreateEquipmentInput!) { createEquipment(input: $input) { ${EQUIPMENT_FIELDS} } }`,
+    variables: { input: withoutTimestamps(input) },
+  }) as { data: { createEquipment: Equipment } }
+  return result.data.createEquipment
+}
+
+export async function updateEquipment(
+  id: string,
+  patch: Partial<Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<Equipment> {
+  const result = await client.graphql({
+    query: `mutation UpdateEquipment($input: UpdateEquipmentInput!) { updateEquipment(input: $input) { ${EQUIPMENT_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateEquipment: Equipment } }
+  return result.data.updateEquipment
+}
+
+export async function deleteEquipment(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteEquipment($input: DeleteEquipmentInput!) { deleteEquipment(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Maintenance tasks ───────────────────────────────────────────────────────────
+
+const MAINT_TASK_FIELDS = `
+  id equipmentId title dueDate priority status notes autoDot assignee createdAt updatedAt
+`
+
+export async function listMaintenanceTasks(): Promise<MaintenanceTask[]> {
+  const result = await client.graphql({
+    query: `query ListMaintenanceTasks { listMaintenanceTasks(limit: 5000) { items { ${MAINT_TASK_FIELDS} } } }`,
+  }) as { data: { listMaintenanceTasks: { items: MaintenanceTask[] } } }
+  return result.data.listMaintenanceTasks.items ?? []
+}
+
+export async function createMaintenanceTask(input: MaintenanceTask): Promise<MaintenanceTask> {
+  const result = await client.graphql({
+    query: `mutation CreateMaintenanceTask($input: CreateMaintenanceTaskInput!) { createMaintenanceTask(input: $input) { ${MAINT_TASK_FIELDS} } }`,
+    variables: { input: withoutTimestamps(input) },
+  }) as { data: { createMaintenanceTask: MaintenanceTask } }
+  return result.data.createMaintenanceTask
+}
+
+export async function updateMaintenanceTask(
+  id: string,
+  patch: Partial<Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<MaintenanceTask> {
+  const result = await client.graphql({
+    query: `mutation UpdateMaintenanceTask($input: UpdateMaintenanceTaskInput!) { updateMaintenanceTask(input: $input) { ${MAINT_TASK_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateMaintenanceTask: MaintenanceTask } }
+  return result.data.updateMaintenanceTask
+}
+
+export async function deleteMaintenanceTask(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteMaintenanceTask($input: DeleteMaintenanceTaskInput!) { deleteMaintenanceTask(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Maintenance invoices ──────────────────────────────────────────────────────────
+
+const MAINT_INVOICE_FIELDS = `
+  id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate assignee createdAt updatedAt
+`
+
+export async function listMaintenanceInvoices(): Promise<MaintenanceInvoice[]> {
+  const result = await client.graphql({
+    query: `query ListMaintenanceInvoices { listMaintenanceInvoices(limit: 5000) { items { ${MAINT_INVOICE_FIELDS} } } }`,
+  }) as { data: { listMaintenanceInvoices: { items: MaintenanceInvoice[] } } }
+  return result.data.listMaintenanceInvoices.items ?? []
+}
+
+export async function createMaintenanceInvoice(input: MaintenanceInvoice): Promise<MaintenanceInvoice> {
+  const result = await client.graphql({
+    query: `mutation CreateMaintenanceInvoice($input: CreateMaintenanceInvoiceInput!) { createMaintenanceInvoice(input: $input) { ${MAINT_INVOICE_FIELDS} } }`,
+    variables: { input: withoutTimestamps(input) },
+  }) as { data: { createMaintenanceInvoice: MaintenanceInvoice } }
+  return result.data.createMaintenanceInvoice
+}
+
+export async function updateMaintenanceInvoice(
+  id: string,
+  patch: Partial<Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<MaintenanceInvoice> {
+  const result = await client.graphql({
+    query: `mutation UpdateMaintenanceInvoice($input: UpdateMaintenanceInvoiceInput!) { updateMaintenanceInvoice(input: $input) { ${MAINT_INVOICE_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateMaintenanceInvoice: MaintenanceInvoice } }
+  return result.data.updateMaintenanceInvoice
+}
+
+export async function deleteMaintenanceInvoice(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteMaintenanceInvoice($input: DeleteMaintenanceInvoiceInput!) { deleteMaintenanceInvoice(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
 }
 
 // ── TruckMileage ──────────────────────────────────────────────────────────────
@@ -843,4 +1041,46 @@ export async function listTruckMileages(truckId?: string): Promise<TruckMileage[
     query: `query ListTruckMileages { listTruckMileages(limit: 5000) { items { ${TRUCK_MILEAGE_FIELDS} } } }`,
   }) as { data: { listTruckMileages: { items: TruckMileage[] } } }
   return result.data.listTruckMileages.items ?? []
+}
+
+// ── TruckLocation ───────────────────────────────────────────────────────────────
+
+export interface TruckLocation {
+  truckId:      string
+  unitNumber:   string
+  lat:          number
+  lon:          number
+  bearing:      number | null
+  speed:        number | null
+  locatedAt:    string   // ISO timestamp Motive reported the fix
+  description:  string | null
+  source:       string
+  syncedAt:     string
+  createdAt:    string
+  updatedAt:    string
+}
+
+const TRUCK_LOCATION_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description source syncedAt createdAt updatedAt`
+
+/** Current location of every truck (one row per truck, latest fix). */
+export async function listTruckLocations(): Promise<TruckLocation[]> {
+  const result = await client.graphql({
+    query: `query ListTruckLocations { listTruckLocations(limit: 5000) { items { ${TRUCK_LOCATION_FIELDS} } } }`,
+  }) as { data: { listTruckLocations: { items: TruckLocation[] } } }
+  return result.data.listTruckLocations.items ?? []
+}
+
+const TRUCK_LOCATION_HISTORY_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description source syncedAt`
+
+/** Breadcrumb history for one truck, oldest → newest, for drawing its trail. */
+export async function listTruckLocationHistory(truckId: string): Promise<TruckLocation[]> {
+  const result = await client.graphql({
+    query: `query ListByTruck($truckId: String!) {
+      listTruckLocationHistoryByTruckIdAndLocatedAt(truckId: $truckId, limit: 500) {
+        items { ${TRUCK_LOCATION_HISTORY_FIELDS} }
+      }
+    }`,
+    variables: { truckId },
+  }) as { data: { listTruckLocationHistoryByTruckIdAndLocatedAt: { items: TruckLocation[] } } }
+  return result.data.listTruckLocationHistoryByTruckIdAndLocatedAt.items ?? []
 }

@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock, Search } from 'lucide-react'
+import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock, Search, ShieldCheck } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -447,6 +448,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 // ── Drivers Page ──────────────────────────────────────────────────────────────
 
 export function DriversPage() {
+  const navigate = useNavigate()
   const { drivers, updateDriver } = useDrivers()
   const equipment = useAppStore((s) => s.equipment)
   const [drawerOpen, setDrawerOpen]       = useState(false)
@@ -636,6 +638,14 @@ export function DriversPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1 justify-end">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button variant="ghost" size="icon" className="size-8" onClick={() => navigate(`/compliance/driver/${driver.id}`)} aria-label="Compliance & onboarding">
+                              <ShieldCheck className="size-3.5" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Compliance &amp; onboarding</TooltipContent>
+                        </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button variant="ghost" size="icon" className="size-8" onClick={() => openEdit(driver)} aria-label="Edit driver">

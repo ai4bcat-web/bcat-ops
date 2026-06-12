@@ -155,6 +155,18 @@ function serializeApplicationInput(
   return out
 }
 
+export async function listApplicationsByStatus(
+  status: DriverApplicationRecord['status'],
+): Promise<DriverApplicationRecord[]> {
+  const data = await gql<{ listDriverApplications: { items: Record<string, unknown>[] } }>(
+    `query ($filter: ModelDriverApplicationFilterInput) {
+      listDriverApplications(filter: $filter, limit: 1000) { items { ${APPLICATION_FIELDS} } }
+    }`,
+    { filter: { status: { eq: status } } },
+  )
+  return (data.listDriverApplications.items ?? []).map((r) => deserializeApplication(r)!).filter(Boolean)
+}
+
 export async function getApplicationByDriver(
   driverId: string,
 ): Promise<DriverApplicationRecord | null> {

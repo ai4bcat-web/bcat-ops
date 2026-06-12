@@ -15,6 +15,9 @@ import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useAppStore } from '@/store/useAppStore'
 import { FuelWidget } from './FuelWidget'
 import { OpenTasksWidget } from './OpenTasksWidget'
+import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
+import { TruckMapWidget } from './TruckMapWidget'
+import { TruckMilesWidget } from './TruckMilesWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 
@@ -242,6 +245,12 @@ export function DashboardPage() {
             sparkColor="#1ea8f3"
             icon={<DollarSign size={15} />}
           />
+        </div>
+
+        {/* ── Fleet tracking (Motive ELD) ──────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 16 }}>
+          <TruckMapWidget />
+          <TruckMilesWidget />
         </div>
 
         {/* ── Charts row ───────────────────────────────────────────────────── */}
@@ -473,6 +482,7 @@ export function DashboardPage() {
 
         {/* ── Bottom row: Fuel · Open Tasks · Profitability ─────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
+          <ComplianceAlertsWidget />
           <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
           <OpenTasksWidget />
 

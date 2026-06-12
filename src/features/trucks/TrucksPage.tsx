@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
 import type { TruckConfig } from '@/lib/apiClient'
@@ -9,7 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Check, Search,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Check, Search, ShieldCheck,
 } from 'lucide-react'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
@@ -632,32 +633,42 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
 
 // ── Equipment Table Row ────────────────────────────────────────────────────────
 
+// TruckConfig.ownershipType — drives Motive sync ('COMPANY' is load-bearing there).
+// 'LEASED' was added alongside the DOT-compliance work; the badge cycles through all three.
+type TruckOwnership = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
+
+const OWNER_LABEL: Record<TruckOwnership, string> = { COMPANY: 'CO', OWNER_OPERATOR: 'O/O', LEASED: 'LSE' }
+const OWNER_FULL:  Record<TruckOwnership, string> = { COMPANY: 'Company', OWNER_OPERATOR: 'Owner-Operator', LEASED: 'Leased' }
+const OWNER_NEXT:  Record<TruckOwnership, TruckOwnership> = { COMPANY: 'OWNER_OPERATOR', OWNER_OPERATOR: 'LEASED', LEASED: 'COMPANY' }
+
 interface EquipRowProps {
   equip:             Equipment
   tasks:             MaintenanceTask[]
   invoices:          MaintenanceInvoice[]
   driverName?:       string
   colSpan:           number
-  ownershipType?:    'COMPANY' | 'OWNER_OPERATOR'
-  onOwnershipChange: (truckId: string, unitNumber: string, type: 'COMPANY' | 'OWNER_OPERATOR') => void
+  ownershipType?:    TruckOwnership
+  onOwnershipChange: (truckId: string, unitNumber: string, type: TruckOwnership) => void
   onEdit:            (e: Equipment) => void
   onDelete:          (id: string) => void
 }
 
 function OwnershipBadge({
   type, onClick,
-}: { type?: 'COMPANY' | 'OWNER_OPERATOR'; onClick: (next: 'COMPANY' | 'OWNER_OPERATOR') => void }) {
-  const next = type === 'COMPANY' ? 'OWNER_OPERATOR' : 'COMPANY'
-  const label = type === 'COMPANY' ? 'CO' : type === 'OWNER_OPERATOR' ? 'O/O' : '?'
+}: { type?: TruckOwnership; onClick: (next: TruckOwnership) => void }) {
+  const next: TruckOwnership = type ? OWNER_NEXT[type] : 'COMPANY'
+  const label = type ? OWNER_LABEL[type] : '?'
   const cls = type === 'COMPANY'
     ? 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100'
     : type === 'OWNER_OPERATOR'
       ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-      : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100'
+      : type === 'LEASED'
+        ? 'bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100'
+        : 'bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100'
   return (
     <button
       onClick={(e) => { e.stopPropagation(); onClick(next) }}
-      title={type ? `Click to set ${next === 'COMPANY' ? 'Company' : 'Owner-Operator'}` : 'Click to set ownership type'}
+      title={type ? `Click to set ${OWNER_FULL[next]}` : 'Click to set ownership type'}
       className={`inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full border cursor-pointer ${cls}`}
     >
       {label}
@@ -666,6 +677,7 @@ function OwnershipBadge({
 }
 
 function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete }: EquipRowProps) {
+  const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
 
   const upcomingTasks = tasks.filter((t) => t.status === 'upcoming')
@@ -778,6 +790,14 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
           <div className="flex items-center gap-1 justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => navigate(`/compliance/truck/${equip.id}`)}>
+                  <ShieldCheck className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Compliance &amp; onboarding</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onEdit(equip)}>
                   <Pencil className="size-3.5" />
                 </Button>
@@ -834,7 +854,7 @@ export function TrucksPage() {
       .catch((err) => console.warn('[TrucksPage] failed to load TruckConfigs:', err))
   }, [])
 
-  async function handleOwnershipChange(truckId: string, unitNumber: string, type: 'COMPANY' | 'OWNER_OPERATOR') {
+  async function handleOwnershipChange(truckId: string, unitNumber: string, type: TruckOwnership) {
     // Optimistic update
     setTruckConfigs((prev) => {
       const next = new Map(prev)

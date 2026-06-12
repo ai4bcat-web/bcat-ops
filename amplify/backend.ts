@@ -3,7 +3,7 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType } from 'aws-cdk-lib/aws-lambda'
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { CfnOutput } from 'aws-cdk-lib'
+import { CfnOutput, Duration } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { storage } from './storage/resource'
@@ -13,6 +13,8 @@ import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
 import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
+import { motiveLocationSync } from './functions/motive-location-sync/resource'
+import { complianceScanner } from './functions/compliance-scanner/resource'
 
 const backend = defineBackend({
   auth,
@@ -24,6 +26,8 @@ const backend = defineBackend({
   fuelImport,
   generateRecurringExpenses,
   motiveMileageSync,
+  motiveLocationSync,
+  complianceScanner,
 })
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
@@ -158,23 +162,91 @@ const motiveFn = backend.motiveMileageSync.resources.lambda as LambdaFunction
 
 const truckConfigTable  = backend.data.resources.tables['TruckConfig']
 const truckMileageTable = backend.data.resources.tables['TruckMileage']
+const equipmentTable    = backend.data.resources.tables['Equipment']
 
 backend.motiveMileageSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
     resources: [
-      truckConfigTable.tableArn,
+      equipmentTable.tableArn,
       truckMileageTable.tableArn,
     ],
   })
 )
 
-motiveFn.addEnvironment('TRUCK_CONFIG_TABLE_NAME',  truckConfigTable.tableName)
+motiveFn.addEnvironment('EQUIPMENT_TABLE_NAME',     equipmentTable.tableName)
 motiveFn.addEnvironment('TRUCK_MILEAGE_TABLE_NAME', truckMileageTable.tableName)
 
 // EventBridge daily cron — 02:05 UTC every day
 const dailyMileageRule = new Rule(motiveFn.stack, 'MotiveMileageDailySyncRule', {
   schedule:    Schedule.cron({ minute: '5', hour: '2', day: '*', month: '*' }),
-  description: 'Sync Motive ELD mileage for COMPANY trucks daily',
+  description: 'Sync Motive ELD mileage for every Motive vehicle daily',
 })
 dailyMileageRule.addTarget(new EventsLambdaTarget(motiveFn))
+
+// ── motiveLocationSync Lambda ──────────────────────────────────────────────
+
+const motiveLocationFn = backend.motiveLocationSync.resources.lambda as LambdaFunction
+
+const truckLocationTable        = backend.data.resources.tables['TruckLocation']
+const truckLocationHistoryTable = backend.data.resources.tables['TruckLocationHistory']
+
+backend.motiveLocationSync.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
+    resources: [
+      equipmentTable.tableArn,
+      truckLocationTable.tableArn,
+      truckLocationHistoryTable.tableArn,
+    ],
+  })
+)
+
+motiveLocationFn.addEnvironment('EQUIPMENT_TABLE_NAME',              equipmentTable.tableName)
+motiveLocationFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME',         truckLocationTable.tableName)
+motiveLocationFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', truckLocationHistoryTable.tableName)
+
+// EventBridge cron — every 10 minutes (near-real-time fleet positions)
+const locationSyncRule = new Rule(motiveLocationFn.stack, 'MotiveLocationSyncRule', {
+  schedule:    Schedule.rate(Duration.minutes(10)),
+  description: 'Sync Motive ELD truck locations for every Motive vehicle every 10 minutes',
+})
+locationSyncRule.addTarget(new EventsLambdaTarget(motiveLocationFn))
+
+// ── complianceScanner Lambda ───────────────────────────────────────────────
+
+const complianceScannerFn = backend.complianceScanner.resources.lambda as LambdaFunction
+
+const complianceDocTable   = backend.data.resources.tables['ComplianceDocument']
+const onboardingTaskTable  = backend.data.resources.tables['OnboardingTask']
+const complianceAlertTable = backend.data.resources.tables['ComplianceAlert']
+const driverTable          = backend.data.resources.tables['Driver']
+
+backend.complianceScanner.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:GetItem'],
+    resources: [
+      complianceDocTable.tableArn,
+      onboardingTaskTable.tableArn,
+      complianceAlertTable.tableArn,
+      driverTable.tableArn,
+      truckConfigTable.tableArn,
+    ],
+  })
+)
+
+complianceScannerFn.addEnvironment('DOC_TABLE_NAME',          complianceDocTable.tableName)
+complianceScannerFn.addEnvironment('TASK_TABLE_NAME',         onboardingTaskTable.tableName)
+complianceScannerFn.addEnvironment('ALERT_TABLE_NAME',        complianceAlertTable.tableName)
+complianceScannerFn.addEnvironment('DRIVER_TABLE_NAME',       driverTable.tableName)
+complianceScannerFn.addEnvironment('TRUCK_CONFIG_TABLE_NAME', truckConfigTable.tableName)
+
+// EventBridge daily cron — 6:00 AM America/Chicago.
+// aws-events Schedule.cron is UTC-only; 11:00 UTC = 6:00 AM CDT (the DST-active
+// half of the year). It runs at 5:00 AM CST in winter — acceptable drift for a
+// daily expiration sweep. Switch to EventBridge Scheduler if exact local time matters.
+const complianceScanRule = new Rule(complianceScannerFn.stack, 'ComplianceScannerDailyRule', {
+  schedule:    Schedule.cron({ minute: '0', hour: '11', day: '*', month: '*' }),
+  description: 'Daily DOT compliance expiration scan (6:00 AM America/Chicago)',
+})
+complianceScanRule.addTarget(new EventsLambdaTarget(complianceScannerFn))
