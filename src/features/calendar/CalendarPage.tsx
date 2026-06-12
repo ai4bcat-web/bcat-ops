@@ -46,7 +46,8 @@ export function CalendarPage() {
   // through Sunday, weekends included. Month is rendered by GridCalendarView instead.
   const cols = useMemo<Date[]>(() => {
     if (currentView === 'day')  return [startDate]
-    if (currentView === 'week') return Array.from({ length: 7 }, (_, i) => addDays(startDate, i))
+    // Week = Monday through the following Monday inclusive (8 days, weekends included).
+    if (currentView === 'week') return Array.from({ length: 8 }, (_, i) => addDays(startDate, i))
     return []
   }, [currentView, startDate])
 
