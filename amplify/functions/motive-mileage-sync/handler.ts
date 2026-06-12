@@ -135,6 +135,10 @@ async function upsertMileage(
       truckId,
       periodStart,
       periodType,
+      // Amplify Gen 2 synthesizes a single composite sort key from the 2nd+ identifier
+      // fields (joined by '#'). Writing directly to DynamoDB (not via AppSync) means we
+      // must supply it ourselves, or the put is rejected with a missing-key error.
+      'periodStart#periodType': `${periodStart}#${periodType}`,
       unitNumber,
       miles,
       source:    'motive',

@@ -68,7 +68,7 @@ export function TruckMilesWidget() {
       <div style={{ padding: '16px 20px' }}>
         {!loading && rows.length === 0 ? (
           <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center', padding: '0 24px' }}>
-            No mileage synced yet. Confirm the Motive API key is set and trucks are marked COMPANY in the Trucks page.
+            No mileage synced yet. Mileage syncs nightly from Motive (IFTA data) — a truck only shows miles once it has moved in the current week or month.
           </div>
         ) : (
           <>
