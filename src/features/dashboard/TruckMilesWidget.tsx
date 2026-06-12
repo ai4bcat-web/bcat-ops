@@ -26,11 +26,19 @@ export function TruckMilesWidget() {
   const [mileages, setMileages] = useState<TruckMileage[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Initial load + auto-refresh every 5 min so new trucks / re-syncs appear
+  // without a manual page reload. Mileage syncs nightly, so a slow poll is fine.
   useEffect(() => {
-    listTruckMileages()
-      .then(setMileages)
-      .catch((e) => console.error('listTruckMileages failed', e))
-      .finally(() => setLoading(false))
+    let active = true
+    const load = () => {
+      listTruckMileages()
+        .then((d) => { if (active) setMileages(d) })
+        .catch((e) => console.error('listTruckMileages failed', e))
+        .finally(() => { if (active) setLoading(false) })
+    }
+    load()
+    const id = setInterval(load, 300_000)
+    return () => { active = false; clearInterval(id) }
   }, [])
 
   const { rows, weekStart, monthStart } = useMemo(() => {

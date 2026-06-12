@@ -18,13 +18,21 @@ function cityState(desc: string | null): string {
 export function TruckMapWidget() {
   const [locations, setLocations] = useState<TruckLocation[]>([])
   const [loading, setLoading] = useState(true)
-  const [now] = useState(() => Date.now())
+  const [now, setNow] = useState(() => Date.now())
 
+  // Initial load + auto-refresh every 2 min so newly-synced trucks/positions
+  // appear without a manual page reload. The location cron runs every 10 min.
   useEffect(() => {
-    listTruckLocations()
-      .then(setLocations)
-      .catch((e) => console.error('listTruckLocations failed', e))
-      .finally(() => setLoading(false))
+    let active = true
+    const load = () => {
+      listTruckLocations()
+        .then((d) => { if (active) { setLocations(d); setNow(Date.now()) } })
+        .catch((e) => console.error('listTruckLocations failed', e))
+        .finally(() => { if (active) setLoading(false) })
+    }
+    load()
+    const id = setInterval(load, 120_000)
+    return () => { active = false; clearInterval(id) }
   }, [])
 
   const rows = useMemo(
