@@ -4,16 +4,14 @@ export const auth = defineAuth({
   loginWith: {
     email: true,
   },
-  // Send Cognito emails (invites / temp passwords / password resets) through Amazon SES
-  // from the bcatcorp.com domain instead of Cognito's unreliable default channel.
-  // PREREQUISITE: the bcatcorp.com SES identity must be VERIFIED in us-east-1, and SES out
-  // of sandbox (production access) to email brand-new users. If the identity is NOT verified,
-  // the auth-stack update fails — see Docs/POST-DEPLOY-RUNBOOK.md before deploying.
-  senders: {
-    email: {
-      fromEmail: 'noreply@bcatcorp.com',
-      fromName: 'BCAT Ops',
-    },
-  },
+  // NOTE: SES email-sender config is intentionally DISABLED until the bcatcorp.com SES
+  // domain identity is VERIFIED in us-east-1. Pointing Cognito at an unverified identity
+  // fails the auth-stack update and blocks ALL deploys. Once the domain shows "Verified",
+  // re-enable by uncommenting the `senders` block below (fromEmail under the verified domain
+  // works without a separate email-address identity):
+  //
+  // senders: {
+  //   email: { fromEmail: 'noreply@bcatcorp.com', fromName: 'BCAT Ops' },
+  // },
   groups: ['ADMIN', 'DISPATCHER'],
 })
