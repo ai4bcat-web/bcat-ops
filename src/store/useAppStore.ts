@@ -360,6 +360,7 @@ interface AppState {
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
+  multiStopRender: boolean   // calendar renders one item per STOP (vs per load); off by default
 
   // ── Initialization ─────────────────────────────────────────────────────────
   initializeData: (userEmail: string) => Promise<void>
@@ -405,6 +406,7 @@ interface AppState {
   setFilterDriver: (id: string | null) => void
   setSearchQuery: (q: string) => void
   toggleFilter: (f: keyof AppState['filters']) => void
+  setMultiStopRender: (v: boolean) => void
 }
 
 // ── Audit helper ──────────────────────────────────────────────────────────────
@@ -448,6 +450,7 @@ export const useAppStore = create<AppState>()(
       filterDriverId: null,
       searchQuery: '',
       filters: { readyToInvoice: false, split: false, unassigned: false, needsAppt: false },
+      multiStopRender: false,
 
       // ── Init ───────────────────────────────────────────────────────────────
       setCurrentUser: (email) => set({ currentUserEmail: email }),
@@ -666,6 +669,7 @@ export const useAppStore = create<AppState>()(
       setSearchQuery: (q) => set({ searchQuery: q }),
       toggleFilter: (f) =>
         set((s) => ({ filters: { ...s.filters, [f]: !s.filters[f] } })),
+      setMultiStopRender: (v) => set({ multiStopRender: v }),
     }),
     {
       name: 'bcat-ops-ui-v4',
@@ -677,6 +681,7 @@ export const useAppStore = create<AppState>()(
         viewMode: s.viewMode,
         weekStart: s.weekStart,
         filters: s.filters,
+        multiStopRender: s.multiStopRender,
         equipment: s.equipment,
         maintenanceTasks: s.maintenanceTasks,
         maintenanceInvoices: s.maintenanceInvoices,
