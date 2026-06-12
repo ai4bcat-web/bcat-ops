@@ -7,8 +7,7 @@ import { getRequirement } from '@/lib/complianceRequirements'
 import type { DriverApplicationDraft } from '@/lib/schemas'
 
 // Driver-facing contact info shown on the expired/error page.
-// NOTE: the phone number is a placeholder — replace with the real dispatch/office line.
-const CONTACT_PHONE = '(630) 555-0100'
+const CONTACT_PHONE = '(847) 450-0899'
 const CONTACT_EMAIL = 'onboarding@bcatcorp.com'
 
 function statusChip(item: ChecklistItem) {
