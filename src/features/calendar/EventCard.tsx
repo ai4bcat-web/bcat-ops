@@ -38,13 +38,13 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
   const card = (
     <div
       className={cn(
-        'h-full w-full rounded-md border border-l-[3px] overflow-hidden relative',
+        'h-full w-full rounded-md border-2 border-l-[3px] overflow-hidden relative',
         'transition-shadow cursor-pointer hover:shadow-lg hover:brightness-110',
         isSelected && 'ring-2 ring-offset-1',
         isConflict && 'animate-pulse-once',
       )}
       style={{
-        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#e5e5e2',
+        borderColor:     isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#111827',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         ...(isSplit ? { borderRightColor: deliveryColor.border, borderRightWidth: 3 } : {}),

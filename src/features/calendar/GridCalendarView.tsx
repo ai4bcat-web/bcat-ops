@@ -202,7 +202,7 @@ function LoadCard({
       className="group/card"
       style={{
         marginBottom: 4,
-        border: '1px solid var(--ds-border)',
+        border: '2px solid #111827',
         borderLeft: `3px solid ${borderHex}${borderAlpha}`,
         background: bg,
         borderRadius: 4,

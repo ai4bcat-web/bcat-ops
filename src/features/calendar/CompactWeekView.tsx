@@ -91,11 +91,11 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
 
   const card = (
     <div
-      className="h-full rounded border border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none flex flex-col justify-between"
+      className="h-full rounded border-2 border-l-2 px-1.5 py-1 cursor-pointer hover:brightness-105 hover:shadow-sm transition-all select-none flex flex-col justify-between"
       style={{
         borderColor:     isContinuation
           ? 'rgba(0,0,0,0.07)'
-          : isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#e5e7eb',
+          : isConflict ? 'rgba(239,68,68,0.3)' : isRTI ? '#15803d' : '#111827',
         borderLeftColor: borderColor,
         backgroundColor: bgColor,
         opacity: isContinuation ? 0.72 : 1,
