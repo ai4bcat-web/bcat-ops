@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
 import type { TruckConfig } from '@/lib/apiClient'
 import { Button } from '@/components/ui/button'
@@ -888,6 +889,7 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export function TrucksPage() {
+  const isMobile            = useIsMobile()
   const equipment           = useAppStore((s) => s.equipment)
   const maintenanceTasks    = useAppStore((s) => s.maintenanceTasks)
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -1058,6 +1060,36 @@ export function TrucksPage() {
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <Truck className="size-8 opacity-20" />
               <p className="text-sm">No equipment found.</p>
+            </div>
+          ) : isMobile ? (
+            <div>
+              {filtered.map((e) => {
+                const driver = drivers.find((d) => d.id === e.assignedDriverId)
+                const taskCount = maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
+                const repair = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id).reduce((s, inv) => s + inv.amount, 0)
+                return (
+                  <button
+                    key={e.id}
+                    onClick={() => setShowForm(e)}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', background: 'var(--ds-surface)', border: 'none', borderBottom: '1px solid var(--ds-border)', padding: '12px 16px', cursor: 'pointer' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--ds-t1)' }}>#{e.unitNumber}</span>
+                      <span style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'capitalize' }}>{e.type}</span>
+                      {!e.active && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>· inactive</span>}
+                      {taskCount > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#dc2626' }}>{taskCount} task{taskCount !== 1 ? 's' : ''}</span>}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--ds-t2)', marginTop: 3 }}>
+                      {[e.year, e.make, e.model].filter(Boolean).join(' ') || '—'}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {e.plate && <span>{e.plate}</span>}
+                      {driver?.name && <span>· {driver.name}</span>}
+                      {repair > 0 && <span>· ${repair.toFixed(0)} repairs</span>}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           ) : (
             <Table>

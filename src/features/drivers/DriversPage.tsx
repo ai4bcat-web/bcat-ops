@@ -6,6 +6,7 @@ import { Plus, Phone, Edit2, Trash2, Building2, Truck, Package, Camera, X, Check
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP, getColor } from '@/lib/driverColors'
 import type { ColorKey } from '@/types'
@@ -501,6 +502,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
 export function DriversPage() {
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const { drivers } = useDrivers()
   const loads = useAppStore((s) => s.loads)
 
@@ -612,8 +614,33 @@ export function DriversPage() {
           </div>
         </div>
 
-        {/* Table */}
+        {/* Table (desktop) / card list (mobile) */}
         <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+          {isMobile ? (
+            <div>
+              {sorted.map((driver) => {
+                const activeLoads = activeLoadCount(driver.id)
+                const avatarColor = driver.colorKey ? getColor(driver.colorKey).border : undefined
+                return (
+                  <button
+                    key={driver.id}
+                    onClick={() => openEdit(driver)}
+                    className={cn(!driver.active && 'opacity-50')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', background: 'var(--ds-surface)', border: 'none', borderBottom: '1px solid var(--ds-border)', padding: '12px 16px', cursor: 'pointer' }}
+                  >
+                    <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={avatarColor ? { background: avatarColor, color: '#ffffff' } : undefined} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ds-t1)' }}>{driver.name}</div>
+                      <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+                        {driver.phone ? formatPhone(driver.phone) : '—'}{driver.type ? ` · ${driver.type}` : ''}
+                      </div>
+                    </div>
+                    {activeLoads > 0 && <span style={{ fontSize: 11, color: '#16a34a', flexShrink: 0 }}>{activeLoads} active</span>}
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
@@ -730,6 +757,7 @@ export function DriversPage() {
               )}
             </TableBody>
           </Table>
+          )}
         </div>
       </div>
 

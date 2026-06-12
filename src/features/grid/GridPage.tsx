@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useIsMobile } from '@/hooks/useIsMobile'
+import { MobileLoadAgenda } from '@/features/calendar/MobileLoadAgenda'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useAppStore } from '@/store/useAppStore'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -50,6 +52,7 @@ const KPI_COLORS: Record<TabId, string> = {
 export function GridPage() {
   const { loads, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
+  const isMobile = useIsMobile()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   const [tab, setTab] = useState<TabId>('all')
@@ -501,7 +504,10 @@ export function GridPage() {
         <Btn icon={<Filter size={13} />} label="Columns" onClick={() => {}} />
       </div>
 
-      {/* ── Table ──────────────────────────────────────────────────────────── */}
+      {/* ── Table (desktop) / card agenda (mobile) ──────────────────────────── */}
+      {isMobile ? (
+        <MobileLoadAgenda loads={tabFiltered} drivers={drivers} />
+      ) : (
       <div style={{ flex: 1, overflow: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-bg)' }}>
@@ -558,6 +564,7 @@ export function GridPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       <LoadDrawer />
     </div>
