@@ -397,7 +397,7 @@ function buildEscalationEmail(rule: EscalationRuleInput, alert: FullAlert, daysR
 
 You are not eligible to drive for the company until this is resolved.
 ${linkLine}
-— BCAT Logistics Safety & Compliance`,
+— Ivan Cartage Safety & Compliance`,
     }
   }
   // Final warning (≤ 7 days)
@@ -409,7 +409,7 @@ ${linkLine}
 
 If this is not updated by ${expDate}, you will not be eligible to drive for the company until it is resolved.
 ${linkLine}
-— BCAT Logistics Safety & Compliance`,
+— Ivan Cartage Safety & Compliance`,
     }
   }
   // Standard reminder
@@ -420,6 +420,6 @@ ${linkLine}
 
 Please upload the renewal so you stay compliant.
 ${linkLine}
-— BCAT Logistics Safety & Compliance`,
+— Ivan Cartage Safety & Compliance`,
   }
 }

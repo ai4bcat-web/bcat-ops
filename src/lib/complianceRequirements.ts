@@ -91,7 +91,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT verifies that your medical examiner is listed on the FMCSA National Registry.',
+    helpText: 'Ivan Cartage verifies that your medical examiner is listed on the FMCSA National Registry.',
     internalNotes: 'Internal verification step — confirm examiner NRC number on the registry.',
   },
   {
@@ -104,7 +104,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT pulls your Motor Vehicle Record from each licensing state (49 CFR 391.23).',
+    helpText: 'Ivan Cartage pulls your Motor Vehicle Record from each licensing state (49 CFR 391.23).',
   },
   {
     key: 'mvr_annual_review',
@@ -118,7 +118,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     defaultExpirationRule: 'PLUS_N_MONTHS',
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT reviews your driving record every 12 months (49 CFR 391.25).',
+    helpText: 'Ivan Cartage reviews your driving record every 12 months (49 CFR 391.25).',
   },
   {
     key: 'prev_employer_inquiry',
@@ -130,7 +130,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT contacts your prior DOT employers for safety-performance history (49 CFR 391.23).',
+    helpText: 'Ivan Cartage contacts your prior DOT employers for safety-performance history (49 CFR 391.23).',
     internalNotes: 'Driver supplies employer contacts via the application; staff send inquiries.',
   },
   {
@@ -143,7 +143,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT documents a road test, or accepts your CDL as equivalent (49 CFR 391.31/.33).',
+    helpText: 'Ivan Cartage documents a road test, or accepts your CDL as equivalent (49 CFR 391.31/.33).',
   },
   {
     key: 'pre_employment_drug_test',
@@ -156,7 +156,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: false,
     helpText:
-      'You must complete a pre-employment drug test with a negative result before driving (49 CFR 382.301). BCAT schedules this and records the result.',
+      'You must complete a pre-employment drug test with a negative result before driving (49 CFR 382.301). Ivan Cartage schedules this and records the result.',
   },
   {
     key: 'clearinghouse_pre_employment',
@@ -169,7 +169,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Grant BCAT consent for a full FMCSA Drug & Alcohol Clearinghouse query (49 CFR 382.701). Log in to the Clearinghouse and approve our request — follow the on-screen instructions.',
+      'Grant Ivan Cartage consent for a full FMCSA Drug & Alcohol Clearinghouse query (49 CFR 382.701). Log in to the Clearinghouse and approve our request — follow the on-screen instructions.',
   },
   {
     key: 'clearinghouse_annual',
@@ -183,7 +183,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     defaultExpirationRule: 'PLUS_N_MONTHS',
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT runs a limited Clearinghouse query every 12 months.',
+    helpText: 'Ivan Cartage runs a limited Clearinghouse query every 12 months.',
   },
   {
     key: 'random_testing_enrollment',
@@ -195,7 +195,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: false,
     driverActionable: false,
-    helpText: 'BCAT enrolls you in a random drug & alcohol testing consortium.',
+    helpText: 'Ivan Cartage enrolls you in a random drug & alcohol testing consortium.',
   },
   {
     key: 'eldt_verification',
@@ -221,7 +221,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Read and acknowledge BCAT’s Drug & Alcohol and company policies. You sign electronically by typing your name and checking the attestation box.',
+      'Read and acknowledge Ivan Cartage’s Drug & Alcohol and company policies. You sign electronically by typing your name and checking the attestation box.',
   },
   {
     key: 'voided_check_or_direct_deposit',
@@ -275,8 +275,8 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: false,
     helpText:
-      'A written lease between you and BCAT is required under 49 CFR Part 376. BCAT generates it; you sign. The expiration matches the lease term.',
-    internalNotes: 'BCAT generates the lease; driver signs. Internal upload of the executed copy.',
+      'A written lease between you and Ivan Cartage is required under 49 CFR Part 376. Ivan Cartage generates it; you sign. The expiration matches the lease term.',
+    internalNotes: 'Ivan Cartage generates the lease; driver signs. Internal upload of the executed copy.',
   },
   {
     key: 'w9',
@@ -300,7 +300,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: true,
     driverActionable: true,
-    helpText: 'Sign and upload the receipt for any BCAT-issued equipment (ELD, transponder, etc.).',
+    helpText: 'Sign and upload the receipt for any Ivan Cartage-issued equipment (ELD, transponder, etc.).',
   },
   {
     key: 'escrow_terms',
@@ -312,7 +312,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: false,
     driverActionable: false,
-    helpText: 'If an escrow/maintenance fund applies, BCAT documents the terms per 49 CFR 376.12(k).',
+    helpText: 'If an escrow/maintenance fund applies, Ivan Cartage documents the terms per 49 CFR 376.12(k).',
     internalNotes: 'Internal — only when an escrow arrangement exists.',
   },
   {

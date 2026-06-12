@@ -52,7 +52,7 @@ function buildEmail(type: EmailType, ctx: { firstName: string; link: string; exp
   switch (type) {
     case 'invite':
       return {
-        subject: 'BCAT Logistics — start your driver onboarding',
+        subject: 'Ivan Cartage — start your driver onboarding',
         text:
 `Hi ${ctx.firstName},
 
@@ -66,7 +66,7 @@ ${ctx.expiresAt ? `This link is valid until ${ctx.expiresAt}.` : ''}
 
 If you have any questions, just reply to this email.
 
-— BCAT Logistics`,
+— Ivan Cartage`,
       }
     case 'rejected':
       return {
@@ -84,7 +84,7 @@ Please open your onboarding portal and re-upload it:
 
 ${ctx.link}
 
-— BCAT Logistics`,
+— Ivan Cartage`,
       }
     case 'complete':
       return {
@@ -94,9 +94,9 @@ ${ctx.link}
 
 Great news — your onboarding is complete and everything has been approved. You're cleared to roll.
 
-Welcome to the BCAT Logistics team!
+Welcome to the Ivan Cartage team!
 
-— BCAT Logistics`,
+— Ivan Cartage`,
       }
   }
 }
