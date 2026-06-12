@@ -394,3 +394,48 @@ body {
   transition: background 0.1s, color 0.1s; flex-shrink: 0;
 }
 .sidebar-logout:hover { background: var(--ds-bg-3); color: var(--foreground); }
+
+/* ── Mobile drawer + responsive shell (≤768px) ───────────────────────────── */
+
+/* Backdrop behind the drawer; only rendered on mobile when the menu is open. */
+.app-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+/* Hamburger button — hidden on desktop, shown on mobile via the media query. */
+.menu-btn {
+  display: none;
+  width: 38px; height: 38px; align-items: center; justify-content: center;
+  background: var(--ds-bg); border: 1px solid var(--ds-border); border-radius: 8px;
+  color: var(--ds-t2); cursor: pointer; flex-shrink: 0; margin-right: 10px;
+}
+
+.mobile-only { display: none; }
+
+/* Horizontal-scroll wrapper for tables that can't fully restructure on mobile. */
+.mobile-scroll-x { overflow-x: visible; }
+
+@media (max-width: 768px) {
+  .menu-btn { display: flex; }
+  .mobile-only { display: revert; }
+  .desktop-only { display: none !important; }
+
+  /* Sidebar becomes an off-canvas drawer that overlays content. */
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0;
+    width: 270px; max-width: 84vw; z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 8px 0 28px rgba(0, 0, 0, 0.18);
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .topbar { height: 56px; padding: 0 12px; }
+
+  /* Let long tables scroll sideways instead of truncating. */
+  .mobile-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Comfortable tap targets. */
+  button, .sidebar-link, a[role="button"] { min-height: 40px; }
+}

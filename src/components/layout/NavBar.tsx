@@ -25,7 +25,7 @@ function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
   )
 }
 
-export function NavBar() {
+export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: () => void } = {}) {
   const { user, logout, isOwner, hasPageAccess } = useAuth()
   const loads = useAppStore(s => s.loads)
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
@@ -52,7 +52,7 @@ export function NavBar() {
     : 'U'
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${open ? ' open' : ''}`}>
       {/* Logo */}
       <div style={{ padding: '20px 20px 18px', display: 'flex', alignItems: 'center', gap: 11, borderBottom: '1px solid var(--ds-border)' }}>
         <div style={{
@@ -81,6 +81,7 @@ export function NavBar() {
       <div style={{ padding: '14px 14px 10px' }}>
         <NavLink
           to="/loads"
+          onClick={onClose}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             height: 34, borderRadius: 8, fontSize: 13, fontWeight: 600,
@@ -107,6 +108,7 @@ export function NavBar() {
                   <NavLink
                     key={to}
                     to={to}
+                    onClick={onClose}
                     className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
                   >
                     <Icon size={16} style={{ flexShrink: 0 }} />
@@ -123,6 +125,7 @@ export function NavBar() {
             <div style={{ height: 1, background: 'var(--ds-border)', margin: '8px 6px' }} />
             <NavLink
               to="/users"
+              onClick={onClose}
               className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
             >
               <UserCog size={16} style={{ flexShrink: 0 }} />

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Bell, Settings, ChevronRight, Search } from 'lucide-react'
+import { Bell, Settings, ChevronRight, Search, Menu } from 'lucide-react'
 
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:   'Dashboard',
@@ -17,7 +17,7 @@ const ROUTE_LABELS: Record<string, string> = {
   users:       'Users',
 }
 
-export function Topbar() {
+export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
   const location = useLocation()
   const [search, setSearch] = useState('')
   const [elapsed, setElapsed] = useState(0)
@@ -32,15 +32,20 @@ export function Topbar() {
 
   return (
     <header className="topbar">
+      {/* Hamburger — mobile only (CSS .menu-btn) */}
+      <button className="menu-btn" onClick={onMenuToggle} aria-label="Open menu">
+        <Menu size={18} />
+      </button>
+
       {/* Breadcrumb */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--ds-t3)' }}>
-        <span>BCAT Ops</span>
-        <ChevronRight size={13} />
+        <span className="desktop-only">BCAT Ops</span>
+        <ChevronRight size={13} className="desktop-only" />
         <span style={{ color: 'var(--ds-t1)', fontWeight: 500 }}>{pageLabel}</span>
       </div>
 
-      {/* Global search */}
-      <div style={{ flex: 1, maxWidth: 480, marginLeft: 32, position: 'relative' }}>
+      {/* Global search — desktop only */}
+      <div className="desktop-only" style={{ flex: 1, maxWidth: 480, marginLeft: 32, position: 'relative' }}>
         <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
         <input
           style={{
@@ -63,8 +68,8 @@ export function Topbar() {
 
       {/* Right actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-        {/* Live indicator */}
-        <div style={{
+        {/* Live indicator — desktop only */}
+        <div className="desktop-only" style={{
           display: 'flex', alignItems: 'center', gap: 7, padding: '5px 10px',
           borderRadius: 7, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
         }}>
