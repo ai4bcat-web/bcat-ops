@@ -164,11 +164,18 @@ function TaskModal({ task, equipment, onSave, onClose }: { task: MaintenanceTask
 
 type InvoiceData = Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>
 
-function InvoiceModal({ equipment, onSave, onClose }: { equipment: Equipment[]; onSave: (data: InvoiceData) => void; onClose: () => void }) {
+function InvoiceModal({ invoice, equipment, onSave, onClose }: { invoice: MaintenanceInvoice | null; equipment: Equipment[]; onSave: (data: InvoiceData) => void; onClose: () => void }) {
+  const isEdit = invoice !== null
   const [form, setForm] = useState({
-    equipmentId: equipment[0]?.id ?? '',
-    date: '', vendor: '', description: '', amount: '',
-    invoiceNumber: '', paymentMethod: '', paymentDate: '', assignee: '',
+    equipmentId: invoice?.equipmentId ?? (equipment[0]?.id ?? ''),
+    date: invoice?.date ?? '',
+    vendor: invoice?.vendor ?? '',
+    description: invoice?.description ?? '',
+    amount: invoice != null ? (invoice.amount / 100).toString() : '',
+    invoiceNumber: invoice?.invoiceNumber ?? '',
+    paymentMethod: invoice?.paymentMethod ?? '',
+    paymentDate: invoice?.paymentDate ?? '',
+    assignee: invoice?.assignee ?? '',
   })
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
 
@@ -193,13 +200,13 @@ function InvoiceModal({ equipment, onSave, onClose }: { equipment: Equipment[]; 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold">New Invoice</h2>
+          <h2 className="text-base font-semibold">{isEdit ? 'Edit Invoice' : 'New Invoice'}</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
           <div className="space-y-1.5">
             <label className="text-xs text-muted-foreground uppercase tracking-wider font-medium">Equipment</label>
-            <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.equipmentId} onChange={(e) => set('equipmentId', e.target.value)} required>
+            <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.equipmentId} onChange={(e) => set('equipmentId', e.target.value)} disabled={isEdit} required>
               <option value="" disabled>Select equipment…</option>
               {equipment.map((eq) => (
                 <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
@@ -256,6 +263,7 @@ export function MaintenancePage() {
   const updateMaintenanceTask    = useAppStore((s) => s.updateMaintenanceTask)
   const deleteMaintenanceTask    = useAppStore((s) => s.deleteMaintenanceTask)
   const addMaintenanceInvoice    = useAppStore((s) => s.addMaintenanceInvoice)
+  const updateMaintenanceInvoice = useAppStore((s) => s.updateMaintenanceInvoice)
   const deleteMaintenanceInvoice = useAppStore((s) => s.deleteMaintenanceInvoice)
 
   const [tab, setTab]                 = useState<Tab>('tasks')
@@ -266,6 +274,7 @@ export function MaintenancePage() {
   const [editTask, setEditTask]       = useState<MaintenanceTask | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [newInvoiceOpen, setNewInvoiceOpen] = useState(false)
+  const [editInvoice, setEditInvoice] = useState<MaintenanceInvoice | null>(null)
 
   function equipName(id: string) {
     const e = equipment.find((eq) => eq.id === id)
@@ -543,9 +552,14 @@ export function MaintenancePage() {
                       </TableCell>
                       <TableCell className="text-right text-sm font-semibold text-foreground">{formatCents(inv.amount)}</TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => deleteMaintenanceInvoice(inv.id)}>
-                          <Trash2 className="size-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditInvoice(inv)}>
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => deleteMaintenanceInvoice(inv.id)}>
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -583,9 +597,18 @@ export function MaintenancePage() {
       )}
       {newInvoiceOpen && (
         <InvoiceModal
+          invoice={null}
           equipment={equipment}
           onSave={(data) => addMaintenanceInvoice(data)}
           onClose={() => setNewInvoiceOpen(false)}
+        />
+      )}
+      {editInvoice && (
+        <InvoiceModal
+          invoice={editInvoice}
+          equipment={equipment}
+          onSave={(data) => updateMaintenanceInvoice(editInvoice.id, data)}
+          onClose={() => setEditInvoice(null)}
         />
       )}
     </div>
