@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, formatDistanceToNowStrict } from 'date-fns'
 import { MapPin } from 'lucide-react'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 
@@ -13,6 +13,14 @@ function cityState(desc: string | null): string {
   if (!desc) return '—'
   const i = desc.lastIndexOf(' of ')
   return (i >= 0 ? desc.slice(i + 4) : desc).trim()
+}
+
+/** "Moving · 25m" / "Idle · 3h" from the truck's motion state + motionSince. */
+function motionLabel(loc: TruckLocation): { text: string; moving: boolean } {
+  const moving = loc.motion === 'MOVING'
+  const since = loc.motionSince ? formatDistanceToNowStrict(new Date(loc.motionSince)) : null
+  const base = moving ? 'Moving' : 'Idle'
+  return { text: since ? `${base} · ${since}` : base, moving }
 }
 
 export function TruckMapWidget() {
@@ -70,19 +78,21 @@ export function TruckMapWidget() {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {/* Header row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '56px 1fr 120px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               <div>Unit</div>
               <div>Location</div>
+              <div>Status</div>
               <div style={{ textAlign: 'right' }}>Updated</div>
             </div>
 
             {rows.map((loc) => {
               const stale = now - new Date(loc.locatedAt).getTime() > STALE_MS
+              const { text: motionText, moving } = motionLabel(loc)
               return (
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '64px 1fr auto', gap: 12,
+                    display: 'grid', gridTemplateColumns: '56px 1fr 120px auto', gap: 12,
                     padding: '11px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -93,6 +103,10 @@ export function TruckMapWidget() {
                   </div>
                   <div style={{ color: 'var(--ds-t1)' }}>
                     {cityState(loc.description)}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, whiteSpace: 'nowrap', color: moving ? '#15803d' : 'var(--ds-t3)' }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: moving ? '#22c55e' : '#94a3b8' }} />
+                    {motionText}
                   </div>
                   <div style={{ textAlign: 'right', color: 'var(--ds-t3)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     {formatDistanceToNow(new Date(loc.locatedAt), { addSuffix: true })}

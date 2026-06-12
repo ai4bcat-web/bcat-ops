@@ -331,6 +331,8 @@ const schema = a.schema({
       speed:       a.float(),               // mph (X-Metric-Units: false), may be null
       locatedAt:   a.string().required(),   // ISO timestamp Motive reported the fix
       description: a.string(),              // human-readable, e.g. "4.5 mi NE of Tucson, AZ"
+      motion:      a.string(),              // 'MOVING' | 'STATIONARY' (derived from speed)
+      motionSince: a.string(),              // ISO timestamp the truck entered its current motion state
       source:      a.string().required(),   // 'motive'
       syncedAt:    a.datetime().required(),
     })

@@ -23,6 +23,7 @@ import {
   DynamoDBDocumentClient,
   ScanCommand,
   PutCommand,
+  GetCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { fetchVehicleLocations } from './motiveClient'
 
@@ -76,6 +77,26 @@ export const handler = async (): Promise<void> => {
     // the Motive number so the vehicle is still tracked on the map.
     const truckId = equipmentByUnit.get(loc.number) ?? `motive:${loc.number}`
 
+    // Moving vs. sitting, from the ping's speed (mph). >=1 mph avoids GPS jitter.
+    const motion = loc.speed != null && loc.speed >= 1 ? 'MOVING' : 'STATIONARY'
+
+    // Preserve the timestamp the truck entered its current motion state: read the
+    // previous record and keep its motionSince if the state hasn't changed, so the
+    // dashboard can show "moving/idle for X". On a state flip, reset to this fix.
+    let motionSince = loc.locatedAt
+    try {
+      const prev = await dynamo.send(new GetCommand({
+        TableName: TRUCK_LOCATION_TABLE,
+        Key: { truckId },
+      }))
+      const prevItem = prev.Item as { motion?: string; motionSince?: string } | undefined
+      if (prevItem?.motion === motion && prevItem.motionSince) {
+        motionSince = prevItem.motionSince
+      }
+    } catch (err) {
+      console.warn(`[location] could not read prior state for truck=${loc.number}:`, err)
+    }
+
     const base = {
       unitNumber:  loc.number,
       lat:         loc.lat,
@@ -83,6 +104,8 @@ export const handler = async (): Promise<void> => {
       bearing:     loc.bearing,
       speed:       loc.speed,
       description: loc.description,
+      motion,
+      motionSince,
       source:      'motive',
       syncedAt:    now,
     }

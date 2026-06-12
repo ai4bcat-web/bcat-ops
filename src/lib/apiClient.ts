@@ -1065,13 +1065,15 @@ export interface TruckLocation {
   speed:        number | null
   locatedAt:    string   // ISO timestamp Motive reported the fix
   description:  string | null
+  motion:       string | null   // 'MOVING' | 'STATIONARY'
+  motionSince:  string | null   // ISO timestamp the truck entered its current motion state
   source:       string
   syncedAt:     string
   createdAt:    string
   updatedAt:    string
 }
 
-const TRUCK_LOCATION_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description source syncedAt createdAt updatedAt`
+const TRUCK_LOCATION_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description motion motionSince source syncedAt createdAt updatedAt`
 
 /** Current location of every truck (one row per truck, latest fix). */
 export async function listTruckLocations(): Promise<TruckLocation[]> {

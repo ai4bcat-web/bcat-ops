@@ -197,7 +197,8 @@ const truckLocationHistoryTable = backend.data.resources.tables['TruckLocationHi
 
 backend.motiveLocationSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
+    // GetItem: read prior TruckLocation to preserve motionSince across syncs.
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
     resources: [
       equipmentTable.tableArn,
       truckLocationTable.tableArn,
