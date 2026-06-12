@@ -36,10 +36,12 @@ const CARD_TO_TRUCK = {
 
 // ─── Parser (same logic as src/lib/parsers/efsTransactionReport.ts) ───────────
 // Kept in sync manually; if the app parser changes, update here too.
+// Handles both the URL-download text format ("USD/Gallon", indented card #)
+// and the PDF -> pdftotext -layout format ("USD/Gallons", card # at col 0).
 const FUEL_ITEM_TYPES = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
-const TX_LINE_RE = /[A-Z]\s{2,4}USD\/Gallon\s*$/
-const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallon/
-const CARD_RE = /^\s{2,8}(\d{5})\s/
+const TX_LINE_RE = /[A-Z]\s{1,4}USD\/Gallons?\s*$/
+const RIGHT_RE = /(\S+)\s+(?:([\d,]+\.?\d*)\s+)?([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+([A-Z])\s+USD\/Gallons?/
+const CARD_RE = /^\s{0,8}(\d{5})\s/
 const DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b|\b(\d{1,2}\/\d{1,2}\/\d{4})\b/
 
 const num = (s) => parseFloat(String(s ?? '0').replace(/,/g, ''))
