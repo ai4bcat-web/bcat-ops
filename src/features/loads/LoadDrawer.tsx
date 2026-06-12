@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, useFieldArray, type Control } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw } from 'lucide-react'
+import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw, Plus, Truck, Package } from 'lucide-react'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
 } from '@/components/ui/sheet'
@@ -17,13 +17,62 @@ import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
-import { loadSchema, type LoadFormValues } from '@/lib/schemas'
+import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
+import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
   formatDateInput, fromDateInput,
 } from '@/lib/date'
 import { toast } from 'sonner'
-import type { ApptType, Load } from '@/types'
+import type { ApptType, Load, Stop } from '@/types'
+
+// ── Stop ↔ form conversion ───────────────────────────────────────────────────
+// Form stores appt as a datetime-local / date string; the stored Stop uses ISO UTC.
+
+function stopToForm(stop: Stop): StopFormValue {
+  const isDateOnly = stop.apptType === 'tbd' || stop.apptType === 'fcfs'
+  return {
+    id: stop.id,
+    type: stop.type,
+    name: stop.name ?? '',
+    city: stop.city ?? '',
+    appt: stop.appt ? (isDateOnly ? formatDateInput(stop.appt) : formatDateTimeInput(stop.appt)) : '',
+    apptType: stop.apptType ?? 'exact',
+    apptEnd: stop.apptEnd ? formatDateTimeInput(stop.apptEnd) : '',
+    driverId: stop.driverId,
+    sequence: stop.sequence,
+  }
+}
+
+function loadToStopForms(load: Load): StopFormValue[] {
+  return getStops(load).map(stopToForm)
+}
+
+// Default stops for a brand-new load: one pickup + one delivery.
+function emptyStopForms(preDate?: string, driverId?: string | null): StopFormValue[] {
+  const pu = makeStop({ type: 'pickup', driverId: driverId ?? null }, 0)
+  const de = makeStop({ type: 'delivery', driverId: driverId ?? null }, 1)
+  return [
+    { ...stopToForm(pu), appt: preDate ? `${preDate}T08:00` : '' },
+    { ...stopToForm(de), appt: preDate ? `${preDate}T17:00` : '' },
+  ]
+}
+
+// Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
+function stopFormToStop(s: StopFormValue, sequence: number): Stop {
+  const dateOnly = s.apptType === 'tbd' || s.apptType === 'fcfs'
+  return {
+    id: s.id,
+    type: s.type,
+    name: s.name?.trim() || undefined,
+    city: s.city?.trim() || undefined,
+    appt: dateOnly ? fromDateInput(s.appt.slice(0, 10)) : fromDateTimeInput(s.appt),
+    apptType: s.apptType,
+    apptEnd: s.apptType === 'range' && s.apptEnd ? fromDateTimeInput(s.apptEnd) : undefined,
+    driverId: s.driverId,
+    sequence,
+  }
+}
 
 // ── Miles calculator (Nominatim geocoding + OSRM routing) ────────────────────
 
@@ -316,6 +365,91 @@ function DriverPicker({
   )
 }
 
+// ── Stop card (one pickup or delivery in the stops editor) ────────────────────
+
+function StopCard({
+  index, control, register, errors, drivers, onRemove, canRemove, onCityBlur,
+}: {
+  index: number
+  control: Control<LoadFormValues>
+  register: ReturnType<typeof useForm<LoadFormValues>>['register']
+  errors: ReturnType<typeof useForm<LoadFormValues>>['formState']['errors']
+  drivers: Array<{ id: string; name: string }>
+  onRemove: () => void
+  canRemove: boolean
+  onCityBlur: () => void
+}) {
+  const stopErr = errors.stops?.[index]
+  return (
+    <div style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: 14, marginBottom: 12, background: 'var(--ds-surface)' }}>
+      {/* Header: type toggle + remove */}
+      <div className="flex items-center justify-between gap-2" style={{ marginBottom: 12 }}>
+        <Controller
+          name={`stops.${index}.type`}
+          control={control}
+          render={({ field }) => (
+            <ToggleGroup type="single" value={field.value} onValueChange={(v) => v && field.onChange(v)}>
+              <ToggleGroupItem value="pickup" className="gap-1.5"><Truck className="size-3.5" /> Pickup</ToggleGroupItem>
+              <ToggleGroupItem value="delivery" className="gap-1.5"><Package className="size-3.5" /> Delivery</ToggleGroupItem>
+            </ToggleGroup>
+          )}
+        />
+        <Button type="button" variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" disabled={!canRemove} onClick={onRemove} title={canRemove ? 'Remove stop' : 'A load needs at least one pickup and one delivery'}>
+          <Trash2 className="size-4" />
+        </Button>
+      </div>
+
+      {/* Name + city */}
+      <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
+        <Field label="Facility / Name">
+          <Input {...register(`stops.${index}.name`)} placeholder="Shipper / Consignee" className="h-9" />
+        </Field>
+        <Field label="City">
+          <Input
+            {...register(`stops.${index}.city`)}
+            placeholder="Chicago, IL"
+            className="h-9"
+            onBlur={(e) => { register(`stops.${index}.city`).onBlur(e); onCityBlur() }}
+          />
+        </Field>
+      </div>
+
+      {/* Appointment */}
+      <Controller
+        name={`stops.${index}.apptType`}
+        control={control}
+        render={({ field: tf }) => (
+          <Controller name={`stops.${index}.appt`} control={control} render={({ field: sf }) => (
+            <Controller name={`stops.${index}.apptEnd`} control={control} render={({ field: ef }) => (
+              <ApptFields
+                label="Appointment"
+                typeField={{ value: tf.value as ApptType, onChange: (v) => { const prev = tf.value; tf.onChange(v); ef.onChange(''); if (prev === 'tbd' && v !== 'tbd' && v !== 'fcfs') sf.onChange('') } }}
+                startField={{ value: sf.value ?? '', onChange: sf.onChange }}
+                endField={{ value: ef.value ?? '', onChange: ef.onChange }}
+                startError={stopErr?.appt?.message}
+                endError={stopErr?.apptEnd?.message}
+              />
+            )} />
+          )} />
+        )}
+      />
+
+      {/* Driver */}
+      <div style={{ marginTop: 12 }}>
+        <Field label="Driver">
+          <Controller
+            name={`stops.${index}.driverId`}
+            control={control}
+            render={({ field }) => (
+              <DriverPicker value={field.value} onChange={field.onChange} drivers={drivers} />
+            )}
+          />
+        </Field>
+      </div>
+    </div>
+  )
+}
+
 // ── New Load Dialog (create mode) ─────────────────────────────────────────────
 
 function NewLoadDialog({
@@ -347,14 +481,15 @@ function NewLoadDialog({
   aljexId?: string
   onDelete?: () => void
 }) {
-  const [splitLoad, setSplitLoad]       = useState(false)
   const [milesLoading, setMilesLoading] = useState(false)
 
-  const pickupDriverId = watch('pickupDriverId')
+  const { fields: stopFields, append, remove } = useFieldArray({ control, name: 'stops' })
 
-  async function calcMiles(origin?: string, destination?: string) {
-    const o = (origin      ?? watch('originCity')      ?? '').trim()
-    const d = (destination ?? watch('destinationCity') ?? '').trim()
+  // Miles = driving distance from the first pickup's city to the last delivery's city.
+  async function calcMiles() {
+    const stops = watch('stops') ?? []
+    const o = (stops.find((s) => s.type === 'pickup')?.city ?? '').trim()
+    const d = ([...stops].reverse().find((s) => s.type === 'delivery')?.city ?? '').trim()
     if (!o || !d) return
     setMilesLoading(true)
     try {
@@ -365,6 +500,11 @@ function NewLoadDialog({
     } finally {
       setMilesLoading(false)
     }
+  }
+
+  const addStop = (type: 'pickup' | 'delivery') => {
+    const prevDriver = stopFields.length > 0 ? watch(`stops.${stopFields.length - 1}.driverId`) : null
+    append(stopToForm(makeStop({ type, driverId: prevDriver ?? null }, stopFields.length)))
   }
 
   return (
@@ -408,41 +548,38 @@ function NewLoadDialog({
               </Field>
             </div>
 
-            {/* ── Section 2: Route ───────────────────────────────────── */}
+            {/* ── Section 2: Stops (multi-pickup / multi-delivery) ───── */}
             <div style={{ marginBottom: 24 }}>
-              <SectionHeading>Route</SectionHeading>
-              <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
-                <Field label="Origin Name">
-                  <Input {...register('originName')} placeholder="Shipper / Facility" className="h-9" />
-                </Field>
-                <Field label="Origin City">
-                  <Input
-                    {...register('originCity')}
-                    placeholder="Chicago, IL"
-                    className="h-9"
-                    onBlur={(e) => {
-                      register('originCity').onBlur(e)
-                      calcMiles(e.target.value, undefined)
-                    }}
-                  />
-                </Field>
+              <SectionHeading>Stops</SectionHeading>
+
+              {stopFields.map((f, i) => (
+                <StopCard
+                  key={f.id}
+                  index={i}
+                  control={control}
+                  register={register}
+                  errors={errors}
+                  drivers={activeDrivers}
+                  canRemove={stopFields.length > 2}
+                  onRemove={() => remove(i)}
+                  onCityBlur={calcMiles}
+                />
+              ))}
+
+              {typeof errors.stops?.message === 'string' && (
+                <p className="text-xs text-destructive" style={{ marginBottom: 8 }}>{errors.stops.message}</p>
+              )}
+
+              <div className="flex items-center gap-2" style={{ marginBottom: 14 }}>
+                <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => addStop('pickup')}>
+                  <Plus className="size-3.5" /> Add Pickup
+                </Button>
+                <Button type="button" variant="outline" size="sm" className="h-8 gap-1.5" onClick={() => addStop('delivery')}>
+                  <Plus className="size-3.5" /> Add Delivery
+                </Button>
               </div>
-              <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
-                <Field label="Destination Name">
-                  <Input {...register('destinationName')} placeholder="Consignee / Facility" className="h-9" />
-                </Field>
-                <Field label="Destination City">
-                  <Input
-                    {...register('destinationCity')}
-                    placeholder="Indianapolis, IN"
-                    className="h-9"
-                    onBlur={(e) => {
-                      register('destinationCity').onBlur(e)
-                      calcMiles(undefined, e.target.value)
-                    }}
-                  />
-                </Field>
-              </div>
+
+              {/* Miles (first pickup → last delivery) */}
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, maxWidth: 240 }}>
                 <div style={{ flex: 1 }}>
                   <Field label="Miles">
@@ -463,7 +600,7 @@ function NewLoadDialog({
                   size="sm"
                   className="h-9 px-3 shrink-0"
                   disabled={milesLoading}
-                  title="Recalculate miles from city fields"
+                  title="Recalculate miles (first pickup → last delivery)"
                   onClick={() => calcMiles()}
                 >
                   <RotateCw className={`size-3.5 ${milesLoading ? 'animate-spin' : ''}`} />
@@ -471,119 +608,6 @@ function NewLoadDialog({
               </div>
             </div>
 
-            {/* ── Section 3: Schedule ────────────────────────────────── */}
-            <div style={{ marginBottom: 24 }}>
-              <SectionHeading>Schedule</SectionHeading>
-              <div style={{ marginBottom: 12 }}>
-                <Controller
-                  name="pickupApptType"
-                  control={control}
-                  render={({ field: tf }) => (
-                    <Controller name="pickupAppt" control={control} render={({ field: sf }) => (
-                      <Controller name="pickupApptEnd" control={control} render={({ field: ef }) => (
-                        <ApptFields
-                          label="Pickup"
-                          typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd' && v !== 'fcfs') sf.onChange('') } }}
-                          startField={{ value: sf.value ?? '', onChange: sf.onChange }}
-                          endField={{ value: ef.value ?? '', onChange: ef.onChange }}
-                          startError={errors.pickupAppt?.message}
-                          endError={errors.pickupApptEnd?.message}
-                        />
-                      )} />
-                    )} />
-                  )}
-                />
-              </div>
-              <Controller
-                name="deliveryApptType"
-                control={control}
-                render={({ field: tf }) => (
-                  <Controller name="deliveryAppt" control={control} render={({ field: sf }) => (
-                    <Controller name="deliveryApptEnd" control={control} render={({ field: ef }) => (
-                      <ApptFields
-                        label="Delivery"
-                        typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange(''); if (tf.value === 'tbd' && v !== 'tbd' && v !== 'fcfs') sf.onChange('') } }}
-                        startField={{ value: sf.value ?? '', onChange: sf.onChange }}
-                        endField={{ value: ef.value ?? '', onChange: ef.onChange }}
-                        startError={errors.deliveryAppt?.message}
-                        endError={errors.deliveryApptEnd?.message}
-                      />
-                    )} />
-                  )} />
-                )}
-              />
-            </div>
-
-            {/* ── Section 4: Assignment ──────────────────────────────── */}
-            <div style={{ marginBottom: 24 }}>
-              <SectionHeading>Assignment</SectionHeading>
-              <div style={{ marginBottom: 12 }}>
-                <Field label="Pickup Driver" error={errors.pickupDriverId?.message}>
-                  <Controller
-                    name="pickupDriverId"
-                    control={control}
-                    render={({ field }) => (
-                      <DriverPicker
-                        value={field.value}
-                        onChange={(v) => {
-                          field.onChange(v)
-                          if (!splitLoad) setValue('deliveryDriverId', v)
-                        }}
-                        drivers={activeDrivers}
-                      />
-                    )}
-                  />
-                </Field>
-              </div>
-
-              {/* Split-load toggle */}
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !splitLoad
-                  setSplitLoad(next)
-                  if (!next) setValue('deliveryDriverId', pickupDriverId)
-                }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                  border: '1px solid var(--ds-border)', marginBottom: 12,
-                  background: splitLoad ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
-                  color: splitLoad ? 'var(--ds-blue)' : 'var(--ds-t2)',
-                  fontSize: 13, fontWeight: 500,
-                }}
-              >
-                <div style={{
-                  width: 32, height: 18, borderRadius: 9,
-                  background: splitLoad ? 'var(--ds-blue)' : 'var(--ds-border)',
-                  position: 'relative', flexShrink: 0, transition: 'background 0.15s',
-                }}>
-                  <div style={{
-                    position: 'absolute', top: 2, left: splitLoad ? 14 : 2,
-                    width: 14, height: 14, borderRadius: '50%', background: 'white',
-                    transition: 'left 0.15s',
-                  }} />
-                </div>
-                Split load — different delivery driver
-              </button>
-
-              {splitLoad && (
-                <Field label="Delivery Driver" error={errors.deliveryDriverId?.message}>
-                  <Controller
-                    name="deliveryDriverId"
-                    control={control}
-                    render={({ field }) => (
-                      <DriverPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        drivers={activeDrivers}
-                        placeholder="Delivery driver"
-                      />
-                    )}
-                  />
-                </Field>
-              )}
-            </div>
 
             {/* ── Section 5: Financials ──────────────────────────────── */}
             <div style={{ marginBottom: 16 }}>
@@ -795,10 +819,7 @@ export function LoadDrawer() {
     resolver: zodResolver(loadSchema),
     defaultValues: {
       aljexId: '', tmsId: '', pickupNumber: '',
-      originName: '', originCity: '', destinationName: '', destinationCity: '',
-      pickupApptType: 'exact', pickupAppt: '', pickupApptEnd: '',
-      deliveryApptType: 'exact', deliveryAppt: '', deliveryApptEnd: '',
-      pickupDriverId: null, deliveryDriverId: null, readyToInvoice: false,
+      stops: emptyStopForms(), readyToInvoice: false,
       customer: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
     },
   })
@@ -810,18 +831,7 @@ export function LoadDrawer() {
         aljexId: load.aljexId,
         tmsId: load.tmsId,
         pickupNumber: load.pickupNumber,
-        originName:      load.originName      ?? '',
-        originCity:      load.originCity      ?? '',
-        destinationName: load.destinationName ?? '',
-        destinationCity: load.destinationCity ?? '',
-        pickupApptType:   (load.pickupApptType   ?? 'exact') as ApptType,
-        pickupAppt:       (load.pickupApptType === 'tbd' || load.pickupApptType === 'fcfs') ? formatDateInput(load.pickupAppt) : formatDateTimeInput(load.pickupAppt),
-        pickupApptEnd:    load.pickupApptEnd ? formatDateTimeInput(load.pickupApptEnd) : '',
-        deliveryApptType: (load.deliveryApptType ?? 'exact') as ApptType,
-        deliveryAppt:     (load.deliveryApptType === 'tbd' || load.deliveryApptType === 'fcfs') ? formatDateInput(load.deliveryAppt) : formatDateTimeInput(load.deliveryAppt),
-        deliveryApptEnd:  load.deliveryApptEnd ? formatDateTimeInput(load.deliveryApptEnd) : '',
-        pickupDriverId:   load.pickupDriverId,
-        deliveryDriverId: load.deliveryDriverId,
+        stops: loadToStopForms(load),
         readyToInvoice:   load.readyToInvoice,
         customer: load.customer ?? '',
         miles: load.miles ?? null,
@@ -834,15 +844,7 @@ export function LoadDrawer() {
       const preDate = createPreFill?.dateStr
       reset({
         aljexId: '', tmsId: '', pickupNumber: '',
-        originName: '', originCity: '', destinationName: '', destinationCity: '',
-        pickupApptType: 'exact',
-        pickupAppt:    preDate ? `${preDate}T08:00` : '',
-        pickupApptEnd: '',
-        deliveryApptType: 'exact',
-        deliveryAppt:  preDate ? `${preDate}T17:00` : '',
-        deliveryApptEnd: '',
-        pickupDriverId:  createPreFill?.driverId ?? null,
-        deliveryDriverId: createPreFill?.driverId ?? null,
+        stops: emptyStopForms(preDate, createPreFill?.driverId ?? null),
         readyToInvoice: false,
         customer: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
       })
@@ -880,20 +882,6 @@ export function LoadDrawer() {
     }
   }
 
-  // Auto-sync delivery driver when pickup changes (Sheet edit mode)
-  const watchPickupDriver  = watch('pickupDriverId')
-  const watchDeliveryDriver = watch('deliveryDriverId')
-  const prevPickupDriver = useRef(watchPickupDriver)
-  useEffect(() => {
-    if (isCreate) return // create mode handles this via DriverPicker + splitLoad
-    const prev = prevPickupDriver.current
-    prevPickupDriver.current = watchPickupDriver
-    if (watchDeliveryDriver === prev || watchDeliveryDriver === null) {
-      setValue('deliveryDriverId', watchPickupDriver)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchPickupDriver])
-
   const onClose = () => setSelectedLoad(null)
 
   const onSubmit = async (values: LoadFormValues) => {
@@ -904,17 +892,23 @@ export function LoadDrawer() {
       toast.error(`Pro # ${values.aljexId} is already used on another load`)
       return
     }
-    const toIso = (s: string, t: ApptType) => (t === 'tbd' || t === 'fcfs') ? fromDateInput(s.slice(0, 10)) : fromDateTimeInput(s)
     const userEmail = user?.email ?? 'dispatch'
+    // Build the canonical stops array; the store derives the legacy pickup/delivery
+    // mirror fields (withDerivedLegacy) — the form never sets them directly.
+    const stops = values.stops.map((s, i) => stopFormToStop(s, i))
     const payload = {
-      ...values,
-      pickupAppt:      toIso(values.pickupAppt, values.pickupApptType),
-      pickupApptEnd:   values.pickupApptType === 'range' && values.pickupApptEnd ? fromDateTimeInput(values.pickupApptEnd) : undefined,
-      deliveryAppt:    toIso(values.deliveryAppt, values.deliveryApptType),
-      deliveryApptEnd: values.deliveryApptType === 'range' && values.deliveryApptEnd ? fromDateTimeInput(values.deliveryApptEnd) : undefined,
+      aljexId: values.aljexId,
+      tmsId: values.tmsId,
+      pickupNumber: values.pickupNumber,
+      stops,
+      ...deriveLegacyFields(stops), // pickupAppt/deliveryAppt/origin*/dest*/drivers (store re-derives; idempotent)
+      readyToInvoice: values.readyToInvoice,
       rate: values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined,
+      miles: values.miles ?? undefined,
       customer: values.customer || undefined,
       notes: values.notes || undefined,
+      hot: values.hot,
+      unscheduled: values.unscheduled,
       createdBy: userEmail,
       updatedBy: userEmail,
     }
@@ -1019,19 +1013,26 @@ export function LoadDrawer() {
               <ReadonlyField label="TMS / PO"   value={load.tmsId} />
               <ReadonlyField label="PU #"       value={load.pickupNumber} />
               {load.customer && <ReadonlyField label="Customer" value={load.customer} />}
-              {(load.originName || load.originCity) && (
-                <ReadonlyField label="Origin" value={[load.originName, load.originCity].filter(Boolean).join(' · ')} />
-              )}
-              {(load.destinationName || load.destinationCity) && (
-                <ReadonlyField label="Destination" value={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')} />
-              )}
+              {/* Stops — each pickup/delivery with its appointment + driver */}
+              {(() => {
+                const stops = getStops(load)
+                let pu = 0, de = 0
+                return stops.map((s) => {
+                  const n = s.type === 'pickup' ? ++pu : ++de
+                  const label = `${s.type === 'pickup' ? 'Pickup' : 'Delivery'}${(s.type === 'pickup' ? pu : de) > 1 || stops.filter((x) => x.type === s.type).length > 1 ? ` #${n}` : ''}`
+                  const where = [s.name, s.city].filter(Boolean).join(' · ')
+                  const when = apptLabel(s.appt, s.apptType, s.apptEnd)
+                  const who = driverName(s.driverId)
+                  return (
+                    <ReadonlyField
+                      key={s.id}
+                      label={label}
+                      value={[where, when, who !== '—' ? `Driver: ${who}` : null].filter(Boolean).join('  ·  ')}
+                    />
+                  )
+                })
+              })()}
               {load.miles && <ReadonlyField label="Miles" value={String(load.miles)} />}
-              <ReadonlyField label="Pickup"     value={apptLabel(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)} />
-              <ReadonlyField label="Delivery"   value={apptLabel(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)} />
-              <ReadonlyField label="PU Driver"  value={driverName(load.pickupDriverId)} />
-              {load.deliveryDriverId !== load.pickupDriverId && (
-                <ReadonlyField label="DE Driver" value={driverName(load.deliveryDriverId)} />
-              )}
               {load.rate != null && (
                 <ReadonlyField label="Rate" value={`$${(load.rate / 100).toFixed(2)}`} />
               )}
