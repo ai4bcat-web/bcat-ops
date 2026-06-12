@@ -8,6 +8,7 @@ import {
   AdminAddUserToGroupCommand,
   AdminRemoveUserFromGroupCommand,
   AdminResetUserPasswordCommand,
+  AdminGetUserCommand,
   CreateGroupCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
 
@@ -58,9 +59,27 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
   // Server-side authorization: only the owner may manage users. The data model's
   // allow.authenticated() lets any signed-in user reach this Lambda, so the real
   // gate lives here (the client-side check in UsersPage is just UX).
-  const callerEmail = (event.identity?.claims?.email ?? '').toLowerCase().trim()
+  //
+  // Amplify sends the Cognito ACCESS token, which has NO `email` claim — so resolve
+  // the caller's email from the username (which is the email for users created via
+  // AdminCreateUser), and if that's a UUID, look up the email attribute via AdminGetUser.
+  const claims = (event.identity?.claims ?? {}) as Record<string, unknown>
+  let callerEmail = [claims.email, event.identity?.username, claims['cognito:username']]
+    .map((v) => (typeof v === 'string' ? v : ''))
+    .find((v) => v.includes('@'))?.toLowerCase().trim() ?? ''
+  if (!callerEmail) {
+    const lookup = event.identity?.username ?? event.identity?.sub
+    if (lookup) {
+      try {
+        const me = await cognito.send(new AdminGetUserCommand({ UserPoolId: USER_POOL_ID, Username: String(lookup) }))
+        callerEmail = (me.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? '').toLowerCase().trim()
+      } catch (e: unknown) {
+        console.warn('[userManagement] could not resolve caller email:', String(e))
+      }
+    }
+  }
   if (callerEmail !== OWNER_EMAIL) {
-    console.warn('[userManagement] forbidden caller:', callerEmail || '(no identity)')
+    console.warn('[userManagement] forbidden caller:', callerEmail || '(unresolved)', '| identity:', JSON.stringify(event.identity))
     throw new Error('Forbidden: only the owner may view or manage users.')
   }
 
