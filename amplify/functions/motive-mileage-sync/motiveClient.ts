@@ -95,12 +95,13 @@ export async function fetchMilesForVehicle(
     })
     params.append('vehicle_ids[]', String(vehicleId))
     const url = `${BASE_URL}/v1/ifta/summary?${params.toString()}`
+    // Each element is wrapped: { ifta_trip: { jurisdiction, vehicle, distance } }.
     const data = await getJson(url, apiKey) as {
-      ifta_trips: MotiveIftaSummaryRow[]
+      ifta_trips: Array<{ ifta_trip: MotiveIftaSummaryRow }>
       pagination:  PaginationMeta
     }
     for (const row of data.ifta_trips ?? []) {
-      totalMiles += Number(row.distance) || 0
+      totalMiles += Number(row.ifta_trip?.distance) || 0
     }
     const { total, per_page } = data.pagination
     if (page * per_page >= total) break
