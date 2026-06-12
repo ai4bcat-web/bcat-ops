@@ -4,14 +4,13 @@ export const auth = defineAuth({
   loginWith: {
     email: true,
   },
-  // Cognito sends invites / temp passwords / password resets from noreply@bcatcorp.com
-  // via SES. Requires the bcatcorp.com domain verified in SES **us-east-1** (same region
-  // as the user pool), DKIM "Successful". If a deploy fails with "Email address is not
-  // verified", the identity isn't verified in us-east-1 — that's the only cause.
-  // (SES sandbox limits *recipients* to verified addresses; request production access to
-  // email arbitrary new users — but that does not affect deploys.)
-  senders: {
-    email: { fromEmail: 'noreply@bcatcorp.com', fromName: 'BCAT Ops' },
-  },
+  // SES sender DISABLED so deploys succeed. The custom Cognito FROM
+  // (noreply@bcatcorp.com via SES) fails CloudFormation's validation on every deploy —
+  // SES in ACCOUNT 273354631837 / REGION us-east-1 reports the identity "not verified",
+  // which rolls back the whole backend stack. Cognito's default email sender needs no
+  // SES verification. Before re-enabling, confirm in the SES console — with the region
+  // set to us-east-1 (N. Virginia) and in account 273354631837 — that bcatcorp.com shows
+  // "Verified" and DKIM "Successful"; otherwise the deploy fails again. Then restore:
+  //   senders: { email: { fromEmail: 'noreply@bcatcorp.com', fromName: 'BCAT Ops' } },
   groups: ['ADMIN', 'DISPATCHER'],
 })
