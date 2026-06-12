@@ -30,7 +30,8 @@ const DOC_TABLE = process.env.DOC_TABLE_NAME!
 const APP_TABLE = process.env.APP_TABLE_NAME!
 const AUDIT_TABLE = process.env.AUDIT_TABLE_NAME!
 const BUCKET = process.env.BUCKET_NAME!
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+// Note: ALLOWED_ORIGINS env is still set in backend.ts but CORS is enforced by the
+// Function URL's CORS config, so the handler no longer reads it.
 
 const MAX_REQUESTS_PER_TOKEN = 2000
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
@@ -56,18 +57,11 @@ interface InviteRow {
   requestCount?: number
 }
 
-function corsHeaders(origin: string | undefined) {
-  const allow = origin && ALLOWED_ORIGINS.includes(origin) ? origin : (ALLOWED_ORIGINS[0] ?? '*')
-  return {
-    'Access-Control-Allow-Origin': allow,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type',
-    'Content-Type': 'application/json',
-  }
-}
-
-function reply(status: number, body: unknown, origin?: string) {
-  return { statusCode: status, headers: corsHeaders(origin), body: JSON.stringify(body) }
+// CORS is owned by the Lambda Function URL's own CORS config (see backend.ts) — it
+// echoes the matching Origin and handles preflight. We must NOT also set
+// Access-Control-* here, or the browser sees a duplicated header and blocks the call.
+function reply(status: number, body: unknown, _origin?: string) {
+  return { statusCode: status, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
 }
 
 async function scan(table: string, filter: string, names: Record<string, string>, values: Record<string, unknown>) {
