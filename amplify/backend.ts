@@ -3,7 +3,6 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod } from 'aws-cdk-lib/aws-lambda'
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { EmailIdentity, Identity } from 'aws-cdk-lib/aws-ses'
 import { CfnOutput, Duration } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
@@ -332,23 +331,16 @@ emailerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTable.tableNam
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────
-// Creates the domain identity with Easy DKIM. After deploy, add the emitted DNS
-// records below to bcatcorp.com's DNS to verify the domain (do NOT assume they
-// already exist). The compliance-scanner is also granted ses:SendEmail for Phase 4.
-const sendingDomain = new EmailIdentity(emailerFn.stack, 'BcatSendingDomain', {
-  identity: Identity.domain('bcatcorp.com'),
-})
+// The bcatcorp.com SES domain identity is managed OUT OF BAND (one-time,
+// account-global) and is intentionally NOT created here. A CDK-managed
+// AWS::SES::EmailIdentity is provisioned per Amplify branch stack, but SES permits
+// only one identity per domain per account — so every additional branch deploy
+// collided with "bcatcorp.com already exists in stack …" and rolled the data stack
+// back. Verify the domain + DKIM once in the SES console; the emailer/scanner
+// Lambdas only need ses:SendEmail + the FROM_ADDRESS env var (granted below).
 backend.complianceScanner.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })
 )
-
-// Emit the DNS records the user must add to verify the domain + DKIM.
-new CfnOutput(emailerFn.stack, 'SesDkimRecord1', { value: `${sendingDomain.dkimDnsTokenName1} CNAME ${sendingDomain.dkimDnsTokenValue1}` })
-new CfnOutput(emailerFn.stack, 'SesDkimRecord2', { value: `${sendingDomain.dkimDnsTokenName2} CNAME ${sendingDomain.dkimDnsTokenValue2}` })
-new CfnOutput(emailerFn.stack, 'SesDkimRecord3', { value: `${sendingDomain.dkimDnsTokenName3} CNAME ${sendingDomain.dkimDnsTokenValue3}` })
-new CfnOutput(emailerFn.stack, 'SesMailFromNote', {
-  value: 'Add the 3 DKIM CNAMEs above to bcatcorp.com DNS, plus an SPF TXT "v=spf1 include:amazonses.com ~all" on the MAIL FROM domain. Verify in the SES console.',
-})
 
 // ── complianceScanner: Phase 4 escalation wiring ────────────────────────────
 // Granted/env'd here (not in the scanner block above) because the escalation
