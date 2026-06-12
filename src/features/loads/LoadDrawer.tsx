@@ -129,7 +129,7 @@ const APPT_TYPE_OPTIONS: { value: ApptType; label: string; icon: React.ElementTy
   { value: 'exact', label: 'Exact',  icon: Clock        },
   { value: 'range', label: 'Range',  icon: CalendarRange },
   { value: 'fcfs',  label: 'FCFS',   icon: AlarmClock   },
-  { value: 'tbd',   label: 'TBD',    icon: HelpCircle   },
+  { value: 'tbd',   label: 'NEED',   icon: HelpCircle   },
 ]
 
 function ApptFields({
@@ -958,7 +958,7 @@ export function LoadDrawer() {
   const driverName = (id: string | null) => id ? (drivers.find((d) => d.id === id)?.name ?? id) : '—'
 
   const apptLabel = (appt: string, type?: string, apptEnd?: string) => {
-    if (type === 'tbd') return 'TBD'
+    if (type === 'tbd') return 'NEED'
     if (type === 'fcfs') return 'FCFS (first come first serve)'
     if (type === 'range' && apptEnd) return `${formatDateTime(appt)} – ${formatDateTime(apptEnd)}`
     return formatDateTime(appt)
