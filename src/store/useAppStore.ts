@@ -5,6 +5,7 @@ import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equ
 import type { Expense } from '@/types/expense'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
+import { withDerivedLegacy } from '@/lib/stops'
 import { errorMessage } from '@/lib/utils/errorMessage'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
@@ -544,7 +545,9 @@ export const useAppStore = create<AppState>()(
 
       // ── Loads ──────────────────────────────────────────────────────────────
       addLoad: async (l) => {
-        const load = await api.createLoad(l)
+        // If stops are set, derive the legacy pickup/delivery mirror fields (single
+        // source of derivation). No-op for loads created without stops.
+        const load = await api.createLoad(withDerivedLegacy(l))
         set((s) => ({ loads: [...s.loads, load] }))
         writeAudit(get().currentUserEmail, 'Load', load.id, 'create', {
           _snapshot: { from: null, to: load },
@@ -556,10 +559,11 @@ export const useAppStore = create<AppState>()(
         const before = get().loads.find((l) => l.id === id)
         if (!before) return
         // Do NOT pass updatedAt — Amplify Gen 2 manages it server-side.
-        const after = await api.updateLoad(id, {
+        // withDerivedLegacy re-derives the legacy pickup/delivery mirrors when stops change.
+        const after = await api.updateLoad(id, withDerivedLegacy({
           ...patch,
           updatedBy: get().currentUserEmail,
-        })
+        }))
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
       },

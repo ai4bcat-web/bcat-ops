@@ -35,6 +35,10 @@ const schema = a.schema({
       notes:           a.string(),   // short free-text notes
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       unscheduled:     a.boolean(),  // true = orphan (no firm date) → parked in the calendar's Unscheduled lane
+      // Canonical multi-stop array: Stop[] (see src/lib/stops.ts). The legacy pickup*/
+      // delivery*/origin*/destination*/*DriverId fields above are dual-written mirrors
+      // derived from stops (first pickup → pickup*, last delivery → delivery*).
+      stops:           a.json(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })

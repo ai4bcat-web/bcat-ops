@@ -23,10 +23,18 @@ const LOAD_FIELDS = `
   createdBy updatedBy createdAt updatedAt
 `
 
-// `hot` and `unscheduled` are newer fields; both ship in the same backend deploy, so
-// one flag gates them together (self-heals if the API predates them — see below).
+// `hot`/`unscheduled` and `stops` are newer fields added in later backend deploys. Each
+// is gated by a flag and appended only while the backend supports it; if the API predates
+// a field, listLoads detects the FieldUndefined error, clears that flag, and retries (so a
+// frontend shipping before the backend deploy keeps working). Self-heals post-deploy.
 let loadsHaveHot = true
-const loadFields = () => (loadsHaveHot ? `${LOAD_FIELDS} hot unscheduled` : LOAD_FIELDS)
+let loadsHaveStops = true
+const loadFields = () => {
+  let f = LOAD_FIELDS
+  if (loadsHaveHot) f += ' hot unscheduled'
+  if (loadsHaveStops) f += ' stops'
+  return f
+}
 
 // Base selection set. onboardingStatus/complianceStatus are newer compliance fields;
 // appended via driverFields() only while the backend supports them (self-heals like
@@ -51,10 +59,15 @@ const AUDIT_FIELDS = `
 
 // ── Loads ─────────────────────────────────────────────────────────────────────
 
-// True if the error is the backend rejecting our `hot`/`unscheduled` selection (fields not deployed yet).
-function isHotFieldUndefined(err: unknown): boolean {
+// Which newer fields the backend is rejecting (not deployed yet). Used to clear the
+// corresponding flag and retry. Handles `hot`/`unscheduled` and `stops` together.
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
-  return Array.isArray(errs) && errs.some((e) => /'(hot|unscheduled)'.*undefined|undefined.*'(hot|unscheduled)'|Field '(hot|unscheduled)'/i.test(e?.message ?? ''))
+  const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
+  return {
+    hot: /'(hot|unscheduled)'/i.test(msg),
+    stops: /'stops'/i.test(msg),
+  }
 }
 
 export async function listLoads(): Promise<Load[]> {
@@ -63,20 +76,38 @@ export async function listLoads(): Promise<Load[]> {
   }) as Promise<{ data: { listLoads: { items: (Load & { rateConfirmKey?: string })[] } } }>
 
   let result
-  try {
-    result = await run()
-  } catch (err) {
-    if (loadsHaveHot && isHotFieldUndefined(err)) {
-      // Backend doesn't have `hot` yet (pre-deploy) — drop it and retry once.
-      console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
-      loadsHaveHot = false
-      result = await run()
-    } else {
-      throw err
+  // Retry up to twice so a single query missing BOTH hot/unscheduled and stops recovers.
+  for (let attempt = 0; ; attempt++) {
+    try { result = await run(); break }
+    catch (err) {
+      if (attempt >= 2) throw err
+      const u = undefinedLoadFields(err)
+      let changed = false
+      if (loadsHaveHot && u.hot) {
+        console.warn("[apiClient] backend has no 'hot' field yet — querying loads without it until deploy")
+        loadsHaveHot = false; changed = true
+      }
+      if (loadsHaveStops && u.stops) {
+        console.warn("[apiClient] backend has no 'stops' field yet — querying loads without it until deploy")
+        loadsHaveStops = false; changed = true
+      }
+      if (!changed) throw err
     }
   }
   const items = result.data.listLoads.items ?? []
   return Promise.all(items.map(resolveRateConfirmUrl))
+}
+
+// `stops` is an a.json() (AWSJSON) field. Through this client it must be written as a
+// JSON STRING (same as createAuditLog's `changes`); reads undo the encoding via unwrapJson.
+// Also drop `stops` from the input if the backend doesn't have the field yet (pre-deploy).
+function serializeLoadInput<T extends { stops?: unknown }>(input: T): T {
+  if (!loadsHaveStops) {
+    const { stops: _drop, ...rest } = input as T & { stops?: unknown }
+    return rest as T
+  }
+  if (input.stops == null) return input
+  return { ...input, stops: JSON.stringify(input.stops) }
 }
 
 export async function createLoad(
@@ -85,9 +116,9 @@ export async function createLoad(
   const { rateConfirmUrl: _skip, ...rest } = input as Load & { rateConfirmUrl?: string }
   const result = await client.graphql({
     query: `mutation CreateLoad($input: CreateLoadInput!) { createLoad(input: $input) { ${loadFields()} } }`,
-    variables: { input: rest },
+    variables: { input: serializeLoadInput(rest) },
   }) as { data: { createLoad: Load } }
-  return result.data.createLoad
+  return normalizeLoadStops(result.data.createLoad)
 }
 
 export async function updateLoad(
@@ -97,7 +128,7 @@ export async function updateLoad(
   const { rateConfirmUrl: _skip, ...rest } = patch as typeof patch & { rateConfirmUrl?: string }
   const result = await client.graphql({
     query: `mutation UpdateLoad($input: UpdateLoadInput!) { updateLoad(input: $input) { ${loadFields()} } }`,
-    variables: { input: { id, ...rest } },
+    variables: { input: serializeLoadInput({ id, ...rest }) },
   }) as { data: { updateLoad: Load } }
   return resolveRateConfirmUrl(result.data.updateLoad)
 }
@@ -136,14 +167,14 @@ export function subscribeToLoadChanges(callbacks: {
     const cb = callbacks.onCreate
     wire<{ onCreateLoad: Load }>(
       `subscription OnCreateLoad { onCreateLoad { ${loadFields()} } }`,
-      (d) => { if (d.onCreateLoad) cb(d.onCreateLoad) },
+      (d) => { if (d.onCreateLoad) cb(normalizeLoadStops(d.onCreateLoad)) },
     )
   }
   if (callbacks.onUpdate) {
     const cb = callbacks.onUpdate
     wire<{ onUpdateLoad: Load }>(
       `subscription OnUpdateLoad { onUpdateLoad { ${loadFields()} } }`,
-      (d) => { if (d.onUpdateLoad) cb(d.onUpdateLoad) },
+      (d) => { if (d.onUpdateLoad) cb(normalizeLoadStops(d.onUpdateLoad)) },
     )
   }
   if (callbacks.onDelete) {
@@ -853,9 +884,19 @@ async function resolveDriverPhotoUrl(driver: Driver): Promise<Driver> {
   }
 }
 
+// `stops` is an a.json() field — AppSync may return it as a (possibly double-encoded)
+// string. Unwrap to a real array; null/garbage → undefined so getStops() falls back to
+// the legacy pickup/delivery synthesis rather than crashing a view.
+function normalizeLoadStops<T extends { stops?: unknown }>(load: T): T {
+  if (load.stops == null) return load
+  const v = unwrapJson(load.stops)
+  return { ...load, stops: Array.isArray(v) ? v : undefined }
+}
+
 async function resolveRateConfirmUrl(
-  load: Load & { rateConfirmKey?: string }
+  raw: Load & { rateConfirmKey?: string }
 ): Promise<Load> {
+  const load = normalizeLoadStops(raw)
   if (!load.rateConfirmKey) return load
   try {
     const url = await getRateConfirmUrl(load.rateConfirmKey)

@@ -30,6 +30,30 @@ export const driverSchema = z.object({
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])
 
+// ── Multi-stop ───────────────────────────────────────────────────────────────
+// A single stop in the load form. `appt` is a form string (datetime-local or date);
+// the submit mapper converts it to ISO via toIso() just like the legacy pickup/delivery.
+export const stopSchema = z.object({
+  id: z.string(),
+  type: z.enum(['pickup', 'delivery']),
+  name: z.string().optional(),
+  city: z.string().optional(),
+  appt: z.string().min(1, 'Appointment is required'),
+  apptType: apptTypeEnum,
+  apptEnd: z.string().optional(),
+  driverId: z.string().nullable(),
+  sequence: z.number(),
+})
+export type StopFormValue = z.infer<typeof stopSchema>
+
+// A valid multi-stop load needs at least one pickup AND one delivery so the derived
+// legacy pickupAppt/deliveryAppt (both .required() on the model) are always populated.
+export const stopsSchema = z
+  .array(stopSchema)
+  .min(2, 'A load needs at least one pickup and one delivery')
+  .refine((stops) => stops.some((s) => s.type === 'pickup'), { message: 'At least one pickup is required' })
+  .refine((stops) => stops.some((s) => s.type === 'delivery'), { message: 'At least one delivery is required' })
+
 export const loadSchema = z
   .object({
     aljexId: z.string().min(1, 'Pro # is required'),

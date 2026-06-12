@@ -199,6 +199,22 @@ export interface EscalationEmailLog {
 
 export type ApptType = 'exact' | 'range' | 'fcfs' | 'tbd'
 
+export type StopType = 'pickup' | 'delivery'
+
+// A single stop on a multi-stop load. Canonical scheduling unit (see src/lib/stops.ts).
+// Field names mirror the legacy load fields: appt↔pickupAppt, name↔originName, city↔originCity.
+export interface Stop {
+  id: string                 // stable id; deterministic for legacy synthesis (`${load.id}:pu|de`)
+  type: StopType
+  name?: string              // facility / shipper / consignee
+  city?: string              // e.g. "Chicago, IL"
+  appt: string               // ISO UTC (or FCFS/TBD date at 00:00)
+  apptType?: ApptType        // default 'exact'
+  apptEnd?: string           // ISO UTC — end of window (range only)
+  driverId: string | null    // ONE driver per stop — subsumes the old split-load concept
+  sequence: number           // 0-based order along the route
+}
+
 export interface Load {
   id: string
   aljexId: string
@@ -228,6 +244,7 @@ export interface Load {
   notes?: string | null       // short free-text notes
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane
+  stops?: Stop[] | null       // canonical multi-stop array; legacy pickup*/delivery* are derived mirrors
   createdAt: string
   updatedAt: string
   createdBy: string
