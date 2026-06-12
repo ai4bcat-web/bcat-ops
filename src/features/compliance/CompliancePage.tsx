@@ -6,16 +6,19 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet'
 import { useComplianceAlerts } from '@/hooks/useComplianceAlerts'
+import { useAuth } from '@/hooks/useAuth'
 import { listEscalationEmailLogsByAlert } from '@/lib/complianceClient'
 import { SeverityBadge, daysRemainingLabel, Card } from './components'
 import { EmailSettingsCard } from './EmailSettingsCard'
 import { EscalationRulesCard } from './EscalationRulesCard'
+import { BackfillOnboardingCard } from './BackfillOnboardingCard'
 import type { AlertSeverity, ComplianceAlert, ComplianceEntityType, EscalationEmailLog } from '@/types'
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = { EXPIRED: 0, CRITICAL: 1, URGENT: 2, UPCOMING: 3 }
 
 export function CompliancePage() {
   const navigate = useNavigate()
+  const { isOwner } = useAuth()
   const { alerts, loading, acknowledge } = useComplianceAlerts()
   const [severity, setSeverity] = useState<AlertSeverity | 'ALL'>('ALL')
   const [entityType, setEntityType] = useState<ComplianceEntityType | 'ALL'>('ALL')
@@ -131,6 +134,7 @@ export function CompliancePage() {
           </div>
         </Card>
 
+        {isOwner && <BackfillOnboardingCard />}
         <EscalationRulesCard />
         <EmailSettingsCard />
       </div>
