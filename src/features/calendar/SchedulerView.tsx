@@ -25,10 +25,9 @@ import {
 const LICENSE = import.meta.env.VITE_FULLCALENDAR_LICENSE ?? 'GPL-My-Project-Is-Open-Source'
 
 const FC_VIEWS: Record<ViewMode, string> = {
-  'day':      'resourceTimelineDay',
-  'week':     'resourceTimelineWeek',
-  'two-week': 'resourceTimeline2Weeks',
-  'month':    'resourceTimelineMonth',
+  'day':   'resourceTimelineDay',
+  'week':  'resourceTimelineWeek',
+  'month': 'resourceTimelineMonth',
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -423,11 +422,6 @@ export function SchedulerView({
             type: 'resourceTimeline',
             duration: { weeks: 1 },
             hiddenDays: [0, 6],
-            slotDuration: { days: 1 },
-          },
-          resourceTimeline2Weeks: {
-            type: 'resourceTimeline',
-            duration: { weeks: 2 },
             slotDuration: { days: 1 },
           },
           resourceTimelineDay: {

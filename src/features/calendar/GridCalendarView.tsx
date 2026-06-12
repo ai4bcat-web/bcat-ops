@@ -782,9 +782,8 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   const todayStr = useMemo(() => chicagoDateStr(new Date().toISOString()) ?? '', [])
 
   const gridDays = useMemo<Date[]>(() => {
-    if (viewMode === 'day')      return [startDate]
-    if (viewMode === 'week')     return Array.from({ length: 7 },  (_, i) => addDays(startDate, i))
-    if (viewMode === 'two-week') return Array.from({ length: 14 }, (_, i) => addDays(startDate, i))
+    if (viewMode === 'day')  return [startDate]
+    if (viewMode === 'week') return Array.from({ length: 7 }, (_, i) => addDays(startDate, i))
     // month
     const daysInMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
     return Array.from({ length: daysInMonth }, (_, i) =>

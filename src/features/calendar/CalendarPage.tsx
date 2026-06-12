@@ -14,24 +14,10 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
-const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
-  'day':      { numDays: 3,  navDays: 1  }, // current day + next 2 work days
-  'week':     { numDays: 7,  navDays: 7  },
-  'two-week': { numDays: 14, navDays: 14 },
-  'month':    { numDays: -1, navDays: -1 }, // numDays computed dynamically
-}
-
-// Day view shows the current day plus the next work days (Mon–Fri), skipping weekends.
-const DAY_VIEW_DAYS = 3
-function workDaysFrom(start: Date, count: number): Date[] {
-  const out: Date[] = []
-  let d = new Date(start)
-  while (out.length < count) {
-    const dow = d.getDay() // 0 = Sun, 6 = Sat
-    if (dow !== 0 && dow !== 6) out.push(new Date(d))
-    d = addDays(d, 1)
-  }
-  return out
+const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
+  'day':   { navDays: 1  }, // single current day
+  'week':  { navDays: 7  }, // Monday-started week, weekends included
+  'month': { navDays: -1 }, // month nav handled separately
 }
 
 const STATUS_LEGEND = [
@@ -56,31 +42,21 @@ export function CalendarPage() {
 
   const { navDays } = VIEW_CONFIG[currentView]
 
-  // Day view: explicit work-day columns (today + next 2 work days, weekends skipped).
-  const dayViewDays = useMemo(() => workDaysFrom(startDate, DAY_VIEW_DAYS), [startDate])
-
-  // For month view, numDays = days in the displayed month
-  const numDays = useMemo(() => {
-    if (currentView === 'month') {
-      return new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()
-    }
-    return VIEW_CONFIG[currentView].numDays
+  // Day/Week board columns (PlannerView): Day = the single current day; Week = Monday
+  // through Sunday, weekends included. Month is rendered by GridCalendarView instead.
+  const cols = useMemo<Date[]>(() => {
+    if (currentView === 'day')  return [startDate]
+    if (currentView === 'week') return Array.from({ length: 7 }, (_, i) => addDays(startDate, i))
+    return []
   }, [currentView, startDate])
 
   const dateLabel = useMemo(() => {
     if (currentView === 'month') {
       return startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     }
-    if (currentView === 'day') {
-      const first = dayViewDays[0]
-      const last  = dayViewDays[dayViewDays.length - 1]
-      return `${formatDateShort(first.toISOString())} – ${formatDateShort(last.toISOString())}`
-    }
-    const end = addDays(startDate, numDays - 1)
-    return numDays === 1
-      ? formatDateShort(startDate.toISOString())
-      : `${formatDateShort(startDate.toISOString())} – ${formatDateShort(end.toISOString())}`
-  }, [startDate, numDays, currentView, dayViewDays])
+    if (cols.length <= 1) return formatDateShort(startDate.toISOString())
+    return `${formatDateShort(cols[0].toISOString())} – ${formatDateShort(cols[cols.length - 1].toISOString())}`
+  }, [startDate, currentView, cols])
 
   const onPrev  = useCallback(() => {
     if (currentView === 'month') {
@@ -205,20 +181,20 @@ export function CalendarPage() {
         <CalendarErrorBoundary>
           {isMobile ? (
             <MobileLoadAgenda loads={visibleLoads} drivers={drivers} />
-          ) : currentView === 'day' ? (
-            <PlannerView
-              loads={visibleLoads}
-              drivers={drivers}
-              weekStart={startDate}
-              days={dayViewDays}
-              availabilities={availabilities}
-            />
-          ) : (
+          ) : currentView === 'month' ? (
             <GridCalendarView
               loads={visibleLoads}
               drivers={drivers}
               startDate={startDate}
               viewMode={currentView}
+              availabilities={availabilities}
+            />
+          ) : (
+            <PlannerView
+              loads={visibleLoads}
+              drivers={drivers}
+              weekStart={startDate}
+              days={cols}
               availabilities={availabilities}
             />
           )}
