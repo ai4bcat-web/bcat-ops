@@ -90,6 +90,53 @@ function monthsInRange(startDate: string, endDate: string): Array<{ start: strin
   return months
 }
 
+function yearStart(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+}
+
+function yearEnd(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), 11, 31))
+}
+
+/** Every day in [startDate, endDate] inclusive (each day's start == end). */
+function daysInRange(startDate: string, endDate: string): Array<{ start: string; end: string }> {
+  const days: Array<{ start: string; end: string }> = []
+  const cursor = new Date(startDate + 'T12:00:00Z')
+  const last = new Date(endDate + 'T12:00:00Z')
+  while (cursor <= last) {
+    const iso = toIso(cursor)
+    days.push({ start: iso, end: iso })
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return days
+}
+
+/** All Jan-1 year-starts covering [startDate, endDate] inclusive. */
+function yearsInRange(startDate: string, endDate: string): Array<{ start: string; end: string }> {
+  const years: Array<{ start: string; end: string }> = []
+  let y = new Date(startDate + 'T12:00:00Z').getUTCFullYear()
+  const lastY = new Date(endDate + 'T12:00:00Z').getUTCFullYear()
+  while (y <= lastY) {
+    const d = new Date(Date.UTC(y, 6, 1))
+    years.push({ start: toIso(yearStart(d)), end: toIso(yearEnd(d)) })
+    y++
+  }
+  return years
+}
+
+/** Run async tasks with a bounded concurrency (keeps us under the Motive rate
+ *  limit and the Lambda timeout during large backfills). */
+async function runPooled<T>(items: T[], limit: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let i = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (i < items.length) {
+      const idx = i++
+      await worker(items[idx])
+    }
+  })
+  await Promise.all(runners)
+}
+
 // ── DynamoDB helpers ──────────────────────────────────────────────────────────
 
 // A vehicle to sync miles for. truckId links to an Equipment record when the
@@ -154,10 +201,12 @@ async function upsertMileage(
 
 // ── Core sync ─────────────────────────────────────────────────────────────────
 
+type PeriodType = 'DAY' | 'WEEK' | 'MONTH' | 'YEAR'
+
 interface Period {
   start: string
   end:   string
-  type:  'WEEK' | 'MONTH'
+  type:  PeriodType
 }
 
 async function syncTruck(truck: SyncTarget, periods: Period[]): Promise<void> {
@@ -175,9 +224,10 @@ async function syncTruck(truck: SyncTarget, periods: Period[]): Promise<void> {
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 interface BackfillEvent {
-  mode:      'backfill'
-  startDate: string   // YYYY-MM-DD
-  endDate:   string   // YYYY-MM-DD
+  mode:           'backfill'
+  startDate:      string         // YYYY-MM-DD
+  endDate:        string         // YYYY-MM-DD
+  granularities?: PeriodType[]   // default: all four
 }
 
 function isBackfillEvent(e: unknown): e is BackfillEvent {
@@ -215,25 +265,33 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
   let periods: Period[]
   if (isBackfillEvent(event)) {
     const { startDate, endDate } = event
-    const weekPeriods  = weeksInRange(startDate, endDate).map((w) => ({ ...w, type: 'WEEK'  as const }))
-    const monthPeriods = monthsInRange(startDate, endDate).map((m) => ({ ...m, type: 'MONTH' as const }))
-    periods = [...weekPeriods, ...monthPeriods]
-    console.log(`[motive-mileage-sync] backfill ${startDate}–${endDate}: ${weekPeriods.length} weeks, ${monthPeriods.length} months`)
-  } else {
-    // Daily cron: current week (Mon to today) + current month (1st to today)
-    const today = toIso(new Date())
-    const mon   = toIso(weekMonday(new Date()))
-    const m1    = toIso(monthStart(new Date()))
-    periods = [
-      { start: mon, end: today, type: 'WEEK'  },
-      { start: m1,  end: today, type: 'MONTH' },
+    const want = new Set<PeriodType>(event.granularities ?? ['DAY', 'WEEK', 'MONTH', 'YEAR'])
+    const gens: Array<[PeriodType, (s: string, e: string) => Array<{ start: string; end: string }>]> = [
+      ['DAY',   daysInRange],
+      ['WEEK',  weeksInRange],
+      ['MONTH', monthsInRange],
+      ['YEAR',  yearsInRange],
     ]
-    console.log(`[motive-mileage-sync] daily sync: week ${mon}–${today}, month ${m1}–${today}`)
+    periods = gens
+      .filter(([t]) => want.has(t))
+      .flatMap(([t, gen]) => gen(startDate, endDate).map((p) => ({ ...p, type: t })))
+    console.log(`[motive-mileage-sync] backfill ${startDate}–${endDate}: ${periods.length} periods (${[...want].join(',')})`)
+  } else {
+    // Daily cron: current day, week (Mon→today), month (1st→today), year (Jan1→today).
+    const now   = new Date()
+    const today = toIso(now)
+    periods = [
+      { start: today,                  end: today, type: 'DAY'   },
+      { start: toIso(weekMonday(now)), end: today, type: 'WEEK'  },
+      { start: toIso(monthStart(now)), end: today, type: 'MONTH' },
+      { start: toIso(yearStart(now)),  end: today, type: 'YEAR'  },
+    ]
+    console.log(`[motive-mileage-sync] daily sync: day/week/month/year through ${today}`)
   }
 
-  for (const truck of trucks) {
-    await syncTruck(truck, periods)
-  }
+  // Bounded concurrency across (truck × period) so big backfills stay under the timeout.
+  const jobs = trucks.flatMap((truck) => periods.map((period) => ({ truck, period })))
+  await runPooled(jobs, 5, ({ truck, period }) => syncTruck(truck, [period]))
 
-  console.log('[motive-mileage-sync] complete')
+  console.log(`[motive-mileage-sync] complete — ${jobs.length} (truck × period) writes`)
 }

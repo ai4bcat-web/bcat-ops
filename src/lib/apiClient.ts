@@ -1058,11 +1058,17 @@ export interface TruckMileage {
 
 const TRUCK_MILEAGE_FIELDS = `truckId unitNumber periodStart periodType miles source syncedAt createdAt updatedAt`
 
-export async function listTruckMileages(truckId?: string): Promise<TruckMileage[]> {
+/**
+ * List mileage records. With a truckId, returns that truck's full history (all
+ * period types). Without, returns the whole fleet — pass a periodType to fetch only
+ * that granularity (DAY/WEEK/MONTH/YEAR), which keeps payloads small as DAY records
+ * accumulate.
+ */
+export async function listTruckMileages(truckId?: string, periodType?: string): Promise<TruckMileage[]> {
   if (truckId) {
     const result = await client.graphql({
       query: `query ListByTruck($truckId: String!) {
-        listTruckMileageByTruckIdAndPeriodStart(truckId: $truckId, limit: 500) {
+        listTruckMileageByTruckIdAndPeriodStart(truckId: $truckId, limit: 2000) {
           items { ${TRUCK_MILEAGE_FIELDS} }
         }
       }`,
@@ -1071,7 +1077,10 @@ export async function listTruckMileages(truckId?: string): Promise<TruckMileage[
     return result.data.listTruckMileageByTruckIdAndPeriodStart.items ?? []
   }
   const result = await client.graphql({
-    query: `query ListTruckMileages { listTruckMileages(limit: 5000) { items { ${TRUCK_MILEAGE_FIELDS} } } }`,
+    query: `query ListTruckMileages($filter: ModelTruckMileageFilterInput) {
+      listTruckMileages(limit: 10000, filter: $filter) { items { ${TRUCK_MILEAGE_FIELDS} } }
+    }`,
+    variables: periodType ? { filter: { periodType: { eq: periodType } } } : {},
   }) as { data: { listTruckMileages: { items: TruckMileage[] } } }
   return result.data.listTruckMileages.items ?? []
 }

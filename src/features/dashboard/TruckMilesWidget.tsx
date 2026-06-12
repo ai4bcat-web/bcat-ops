@@ -3,35 +3,35 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip,
   ResponsiveContainer, Cell,
 } from 'recharts'
-import { Gauge } from 'lucide-react'
+import { Gauge, ChevronLeft, ChevronRight } from 'lucide-react'
 import { listTruckMileages, type TruckMileage } from '@/lib/apiClient'
+import {
+  PERIOD_TYPES, PERIOD_LABELS, periodStartIso, periodLabel, type PeriodType,
+} from '@/lib/mileagePeriods'
+import { TruckMileageDetail } from './TruckMileageDetail'
 
 interface Row {
   truckId:    string
   unitNumber: string
-  week:       number
-  month:      number
+  miles:      number
 }
 
 function fmtMiles(n: number): string {
   return Math.round(n).toLocaleString()
 }
 
-function prettyDate(iso?: string): string {
-  if (!iso) return '—'
-  return new Date(iso + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-}
-
 export function TruckMilesWidget() {
+  const [periodType, setPeriodType] = useState<PeriodType>('WEEK')
+  const [offset, setOffset] = useState(0)               // 0 = current, 1 = previous…
   const [mileages, setMileages] = useState<TruckMileage[]>([])
   const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<{ truckId: string; unitNumber: string } | null>(null)
 
-  // Initial load + auto-refresh every 5 min so new trucks / re-syncs appear
-  // without a manual page reload. Mileage syncs nightly, so a slow poll is fine.
+  // Fetch only the selected granularity. Refetch on type change + every 5 min.
   useEffect(() => {
     let active = true
     const load = () => {
-      listTruckMileages()
+      listTruckMileages(undefined, periodType)
         .then((d) => { if (active) setMileages(d) })
         .catch((e) => console.error('listTruckMileages failed', e))
         .finally(() => { if (active) setLoading(false) })
@@ -39,48 +39,81 @@ export function TruckMilesWidget() {
     load()
     const id = setInterval(load, 300_000)
     return () => { active = false; clearInterval(id) }
-  }, [])
+  }, [periodType])
 
-  const { rows, weekStart, monthStart } = useMemo(() => {
-    // Latest WEEK / MONTH periodStart present in the data = "this week"/"this month".
-    const weekStarts = mileages.filter((m) => m.periodType === 'WEEK').map((m) => m.periodStart).sort()
-    const monthStarts = mileages.filter((m) => m.periodType === 'MONTH').map((m) => m.periodStart).sort()
-    const weekStart = weekStarts[weekStarts.length - 1]
-    const monthStart = monthStarts[monthStarts.length - 1]
+  const targetStart = periodStartIso(periodType, offset)
 
+  const rows = useMemo(() => {
     const byTruck = new Map<string, Row>()
     for (const m of mileages) {
-      const r = byTruck.get(m.truckId) ?? { truckId: m.truckId, unitNumber: m.unitNumber, week: 0, month: 0 }
-      if (m.periodType === 'WEEK' && m.periodStart === weekStart) r.week = m.miles
-      if (m.periodType === 'MONTH' && m.periodStart === monthStart) r.month = m.miles
+      if (m.periodType !== periodType || m.periodStart !== targetStart) continue
+      const r = byTruck.get(m.truckId) ?? { truckId: m.truckId, unitNumber: m.unitNumber, miles: 0 }
+      r.miles += m.miles
       byTruck.set(m.truckId, r)
     }
-    const rows = [...byTruck.values()].sort((a, b) => b.week - a.week)
-    return { rows, weekStart, monthStart }
-  }, [mileages])
+    return [...byTruck.values()].sort((a, b) => b.miles - a.miles)
+  }, [mileages, periodType, targetStart])
 
-  const weekTotal = rows.reduce((s, r) => s + r.week, 0)
-  const monthTotal = rows.reduce((s, r) => s + r.month, 0)
+  const fleetTotal = rows.reduce((s, r) => s + r.miles, 0)
+
+  function changeType(t: PeriodType) {
+    setPeriodType(t)
+    setOffset(0)
+    setLoading(true)
+  }
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', display: 'flex', alignItems: 'center', gap: 7 }}>
-          <Gauge size={15} /> Miles per Truck
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', display: 'flex', alignItems: 'center', gap: 7 }}>
+            <Gauge size={15} /> Miles per Truck
+          </div>
+          {/* Day / Week / Month / Year toggle */}
+          <div style={{ display: 'flex', gap: 3, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, padding: 3 }}>
+            {PERIOD_TYPES.map((t) => (
+              <button
+                key={t}
+                onClick={() => changeType(t)}
+                style={{
+                  padding: '3px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11.5, fontFamily: 'inherit',
+                  fontWeight: periodType === t ? 600 : 500,
+                  background: periodType === t ? '#fff' : 'transparent',
+                  color: periodType === t ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                  boxShadow: periodType === t ? 'var(--sh-sm)' : 'none',
+                }}
+              >
+                {PERIOD_LABELS[t]}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-          {loading ? 'Loading…' : `Week of ${prettyDate(weekStart)} · from Motive ELD`}
+
+        {/* Look-back stepper */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+          <button onClick={() => setOffset((o) => o + 1)} title="Previous period"
+            style={{ display: 'flex', alignItems: 'center', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 6, cursor: 'pointer', padding: '3px 5px', color: 'var(--ds-t2)' }}>
+            <ChevronLeft size={15} />
+          </button>
+          <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', fontWeight: 500, minWidth: 130, textAlign: 'center' }}>
+            {periodLabel(periodType, targetStart)}{offset === 0 ? ' (current)' : ''}
+          </div>
+          <button onClick={() => setOffset((o) => Math.max(0, o - 1))} disabled={offset === 0} title="Next period"
+            style={{ display: 'flex', alignItems: 'center', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 6, cursor: offset === 0 ? 'default' : 'pointer', padding: '3px 5px', color: 'var(--ds-t2)', opacity: offset === 0 ? 0.4 : 1 }}>
+            <ChevronRight size={15} />
+          </button>
+          <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--ds-t3)' }}>from Motive ELD</div>
         </div>
       </div>
 
       <div style={{ padding: '16px 20px' }}>
         {!loading && rows.length === 0 ? (
-          <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center', padding: '0 24px' }}>
-            No mileage synced yet. Mileage syncs nightly from Motive (IFTA data) — a truck only shows miles once it has moved in the current week or month.
+          <div style={{ height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center', padding: '0 24px' }}>
+            No mileage for this {PERIOD_LABELS[periodType].toLowerCase()}. Mileage syncs from Motive (IFTA data); a truck shows miles once it has moved in the period.
           </div>
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={Math.max(160, rows.length * 40)}>
+            <ResponsiveContainer width="100%" height={Math.max(150, rows.length * 40)}>
               <BarChart data={rows} layout="vertical" margin={{ left: 4, right: 28, top: 4, bottom: 4 }}>
                 <XAxis type="number" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
                 <YAxis type="category" dataKey="unitNumber" width={56} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
@@ -90,35 +123,31 @@ export function TruckMilesWidget() {
                     active && payload?.[0] ? (
                       <div style={{ background: '#fff', border: '1px solid var(--ds-border)', borderRadius: 8, padding: '7px 12px', fontSize: 13, boxShadow: 'var(--sh-md)' }}>
                         <span style={{ fontWeight: 600 }}>Unit {payload[0].payload.unitNumber}</span>
-                        <div style={{ color: 'var(--ds-t3)', marginTop: 2 }}>
-                          {fmtMiles(payload[0].payload.week)} mi this week
-                        </div>
-                        <div style={{ color: 'var(--ds-t3)' }}>
-                          {fmtMiles(payload[0].payload.month)} mi this month
-                        </div>
+                        <span style={{ color: 'var(--ds-t3)', marginLeft: 8 }}>{fmtMiles(payload[0].payload.miles)} mi</span>
                       </div>
                     ) : null
                   }
                 />
-                <Bar dataKey="week" radius={[0, 4, 4, 0]} maxBarSize={24}>
-                  {rows.map((_, i) => (
-                    <Cell key={i} fill="#1ea8f3" />
-                  ))}
+                <Bar dataKey="miles" radius={[0, 4, 4, 0]} maxBarSize={24} cursor="pointer"
+                  onClick={(d: { payload?: Row }) => d?.payload && setSelected({ truckId: d.payload.truckId, unitNumber: d.payload.unitNumber })}>
+                  {rows.map((_, i) => <Cell key={i} fill="#1ea8f3" />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
 
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--ds-border)', display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--ds-t3)' }}>
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--ds-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: 'var(--ds-t3)' }}>
               <div>
-                Fleet this week <span style={{ color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{fmtMiles(weekTotal)}</span> mi
+                Fleet total <span style={{ color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{fmtMiles(fleetTotal)}</span> mi
               </div>
-              <div>
-                This month ({prettyDate(monthStart)}) <span style={{ color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{fmtMiles(monthTotal)}</span> mi
-              </div>
+              <div style={{ fontSize: 11.5 }}>Click a truck for its breakdown &amp; trend</div>
             </div>
           </>
         )}
       </div>
+
+      {selected && (
+        <TruckMileageDetail truck={selected} periodType={periodType} onClose={() => setSelected(null)} />
+      )}
     </div>
   )
 }
