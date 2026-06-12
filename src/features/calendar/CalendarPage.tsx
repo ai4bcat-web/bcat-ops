@@ -15,10 +15,23 @@ import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import type { ViewMode } from '@/types'
 
 const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
-  'day':      { numDays: 1,  navDays: 1  },
+  'day':      { numDays: 3,  navDays: 1  }, // current day + next 2 work days
   'week':     { numDays: 7,  navDays: 7  },
   'two-week': { numDays: 14, navDays: 14 },
   'month':    { numDays: -1, navDays: -1 }, // numDays computed dynamically
+}
+
+// Day view shows the current day plus the next work days (Mon–Fri), skipping weekends.
+const DAY_VIEW_DAYS = 3
+function workDaysFrom(start: Date, count: number): Date[] {
+  const out: Date[] = []
+  let d = new Date(start)
+  while (out.length < count) {
+    const dow = d.getDay() // 0 = Sun, 6 = Sat
+    if (dow !== 0 && dow !== 6) out.push(new Date(d))
+    d = addDays(d, 1)
+  }
+  return out
 }
 
 const STATUS_LEGEND = [
@@ -38,10 +51,13 @@ export function CalendarPage() {
 
   const [showAvailModal, setShowAvailModal] = useState(false)
 
-  const [currentView, setCurrentView] = useState<ViewMode>('two-week')
-  const [startDate, setStartDate]     = useState<Date>(() => getMondayOf(new Date()))
+  const [currentView, setCurrentView] = useState<ViewMode>('day')
+  const [startDate, setStartDate]     = useState<Date>(() => new Date())
 
   const { navDays } = VIEW_CONFIG[currentView]
+
+  // Day view: explicit work-day columns (today + next 2 work days, weekends skipped).
+  const dayViewDays = useMemo(() => workDaysFrom(startDate, DAY_VIEW_DAYS), [startDate])
 
   // For month view, numDays = days in the displayed month
   const numDays = useMemo(() => {
@@ -55,11 +71,16 @@ export function CalendarPage() {
     if (currentView === 'month') {
       return startDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     }
+    if (currentView === 'day') {
+      const first = dayViewDays[0]
+      const last  = dayViewDays[dayViewDays.length - 1]
+      return `${formatDateShort(first.toISOString())} – ${formatDateShort(last.toISOString())}`
+    }
     const end = addDays(startDate, numDays - 1)
     return numDays === 1
       ? formatDateShort(startDate.toISOString())
       : `${formatDateShort(startDate.toISOString())} – ${formatDateShort(end.toISOString())}`
-  }, [startDate, numDays, currentView])
+  }, [startDate, numDays, currentView, dayViewDays])
 
   const onPrev  = useCallback(() => {
     if (currentView === 'month') {
@@ -189,7 +210,7 @@ export function CalendarPage() {
               loads={visibleLoads}
               drivers={drivers}
               weekStart={startDate}
-              numDays={1}
+              days={dayViewDays}
               availabilities={availabilities}
             />
           ) : (

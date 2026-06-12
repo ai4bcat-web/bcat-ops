@@ -708,11 +708,15 @@ interface PlannerViewProps {
   drivers:         Driver[]
   weekStart:       Date
   numDays?:        number
+  days?:           Date[]   // explicit day columns (e.g. work-day day view); overrides numDays
   availabilities?: DriverAvailability[]
 }
 
-export function PlannerView({ loads, drivers, weekStart, numDays = 7, availabilities = [] }: PlannerViewProps) {
-  const days = useMemo(() => Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)), [weekStart, numDays])
+export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: daysProp, availabilities = [] }: PlannerViewProps) {
+  const days = useMemo(
+    () => daysProp ?? Array.from({ length: numDays }, (_, i) => addDays(weekStart, i)),
+    [daysProp, weekStart, numDays],
+  )
 
   // Pre-compute availability strips per calendar day
   const availStripsByDay = useMemo(() => {
