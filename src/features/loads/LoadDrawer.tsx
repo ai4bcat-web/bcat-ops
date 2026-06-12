@@ -660,6 +660,40 @@ function NewLoadDialog({
                   )}
                 />
               </div>
+
+              {/* Hot load toggle card */}
+              <div style={{ marginTop: 12 }}>
+                <Controller
+                  name="hot"
+                  control={control}
+                  render={({ field }) => (
+                    <button
+                      type="button"
+                      onClick={() => field.onChange(!field.value)}
+                      style={{
+                        width: '100%', padding: '14px 16px',
+                        borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+                        border: field.value ? '2px solid #f87171' : '2px solid var(--ds-border)',
+                        background: field.value ? '#fef2f2' : 'var(--ds-surface)',
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        transition: 'border-color 0.15s, background 0.15s',
+                      }}
+                    >
+                      <span style={{ fontSize: 20, lineHeight: 1, flexShrink: 0, filter: field.value ? 'none' : 'grayscale(1)', opacity: field.value ? 1 : 0.5 }}>
+                        🔥
+                      </span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: field.value ? '#b91c1c' : 'var(--ds-t1)' }}>
+                          {field.value ? 'Hot Load' : 'Mark as Hot Load'}
+                        </div>
+                        <div style={{ fontSize: 12, color: field.value ? '#dc2626' : 'var(--ds-t3)', marginTop: 2 }}>
+                          {field.value ? 'Click to undo — shows 🔥 in the schedule' : 'Urgent load — flag it with 🔥 in the schedule'}
+                        </div>
+                      </div>
+                    </button>
+                  )}
+                />
+              </div>
             </div>
 
           </form>
@@ -731,7 +765,7 @@ export function LoadDrawer() {
       pickupApptType: 'exact', pickupAppt: '', pickupApptEnd: '',
       deliveryApptType: 'exact', deliveryAppt: '', deliveryApptEnd: '',
       pickupDriverId: null, deliveryDriverId: null, readyToInvoice: false,
-      customer: '', miles: null, rate: null, notes: '',
+      customer: '', miles: null, rate: null, notes: '', hot: false,
     },
   })
 
@@ -759,6 +793,7 @@ export function LoadDrawer() {
         miles: load.miles ?? null,
         rate: load.rate != null ? load.rate / 100 : null,
         notes: load.notes ?? '',
+        hot: load.hot ?? false,
       })
     } else {
       const preDate = createPreFill?.dateStr
@@ -774,7 +809,7 @@ export function LoadDrawer() {
         pickupDriverId:  createPreFill?.driverId ?? null,
         deliveryDriverId: createPreFill?.driverId ?? null,
         readyToInvoice: false,
-        customer: '', miles: null, rate: null, notes: '',
+        customer: '', miles: null, rate: null, notes: '', hot: false,
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

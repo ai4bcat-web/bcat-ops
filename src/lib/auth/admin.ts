@@ -11,3 +11,16 @@ export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false
   return (ADMIN_EMAILS as readonly string[]).includes(email.toLowerCase().trim())
 }
+
+/**
+ * The single owner permitted to view and manage users / user permissions.
+ * Stricter than isAdminEmail — admins still get full page access, but only the
+ * owner can open the Users page and change other users' access. Enforced both
+ * client-side (UsersPage + NavBar) and server-side (userManagement Lambda).
+ */
+export const OWNER_EMAIL = 'ryne@bcatcorp.com'
+
+export function isOwnerEmail(email: string | null | undefined): boolean {
+  if (!email) return false
+  return email.toLowerCase().trim() === OWNER_EMAIL
+}

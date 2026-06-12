@@ -8,7 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip as RTooltip,
   ResponsiveContainer, Legend,
 } from 'recharts'
-import { Upload, RefreshCw, ArrowLeft, Fuel, ChevronRight, ChevronDown, Trash2 } from 'lucide-react'
+import { Upload, RefreshCw, ArrowLeft, Fuel, ChevronRight, ChevronDown, Trash2, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -341,11 +341,16 @@ function OverviewTab({
           <table className="w-full text-xs">
             <thead className="bg-slate-50">
               <tr>
-                <th className="sticky left-0 bg-slate-50 z-10 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
-                {CATEGORIES.map(({ label }) => (
-                  <th key={label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">{label}</th>
+                <th className="sticky left-0 bg-slate-50 z-20 text-left px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Truck</th>
+                {CATEGORIES.map(({ label, color }) => (
+                  <th key={label} className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="inline-block size-2 rounded-full shrink-0" style={{ background: color }} />
+                      {label}
+                    </span>
+                  </th>
                 ))}
-                <th className="text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
+                <th className="sticky right-0 bg-slate-50 z-20 text-right px-4 py-3 font-medium text-muted-foreground whitespace-nowrap">Total</th>
               </tr>
             </thead>
             <tbody>
@@ -363,30 +368,38 @@ function OverviewTab({
                   </td>
                 </tr>
               ) : (
-                matrixRows.map(({ truck, summary }) => (
-                  <tr key={truck.id} className="border-t border-slate-100 hover:bg-slate-50/60">
-                    <td className="sticky left-0 bg-white z-10 px-4 py-3 font-bold whitespace-nowrap" style={{ color: truckColor(allTrucks.findIndex((t) => t.id === truck.id)) }}>
-                      #{truck.unitNumber}
+                matrixRows.map(({ truck, summary }) => {
+                  const color = truckColor(allTrucks.findIndex((t) => t.id === truck.id))
+                  return (
+                  <tr key={truck.id} className="border-t border-slate-100 hover:bg-slate-50/60 group">
+                    <td className="sticky left-0 bg-white group-hover:bg-slate-50/60 z-10 px-4 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex items-center justify-center shrink-0" style={{ width: 30, height: 30, borderRadius: 7, background: `${color}1a`, color }}>
+                          <Truck className="size-3.5" />
+                        </div>
+                        <span className="font-mono font-bold text-base" style={{ color }}>#{truck.unitNumber}</span>
+                      </div>
                     </td>
                     {CATEGORIES.map(({ key }) => (
-                      <td key={key} className="px-4 py-3 tabular-nums text-right">
+                      <td key={key} className="px-4 py-4 tabular-nums text-right">
                         {summary[key] > 0 ? fmtMoney(summary[key]) : <span className="text-muted-foreground/25">—</span>}
                       </td>
                     ))}
-                    <td className="px-4 py-3 tabular-nums text-right font-semibold">{fmtMoney(summary.total)}</td>
+                    <td className="sticky right-0 bg-white group-hover:bg-slate-50/60 z-10 px-4 py-4 tabular-nums text-right font-bold text-foreground">{fmtMoney(summary.total)}</td>
                   </tr>
-                ))
+                  )
+                })
               )}
 
               {hasData && (
-                <tr className="border-t-2 border-slate-200 bg-slate-50 font-semibold">
-                  <td className="sticky left-0 bg-slate-50 z-10 px-4 py-3 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
+                <tr className="border-t-2 border-slate-200 bg-slate-50 font-bold">
+                  <td className="sticky left-0 bg-slate-50 z-10 px-4 py-4 text-xs text-muted-foreground uppercase tracking-wider">Total</td>
                   {CATEGORIES.map(({ key }) => (
-                    <td key={key} className="px-4 py-3 tabular-nums text-right">
+                    <td key={key} className="px-4 py-4 tabular-nums text-right text-foreground">
                       {(fleetTotals[key] ?? 0) > 0 ? fmtMoney(fleetTotals[key]) : <span className="text-muted-foreground/25">—</span>}
                     </td>
                   ))}
-                  <td className="px-4 py-3 tabular-nums text-right">{fmtMoney(fleetTotals.total || 0)}</td>
+                  <td className="sticky right-0 bg-slate-50 z-10 px-4 py-4 tabular-nums text-right text-base" style={{ color: 'var(--ds-blue-dark)' }}>{fmtMoney(fleetTotals.total || 0)}</td>
                 </tr>
               )}
             </tbody>

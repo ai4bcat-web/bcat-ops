@@ -3,7 +3,7 @@ import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
   confirmSignIn, type SignInOutput,
 } from 'aws-amplify/auth'
-import { isAdminEmail } from '@/lib/auth/admin'
+import { isAdminEmail, isOwnerEmail } from '@/lib/auth/admin'
 
 export interface AuthUser {
   userId: string
@@ -19,6 +19,7 @@ interface AuthContextValue {
   completeNewPassword: (newPassword: string) => Promise<void>
   logout: () => Promise<void>
   isAdmin: boolean
+  isOwner: boolean
   hasPageAccess: (pageKey: string) => boolean
 }
 
@@ -77,6 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const isAdmin = (user?.groups.includes('ADMIN') || isAdminEmail(user?.email)) ?? false
+  // Owner is the only account allowed to manage users — independent of admin status.
+  const isOwner = isOwnerEmail(user?.email)
 
   return (
     <AuthContext.Provider value={{
@@ -87,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       completeNewPassword,
       logout,
       isAdmin,
+      isOwner,
       hasPageAccess: (pageKey: string) =>
         isAdmin || (user?.groups.includes(`page-${pageKey}`) ?? false),
     }}>

@@ -26,6 +26,7 @@ const LICENSE = import.meta.env.VITE_FULLCALENDAR_LICENSE ?? 'GPL-My-Project-Is-
 
 const FC_VIEWS: Record<ViewMode, string> = {
   'day':      'resourceTimelineDay',
+  'week':     'resourceTimelineWeek',
   'two-week': 'resourceTimeline2Weeks',
   'month':    'resourceTimelineMonth',
 }

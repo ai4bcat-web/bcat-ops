@@ -53,7 +53,7 @@ function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
 }
 
 export function NavBar() {
-  const { user, logout, isAdmin, hasPageAccess } = useAuth()
+  const { user, logout, isOwner, hasPageAccess } = useAuth()
   const loads = useAppStore(s => s.loads)
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
   const { items: intakeItems } = useIntakeItems()
@@ -145,7 +145,7 @@ export function NavBar() {
           </div>
         ))}
 
-        {isAdmin && (
+        {isOwner && (
           <>
             <div style={{ height: 1, background: 'var(--ds-border)', margin: '8px 6px' }} />
             <NavLink

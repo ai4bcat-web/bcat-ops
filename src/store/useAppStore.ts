@@ -341,10 +341,12 @@ interface AppState {
   error: string | null
   currentUserEmail: string
 
-  // ── Local data (no backend yet — Zustand only) ─────────────────────────────
+  // ── Fleet data (backend-persisted; seed used as fallback before first deploy) ──
   equipment: Equipment[]
   maintenanceTasks: MaintenanceTask[]
   maintenanceInvoices: MaintenanceInvoice[]
+  fleetSeeded: boolean   // true once the local fleet has been migrated up to the backend
+  // ── Expenses (no backend yet — Zustand only) ───────────────────────────────
   expenses: Expense[]
 
   // ── UI (persisted to localStorage) ────────────────────────────────────────
@@ -372,12 +374,12 @@ interface AppState {
   updateLoad: (id: string, patch: Partial<Omit<Load, 'id' | 'createdAt'>>) => Promise<void>
   deleteLoad: (id: string) => Promise<void>
 
-  // ── Equipment actions (local) ──────────────────────────────────────────────
+  // ── Equipment actions (optimistic local update + write-through to backend) ──
   addEquipment: (e: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => Equipment
   updateEquipment: (id: string, patch: Partial<Omit<Equipment, 'id' | 'createdAt'>>) => void
   deleteEquipment: (id: string) => void
 
-  // ── Maintenance actions (local) ────────────────────────────────────────────
+  // ── Maintenance actions (optimistic local update + write-through to backend) ─
   addMaintenanceTask: (t: Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>) => void
   updateMaintenanceTask: (id: string, patch: Partial<Omit<MaintenanceTask, 'id' | 'createdAt'>>) => void
   deleteMaintenanceTask: (id: string) => void
@@ -433,6 +435,7 @@ export const useAppStore = create<AppState>()(
       equipment: SEED_EQUIPMENT,
       maintenanceTasks: SEED_TASKS,
       maintenanceInvoices: SEED_INVOICES,
+      fleetSeeded: false,
       expenses: SEED_EXPENSES,
 
       viewMode: 'compact' as ViewMode,
@@ -461,6 +464,34 @@ export const useAppStore = create<AppState>()(
           console.error('[store] initializeData failed', err)
           set({ isLoading: false, error: errorMessage(err) })
           return
+        }
+
+        // ── Fleet (Equipment + Maintenance) ─────────────────────────────────
+        // Separate + non-fatal: if the backend models aren't deployed yet, keep the
+        // local/seed fleet so the page still works until the Amplify deploy lands.
+        try {
+          const [equipment, maintenanceTasks, maintenanceInvoices] = await Promise.all([
+            api.listEquipment(),
+            api.listMaintenanceTasks(),
+            api.listMaintenanceInvoices(),
+          ])
+          if (equipment.length === 0 && !get().fleetSeeded) {
+            // First run against a fresh backend — migrate the current local fleet up
+            // (includes any edits made before deploy) so nothing is lost.
+            const localEquip = get().equipment
+            const localTasks = get().maintenanceTasks
+            const localInv   = get().maintenanceInvoices
+            await Promise.all([
+              ...localEquip.map((e) => api.createEquipment(e).catch((err) => console.warn('[store] seed equipment failed', e.id, err))),
+              ...localTasks.map((t) => api.createMaintenanceTask(t).catch((err) => console.warn('[store] seed task failed', t.id, err))),
+              ...localInv.map((i) => api.createMaintenanceInvoice(i).catch((err) => console.warn('[store] seed invoice failed', i.id, err))),
+            ])
+            set({ fleetSeeded: true })
+          } else {
+            set({ equipment, maintenanceTasks, maintenanceInvoices, fleetSeeded: true })
+          }
+        } catch (err) {
+          console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
         }
 
         // ── Real-time subscriptions — keep all clients in sync ──────────────
@@ -544,44 +575,65 @@ export const useAppStore = create<AppState>()(
       },
 
       // ── Equipment ──────────────────────────────────────────────────────────
+      // Optimistic: update local state immediately, then persist to the backend.
+      // The client-generated id is passed to the create mutation so local/server stay aligned.
       addEquipment: (e) => {
         const item: Equipment = { ...e, id: `equip-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
         set((s) => ({ equipment: [...s.equipment, item] }))
+        api.createEquipment(item).catch((err) => console.error('[store] createEquipment failed', err))
         return item
       },
       updateEquipment: (id, patch) => {
         set((s) => ({ equipment: s.equipment.map((e) => e.id === id ? { ...e, ...patch, updatedAt: nowIso() } : e) }))
+        api.updateEquipment(id, patch as Partial<Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>>)
+          .catch((err) => console.error('[store] updateEquipment failed', err))
       },
       deleteEquipment: (id) => {
+        const { maintenanceTasks, maintenanceInvoices } = get()
+        const taskIds = maintenanceTasks.filter((t) => t.equipmentId === id).map((t) => t.id)
+        const invIds  = maintenanceInvoices.filter((i) => i.equipmentId === id).map((i) => i.id)
         set((s) => ({
           equipment: s.equipment.filter((e) => e.id !== id),
           maintenanceTasks: s.maintenanceTasks.filter((t) => t.equipmentId !== id),
           maintenanceInvoices: s.maintenanceInvoices.filter((i) => i.equipmentId !== id),
         }))
+        Promise.all([
+          ...taskIds.map((tid) => api.deleteMaintenanceTask(tid)),
+          ...invIds.map((iid) => api.deleteMaintenanceInvoice(iid)),
+          api.deleteEquipment(id),
+        ]).catch((err) => console.error('[store] deleteEquipment failed', err))
       },
 
       // ── Maintenance tasks ──────────────────────────────────────────────────
       addMaintenanceTask: (t) => {
         const task: MaintenanceTask = { ...t, id: `task-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
         set((s) => ({ maintenanceTasks: [...s.maintenanceTasks, task] }))
+        api.createMaintenanceTask(task).catch((err) => console.error('[store] createMaintenanceTask failed', err))
       },
       updateMaintenanceTask: (id, patch) => {
         set((s) => ({ maintenanceTasks: s.maintenanceTasks.map((t) => t.id === id ? { ...t, ...patch, updatedAt: nowIso() } : t) }))
+        api.updateMaintenanceTask(id, patch as Partial<Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>>)
+          .catch((err) => console.error('[store] updateMaintenanceTask failed', err))
       },
       deleteMaintenanceTask: (id) => {
         set((s) => ({ maintenanceTasks: s.maintenanceTasks.filter((t) => t.id !== id) }))
+        api.deleteMaintenanceTask(id).catch((err) => console.error('[store] deleteMaintenanceTask failed', err))
       },
 
       // ── Maintenance invoices ───────────────────────────────────────────────
       addMaintenanceInvoice: (i) => {
         const inv: MaintenanceInvoice = { ...i, id: `inv-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
         set((s) => ({ maintenanceInvoices: [...s.maintenanceInvoices, inv] }))
+        api.createMaintenanceInvoice(inv).catch((err) => console.error('[store] createMaintenanceInvoice failed', err))
       },
       updateMaintenanceInvoice: (id, patch) => {
         set((s) => ({ maintenanceInvoices: s.maintenanceInvoices.map((i) => i.id === id ? { ...i, ...patch, updatedAt: nowIso() } : i) }))
+        api.updateMaintenanceInvoice(id, patch as Partial<Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>>)
+          .catch((err) => console.error('[store] updateMaintenanceInvoice failed', err))
       },
       deleteMaintenanceInvoice: (id) => {
         set((s) => ({ maintenanceInvoices: s.maintenanceInvoices.filter((i) => i.id !== id) }))
+        api.deleteMaintenanceInvoice(id).catch((err) => console.error('[store] deleteMaintenanceInvoice failed', err))
       },
 
       // ── Expenses ───────────────────────────────────────────────────────────
@@ -613,7 +665,10 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'bcat-ops-ui-v4',
-      // Persist UI prefs + local-only data (equipment/maintenance have no backend yet)
+      // Persist UI prefs + a fleet fallback. Equipment/maintenance are backend-backed
+      // now; the cached copy here only bridges the gap before initializeData's fetch
+      // resolves (and keeps the page usable if the backend isn't deployed yet).
+      // `fleetSeeded` guards the one-time local→backend migration.
       partialize: (s) => ({
         viewMode: s.viewMode,
         weekStart: s.weekStart,
@@ -621,6 +676,7 @@ export const useAppStore = create<AppState>()(
         equipment: s.equipment,
         maintenanceTasks: s.maintenanceTasks,
         maintenanceInvoices: s.maintenanceInvoices,
+        fleetSeeded: s.fleetSeeded,
       }),
       // Backfill fields added to SEED_EQUIPMENT after the user's first load
       onRehydrateStorage: () => (state) => {

@@ -14,6 +14,7 @@ import type { ViewMode } from '@/types'
 
 const VIEW_CONFIG: Record<ViewMode, { numDays: number; navDays: number }> = {
   'day':      { numDays: 1,  navDays: 1  },
+  'week':     { numDays: 7,  navDays: 7  },
   'two-week': { numDays: 14, navDays: 14 },
   'month':    { numDays: -1, navDays: -1 }, // numDays computed dynamically
 }

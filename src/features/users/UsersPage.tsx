@@ -19,16 +19,18 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
+// Controllable pages — must mirror the gated (non-alwaysVisible) nav items in NavBar.tsx
+// and the Lambda's PAGE_GROUPS. Intake/Tasks/Compliance are always visible, so not listed.
 const PAGE_OPTIONS = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'calendar',  label: 'Calendar'  },
-  { key: 'loads',     label: 'Loads'     },
-  { key: 'intake',    label: 'Intake'    },
-  { key: 'drivers',   label: 'Drivers'   },
-  { key: 'trucks',    label: 'Trucks'    },
-  { key: 'expenses',  label: 'Expenses'  },
-  { key: 'schedule',  label: 'Schedules' },
-  { key: 'audit',     label: 'Audit Log' },
+  { key: 'dashboard',   label: 'Dashboard'   },
+  { key: 'calendar',    label: 'Calendar'    },
+  { key: 'loads',       label: 'Loads'       },
+  { key: 'drivers',     label: 'Drivers'     },
+  { key: 'trucks',      label: 'Fleet'       },
+  { key: 'maintenance', label: 'Maintenance' },
+  { key: 'expenses',    label: 'Expenses'    },
+  { key: 'schedule',    label: 'Schedules'   },
+  { key: 'audit',       label: 'Audit Log'   },
 ] as const
 
 function StatusBadge({ user }: { user: CognitoUser }) {
@@ -273,7 +275,8 @@ function UserRow({
 }
 
 export function UsersPage() {
-  const { loading: authLoading, isAdmin } = useAuth()
+  // Only the owner (ryne@bcatcorp.com) may view or manage users. Other admins are redirected.
+  const { loading: authLoading, isOwner } = useAuth()
   const navigate = useNavigate()
   const [users, setUsers] = useState<CognitoUser[]>([])
   const [loading, setLoading] = useState(true)
@@ -283,15 +286,20 @@ export function UsersPage() {
   const [creating, setCreating] = useState(false)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [resettingId, setResettingId] = useState<string | null>(null)
+  // Page access chosen at invite time (bare keys, e.g. 'dashboard'); empty = none yet.
+  const [invitePages, setInvitePages] = useState<string[]>([])
+  const [inviteAdmin, setInviteAdmin] = useState(false)
+  const toggleInvitePage = (key: string) =>
+    setInvitePages((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
 
-  // Client-side access gate — redirect non-admins immediately.
+  // Client-side access gate — redirect non-owners immediately.
   // Server-side enforcement is handled independently in the Lambda.
   useEffect(() => {
-    if (!authLoading && !isAdmin) {
+    if (!authLoading && !isOwner) {
       toast.error("You don't have access to that page.")
       navigate('/dashboard', { replace: true })
     }
-  }, [authLoading, isAdmin, navigate])
+  }, [authLoading, isOwner, navigate])
 
   const loadUsers = useCallback(async () => {
     setLoading(true)
@@ -314,17 +322,30 @@ export function UsersPage() {
   }, [])
 
   useEffect(() => {
-    if (isAdmin) loadUsers()
-  }, [isAdmin, loadUsers])
+    if (isOwner) loadUsers()
+  }, [isOwner, loadUsers])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newEmail.trim()) return
+    const email = newEmail.trim()
+    if (!email) return
     setCreating(true)
     try {
-      await createCognitoUser(newEmail.trim())
-      toast.success(`Invite sent to ${newEmail}`)
+      await createCognitoUser(email)
+      // Apply the chosen access immediately. A new Cognito user's username === their email.
+      try {
+        if (inviteAdmin) {
+          await setUserAdmin(email, true)
+        } else if (invitePages.length > 0) {
+          await setUserPageGroups(email, invitePages)
+        }
+      } catch (permErr: unknown) {
+        toast.error(`User invited, but setting permissions failed: ${errorMessage(permErr)}`)
+      }
+      toast.success(`Invite sent to ${email}`)
       setNewEmail('')
+      setInvitePages([])
+      setInviteAdmin(false)
       await loadUsers()
     } catch (err: unknown) {
       toast.error(errorMessage(err))
@@ -364,8 +385,8 @@ export function UsersPage() {
     }
   }
 
-  // Never flash real UI for non-admins while the redirect is in flight
-  if (authLoading || !isAdmin) return null
+  // Never flash real UI for non-owners while the redirect is in flight
+  if (authLoading || !isOwner) return null
 
   const activeCount   = users.filter((u) => u.enabled && u.status !== 'FORCE_CHANGE_PASSWORD').length
   const pendingCount  = users.filter((u) => u.status === 'FORCE_CHANGE_PASSWORD').length
@@ -420,25 +441,75 @@ export function UsersPage() {
               They'll receive an email with a temporary password to log in.
             </p>
           </div>
-          <form onSubmit={handleCreate} className="flex items-end gap-3">
-            <div className="flex-1 space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Email Address
-              </Label>
-              <Input
-                type="email"
-                placeholder="driver@bcatcorp.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                className="h-9"
-                required
-                disabled={creating}
-              />
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="flex items-end gap-3">
+              <div className="flex-1 space-y-1.5">
+                <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Email Address
+                </Label>
+                <Input
+                  type="email"
+                  placeholder="driver@bcatcorp.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  className="h-9"
+                  required
+                  disabled={creating}
+                />
+              </div>
+              <Button type="submit" size="lg" className="gap-1.5" disabled={creating || !newEmail.trim()}>
+                <Plus className="size-4" />
+                {creating ? 'Sending…' : 'Send Invite'}
+              </Button>
             </div>
-            <Button type="submit" size="lg" className="gap-1.5" disabled={creating || !newEmail.trim()}>
-              <Plus className="size-4" />
-              {creating ? 'Sending…' : 'Send Invite'}
-            </Button>
+
+            {/* Page access for the invited user — applied right after the invite is created */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Page Access
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInviteAdmin((v) => !v)}
+                  style={{
+                    height: 28, padding: '0 12px', fontSize: 12, fontWeight: 600,
+                    borderRadius: 999, border: `1px solid ${inviteAdmin ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                    background: inviteAdmin ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+                    color: inviteAdmin ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                    cursor: 'pointer', transition: 'all 0.15s',
+                  }}
+                >
+                  Admin — all pages
+                </button>
+                {!inviteAdmin && PAGE_OPTIONS.map(({ key, label }) => {
+                  const active = invitePages.includes(key)
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => toggleInvitePage(key)}
+                      style={{
+                        height: 28, padding: '0 12px', fontSize: 12, fontWeight: 600,
+                        borderRadius: 999, border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                        background: active ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+                        color: active ? 'var(--ds-blue)' : 'var(--ds-t3)',
+                        cursor: 'pointer', transition: 'all 0.15s',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {inviteAdmin
+                  ? 'Full access to every page.'
+                  : invitePages.length > 0
+                    ? `${invitePages.length} page${invitePages.length !== 1 ? 's' : ''} selected. Intake, Tasks & Compliance are visible to everyone.`
+                    : 'Pick the pages this user can see (you can also change this later from the list below).'}
+              </p>
+            </div>
           </form>
         </div>
 

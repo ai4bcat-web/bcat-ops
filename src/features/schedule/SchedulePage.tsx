@@ -94,12 +94,15 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
   const isBroker = driver.type === 'broker'
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
+    <div style={{ borderRadius: 12, border: '2px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm text-foreground truncate">{driver.name}</span>
+            {loads.some((l) => l.hot) && (
+              <span title="Has a hot load" className="shrink-0">🔥</span>
+            )}
             {isBroker && (
               <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground border border-border rounded px-1.5 py-0.5 shrink-0">
                 Broker
@@ -122,15 +125,21 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
             const origin = [load.originName, load.originCity].filter(Boolean).join(', ')
             const dest   = [load.destinationName, load.destinationCity].filter(Boolean).join(', ')
             return (
-              <li key={load.id} className="px-4 py-3">
+              <li key={load.id} className={cn('px-4 py-3', load.hot && 'bg-red-50/60')}>
                 <div className="flex items-start gap-3">
-                  <span className="size-5 rounded-full bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                  <span className={cn(
+                    'size-5 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5',
+                    load.hot ? 'bg-red-100 text-red-700' : 'bg-primary/10 text-primary',
+                  )}>
                     {i + 1}
                   </span>
                   <div className="min-w-0 flex-1 space-y-1">
                     {/* Route */}
                     <div className="text-sm font-medium text-foreground">
-                      <span className="truncate block" title={origin || 'Origin TBD'}>{origin || <span className="text-muted-foreground">Origin TBD</span>}</span>
+                      <span className="truncate block" title={origin || 'Origin TBD'}>
+                        {load.hot && <span title="Hot load" className="mr-1">🔥</span>}
+                        {origin || <span className="text-muted-foreground">Origin TBD</span>}
+                      </span>
                       <span className="text-muted-foreground text-xs">→ </span>
                       <span className="truncate block" title={dest || 'Destination TBD'}>{dest || <span className="text-muted-foreground">Destination TBD</span>}</span>
                     </div>

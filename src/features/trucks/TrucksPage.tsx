@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Check, Search, ShieldCheck,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck,
 } from 'lucide-react'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
@@ -63,12 +63,58 @@ function ExpiryBadge({ date, label, stateFn = expiryState }: { date?: string; la
   )
 }
 
-function DateCell({ date, stateFn = expiryState }: { date?: string; stateFn?: (d?: string) => ExpiryState }) {
-  const state = stateFn(date)
-  if (state === 'none') return <span className="text-muted-foreground/40 text-xs">—</span>
-  const cls = state === 'overdue' ? 'text-red-600 font-semibold' : state === 'expiring' ? 'text-amber-600 font-semibold' : 'text-emerald-700'
-  const icon = state === 'overdue' ? <AlertTriangle className="size-3 shrink-0" /> : state === 'expiring' ? <Clock className="size-3 shrink-0" /> : null
-  return <span className={cn('inline-flex items-center gap-1 text-xs font-mono', cls)}>{icon}{date}</span>
+// Chip-level expiry: amber within ~6 weeks (matches the consolidated Compliance cell spec).
+function chipExpiryState(dateStr?: string): ExpiryState {
+  if (!dateStr) return 'none'
+  const days = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000)
+  if (days < 0) return 'overdue'
+  if (days <= 42) return 'expiring'
+  return 'ok'
+}
+
+const SEVERITY_ORDER: Record<ExpiryState, number> = { none: 0, ok: 1, expiring: 2, overdue: 3 }
+
+// Consolidated compliance cell — one worst-of status pill + per-field chips with date tooltips.
+function ComplianceCell({ equip, isTruck }: { equip: Equipment; isTruck: boolean }) {
+  const chips: { key: string; date?: string; state: ExpiryState }[] = [
+    { key: 'DOT', date: equip.dotInspectionDate, state: dotInspectionState(equip.dotInspectionDate) },
+    ...(isTruck ? [{ key: 'IFTA', date: equip.iftaExpirationDate, state: chipExpiryState(equip.iftaExpirationDate) }] : []),
+    ...(isTruck ? [{ key: 'IRP', date: equip.irpExpirationDate, state: chipExpiryState(equip.irpExpirationDate) }] : []),
+    { key: 'INS', date: equip.insuranceExpirationDate, state: chipExpiryState(equip.insuranceExpirationDate) },
+  ]
+  const worst = chips.reduce<ExpiryState>((w, c) => (SEVERITY_ORDER[c.state] > SEVERITY_ORDER[w] ? c.state : w), 'none')
+
+  const pill =
+    worst === 'overdue'  ? { cls: 'bg-red-50 text-red-700 border-red-200',            label: 'Action needed', icon: <AlertTriangle className="size-3" /> } :
+    worst === 'expiring' ? { cls: 'bg-amber-50 text-amber-700 border-amber-200',      label: 'Renewal soon',  icon: <Clock className="size-3" /> } :
+    worst === 'ok'       ? { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: 'All current',   icon: <CheckCircle2 className="size-3" /> } :
+                           { cls: 'bg-slate-50 text-slate-400 border-slate-200',       label: 'No dates',      icon: null }
+
+  const chipCls: Record<ExpiryState, string> = {
+    overdue:  'bg-red-50 text-red-700 border-red-200',
+    expiring: 'bg-amber-50 text-amber-700 border-amber-200',
+    ok:       'bg-slate-50 text-slate-500 border-slate-200',
+    none:     'bg-slate-50 text-slate-300 border-slate-100',
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 items-start">
+      <span className={cn('inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border w-fit', pill.cls)}>
+        {pill.icon}{pill.label}
+      </span>
+      <div className="flex flex-wrap gap-1">
+        {chips.map((c) => (
+          <span
+            key={c.key}
+            title={`${c.key}: ${c.date ?? 'no date'}`}
+            className={cn('inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border cursor-default', chipCls[c.state])}
+          >
+            {c.key}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function priorityColor(p: TaskPriority) {
@@ -691,33 +737,30 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
         className={cn('cursor-pointer hover:bg-slate-50/80 transition-colors', !equip.active && 'opacity-50', expanded && 'bg-slate-50')}
         onClick={() => setExpanded((v) => !v)}
       >
-        {/* Type */}
+        {/* Equipment — icon box + unit# (+ ownership) + year · make/model subtitle */}
         <TableCell className="py-3">
-          <span className={cn('inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border',
-            isTruck ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-violet-50 text-violet-700 border-violet-200'
-          )}>
-            {isTruck ? <Truck className="size-3" /> : <Container className="size-3" />}
-            {isTruck ? 'Truck' : 'Trailer'}
-          </span>
-        </TableCell>
-
-        {/* Ownership */}
-        <TableCell className="py-3">
-          {isTruck
-            ? <OwnershipBadge type={ownershipType} onClick={(next) => onOwnershipChange(equip.id, equip.unitNumber, next)} />
-            : <span className="text-muted-foreground/40 text-xs">—</span>}
-        </TableCell>
-
-        {/* Unit # */}
-        <TableCell className="py-3 font-bold text-sm text-foreground">
-          #{equip.unitNumber}
-          {equip.nickname && <div className="text-xs text-muted-foreground font-normal">{equip.nickname}</div>}
-        </TableCell>
-
-        {/* Year / Make / Model */}
-        <TableCell className="py-3 text-sm">
-          <span className="font-medium">{equip.year}</span>
-          <span className="text-muted-foreground ml-1">{[equip.make, equip.model].filter(Boolean).join(' ')}</span>
+          <div className="flex items-center gap-3">
+            <div
+              className="flex items-center justify-center shrink-0"
+              style={{
+                width: 36, height: 36, borderRadius: 8,
+                background: isTruck ? 'var(--ds-blue-bg)' : 'var(--ds-violet-bg)',
+                color: isTruck ? 'var(--ds-blue-dark)' : '#7c3aed',
+              }}
+            >
+              {isTruck ? <Truck className="size-4" /> : <Container className="size-4" />}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-bold text-sm text-foreground">#{equip.unitNumber}</span>
+                {isTruck && <OwnershipBadge type={ownershipType} onClick={(next) => onOwnershipChange(equip.id, equip.unitNumber, next)} />}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">
+                {[equip.year, [equip.make, equip.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ') || '—'}
+                {equip.nickname ? ` · ${equip.nickname}` : ''}
+              </div>
+            </div>
+          </div>
         </TableCell>
 
         {/* Plate */}
@@ -725,49 +768,28 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
           {equip.plate || <span className="text-muted-foreground/40">—</span>}
         </TableCell>
 
-        {/* DOT Inspection */}
-        <TableCell className="py-3"><DateCell date={equip.dotInspectionDate} stateFn={dotInspectionState} /></TableCell>
+        {/* Compliance — worst-of pill + DOT/IFTA/IRP/INS chips */}
+        <TableCell className="py-3 min-w-[180px]">
+          <ComplianceCell equip={equip} isTruck={isTruck} />
+        </TableCell>
 
-        {/* IFTA */}
+        {/* Assignment — driver + "fleet manager · tollway" subtitle */}
         <TableCell className="py-3">
-          {isTruck ? <DateCell date={equip.iftaExpirationDate} /> : <span className="text-muted-foreground/40 text-xs">—</span>}
+          {isTruck ? (
+            <>
+              <div className="text-sm font-medium text-foreground">
+                {driverName || <span className="text-muted-foreground/40 text-xs font-normal">Unassigned</span>}
+              </div>
+              <div className="text-xs text-muted-foreground capitalize">
+                {[equip.fleetManagerAssignee, equip.onTollwayAccount ? 'Tollway' : null].filter(Boolean).join(' · ') || '—'}
+              </div>
+            </>
+          ) : (
+            <span className="text-muted-foreground/40 text-xs">—</span>
+          )}
         </TableCell>
 
-        {/* IRP */}
-        <TableCell className="py-3">
-          {isTruck ? <DateCell date={equip.irpExpirationDate} /> : <span className="text-muted-foreground/40 text-xs">—</span>}
-        </TableCell>
-
-        {/* Insurance */}
-        <TableCell className="py-3"><DateCell date={equip.insuranceExpirationDate} /></TableCell>
-
-        {/* Bobtail */}
-        <TableCell className="py-3">
-          {isTruck ? <DateCell date={equip.bobtailInsuranceDate} /> : <span className="text-muted-foreground/40 text-xs">—</span>}
-        </TableCell>
-
-        {/* Driver */}
-        <TableCell className="py-3 text-sm">
-          {isTruck
-            ? driverName
-              ? <span className="text-foreground font-medium">{driverName}</span>
-              : <span className="text-muted-foreground/40 text-xs">Unassigned</span>
-            : <span className="text-muted-foreground/40 text-xs">—</span>}
-        </TableCell>
-
-        {/* Fleet Mgr */}
-        <TableCell className="py-3 text-xs text-muted-foreground capitalize">
-          {equip.fleetManagerAssignee || '—'}
-        </TableCell>
-
-        {/* Tollway */}
-        <TableCell className="py-3">
-          {equip.onTollwayAccount
-            ? <span className="inline-flex items-center gap-1 text-xs text-emerald-700 font-medium"><Check className="size-3" />Yes</span>
-            : <span className="text-xs text-muted-foreground/40">No</span>}
-        </TableCell>
-
-        {/* Tasks */}
+        {/* Open Tasks */}
         <TableCell className="py-3">
           {upcomingTasks.length === 0
             ? <span className="text-xs text-muted-foreground/40">None</span>
@@ -781,7 +803,7 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
         </TableCell>
 
         {/* Repair Spend */}
-        <TableCell className="py-3 text-xs font-mono font-semibold text-foreground">
+        <TableCell className="py-3 text-xs font-mono font-semibold text-foreground text-right">
           {repairSpend > 0 ? formatCents(repairSpend) : <span className="text-muted-foreground/40">—</span>}
         </TableCell>
 
@@ -998,7 +1020,7 @@ export function TrucksPage() {
         </div>
 
         {/* Equipment table */}
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
               <Truck className="size-8 opacity-20" />
@@ -1008,21 +1030,12 @@ export function TrucksPage() {
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent bg-slate-50/60">
-                  <TableHead className="py-3 text-xs">Type</TableHead>
-                  <TableHead className="py-3 text-xs">Ownership</TableHead>
-                  <TableHead className="py-3 text-xs">Unit #</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[160px]">Year / Make / Model</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[220px]">Equipment</TableHead>
                   <TableHead className="py-3 text-xs">Plate</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px]">DOT Insp</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px]">IFTA Exp</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px]">IRP Exp</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px]">Insurance</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px]">Bobtail Ins</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[120px]">Driver</TableHead>
-                  <TableHead className="py-3 text-xs">Fleet Mgr</TableHead>
-                  <TableHead className="py-3 text-xs">Tollway</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[180px]">Compliance</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[140px]">Assignment</TableHead>
                   <TableHead className="py-3 text-xs min-w-[120px]">Open Tasks</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px]">Repair Spend</TableHead>
+                  <TableHead className="py-3 text-xs min-w-[100px] text-right">Repair Spend</TableHead>
                   <TableHead className="py-3 w-24" />
                 </TableRow>
               </TableHeader>
@@ -1038,7 +1051,7 @@ export function TrucksPage() {
                       tasks={tasks}
                       invoices={invs}
                       driverName={driver?.name}
-                      colSpan={16}
+                      colSpan={7}
                       ownershipType={truckConfigs.get(e.id)?.ownershipType}
                       onOwnershipChange={handleOwnershipChange}
                       onEdit={setShowForm}

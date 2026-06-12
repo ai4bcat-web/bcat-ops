@@ -202,6 +202,7 @@ function LoadCard({
       className="group/card"
       style={{
         marginBottom: 4,
+        border: '1px solid var(--ds-border)',
         borderLeft: `3px solid ${borderHex}${borderAlpha}`,
         background: bg,
         borderRadius: 4,
@@ -707,6 +708,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
 
   const gridDays = useMemo<Date[]>(() => {
     if (viewMode === 'day')      return [startDate]
+    if (viewMode === 'week')     return Array.from({ length: 7 },  (_, i) => addDays(startDate, i))
     if (viewMode === 'two-week') return Array.from({ length: 14 }, (_, i) => addDays(startDate, i))
     // month
     const daysInMonth = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0).getDate()

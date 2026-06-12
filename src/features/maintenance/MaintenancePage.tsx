@@ -29,12 +29,16 @@ function formatCents(cents: number) {
   return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function priorityDot(color: string) {
+  return <span className="inline-block size-1.5 rounded-full mr-1 shrink-0" style={{ background: color }} />
+}
+
 function priorityBadge(p: TaskPriority) {
   return p === 'high'
-    ? <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200 text-xs">High</Badge>
+    ? <Badge variant="secondary" className="bg-red-50 text-red-700 border-red-200 text-xs">{priorityDot('#dc2626')}High</Badge>
     : p === 'med'
-    ? <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">Med</Badge>
-    : <Badge variant="secondary" className="bg-slate-50 text-slate-600 border-slate-200 text-xs">Low</Badge>
+    ? <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">{priorityDot('#d97706')}Med</Badge>
+    : <Badge variant="secondary" className="bg-slate-50 text-slate-600 border-slate-200 text-xs">{priorityDot('#94a3b8')}Low</Badge>
 }
 
 function DueBadge({ date }: { date?: string }) {
@@ -55,7 +59,7 @@ function DueBadge({ date }: { date?: string }) {
     none:    null,
   }
   return (
-    <span className={cn('inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border', styles[state])}>
+    <span className={cn('inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border', state === 'overdue' ? 'font-bold' : 'font-medium', styles[state])}>
       {icon[state]}{date}
     </span>
   )
@@ -320,9 +324,13 @@ export function MaintenancePage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredTasks.map((t) => (
+                  {filteredTasks.map((t) => {
+                    const over = t.status !== 'complete' && dueState(t.dueDate) === 'overdue'
+                    // Left-accent bar: red for overdue, amber for High priority, else none.
+                    const accent = over ? 'var(--ds-red)' : t.priority === 'high' ? 'var(--ds-amber)' : 'transparent'
+                    return (
                     <TableRow key={t.id} className={cn(t.status === 'complete' && 'opacity-50')}>
-                      <TableCell>
+                      <TableCell className="py-4" style={{ boxShadow: `inset 3px 0 0 ${accent}` }}>
                         <button
                           onClick={() => updateMaintenanceTask(t.id, { status: t.status === 'complete' ? 'upcoming' : 'complete' })}
                           className={cn('transition-colors', t.status === 'complete' ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400')}
@@ -330,20 +338,35 @@ export function MaintenancePage() {
                           <CheckCircle2 className="size-4" />
                         </button>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-4">
                         <span className={cn('text-sm font-medium', t.status === 'complete' && 'line-through')}>{t.title}</span>
                         {t.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px]">{t.notes}</p>}
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{equipName(t.equipmentId)}</TableCell>
-                      <TableCell><DueBadge date={t.dueDate} /></TableCell>
-                      <TableCell>{priorityBadge(t.priority)}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground capitalize">{t.assignee || '—'}</TableCell>
-                      <TableCell>
+                      <TableCell className="py-4">
+                        <span className="inline-flex items-center font-mono text-xs bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
+                          {equipName(t.equipmentId)}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-4"><DueBadge date={t.dueDate} /></TableCell>
+                      <TableCell className="py-4">{priorityBadge(t.priority)}</TableCell>
+                      <TableCell className="py-4">
+                        {t.assignee
+                          ? <span className="text-sm text-muted-foreground capitalize">{t.assignee}</span>
+                          : (
+                            <button
+                              onClick={() => setEditTask(t)}
+                              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:border-slate-400 border border-dashed border-slate-300 rounded px-2 py-1 transition-colors"
+                            >
+                              <Plus className="size-3" /> Assign
+                            </button>
+                          )}
+                      </TableCell>
+                      <TableCell className="py-4">
                         {t.status === 'complete'
                           ? <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">Complete</Badge>
                           : <Badge variant="secondary" className="bg-blue-50 text-blue-700 border-blue-200 text-xs">Upcoming</Badge>}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-4">
                         <div className="flex items-center gap-1">
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditTask(t)}>
                             <Pencil className="size-3.5" />
@@ -354,7 +377,7 @@ export function MaintenancePage() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  )})}
                 </TableBody>
               </Table>
             )}

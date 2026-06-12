@@ -18,12 +18,15 @@ const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 
 // All controllable page groups (must match frontend PAGE_OPTIONS keys)
 const PAGE_GROUPS = [
-  'page-dashboard', 'page-calendar', 'page-loads', 'page-intake',
-  'page-drivers', 'page-trucks', 'page-expenses', 'page-schedule', 'page-audit',
+  'page-dashboard', 'page-calendar', 'page-loads',
+  'page-drivers', 'page-trucks', 'page-maintenance', 'page-expenses', 'page-schedule', 'page-audit',
 ]
 
 const ADMIN_GROUP = 'ADMIN'
 const DEFAULT_GROUP = 'DISPATCHER'  // auto-assigned to new invited users
+
+// Only this account may manage users. Must match OWNER_EMAIL in src/lib/auth/admin.ts.
+const OWNER_EMAIL = 'ryne@bcatcorp.com'
 
 interface Args {
   action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups' | 'resetPassword' | 'setAdmin'
@@ -51,6 +54,15 @@ async function ensureGroup(name: string) {
 
 export const handler = async (event: { arguments: Args; identity?: AppSyncIdentity | null }) => {
   console.log('[userManagement] action:', event.arguments?.action, '| pool:', USER_POOL_ID)
+
+  // Server-side authorization: only the owner may manage users. The data model's
+  // allow.authenticated() lets any signed-in user reach this Lambda, so the real
+  // gate lives here (the client-side check in UsersPage is just UX).
+  const callerEmail = (event.identity?.claims?.email ?? '').toLowerCase().trim()
+  if (callerEmail !== OWNER_EMAIL) {
+    console.warn('[userManagement] forbidden caller:', callerEmail || '(no identity)')
+    throw new Error('Forbidden: only the owner may view or manage users.')
+  }
 
   const { action, email, username, pages, isAdmin: makeAdmin } = event.arguments
 
@@ -119,7 +131,12 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
     }
     case 'setPageGroups': {
       if (!username) throw new Error('username is required')
-      const desired: string[] = pages ? JSON.parse(pages) : []
+      // Frontend sends bare keys (e.g. "dashboard"); normalize to full group names
+      // ("page-dashboard") and drop anything not in the known controllable set.
+      const rawDesired: string[] = pages ? JSON.parse(pages) : []
+      const desired = rawDesired
+        .map((p) => (p.startsWith('page-') ? p : `page-${p}`))
+        .filter((g) => PAGE_GROUPS.includes(g))
       // Ensure all page groups exist first
       await Promise.all(PAGE_GROUPS.map(ensureGroup))
       // Get current groups

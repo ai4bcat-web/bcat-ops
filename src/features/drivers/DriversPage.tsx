@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, ToggleLeft, ToggleRight, Edit2, Trash2, Building2, Truck, Camera, X, Check, AlertTriangle, Clock, Search, ShieldCheck } from 'lucide-react'
+import { Plus, Phone, Edit2, Trash2, Building2, Truck, Package, Camera, X, Check, AlertTriangle, Eye, Search, ShieldCheck } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -39,21 +39,41 @@ function expiryState(date?: string): 'none' | 'overdue' | 'expiring' | 'ok' {
   return 'ok'
 }
 
-function DateBadge({ date, label }: { date?: string; label: string }) {
-  const state = expiryState(date)
-  if (state === 'none') return <span className="text-muted-foreground/40 text-xs">—</span>
-  const cls =
-    state === 'overdue' ? 'text-red-600 font-semibold' :
-    state === 'expiring' ? 'text-amber-600 font-semibold' :
-    'text-emerald-700'
-  const icon =
-    state === 'overdue' ? <AlertTriangle className="size-3 shrink-0" /> :
-    state === 'expiring' ? <Clock className="size-3 shrink-0" /> :
-    null
+// Consolidated compliance cell — replaces the CDL/Med/Drug/Hire date columns.
+function DriverComplianceCell({ driver }: { driver: Driver }) {
+  if ((driver.type ?? 'driver') === 'broker') {
+    return <span className="text-muted-foreground/40 text-xs">N/A</span>
+  }
+  const hasCdl = !!(driver.cdl || driver.cdlExpiration)
+  const hasMed = !!driver.medCardExpiration
+  if (!hasCdl || !hasMed) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 w-fit">
+        <AlertTriangle className="size-3" /> Missing docs
+      </span>
+    )
+  }
+  const chip = (label: string, date?: string) => {
+    const st = expiryState(date)
+    const cls = st === 'overdue' ? 'bg-red-50 text-red-700 border-red-200'
+              : st === 'expiring' ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : 'bg-slate-50 text-slate-500 border-slate-200'
+    return (
+      <span title={`${label}: ${date ?? 'no date'}`} className={cn('inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded border cursor-default', cls)}>
+        {label}
+      </span>
+    )
+  }
   return (
-    <span className={cn('inline-flex items-center gap-1 text-xs font-mono', cls)} title={label}>
-      {icon}{date}
-    </span>
+    <div className="flex flex-col gap-1.5 items-start">
+      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 w-fit">
+        <ShieldCheck className="size-3" /> Verified
+      </span>
+      <div className="flex gap-1">
+        {chip('CDL', driver.cdlExpiration)}
+        {chip('MED', driver.medCardExpiration)}
+      </div>
+    </div>
   )
 }
 
@@ -449,8 +469,12 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
 export function DriversPage() {
   const navigate = useNavigate()
-  const { drivers, updateDriver } = useDrivers()
-  const equipment = useAppStore((s) => s.equipment)
+  const { drivers } = useDrivers()
+  const loads = useAppStore((s) => s.loads)
+
+  // Active loads = assigned to the driver and not yet ready to invoice.
+  const activeLoadCount = (driverId: string) =>
+    loads.filter((l) => !l.readyToInvoice && (l.pickupDriverId === driverId || l.deliveryDriverId === driverId)).length
   const [drawerOpen, setDrawerOpen]       = useState(false)
   const [editingDriver, setEditingDriver] = useState<Driver | null>(null)
   const [search, setSearch]               = useState('')
@@ -557,95 +581,93 @@ export function DriversPage() {
         </div>
 
         {/* Table */}
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflowX: 'auto' }}>
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="min-w-[180px]">Name</TableHead>
-                <TableHead className="min-w-[140px]">Phone</TableHead>
-                <TableHead className="min-w-[130px]">Type</TableHead>
-                <TableHead className="min-w-[120px]">Truck</TableHead>
+                <TableHead className="min-w-[220px]">Driver</TableHead>
+                <TableHead className="min-w-[150px]">Contact</TableHead>
+                <TableHead className="min-w-[140px]">Type</TableHead>
+                <TableHead className="min-w-[150px]">Assignment</TableHead>
+                <TableHead className="min-w-[160px]">Compliance</TableHead>
                 <TableHead className="min-w-[90px]">Status</TableHead>
-                <TableHead className="min-w-[110px]">CDL Exp</TableHead>
-                <TableHead className="min-w-[110px]">Med Card Exp</TableHead>
-                <TableHead className="min-w-[110px]">Drug Test</TableHead>
-                <TableHead className="min-w-[110px]">Hire Date</TableHead>
-                <TableHead className="min-w-[180px]">Notes</TableHead>
                 <TableHead className="w-20" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {sorted.map((driver) => {
-                const assignedTruck = equipment.find((e) => e.id === driver.assignedTruckId && e.type === 'truck')
                 const driverType = driver.type ?? 'driver'
+                const activeLoads = activeLoadCount(driver.id)
+                const avatarColor = driver.colorKey ? getColor(driver.colorKey).border : undefined
                 return (
                   <TableRow key={driver.id} className={cn(!driver.active && 'opacity-50')}>
-                    <TableCell className="font-semibold text-foreground">
-                      <div className="flex items-center gap-2">
-                        <Avatar
-                          src={driver.photoUrl}
-                          initials={getInitials(driver.name)}
-                          size="sm"
-                          style={driver.colorKey ? { background: getColor(driver.colorKey).border, color: '#ffffff' } : undefined}
-                        />
-                        <span>{driver.name}</span>
-                        {driver.colorKey && (
-                          <span className="size-2.5 rounded-full shrink-0" style={{ background: getColor(driver.colorKey).border }} />
-                        )}
+                    {/* Driver — avatar (+ active pulse) + name + notes/ID subtitle */}
+                    <TableCell className="py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="relative shrink-0">
+                          <Avatar
+                            src={driver.photoUrl}
+                            initials={getInitials(driver.name)}
+                            size="lg"
+                            style={avatarColor ? { background: avatarColor, color: '#ffffff' } : undefined}
+                          />
+                          {activeLoads > 0 && (
+                            <span className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" title={`${activeLoads} active load${activeLoads !== 1 ? 's' : ''}`} />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-foreground truncate">{driver.name}</div>
+                          <div className="text-xs text-muted-foreground truncate max-w-[160px]">
+                            {driver.notes
+                              ? driver.notes
+                              : <span className="font-mono text-muted-foreground/60">{driver.id}</span>}
+                          </div>
+                        </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+
+                    {/* Contact — tel: link, mono */}
+                    <TableCell className="py-3 text-muted-foreground">
                       {driver.phone
-                        ? <a href={`tel:${driver.phone}`} className="flex items-center gap-1.5 hover:text-primary transition-colors w-fit text-sm">
-                            <Phone className="size-3.5" />{formatPhone(driver.phone)}
+                        ? <a href={`tel:${driver.phone}`} className="inline-flex items-center gap-1.5 hover:text-primary transition-colors w-fit text-sm font-mono">
+                            <Phone className="size-3.5 shrink-0" />{formatPhone(driver.phone)}
                           </a>
                         : <span className="text-muted-foreground/50">—</span>}
                     </TableCell>
-                    <TableCell>
+
+                    {/* Type — company (blue, truck) or broker (violet, box) */}
+                    <TableCell className="py-3">
                       {driverType === 'broker'
-                        ? <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-200">Broker / 3PL</Badge>
+                        ? <Badge variant="secondary" className="bg-violet-50 text-violet-700 border-violet-200">
+                            <Package className="size-3 mr-1" />Broker / 3PL
+                          </Badge>
                         : <Badge variant="secondary" className="bg-sky-50 text-sky-700 border-sky-200">
-                            <Building2 className="size-3 mr-1" />Company Driver
+                            <Truck className="size-3 mr-1" />Company
                           </Badge>}
                     </TableCell>
-                    <TableCell>
-                      {assignedTruck
-                        ? <span className="flex items-center gap-1.5 text-sm text-foreground font-medium">
-                            <Truck className="size-3.5 text-muted-foreground" />#{assignedTruck.unitNumber}
-                            <span className="text-muted-foreground font-normal text-xs">{assignedTruck.make} {assignedTruck.model}</span>
+
+                    {/* Assignment — active loads pill or muted fallback */}
+                    <TableCell className="py-3">
+                      {activeLoads > 0
+                        ? <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                            {activeLoads} active
                           </span>
-                        : <span className="text-muted-foreground/50 text-sm">Unassigned</span>}
+                        : <span className="text-muted-foreground/50 text-sm">No truck assigned</span>}
                     </TableCell>
-                    <TableCell>
+
+                    {/* Compliance — Verified / Missing docs / N/A */}
+                    <TableCell className="py-3"><DriverComplianceCell driver={driver} /></TableCell>
+
+                    {/* Status */}
+                    <TableCell className="py-3">
                       {driver.active
                         ? <Badge variant="green">Active</Badge>
                         : <Badge variant="secondary">Inactive</Badge>}
                     </TableCell>
-                    <TableCell><DateBadge date={driver.cdlExpiration} label="CDL Expiration" /></TableCell>
-                    <TableCell><DateBadge date={driver.medCardExpiration} label="Med Card Expiration" /></TableCell>
-                    <TableCell>
-                      {driver.drugTestDate
-                        ? <span className="text-xs font-mono text-muted-foreground">{driver.drugTestDate}</span>
-                        : <span className="text-muted-foreground/40 text-xs">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      {driver.hireDate
-                        ? <span className="text-xs font-mono text-muted-foreground">{driver.hireDate}</span>
-                        : <span className="text-muted-foreground/40 text-xs">—</span>}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs max-w-[180px] truncate">
-                      {driver.notes || '—'}
-                    </TableCell>
-                    <TableCell>
+
+                    {/* Actions — edit + view */}
+                    <TableCell className="py-3">
                       <div className="flex items-center gap-1 justify-end">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="size-8" onClick={() => navigate(`/compliance/driver/${driver.id}`)} aria-label="Compliance & onboarding">
-                              <ShieldCheck className="size-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Compliance &amp; onboarding</TooltipContent>
-                        </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <Button variant="ghost" size="icon" className="size-8" onClick={() => openEdit(driver)} aria-label="Edit driver">
@@ -656,17 +678,11 @@ export function DriversPage() {
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost" size="icon" className="size-8"
-                              onClick={() => updateDriver(driver.id, { active: !driver.active })}
-                              aria-label={driver.active ? 'Deactivate driver' : 'Activate driver'}
-                            >
-                              {driver.active
-                                ? <ToggleRight className="size-4 text-emerald-600" />
-                                : <ToggleLeft className="size-4 text-muted-foreground" />}
+                            <Button variant="ghost" size="icon" className="size-8" onClick={() => navigate(`/compliance/driver/${driver.id}`)} aria-label="View driver">
+                              <Eye className="size-3.5" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>{driver.active ? 'Deactivate' : 'Activate'}</TooltipContent>
+                          <TooltipContent>View</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>
@@ -675,7 +691,7 @@ export function DriversPage() {
               })}
               {sorted.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={11} className="py-12 text-center text-muted-foreground text-sm">
+                  <TableCell colSpan={7} className="py-12 text-center text-muted-foreground text-sm">
                     {drivers.length === 0 ? 'No drivers yet. Add one to get started.' : 'No drivers match your filter.'}
                   </TableCell>
                 </TableRow>
