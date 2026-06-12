@@ -20,6 +20,7 @@ import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
+import { driverForTruck } from '@/lib/assignments'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1019,7 +1020,7 @@ export function TrucksPage() {
           ) : isMobile ? (
             <div>
               {filtered.map((e) => {
-                const driver = drivers.find((d) => d.id === e.assignedDriverId)
+                const driver = driverForTruck(e.id, drivers)
                 const taskCount = maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
                 const repair = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id).reduce((s, inv) => s + inv.amount, 0)
                 return (
@@ -1061,7 +1062,7 @@ export function TrucksPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map((e) => {
-                  const driver = drivers.find((d) => d.id === e.assignedDriverId)
+                  const driver = driverForTruck(e.id, drivers)
                   const tasks  = maintenanceTasks.filter((t) => t.equipmentId === e.id)
                   const invs   = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id)
                   return (
