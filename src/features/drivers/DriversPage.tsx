@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Phone, Edit2, Trash2, Building2, Truck, Package, Camera, X, Check, AlertTriangle, Eye, Search, ShieldCheck } from 'lucide-react'
+import { Plus, Phone, Edit2, Trash2, Building2, Truck, Package, Camera, X, Check, AlertTriangle, Search, ShieldCheck } from 'lucide-react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
@@ -737,11 +737,11 @@ export function DriversPage() {
                         </Tooltip>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button variant="ghost" size="icon" className="size-8" onClick={() => navigate(`/compliance/driver/${driver.id}`)} aria-label="View driver">
-                              <Eye className="size-3.5" />
+                            <Button variant="ghost" size="icon" className="size-8" onClick={() => navigate(`/compliance/driver/${driver.id}`)} aria-label="Onboarding & compliance">
+                              <ShieldCheck className="size-3.5" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>View</TooltipContent>
+                          <TooltipContent>Onboarding &amp; compliance</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>

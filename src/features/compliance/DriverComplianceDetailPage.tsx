@@ -54,8 +54,10 @@ export function DriverComplianceDetailPage() {
               <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>Onboarding: {onboardingStatusLabel(driver.onboardingStatus)}</span>
             </div>
           </div>
-          {tasks.length === 0 && !loading && (
-            <Button onClick={() => setKickoffOpen(true)}><Rocket size={15} /> Start onboarding</Button>
+          {!loading && (
+            <Button onClick={() => setKickoffOpen(true)}>
+              <Rocket size={15} /> {tasks.length === 0 ? 'Start onboarding' : 'Onboarding & invite'}
+            </Button>
           )}
         </div>
 
