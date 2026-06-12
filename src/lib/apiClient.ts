@@ -485,17 +485,30 @@ export interface CognitoUser {
   createdAt: string
 }
 
+// AppSync AWSJSON round-trips can return a parsed value, a JSON string, or even a
+// double-encoded JSON string (the Lambda does JSON.stringify(...) into an a.json()
+// field). Unwrap string layers until we reach the real value so a double-encoded
+// array doesn't end up as a string (which callers then treat as empty).
+function unwrapJson(raw: unknown): unknown {
+  let v = raw
+  for (let i = 0; i < 4 && typeof v === 'string'; i++) {
+    try { v = JSON.parse(v) } catch { break }
+  }
+  return v
+}
+
 export async function listCognitoUsers(): Promise<CognitoUser[]> {
   const result = await client.graphql({
     query: `query ManageUsers($action: String!) { manageUsers(action: $action) }`,
     variables: { action: 'list' },
   }) as { data: { manageUsers: unknown } }
-  const raw = result.data.manageUsers
-  // AppSync AWSJSON may already be parsed or still a string — handle both
-  if (Array.isArray(raw)) return raw as CognitoUser[]
-  if (typeof raw === 'string') return JSON.parse(raw) as CognitoUser[]
+  const v = unwrapJson(result.data.manageUsers)
+  if (Array.isArray(v)) return v as CognitoUser[]
   // null means the Lambda didn't return a value — surface as error instead of silently showing 0 users
-  throw new Error(`manageUsers returned null — Lambda may not be deployed or USER_POOL_ID may be misconfigured. Raw response: ${JSON.stringify(raw)}`)
+  if (v == null) {
+    throw new Error('manageUsers returned null — Lambda may not be deployed or USER_POOL_ID may be misconfigured.')
+  }
+  throw new Error(`manageUsers returned an unexpected shape (${typeof v}): ${JSON.stringify(v).slice(0, 300)}`)
 }
 
 export async function createCognitoUser(email: string): Promise<void> {
@@ -524,10 +537,8 @@ export async function getUserGroups(username: string): Promise<string[]> {
     query: `query ManageUsers($action: String!, $username: String) { manageUsers(action: $action, username: $username) }`,
     variables: { action: 'getGroups', username },
   }) as { data: { manageUsers: unknown } }
-  const raw = result.data.manageUsers
-  if (Array.isArray(raw)) return raw as string[]
-  if (typeof raw === 'string') return JSON.parse(raw) as string[]
-  return []
+  const v = unwrapJson(result.data.manageUsers)
+  return Array.isArray(v) ? v as string[] : []
 }
 
 export async function setUserPageGroups(username: string, pages: string[]): Promise<void> {
