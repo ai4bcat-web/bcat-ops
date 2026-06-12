@@ -9,9 +9,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton } from '@/components/ui/sheet'
+import { FormSection, Field } from '@/components/ui/form-section'
 import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
-  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck,
+  CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck, Gauge,
 } from 'lucide-react'
 import {
   Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
@@ -134,9 +137,10 @@ interface EquipmentFormProps {
   initial?: Partial<Equipment>
   onSave: (data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>) => void
   onClose: () => void
+  onDelete?: () => void
 }
 
-function EquipmentForm({ initial, onSave, onClose }: EquipmentFormProps) {
+function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProps) {
   const [form, setForm] = useState({
     type:                    (initial?.type ?? 'truck') as EquipmentType,
     unitNumber:              initial?.unitNumber ?? '',
@@ -195,177 +199,128 @@ function EquipmentForm({ initial, onSave, onClose }: EquipmentFormProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
-          <h2 className="text-base font-semibold">{initial?.id ? 'Edit Equipment' : 'Add Equipment'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
-        </div>
-        <form onSubmit={handleSubmit} className="px-6 py-5 space-y-5">
-          {/* Type + Unit + Nickname */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Type *</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.type} onChange={(e) => set('type', e.target.value)}>
-                <option value="truck">Truck</option>
-                <option value="trailer">Trailer</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Unit # *</Label>
-              <Input value={form.unitNumber} onChange={(e) => set('unitNumber', e.target.value)} placeholder="e.g. 530" required className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Nickname</Label>
-              <Input value={form.nickname} onChange={(e) => set('nickname', e.target.value)} placeholder="Optional" className="h-9" />
-            </div>
-          </div>
+    <Sheet open onOpenChange={(o) => { if (!o) onClose() }}>
+      <SheetContent>
+        <SheetHeader>
+          <SheetTitle className="text-base font-semibold">{initial?.id ? 'Edit Equipment' : 'Add Equipment'}</SheetTitle>
+          <SheetCloseButton />
+        </SheetHeader>
 
-          {/* Make / Model / Year */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Make</Label>
-              <Input value={form.make} onChange={(e) => set('make', e.target.value)} placeholder="Freightliner" className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Model</Label>
-              <Input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="Cascadia" className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Year</Label>
-              <Input type="number" value={form.year} onChange={(e) => set('year', e.target.value)} placeholder="2022" className="h-9" />
-            </div>
-          </div>
+        <form onSubmit={handleSubmit} className="flex flex-col h-full">
+          <SheetBody>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
-          {/* Plate / VIN / Mileage */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Plate</Label>
-              <Input value={form.plate} onChange={(e) => set('plate', e.target.value)} className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">VIN</Label>
-              <Input value={form.vin} onChange={(e) => set('vin', e.target.value)} className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Mileage</Label>
-              <Input type="number" value={form.mileage} onChange={(e) => set('mileage', e.target.value)} className="h-9" />
-            </div>
-          </div>
+              {/* Equipment type segmented toggle (drives conditional fields) */}
+              <Field label="Equipment Type">
+                <ToggleGroup type="single" className="w-full grid grid-cols-2" value={form.type} onValueChange={(v) => v && set('type', v)}>
+                  <ToggleGroupItem value="truck" className="gap-2"><Truck className="size-3.5" /> Truck</ToggleGroupItem>
+                  <ToggleGroupItem value="trailer" className="gap-2"><Container className="size-3.5" /> Trailer</ToggleGroupItem>
+                </ToggleGroup>
+              </Field>
 
-          {/* Ownership + Fleet Manager */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Ownership</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.ownership} onChange={(e) => set('ownership', e.target.value)}>
-                <option value="owned">Owned</option>
-                <option value="leased">Leased</option>
-                <option value="rented">Rented</option>
-                <option value="financed">Financed</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Fleet Manager</Label>
-              <select className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white" value={form.fleetManagerAssignee} onChange={(e) => set('fleetManagerAssignee', e.target.value)}>
-                <option value="">— None —</option>
-                <option value="jason">Jason</option>
-                <option value="ryne">Ryne</option>
-              </select>
-            </div>
-          </div>
-
-          {/* ELD / Telematics (trucks only) */}
-          {isTruck && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground uppercase tracking-wider">ELD / Telematics</Label>
-                <select
-                  className="h-9 w-full rounded-md border border-slate-200 px-3 text-sm bg-white"
-                  value={form.eldSource}
-                  onChange={(e) => set('eldSource', e.target.value as EldSource)}
-                >
-                  <option value="motive">Motive — auto-connect by unit #</option>
-                  <option value="manual">Own ELD — manual</option>
-                </select>
-                <p className="text-[11px] text-muted-foreground">
-                  {form.eldSource === 'motive'
-                    ? 'Mileage auto-syncs from Motive matched on the unit number above.'
-                    : 'Excluded from Motive sync — this truck uses its own ELD.'}
-                </p>
-              </div>
-              {form.eldSource === 'manual' && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground uppercase tracking-wider">ELD Serial #</Label>
-                  <Input value={form.eldSerialNumber} onChange={(e) => set('eldSerialNumber', e.target.value)} placeholder="Device serial (optional)" className="h-9" />
+              {/* Identification */}
+              <FormSection icon={<Truck size={15} />} title="Identification" subtitle="Unit, make, model & VIN">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field label="Unit # *"><Input value={form.unitNumber} onChange={(e) => set('unitNumber', e.target.value)} placeholder="e.g. 530" required className="h-9" /></Field>
+                  <Field label="Nickname"><Input value={form.nickname} onChange={(e) => set('nickname', e.target.value)} placeholder="Optional" className="h-9" /></Field>
+                  <Field label="Make"><Input value={form.make} onChange={(e) => set('make', e.target.value)} placeholder="Freightliner" className="h-9" /></Field>
+                  <Field label="Model"><Input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="Cascadia" className="h-9" /></Field>
                 </div>
-              )}
+                <div style={{ display: 'grid', gridTemplateColumns: isTruck ? '1fr 1fr 1fr' : '1fr 1fr', gap: 14 }}>
+                  <Field label="Year"><Input type="number" value={form.year} onChange={(e) => set('year', e.target.value)} placeholder="2022" className="h-9" /></Field>
+                  <Field label="Plate"><Input value={form.plate} onChange={(e) => set('plate', e.target.value)} className="h-9" /></Field>
+                  {isTruck && <Field label="Mileage"><Input type="number" value={form.mileage} onChange={(e) => set('mileage', e.target.value)} className="h-9" /></Field>}
+                </div>
+                <Field label="VIN"><Input value={form.vin} onChange={(e) => set('vin', e.target.value)} placeholder="17-character VIN" className="h-9" /></Field>
+              </FormSection>
+
+              {/* Ownership & Telematics */}
+              <FormSection icon={<Gauge size={15} />} title="Ownership & Telematics" subtitle="Owner, fleet manager & ELD">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field label="Ownership">
+                    <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.ownership} onChange={(e) => set('ownership', e.target.value)}>
+                      <option value="owned">Owned</option>
+                      <option value="leased">Leased</option>
+                      <option value="rented">Rented</option>
+                      <option value="financed">Financed</option>
+                    </select>
+                  </Field>
+                  <Field label="Fleet Manager">
+                    <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.fleetManagerAssignee} onChange={(e) => set('fleetManagerAssignee', e.target.value)}>
+                      <option value="">— None —</option>
+                      <option value="jason">Jason</option>
+                      <option value="ryne">Ryne</option>
+                    </select>
+                  </Field>
+                </div>
+                {isTruck && (
+                  <Field label="ELD / Telematics">
+                    <ToggleGroup type="single" className="w-full grid grid-cols-2" value={form.eldSource} onValueChange={(v) => v && set('eldSource', v as EldSource)}>
+                      <ToggleGroupItem value="motive" className="gap-2"><Gauge className="size-3.5" /> Motive auto-sync</ToggleGroupItem>
+                      <ToggleGroupItem value="manual" className="gap-2"><Wrench className="size-3.5" /> Manual</ToggleGroupItem>
+                    </ToggleGroup>
+                    {form.eldSource === 'motive' ? (
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
+                        <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage auto-syncs from Motive, matched on the unit number above.
+                      </div>
+                    ) : (
+                      <Input value={form.eldSerialNumber} onChange={(e) => set('eldSerialNumber', e.target.value)} placeholder="ELD serial # (optional)" className="h-9 mt-2" />
+                    )}
+                  </Field>
+                )}
+              </FormSection>
+
+              {/* Compliance Dates (collapsed) */}
+              <FormSection icon={<FileText size={15} />} title="Compliance Dates" subtitle="DOT, insurance, IFTA & IRP" collapsible defaultOpen={false}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <Field label="Last DOT Inspection"><Input type="date" value={form.dotInspectionDate} onChange={(e) => set('dotInspectionDate', e.target.value)} className="h-9" /></Field>
+                  <Field label="Insurance Expiry"><Input type="date" value={form.insuranceExpirationDate} onChange={(e) => set('insuranceExpirationDate', e.target.value)} className="h-9" /></Field>
+                  {isTruck && (
+                    <>
+                      <Field label="IFTA Expiration"><Input type="date" value={form.iftaExpirationDate} onChange={(e) => set('iftaExpirationDate', e.target.value)} className="h-9" /></Field>
+                      <Field label="IRP Expiration"><Input type="date" value={form.irpExpirationDate} onChange={(e) => set('irpExpirationDate', e.target.value)} className="h-9" /></Field>
+                      <Field label="Bobtail Insurance"><Input type="date" value={form.bobtailInsuranceDate} onChange={(e) => set('bobtailInsuranceDate', e.target.value)} className="h-9" /></Field>
+                    </>
+                  )}
+                </div>
+              </FormSection>
+
+              {/* Status chips */}
+              <Field label="Status">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {([['insured', 'Insured'], ['active', 'Active'], ['onTollwayAccount', 'On Tollway Account']] as [string, string][]).map(([key, label]) => {
+                    const on = form[key as keyof typeof form] as boolean
+                    return (
+                      <button key={key} type="button" onClick={() => set(key, !on)}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 500, cursor: 'pointer',
+                          border: `1.5px solid ${on ? '#86efac' : 'var(--ds-border)'}`, background: on ? '#f0fdf4' : 'var(--ds-surface)', color: on ? '#15803d' : 'var(--ds-t3)' }}>
+                        {on && <CheckCircle2 size={13} />} {label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </Field>
+
+              {/* Notes */}
+              <Field label="Notes">
+                <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/20" placeholder="Optional notes" />
+              </Field>
             </div>
-          )}
+          </SheetBody>
 
-          {/* Compliance dates */}
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Compliance Dates</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Last DOT Inspection</Label>
-                <Input type="date" value={form.dotInspectionDate} onChange={(e) => set('dotInspectionDate', e.target.value)} className="h-9" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Insurance Expiry</Label>
-                <Input type="date" value={form.insuranceExpirationDate} onChange={(e) => set('insuranceExpirationDate', e.target.value)} className="h-9" />
-              </div>
-              {isTruck && (
-                <>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">IFTA Expiration</Label>
-                    <Input type="date" value={form.iftaExpirationDate} onChange={(e) => set('iftaExpirationDate', e.target.value)} className="h-9" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">IRP Expiration</Label>
-                    <Input type="date" value={form.irpExpirationDate} onChange={(e) => set('irpExpirationDate', e.target.value)} className="h-9" />
-                  </div>
-                </>
-              )}
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">Bobtail Insurance Expiry</Label>
-                <Input type="date" value={form.bobtailInsuranceDate} onChange={(e) => set('bobtailInsuranceDate', e.target.value)} className="h-9" />
-              </div>
-            </div>
-          </div>
-
-          {/* Toggles */}
-          <div className="flex flex-wrap gap-x-6 gap-y-3">
-            {([
-              ['insured',         'Insured'],
-              ['active',          'Active'],
-              ['onTollwayAccount','On Tollway Account'],
-            ] as [string, string][]).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input type="checkbox" checked={form[key as keyof typeof form] as boolean} onChange={(e) => set(key, e.target.checked)} className="rounded" />
-                {label}
-              </label>
-            ))}
-          </div>
-
-          {/* Notes */}
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground uppercase tracking-wider">Notes</Label>
-            <textarea
-              value={form.notes}
-              onChange={(e) => set('notes', e.target.value)}
-              rows={2}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="Optional notes"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit">Save</Button>
-          </div>
+          <SheetFooter>
+            {initial?.id && onDelete && (
+              <Button type="button" variant="outline" size="sm" className="mr-auto h-9 text-destructive border-destructive/30 hover:bg-destructive/5 gap-1.5" onClick={onDelete}>
+                <Trash2 className="size-3.5" /> Delete
+              </Button>
+            )}
+            <Button type="button" variant="outline" size="sm" className="h-9" onClick={onClose}>Cancel</Button>
+            <Button type="submit" size="sm" className="h-9">{initial?.id ? 'Save Changes' : 'Add Equipment'}</Button>
+          </SheetFooter>
         </form>
-      </div>
-    </div>
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -1135,6 +1090,7 @@ export function TrucksPage() {
           initial={showForm === 'new' ? undefined : showForm}
           onSave={handleSave}
           onClose={() => setShowForm(null)}
+          onDelete={showForm !== 'new' && showForm.id ? () => { handleDelete(showForm.id); setShowForm(null) } : undefined}
         />
       )}
     </div>
