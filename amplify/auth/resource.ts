@@ -4,12 +4,12 @@ export const auth = defineAuth({
   loginWith: {
     email: true,
   },
-  // Cognito sends invites / temp passwords / password resets via SES from the VERIFIED
-  // bcatcorp.com domain (fromEmail under a verified domain needs no separate email-address
-  // identity). NOTE: while SES is in sandbox, only verified recipients receive mail —
-  // request SES production access to email arbitrary new users.
-  senders: {
-    email: { fromEmail: 'noreply@bcatcorp.com', fromName: 'BCAT Ops' },
-  },
+  // SES sender DISABLED — re-enabling it (commit 965bcc3) broke every deploy because
+  // `bcatcorp.com` / noreply@bcatcorp.com is NOT a verified SES identity in us-east-1,
+  // so Cognito's UserPool update fails ("Email address is not verified") and the whole
+  // backend stack rolls back. Cognito falls back to its default email sender, which
+  // needs no SES verification. To re-enable: verify the bcatcorp.com domain in SES
+  // (us-east-1) — confirm it shows "Verified" in the SES console — then restore:
+  //   senders: { email: { fromEmail: 'noreply@bcatcorp.com', fromName: 'BCAT Ops' } },
   groups: ['ADMIN', 'DISPATCHER'],
 })
