@@ -9,8 +9,9 @@ import { UserCheck, Trash2, Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
+import { flattenLoadsToStopEntries, updateStop } from '@/lib/stops'
 import { EventCard } from './EventCard'
-import type { Load, Driver, ViewMode } from '@/types'
+import type { Load, Driver, ViewMode, Stop } from '@/types'
 import { formatTime } from '@/lib/date'
 import { formatPhone } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -58,6 +59,7 @@ export function SchedulerView({
 }: SchedulerViewProps) {
   const { updateLoad, addLoad, deleteLoad } = useLoads()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
 
   const dragModifierRef = useRef<'none' | 'shift' | 'alt'>('none')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -108,49 +110,73 @@ export function SchedulerView({
   // ── Events (load blocks) ──────────────────────────────────────────────────
 
   const events = useMemo(() => {
+    if (multiStopRender) {
+      // One event per stop, on its own day under its own driver. Give each a 1h block
+      // so it's visible in both the day (hour slots) and week/month (day slots) views.
+      return flattenLoadsToStopEntries(loads).map(({ load, stop, key }) => ({
+        id: key,
+        resourceId: stop.driverId ?? 'unassigned',
+        start: stop.appt,
+        end: new Date(new Date(stop.appt).getTime() + 60 * 60 * 1000).toISOString(),
+        editable: true,
+        extendedProps: { load, stop },
+      }))
+    }
     return loads.map((load) => ({
       id: load.id,
       resourceId: load.pickupDriverId ?? 'unassigned',
       start: load.pickupAppt,
       end: load.deliveryAppt,
       editable: true,
-      extendedProps: { load },
+      extendedProps: { load, stop: undefined as Stop | undefined },
     }))
-  }, [loads])
+  }, [loads, multiStopRender])
 
   // ── Load order map (sequence # per driver per day) ───────────────────────
 
+  // Sequence # per driver per day. Keyed by EVENT id so it works for both the
+  // per-load (legacy) and per-stop (multi-stop) event sets.
   const loadOrderMap = useMemo(() => {
     const map = new Map<string, number>()
-    const groups = new Map<string, Load[]>()
-    loads.forEach((l) => {
-      const date = l.pickupAppt.slice(0, 10)
-      const key = `${l.pickupDriverId ?? 'unassigned'}-${date}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push(l)
-    })
+    const groups = new Map<string, { id: string; sortAppt: string }[]>()
+    const push = (gk: string, id: string, sortAppt: string) => {
+      if (!groups.has(gk)) groups.set(gk, [])
+      groups.get(gk)!.push({ id, sortAppt })
+    }
+    if (multiStopRender) {
+      for (const { stop, key } of flattenLoadsToStopEntries(loads)) {
+        push(`${stop.driverId ?? 'unassigned'}-${stop.appt.slice(0, 10)}`, key, stop.appt)
+      }
+    } else {
+      for (const l of loads) {
+        push(`${l.pickupDriverId ?? 'unassigned'}-${l.pickupAppt.slice(0, 10)}`, l.id, l.pickupAppt)
+      }
+    }
     groups.forEach((group) => {
       group
-        .sort((a, b) => a.pickupAppt.localeCompare(b.pickupAppt))
-        .forEach((l, i) => map.set(l.id, i + 1))
+        .sort((a, b) => a.sortAppt.localeCompare(b.sortAppt))
+        .forEach((g, i) => map.set(g.id, i + 1))
     })
     return map
-  }, [loads])
+  }, [loads, multiStopRender])
 
   // ── Event content renderer ────────────────────────────────────────────────
 
   const renderEventContent = useCallback((info: EventContentArg) => {
     const load = info.event.extendedProps.load as Load
-    const driver = drivers.find((d) => d.id === load.pickupDriverId)
+    const stop = info.event.extendedProps.stop as Stop | undefined
+    const driverId = stop ? stop.driverId : load.pickupDriverId
+    const driver = drivers.find((d) => d.id === driverId)
     const color = driver?.colorKey ? getColor(driver.colorKey) : UNASSIGNED_COLOR
     return (
       <EventCard
         load={load}
+        stop={stop}
         drivers={drivers}
         color={color}
         isConflict={conflictIds.has(load.id)}
         isSelected={selectedIds.has(load.id)}
-        orderNumber={loadOrderMap.get(load.id) ?? 1}
+        orderNumber={loadOrderMap.get(info.event.id) ?? 1}
         onEdit={() => setSelectedLoad(load.id, 'edit')}
         onContextMenu={(e) => {
           e.preventDefault()
@@ -167,9 +193,10 @@ export function SchedulerView({
       driver: Driver | null; isUnassigned: boolean
     }
     const resourceId = info.resource.id
-    const loadCount = loads.filter((l) =>
-      l.pickupDriverId === (isUnassigned ? null : resourceId)
-    ).length
+    const targetDriverId = isUnassigned ? null : resourceId
+    const loadCount = multiStopRender
+      ? flattenLoadsToStopEntries(loads).filter(({ stop }) => stop.driverId === targetDriverId).length
+      : loads.filter((l) => l.pickupDriverId === targetDriverId).length
 
     if (isUnassigned) {
       return (
@@ -218,19 +245,42 @@ export function SchedulerView({
         </div>
       </button>
     )
-  }, [loads])
+  }, [loads, multiStopRender])
 
   // ── Drag / drop ───────────────────────────────────────────────────────────
 
   const handleEventDrop = useCallback((info: EventDropArg) => {
     const load = info.event.extendedProps.load as Load
+    const stop = info.event.extendedProps.stop as Stop | undefined
     const modifier = dragModifierRef.current
     const infoAny = info as unknown as { newResource?: { id: string } }
+    const deltaDays = Math.round(info.delta.milliseconds / 86_400_000)
+    const snapshot = { ...load }
+
+    // Multi-stop: a dropped stop event moves only THAT stop's day + driver. No split
+    // (shift/alt) modifiers — each stop already carries its own driver.
+    if (stop) {
+      const newDriverId = infoAny.newResource
+        ? (infoAny.newResource.id === 'unassigned' ? null : infoAny.newResource.id)
+        : stop.driverId
+      updateLoad(load.id, {
+        stops: updateStop(load, stop.id, {
+          driverId: newDriverId,
+          appt: deltaDays !== 0 ? shiftDays(stop.appt, deltaDays) : stop.appt,
+        }),
+      })
+      const dest = drivers.find((d) => d.id === newDriverId)?.name ?? 'Unassigned'
+      toast('Stop updated', {
+        description: `${load.aljexId} ${stop.type} → ${dest}`,
+        action: { label: 'Undo', onClick: () => updateLoad(load.id, snapshot) },
+        duration: 5000,
+      })
+      return
+    }
+
     const newDriverId = infoAny.newResource
       ? (infoAny.newResource.id === 'unassigned' ? null : infoAny.newResource.id)
       : load.pickupDriverId
-    const deltaDays = Math.round(info.delta.milliseconds / 86_400_000)
-    const snapshot = { ...load }
     const patch: Partial<Omit<Load, 'id' | 'createdAt'>> = {}
 
     if (modifier === 'shift') {
@@ -261,6 +311,8 @@ export function SchedulerView({
 
   const handleEventResize = useCallback((info: EventResizeArg) => {
     const load = info.event.extendedProps.load as Load
+    // A per-stop event is a point in time, not a span — resizing it is meaningless.
+    if (info.event.extendedProps.stop) { info.revert(); return }
     const snapshot = { ...load }
     const newEnd = info.event.end?.toISOString() ?? load.deliveryAppt
     updateLoad(load.id, { deliveryAppt: newEnd })

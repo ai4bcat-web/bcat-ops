@@ -10,7 +10,8 @@ import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTime
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
-import type { Load, Driver, ViewMode } from '@/types'
+import { flattenLoadsToStopEntries, updateStop } from '@/lib/stops'
+import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -52,7 +53,9 @@ function hexBg(hex: string, alpha: number): string {
 }
 
 type Role = 'pickup' | 'delivery' | 'same-day'
-interface DayEntry { load: Load; role: Role }
+// `key` is the stable card identity (used for drag/reorder). Legacy: `${loadId}:${role}`.
+// Multi-stop: `${loadId}::${stopId}`. `stop` is present only in multi-stop render mode.
+interface DayEntry { load: Load; role: Role; key: string; stop?: Stop }
 
 interface AvailabilityStrip {
   driverId:   string
@@ -116,6 +119,12 @@ function computeMoveDates(load: Load, role: Role, targetDayStr: string) {
   }
 }
 
+// Multi-stop: dragging a stop card shifts ONLY that stop's appt to the target day.
+// The store re-derives the legacy pickup*/delivery* mirrors from the new stops.
+function computeStopMove(load: Load, stop: Stop, targetDayStr: string): Partial<Load> {
+  return { stops: updateStop(load, stop.id, { appt: shiftApptToDay(stop.appt, targetDayStr) }) }
+}
+
 // ── Full-detail load card ─────────────────────────────────────────────────────
 
 function LoadCard({
@@ -132,7 +141,8 @@ function LoadCard({
   onDragEnter: (key: string) => void
   onDragEnd: () => void
 }) {
-  const { load, role } = entry
+  const { load, role, stop } = entry
+  const stopMode = !!stop
   const { updateLoad } = useLoads()
 
   // Color picker state
@@ -160,26 +170,32 @@ function LoadCard({
   const rti         = load.readyToInvoice
   const highlightHex = getHighlightHex(load.colorKey)
 
-  // Driver for this role
-  const driverId    = isDelivery ? load.deliveryDriverId : load.pickupDriverId
+  // Driver — the stop's own driver in multi-stop mode, else the role-relevant driver.
+  const driverId    = stopMode ? stop!.driverId : (isDelivery ? load.deliveryDriverId : load.pickupDriverId)
   const driver      = drivers.find((d) => d.id === driverId)
   const driverColor = getColor(driver?.colorKey)
 
-
-  // Appt display — yard on the "other" side
-  const puYard    = isDelivery
-  const deYard    = role === 'pickup'
-  const puTime    = apptDisplay(load.pickupAppt,  load.pickupApptType,  puYard)
-  const deTime    = apptDisplay(load.deliveryAppt, load.deliveryApptType, deYard)
-  const puDate    = puYard ? '' : apptDate(load.pickupAppt)
-  const deDate    = deYard ? '' : apptDate(load.deliveryAppt)
+  // Appt display. Multi-stop: show only THIS stop's appt in its own row; the other row
+  // renders an em dash (no Yard half-leg). Legacy: Yard on the "other" side.
+  const puIso  = stopMode ? (role === 'pickup'   ? stop!.appt     : null) : load.pickupAppt
+  const puTyp  = stopMode ? (role === 'pickup'   ? stop!.apptType : null) : load.pickupApptType
+  const deIso  = stopMode ? (role === 'delivery' ? stop!.appt     : null) : load.deliveryAppt
+  const deTyp  = stopMode ? (role === 'delivery' ? stop!.apptType : null) : load.deliveryApptType
+  const puYard = stopMode ? false : isDelivery
+  const deYard = stopMode ? false : (role === 'pickup')
+  const puTime = apptDisplay(puIso, puTyp, puYard)
+  const deTime = apptDisplay(deIso, deTyp, deYard)
+  const puDate = puYard ? '' : apptDate(puIso)
+  const deDate = deYard ? '' : apptDate(deIso)
 
   // Route
-  const route = role === 'pickup'
-    ? [load.originCity, 'Yard'].filter(Boolean).join(' → ')
-    : role === 'delivery'
-      ? ['Yard', load.destinationCity].filter(Boolean).join(' → ')
-      : [load.originCity, load.destinationCity].filter(Boolean).join(' → ')
+  const route = stopMode
+    ? (stop!.city || stop!.name || '')
+    : role === 'pickup'
+      ? [load.originCity, 'Yard'].filter(Boolean).join(' → ')
+      : role === 'delivery'
+        ? ['Yard', load.destinationCity].filter(Boolean).join(' → ')
+        : [load.originCity, load.destinationCity].filter(Boolean).join(' → ')
 
   // Rate (only meaningful on delivery/same-day)
   const rateStr = isFinalDest && load.rate != null
@@ -194,7 +210,7 @@ function LoadCard({
       ? hexBg(highlightHex, selected ? 0.40 : isDelivery ? 0.14 : 0.26)
       : selected ? 'rgba(139,92,246,0.12)' : undefined
 
-  const cardKey = `${load.id}:${role}`
+  const cardKey = entry.key
 
   return (
     <div
@@ -266,8 +282,14 @@ function LoadCard({
         </div>
       )}
 
-      {/* Location names (facility / shipper names) */}
-      {(load.originName || load.destinationName) && (
+      {/* Location names (facility / shipper names) — single stop name in multi-stop mode */}
+      {stopMode ? (
+        stop!.name && (
+          <div style={{ fontSize: 9.5, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {stop!.name}
+          </div>
+        )
+      ) : (load.originName || load.destinationName) && (
         <div style={{ fontSize: 9.5, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {[
             !isDelivery ? load.originName : null,
@@ -589,7 +611,7 @@ function DayColumn({
           <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontStyle: 'italic', padding: '6px 2px' }}>No loads</div>
         ) : (
           entries.map((entry) => {
-            const cardKey = `${entry.load.id}:${entry.role}`
+            const cardKey = entry.key
             return (
               <LoadCard
                 key={cardKey}
@@ -618,11 +640,11 @@ function DayColumn({
 const ORPHAN_KEY = '__unscheduled__'
 
 function UnscheduledColumn({
-  loads, drivers, selectedIds, onSelect,
+  entries, drivers, selectedIds, onSelect,
   dragOverKey, dropTargetDay, onDragStart, onDragEnter, onDragEnd,
   onColumnDragEnter, onColumnDragLeave, onColumnDrop,
 }: {
-  loads: Load[]; drivers: Driver[]; selectedIds: string[]
+  entries: DayEntry[]; drivers: Driver[]; selectedIds: string[]
   onSelect: (loadId: string, e: React.MouseEvent) => void
   dragOverKey: string | null; dropTargetDay: string | null
   onDragStart: (dayStr: string, key: string) => void
@@ -647,23 +669,22 @@ function UnscheduledColumn({
     >
       <div style={{ height: HEADER_H, position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', gap: 6, padding: `0 ${COL_PAD + 2}px`, borderBottom: '2px solid #f59e0b', background: '#fef3c7', flexShrink: 0 }}>
         <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#b45309' }}>Unscheduled</span>
-        {loads.length > 0 && <span style={{ fontSize: 10, color: '#b45309', marginLeft: 'auto' }}>{loads.length}</span>}
+        {entries.length > 0 && <span style={{ fontSize: 10, color: '#b45309', marginLeft: 'auto' }}>{entries.length}</span>}
       </div>
       <div style={{ flex: 1, padding: `${COL_PAD}px ${COL_PAD}px 8px`, overflowY: 'auto' }}>
-        {loads.length === 0 ? (
+        {entries.length === 0 ? (
           <div style={{ fontSize: 10, color: 'var(--ds-t3)', fontStyle: 'italic', padding: '6px 2px', lineHeight: 1.5 }}>
             Drag loads here when the date isn&apos;t set yet.
           </div>
         ) : (
-          loads.map((load) => {
-            const entry: DayEntry = { load, role: 'same-day' }
-            const cardKey = `${load.id}:same-day`
+          entries.map((entry) => {
+            const cardKey = entry.key
             return (
               <LoadCard
                 key={cardKey}
                 entry={entry}
                 drivers={drivers}
-                selected={selectedIds.includes(load.id)}
+                selected={selectedIds.includes(entry.load.id)}
                 onSelect={onSelect}
                 dragging={false}
                 dragOver={dragOverKey === cardKey}
@@ -691,6 +712,7 @@ interface GridCalendarViewProps {
 
 export function GridCalendarView({ loads, drivers, startDate, viewMode, availabilities }: GridCalendarViewProps) {
   const { updateLoad } = useLoads()
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const onSelect = useCallback((loadId: string, e: React.MouseEvent) => {
@@ -704,14 +726,18 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   const [dropTargetDay, setDropTargetDay] = useState<string | null>(null)
   const dragKey            = useRef<string | null>(null)
   const dragDay            = useRef<string | null>(null)
+  const dragEntry          = useRef<DayEntry | null>(null)  // the dragged card's entry (load/role/stop)
   const dropTargetDayRef   = useRef<string | null>(null)  // hover highlight tracking
   const dropCommittedDay   = useRef<string | null>(null)  // set by onDrop — survives dragLeave
   const loadsRef = useRef(loads)
   loadsRef.current = loads
 
+  const entryByKeyRef = useRef<Map<string, DayEntry>>(new Map())
+
   const handleDragStart = useCallback((dayStr: string, key: string) => {
     dragKey.current = key
     dragDay.current = dayStr
+    dragEntry.current = entryByKeyRef.current.get(key) ?? null
   }, [])
 
   // Within-day reorder
@@ -720,7 +746,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     setDragOverKey(key)
     setDayOrder((prev) => {
       const entries = entriesByDayRef.current.get(dayStr) ?? []
-      const currentOrder = prev.get(dayStr) ?? entries.map((e) => `${e.load.id}:${e.role}`)
+      const currentOrder = prev.get(dayStr) ?? entries.map((e) => e.key)
       const fromIdx = currentOrder.indexOf(dragKey.current!)
       const toIdx   = currentOrder.indexOf(key)
       if (fromIdx === -1 || toIdx === -1) return prev
@@ -757,22 +783,28 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   // (which can be cleared by dragLeave firing during the drop sequence).
   const handleDragEnd = useCallback(() => {
     const targetDay = dropCommittedDay.current
-    if (targetDay && dragKey.current && dragDay.current && dragDay.current !== targetDay) {
-      const [loadId, role] = dragKey.current.split(':') as [string, Role]
-      const load = loadsRef.current.find((l) => l.id === loadId)
+    const entry = dragEntry.current
+    if (targetDay && entry && dragDay.current && dragDay.current !== targetDay) {
+      // Re-read the load from the live list (entry.load may be a stale snapshot).
+      const load = loadsRef.current.find((l) => l.id === entry.load.id)
       if (load) {
+        const loadId = load.id
         if (targetDay === ORPHAN_KEY) {
           // Dropped onto the Unscheduled lane → park it (keep its appt as a placeholder).
           updateLoad(loadId, { unscheduled: true })
+        } else if (entry.stop) {
+          // Multi-stop: move only this stop's appt to the target day (store re-derives mirrors).
+          updateLoad(loadId, { unscheduled: false, ...computeStopMove(load, entry.stop, targetDay) })
         } else {
-          // Dropped onto a day → schedule it there (also rescues an orphan).
-          updateLoad(loadId, { unscheduled: false, ...computeMoveDates(load, role, targetDay) })
+          // Legacy: shift the load's pickup/delivery pair to the target day.
+          updateLoad(loadId, { unscheduled: false, ...computeMoveDates(load, entry.role, targetDay) })
         }
         setDayOrder(new Map())
       }
     }
     dragKey.current          = null
     dragDay.current          = null
+    dragEntry.current        = null
     dropTargetDayRef.current = null
     dropCommittedDay.current = null
     setDragOverKey(null)
@@ -815,46 +847,69 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   const entriesByDay = useMemo(() => {
     const map = new Map<string, DayEntry[]>()
     const add = (key: string, e: DayEntry) => { if (!map.has(key)) map.set(key, []); map.get(key)!.push(e) }
-    for (const l of loads) {
-      if (l.unscheduled) continue   // orphans live in the Unscheduled lane, not on a day
-      const puDay = chicagoDateStr(l.pickupAppt)
-      if (!puDay) continue
-      const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
-      if (puDay !== deDay) {
-        add(puDay, { load: l, role: 'pickup' })
-        add(deDay, { load: l, role: 'delivery' })
-      } else {
-        add(puDay, { load: l, role: 'same-day' })
+    if (multiStopRender) {
+      // Multi-stop: one card per STOP, placed on its own appt day.
+      for (const { load: l, stop, key } of flattenLoadsToStopEntries(loads.filter((l) => !l.unscheduled))) {
+        const day = chicagoDateStr(stop.appt)
+        if (!day) continue
+        add(day, { load: l, role: stop.type, key, stop })
+      }
+    } else {
+      for (const l of loads) {
+        if (l.unscheduled) continue   // orphans live in the Unscheduled lane, not on a day
+        const puDay = chicagoDateStr(l.pickupAppt)
+        if (!puDay) continue
+        const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
+        if (puDay !== deDay) {
+          add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })
+          add(deDay, { load: l, role: 'delivery', key: `${l.id}:delivery` })
+        } else {
+          add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
+        }
       }
     }
+    const rowTime = (e: DayEntry) =>
+      e.stop ? e.stop.appt : (e.role === 'delivery' ? e.load.deliveryAppt : e.load.pickupAppt)
     for (const arr of map.values()) {
-      arr.sort((a, b) => {
-        const at = a.role === 'delivery' ? a.load.deliveryAppt : a.load.pickupAppt
-        const bt = b.role === 'delivery' ? b.load.deliveryAppt : b.load.pickupAppt
-        return (at ?? '').localeCompare(bt ?? '')
-      })
+      arr.sort((a, b) => (rowTime(a) ?? '').localeCompare(rowTime(b) ?? ''))
     }
     entriesByDayRef.current = map
     return map
-  }, [loads])
+  }, [loads, multiStopRender])
 
   const orderedEntries = useCallback((dayStr: string): DayEntry[] => {
     const entries = entriesByDay.get(dayStr) ?? []
     const order   = dayOrder.get(dayStr)
     if (!order) return entries
-    const byKey = new Map(entries.map((e) => [`${e.load.id}:${e.role}`, e]))
+    const byKey = new Map(entries.map((e) => [e.key, e]))
     return order.map((k) => byKey.get(k)).filter((e): e is DayEntry => e !== undefined)
   }, [entriesByDay, dayOrder])
 
   const currentMonth = viewMode === 'month' ? startDate.getMonth() : -1
 
-  const unscheduledLoads = useMemo(() => loads.filter((l) => l.unscheduled), [loads])
+  // Unscheduled (orphan) lane entries — one card per stop in multi-stop mode, else per load.
+  const unscheduledEntries = useMemo<DayEntry[]>(() => {
+    const u = loads.filter((l) => l.unscheduled)
+    if (multiStopRender) {
+      return flattenLoadsToStopEntries(u).map(({ load: l, stop, key }) => ({ load: l, role: stop.type, key, stop }))
+    }
+    return u.map((l) => ({ load: l, role: 'same-day' as Role, key: `${l.id}:same-day` }))
+  }, [loads, multiStopRender])
+
+  // Combined key→entry map so drag handlers can resolve the dragged card without parsing keys.
+  useMemo(() => {
+    const m = new Map<string, DayEntry>()
+    for (const arr of entriesByDay.values()) for (const e of arr) m.set(e.key, e)
+    for (const e of unscheduledEntries) m.set(e.key, e)
+    entryByKeyRef.current = m
+    return m
+  }, [entriesByDay, unscheduledEntries])
 
   return (
     <div style={{ height: '100%', overflow: 'auto' }}>
       <div style={{ display: 'flex', minHeight: '100%', alignItems: 'flex-start' }}>
         <UnscheduledColumn
-          loads={unscheduledLoads}
+          entries={unscheduledEntries}
           drivers={drivers}
           selectedIds={selectedIds}
           onSelect={onSelect}

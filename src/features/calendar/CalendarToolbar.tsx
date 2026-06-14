@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal, Search, AlertCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, HelpCircle, SplitSquareHorizontal, Search, AlertCircle, Route } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
 import type { ViewMode } from '@/types'
@@ -28,11 +28,13 @@ const FILTER_CHIPS = [
 export function CalendarToolbar({
   currentView, dateLabel, onPrev, onNext, onToday, onViewChange,
 }: CalendarToolbarProps) {
-  const searchQuery     = useAppStore((s) => s.searchQuery)
-  const filters         = useAppStore((s) => s.filters)
-  const setSearchQuery  = useAppStore((s) => s.setSearchQuery)
-  const toggleFilter    = useAppStore((s) => s.toggleFilter)
-  const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const searchQuery      = useAppStore((s) => s.searchQuery)
+  const filters          = useAppStore((s) => s.filters)
+  const setSearchQuery   = useAppStore((s) => s.setSearchQuery)
+  const toggleFilter     = useAppStore((s) => s.toggleFilter)
+  const setSelectedLoad  = useAppStore((s) => s.setSelectedLoad)
+  const multiStopRender  = useAppStore((s) => s.multiStopRender)
+  const setMultiStopRender = useAppStore((s) => s.setMultiStopRender)
 
   return (
     <div style={{
@@ -64,6 +66,29 @@ export function CalendarToolbar({
           )
         })}
       </div>
+
+      {/* ── Multi-stop render toggle (per-stop calendar; off by default) ──── */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => setMultiStopRender(!multiStopRender)}
+            aria-pressed={multiStopRender}
+            aria-label="Toggle per-stop calendar rendering"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5,
+              height: 30, padding: '0 10px', borderRadius: 20, border: '1px solid',
+              fontSize: 12, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit',
+              whiteSpace: 'nowrap', flexShrink: 0,
+              background: multiStopRender ? 'var(--ds-blue-bg)' : 'var(--ds-bg)',
+              borderColor: multiStopRender ? 'var(--ds-blue)' : 'var(--ds-border)',
+              color: multiStopRender ? 'var(--ds-blue)' : 'var(--ds-t2)',
+            }}
+          >
+            <Route size={12} /> Stops
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Render one calendar item per stop (multi-stop)</TooltipContent>
+      </Tooltip>
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>

@@ -1,9 +1,10 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
-import type { Load, Driver } from '@/types'
+import type { Load, Driver, Stop } from '@/types'
 import {
   getFullWeek, chicagoDateStr, formatApptTime, formatDateTime, formatDayHeader,
 } from '@/lib/date'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
+import { getStops, updateStop } from '@/lib/stops'
 import { Avatar } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CheckCircle2, ArrowRight } from 'lucide-react'
@@ -37,17 +38,22 @@ interface CompactCardProps {
   conflictIds: Set<string>
   slotLabel: number
   isContinuation: boolean
+  // Multi-stop leg mode: this card represents the leg fromStop → toStop (one driver per leg).
+  fromStop?: Stop
+  toStop?: Stop
 }
 
 function initials(name: string) {
   return name.split(' ').slice(0, 2).map((n) => n[0] ?? '').join('').toUpperCase() || '?'
 }
 
-function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: CompactCardProps) {
+function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation, fromStop, toStop }: CompactCardProps) {
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const { updateLoad } = useLoads()
   const [pickingDriver, setPickingDriver] = useState(false)
   const driverPickerRef = useRef<HTMLDivElement>(null)
+
+  const legMode = !!(fromStop && toStop)
 
   useEffect(() => {
     if (!pickingDriver) return
@@ -61,18 +67,27 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
   }, [pickingDriver])
 
   const assignDriver = (driverId: string | null) => {
-    updateLoad(load.id, { pickupDriverId: driverId, deliveryDriverId: driverId })
+    if (legMode) updateLoad(load.id, { stops: updateStop(load, fromStop!.id, { driverId }) })
+    else updateLoad(load.id, { pickupDriverId: driverId, deliveryDriverId: driverId })
     setPickingDriver(false)
   }
 
   const activeDrivers = drivers.filter((d) => d.active).sort((a, b) => a.name.localeCompare(b.name))
 
+  // Per-leg appt/driver/route values in leg mode; whole-load values otherwise.
+  const puApptType = legMode ? fromStop!.apptType : load.pickupApptType
+  const deApptType = legMode ? toStop!.apptType   : load.deliveryApptType
+  const originCity = legMode ? fromStop!.city     : load.originCity
+  const destCity   = legMode ? toStop!.city       : load.destinationCity
+  const legDriverId = legMode ? fromStop!.driverId : load.pickupDriverId
+
   const isRTI      = load.readyToInvoice
   const isConflict = conflictIds.has(load.id)
-  const isAssigned = !!load.pickupDriverId
-  const isSplit    = load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
+  const isAssigned = !!legDriverId
+  // A leg has exactly one driver; only legacy whole-load rows can be "split".
+  const isSplit    = !legMode && load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
 
-  const pickupDriver       = drivers.find((d) => d.id === load.pickupDriverId)
+  const pickupDriver       = drivers.find((d) => d.id === legDriverId)
   const deliveryDriver     = isSplit ? drivers.find((d) => d.id === load.deliveryDriverId) : undefined
   const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
   const deliveryDriverName = deliveryDriver?.name ?? 'Unassigned'
@@ -86,8 +101,10 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
     : isConflict ? 'rgba(239,68,68,0.06)' : isRTI ? '#22c55e' : color.bg
   const textColor   = isRTI ? '#fff' : color.text
 
-  const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
-  const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
+  const puApptIso = legMode ? fromStop!.appt : load.pickupAppt
+  const deApptIso = legMode ? toStop!.appt   : load.deliveryAppt
+  const puTime = formatApptTime(puApptIso, puApptType, legMode ? fromStop!.apptEnd : load.pickupApptEnd)
+  const deTime = formatApptTime(deApptIso, deApptType, legMode ? toStop!.apptEnd : load.deliveryApptEnd)
 
   const card = (
     <div
@@ -177,7 +194,7 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
                 <div className="border-t border-slate-100 my-0.5" />
                 {activeDrivers.map((d) => {
                   const dc = d.colorKey ? getColor(d.colorKey) : UNASSIGNED_COLOR
-                  const isCurrent = d.id === load.pickupDriverId
+                  const isCurrent = d.id === legDriverId
                   return (
                     <button
                       key={d.id}
@@ -206,26 +223,26 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
         {isContinuation ? (
           <>
             <span className="text-[9px] text-slate-400 shrink-0 leading-none">DE:</span>
-            <ApptBadge type={load.deliveryApptType ?? 'exact'} />
+            <ApptBadge type={deApptType ?? 'exact'} />
             <span className="text-[9px] tabular-nums text-slate-500 shrink-0 leading-none">{deTime}</span>
           </>
         ) : (
           <>
-            <ApptBadge type={load.pickupApptType ?? 'exact'} />
+            <ApptBadge type={puApptType ?? 'exact'} />
             <span className="text-[9px] tabular-nums text-slate-500 leading-none">{puTime}</span>
             <ArrowRight className="size-2 shrink-0 text-slate-300" />
-            <ApptBadge type={load.deliveryApptType ?? 'exact'} />
+            <ApptBadge type={deApptType ?? 'exact'} />
             <span className="text-[9px] tabular-nums text-slate-500 leading-none">{deTime}</span>
           </>
         )}
       </div>
 
       {/* Row 3: origin → destination */}
-      {(load.originCity || load.destinationCity) && (
+      {(originCity || destCity) && (
         <div className="flex items-center gap-0.5 min-w-0 mt-0.5">
-          <span className="text-[9px] text-slate-400 truncate leading-none">{load.originCity || '—'}</span>
+          <span className="text-[9px] text-slate-400 truncate leading-none">{originCity || '—'}</span>
           <ArrowRight className="size-2 shrink-0 text-slate-300" />
-          <span className="text-[9px] text-slate-400 truncate leading-none">{load.destinationCity || '—'}</span>
+          <span className="text-[9px] text-slate-400 truncate leading-none">{destCity || '—'}</span>
         </div>
       )}
     </div>
@@ -243,21 +260,21 @@ function CompactCard({ load, drivers, conflictIds, slotLabel, isContinuation }: 
         <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
           <span className="text-muted-foreground">TMS/PO</span><span>{load.tmsId}</span>
           <span className="text-muted-foreground">PU#</span><span>{load.pickupNumber}</span>
-          <span className="text-muted-foreground">Pickup</span>
+          <span className="text-muted-foreground">{legMode ? 'From' : 'Pickup'}</span>
           <span>
-            {(load.pickupApptType ?? 'exact') !== 'exact'
+            {(puApptType ?? 'exact') !== 'exact'
               ? puTime
-              : formatDateTime(load.pickupAppt)}
+              : formatDateTime(puApptIso)}
             {' '}
-            <span className="text-muted-foreground text-[10px]">({APPT_TYPE_CONFIG[load.pickupApptType ?? 'exact']?.label})</span>
+            <span className="text-muted-foreground text-[10px]">({APPT_TYPE_CONFIG[puApptType ?? 'exact']?.label})</span>
           </span>
-          <span className="text-muted-foreground">Delivery</span>
+          <span className="text-muted-foreground">{legMode ? 'To' : 'Delivery'}</span>
           <span>
-            {(load.deliveryApptType ?? 'exact') !== 'exact'
+            {(deApptType ?? 'exact') !== 'exact'
               ? deTime
-              : formatDateTime(load.deliveryAppt)}
+              : formatDateTime(deApptIso)}
             {' '}
-            <span className="text-muted-foreground text-[10px]">({APPT_TYPE_CONFIG[load.deliveryApptType ?? 'exact']?.label})</span>
+            <span className="text-muted-foreground text-[10px]">({APPT_TYPE_CONFIG[deApptType ?? 'exact']?.label})</span>
           </span>
           <span className="text-muted-foreground">PU Driver</span>
           <span>{pickupDriverName}</span>
@@ -285,14 +302,61 @@ interface CompactWeekViewProps {
   weekStart: Date
 }
 
+// A scheduling bar: a whole load (legacy) or a single leg between consecutive stops
+// (multi-stop). The track/segment machinery is identical for both — it only needs a
+// start/end appt and a driver.
+interface WeekItem {
+  key: string
+  load: Load
+  driverId: string | null
+  startAppt: string
+  endAppt: string
+  fromStop?: Stop
+  toStop?: Stop
+}
+
 // Group key for natural ordering within a driver's day
-function groupKey(load: Load): string {
-  return `${load.pickupDriverId ?? 'unassigned'}-${chicagoDateStr(load.pickupAppt)}`
+function groupKey(item: WeekItem): string {
+  return `${item.driverId ?? 'unassigned'}-${chicagoDateStr(item.startAppt)}`
 }
 
 export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: CompactWeekViewProps) {
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const days = getFullWeek(weekStart) // [Mon … Sun]
   const dayStrs = useMemo(() => days.map((d) => chicagoDateStr(d.toISOString())), [days])
+
+  // One bar per load (legacy) or one bar per leg between consecutive stops (multi-stop).
+  const items = useMemo<WeekItem[]>(() => {
+    if (multiStopRender) {
+      const out: WeekItem[] = []
+      for (const load of loads) {
+        const stops = getStops(load)
+        for (let i = 0; i < stops.length - 1; i++) {
+          const from = stops[i], to = stops[i + 1]
+          if (!from.appt) continue
+          out.push({
+            key: `${load.id}:leg:${from.id}`,
+            load,
+            driverId: from.driverId,   // the driver departing this leg's origin
+            startAppt: from.appt,
+            endAppt: to.appt || from.appt,
+            fromStop: from,
+            toStop: to,
+          })
+        }
+      }
+      return out
+    }
+    return loads.map((load) => ({
+      key: load.id,
+      load,
+      driverId: load.pickupDriverId,
+      startAppt: load.pickupAppt,
+      endAppt: load.deliveryAppt || load.pickupAppt,
+    }))
+  }, [loads, multiStopRender])
+
+  const itemByKey = useMemo(() => new Map(items.map((it) => [it.key, it])), [items])
 
   // ── Track assignment ───────────────────────────────────────────────────────
   const trackMap = useMemo<Map<string, number>>(() => {
@@ -300,52 +364,52 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
 
     for (const dayStr of dayStrs) {
       const occupied = new Set<number>()
-      for (const [id, track] of map) {
-        const l = loads.find((x) => x.id === id)
-        if (!l?.pickupAppt) continue
-        const pDay = chicagoDateStr(l.pickupAppt)
-        const dDay = l.deliveryAppt ? chicagoDateStr(l.deliveryAppt) : pDay
+      for (const [key, track] of map) {
+        const it = itemByKey.get(key)
+        if (!it?.startAppt) continue
+        const pDay = chicagoDateStr(it.startAppt)
+        const dDay = it.endAppt ? chicagoDateStr(it.endAppt) : pDay
         if (pDay < dayStr && dDay >= dayStr) occupied.add(track)
       }
 
-      const newToday = loads
-        .filter((l) => l.pickupAppt && chicagoDateStr(l.pickupAppt) === dayStr)
+      const newToday = items
+        .filter((it) => it.startAppt && chicagoDateStr(it.startAppt) === dayStr)
         .sort((a, b) => {
           const ga = groupKey(a), gb = groupKey(b)
           if (ga !== gb) return ga.localeCompare(gb)
-          return (a.pickupAppt ?? '').localeCompare(b.pickupAppt ?? '')
+          return (a.startAppt ?? '').localeCompare(b.startAppt ?? '')
         })
 
-      for (const l of newToday) {
+      for (const it of newToday) {
         let t = 0
         while (occupied.has(t)) t++
-        map.set(l.id, t)
+        map.set(it.key, t)
         occupied.add(t)
       }
     }
 
     return map
-  }, [loads, dayStrs])
+  }, [items, itemByKey, dayStrs])
 
   const maxTrack = useMemo(() => {
     if (trackMap.size === 0) return -1
     return Math.max(...trackMap.values())
   }, [trackMap])
 
-  // ── Build grid segments — one entry per load, with column span ─────────────
+  // ── Build grid segments — one entry per item, with column span ─────────────
   const segments = useMemo(() => {
     const result: {
-      load: Load; track: number
+      item: WeekItem; track: number
       startCol: number; endCol: number
       isContinuation: boolean
     }[] = []
 
-    for (const [loadId, track] of trackMap) {
-      const load = loads.find((l) => l.id === loadId)
-      if (!load?.pickupAppt) continue
+    for (const [key, track] of trackMap) {
+      const it = itemByKey.get(key)
+      if (!it?.startAppt) continue
 
-      const pDay = chicagoDateStr(load.pickupAppt)
-      const dDay = load.deliveryAppt ? chicagoDateStr(load.deliveryAppt) : pDay
+      const pDay = chicagoDateStr(it.startAppt)
+      const dDay = it.endAppt ? chicagoDateStr(it.endAppt) : pDay
 
       let startCol = -1, endCol = -1
       for (let i = 0; i < dayStrs.length; i++) {
@@ -357,16 +421,16 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
       if (startCol === -1) continue // not visible this week
 
       result.push({
-        load, track,
+        item: it, track,
         startCol, endCol,
         isContinuation: pDay < dayStrs[0], // carried over from a previous week
       })
     }
 
     return result
-  }, [trackMap, loads, dayStrs])
+  }, [trackMap, itemByKey, dayStrs])
 
-  // Load count per column (for header badge — only count loads starting that day)
+  // Bar count per column (for header badge — only count bars starting that day)
   const primaryCounts = useMemo(() =>
     dayStrs.map((d) =>
       segments.filter((s) => dayStrs[s.startCol] === d && !s.isContinuation).length
@@ -430,13 +494,12 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
               />
             ))}
 
-            {/* Load cards — spanning across their full day range */}
-            {segments.map(({ load, track, startCol, endCol, isContinuation }) => {
-              const driverId = load.pickupDriverId
-              const slotLabel = segments.filter((s) => s.load.pickupDriverId === driverId && s.track < track).length + 1
+            {/* Bars — one per load (legacy) or per leg (multi-stop), spanning their day range */}
+            {segments.map(({ item, track, startCol, endCol, isContinuation }) => {
+              const slotLabel = segments.filter((s) => s.item.driverId === item.driverId && s.track < track).length + 1
               return (
                 <div
-                  key={load.id}
+                  key={item.key}
                   className="px-1 py-0.5 relative z-10"
                   style={{
                     gridColumn: `${startCol + 1} / ${endCol + 2}`,
@@ -444,11 +507,13 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
                   }}
                 >
                   <CompactCard
-                    load={load}
+                    load={item.load}
                     drivers={drivers}
                     conflictIds={conflictIds}
                     slotLabel={slotLabel}
                     isContinuation={isContinuation}
+                    fromStop={item.fromStop}
+                    toStop={item.toStop}
                   />
                 </div>
               )

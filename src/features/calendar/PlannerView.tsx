@@ -18,8 +18,9 @@ import { addDays, formatDayHeader, formatTime, formatDateShort, formatDateTimeIn
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
+import { flattenLoadsToStopEntries, updateStop } from '@/lib/stops'
 import { cn } from '@/lib/utils'
-import type { Load, Driver, ColorKey, ApptType } from '@/types'
+import type { Load, Driver, ColorKey, ApptType, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
@@ -41,8 +42,10 @@ type Role = 'pickup' | 'delivery' | 'same-day'
 interface DayEntry {
   load: Load
   role: Role
-  /** Stable key for ordering/dragging: `${loadId}:${role}` */
+  /** Stable key for ordering/dragging: `${loadId}:${role}` (legacy) or `${loadId}:${stopId}` (multi-stop) */
   key:  string
+  /** Present in multi-stop render mode: this row represents ONE stop, not a pickup/delivery half. */
+  stop?: Stop
 }
 
 // ── Chicago date string ───────────────────────────────────────────────────────
@@ -135,8 +138,9 @@ function ColorPicker({
 }
 
 // ── Driver picker popover ─────────────────────────────────────────────────────
-function DriverPicker({ loadId, currentId, field, drivers, onClose }: {
-  loadId: string; currentId: string | null; field: 'pickupDriverId' | 'deliveryDriverId'; drivers: Driver[]; onClose: () => void
+function DriverPicker({ loadId, load, stop, currentId, field, drivers, onClose }: {
+  loadId: string; load?: Load; stop?: Stop
+  currentId: string | null; field: 'pickupDriverId' | 'deliveryDriverId'; drivers: Driver[]; onClose: () => void
 }) {
   const { updateLoad } = useLoads()
   const [query, setQuery]   = useState('')
@@ -145,9 +149,12 @@ function DriverPicker({ loadId, currentId, field, drivers, onClose }: {
 
   const pick = useCallback(async (driverId: string | null) => {
     setSaving(true)
-    try { await updateLoad(loadId, { [field]: driverId }) } finally { setSaving(false) }
+    try {
+      if (stop && load) await updateLoad(loadId, { stops: updateStop(load, stop.id, { driverId }) })
+      else await updateLoad(loadId, { [field]: driverId })
+    } finally { setSaving(false) }
     onClose()
-  }, [updateLoad, loadId, field, onClose])
+  }, [updateLoad, loadId, load, stop, field, onClose])
 
   return (
     <div
@@ -236,18 +243,21 @@ function EditableTextCell({ load, field, width, dimmed }: {
 }
 
 // ── Appt edit popover ─────────────────────────────────────────────────────────
-function ApptEditPopover({ load, apptField, typeField, onClose }: {
+function ApptEditPopover({ load, stop, apptField, typeField, onClose }: {
   load: Load
+  stop?: Stop  // present in multi-stop mode → edit writes this one stop's appt
   apptField: 'pickupAppt' | 'deliveryAppt'
   typeField: 'pickupApptType' | 'deliveryApptType'
   onClose: () => void
 }) {
   const { updateLoad } = useLoads()
 
-  const initVal = load[apptField] ? formatDateTimeInput(load[apptField]!) : ''
+  const srcAppt = stop ? stop.appt : load[apptField]
+  const srcType = stop ? stop.apptType : load[typeField]
+  const initVal = srcAppt ? formatDateTimeInput(srcAppt) : ''
 
   const [dateVal, setDateVal] = useState(initVal)
-  const [typeVal, setTypeVal] = useState<ApptType>(load[typeField] ?? 'exact')
+  const [typeVal, setTypeVal] = useState<ApptType>(srcType ?? 'exact')
   const [saving,  setSaving]  = useState(false)
 
   const datePart = dateVal.slice(0, 10)
@@ -256,9 +266,17 @@ function ApptEditPopover({ load, apptField, typeField, onClose }: {
 
   const commit = async () => {
     setSaving(true)
-    const patch: Partial<Load> = { [typeField]: typeVal }
-    if (dateVal) patch[apptField] = new Date(dateVal).toISOString()
-    try { await updateLoad(load.id, patch) } finally { setSaving(false) }
+    try {
+      if (stop) {
+        const stopPatch: Partial<Stop> = { apptType: typeVal }
+        if (dateVal) stopPatch.appt = new Date(dateVal).toISOString()
+        await updateLoad(load.id, { stops: updateStop(load, stop.id, stopPatch) })
+      } else {
+        const patch: Partial<Load> = { [typeField]: typeVal }
+        if (dateVal) patch[apptField] = new Date(dateVal).toISOString()
+        await updateLoad(load.id, patch)
+      }
+    } finally { setSaving(false) }
     onClose()
   }
 
@@ -458,7 +476,8 @@ interface PlannerRowProps {
 }
 
 function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart, onDragEnter, onDragEnd, onSelect, selectedIds }: PlannerRowProps) {
-  const { load, role } = entry
+  const { load, role, stop } = entry
+  const stopMode = !!stop
   const { updateLoad } = useLoads()
   const [showColor,   setShowColor]   = useState(false)
   const [showDriver,  setShowDriver]  = useState(false)
@@ -466,15 +485,28 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
 
   const highlightHex  = getHighlightHex(load.colorKey)
   const driverField   = role === 'delivery' ? 'deliveryDriverId' : 'pickupDriverId'
-  const relevantDriverId = load[driverField] as string | null
+  // In multi-stop mode the row is ONE stop → its own driver. Legacy mode keeps the role→field mapping.
+  const relevantDriverId = stopMode ? stop!.driverId : (load[driverField] as string | null)
   const relevantDriver   = drivers.find((d) => d.id === relevantDriverId)
   const driverName       = relevantDriver?.name ?? '—'
   const isDeliveryDay = role === 'delivery'
   const isFinalDest   = role !== 'pickup'  // delivery or same-day — load ends here
-  const isNeed = load.pickupApptType === 'tbd' || load.deliveryApptType === 'tbd'
+  const isNeed = stopMode
+    ? stop!.apptType === 'tbd'
+    : (load.pickupApptType === 'tbd' || load.deliveryApptType === 'tbd')
+
+  // Per-column appt values. In multi-stop mode each row shows only THIS stop's appt
+  // in the matching column (the other column renders an em dash, no Yard half-leg).
+  const puIso  = stopMode ? (role === 'pickup'   ? stop!.appt     : undefined) : load.pickupAppt
+  const puType = stopMode ? (role === 'pickup'   ? stop!.apptType : undefined) : load.pickupApptType
+  const puYard = stopMode ? false : isDeliveryDay
+  const deIso  = stopMode ? (role === 'delivery' ? stop!.appt     : undefined) : load.deliveryAppt
+  const deType = stopMode ? (role === 'delivery' ? stop!.apptType : undefined) : load.deliveryApptType
+  const deYard = stopMode ? false : (role === 'pickup')
 
   // Route text
   const route = (() => {
+    if (stopMode)            return stop!.city || stop!.name || '—'
     if (role === 'pickup')   return [load.originCity, 'Yard'].filter(Boolean).join(' → ') || '—'
     if (role === 'delivery') return ['Yard', load.destinationCity].filter(Boolean).join(' → ') || '—'
     return [load.originCity, load.destinationCity].filter(Boolean).join(' → ') || '—'
@@ -553,13 +585,19 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       <EditableTextCell load={load} field="tmsId"        width={COL.tms} dimmed={isDeliveryDay} />
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu}  dimmed={isDeliveryDay} />
 
-      {/* PU / DE location names */}
+      {/* PU / DE location names — single stop name in multi-stop mode */}
       <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
-        {load.originName && (
-          <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
-        )}
-        {load.destinationName && (
-          <span className="text-[10px] text-slate-400 truncate" title={load.destinationName}>{load.destinationName}</span>
+        {stopMode ? (
+          stop!.name && <span className="text-[10px] text-slate-500 truncate" title={stop!.name}>{stop!.name}</span>
+        ) : (
+          <>
+            {load.originName && (
+              <span className="text-[10px] text-slate-500 truncate" title={load.originName}>{load.originName}</span>
+            )}
+            {load.destinationName && (
+              <span className="text-[10px] text-slate-400 truncate" title={load.destinationName}>{load.destinationName}</span>
+            )}
+          </>
         )}
       </div>
 
@@ -569,42 +607,46 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       {/* PU Appt */}
       <div className="relative group/appt shrink-0">
         <ApptCell
-          iso={load.pickupAppt}
-          type={load.pickupApptType}
+          iso={puIso}
+          type={puType}
           colorCls="text-blue-600"
-          yard={isDeliveryDay}
-          city={isDeliveryDay ? load.destinationCity : undefined}
+          yard={puYard}
+          city={puYard ? load.destinationCity : undefined}
         />
-        <button
-          className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); setEditingAppt('pu') }}
-        >
-          <Pencil className="size-2" />
-        </button>
+        {(!stopMode || role === 'pickup') && (
+          <button
+            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setEditingAppt('pu') }}
+          >
+            <Pencil className="size-2" />
+          </button>
+        )}
         {editingAppt === 'pu' && (
-          <ApptEditPopover load={load} apptField="pickupAppt" typeField="pickupApptType" onClose={() => setEditingAppt(null)} />
+          <ApptEditPopover load={load} stop={stop} apptField="pickupAppt" typeField="pickupApptType" onClose={() => setEditingAppt(null)} />
         )}
       </div>
 
       {/* DE Appt */}
       <div className="relative group/appt shrink-0">
         <ApptCell
-          iso={load.deliveryAppt}
-          type={load.deliveryApptType}
+          iso={deIso}
+          type={deType}
           colorCls="text-violet-600"
-          yard={role === 'pickup'}
-          city={role === 'pickup' ? load.destinationCity : undefined}
+          yard={deYard}
+          city={deYard ? load.destinationCity : undefined}
         />
-        <button
-          className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); setEditingAppt('de') }}
-        >
-          <Pencil className="size-2" />
-        </button>
+        {(!stopMode || role === 'delivery') && (
+          <button
+            className="absolute top-0.5 right-0.5 size-3.5 flex items-center justify-center rounded opacity-0 group-hover/appt:opacity-100 hover:bg-black/10 text-slate-400 transition-opacity"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); setEditingAppt('de') }}
+          >
+            <Pencil className="size-2" />
+          </button>
+        )}
         {editingAppt === 'de' && (
-          <ApptEditPopover load={load} apptField="deliveryAppt" typeField="deliveryApptType" onClose={() => setEditingAppt(null)} />
+          <ApptEditPopover load={load} stop={stop} apptField="deliveryAppt" typeField="deliveryApptType" onClose={() => setEditingAppt(null)} />
         )}
       </div>
 
@@ -632,6 +674,8 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         {showDriver && (
           <DriverPicker
             loadId={load.id}
+            load={load}
+            stop={stop}
             currentId={relevantDriverId}
             field={driverField}
             drivers={drivers}
@@ -737,6 +781,8 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
     return map
   }, [availabilities, drivers])
 
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
+
   // Multi-select state — shift/ctrl-click to toggle load selection
   const [selectedLoadIds, setSelectedLoadIds] = useState<string[]>([])
 
@@ -756,38 +802,51 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       map.get(dayStr)!.push(entry)
     }
 
-    for (const l of loads) {
-      if (l.unscheduled) continue  // orphans live in the Unscheduled section, not on a day
-      const puDay = chicagoDateStr(l.pickupAppt)
-      if (!puDay) continue  // skip loads with invalid pickup date
-      const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
-      const isMultiDay = puDay !== deDay
+    if (multiStopRender) {
+      // Multi-stop mode: one row per STOP, placed on its own appt day.
+      for (const { load: l, stop, key } of flattenLoadsToStopEntries(loads.filter((l) => !l.unscheduled))) {
+        const day = chicagoDateStr(stop.appt)
+        if (!day) continue
+        add(day, { load: l, role: stop.type, key, stop })
+      }
+    } else {
+      for (const l of loads) {
+        if (l.unscheduled) continue  // orphans live in the Unscheduled section, not on a day
+        const puDay = chicagoDateStr(l.pickupAppt)
+        if (!puDay) continue  // skip loads with invalid pickup date
+        const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
+        const isMultiDay = puDay !== deDay
 
-      if (isMultiDay) {
-        add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })
-        add(deDay, { load: l, role: 'delivery', key: `${l.id}:delivery` })
-      } else {
-        add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
+        if (isMultiDay) {
+          add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })
+          add(deDay, { load: l, role: 'delivery', key: `${l.id}:delivery` })
+        } else {
+          add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
+        }
       }
     }
 
-    // Sort each day: same-day and pickup entries by pickupAppt, delivery entries at the end by deliveryAppt
+    // Sort each day by the row's own appt (the stop's appt in multi-stop mode; the
+    // role-relevant legacy appt otherwise).
+    const rowTime = (e: DayEntry) =>
+      e.stop ? e.stop.appt
+        : e.role === 'delivery' ? (e.load.deliveryAppt ?? e.load.pickupAppt ?? '')
+        : (e.load.pickupAppt ?? '')
     for (const arr of map.values()) {
-      arr.sort((a, b) => {
-        const aTime = a.role === 'delivery' ? (a.load.deliveryAppt ?? a.load.pickupAppt ?? '') : (a.load.pickupAppt ?? '')
-        const bTime = b.role === 'delivery' ? (b.load.deliveryAppt ?? b.load.pickupAppt ?? '') : (b.load.pickupAppt ?? '')
-        return aTime.localeCompare(bTime)
-      })
+      arr.sort((a, b) => rowTime(a).localeCompare(rowTime(b)))
     }
 
     return map
-  }, [loads])
+  }, [loads, multiStopRender])
 
   // Orphan / unscheduled loads — shown in their own section so they're visible here too.
-  const unscheduledEntries = useMemo<DayEntry[]>(
-    () => loads.filter((l) => l.unscheduled).map((l) => ({ load: l, role: 'same-day', key: `${l.id}:same-day` })),
-    [loads],
-  )
+  const unscheduledEntries = useMemo<DayEntry[]>(() => {
+    const u = loads.filter((l) => l.unscheduled)
+    if (multiStopRender) {
+      return flattenLoadsToStopEntries(u).map(({ load: l, stop, key }) => ({ load: l, role: stop.type, key, stop }))
+    }
+    return u.map((l) => ({ load: l, role: 'same-day', key: `${l.id}:same-day` }))
+  }, [loads, multiStopRender])
 
   // Per-day local drag-to-reorder (session state, keys are DayEntry.key)
   const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
@@ -886,6 +945,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         const entries = orderedEntries(dayStr ?? '')
         const loadCount = entries.filter((e) => e.role !== 'delivery').length
         const tbdCount = entries.filter((e) => {
+          if (e.stop) return e.stop.apptType === 'tbd'
           if (e.role === 'delivery') return e.load.deliveryApptType === 'tbd'
           return e.load.pickupApptType === 'tbd'
         }).length

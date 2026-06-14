@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, Clock, ArrowRight } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Avatar } from '@/components/ui/avatar'
-import type { Load, Driver } from '@/types'
+import type { Load, Driver, Stop } from '@/types'
 import type { DriverColor } from '@/lib/driverColors'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
 import { formatApptTime, formatDateTime, isSameChicagoDay } from '@/lib/date'
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 
 interface EventCardProps {
   load: Load
+  stop?: Stop  // multi-stop mode: this card is ONE stop (its own driver/appt/location)
   drivers: Driver[]
   color: DriverColor
   isConflict: boolean
@@ -18,12 +19,15 @@ interface EventCardProps {
   onContextMenu: (e: React.MouseEvent) => void
 }
 
-export function EventCard({ load, drivers, color, isConflict, isSelected, orderNumber, onEdit, onContextMenu }: EventCardProps) {
+export function EventCard({ load, stop, drivers, color, isConflict, isSelected, orderNumber, onEdit, onContextMenu }: EventCardProps) {
+  const stopMode = !!stop
   const isRTI    = load.readyToInvoice
-  const isSplit  = load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId
-  const isMultiDay = !isSameChicagoDay(load.pickupAppt, load.deliveryAppt)
+  // A single stop has exactly one driver and one day — no split / multi-day decorations.
+  const isSplit  = stopMode ? false : (load.pickupDriverId !== load.deliveryDriverId && !!load.deliveryDriverId)
+  const isMultiDay = stopMode ? false : !isSameChicagoDay(load.pickupAppt, load.deliveryAppt)
 
-  const pickupDriver       = drivers.find((d) => d.id === load.pickupDriverId)
+  const primaryDriverId    = stopMode ? stop!.driverId : load.pickupDriverId
+  const pickupDriver       = drivers.find((d) => d.id === primaryDriverId)
   const deliveryDriver     = isSplit ? drivers.find((d) => d.id === load.deliveryDriverId) : undefined
   const deliveryColor      = deliveryDriver?.colorKey ? getColor(deliveryDriver.colorKey) : UNASSIGNED_COLOR
   const pickupDriverName   = pickupDriver?.name  ?? 'Unassigned'
@@ -33,7 +37,9 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
   const bgColor     = isConflict ? 'rgba(239,68,68,0.08)' : isRTI ? '#22c55e' : color.bg
   const textColor   = isRTI ? '#fff' : color.text
 
-  const puTime = formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
+  const puTime = stopMode
+    ? formatApptTime(stop!.appt, stop!.apptType, stop!.apptEnd)
+    : formatApptTime(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)
 
   const card = (
     <div
@@ -87,25 +93,41 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           <span className="text-[10px] font-mono truncate" style={{ color: '#6b7280' }}>{load.pickupNumber}</span>
         </div>
 
-        {/* Origin */}
-        {(load.originName || load.originCity) && (
-          <div className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}
-            title={[load.originName, load.originCity].filter(Boolean).join(' · ')}>
-            {load.originName}
-            {load.originCity && <span style={{ color: '#6b7280' }}> · {load.originCity}</span>}
-          </div>
-        )}
+        {stopMode ? (
+          /* Single stop location — delivery stops get the arrow marker */
+          (stop!.name || stop!.city) && (
+            <div className="flex items-center gap-0.5 min-w-0"
+              title={[stop!.name, stop!.city].filter(Boolean).join(' · ')}>
+              {stop!.type === 'delivery' && <ArrowRight className="size-2 shrink-0" style={{ color: '#2563eb' }} />}
+              <span className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}>
+                {stop!.name}
+                {stop!.city && <span style={{ color: '#6b7280' }}> · {stop!.city}</span>}
+              </span>
+            </div>
+          )
+        ) : (
+          <>
+            {/* Origin */}
+            {(load.originName || load.originCity) && (
+              <div className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}
+                title={[load.originName, load.originCity].filter(Boolean).join(' · ')}>
+                {load.originName}
+                {load.originCity && <span style={{ color: '#6b7280' }}> · {load.originCity}</span>}
+              </div>
+            )}
 
-        {/* Destination */}
-        {(load.destinationName || load.destinationCity) && (
-          <div className="flex items-center gap-0.5 min-w-0"
-            title={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')}>
-            <ArrowRight className="size-2 shrink-0" style={{ color: '#2563eb' }} />
-            <span className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}>
-              {load.destinationName}
-              {load.destinationCity && <span style={{ color: '#6b7280' }}> · {load.destinationCity}</span>}
-            </span>
-          </div>
+            {/* Destination */}
+            {(load.destinationName || load.destinationCity) && (
+              <div className="flex items-center gap-0.5 min-w-0"
+                title={[load.destinationName, load.destinationCity].filter(Boolean).join(' · ')}>
+                <ArrowRight className="size-2 shrink-0" style={{ color: '#2563eb' }} />
+                <span className="text-[10px] leading-tight truncate" style={{ color: '#374151' }}>
+                  {load.destinationName}
+                  {load.destinationCity && <span style={{ color: '#6b7280' }}> · {load.destinationCity}</span>}
+                </span>
+              </div>
+            )}
+          </>
         )}
 
         <div className="flex-1" />
@@ -116,7 +138,7 @@ export function EventCard({ load, drivers, color, isConflict, isSelected, orderN
           <div className="flex items-center gap-1 min-w-0 overflow-hidden"
             title={isSplit ? `${pickupDriverName} → ${deliveryDriverName}` : pickupDriverName}>
             {isRTI && <CheckCircle2 className="size-3 shrink-0" style={{ color: '#fff' }} />}
-            {load.pickupDriverId ? (
+            {primaryDriverId ? (
               <>
                 <Avatar
                   src={pickupDriver?.photoUrl}
