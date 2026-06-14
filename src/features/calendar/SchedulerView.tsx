@@ -113,14 +113,19 @@ export function SchedulerView({
     if (multiStopRender) {
       // One event per stop, on its own day under its own driver. Give each a 1h block
       // so it's visible in both the day (hour slots) and week/month (day slots) views.
-      return flattenLoadsToStopEntries(loads).map(({ load, stop, key }) => ({
-        id: key,
-        resourceId: stop.driverId ?? 'unassigned',
-        start: stop.appt,
-        end: new Date(new Date(stop.appt).getTime() + 60 * 60 * 1000).toISOString(),
-        editable: true,
-        extendedProps: { load, stop },
-      }))
+      // Skip stops with no firm appt (e.g. TBD) — they can't be placed on the timeline.
+      return flattenLoadsToStopEntries(loads).flatMap(({ load, stop, key }) => {
+        const startMs = stop.appt ? new Date(stop.appt).getTime() : NaN
+        if (isNaN(startMs)) return []
+        return [{
+          id: key,
+          resourceId: stop.driverId ?? 'unassigned',
+          start: stop.appt,
+          end: new Date(startMs + 60 * 60 * 1000).toISOString(),
+          editable: true,
+          extendedProps: { load, stop },
+        }]
+      })
     }
     return loads.map((load) => ({
       id: load.id,
