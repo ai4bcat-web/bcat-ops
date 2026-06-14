@@ -330,3 +330,21 @@ export const escalationRuleSchema = z.object({
   active: z.boolean(),
 })
 export type EscalationRuleValues = z.infer<typeof escalationRuleSchema>
+
+// ── Driver pay (manual biweekly entry → fleet profitability) ────────────────────
+// grossPay is entered in dollars. `source` defaults to MANUAL; PAYCHEX is the
+// integration seam for an eventual automated import.
+export const driverPaySchema = z
+  .object({
+    driverId:    z.string().min(1, 'Select a driver'),
+    periodStart: dateString,
+    periodEnd:   dateString,
+    grossPay:    z.coerce.number().min(0, 'Gross pay must be ≥ 0'),
+    source:      z.enum(['MANUAL', 'PAYCHEX']).default('MANUAL'),
+    notes:       z.string().optional(),
+  })
+  .refine((v) => v.periodEnd >= v.periodStart, {
+    message: 'Period end must be on or after the start',
+    path: ['periodEnd'],
+  })
+export type DriverPayValues = z.infer<typeof driverPaySchema>

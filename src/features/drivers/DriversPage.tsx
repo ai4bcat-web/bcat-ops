@@ -180,6 +180,11 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
         driverId = newDriver.id
       }
 
+      // Enforce one-driver-per-truck: if a truck was assigned, clear it from any other driver.
+      if (normalized.assignedTruckId) {
+        await useAppStore.getState().assignTruckToDriver(normalized.assignedTruckId, driverId)
+      }
+
       // Handle photo upload / removal separately
       try {
         if (shouldDeletePhoto && driver?.photoKey) {

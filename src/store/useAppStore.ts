@@ -370,6 +370,9 @@ interface AppState {
   addDriver: (d: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Driver>
   updateDriver: (id: string, patch: Partial<Omit<Driver, 'id' | 'createdAt'>>) => Promise<void>
   deleteDriver: (id: string) => Promise<void>
+  // Assign a truck (Equipment.id) to a driver — single source of truth is
+  // Driver.assignedTruckId, one driver per truck. driverId=null clears the truck.
+  assignTruckToDriver: (equipmentId: string, driverId: string | null) => Promise<void>
 
   // ── Load actions ───────────────────────────────────────────────────────────
   addLoad: (l: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Load>
@@ -534,6 +537,16 @@ export const useAppStore = create<AppState>()(
         const after = await api.updateDriver(id, patch)
         set((s) => ({ drivers: s.drivers.map((d) => (d.id === id ? after : d)) }))
         writeAudit(get().currentUserEmail, 'Driver', id, 'update', diffChanges(before, after))
+      },
+
+      assignTruckToDriver: async (equipmentId, driverId) => {
+        const { drivers, updateDriver } = get()
+        // Clear this truck from any other driver (one driver per truck).
+        const holders = drivers.filter((d) => d.assignedTruckId === equipmentId && d.id !== driverId)
+        await Promise.all(holders.map((d) => updateDriver(d.id, { assignedTruckId: null })))
+        if (driverId) {
+          await updateDriver(driverId, { assignedTruckId: equipmentId })
+        }
       },
 
       deleteDriver: async (id) => {

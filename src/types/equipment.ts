@@ -2,6 +2,7 @@ export type EquipmentType = 'truck' | 'trailer'
 export type Ownership = 'owned' | 'leased' | 'rented' | 'financed'
 export type EldSource = 'motive' | 'manual'
 export type OwnershipType = 'COMPANY' | 'OWNER_OPERATOR'
+export type FleetGroup = 'LOCAL' | 'AMAZON'
 export type TaskPriority = 'high' | 'med' | 'low'
 export type TaskStatus = 'upcoming' | 'complete'
 
@@ -30,6 +31,7 @@ export interface Equipment {
   fuelCardNumbers?: string[]    // EFS card # prefixes, e.g. ["00007"]
   eldSource?: EldSource         // 'motive' (auto-sync) | 'manual' (own ELD); default motive
   eldSerialNumber?: string      // own-ELD device serial (manual trucks)
+  fleetGroup?: FleetGroup | null // LOCAL (Ivan) | AMAZON — source of truth for profitability grouping
   notes?: string
   createdAt: string
   updatedAt: string
