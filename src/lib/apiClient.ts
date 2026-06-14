@@ -970,7 +970,7 @@ const EQUIPMENT_FIELDS = `
   ownership insured active
   dotInspectionDate iftaExpirationDate irpExpirationDate insuranceExpirationDate bobtailInsuranceDate
   assignedDriverId fleetManagerAssignee onTollwayAccount fuelCardNumbers
-  eldSource eldSerialNumber notes
+  eldSource eldSerialNumber fleetGroup notes
   createdAt updatedAt
 `
 
@@ -1170,4 +1170,56 @@ export async function listTruckLocationHistory(truckId: string): Promise<TruckLo
     variables: { truckId },
   }) as { data: { listTruckLocationHistoryByTruckIdAndLocatedAt: { items: TruckLocation[] } } }
   return result.data.listTruckLocationHistoryByTruckIdAndLocatedAt.items ?? []
+}
+
+// ── DriverPayPeriod ─────────────────────────────────────────────────────────────
+// Manual biweekly gross-pay entry. `source` is the Paychex integration seam.
+
+export interface DriverPayPeriod {
+  id:          string
+  driverId:    string
+  periodStart: string   // YYYY-MM-DD (inclusive)
+  periodEnd:   string   // YYYY-MM-DD (inclusive)
+  grossPay:    number   // dollars
+  source?:     'MANUAL' | 'PAYCHEX' | null
+  notes?:      string | null
+  createdAt:   string
+  updatedAt:   string
+}
+
+const DRIVER_PAY_FIELDS = `id driverId periodStart periodEnd grossPay source notes createdAt updatedAt`
+
+export async function listDriverPayPeriods(): Promise<DriverPayPeriod[]> {
+  const result = await client.graphql({
+    query: `query ListDriverPayPeriods { listDriverPayPeriods(limit: 5000) { items { ${DRIVER_PAY_FIELDS} } } }`,
+  }) as { data: { listDriverPayPeriods: { items: DriverPayPeriod[] } } }
+  return result.data.listDriverPayPeriods.items ?? []
+}
+
+export async function createDriverPayPeriod(
+  input: Omit<DriverPayPeriod, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<DriverPayPeriod> {
+  const result = await client.graphql({
+    query: `mutation CreateDriverPayPeriod($input: CreateDriverPayPeriodInput!) { createDriverPayPeriod(input: $input) { ${DRIVER_PAY_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createDriverPayPeriod: DriverPayPeriod } }
+  return result.data.createDriverPayPeriod
+}
+
+export async function updateDriverPayPeriod(
+  id: string,
+  patch: Partial<Omit<DriverPayPeriod, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<DriverPayPeriod> {
+  const result = await client.graphql({
+    query: `mutation UpdateDriverPayPeriod($input: UpdateDriverPayPeriodInput!) { updateDriverPayPeriod(input: $input) { ${DRIVER_PAY_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateDriverPayPeriod: DriverPayPeriod } }
+  return result.data.updateDriverPayPeriod
+}
+
+export async function deleteDriverPayPeriod(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteDriverPayPeriod($input: DeleteDriverPayPeriodInput!) { deleteDriverPayPeriod(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
 }

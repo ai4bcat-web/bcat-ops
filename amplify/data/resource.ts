@@ -100,8 +100,30 @@ const schema = a.schema({
       // 'manual' = own ELD, excluded from Motive mileage sync. null = treated as motive.
       eldSource:               a.string(),
       eldSerialNumber:         a.string(),             // own-ELD device serial (manual trucks)
+      // Fleet grouping for profitability — LOCAL (Ivan) vs AMAZON. Optional: legacy
+      // records read null and are treated as "ungrouped" by the profitability view.
+      // This is the SOURCE OF TRUTH for fleet membership (no hardcoded unit lists).
+      fleetGroup:              a.enum(['LOCAL', 'AMAZON']),
       notes:                   a.string(),
     })
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Driver pay periods (biweekly) ──────────────────────────────────────────
+  // Manual gross-pay entry now; `source` is the Paychex integration seam. A driver's
+  // pay is mapped to their truck via Driver.assignedTruckId and spread (prorated by
+  // day) across the weeks of the requested range in the profitability calc layer.
+  DriverPayPeriod: a
+    .model({
+      driverId:    a.string().required(),
+      periodStart: a.string().required(),   // YYYY-MM-DD (inclusive)
+      periodEnd:   a.string().required(),    // YYYY-MM-DD (inclusive)
+      grossPay:    a.float().required(),     // dollars
+      source:      a.enum(['MANUAL', 'PAYCHEX']),
+      notes:       a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('driverId').sortKeys(['periodStart']),
+    ])
     .authorization((allow) => [allow.authenticated()]),
 
   MaintenanceTask: a
