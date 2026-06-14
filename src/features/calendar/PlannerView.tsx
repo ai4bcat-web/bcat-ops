@@ -782,9 +782,12 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
   }, [availabilities, drivers])
 
   const multiStopRender = useAppStore((s) => s.multiStopRender)
+  const { updateLoad } = useLoads()
 
   // Multi-select state — shift/ctrl-click to toggle load selection
   const [selectedLoadIds, setSelectedLoadIds] = useState<string[]>([])
+  // Drag-over highlight for the Unscheduled drop zone.
+  const [unschedDropOver, setUnschedDropOver] = useState(false)
 
   const handleSelect = useCallback((loadId: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -848,6 +851,15 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
     return u.map((l) => ({ load: l, role: 'same-day', key: `${l.id}:same-day` }))
   }, [loads, multiStopRender])
 
+  // Map every draggable row key → its load id, so a drop onto the Unscheduled zone can
+  // resolve which load to park (dragKey holds the row key during the drag).
+  const keyToLoadId = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const arr of entriesByDay.values()) for (const e of arr) m.set(e.key, e.load.id)
+    for (const e of unscheduledEntries) m.set(e.key, e.load.id)
+    return m
+  }, [entriesByDay, unscheduledEntries])
+
   // Per-day local drag-to-reorder (session state, keys are DayEntry.key)
   const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
   const dragKey  = useRef<string | null>(null)
@@ -909,33 +921,52 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         <ColHeader width={32}>RTI</ColHeader>
       </div>
 
-      {/* Unscheduled (orphan) section — loads with no firm date */}
-      {unscheduledEntries.length > 0 && (
-        <div className="shrink-0" style={{ borderBottom: '1px solid var(--ds-border)' }}>
-          <div
-            className="flex items-center gap-2 px-2 sticky z-10"
-            style={{ top: ROW_H, height: 22, background: '#fef3c7', borderBottom: '1px solid var(--ds-border)' }}
-          >
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Unscheduled</span>
-            <span style={{ fontSize: 10, color: '#b45309' }}>· {unscheduledEntries.length} load{unscheduledEntries.length !== 1 ? 's' : ''} with no firm date</span>
-          </div>
-          {unscheduledEntries.map((entry) => (
-            <PlannerRow
-              key={entry.key}
-              entry={entry}
-              drivers={drivers}
-              dragging={false}
-              dragOver={false}
-              selected={selectedLoadIds.includes(entry.load.id)}
-              selectedIds={selectedLoadIds}
-              onDragStart={() => {}}
-              onDragEnter={() => {}}
-              onDragEnd={() => {}}
-              onSelect={handleSelect}
-            />
-          ))}
+      {/* Unscheduled (orphan) section — always shown so it's a visible drop target.
+          Drag a load here to park it (sets unscheduled: true). */}
+      <div
+        className="shrink-0"
+        style={{
+          borderBottom: '1px solid var(--ds-border)',
+          background: unschedDropOver ? 'rgba(245,158,11,0.10)' : undefined,
+          outline: unschedDropOver ? '2px solid #f59e0b' : undefined, outlineOffset: -2,
+        }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+        onDragEnter={() => setUnschedDropOver(true)}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setUnschedDropOver(false) }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setUnschedDropOver(false)
+          const id = dragKey.current ? keyToLoadId.get(dragKey.current) : null
+          if (id) updateLoad(id, { unscheduled: true })
+        }}
+      >
+        <div
+          className="flex items-center gap-2 px-2 sticky z-10"
+          style={{ top: ROW_H, height: 22, background: '#fef3c7', borderBottom: '1px solid var(--ds-border)' }}
+        >
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Unscheduled</span>
+          <span style={{ fontSize: 10, color: '#b45309' }}>
+            {unscheduledEntries.length > 0
+              ? `· ${unscheduledEntries.length} load${unscheduledEntries.length !== 1 ? 's' : ''} with no firm date`
+              : '· drag a load here when the date isn’t set yet'}
+          </span>
         </div>
-      )}
+        {unscheduledEntries.map((entry) => (
+          <PlannerRow
+            key={entry.key}
+            entry={entry}
+            drivers={drivers}
+            dragging={false}
+            dragOver={false}
+            selected={selectedLoadIds.includes(entry.load.id)}
+            selectedIds={selectedLoadIds}
+            onDragStart={() => {}}
+            onDragEnter={() => {}}
+            onDragEnd={() => {}}
+            onSelect={handleSelect}
+          />
+        ))}
+      </div>
 
       {/* Day sections */}
       {days.map((day, di) => {
