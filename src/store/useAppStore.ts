@@ -360,7 +360,7 @@ interface AppState {
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
-  multiStopRender: boolean   // calendar renders one item per STOP (vs per load); off by default
+  multiStopRender: boolean   // calendar renders one item per STOP (vs per load); ON by default (toggle is the fallback)
 
   // ── Initialization ─────────────────────────────────────────────────────────
   initializeData: (userEmail: string) => Promise<void>
@@ -453,7 +453,7 @@ export const useAppStore = create<AppState>()(
       filterDriverId: null,
       searchQuery: '',
       filters: { readyToInvoice: false, split: false, unassigned: false, needsAppt: false },
-      multiStopRender: false,
+      multiStopRender: true,
 
       // ── Init ───────────────────────────────────────────────────────────────
       setCurrentUser: (email) => set({ currentUserEmail: email }),
@@ -686,6 +686,17 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'bcat-ops-ui-v4',
+      // Bumped to 1 when multi-stop rendering became the default (Phase 2/3 cleanup).
+      version: 1,
+      migrate: (persisted, version) => {
+        const s = (persisted ?? {}) as Record<string, unknown>
+        if (version < 1) {
+          // One-time flip: anyone still on the old off-by-default value gets multi-stop on.
+          // They can still toggle it back off afterwards (that choice persists at v1).
+          return { ...s, multiStopRender: true }
+        }
+        return s
+      },
       // Persist UI prefs + a fleet fallback. Equipment/maintenance are backend-backed
       // now; the cached copy here only bridges the gap before initializeData's fetch
       // resolves (and keeps the page usable if the backend isn't deployed yet).
