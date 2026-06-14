@@ -257,6 +257,12 @@ export function DashboardPage() {
           <TruckMilesWidget />
         </div>
 
+        {/* ── Weekly fleet profitability (under fleet tracking) ─────────────── */}
+        <FleetProfitabilitySection />
+
+        {/* ── Compliance alerts (under profitability) ───────────────────────── */}
+        <ComplianceAlertsWidget />
+
         {/* ── Charts row ───────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1.4fr', gap: 16 }}>
 
@@ -484,15 +490,11 @@ export function DashboardPage() {
           </Card>
         </div>
 
-        {/* ── Bottom row: Compliance · Fuel · Open Tasks ────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
-          <ComplianceAlertsWidget />
+        {/* ── Bottom row: Fuel · Open Tasks ─────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
           <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
           <OpenTasksWidget />
         </div>
-
-        {/* ── Weekly fleet profitability (replaces the Profitability placeholder) ── */}
-        <FleetProfitabilitySection />
 
       </div>
     </div>
