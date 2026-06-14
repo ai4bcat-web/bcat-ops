@@ -18,6 +18,7 @@ import { OpenTasksWidget } from './OpenTasksWidget'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { TruckMapWidget } from './TruckMapWidget'
 import { TruckMilesWidget } from './TruckMilesWidget'
+import { FleetProfitabilitySection } from '@/features/fleet-profitability/FleetProfitabilitySection'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -483,25 +484,15 @@ export function DashboardPage() {
           </Card>
         </div>
 
-        {/* ── Bottom row: Fuel · Open Tasks · Profitability ─────────────────── */}
+        {/* ── Bottom row: Compliance · Fuel · Open Tasks ────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: col1 ?? 'repeat(3, minmax(0, 1fr))', gap: 16 }}>
           <ComplianceAlertsWidget />
           <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
           <OpenTasksWidget />
-
-          {/* Profitability placeholder */}
-          <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '20px 20px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Profitability</div>
-              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', background: 'var(--ds-bg)', color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 5, padding: '2px 7px' }}>
-                Coming soon
-              </span>
-            </div>
-            <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
-              Track revenue minus expenses per truck, driver, and time period.
-            </div>
-          </div>
         </div>
+
+        {/* ── Weekly fleet profitability (replaces the Profitability placeholder) ── */}
+        <FleetProfitabilitySection />
 
       </div>
     </div>
