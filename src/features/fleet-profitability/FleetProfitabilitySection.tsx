@@ -32,7 +32,7 @@ export function FleetProfitabilitySection() {
   const [showPayForm, setShowPayForm] = useState(false)
 
   const range = weekRange(weekOffset)
-  const { data, loading } = useFleetProfitability(range, group)
+  const { data, loading, refresh: refreshProfitability } = useFleetProfitability(range, group)
   const { payPeriods, createPay, deletePay, refresh: refreshPay } = useDriverPay()
   const { drivers } = useDrivers()
 
@@ -41,8 +41,14 @@ export function FleetProfitabilitySection() {
 
   async function handleSavePay(input: Parameters<typeof createPay>[0]) {
     await createPay(input)
-    // Re-fetch so the profitability calc picks up the new pay period.
+    // Re-fetch both this list and the profitability calc's own pay data.
     refreshPay()
+    refreshProfitability()
+  }
+
+  async function handleDeletePay(id: string) {
+    await deletePay(id)
+    refreshProfitability()
   }
 
   const driverName = (id: string) => drivers.find((d) => d.id === id)?.name ?? id
@@ -149,7 +155,7 @@ export function FleetProfitabilitySection() {
                 <span style={{ color: 'var(--ds-t3)' }}>{p.periodStart} → {p.periodEnd}</span>
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(p.grossPay)}</span>
                 <span style={{ fontSize: 10, color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '1px 5px' }}>{p.source ?? 'MANUAL'}</span>
-                <button onClick={() => deletePay(p.id)} style={{ marginLeft: 'auto', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }} title="Delete"><Trash2 size={13} /></button>
+                <button onClick={() => handleDeletePay(p.id)} style={{ marginLeft: 'auto', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }} title="Delete"><Trash2 size={13} /></button>
               </div>
             ))}
           </div>
