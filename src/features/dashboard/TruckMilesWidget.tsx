@@ -23,6 +23,7 @@ function fmtMiles(n: number): string {
 export function TruckMilesWidget() {
   const [periodType, setPeriodType] = useState<PeriodType>('WEEK')
   const [offset, setOffset] = useState(0)               // 0 = current, 1 = previous…
+  const [userStepped, setUserStepped] = useState(false) // true once the user steps periods
   const [mileages, setMileages] = useState<TruckMileage[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<{ truckId: string; unitNumber: string } | null>(null)
@@ -40,6 +41,20 @@ export function TruckMilesWidget() {
     const id = setInterval(load, 300_000)
     return () => { active = false; clearInterval(id) }
   }, [periodType])
+
+  // Day view: Motive's IFTA miles lag a day or two, so "today" is usually empty.
+  // Default the Day view to the most recent day that actually has miles (until the
+  // user steps periods manually). Week/Month/Year stay on the current period.
+  useEffect(() => {
+    if (periodType !== 'DAY' || userStepped) return
+    const latest = mileages
+      .filter((m) => m.periodType === 'DAY' && m.miles > 0)
+      .reduce<string | null>((max, m) => (max === null || m.periodStart > max ? m.periodStart : max), null)
+    if (!latest) return
+    for (let off = 0; off <= 400; off++) {
+      if (periodStartIso('DAY', off) === latest) { setOffset(off); break }
+    }
+  }, [mileages, periodType, userStepped])
 
   const targetStart = periodStartIso(periodType, offset)
 
@@ -72,6 +87,7 @@ export function TruckMilesWidget() {
   function changeType(t: PeriodType) {
     setPeriodType(t)
     setOffset(0)
+    setUserStepped(false)   // re-enable the "latest day with data" default for the new type
     setLoading(true)
   }
 
@@ -104,14 +120,14 @@ export function TruckMilesWidget() {
 
         {/* Look-back stepper */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-          <button onClick={() => setOffset((o) => o + 1)} title="Previous period"
+          <button onClick={() => { setUserStepped(true); setOffset((o) => o + 1) }} title="Previous period"
             style={{ display: 'flex', alignItems: 'center', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 6, cursor: 'pointer', padding: '3px 5px', color: 'var(--ds-t2)' }}>
             <ChevronLeft size={15} />
           </button>
           <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', fontWeight: 500, minWidth: 130, textAlign: 'center' }}>
             {periodLabel(periodType, targetStart)}{offset === 0 ? ' (current)' : ''}
           </div>
-          <button onClick={() => setOffset((o) => Math.max(0, o - 1))} disabled={offset === 0} title="Next period"
+          <button onClick={() => { setUserStepped(true); setOffset((o) => Math.max(0, o - 1)) }} disabled={offset === 0} title="Next period"
             style={{ display: 'flex', alignItems: 'center', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 6, cursor: offset === 0 ? 'default' : 'pointer', padding: '3px 5px', color: 'var(--ds-t2)', opacity: offset === 0 ? 0.4 : 1 }}>
             <ChevronRight size={15} />
           </button>
