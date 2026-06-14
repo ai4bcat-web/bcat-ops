@@ -686,6 +686,17 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'bcat-ops-ui-v4',
+      // Bump when an existing persisted pref needs a one-time reset across all users.
+      // v1: force the calendar "stops" toggle (multiStopRender) back off for users
+      //     who had it persisted on before it became off-by-default.
+      version: 1,
+      migrate: (persisted, fromVersion) => {
+        const state = (persisted ?? {}) as Record<string, unknown>
+        if (fromVersion < 1) {
+          state.multiStopRender = false
+        }
+        return state
+      },
       // Persist UI prefs + a fleet fallback. Equipment/maintenance are backend-backed
       // now; the cached copy here only bridges the gap before initializeData's fetch
       // resolves (and keeps the page usable if the backend isn't deployed yet).
