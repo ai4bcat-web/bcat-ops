@@ -16,7 +16,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { getExpensesByTruck } from '@/lib/expenseAllocation'
+import { getFleetExpenses } from '@/lib/expenseAllocation'
+import { FleetProfitabilitySection } from '@/features/fleet-profitability/FleetProfitabilitySection'
 import { filterByDate, getWeeksInRange } from '@/lib/fuelDateUtils'
 import type { WeekBucket } from '@/lib/fuelDateUtils'
 import {
@@ -234,43 +235,17 @@ function OverviewTab({
     [expenseData.records],
   )
 
-  // Expand recurring expenses into one virtual record per month in the date range.
-  // RecurringExpense rows are never stored as ExpenseRecords — they must be projected
-  // here before being passed to the allocation engine.
-  const recurringInputs = useMemo(() => {
-    const startMonth = startStr.slice(0, 7)   // "2026-05"
-    const endMonth   = endStr.slice(0, 7)
-    const virtual: Array<{
-      expenseTypeId: string; allocationId: string | null
-      amount: number; periodMonth: string
-      transactionDate: null; directTruckId: null
-    }> = []
-
-    for (const r of expenseData.recurring) {
-      if (!r.active) continue
-      // Normalize YYYY-M → YYYY-MM so string comparisons work correctly
-      const rStart = r.startMonth.replace(/^(\d{4})-(\d)$/, '$1-0$2')
-      const rEnd   = r.endMonth ? r.endMonth.replace(/^(\d{4})-(\d)$/, '$1-0$2') : null
-      // clamp to the date range
-      const lo = rStart > startMonth ? rStart : startMonth
-      const hi = rEnd && rEnd < endMonth ? rEnd : endMonth
-      let month = lo
-      while (month <= hi) {
-        virtual.push({
-          expenseTypeId: r.expenseTypeId,
-          allocationId:  r.allocationId,
-          amount:        r.monthlyAmount,
-          periodMonth:   month,
-          transactionDate: null,
-          directTruckId:   null,
-        })
-        // advance by one month
-        const [y, m] = month.split('-').map(Number)
-        month = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`
-      }
-    }
-    return virtual
-  }, [expenseData.recurring, startStr, endStr])
+  const recurringInputs = useMemo(() =>
+    expenseData.recurring.map((r) => ({
+      expenseTypeId: r.expenseTypeId,
+      allocationId:  r.allocationId,
+      monthlyAmount: r.monthlyAmount,
+      startMonth:    r.startMonth,
+      endMonth:      r.endMonth,
+      active:        r.active,
+    })),
+    [expenseData.recurring],
+  )
 
   const allocInputs = useMemo(() =>
     expenseData.allocations.map((a) => ({
@@ -290,8 +265,14 @@ function OverviewTab({
     [expenseData.expenseTypes],
   )
 
+  // Shared aggregation — identical to the Profitability view: fuel + records +
+  // projected recurring, with monthly costs prorated to the selected range.
   const matrix = useMemo(
-    () => getExpensesByTruck(startStr, endStr, fuelInputs, [...recordInputs, ...recurringInputs], allocInputs, typeInputs),
+    () => getFleetExpenses(
+      startStr, endStr,
+      { fuelTxs: fuelInputs, records: recordInputs, recurring: recurringInputs, allocations: allocInputs, expenseTypes: typeInputs },
+      { prorateMonthly: true },
+    ),
     [startStr, endStr, fuelInputs, recordInputs, recurringInputs, allocInputs, typeInputs],
   )
 
@@ -978,12 +959,13 @@ function EfficiencyTab({
 
 // ── Page tabs ─────────────────────────────────────────────────────────────────
 
-type PageTab = 'overview' | 'fuel' | 'efficiency' | 'manage'
+type PageTab = 'overview' | 'fuel' | 'efficiency' | 'profitability' | 'manage'
 
 const PAGE_TABS: { value: PageTab; label: string }[] = [
   { value: 'overview',   label: 'Overview'    },
   { value: 'fuel',       label: 'Fuel'        },
   { value: 'efficiency', label: 'Efficiency'  },
+  { value: 'profitability', label: 'Profitability' },
   { value: 'manage',     label: 'Manage'      },
 ]
 
@@ -1146,6 +1128,12 @@ export function ExpensesPage() {
             filteredFuelTxs={filteredFuelTxs}
             rangeStart={rangeStart}
             rangeEnd={rangeEnd}
+          />
+        )}
+
+        {tab === 'profitability' && (
+          <FleetProfitabilitySection
+            externalRange={{ start: format(rangeStart, 'yyyy-MM-dd'), end: format(rangeEnd, 'yyyy-MM-dd') }}
           />
         )}
 

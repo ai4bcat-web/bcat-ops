@@ -5,7 +5,7 @@ import { useDriverPay } from '@/hooks/useDriverPay'
 import { useDrivers } from '@/hooks/useDrivers'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
-import type { TruckProfitability } from '@/lib/fleetProfitability'
+import type { TruckProfitability, DateRange } from '@/lib/fleetProfitability'
 import { weekRange, weekLabel } from './weekRange'
 import { DriverPayForm } from './DriverPayForm'
 
@@ -26,12 +26,18 @@ function netColor(n: number): string {
   return n > 0 ? '#15803d' : n < 0 ? '#dc2626' : 'var(--ds-t2)'
 }
 
-export function FleetProfitabilitySection() {
+/**
+ * Weekly fleet profitability. Standalone (dashboard) it manages its own week
+ * navigation; when `externalRange` is passed (e.g. embedded in the Expenses tab) it
+ * uses that date range instead and hides the week stepper, so it stays in sync with
+ * the page's range selector and the Expenses Overview numbers.
+ */
+export function FleetProfitabilitySection({ externalRange }: { externalRange?: DateRange } = {}) {
   const [weekOffset, setWeekOffset] = useState(0)
   const [group, setGroup] = useState<FleetGroup>('LOCAL')
   const [showPayForm, setShowPayForm] = useState(false)
 
-  const range = weekRange(weekOffset)
+  const range = externalRange ?? weekRange(weekOffset)
   const { data, loading, refresh: refreshProfitability } = useFleetProfitability(range, group)
   const { payPeriods, createPay, deletePay, refresh: refreshPay } = useDriverPay()
   const { drivers } = useDrivers()
@@ -60,8 +66,8 @@ export function FleetProfitabilitySection() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <TrendingUp size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Weekly Profitability</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Revenue, miles, fuel &amp; driver cost per truck</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{externalRange ? 'Profitability' : 'Weekly Profitability'}</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Revenue − fuel, insurance, loans &amp; driver cost per truck</div>
           </div>
         </div>
 
@@ -86,14 +92,16 @@ export function FleetProfitabilitySection() {
             })}
           </div>
 
-          {/* Week navigation */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn}><ChevronLeft size={15} /></button>
-            <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 150, textAlign: 'center' }}>
-              {weekOffset === 0 ? 'This week' : weekLabel(range)}
-            </span>
-            <button onClick={() => setWeekOffset((o) => Math.max(0, o - 1))} disabled={weekOffset === 0} style={{ ...navBtn, opacity: weekOffset === 0 ? 0.4 : 1 }}><ChevronRight size={15} /></button>
-          </div>
+          {/* Week navigation — only when self-managed (hidden when a range is supplied) */}
+          {!externalRange && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn}><ChevronLeft size={15} /></button>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 150, textAlign: 'center' }}>
+                {weekOffset === 0 ? 'This week' : weekLabel(range)}
+              </span>
+              <button onClick={() => setWeekOffset((o) => Math.max(0, o - 1))} disabled={weekOffset === 0} style={{ ...navBtn, opacity: weekOffset === 0 ? 0.4 : 1 }}><ChevronRight size={15} /></button>
+            </div>
+          )}
 
           <button onClick={() => setShowPayForm(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
             <Plus size={13} /> Driver pay
@@ -107,6 +115,8 @@ export function FleetProfitabilitySection() {
           <Kpi label="Revenue" value={money(r.revenue)} />
           <Kpi label="Miles" value={miles(r.miles)} />
           <Kpi label="Fuel" value={money(r.fuel)} />
+          <Kpi label="Insurance" value={money(r.insurance)} />
+          <Kpi label="Loan" value={money(r.loan)} />
           <Kpi label="Other exp." value={money(r.otherExpenses)} />
           <Kpi label="Driver cost" value={money(r.driverCost)} />
           <Kpi label="Net" value={money(r.net)} color={netColor(r.net)} />
@@ -125,6 +135,8 @@ export function FleetProfitabilitySection() {
               <th style={TH}>Revenue</th>
               <th style={TH}>Miles</th>
               <th style={TH}>Fuel</th>
+              <th style={TH}>Insurance</th>
+              <th style={TH}>Loan</th>
               <th style={TH}>Other</th>
               <th style={TH}>Driver $</th>
               <th style={TH}>Net</th>
@@ -134,10 +146,10 @@ export function FleetProfitabilitySection() {
           </thead>
           <tbody>
             {loading && trucks.length === 0 && (
-              <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>Loading…</td></tr>
+              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>Loading…</td></tr>
             )}
             {!loading && trucks.length === 0 && (
-              <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{FLEET_GROUP_LABELS[group]}” in Fleet.</td></tr>
+              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{FLEET_GROUP_LABELS[group]}” in Fleet.</td></tr>
             )}
             {trucks.map((t) => <TruckRow key={t.truckId} t={t} />)}
           </tbody>
@@ -199,6 +211,8 @@ function TruckRow({ t }: { t: TruckProfitability }) {
       <td style={TD}>{money(t.revenue)}</td>
       <td style={TD}>{miles(t.miles)}</td>
       <td style={{ ...TD, color: t.hasFuelCard ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t.hasFuelCard ? money(t.fuel) : '—'}</td>
+      <td style={TD}>{money(t.insurance)}</td>
+      <td style={TD}>{money(t.loan)}</td>
       <td style={TD}>{money(t.otherExpenses)}</td>
       <td style={TD}>{money(t.driverCost)}</td>
       <td style={{ ...TD, fontWeight: 700, color: netColor(t.net) }}>{money(t.net)}</td>
