@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
 import { driverForTruck } from '@/lib/assignments'
-import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, TaskPriority, TaskStatus } from '@/types/equipment'
+import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, FleetGroup, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -164,6 +164,8 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
     fleetManagerAssignee:    initial?.fleetManagerAssignee ?? '',
     eldSource:               (initial?.eldSource ?? 'motive') as EldSource,
     eldSerialNumber:         initial?.eldSerialNumber ?? '',
+    fleetGroup:              (initial?.fleetGroup ?? '') as '' | FleetGroup,
+    fuelCard:                (initial?.fuelCardNumbers ?? []).join(', '),
     notes:                   initial?.notes ?? '',
   })
 
@@ -195,6 +197,12 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
       // ELD source applies to trucks only; manual keeps an optional serial.
       eldSource: isTruck ? form.eldSource : undefined,
       eldSerialNumber: isTruck && form.eldSource === 'manual' ? (form.eldSerialNumber.trim() || undefined) : undefined,
+      // Fleet group + fuel card (trucks only) — drive profitability grouping and the
+      // data-backed fuel-card → truck mapping (no code edit needed to add a truck).
+      fleetGroup: isTruck ? (form.fleetGroup || null) : null,
+      fuelCardNumbers: isTruck
+        ? (form.fuelCard.split(',').map((c) => c.trim()).filter(Boolean))
+        : undefined,
       notes: form.notes.trim() || undefined,
     })
   }
@@ -255,19 +263,36 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
                   </Field>
                 </div>
                 {isTruck && (
-                  <Field label="ELD / Telematics">
-                    <ToggleGroup type="single" className="w-full grid grid-cols-2" value={form.eldSource} onValueChange={(v) => v && set('eldSource', v as EldSource)}>
-                      <ToggleGroupItem value="motive" className="gap-2"><Gauge className="size-3.5" /> Motive auto-sync</ToggleGroupItem>
-                      <ToggleGroupItem value="manual" className="gap-2"><Wrench className="size-3.5" /> Manual</ToggleGroupItem>
-                    </ToggleGroup>
-                    {form.eldSource === 'motive' ? (
-                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
-                        <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage auto-syncs from Motive, matched on the unit number above.
-                      </div>
-                    ) : (
-                      <Input value={form.eldSerialNumber} onChange={(e) => set('eldSerialNumber', e.target.value)} placeholder="ELD serial # (optional)" className="h-9 mt-2" />
-                    )}
-                  </Field>
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                      <Field label="Fleet Group">
+                        <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.fleetGroup} onChange={(e) => set('fleetGroup', e.target.value)}>
+                          <option value="">— Unassigned —</option>
+                          <option value="LOCAL">Local (Ivan)</option>
+                          <option value="AMAZON">Amazon</option>
+                        </select>
+                      </Field>
+                      <Field label="Fuel Card # (EFS prefix)">
+                        <Input value={form.fuelCard} onChange={(e) => set('fuelCard', e.target.value)} placeholder="e.g. 00023" className="h-9" />
+                      </Field>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: -6 }}>
+                      Fleet Group drives the profitability view. The fuel card prefix maps EFS fuel imports to this truck — no code change needed. Separate multiple cards with commas.
+                    </div>
+                    <Field label="ELD / Telematics">
+                      <ToggleGroup type="single" className="w-full grid grid-cols-2" value={form.eldSource} onValueChange={(v) => v && set('eldSource', v as EldSource)}>
+                        <ToggleGroupItem value="motive" className="gap-2"><Gauge className="size-3.5" /> Motive auto-sync</ToggleGroupItem>
+                        <ToggleGroupItem value="manual" className="gap-2"><Wrench className="size-3.5" /> Manual</ToggleGroupItem>
+                      </ToggleGroup>
+                      {form.eldSource === 'motive' ? (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
+                          <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage auto-syncs from Motive, matched on the unit number above.
+                        </div>
+                      ) : (
+                        <Input value={form.eldSerialNumber} onChange={(e) => set('eldSerialNumber', e.target.value)} placeholder="ELD serial # (optional)" className="h-9 mt-2" />
+                      )}
+                    </Field>
+                  </>
                 )}
               </FormSection>
 

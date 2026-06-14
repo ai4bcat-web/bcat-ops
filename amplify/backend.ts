@@ -107,14 +107,17 @@ notifierFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
 const fuelImportFn = backend.fuelImport.resources.lambda as LambdaFunction
 
 const fuelTxTable = backend.data.resources.tables['FuelTransaction']
+const fuelEquipmentTable = backend.data.resources.tables['Equipment']
 backend.fuelImport.resources.lambda.addToRolePolicy(
   new PolicyStatement({
+    // Scan FuelTransaction (dedup) + Equipment (data-backed card→truck map); write FuelTransaction.
     actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
-    resources: [fuelTxTable.tableArn],
+    resources: [fuelTxTable.tableArn, fuelEquipmentTable.tableArn],
   })
 )
 
 fuelImportFn.addEnvironment('FUEL_TX_TABLE_NAME', fuelTxTable.tableName)
+fuelImportFn.addEnvironment('EQUIPMENT_TABLE_NAME', fuelEquipmentTable.tableName)
 
 const fuelImportUrl = new FunctionUrl(fuelImportFn.stack, 'FuelImportFunctionUrl', {
   function: fuelImportFn,

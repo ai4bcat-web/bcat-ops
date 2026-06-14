@@ -20,16 +20,52 @@ import { parseEfsReport, dedupKey, type ParsedFuelTransaction } from './efsParse
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
-const TABLE_NAME = process.env.FUEL_TX_TABLE_NAME!
-const SECRET     = process.env.FUEL_IMPORT_SECRET!
+const TABLE_NAME           = process.env.FUEL_TX_TABLE_NAME!
+const EQUIPMENT_TABLE_NAME = process.env.EQUIPMENT_TABLE_NAME
+const SECRET               = process.env.FUEL_IMPORT_SECRET!
 
-// ── Card → Equipment ID mapping (mirrors SEED_EQUIPMENT in useAppStore) ─────
-const CARD_MAP: Record<string, string> = {
+// ── Card → Equipment ID mapping ─────────────────────────────────────────────
+// The SOURCE OF TRUTH is now data-backed: Equipment.fuelCardNumbers, editable from
+// the Add/Edit Truck form (no code change/deploy needed to add a truck's card). This
+// hardcoded map remains only as a fallback for the original five trucks, in case the
+// Equipment scan fails or a record predates the fuelCardNumbers field.
+const FALLBACK_CARD_MAP: Record<string, string> = {
   '00049': 'eq-mnmpi9jxwd12', // truck 009
   '00056': 'eq-mnevxuyoxpd8', // truck 299
   '00031': 'eq-mnevuhxgs5jf', // truck 530
   '00007': 'eq-mnevvq8q6tcx', // truck 685
   '00023': 'eq-mnevwst30vwt', // truck 780
+}
+
+/**
+ * Build the card → Equipment.id map by scanning Equipment.fuelCardNumbers. Falls back
+ * to FALLBACK_CARD_MAP for any card not found in the data (and if the scan fails).
+ */
+async function buildCardMap(): Promise<Record<string, string>> {
+  const map: Record<string, string> = { ...FALLBACK_CARD_MAP }
+  if (!EQUIPMENT_TABLE_NAME) return map
+  try {
+    let lastKey: Record<string, unknown> | undefined = undefined
+    do {
+      const res = await dynamo.send(new ScanCommand({
+        TableName: EQUIPMENT_TABLE_NAME,
+        ProjectionExpression: 'id, fuelCardNumbers',
+        ExclusiveStartKey: lastKey,
+      }))
+      for (const item of res.Items ?? []) {
+        const id = item.id as string | undefined
+        const cards = (item.fuelCardNumbers ?? []) as string[]
+        if (!id || !Array.isArray(cards)) continue
+        for (const card of cards) {
+          if (card) map[String(card)] = id   // data wins over the fallback
+        }
+      }
+      lastKey = res.LastEvaluatedKey as Record<string, unknown> | undefined
+    } while (lastKey)
+  } catch (err) {
+    console.error('[fuel-import] Equipment scan failed — using fallback card map', err)
+  }
+  return map
 }
 
 // ── URL extraction ────────────────────────────────────────────────────────────
@@ -224,6 +260,10 @@ export const handler = async (event: LambdaEvent) => {
 
   console.log('[fuel-import] existing dedup keys loaded:', existingKeys.size)
 
+  // ── Card → truck map (data-backed from Equipment.fuelCardNumbers) ──────────
+  const cardMap = await buildCardMap()
+  console.log('[fuel-import] card map entries:', Object.keys(cardMap).length)
+
   // ── Insert new transactions ───────────────────────────────────────────────
   const now        = new Date().toISOString()
   const importedAt = receivedAt ?? now
@@ -237,7 +277,7 @@ export const handler = async (event: LambdaEvent) => {
     }
 
     const id      = randomUUID()
-    const truckId = CARD_MAP[tx.cardNumber] ?? null
+    const truckId = cardMap[tx.cardNumber] ?? null
 
     try {
       await dynamo.send(new PutCommand({
