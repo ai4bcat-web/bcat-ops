@@ -279,16 +279,19 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
       .flatMap(([t, gen]) => gen(startDate, endDate).map((p) => ({ ...p, type: t })))
     console.log(`[motive-mileage-sync] backfill ${startDate}–${endDate}: ${periods.length} periods (${[...want].join(',')})`)
   } else {
-    // Daily cron: current day, week (Mon→today), month (1st→today), year (Jan1→today).
+    // Daily cron: re-sync the last 7 DAY rows (IFTA data lags a day or two, so
+    // syncing only "today" leaves the Day view perpetually empty — re-pulling the
+    // recent days lets lagged miles populate), plus week/month/year to-date.
     const now   = new Date()
     const today = toIso(now)
+    const weekAgo = toIso(new Date(now.getTime() - 6 * 86_400_000))
     periods = [
-      { start: today,                  end: today, type: 'DAY'   },
+      ...daysInRange(weekAgo, today).map((d) => ({ ...d, type: 'DAY' as const })),
       { start: toIso(weekMonday(now)), end: today, type: 'WEEK'  },
       { start: toIso(monthStart(now)), end: today, type: 'MONTH' },
       { start: toIso(yearStart(now)),  end: today, type: 'YEAR'  },
     ]
-    console.log(`[motive-mileage-sync] daily sync: day/week/month/year through ${today}`)
+    console.log(`[motive-mileage-sync] daily sync: last 7 days + week/month/year through ${today}`)
   }
 
   // Bounded concurrency across (truck × period) so big backfills stay under the timeout.

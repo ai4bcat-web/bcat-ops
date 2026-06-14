@@ -51,7 +51,20 @@ export function TruckMilesWidget() {
       r.miles += m.miles
       byTruck.set(m.truckId, r)
     }
-    return [...byTruck.values()].sort((a, b) => b.miles - a.miles)
+    // A unit can have a stale `motive:`/`blueink:` orphan row alongside its real
+    // Equipment-keyed row. Keep one bar per unit (prefer the Equipment-keyed id, else
+    // the larger value) so the same truck isn't charted twice or its miles doubled.
+    const isOrphanKey = (id: string) => id.startsWith('motive:') || id.startsWith('blueink:')
+    const byUnit = new Map<string, Row>()
+    for (const r of byTruck.values()) {
+      const prev = byUnit.get(r.unitNumber)
+      if (!prev) { byUnit.set(r.unitNumber, r); continue }
+      const prevOrphan = isOrphanKey(prev.truckId)
+      const rOrphan    = isOrphanKey(r.truckId)
+      const better = prevOrphan !== rOrphan ? !rOrphan : r.miles > prev.miles
+      if (better) byUnit.set(r.unitNumber, r)
+    }
+    return [...byUnit.values()].sort((a, b) => b.miles - a.miles)
   }, [mileages, periodType, targetStart])
 
   const fleetTotal = rows.reduce((s, r) => s + r.miles, 0)

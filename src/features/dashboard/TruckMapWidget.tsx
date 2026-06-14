@@ -52,22 +52,35 @@ export function TruckMapWidget() {
     return () => { active = false; clearInterval(id) }
   }, [])
 
-  const rows = useMemo(
-    () => [...locations].sort((a, b) =>
-      a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
-    [locations],
-  )
+  // A truck can briefly have two location rows for the same unit — an Equipment-keyed
+  // row plus a stale `motive:`/`blueink:` orphan key from before its Equipment record
+  // existed. Collapse to one row per unit, preferring the Equipment-keyed (real id) and
+  // then the freshest fix, so the list never shows the same unit twice.
+  const rows = useMemo(() => {
+    const isOrphanKey = (id: string) => id.startsWith('motive:') || id.startsWith('blueink:')
+    const byUnit = new Map<string, TruckLocation>()
+    for (const loc of locations) {
+      const prev = byUnit.get(loc.unitNumber)
+      if (!prev) { byUnit.set(loc.unitNumber, loc); continue }
+      const prevOrphan = isOrphanKey(prev.truckId)
+      const locOrphan  = isOrphanKey(loc.truckId)
+      const better = prevOrphan !== locOrphan ? !locOrphan : loc.locatedAt > prev.locatedAt
+      if (better) byUnit.set(loc.unitNumber, loc)
+    }
+    return [...byUnit.values()].sort((a, b) =>
+      a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
+  }, [locations])
 
   const freshest = useMemo(() => {
-    if (locations.length === 0) return null
-    return locations.reduce((a, b) => (a.locatedAt > b.locatedAt ? a : b)).locatedAt
-  }, [locations])
+    if (rows.length === 0) return null
+    return rows.reduce((a, b) => (a.locatedAt > b.locatedAt ? a : b)).locatedAt
+  }, [rows])
 
   const sub = loading
     ? 'Loading…'
-    : locations.length === 0
+    : rows.length === 0
       ? 'No truck positions yet'
-      : `${locations.length} truck${locations.length === 1 ? '' : 's'}` +
+      : `${rows.length} truck${rows.length === 1 ? '' : 's'}` +
         (freshest ? ` · updated ${formatDistanceToNow(new Date(freshest), { addSuffix: true })}` : '')
 
   return (
