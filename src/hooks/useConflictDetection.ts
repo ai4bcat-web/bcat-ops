@@ -2,6 +2,8 @@ import { useMemo, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 import type { Load, Driver } from '@/types'
 import { chicagoDateStr } from '@/lib/date'
+import { getStops } from '@/lib/stops'
+import { useAppStore } from '@/store/useAppStore'
 
 /** Returns IDs of all loads that have overlapping time windows with another load on the same driver+day. */
 function detectConflicts(loads: Load[]): Set<string> {
@@ -34,8 +36,49 @@ function detectConflicts(loads: Load[]): Set<string> {
   return ids
 }
 
+/**
+ * Multi-stop variant: group STOPS by driver + Chicago day and flag overlapping windows.
+ * Each stop's window is [appt, apptEnd ?? appt]. Only CROSS-load overlaps count (a load's
+ * own pickup/delivery on the same driver/day is not a double-booking). Catches conflicts on
+ * a delivery day that the legacy pickup-day-only model structurally can't see. Returns LOAD ids.
+ */
+export function detectConflictsByStop(loads: Load[]): Set<string> {
+  const ids = new Set<string>()
+  const groups = new Map<string, { loadId: string; start: string; end: string }[]>()
+
+  for (const load of loads) {
+    for (const stop of getStops(load)) {
+      if (!stop.driverId || !stop.appt) continue
+      const key = `${stop.driverId}::${chicagoDateStr(stop.appt)}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push({ loadId: load.id, start: stop.appt, end: stop.apptEnd ?? stop.appt })
+    }
+  }
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const a = group[i]
+        const b = group[j]
+        if (a.loadId === b.loadId) continue // a load's own stops aren't a double-booking
+        if (a.start < b.end && b.start < a.end) {
+          ids.add(a.loadId)
+          ids.add(b.loadId)
+        }
+      }
+    }
+  }
+
+  return ids
+}
+
 export function useConflictDetection(loads: Load[], drivers: Driver[]): Set<string> {
-  const conflictIds = useMemo(() => detectConflicts(loads), [loads])
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
+  const conflictIds = useMemo(
+    () => (multiStopRender ? detectConflictsByStop(loads) : detectConflicts(loads)),
+    [loads, multiStopRender],
+  )
   const prevRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {

@@ -19,9 +19,17 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { formatDateTime } from '@/lib/date'
+import { getStops } from '@/lib/stops'
 import { cn } from '@/lib/utils'
 import type { Load } from '@/types'
 import { toast } from 'sonner'
+
+// "Split" = handled by more than one driver. Legacy: pickup driver ≠ delivery driver.
+// Multi-stop: more than one distinct driver across all the load's stops.
+function isSplitLoad(l: Load, multiStop: boolean): boolean {
+  if (multiStop) return new Set(getStops(l).map((s) => s.driverId)).size > 1
+  return l.pickupDriverId !== l.deliveryDriverId && l.deliveryDriverId !== null
+}
 
 const COL_VIS_KEY = 'bcat-col-vis-v1'
 
@@ -52,6 +60,7 @@ const KPI_COLORS: Record<TabId, string> = {
 export function GridPage() {
   const { loads, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const isMobile = useIsMobile()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
@@ -70,18 +79,18 @@ export function GridPage() {
     switch (tab) {
       case 'ready':      return loads.filter((l) => l.readyToInvoice)
       case 'unassigned': return loads.filter((l) => !l.pickupDriverId)
-      case 'split':      return loads.filter((l) => l.pickupDriverId !== l.deliveryDriverId && l.deliveryDriverId !== null)
+      case 'split':      return loads.filter((l) => isSplitLoad(l, multiStopRender))
       default:           return loads
     }
-  }, [loads, tab])
+  }, [loads, tab, multiStopRender])
 
   // Counts for tab badges
   const counts = useMemo(() => ({
     all:        loads.length,
     ready:      loads.filter((l) => l.readyToInvoice).length,
     unassigned: loads.filter((l) => !l.pickupDriverId).length,
-    split:      loads.filter((l) => l.pickupDriverId !== l.deliveryDriverId && l.deliveryDriverId !== null).length,
-  }), [loads])
+    split:      loads.filter((l) => isSplitLoad(l, multiStopRender)).length,
+  }), [loads, multiStopRender])
 
   const columns = useMemo<ColumnDef<Load>[]>(() => [
     {

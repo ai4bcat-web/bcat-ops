@@ -4,26 +4,19 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useAppStore } from '@/store/useAppStore'
 import { chicagoDateStr, formatApptTime, addDays } from '@/lib/date'
 import { cn } from '@/lib/utils'
 import type { Load, Driver } from '@/types'
+import {
+  type StopAssignment,
+  loadsForDriverOnDay, stopsForDriverOnDay, buildSmsText, buildStopSmsText,
+} from './sms'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function todayStr(): string {
   return chicagoDateStr(new Date())
-}
-
-function formatFullDate(dateStr: string): string {
-  // dateStr = "YYYY-MM-DD"
-  const d = new Date(`${dateStr}T12:00:00Z`)
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month:   'long',
-    day:     'numeric',
-    year:    'numeric',
-    timeZone: 'UTC',
-  }).format(d)
 }
 
 function formatShortDate(dateStr: string): string {
@@ -34,35 +27,6 @@ function formatShortDate(dateStr: string): string {
     day:     'numeric',
     timeZone: 'UTC',
   }).format(d)
-}
-
-function loadsForDriverOnDay(loads: Load[], driverId: string, dateStr: string): Load[] {
-  return loads
-    .filter((l) => l.pickupDriverId === driverId && chicagoDateStr(l.pickupAppt) === dateStr)
-    .sort((a, b) => a.pickupAppt.localeCompare(b.pickupAppt))
-}
-
-function buildSmsText(driver: Driver, loads: Load[], dateStr: string): string {
-  const date = formatFullDate(dateStr)
-  const first = driver.name.split(' ')[0]
-
-  if (loads.length === 0) {
-    return `Hi ${first}! No loads scheduled for ${date}.\n\n- BCAT Dispatch`
-  }
-
-  const ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
-  const loadSentences = loads.map((load, i) => {
-    const puTime = formatApptTime(load.pickupAppt,   load.pickupApptType,   load.pickupApptEnd)
-    const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
-    const origin = [load.originName, load.originCity].filter(Boolean).join(' in ') || 'Origin TBD'
-    const dest   = [load.destinationName, load.destinationCity].filter(Boolean).join(' in ') || 'Destination TBD'
-    const ord    = ordinals[i] ?? `#${i + 1}`
-    const verb   = i === 0 ? 'First' : ord.charAt(0).toUpperCase() + ord.slice(1)
-    return `${verb}, pick up at ${origin} at ${puTime} and deliver to ${dest} by ${deTime} (Load: ${load.aljexId}, PU#: ${load.pickupNumber}).`
-  })
-
-  const count = loads.length === 1 ? '1 load' : `${loads.length} loads`
-  return `Hi ${first}! Here's your schedule for ${date}. You have ${count} today.\n\n${loadSentences.join(' ')}\n\n- BCAT Dispatch`
 }
 
 // ── Copy button ───────────────────────────────────────────────────────────────
@@ -89,9 +53,18 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
 
 // ── Driver schedule card ──────────────────────────────────────────────────────
 
-function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[]; dateStr: string }) {
-  const sms = useMemo(() => buildSmsText(driver, loads, dateStr), [driver, loads, dateStr])
+function DriverCard({ driver, dateStr, loads, assignments }: {
+  driver: Driver; dateStr: string; loads?: Load[]; assignments?: StopAssignment[]
+}) {
+  const multiStop = !!assignments
+  const sms = useMemo(
+    () => (multiStop ? buildStopSmsText(driver, assignments!, dateStr) : buildSmsText(driver, loads!, dateStr)),
+    [multiStop, driver, assignments, loads, dateStr],
+  )
   const isBroker = driver.type === 'broker'
+  const count = multiStop ? assignments!.length : loads!.length
+  const unit  = multiStop ? 'stop' : 'load'
+  const hasHot = multiStop ? assignments!.some((a) => a.load.hot) : loads!.some((l) => l.hot)
 
   return (
     <div style={{ borderRadius: 12, border: '2px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
@@ -100,7 +73,7 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm text-foreground truncate">{driver.name}</span>
-            {loads.some((l) => l.hot) && (
+            {hasHot && (
               <span title="Has a hot load" className="shrink-0">🔥</span>
             )}
             {isBroker && (
@@ -110,16 +83,58 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
             )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            {loads.length === 0 ? 'No loads today' : `${loads.length} load${loads.length !== 1 ? 's' : ''}`}
+            {count === 0 ? `No ${unit}s today` : `${count} ${unit}${count !== 1 ? 's' : ''}`}
           </div>
         </div>
         <CopyButton text={sms} />
       </div>
 
-      {/* Load list */}
-      {loads.length > 0 && (
+      {/* Per-stop list (multi-stop mode) */}
+      {multiStop && assignments!.length > 0 && (
         <ul className="divide-y divide-border/60">
-          {loads.map((load, i) => {
+          {assignments!.map(({ load, stop }, i) => {
+            const time = formatApptTime(stop.appt, stop.apptType, stop.apptEnd)
+            const loc  = [stop.name, stop.city].filter(Boolean).join(', ')
+            const isPickup = stop.type === 'pickup'
+            const tbd = isPickup ? 'Pickup TBD' : 'Destination TBD'
+            return (
+              <li key={`${load.id}:${stop.id}`} className={cn('px-4 py-3', load.hot && 'bg-red-50/60')}>
+                <div className="flex items-start gap-3">
+                  <span className={cn(
+                    'size-5 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5',
+                    load.hot ? 'bg-red-100 text-red-700' : 'bg-primary/10 text-primary',
+                  )}>
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="text-sm font-medium text-foreground">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mr-1.5">
+                        {isPickup ? 'Pick up' : 'Deliver'}
+                      </span>
+                      <span className="truncate block" title={loc || tbd}>
+                        {load.hot && <span title="Hot load" className="mr-1">🔥</span>}
+                        {loc || <span className="text-muted-foreground">{tbd}</span>}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                      <span><span className="font-medium text-foreground">{isPickup ? 'Pickup' : 'Delivery'}:</span> {time}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground font-mono">
+                      <span>{load.aljexId}</span>
+                      {isPickup && <span>PU# {load.pickupNumber}</span>}
+                    </div>
+                  </div>
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {/* Load list (legacy whole-load mode) */}
+      {!multiStop && loads!.length > 0 && (
+        <ul className="divide-y divide-border/60">
+          {loads!.map((load, i) => {
             const puTime = formatApptTime(load.pickupAppt,   load.pickupApptType,   load.pickupApptEnd)
             const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
             const origin = [load.originName, load.originCity].filter(Boolean).join(', ')
@@ -176,33 +191,50 @@ function DriverCard({ driver, loads, dateStr }: { driver: Driver; loads: Load[];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+interface DriverWork {
+  driver: Driver
+  loads?: Load[]
+  assignments?: StopAssignment[]
+  count: number
+  sms: string
+}
+
 export function SchedulePage() {
   const { loads } = useLoads()
   const { drivers } = useDrivers()
+  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const [dateStr, setDateStr] = useState(todayStr)
 
   const activeDrivers = drivers.filter((d) => d.active)
 
-  // Only show drivers that have loads on this day
-  const driversWithLoads = useMemo(() =>
+  // Only show drivers that have work on this day. In multi-stop mode "work" is the set of
+  // STOPS assigned to that driver that day (a middle-delivery-only driver still shows up).
+  const driversWithWork = useMemo<DriverWork[]>(() =>
     activeDrivers
-      .map((d) => ({ driver: d, loads: loadsForDriverOnDay(loads, d.id, dateStr) }))
-      .filter(({ loads: l }) => l.length > 0),
-    [activeDrivers, loads, dateStr]
+      .map((d): DriverWork => {
+        if (multiStopRender) {
+          const assignments = stopsForDriverOnDay(loads, d.id, dateStr)
+          return { driver: d, assignments, count: assignments.length, sms: buildStopSmsText(d, assignments, dateStr) }
+        }
+        const dl = loadsForDriverOnDay(loads, d.id, dateStr)
+        return { driver: d, loads: dl, count: dl.length, sms: buildSmsText(d, dl, dateStr) }
+      })
+      .filter((w) => w.count > 0),
+    [activeDrivers, loads, dateStr, multiStopRender]
   )
 
-  // Drivers with no loads today (collapsed section)
-  const driversWithoutLoads = useMemo(() =>
-    activeDrivers.filter((d) => !driversWithLoads.some(({ driver }) => driver.id === d.id)),
-    [activeDrivers, driversWithLoads]
+  // Drivers with no work today (collapsed section)
+  const driversWithoutWork = useMemo(() =>
+    activeDrivers.filter((d) => !driversWithWork.some((w) => w.driver.id === d.id)),
+    [activeDrivers, driversWithWork]
   )
 
   const prevDay = () => setDateStr(chicagoDateStr(addDays(new Date(`${dateStr}T12:00:00Z`), -1)))
   const nextDay = () => setDateStr(chicagoDateStr(addDays(new Date(`${dateStr}T12:00:00Z`),  1)))
   const goToday = () => setDateStr(todayStr())
 
-  const allSms = driversWithLoads
-    .map(({ driver, loads: l }) => buildSmsText(driver, l, dateStr))
+  const allSms = driversWithWork
+    .map((w) => w.sms)
     .join('\n\n' + '─'.repeat(40) + '\n\n')
 
   return (
@@ -233,14 +265,14 @@ export function SchedulePage() {
 
         <div className="flex-1" />
 
-        {driversWithLoads.length > 0 && (
+        {driversWithWork.length > 0 && (
           <CopyButton text={allSms} className="shrink-0" />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {driversWithLoads.length === 0 ? (
+        {driversWithWork.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
             <MessageSquare className="size-10 opacity-20" />
             <p className="text-sm font-medium">No loads scheduled for {formatShortDate(dateStr)}</p>
@@ -248,11 +280,11 @@ export function SchedulePage() {
         ) : (
           <div className="space-y-4 max-w-3xl mx-auto">
             <p className="text-xs text-muted-foreground">
-              {driversWithLoads.length} driver{driversWithLoads.length !== 1 ? 's' : ''} scheduled
-              {driversWithoutLoads.length > 0 && ` · ${driversWithoutLoads.map((d) => d.name.split(' ')[0]).join(', ')} off`}
+              {driversWithWork.length} driver{driversWithWork.length !== 1 ? 's' : ''} scheduled
+              {driversWithoutWork.length > 0 && ` · ${driversWithoutWork.map((d) => d.name.split(' ')[0]).join(', ')} off`}
             </p>
-            {driversWithLoads.map(({ driver, loads: l }) => (
-              <DriverCard key={driver.id} driver={driver} loads={l} dateStr={dateStr} />
+            {driversWithWork.map((w) => (
+              <DriverCard key={w.driver.id} driver={w.driver} dateStr={dateStr} loads={w.loads} assignments={w.assignments} />
             ))}
           </div>
         )}
