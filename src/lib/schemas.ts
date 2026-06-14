@@ -43,7 +43,10 @@ export const stopSchema = z.object({
   apptEnd: z.string().optional(),
   driverId: z.string().nullable(),
   sequence: z.number(),
-})
+}).refine(
+  (s) => s.apptType !== 'range' || (!!s.apptEnd && s.apptEnd > s.appt),
+  { message: 'Range end must be after start', path: ['apptEnd'] }
+)
 export type StopFormValue = z.infer<typeof stopSchema>
 
 // A valid multi-stop load needs at least one pickup AND one delivery so the derived
@@ -54,53 +57,25 @@ export const stopsSchema = z
   .refine((stops) => stops.some((s) => s.type === 'pickup'), { message: 'At least one pickup is required' })
   .refine((stops) => stops.some((s) => s.type === 'delivery'), { message: 'At least one delivery is required' })
 
-export const loadSchema = z
-  .object({
-    aljexId: z.string().min(1, 'Pro # is required'),
-    tmsId: z.string().min(1, 'TMS ID / PO is required'),
-    pickupNumber: z.string().min(1, 'PU# is required'),
+// Multi-stop load form. The single pickup*/delivery*/origin*/destination*/*DriverId
+// fields are no longer edited directly — they're derived from `stops` by the store on
+// save (see withDerivedLegacy). The form edits the canonical stops array.
+export const loadSchema = z.object({
+  aljexId: z.string().min(1, 'Pro # is required'),
+  tmsId: z.string().min(1, 'TMS ID / PO is required'),
+  pickupNumber: z.string().min(1, 'PU# is required'),
 
-    originName:      z.string().optional(),
-    originCity:      z.string().optional(),
-    destinationName: z.string().optional(),
-    destinationCity: z.string().optional(),
+  stops: stopsSchema,
+  readyToInvoice: z.boolean(),
 
-    pickupApptType: apptTypeEnum,
-    pickupAppt: z.string().min(1, 'Pickup appointment is required'),
-    pickupApptEnd: z.string().optional(),
-
-    deliveryApptType: apptTypeEnum,
-    deliveryAppt: z.string(),
-    deliveryApptEnd: z.string().optional(),
-
-    pickupDriverId: z.string().nullable(),
-    deliveryDriverId: z.string().nullable(),
-    readyToInvoice: z.boolean(),
-
-    // Extended fields (optional)
-    customer: z.string().optional().nullable(),
-    miles: z.number().min(0).optional().nullable(),
-    rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
-    notes: z.string().optional().nullable(),
-    hot: z.boolean().optional(),                      // urgent/"hot" load — 🔥 in schedule
-    unscheduled: z.boolean().optional(),              // orphan — no firm date, parked in Unscheduled lane
-  })
-  .refine(
-    (d) => d.deliveryApptType === 'fcfs' || d.deliveryAppt.length > 0,
-    { message: 'Delivery appointment is required', path: ['deliveryAppt'] }
-  )
-  .refine(
-    (d) => d.pickupApptType === 'tbd' || d.deliveryApptType === 'tbd' || d.pickupApptType === 'fcfs' || d.deliveryApptType === 'fcfs' || d.deliveryAppt >= d.pickupAppt,
-    { message: 'Delivery must be on or after pickup', path: ['deliveryAppt'] }
-  )
-  .refine(
-    (d) => d.pickupApptType !== 'range' || (!!d.pickupApptEnd && d.pickupApptEnd > d.pickupAppt),
-    { message: 'Range end must be after start', path: ['pickupApptEnd'] }
-  )
-  .refine(
-    (d) => d.deliveryApptType !== 'range' || (!!d.deliveryApptEnd && d.deliveryApptEnd > d.deliveryAppt),
-    { message: 'Range end must be after start', path: ['deliveryApptEnd'] }
-  )
+  // Extended fields (optional)
+  customer: z.string().optional().nullable(),
+  miles: z.number().min(0).optional().nullable(),
+  rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
+  notes: z.string().optional().nullable(),
+  hot: z.boolean().optional(),                      // urgent/"hot" load — 🔥 in schedule
+  unscheduled: z.boolean().optional(),              // orphan — no firm date, parked in Unscheduled lane
+})
 
 export type DriverFormValues = z.infer<typeof driverSchema>
 export type LoadFormValues = z.infer<typeof loadSchema>
@@ -355,3 +330,21 @@ export const escalationRuleSchema = z.object({
   active: z.boolean(),
 })
 export type EscalationRuleValues = z.infer<typeof escalationRuleSchema>
+
+// ── Driver pay (manual biweekly entry → fleet profitability) ────────────────────
+// grossPay is entered in dollars. `source` defaults to MANUAL; PAYCHEX is the
+// integration seam for an eventual automated import.
+export const driverPaySchema = z
+  .object({
+    driverId:    z.string().min(1, 'Select a driver'),
+    periodStart: dateString,
+    periodEnd:   dateString,
+    grossPay:    z.coerce.number().min(0, 'Gross pay must be ≥ 0'),
+    source:      z.enum(['MANUAL', 'PAYCHEX']).default('MANUAL'),
+    notes:       z.string().optional(),
+  })
+  .refine((v) => v.periodEnd >= v.periodStart, {
+    message: 'Period end must be on or after the start',
+    path: ['periodEnd'],
+  })
+export type DriverPayValues = z.infer<typeof driverPaySchema>

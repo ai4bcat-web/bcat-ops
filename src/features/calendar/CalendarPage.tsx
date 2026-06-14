@@ -182,20 +182,20 @@ export function CalendarPage() {
         <CalendarErrorBoundary>
           {isMobile ? (
             <MobileLoadAgenda loads={visibleLoads} drivers={drivers} />
-          ) : currentView === 'month' ? (
-            <GridCalendarView
-              loads={visibleLoads}
-              drivers={drivers}
-              startDate={startDate}
-              viewMode={currentView}
-              availabilities={availabilities}
-            />
-          ) : (
+          ) : currentView === 'day' ? (
             <PlannerView
               loads={visibleLoads}
               drivers={drivers}
               weekStart={startDate}
               days={cols}
+              availabilities={availabilities}
+            />
+          ) : (
+            <GridCalendarView
+              loads={visibleLoads}
+              drivers={drivers}
+              startDate={startDate}
+              viewMode={currentView}
               availabilities={availabilities}
             />
           )}

@@ -1,0 +1,236 @@
+/**
+ * Fleet profitability engine.
+ *
+ * Pure function — takes pre-fetched data arrays + a date range and a fleet group,
+ * and computes per-truck profitability (revenue, miles, fuel, other expenses,
+ * driver cost, net, revenue/mile, fuel/mile) plus a fleet-wide roll-up.
+ *
+ * Unit normalization (everything in DOLLARS on the way out):
+ *  • Load.rate is stored in CENTS  → divided by 100 here.
+ *  • Fuel/expense amounts are already in DOLLARS (FuelTransaction.amount,
+ *    ExpenseRecord.amount) → reused via getExpensesByTruck unchanged.
+ *  • DriverPayPeriod.grossPay is in DOLLARS.
+ *
+ * Attribution decisions (see build spec):
+ *  • Revenue: a load's FULL rate is attributed to its DELIVERY day (deliveryAppt).
+ *  • Miles: summed from per-day TruckMileage DAY rows in range.
+ *  • Driver cost: a driver's biweekly gross pay is mapped to their truck via
+ *    assignedTruckId and PRORATED BY DAY across the requested range — i.e. the
+ *    portion of each pay period that overlaps [start, end] is counted.
+ *
+ * Membership is driven by `members` (built from Equipment.fleetGroup — the source
+ * of truth). Trucks that lack an Equipment record or a fuel-card mapping are still
+ * included by the caller (e.g. Motive-only units 890 / 89510); this layer surfaces
+ * that via the `hasEquipment` / `hasFuelCard` flags so the UI can flag them.
+ */
+
+import { getExpensesByTruck } from './expenseAllocation'
+import type {
+  FuelTxInput,
+  ExpenseRecordInput,
+  AllocationRecord,
+  ExpenseTypeRecord,
+} from './expenseAllocation'
+
+export interface DateRange {
+  start: string // YYYY-MM-DD inclusive
+  end:   string // YYYY-MM-DD inclusive
+}
+
+/** A truck that belongs to the fleet group being reported on. */
+export interface MemberTruck {
+  /** Equipment.id when an Equipment record exists; otherwise a synthetic key (e.g. `motive:890`). */
+  truckId:     string
+  unitNumber:  string
+  /** Driver display name resolved from assignedTruckId, if any. */
+  driverName?: string | null
+  /** False for Motive-only trucks with no Equipment record (e.g. 890, 89510). */
+  hasEquipment: boolean
+  /** False when no EFS fuel card is mapped (no Equipment.fuelCardNumbers). */
+  hasFuelCard:  boolean
+}
+
+export interface LoadInput {
+  truckId?:      string | null
+  rate?:         number | null   // CENTS
+  deliveryAppt:  string          // ISO datetime or YYYY-MM-DD
+}
+
+export interface DriverPayInput {
+  driverId:    string
+  periodStart: string  // YYYY-MM-DD inclusive
+  periodEnd:   string  // YYYY-MM-DD inclusive
+  grossPay:    number  // dollars
+}
+
+/** Maps a driver to the truck they were assigned to (Driver.assignedTruckId). */
+export interface DriverAssignmentInput {
+  driverId:        string
+  assignedTruckId?: string | null
+}
+
+export interface TruckMileageDayInput {
+  truckId:     string
+  periodStart: string  // YYYY-MM-DD — DAY rows only
+  periodType:  string  // expects 'DAY'
+  miles:       number
+}
+
+export interface TruckProfitability {
+  truckId:        string
+  unitNumber:     string
+  driverName?:    string | null
+  revenue:        number          // dollars
+  miles:          number
+  fuel:           number          // dollars
+  otherExpenses:  number          // dollars (all non-fuel ExpenseRecord categories)
+  driverCost:     number          // dollars (prorated)
+  net:            number          // revenue - fuel - otherExpenses - driverCost
+  revenuePerMile: number | null   // null when miles === 0
+  fuelPerMile:    number | null   // null when miles === 0
+  hasEquipment:   boolean
+  hasFuelCard:    boolean
+}
+
+export interface FleetProfitabilityResult {
+  range:   DateRange
+  trucks:  TruckProfitability[]
+  rollup: {
+    revenue:        number
+    miles:          number
+    fuel:           number
+    otherExpenses:  number
+    driverCost:     number
+    net:            number
+    revenuePerMile: number | null
+    fuelPerMile:    number | null
+  }
+}
+
+/** A load's delivery DATE (YYYY-MM-DD), tolerant of full ISO datetimes. */
+function deliveryDate(load: LoadInput): string {
+  return load.deliveryAppt.slice(0, 10)
+}
+
+/** Inclusive day count between two YYYY-MM-DD dates (UTC, calendar days). */
+function inclusiveDays(start: string, end: string): number {
+  const s = Date.UTC(+start.slice(0, 4), +start.slice(5, 7) - 1, +start.slice(8, 10))
+  const e = Date.UTC(+end.slice(0, 4), +end.slice(5, 7) - 1, +end.slice(8, 10))
+  return Math.floor((e - s) / 86_400_000) + 1
+}
+
+/**
+ * Dollars of a single pay period that fall within [rangeStart, rangeEnd], prorated
+ * evenly per calendar day across the pay period. A biweekly (14-day) period that
+ * fully overlaps a 1-week range contributes 7/14 of its gross pay.
+ */
+function proratedPayInRange(pay: DriverPayInput, range: DateRange): number {
+  const totalDays = inclusiveDays(pay.periodStart, pay.periodEnd)
+  if (totalDays <= 0) return 0
+  // Overlap window
+  const oStart = pay.periodStart > range.start ? pay.periodStart : range.start
+  const oEnd   = pay.periodEnd   < range.end   ? pay.periodEnd   : range.end
+  if (oStart > oEnd) return 0
+  const overlapDays = inclusiveDays(oStart, oEnd)
+  return (pay.grossPay * overlapDays) / totalDays
+}
+
+export function calcFleetProfitability(
+  range: DateRange,
+  members: MemberTruck[],
+  loads: LoadInput[],
+  fuelTxs: FuelTxInput[],
+  expenseRecords: ExpenseRecordInput[],
+  allocations: AllocationRecord[],
+  expenseTypes: ExpenseTypeRecord[],
+  mileageDayRows: TruckMileageDayInput[],
+  driverPay: DriverPayInput[],
+  driverAssignments: DriverAssignmentInput[],
+): FleetProfitabilityResult {
+  const memberIds = new Set(members.map((m) => m.truckId))
+
+  // ── Expenses (fuel + non-fuel) per truck, reusing the allocation engine ──────
+  const expensesByTruck = getExpensesByTruck(
+    range.start, range.end, fuelTxs, expenseRecords, allocations, expenseTypes,
+  )
+
+  // ── Revenue per truck: full rate → delivery day (dollars) ────────────────────
+  const revenueByTruck: Record<string, number> = {}
+  for (const load of loads) {
+    if (!load.truckId || !memberIds.has(load.truckId)) continue
+    const d = deliveryDate(load)
+    if (d < range.start || d > range.end) continue
+    revenueByTruck[load.truckId] = (revenueByTruck[load.truckId] ?? 0) + (load.rate ?? 0) / 100
+  }
+
+  // ── Miles per truck: sum DAY rows in range ───────────────────────────────────
+  const milesByTruck: Record<string, number> = {}
+  for (const row of mileageDayRows) {
+    if (row.periodType !== 'DAY') continue
+    if (!memberIds.has(row.truckId)) continue
+    if (row.periodStart < range.start || row.periodStart > range.end) continue
+    milesByTruck[row.truckId] = (milesByTruck[row.truckId] ?? 0) + row.miles
+  }
+
+  // ── Driver cost per truck: prorate biweekly pay, map via assignedTruckId ──────
+  const truckForDriver = new Map<string, string>()
+  for (const a of driverAssignments) {
+    if (a.assignedTruckId) truckForDriver.set(a.driverId, a.assignedTruckId)
+  }
+  const driverCostByTruck: Record<string, number> = {}
+  for (const pay of driverPay) {
+    const truckId = truckForDriver.get(pay.driverId)
+    if (!truckId || !memberIds.has(truckId)) continue
+    const amount = proratedPayInRange(pay, range)
+    if (amount > 0) driverCostByTruck[truckId] = (driverCostByTruck[truckId] ?? 0) + amount
+  }
+
+  // ── Assemble per-truck rows ──────────────────────────────────────────────────
+  const trucks: TruckProfitability[] = members.map((m) => {
+    const exp = expensesByTruck[m.truckId]
+    const fuel = exp?.fuel ?? 0
+    const otherExpenses = exp ? exp.total - exp.fuel : 0
+    const revenue = revenueByTruck[m.truckId] ?? 0
+    const miles = milesByTruck[m.truckId] ?? 0
+    const driverCost = driverCostByTruck[m.truckId] ?? 0
+    const net = revenue - fuel - otherExpenses - driverCost
+    return {
+      truckId:        m.truckId,
+      unitNumber:     m.unitNumber,
+      driverName:     m.driverName ?? null,
+      revenue,
+      miles,
+      fuel,
+      otherExpenses,
+      driverCost,
+      net,
+      revenuePerMile: miles > 0 ? revenue / miles : null,
+      fuelPerMile:    miles > 0 ? fuel / miles : null,
+      hasEquipment:   m.hasEquipment,
+      hasFuelCard:    m.hasFuelCard,
+    }
+  })
+
+  // ── Roll-up ──────────────────────────────────────────────────────────────────
+  const sum = (f: (t: TruckProfitability) => number) => trucks.reduce((acc, t) => acc + f(t), 0)
+  const revenue = sum((t) => t.revenue)
+  const miles = sum((t) => t.miles)
+  const fuel = sum((t) => t.fuel)
+  const otherExpenses = sum((t) => t.otherExpenses)
+  const driverCost = sum((t) => t.driverCost)
+
+  return {
+    range,
+    trucks,
+    rollup: {
+      revenue,
+      miles,
+      fuel,
+      otherExpenses,
+      driverCost,
+      net: revenue - fuel - otherExpenses - driverCost,
+      revenuePerMile: miles > 0 ? revenue / miles : null,
+      fuelPerMile:    miles > 0 ? fuel / miles : null,
+    },
+  }
+}
