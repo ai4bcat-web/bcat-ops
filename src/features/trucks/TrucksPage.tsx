@@ -4,7 +4,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
 import type { TruckConfig } from '@/lib/apiClient'
-import { provisionTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
+import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
+import { useExpenseData } from '@/hooks/useExpenseData'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -141,9 +142,10 @@ interface EquipmentFormProps {
   onSave: (data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>, costs?: TruckCostInputs) => void
   onClose: () => void
   onDelete?: () => void
+  initialCosts?: TruckCostInputs
 }
 
-function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProps) {
+function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: EquipmentFormProps) {
   const [form, setForm] = useState({
     type:                    (initial?.type ?? 'truck') as EquipmentType,
     unitNumber:              initial?.unitNumber ?? '',
@@ -168,18 +170,17 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
     eldSerialNumber:         initial?.eldSerialNumber ?? '',
     fleetGroup:              (initial?.fleetGroup ?? '') as '' | FleetGroup,
     fuelCard:                (initial?.fuelCardNumbers ?? []).join(', '),
-    // Operating costs — captured only when adding a new truck (see costs section).
-    loanMonthly:             '',
-    insuranceAnnual:         '',
-    platesAnnual:            '',
-    otherLabel:              '',
-    otherAnnual:             '',
+    // Operating costs — prefilled from existing recurring expenses when editing.
+    loanMonthly:             initialCosts?.loanMonthly != null ? String(initialCosts.loanMonthly) : '',
+    insuranceAnnual:         initialCosts?.insuranceAnnual != null ? String(initialCosts.insuranceAnnual) : '',
+    platesAnnual:            initialCosts?.platesAnnual != null ? String(initialCosts.platesAnnual) : '',
+    otherLabel:              initialCosts?.otherLabel ?? '',
+    otherAnnual:             initialCosts?.otherAnnual != null ? String(initialCosts.otherAnnual) : '',
     notes:                   initial?.notes ?? '',
   })
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
   const isTruck = form.type === 'truck'
-  const isNewTruck = !initial?.id && isTruck
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -213,7 +214,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
         ? (form.fuelCard.split(',').map((c) => c.trim()).filter(Boolean))
         : undefined,
       notes: form.notes.trim() || undefined,
-    }, isNewTruck ? {
+    }, isTruck ? {
       loanMonthly:     parseFloat(form.loanMonthly)     || null,
       insuranceAnnual: parseFloat(form.insuranceAnnual) || null,
       platesAnnual:    parseFloat(form.platesAnnual)    || null,
@@ -318,8 +319,8 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
                 )}
               </FormSection>
 
-              {/* Operating Costs — new trucks only; auto-creates recurring expenses */}
-              {isNewTruck && (
+              {/* Operating Costs — creates/updates recurring expenses for this truck */}
+              {isTruck && (
                 <FormSection icon={<DollarSign size={15} />} title="Operating Costs" subtitle="Loan, insurance, plates — flows into Expenses & Profitability">
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                     <Field label="Truck loan ($ / month)">
@@ -339,7 +340,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
                     <Input value={form.otherLabel} onChange={(e) => set('otherLabel', e.target.value)} placeholder="e.g. ELD subscription, parking" className="h-9" />
                   </Field>
                   <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
-                    Annual amounts are spread to a monthly recurring cost and prorated per week in Profitability. Leave any blank to skip. You can edit these later in Expenses → Manage.
+                    Annual amounts are spread to a monthly recurring cost and prorated per week in Profitability. {initial?.id ? 'Clearing a field stops that recurring cost.' : 'Leave any blank to skip.'} You can also manage these in Expenses → Manage.
                   </div>
                 </FormSection>
               )}
@@ -926,6 +927,8 @@ export function TrucksPage() {
   const addEquipment        = useAppStore((s) => s.addEquipment)
   const updateEquipment     = useAppStore((s) => s.updateEquipment)
   const deleteEquipment     = useAppStore((s) => s.deleteEquipment)
+  // Expense data — used to prefill + upsert a truck's recurring operating costs.
+  const expenseData         = useExpenseData()
 
   const [typeFilter, setTypeFilter]       = useState<'all' | 'truck' | 'trailer'>('all')
   const [search, setSearch]               = useState('')
@@ -995,14 +998,23 @@ export function TrucksPage() {
 
   function handleSave(data: Omit<Equipment, 'id' | 'createdAt' | 'updatedAt'>, costs?: TruckCostInputs) {
     if (showForm && showForm !== 'new') {
-      updateEquipment(showForm.id, data)
+      const id = showForm.id
+      const unit = data.unitNumber
+      updateEquipment(id, data)
+      // Upsert this truck's recurring operating costs (create / update amount / clear).
+      if (costs) {
+        const { existing } = readTruckCosts(id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes)
+        applyTruckCosts(id, unit, costs, existing)
+          .then(() => expenseData.refresh())
+          .catch((err) => console.error('[applyTruckCosts] failed', err))
+      }
     } else {
       const truck = addEquipment(data)
-      // Provision recurring costs (loan / insurance / plates / other) captured on the
-      // add-truck form so they flow into Expenses + Profitability. Fire-and-forget.
+      // Provision recurring costs captured on the add-truck form so they flow into
+      // Expenses + Profitability. Fire-and-forget.
       if (costs && hasAnyTruckCost(costs)) {
         provisionTruckCosts(truck.id, truck.unitNumber, costs)
-          .then((n) => { if (n > 0) toast('Operating costs added', { description: `${n} recurring cost${n === 1 ? '' : 's'} created for unit ${truck.unitNumber}` }) })
+          .then((n) => { if (n > 0) { toast('Operating costs added', { description: `${n} recurring cost${n === 1 ? '' : 's'} created for unit ${truck.unitNumber}` }); expenseData.refresh() } })
           .catch((err) => console.error('[provisionTruckCosts] failed', err))
       }
     }
@@ -1169,6 +1181,9 @@ export function TrucksPage() {
       {showForm !== null && (
         <EquipmentForm
           initial={showForm === 'new' ? undefined : showForm}
+          initialCosts={showForm !== 'new' && showForm.id
+            ? readTruckCosts(showForm.id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes).inputs
+            : undefined}
           onSave={handleSave}
           onClose={() => setShowForm(null)}
           onDelete={showForm !== 'new' && showForm.id ? () => { handleDelete(showForm.id); setShowForm(null) } : undefined}
