@@ -280,15 +280,22 @@ function EquipmentForm({ initial, onSave, onClose, onDelete }: EquipmentFormProp
                       Fleet Group drives the profitability view. The fuel card prefix maps EFS fuel imports to this truck — no code change needed. Separate multiple cards with commas.
                     </div>
                     <Field label="ELD / Telematics">
-                      <ToggleGroup type="single" className="w-full grid grid-cols-2" value={form.eldSource} onValueChange={(v) => v && set('eldSource', v as EldSource)}>
-                        <ToggleGroupItem value="motive" className="gap-2"><Gauge className="size-3.5" /> Motive auto-sync</ToggleGroupItem>
+                      <ToggleGroup type="single" className="w-full grid grid-cols-3" value={form.eldSource} onValueChange={(v) => v && set('eldSource', v as EldSource)}>
+                        <ToggleGroupItem value="motive" className="gap-2"><Gauge className="size-3.5" /> Motive</ToggleGroupItem>
+                        <ToggleGroupItem value="blueink" className="gap-2"><Gauge className="size-3.5" /> Blue Ink Tech</ToggleGroupItem>
                         <ToggleGroupItem value="manual" className="gap-2"><Wrench className="size-3.5" /> Manual</ToggleGroupItem>
                       </ToggleGroup>
-                      {form.eldSource === 'motive' ? (
+                      {form.eldSource === 'motive' && (
                         <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
-                          <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage auto-syncs from Motive, matched on the unit number above.
+                          <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage &amp; location auto-sync from Motive, matched on the unit number above.
                         </div>
-                      ) : (
+                      )}
+                      {form.eldSource === 'blueink' && (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
+                          <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage &amp; location auto-sync from Blue Ink Tech, matched on the unit number above.
+                        </div>
+                      )}
+                      {form.eldSource === 'manual' && (
                         <Input value={form.eldSerialNumber} onChange={(e) => set('eldSerialNumber', e.target.value)} placeholder="ELD serial # (optional)" className="h-9 mt-2" />
                       )}
                     </Field>

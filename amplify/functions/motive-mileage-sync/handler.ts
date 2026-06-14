@@ -161,8 +161,10 @@ async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
       ExclusiveStartKey:         token as Record<string, never> | undefined,
     }))
     for (const item of result.Items ?? []) {
-      // Skip trucks marked as using their own ELD — they are not Motive-synced.
-      if (item.eldSource && String(item.eldSource) === 'manual') continue
+      // Skip trucks on a non-Motive ELD (own device, or Blue Ink Tech) — they are
+      // synced elsewhere, not by Motive.
+      const eld = item.eldSource ? String(item.eldSource) : ''
+      if (eld === 'manual' || eld === 'blueink') continue
       if (item.unitNumber && item.id) map.set(String(item.unitNumber), String(item.id))
     }
     token = result.LastEvaluatedKey

@@ -1,6 +1,6 @@
 export type EquipmentType = 'truck' | 'trailer'
 export type Ownership = 'owned' | 'leased' | 'rented' | 'financed'
-export type EldSource = 'motive' | 'manual'
+export type EldSource = 'motive' | 'manual' | 'blueink'
 export type OwnershipType = 'COMPANY' | 'OWNER_OPERATOR'
 export type FleetGroup = 'LOCAL' | 'AMAZON'
 export type TaskPriority = 'high' | 'med' | 'low'

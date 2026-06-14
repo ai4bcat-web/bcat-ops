@@ -1,7 +1,7 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod } from 'aws-cdk-lib/aws-lambda'
-import { Rule, Schedule } from 'aws-cdk-lib/aws-events'
+import { Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
 import { CfnOutput, Duration } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
@@ -14,6 +14,7 @@ import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
 import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
 import { motiveLocationSync } from './functions/motive-location-sync/resource'
+import { blueinkSync } from './functions/blueink-sync/resource'
 import { complianceScanner } from './functions/compliance-scanner/resource'
 import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
@@ -28,6 +29,7 @@ const backend = defineBackend({
   fuelImport,
   generateRecurringExpenses,
   motiveMileageSync,
+  blueinkSync,
   motiveLocationSync,
   complianceScanner,
   onboardingPortalApi,
@@ -220,6 +222,47 @@ const locationSyncRule = new Rule(motiveLocationFn.stack, 'MotiveLocationSyncRul
   description: 'Sync Motive ELD truck locations for every Motive vehicle every 10 minutes',
 })
 locationSyncRule.addTarget(new EventsLambdaTarget(motiveLocationFn))
+
+// ── blueinkSync Lambda (Blue Ink Tech ELD) ─────────────────────────────────
+// One Lambda, two cadences via the event payload: frequent location sync (default
+// {}) and a daily mileage sync ({ mode: 'mileage' }). Writes into the same
+// TruckMileage / TruckLocation tables as Motive so BIT trucks (e.g. unit 310)
+// appear on the dashboard identically.
+
+const blueinkFn = backend.blueinkSync.resources.lambda as LambdaFunction
+
+backend.blueinkSync.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
+    resources: [
+      equipmentTable.tableArn,
+      truckMileageTable.tableArn,
+      truckLocationTable.tableArn,
+      truckLocationHistoryTable.tableArn,
+    ],
+  })
+)
+
+blueinkFn.addEnvironment('EQUIPMENT_TABLE_NAME',              equipmentTable.tableName)
+blueinkFn.addEnvironment('TRUCK_MILEAGE_TABLE_NAME',          truckMileageTable.tableName)
+blueinkFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME',         truckLocationTable.tableName)
+blueinkFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', truckLocationHistoryTable.tableName)
+
+// Location: every 10 minutes (default event → location sync).
+const blueinkLocationRule = new Rule(blueinkFn.stack, 'BlueInkLocationSyncRule', {
+  schedule:    Schedule.rate(Duration.minutes(10)),
+  description: 'Sync Blue Ink Tech truck locations every 10 minutes',
+})
+blueinkLocationRule.addTarget(new EventsLambdaTarget(blueinkFn))
+
+// Mileage: daily at 02:20 UTC ({ mode: 'mileage' } → day/week/month/year).
+const blueinkMileageRule = new Rule(blueinkFn.stack, 'BlueInkMileageSyncRule', {
+  schedule:    Schedule.cron({ minute: '20', hour: '2', day: '*', month: '*' }),
+  description: 'Sync Blue Ink Tech truck mileage (day/week/month/year) daily',
+})
+blueinkMileageRule.addTarget(new EventsLambdaTarget(blueinkFn, {
+  event: RuleTargetInput.fromObject({ mode: 'mileage' }),
+}))
 
 // ── complianceScanner Lambda ───────────────────────────────────────────────
 
