@@ -31,7 +31,8 @@ const schema = a.schema({
       miles:           a.integer(),
       customer:        a.string(),
       colorKey:        a.string(),   // load color swatch (driver-1…driver-12, broker)
-      daySlot:         a.integer(),  // display order badge 1-5 within pickup day
+      daySlot:         a.integer(),  // MANUAL number badge — independent label, no effect on order
+      sortOrder:       a.float(),    // persisted drag-reorder position within a day (hidden; drives sort)
       notes:           a.string(),   // short free-text notes
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       unscheduled:     a.boolean(),  // true = orphan (no firm date) → parked in the calendar's Unscheduled lane
