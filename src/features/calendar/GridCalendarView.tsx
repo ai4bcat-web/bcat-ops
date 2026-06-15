@@ -11,7 +11,6 @@ import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
-import { compareBySlot, persistDaySlotOrder } from '@/lib/calendarOrder'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 
@@ -819,27 +818,6 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
         }
         setDayOrder(new Map())
       }
-    } else if (dragDay.current && (!targetDay || targetDay === dragDay.current)) {
-      // Within-day reorder → persist the new order to daySlot so it survives navigation
-      // and matches the day view. Map the final key order → unique load ids in order.
-      const day = dragDay.current
-      const order = dayOrder.get(day)
-      if (order) {
-        const byKey = entriesByDayRef.current
-        const keyToLoadId = new Map<string, string>()
-        for (const arr of byKey.values()) for (const e of arr) keyToLoadId.set(e.key, e.load.id)
-        const seen = new Set<string>()
-        const loadIds: string[] = []
-        for (const k of order) {
-          const id = keyToLoadId.get(k)
-          if (id && !seen.has(id)) { seen.add(id); loadIds.push(id) }
-        }
-        if (loadIds.length > 0) {
-          const slotOf = (id: string) => loadsRef.current.find((l) => l.id === id)?.daySlot
-          persistDaySlotOrder(loadIds, slotOf, (id, patch) => updateLoad(id, patch))
-        }
-        setDayOrder(new Map())
-      }
     }
     dragKey.current          = null
     dragDay.current          = null
@@ -848,7 +826,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     dropCommittedDay.current = null
     setDragOverKey(null)
     setDropTargetDay(null)
-  }, [updateLoad, dayOrder])
+  }, [updateLoad])
 
   const todayStr = useMemo(() => chicagoDateStr(new Date().toISOString()) ?? '', [])
 
@@ -907,13 +885,12 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
         }
       }
     }
-    // Persistent manual order (load.daySlot) first — survives navigation and matches the
-    // day view — then appt time. See src/lib/calendarOrder.
+    // Sort by appointment time. (The number badge is an independent manual label — it
+    // does NOT affect ordering.)
     const rowTime = (e: DayEntry) =>
-      (e.stop ? e.stop.appt : (e.role === 'delivery' ? e.load.deliveryAppt : e.load.pickupAppt)) ?? ''
-    const cmp = compareBySlot<DayEntry>((e) => e.load.daySlot, rowTime)
+      e.stop ? e.stop.appt : (e.role === 'delivery' ? e.load.deliveryAppt : e.load.pickupAppt)
     for (const arr of map.values()) {
-      arr.sort(cmp)
+      arr.sort((a, b) => (rowTime(a) ?? '').localeCompare(rowTime(b) ?? ''))
     }
     entriesByDayRef.current = map
     return map
