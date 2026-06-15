@@ -136,7 +136,7 @@ export function CalendarToolbar({
         <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
         <input
           type="text"
-          placeholder="Search Pro #, TMS, or PU#"
+          placeholder="Search loads — Pro#, TMS, PU#, driver, city, customer…"
           style={{
             width: '100%', height: 34, paddingLeft: 30, paddingRight: searchQuery ? 28 : 10,
             background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 7,
