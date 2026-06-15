@@ -34,10 +34,10 @@ export const NAV_GROUPS: NavItem[][] = [
   ],
   [
     { to: '/drivers',     label: 'Drivers',      icon: Users,           pageKey: 'drivers' },
+    { to: '/schedule',    label: 'Schedules',    icon: MessageSquare,   pageKey: 'schedule' },
     { to: '/trucks',      label: 'Fleet',        icon: Truck,           pageKey: 'trucks' },
     { to: '/maintenance', label: 'Maintenance',  icon: Wrench,          pageKey: 'maintenance',     badgeKey: 'maintenance' },
     { to: '/expenses',    label: 'Expenses',     icon: DollarSign,      pageKey: 'expenses' },
-    { to: '/schedule',    label: 'Schedules',    icon: MessageSquare,   pageKey: 'schedule' },
   ],
   [
     { to: '/compliance',        label: 'Compliance',   icon: ShieldCheck,    pageKey: 'compliance' },
