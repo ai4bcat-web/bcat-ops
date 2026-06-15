@@ -212,6 +212,7 @@ export interface Stop {
   apptType?: ApptType        // default 'exact'
   apptEnd?: string           // ISO UTC — end of window (range only)
   driverId: string | null    // ONE driver per stop — subsumes the old split-load concept
+  colorKey?: ColorKey | null // per-stop highlight override; falls back to the load's colorKey
   sequence: number           // 0-based order along the route
 }
 

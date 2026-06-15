@@ -10,7 +10,7 @@ import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTime
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
-import { flattenLoadsToStopEntries, updateStop } from '@/lib/stops'
+import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
 import { compareBySlot, persistDaySlotOrder } from '@/lib/calendarOrder'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -169,7 +169,24 @@ function LoadCard({
   const isDelivery  = role === 'delivery'
   const isFinalDest = role !== 'pickup'
   const rti         = load.readyToInvoice
-  const highlightHex = getHighlightHex(load.colorKey)
+
+  // Per-card highlight: this card's stop colour (independent per day/card), falling back
+  // to the load colour. Legacy mode resolves the role's stop (delivery → last, else first).
+  const colorStop = stopMode
+    ? stop
+    : (role === 'delivery'
+        ? [...getStops(load)].reverse().find((s) => s.type === 'delivery')
+        : getStops(load).find((s) => s.type === 'pickup'))
+  const cardColorKey = colorStop?.colorKey ?? load.colorKey
+  const highlightHex = getHighlightHex(cardColorKey)
+
+  // Set THIS card's colour independently by writing its stop (source of truth); fall
+  // back to the load level only if the stop can't be resolved.
+  const setCardColor = (key: typeof load.colorKey) => {
+    if (colorStop) updateLoad(load.id, { stops: updateStop(load, colorStop.id, { colorKey: key }) })
+    else updateLoad(load.id, { colorKey: key })
+    setPickerOpen(false)
+  }
 
   // Driver — the stop's own driver in multi-stop mode, else the role-relevant driver.
   const driverId    = stopMode ? stop!.driverId : (isDelivery ? load.deliveryDriverId : load.pickupDriverId)
@@ -480,12 +497,12 @@ function LoadCard({
           <button
             style={{
               width: 22, height: 22, borderRadius: 3, cursor: 'pointer',
-              background: '#f8fafc', border: load.colorKey == null ? '2px solid #64748b' : '1px dashed #cbd5e1',
+              background: '#f8fafc', border: cardColorKey == null ? '2px solid #64748b' : '1px dashed #cbd5e1',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 10, color: '#64748b', flexShrink: 0,
             }}
             title="Clear color"
-            onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { colorKey: null }); setPickerOpen(false) }}
+            onClick={(e) => { e.stopPropagation(); setCardColor(null) }}
           >
             ✕
           </button>
@@ -495,11 +512,11 @@ function LoadCard({
               style={{
                 width: 22, height: 22, borderRadius: 3, cursor: 'pointer',
                 background: hex,
-                border: load.colorKey === key ? '2.5px solid rgba(0,0,0,0.55)' : '1px solid rgba(0,0,0,0.10)',
+                border: cardColorKey === key ? '2.5px solid rgba(0,0,0,0.55)' : '1px solid rgba(0,0,0,0.10)',
                 flexShrink: 0,
               }}
               title={label}
-              onClick={(e) => { e.stopPropagation(); updateLoad(load.id, { colorKey: key }); setPickerOpen(false) }}
+              onClick={(e) => { e.stopPropagation(); setCardColor(key) }}
             />
           ))}
         </div>
