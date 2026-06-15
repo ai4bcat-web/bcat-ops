@@ -697,7 +697,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         onBlur={(e) => closeOnBlur(() => setShowDriver(false))(e)}
       >
         {/* Slot badge — manually set, editable on pickup/same-day row */}
-        <EditableSlotBadge load={load} hex={highlightHex ?? '#cbd5e1'} readOnly={isDeliveryDay} />
+        <EditableSlotBadge load={load} hex={highlightHex ?? '#cbd5e1'} />
 
         {/* Driver name */}
         <div className={cn(
