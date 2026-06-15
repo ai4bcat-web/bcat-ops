@@ -226,8 +226,8 @@ function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onC
 }
 
 // ── Editable text cell (TMS, PU#) ────────────────────────────────────────────
-function EditableTextCell({ load, field, width, dimmed }: {
-  load: Load; field: 'tmsId' | 'pickupNumber'; width: number; dimmed?: boolean
+function EditableTextCell({ load, field, width }: {
+  load: Load; field: 'tmsId' | 'pickupNumber'; width: number
 }) {
   const { updateLoad } = useLoads()
   const [editing, setEditing] = useState(false)
@@ -259,12 +259,12 @@ function EditableTextCell({ load, field, width, dimmed }: {
 
   return (
     <div
-      className={cn('group/cell shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded', dimmed ? 'text-slate-300' : 'text-slate-600')}
+      className={cn('group/cell shrink-0 flex items-center gap-0.5 px-1.5 cursor-pointer hover:bg-black/5 rounded text-slate-600')}
       style={{ width }}
       onClick={() => { setVal(current ?? ''); setEditing(true) }}
     >
-      <span className="text-[11px] truncate flex-1">{dimmed ? '↳' : (current || '—')}</span>
-      {!dimmed && <Pencil className="size-2 text-slate-300 opacity-0 group-hover/cell:opacity-100 shrink-0" />}
+      <span className="text-[11px] truncate flex-1">{current || '—'}</span>
+      <Pencil className="size-2 text-slate-300 opacity-0 group-hover/cell:opacity-100 shrink-0" />
     </div>
   )
 }
