@@ -29,10 +29,12 @@ const LOAD_FIELDS = `
 // frontend shipping before the backend deploy keeps working). Self-heals post-deploy.
 let loadsHaveHot = true
 let loadsHaveStops = true
+let loadsHaveSortOrder = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
   if (loadsHaveStops) f += ' stops'
+  if (loadsHaveSortOrder) f += ' sortOrder'
   return f
 }
 
@@ -61,12 +63,13 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry. Handles `hot`/`unscheduled` and `stops` together.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
     hot: /'(hot|unscheduled)'/i.test(msg),
     stops: /'stops'/i.test(msg),
+    sortOrder: /'sortOrder'/i.test(msg),
   }
 }
 
@@ -91,6 +94,10 @@ export async function listLoads(): Promise<Load[]> {
         console.warn("[apiClient] backend has no 'stops' field yet — querying loads without it until deploy")
         loadsHaveStops = false; changed = true
       }
+      if (loadsHaveSortOrder && u.sortOrder) {
+        console.warn("[apiClient] backend has no 'sortOrder' field yet — querying loads without it until deploy")
+        loadsHaveSortOrder = false; changed = true
+      }
       if (!changed) throw err
     }
   }
@@ -101,13 +108,18 @@ export async function listLoads(): Promise<Load[]> {
 // `stops` is an a.json() (AWSJSON) field. Through this client it must be written as a
 // JSON STRING (same as createAuditLog's `changes`); reads undo the encoding via unwrapJson.
 // Also drop `stops` from the input if the backend doesn't have the field yet (pre-deploy).
-function serializeLoadInput<T extends { stops?: unknown }>(input: T): T {
+function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown }>(input: T): T {
+  let out: T = input
+  if (!loadsHaveSortOrder && 'sortOrder' in (out as object)) {
+    const { sortOrder: _drop, ...rest } = out as T & { sortOrder?: unknown }
+    out = rest as T
+  }
   if (!loadsHaveStops) {
-    const { stops: _drop, ...rest } = input as T & { stops?: unknown }
+    const { stops: _drop, ...rest } = out as T & { stops?: unknown }
     return rest as T
   }
-  if (input.stops == null) return input
-  return { ...input, stops: JSON.stringify(input.stops) }
+  if (out.stops == null) return out
+  return { ...out, stops: JSON.stringify(out.stops) }
 }
 
 export async function createLoad(

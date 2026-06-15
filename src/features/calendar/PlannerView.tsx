@@ -19,6 +19,7 @@ import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
+import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -619,8 +620,8 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       </Cell>
 
       {/* TMS + PU# — editable inline */}
-      <EditableTextCell load={load} field="tmsId"        width={COL.tms} dimmed={isDeliveryDay} />
-      <EditableTextCell load={load} field="pickupNumber" width={COL.pu}  dimmed={isDeliveryDay} />
+      <EditableTextCell load={load} field="tmsId"        width={COL.tms} />
+      <EditableTextCell load={load} field="pickupNumber" width={COL.pu} />
 
       {/* PU / DE location names — single stop name in multi-stop mode */}
       <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
@@ -867,14 +868,16 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       }
     }
 
-    // Sort each day by appointment time. (The number badge is an independent manual
-    // label — it does NOT affect ordering.)
+    // Sort by persisted drag position (hidden sortOrder) first so a manual order survives
+    // navigation and matches week/month, then by appointment time. (The number badge is a
+    // separate VISIBLE manual label and does NOT affect ordering.)
     const rowTime = (e: DayEntry) =>
       e.stop ? e.stop.appt
         : e.role === 'delivery' ? (e.load.deliveryAppt ?? e.load.pickupAppt ?? '')
         : (e.load.pickupAppt ?? '')
+    const cmp = compareByOrder<DayEntry>((e) => e.load.sortOrder, rowTime)
     for (const arr of map.values()) {
-      arr.sort((a, b) => rowTime(a).localeCompare(rowTime(b)))
+      arr.sort(cmp)
     }
 
     return map
@@ -923,8 +926,30 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
   }, [entriesByDay])
 
   const handleDragEnd = useCallback(() => {
+    // Persist the reordered day to the hidden sortOrder so the position survives
+    // navigation and matches week/month. Map final key order → unique load ids in order.
+    const day = dragDay.current
+    if (day) {
+      const order = dayOrder.get(day)
+      if (order) {
+        const seen = new Set<string>()
+        const loadIds: string[] = []
+        for (const k of order) {
+          const id = keyToLoadId.get(k)
+          if (id && !seen.has(id)) { seen.add(id); loadIds.push(id) }
+        }
+        if (loadIds.length > 0) {
+          const orderOf = (id: string) => loads.find((l) => l.id === id)?.sortOrder
+          persistDragOrder(loadIds, orderOf, (id, patch) => updateLoad(id, patch))
+        }
+      }
+    }
     dragKey.current = null; dragDay.current = null; setDragOverKey(null)
-  }, [])
+    setDayOrder((prev) => {
+      if (!day || !prev.has(day)) return prev
+      const next = new Map(prev); next.delete(day); return next
+    })
+  }, [dayOrder, keyToLoadId, loads, updateLoad])
 
   function orderedEntries(dayStr: string): DayEntry[] {
     const base  = entriesByDay.get(dayStr) ?? []

@@ -241,7 +241,8 @@ export interface Load {
   miles?: number | null     // load distance
   customer?: string | null  // customer/broker name
   colorKey?: ColorKey | null  // load's own color swatch
-  daySlot?: number | null     // display order badge 1-5 within pickup day
+  daySlot?: number | null     // MANUAL number badge — independent label, no effect on order
+  sortOrder?: number | null   // persisted drag-reorder position within a day (hidden; drives sort)
   notes?: string | null       // short free-text notes
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane

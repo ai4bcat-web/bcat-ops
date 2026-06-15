@@ -11,6 +11,7 @@ import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
+import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 
@@ -806,15 +807,36 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
       const load = loadsRef.current.find((l) => l.id === entry.load.id)
       if (load) {
         const loadId = load.id
+        // Moving to a different day/lane → clear the old day's drag position so the load
+        // lands by appointment time on its new day (until reordered there).
         if (targetDay === ORPHAN_KEY) {
           // Dropped onto the Unscheduled lane → park it (keep its appt as a placeholder).
-          updateLoad(loadId, { unscheduled: true })
+          updateLoad(loadId, { unscheduled: true, sortOrder: null })
         } else if (entry.stop) {
           // Multi-stop: move only this stop's appt to the target day (store re-derives mirrors).
-          updateLoad(loadId, { unscheduled: false, ...computeStopMove(load, entry.stop, targetDay) })
+          updateLoad(loadId, { unscheduled: false, sortOrder: null, ...computeStopMove(load, entry.stop, targetDay) })
         } else {
           // Legacy: shift the load's pickup/delivery pair to the target day.
-          updateLoad(loadId, { unscheduled: false, ...computeMoveDates(load, entry.role, targetDay) })
+          updateLoad(loadId, { unscheduled: false, sortOrder: null, ...computeMoveDates(load, entry.role, targetDay) })
+        }
+        setDayOrder(new Map())
+      }
+    } else if (dragDay.current && (!targetDay || targetDay === dragDay.current)) {
+      // Within-day reorder → persist the new order to the hidden sortOrder.
+      const day = dragDay.current
+      const order = dayOrder.get(day)
+      if (order) {
+        const keyToLoadId = new Map<string, string>()
+        for (const arr of entriesByDayRef.current.values()) for (const e of arr) keyToLoadId.set(e.key, e.load.id)
+        const seen = new Set<string>()
+        const loadIds: string[] = []
+        for (const k of order) {
+          const id = keyToLoadId.get(k)
+          if (id && !seen.has(id)) { seen.add(id); loadIds.push(id) }
+        }
+        if (loadIds.length > 0) {
+          const orderOf = (id: string) => loadsRef.current.find((l) => l.id === id)?.sortOrder
+          persistDragOrder(loadIds, orderOf, (id, patch) => updateLoad(id, patch))
         }
         setDayOrder(new Map())
       }
@@ -826,7 +848,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     dropCommittedDay.current = null
     setDragOverKey(null)
     setDropTargetDay(null)
-  }, [updateLoad])
+  }, [updateLoad, dayOrder])
 
   const todayStr = useMemo(() => chicagoDateStr(new Date().toISOString()) ?? '', [])
 
@@ -885,12 +907,14 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
         }
       }
     }
-    // Sort by appointment time. (The number badge is an independent manual label — it
-    // does NOT affect ordering.)
+    // Sort by persisted drag position (hidden sortOrder) first, then appointment time —
+    // so a manual order survives navigation and matches the day view. (The number badge
+    // is a separate VISIBLE manual label and does NOT affect ordering.)
     const rowTime = (e: DayEntry) =>
-      e.stop ? e.stop.appt : (e.role === 'delivery' ? e.load.deliveryAppt : e.load.pickupAppt)
+      (e.stop ? e.stop.appt : (e.role === 'delivery' ? e.load.deliveryAppt : e.load.pickupAppt)) ?? ''
+    const cmp = compareByOrder<DayEntry>((e) => e.load.sortOrder, rowTime)
     for (const arr of map.values()) {
-      arr.sort((a, b) => (rowTime(a) ?? '').localeCompare(rowTime(b) ?? ''))
+      arr.sort(cmp)
     }
     entriesByDayRef.current = map
     return map
