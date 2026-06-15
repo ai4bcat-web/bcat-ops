@@ -20,6 +20,10 @@ function fmtMiles(n: number): string {
   return Math.round(n).toLocaleString()
 }
 
+// Motive vehicles that aren't tracked trucks (trailers / test / decommissioned units) —
+// hidden from Miles per Truck. Add unit numbers here to exclude them.
+const EXCLUDED_UNITS = new Set(['828', '125'])
+
 export function TruckMilesWidget() {
   const [periodType, setPeriodType] = useState<PeriodType>('WEEK')
   const [offset, setOffset] = useState(0)               // 0 = current, 1 = previous…
@@ -62,6 +66,7 @@ export function TruckMilesWidget() {
     const byTruck = new Map<string, Row>()
     for (const m of mileages) {
       if (m.periodType !== periodType || m.periodStart !== targetStart) continue
+      if (EXCLUDED_UNITS.has(m.unitNumber)) continue
       const r = byTruck.get(m.truckId) ?? { truckId: m.truckId, unitNumber: m.unitNumber, miles: 0 }
       r.miles += m.miles
       byTruck.set(m.truckId, r)
