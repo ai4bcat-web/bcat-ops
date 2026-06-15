@@ -91,15 +91,22 @@ function ApptCell({ iso, type, colorCls, yard, city }: {
 
 // ── Color picker popover ──────────────────────────────────────────────────────
 function ColorPicker({
-  loadId, current, onClose, extraIds,
+  loadId, load, stopId, current, onClose, extraIds,
 }: {
-  loadId: string; current?: ColorKey | null; onClose: () => void
+  loadId: string; load?: Load; stopId?: string; current?: ColorKey | null; onClose: () => void
   extraIds?: string[]
 }) {
   const { updateLoad } = useLoads()
   const pick = async (key: ColorKey | null) => {
-    const ids = [loadId, ...(extraIds ?? [])]
-    await Promise.all(ids.map((id) => updateLoad(id, { colorKey: key })))
+    const extras = extraIds ?? []
+    if (extras.length === 0 && load && stopId) {
+      // Single card → set this stop's colour only, so each day/card highlights
+      // independently. Writes through stops (source of truth).
+      await updateLoad(loadId, { stops: updateStop(load, stopId, { colorKey: key }) })
+    } else {
+      // Bulk (multi-select) → colour the whole load(s) at the load level.
+      await Promise.all([loadId, ...extras].map((id) => updateLoad(id, { colorKey: key })))
+    }
     onClose()
   }
   const multiCount = (extraIds?.length ?? 0) + 1
@@ -503,10 +510,19 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
   const [showDriver,  setShowDriver]  = useState(false)
   const [editingAppt, setEditingAppt] = useState<'pu' | 'de' | null>(null)
 
-  const highlightHex  = getHighlightHex(load.colorKey)
   const driverField   = role === 'delivery' ? 'deliveryDriverId' : 'pickupDriverId'
   // In multi-stop mode the row is ONE stop → its own driver. Legacy mode keeps the role→field mapping.
   const relevantDriverId = stopMode ? stop!.driverId : (load[driverField] as string | null)
+
+  // Per-card highlight: this row's stop colour (independent per day/card) falling back to
+  // the load colour. In legacy mode resolve the role's stop (delivery → last, else first).
+  const colorStop = stopMode
+    ? stop
+    : (role === 'delivery'
+        ? [...getStops(load)].reverse().find((s) => s.type === 'delivery')
+        : getStops(load).find((s) => s.type === 'pickup'))
+  const cardColorKey = colorStop?.colorKey ?? load.colorKey
+  const highlightHex = getHighlightHex(cardColorKey)
   const relevantDriver   = drivers.find((d) => d.id === relevantDriverId)
   const driverName       = relevantDriver?.name ?? '—'
   const isDeliveryDay = role === 'delivery'
@@ -551,12 +567,12 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           ? (dragOver ? '#16a34a' : '#22c55e')
           : dragOver    ? hexBg(highlightHex ?? '#94a3b8', 0.30)
           : selected    ? hexBg(highlightHex ?? '#8b5cf6', 0.28)
-          : (!isDeliveryDay && highlightHex)
+          : highlightHex
             ? hexBg(highlightHex, 0.28)
             : undefined,
         borderLeft: load.readyToInvoice
           ? '3px solid #15803d'
-          : (!isDeliveryDay && highlightHex)
+          : highlightHex
             ? `3px solid ${highlightHex}`
             : '3px solid #e2e8f0',
         borderRight: isNeed ? '3px solid #dc2626' : undefined,
@@ -589,7 +605,9 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         {showColor && (
           <ColorPicker
             loadId={load.id}
-            current={load.colorKey}
+            load={load}
+            stopId={colorStop?.id}
+            current={cardColorKey}
             onClose={() => setShowColor(false)}
             extraIds={selectedIds.filter((id) => id !== load.id)}
           />
