@@ -360,7 +360,7 @@ interface AppState {
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
-  multiStopRender: boolean   // calendar renders one item per STOP (vs per load); off by default
+  multiStopRender: boolean   // DEPRECATED — always false; per-stop calendar toggle was removed. Kept so views compile.
 
   // ── Initialization ─────────────────────────────────────────────────────────
   initializeData: (userEmail: string) => Promise<void>
@@ -409,7 +409,6 @@ interface AppState {
   setFilterDriver: (id: string | null) => void
   setSearchQuery: (q: string) => void
   toggleFilter: (f: keyof AppState['filters']) => void
-  setMultiStopRender: (v: boolean) => void
 }
 
 // ── Audit helper ──────────────────────────────────────────────────────────────
@@ -682,17 +681,18 @@ export const useAppStore = create<AppState>()(
       setSearchQuery: (q) => set({ searchQuery: q }),
       toggleFilter: (f) =>
         set((s) => ({ filters: { ...s.filters, [f]: !s.filters[f] } })),
-      setMultiStopRender: (v) => set({ multiStopRender: v }),
     }),
     {
       name: 'bcat-ops-ui-v4',
       // Bump when an existing persisted pref needs a one-time reset across all users.
       // v1: force the calendar "stops" toggle (multiStopRender) back off for users
       //     who had it persisted on before it became off-by-default.
-      version: 1,
+      // v2: the toggle was removed entirely (calendar always renders per-load) — reset
+      //     anyone who had re-enabled it after v1.
+      version: 2,
       migrate: (persisted, fromVersion) => {
         const state = (persisted ?? {}) as Record<string, unknown>
-        if (fromVersion < 1) {
+        if (fromVersion < 2) {
           state.multiStopRender = false
         }
         return state
