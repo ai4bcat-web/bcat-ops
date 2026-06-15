@@ -19,7 +19,6 @@ import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
-import { compareBySlot, persistDaySlotOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -868,16 +867,14 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       }
     }
 
-    // Sort each day by the persistent manual order (load.daySlot) first — so the order
-    // survives navigation and is identical across day/week/month — then by appt time for
-    // any loads without a slot.
+    // Sort each day by appointment time. (The number badge is an independent manual
+    // label — it does NOT affect ordering.)
     const rowTime = (e: DayEntry) =>
       e.stop ? e.stop.appt
         : e.role === 'delivery' ? (e.load.deliveryAppt ?? e.load.pickupAppt ?? '')
         : (e.load.pickupAppt ?? '')
-    const cmp = compareBySlot<DayEntry>((e) => e.load.daySlot, rowTime)
     for (const arr of map.values()) {
-      arr.sort(cmp)
+      arr.sort((a, b) => rowTime(a).localeCompare(rowTime(b)))
     }
 
     return map
@@ -926,31 +923,8 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
   }, [entriesByDay])
 
   const handleDragEnd = useCallback(() => {
-    // Commit the reordered day to persistent daySlot so the order survives navigation
-    // and matches week/month. Map the final key order → unique load ids in order.
-    const day = dragDay.current
-    if (day) {
-      const order = dayOrder.get(day)
-      if (order) {
-        const seen = new Set<string>()
-        const loadIds: string[] = []
-        for (const k of order) {
-          const id = keyToLoadId.get(k)
-          if (id && !seen.has(id)) { seen.add(id); loadIds.push(id) }
-        }
-        if (loadIds.length > 0) {
-          const slotOf = (id: string) => loads.find((l) => l.id === id)?.daySlot
-          persistDaySlotOrder(loadIds, slotOf, (id, patch) => updateLoad(id, patch))
-        }
-      }
-    }
     dragKey.current = null; dragDay.current = null; setDragOverKey(null)
-    // Clear the transient visual order — the persisted daySlot now drives the sort.
-    setDayOrder((prev) => {
-      if (!day || !prev.has(day)) return prev
-      const next = new Map(prev); next.delete(day); return next
-    })
-  }, [dayOrder, keyToLoadId, loads, updateLoad])
+  }, [])
 
   function orderedEntries(dayStr: string): DayEntry[] {
     const base  = entriesByDay.get(dayStr) ?? []
