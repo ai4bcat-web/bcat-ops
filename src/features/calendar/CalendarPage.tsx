@@ -12,7 +12,8 @@ import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { MobileLoadAgenda } from './MobileLoadAgenda'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
-import type { ViewMode } from '@/types'
+import { getStops } from '@/lib/stops'
+import type { ViewMode, Load } from '@/types'
 
 const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
   'day':   { navDays: 1  }, // single current day
@@ -32,6 +33,7 @@ export function CalendarPage() {
 
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
+  const equipment   = useAppStore((s) => s.equipment)
   const isMobile = useIsMobile()
   const { availabilities, createAvailability, deleteAvailability } = useDriverAvailability()
 
@@ -107,18 +109,44 @@ export function CalendarPage() {
 
   // ── Filter loads ──────────────────────────────────────────────────────────
 
+  // Lookup maps so search can match driver names and truck unit numbers, not just ids.
+  const driverNameById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const d of drivers) m.set(d.id, d.name)
+    return m
+  }, [drivers])
+  const truckUnitById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const e of equipment) if (e.unitNumber) m.set(e.id, e.unitNumber)
+    return m
+  }, [equipment])
+
+  // Everything typed in the search box matches against ANY load detail (null-safe).
+  const loadHaystack = useCallback((l: Load): string => {
+    const parts: (string | null | undefined)[] = [
+      l.aljexId, l.tmsId, l.pickupNumber, l.customer, l.notes,
+      l.originName, l.originCity, l.destinationName, l.destinationCity,
+      l.truckId ? truckUnitById.get(l.truckId) : null,
+      l.pickupDriverId ? driverNameById.get(l.pickupDriverId) : null,
+      l.deliveryDriverId ? driverNameById.get(l.deliveryDriverId) : null,
+    ]
+    for (const s of getStops(l)) {
+      parts.push(s.name, s.city)
+      if (s.driverId) parts.push(driverNameById.get(s.driverId))
+    }
+    return parts.filter(Boolean).join(' ').toLowerCase()
+  }, [driverNameById, truckUnitById])
+
   const visibleLoads = loads.filter((l) => {
     if (filters.readyToInvoice && !l.readyToInvoice) return false
     if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
     if (filters.unassigned && l.pickupDriverId !== null) return false
     if (filters.needsAppt && l.pickupApptType !== 'tbd' && l.deliveryApptType !== 'tbd') return false
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      if (
-        !l.aljexId.toLowerCase().includes(q) &&
-        !l.tmsId.toLowerCase().includes(q) &&
-        !l.pickupNumber.toLowerCase().includes(q)
-      ) return false
+    if (searchQuery.trim()) {
+      const hay = loadHaystack(l)
+      // Multi-word: every term must match somewhere (e.g. "ivan chicago").
+      const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean)
+      if (!terms.every((t) => hay.includes(t))) return false
     }
     return true
   })
