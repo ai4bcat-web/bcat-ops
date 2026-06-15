@@ -29,8 +29,12 @@ import type { ApptType, Load, Stop } from '@/types'
 // ── Stop ↔ form conversion ───────────────────────────────────────────────────
 // Form stores appt as a datetime-local / date string; the stored Stop uses ISO UTC.
 
+// A NEED (tbd) appt may carry an optional desired time; a stored UTC-midnight value
+// means no time was set. FCFS is always date-only.
+const tbdHasTime = (iso: string | null | undefined) => !!iso && iso.slice(11, 16) !== '00:00'
+
 function stopToForm(stop: Stop): StopFormValue {
-  const isDateOnly = stop.apptType === 'tbd' || stop.apptType === 'fcfs'
+  const isDateOnly = stop.apptType === 'fcfs' || (stop.apptType === 'tbd' && !tbdHasTime(stop.appt))
   return {
     id: stop.id,
     type: stop.type,
@@ -60,7 +64,8 @@ function emptyStopForms(preDate?: string, driverId?: string | null): StopFormVal
 
 // Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
 function stopFormToStop(s: StopFormValue, sequence: number): Stop {
-  const dateOnly = s.apptType === 'tbd' || s.apptType === 'fcfs'
+  // FCFS is always date-only; NEED (tbd) is date-only unless the form value includes a time.
+  const dateOnly = s.apptType === 'fcfs' || (s.apptType === 'tbd' && s.appt.length <= 10)
   return {
     id: s.id,
     type: s.type,
@@ -267,14 +272,30 @@ function ApptFields({
 
       {type === 'tbd' && (
         <div>
-          <Input
-            type="date"
-            className="h-9 text-sm"
-            value={startField.value.slice(0, 10)}
-            onChange={(e) => startField.onChange(e.target.value)}
-          />
+          <div className="flex gap-2">
+            <Input
+              type="date"
+              className="h-9 text-sm"
+              style={{ flex: 1 }}
+              value={startField.value.slice(0, 10)}
+              onChange={(e) => {
+                const t = startField.value.length > 10 ? startField.value.slice(11, 16) : ''
+                startField.onChange(e.target.value ? (t ? `${e.target.value}T${t}` : e.target.value) : '')
+              }}
+            />
+            <Input
+              type="time"
+              className="h-9 text-sm"
+              style={{ width: 120 }}
+              value={startField.value.length > 10 ? startField.value.slice(11, 16) : ''}
+              onChange={(e) => {
+                const d = startField.value.slice(0, 10)
+                startField.onChange(d ? (e.target.value ? `${d}T${e.target.value}` : d) : '')
+              }}
+            />
+          </div>
           <p className="text-xs text-muted-foreground mt-1.5">
-            Exact time TBD — select the date so the load appears on the calendar.
+            No firm appointment yet — pick the date, and optionally the time you want (shows as “NEED HH:MM”).
           </p>
           {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
         </div>
