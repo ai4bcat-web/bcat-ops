@@ -1,12 +1,11 @@
 import { useState, useMemo } from 'react'
 import { Copy, Check, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
+import { Avatar } from '@/components/ui/avatar'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
-import { chicagoDateStr, formatApptTime, addDays } from '@/lib/date'
-import { cn } from '@/lib/utils'
+import { chicagoDateStr, addDays, formatTime, needLabel } from '@/lib/date'
+import { getColor } from '@/lib/driverColors'
 import type { Load, Driver } from '@/types'
 import {
   type StopAssignment,
@@ -21,17 +20,24 @@ function todayStr(): string {
 
 function formatShortDate(dateStr: string): string {
   const d = new Date(`${dateStr}T12:00:00Z`)
-  return new Intl.DateTimeFormat('en-US', {
-    weekday: 'short',
-    month:   'short',
-    day:     'numeric',
-    timeZone: 'UTC',
-  }).format(d)
+  return new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(d)
+}
+
+function getInitials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
+}
+
+/** Appointment display matching the calendar day view (NEED / NEED HH:MM / FCFS / range / time). */
+function apptText(appt: string, type?: string | null, apptEnd?: string | null): string {
+  if (type === 'tbd')  return needLabel(appt)
+  if (type === 'fcfs') return 'FCFS'
+  if (type === 'range' && apptEnd) return `${formatTime(appt)}–${formatTime(apptEnd)}`
+  return appt ? formatTime(appt) : '—'
 }
 
 // ── Copy button ───────────────────────────────────────────────────────────────
 
-function CopyButton({ text, className }: { text: string; className?: string }) {
+function CopyButton({ text, label = 'Copy', small }: { text: string; label?: string; small?: boolean }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     await navigator.clipboard.writeText(text)
@@ -39,15 +45,34 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
     setTimeout(() => setCopied(false), 2000)
   }
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      className={cn('h-9 gap-1.5 text-xs shrink-0', className)}
+    <button
       onClick={handleCopy}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0,
+        height: small ? 26 : 32, padding: small ? '0 9px' : '0 12px',
+        borderRadius: 8, border: '1px solid var(--ds-border)', cursor: 'pointer',
+        background: copied ? '#f0fdf4' : 'var(--ds-surface)',
+        color: copied ? '#15803d' : 'var(--ds-t2)',
+        fontSize: small ? 11.5 : 13, fontWeight: 600, fontFamily: 'inherit',
+      }}
     >
-      {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
-      {copied ? 'Copied!' : 'Copy'}
-    </Button>
+      {copied ? <Check size={small ? 13 : 14} /> : <Copy size={small ? 13 : 14} />}
+      {copied ? 'Copied' : label}
+    </button>
+  )
+}
+
+// ── PU / DE appt line (day-view style) ──────────────────────────────────────────
+
+function ApptLine({ kind, time, location }: { kind: 'PU' | 'DE'; time: string; location: string }) {
+  const isPickup = kind === 'PU'
+  const need = time.startsWith('NEED')
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12.5, lineHeight: 1.5 }}>
+      <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em', color: isPickup ? 'var(--ds-blue)' : '#7c3aed', width: 18, flexShrink: 0 }}>{kind}</span>
+      <span style={{ flex: 1, minWidth: 0, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{location || <span style={{ color: 'var(--ds-t3)' }}>TBD</span>}</span>
+      <span style={{ flexShrink: 0, fontWeight: need ? 700 : 500, color: need ? '#dc2626' : 'var(--ds-t2)', fontVariantNumeric: 'tabular-nums' }}>{time}</span>
+    </div>
   )
 }
 
@@ -61,129 +86,92 @@ function DriverCard({ driver, dateStr, loads, assignments }: {
     () => (multiStop ? buildStopSmsText(driver, assignments!, dateStr) : buildSmsText(driver, loads!, dateStr)),
     [multiStop, driver, assignments, loads, dateStr],
   )
+  const color = getColor(driver.colorKey)
   const isBroker = driver.type === 'broker'
   const count = multiStop ? assignments!.length : loads!.length
   const unit  = multiStop ? 'stop' : 'load'
   const hasHot = multiStop ? assignments!.some((a) => a.load.hot) : loads!.some((l) => l.hot)
 
   return (
-    <div style={{ borderRadius: 12, border: '2px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm text-foreground truncate">{driver.name}</span>
-            {hasHot && (
-              <span title="Has a hot load" className="shrink-0">🔥</span>
-            )}
+    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
+      {/* Header — circle avatar + name */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
+        <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{driver.name}</span>
+            {hasHot && <span title="Has a hot load">🔥</span>}
             {isBroker && (
-              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground border border-border rounded px-1.5 py-0.5 shrink-0">
-                Broker
-              </span>
+              <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 5, padding: '1px 6px' }}>Broker</span>
             )}
           </div>
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {count === 0 ? `No ${unit}s today` : `${count} ${unit}${count !== 1 ? 's' : ''}`}
+          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+            {count} {unit}{count !== 1 ? 's' : ''} · {formatShortDate(dateStr)}
           </div>
         </div>
-        <CopyButton text={sms} />
+        <CopyButton text={sms} label="Copy SMS" />
       </div>
 
-      {/* Per-stop list (multi-stop mode) */}
-      {multiStop && assignments!.length > 0 && (
-        <ul className="divide-y divide-border/60">
-          {assignments!.map(({ load, stop }, i) => {
-            const time = formatApptTime(stop.appt, stop.apptType, stop.apptEnd)
-            const loc  = [stop.name, stop.city].filter(Boolean).join(', ')
-            const isPickup = stop.type === 'pickup'
-            const tbd = isPickup ? 'Pickup TBD' : 'Destination TBD'
-            return (
-              <li key={`${load.id}:${stop.id}`} className={cn('px-4 py-3', load.hot && 'bg-red-50/60')}>
-                <div className="flex items-start gap-3">
-                  <span className={cn(
-                    'size-5 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5',
-                    load.hot ? 'bg-red-100 text-red-700' : 'bg-primary/10 text-primary',
-                  )}>
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="text-sm font-medium text-foreground">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mr-1.5">
-                        {isPickup ? 'Pick up' : 'Deliver'}
-                      </span>
-                      <span className="truncate block" title={loc || tbd}>
-                        {load.hot && <span title="Hot load" className="mr-1">🔥</span>}
-                        {loc || <span className="text-muted-foreground">{tbd}</span>}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                      <span><span className="font-medium text-foreground">{isPickup ? 'Pickup' : 'Delivery'}:</span> {time}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground font-mono">
-                      <span>{load.aljexId}</span>
-                      {isPickup && <span>PU# {load.pickupNumber}</span>}
-                    </div>
-                  </div>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
+      {/* Day-view-style rows */}
+      <div>
+        {multiStop
+          ? assignments!.map(({ load, stop }, i) => {
+              const loc = [stop.name, stop.city].filter(Boolean).join(', ')
+              const isPickup = stop.type === 'pickup'
+              return (
+                <ScheduleRow key={`${load.id}:${stop.id}`} index={i + 1} hot={!!load.hot} accent={color.border}
+                  proId={load.aljexId} puNum={isPickup ? load.pickupNumber : undefined} tmsId={load.tmsId}>
+                  <ApptLine kind={isPickup ? 'PU' : 'DE'} time={apptText(stop.appt, stop.apptType, stop.apptEnd)} location={loc} />
+                </ScheduleRow>
+              )
+            })
+          : loads!.map((load, i) => {
+              const origin = [load.originName, load.originCity].filter(Boolean).join(', ')
+              const dest   = [load.destinationName, load.destinationCity].filter(Boolean).join(', ')
+              return (
+                <ScheduleRow key={load.id} index={i + 1} hot={!!load.hot} accent={color.border}
+                  proId={load.aljexId} puNum={load.pickupNumber} tmsId={load.tmsId}>
+                  <ApptLine kind="PU" time={apptText(load.pickupAppt, load.pickupApptType, load.pickupApptEnd)} location={origin} />
+                  <ApptLine kind="DE" time={apptText(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)} location={dest} />
+                </ScheduleRow>
+              )
+            })}
+      </div>
 
-      {/* Load list (legacy whole-load mode) */}
-      {!multiStop && loads!.length > 0 && (
-        <ul className="divide-y divide-border/60">
-          {loads!.map((load, i) => {
-            const puTime = formatApptTime(load.pickupAppt,   load.pickupApptType,   load.pickupApptEnd)
-            const deTime = formatApptTime(load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd)
-            const origin = [load.originName, load.originCity].filter(Boolean).join(', ')
-            const dest   = [load.destinationName, load.destinationCity].filter(Boolean).join(', ')
-            return (
-              <li key={load.id} className={cn('px-4 py-3', load.hot && 'bg-red-50/60')}>
-                <div className="flex items-start gap-3">
-                  <span className={cn(
-                    'size-5 rounded-full text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5',
-                    load.hot ? 'bg-red-100 text-red-700' : 'bg-primary/10 text-primary',
-                  )}>
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1 space-y-1">
-                    {/* Route */}
-                    <div className="text-sm font-medium text-foreground">
-                      <span className="truncate block" title={origin || 'Origin TBD'}>
-                        {load.hot && <span title="Hot load" className="mr-1">🔥</span>}
-                        {origin || <span className="text-muted-foreground">Origin TBD</span>}
-                      </span>
-                      <span className="text-muted-foreground text-xs">→ </span>
-                      <span className="truncate block" title={dest || 'Destination TBD'}>{dest || <span className="text-muted-foreground">Destination TBD</span>}</span>
-                    </div>
-                    {/* Times */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-                      <span><span className="font-medium text-foreground">Pickup:</span> {puTime}</span>
-                      <span><span className="font-medium text-foreground">Delivery:</span> {deTime}</span>
-                    </div>
-                    {/* IDs */}
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-muted-foreground font-mono">
-                      <span>{load.aljexId}</span>
-                      <span>PU# {load.pickupNumber}</span>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-
-      {/* SMS preview */}
+      {/* SMS-ready caption */}
       <div style={{ borderTop: '1px solid var(--ds-border)', padding: '12px 16px', background: 'var(--ds-bg)' }}>
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
-          SMS Preview
-        </p>
-        <pre className="text-[11px] text-foreground/80 whitespace-pre-wrap font-sans leading-relaxed select-text">
-          {sms}
-        </pre>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>
+            <MessageSquare size={12} /> Text message
+          </span>
+          <CopyButton text={sms} label="Copy" small />
+        </div>
+        <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, borderTopLeftRadius: 3, padding: '10px 12px' }}>
+          <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.55, color: 'var(--ds-t1)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text' }}>{sms}</pre>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── A single load/stop row, styled like the calendar day view ───────────────────
+
+function ScheduleRow({ index, hot, accent, proId, puNum, tmsId, children }: {
+  index: number; hot: boolean; accent: string
+  proId?: string; puNum?: string | null; tmsId?: string | null
+  children: React.ReactNode
+}) {
+  return (
+    <div style={{ display: 'flex', gap: 10, padding: '11px 16px', borderBottom: '1px solid var(--ds-border)', borderLeft: `3px solid ${hot ? '#dc2626' : accent}`, background: hot ? 'rgba(220,38,38,0.04)' : undefined }}>
+      <span style={{ width: 20, height: 20, borderRadius: 999, flexShrink: 0, marginTop: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, background: hot ? '#fee2e2' : 'var(--ds-bg)', color: hot ? '#b91c1c' : 'var(--ds-t2)', border: '1px solid var(--ds-border)' }}>{index}</span>
+      <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {hot && <span style={{ fontSize: 10, fontWeight: 700, color: '#b91c1c' }}>🔥 HOT</span>}
+        {children}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--ds-t3)', fontFamily: 'var(--font-mono, monospace)', marginTop: 2 }}>
+          {proId && <span>Pro# {proId}</span>}
+          {tmsId && <span>TMS {tmsId}</span>}
+          {puNum && <span>PU# {puNum}</span>}
+        </div>
       </div>
     </div>
   )
@@ -207,8 +195,6 @@ export function SchedulePage() {
 
   const activeDrivers = drivers.filter((d) => d.active)
 
-  // Only show drivers that have work on this day. In multi-stop mode "work" is the set of
-  // STOPS assigned to that driver that day (a middle-delivery-only driver still shows up).
   const driversWithWork = useMemo<DriverWork[]>(() =>
     activeDrivers
       .map((d): DriverWork => {
@@ -223,7 +209,6 @@ export function SchedulePage() {
     [activeDrivers, loads, dateStr, multiStopRender]
   )
 
-  // Drivers with no work today (collapsed section)
   const driversWithoutWork = useMemo(() =>
     activeDrivers.filter((d) => !driversWithWork.some((w) => w.driver.id === d.id)),
     [activeDrivers, driversWithWork]
@@ -232,54 +217,43 @@ export function SchedulePage() {
   const prevDay = () => setDateStr(chicagoDateStr(addDays(new Date(`${dateStr}T12:00:00Z`), -1)))
   const nextDay = () => setDateStr(chicagoDateStr(addDays(new Date(`${dateStr}T12:00:00Z`),  1)))
   const goToday = () => setDateStr(todayStr())
+  const isToday = dateStr === todayStr()
 
-  const allSms = driversWithWork
-    .map((w) => w.sms)
-    .join('\n\n' + '─'.repeat(40) + '\n\n')
+  const allSms = driversWithWork.map((w) => w.sms).join('\n\n' + '─'.repeat(40) + '\n\n')
+
+  const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
-      {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px', minHeight: 64, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0, overflowX: 'auto' }}>
-        <MessageSquare className="size-4 text-muted-foreground shrink-0" />
-        <span className="text-sm font-semibold text-foreground shrink-0">Driver Schedules</span>
-
-        <Separator orientation="vertical" className="h-5 mx-1 shrink-0" />
-
-        {/* Date nav */}
-        <div className="flex items-center gap-1 shrink-0">
-          <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={prevDay} aria-label="Previous day">
-            <ChevronLeft className="size-4" />
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 px-3 text-sm" onClick={goToday}>
-            Today
-          </Button>
-          <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={nextDay} aria-label="Next day">
-            <ChevronRight className="size-4" />
-          </Button>
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '20px 32px 12px', flexWrap: 'wrap' }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Schedules</h1>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Per-driver daily run sheets &amp; ready-to-send texts</p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button style={navBtn} onClick={prevDay} aria-label="Previous day"><ChevronLeft size={16} /></button>
+              <button onClick={goToday} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isToday ? 'var(--ds-blue)' : 'var(--ds-surface)', color: isToday ? '#fff' : 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Today</button>
+              <button style={navBtn} onClick={nextDay} aria-label="Next day"><ChevronRight size={16} /></button>
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 140, textAlign: 'right' }}>{formatShortDate(dateStr)}</span>
+            {driversWithWork.length > 0 && <CopyButton text={allSms} label="Copy all" />}
+          </div>
         </div>
-
-        <span className="text-sm font-semibold text-foreground shrink-0 tabular-nums">
-          {formatShortDate(dateStr)}
-        </span>
-
-        <div className="flex-1" />
-
-        {driversWithWork.length > 0 && (
-          <CopyButton text={allSms} className="shrink-0" />
-        )}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* ── Content ──────────────────────────────────────────────────────── */}
+      <div style={{ padding: '20px 32px 32px' }}>
         {driversWithWork.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
-            <MessageSquare className="size-10 opacity-20" />
-            <p className="text-sm font-medium">No loads scheduled for {formatShortDate(dateStr)}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '80px 0', color: 'var(--ds-t3)' }}>
+            <MessageSquare size={40} style={{ opacity: 0.2 }} />
+            <p style={{ fontSize: 14, fontWeight: 500 }}>No loads scheduled for {formatShortDate(dateStr)}</p>
           </div>
         ) : (
-          <div className="space-y-4 max-w-3xl mx-auto">
-            <p className="text-xs text-muted-foreground">
+          <div style={{ maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
               {driversWithWork.length} driver{driversWithWork.length !== 1 ? 's' : ''} scheduled
               {driversWithoutWork.length > 0 && ` · ${driversWithoutWork.map((d) => d.name.split(' ')[0]).join(', ')} off`}
             </p>
