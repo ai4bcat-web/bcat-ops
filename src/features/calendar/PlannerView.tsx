@@ -18,7 +18,7 @@ import { addDays, formatDayHeader, formatTime, formatDateShort, formatDateTimeIn
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
-import { flattenLoadsToStopEntries, updateStop } from '@/lib/stops'
+import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
 import { compareBySlot, persistDaySlotOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType, Stop } from '@/types'
@@ -139,8 +139,8 @@ function ColorPicker({
 }
 
 // ── Driver picker popover ─────────────────────────────────────────────────────
-function DriverPicker({ loadId, load, stop, currentId, field, drivers, onClose }: {
-  loadId: string; load?: Load; stop?: Stop
+function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onClose }: {
+  loadId: string; load?: Load; stop?: Stop; role?: 'pickup' | 'delivery' | 'same-day'
   currentId: string | null; field: 'pickupDriverId' | 'deliveryDriverId'; drivers: Driver[]; onClose: () => void
 }) {
   const { updateLoad } = useLoads()
@@ -151,11 +151,30 @@ function DriverPicker({ loadId, load, stop, currentId, field, drivers, onClose }
   const pick = useCallback(async (driverId: string | null) => {
     setSaving(true)
     try {
-      if (stop && load) await updateLoad(loadId, { stops: updateStop(load, stop.id, { driverId }) })
-      else await updateLoad(loadId, { [field]: driverId })
+      // Always write through the stops array (the source of truth). Writing only the
+      // legacy pickupDriverId/deliveryDriverId mirror is ignored by getStops and gets
+      // reverted on the next stops write — which is why inline assignments didn't stick.
+      if (stop && load) {
+        await updateLoad(loadId, { stops: updateStop(load, stop.id, { driverId }) })
+      } else if (load) {
+        const stops = getStops(load)
+        const targetIds = new Set<string>()
+        if (role === 'delivery') {
+          const last = [...stops].reverse().find((s) => s.type === 'delivery') ?? stops[stops.length - 1]
+          if (last) targetIds.add(last.id)
+        } else if (role === 'same-day') {
+          for (const s of stops) targetIds.add(s.id)   // single-driver load → all stops
+        } else {
+          const first = stops.find((s) => s.type === 'pickup') ?? stops[0]
+          if (first) targetIds.add(first.id)
+        }
+        await updateLoad(loadId, { stops: stops.map((s) => (targetIds.has(s.id) ? { ...s, driverId } : s)) })
+      } else {
+        await updateLoad(loadId, { [field]: driverId })
+      }
     } finally { setSaving(false) }
     onClose()
-  }, [updateLoad, loadId, load, stop, field, onClose])
+  }, [updateLoad, loadId, load, stop, role, field, onClose])
 
   return (
     <div
@@ -677,6 +696,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
             loadId={load.id}
             load={load}
             stop={stop}
+            role={role}
             currentId={relevantDriverId}
             field={driverField}
             drivers={drivers}
