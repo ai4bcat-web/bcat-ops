@@ -6,7 +6,7 @@
 
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Plus, CheckCircle, Circle, GripVertical, PaintBucket } from 'lucide-react'
-import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
+import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput, needLabel } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -67,7 +67,7 @@ interface AvailabilityStrip {
 
 function apptDisplay(iso: string | undefined | null, type: string | undefined | null, yard: boolean): string {
   if (yard) return 'Yard'
-  if (type === 'tbd')  return 'NEED'
+  if (type === 'tbd')  return needLabel(iso)   // "NEED" or "NEED HH:MM" when a desired time is set
   if (type === 'fcfs') return 'FCFS'
   if (!iso) return '—'
   return formatTime(iso)
@@ -321,7 +321,7 @@ function LoadCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span style={{ fontSize: 9.5, fontWeight: 600, color: puYard ? 'var(--ds-t3)' : 'var(--ds-blue)', width: 18, flexShrink: 0 }}>PU</span>
         {puDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{puDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: puTime === 'NEED' ? 700 : 500, color: puTime === 'NEED' ? '#dc2626' : puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 10.5, fontWeight: puTime.startsWith('NEED') ? 700 : 500, color: puTime.startsWith('NEED') ? '#dc2626' : puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {puTime}
         </span>
       </div>
@@ -330,7 +330,7 @@ function LoadCard({
       <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         <span style={{ fontSize: 9.5, fontWeight: 600, color: deYard ? 'var(--ds-t3)' : '#7c3aed', width: 18, flexShrink: 0 }}>DE</span>
         {deDate && <span style={{ fontSize: 9.5, color: 'var(--ds-t3)' }}>{deDate}</span>}
-        <span style={{ fontSize: 10.5, fontWeight: deTime === 'NEED' ? 700 : 500, color: deTime === 'NEED' ? '#dc2626' : deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+        <span style={{ fontSize: 10.5, fontWeight: deTime.startsWith('NEED') ? 700 : 500, color: deTime.startsWith('NEED') ? '#dc2626' : deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {deTime}
         </span>
       </div>

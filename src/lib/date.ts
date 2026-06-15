@@ -13,6 +13,16 @@ export function formatTime(iso: string): string {
   }).format(d)
 }
 
+/**
+ * Label for a "NEED" (TBD / no firm appointment) appt. If a desired time was entered
+ * (stored appt is not at UTC midnight), show "NEED HH:MM"; otherwise just "NEED".
+ * A date-only entry is saved at UTC midnight, so "00:00" means no time was set.
+ */
+export function needLabel(iso: string | null | undefined): string {
+  if (iso && iso.slice(11, 16) !== '00:00') return `NEED ${formatTime(iso)}`
+  return 'NEED'
+}
+
 export function formatDateShort(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso || '—'

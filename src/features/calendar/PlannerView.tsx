@@ -14,7 +14,7 @@
 
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
-import { addDays, formatDayHeader, formatTime, formatDateShort, formatDateTimeInput } from '@/lib/date'
+import { addDays, formatDayHeader, formatTime, formatDateShort, formatDateTimeInput, needLabel } from '@/lib/date'
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -78,7 +78,7 @@ function ApptCell({ iso, type, colorCls, yard, city }: {
   if (!iso) return <div className="px-1.5 text-[11px] text-slate-300" style={{ width: w }}>—</div>
 
   const isSpecial = type === 'fcfs' || type === 'tbd'
-  const specialLabel = type === 'tbd' ? 'NEED' : type!.toUpperCase()
+  const specialLabel = type === 'tbd' ? needLabel(iso) : type!.toUpperCase()
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
