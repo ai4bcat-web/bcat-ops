@@ -9,8 +9,6 @@ import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
-import { MobileLoadAgenda } from './MobileLoadAgenda'
-import { useIsMobile } from '@/hooks/useIsMobile'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { getStops } from '@/lib/stops'
 import type { ViewMode, Load } from '@/types'
@@ -34,7 +32,6 @@ export function CalendarPage() {
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
   const equipment   = useAppStore((s) => s.equipment)
-  const isMobile = useIsMobile()
   const { availabilities, createAvailability, deleteAvailability } = useDriverAvailability()
 
   const [showAvailModal, setShowAvailModal] = useState(false)
@@ -208,9 +205,9 @@ export function CalendarPage() {
         background: 'var(--ds-surface)',
       }}>
         <CalendarErrorBoundary>
-          {isMobile ? (
-            <MobileLoadAgenda loads={visibleLoads} drivers={drivers} />
-          ) : currentView === 'day' ? (
+          {/* Mobile uses the SAME day/week/month views as desktop (they scroll
+              horizontally on narrow screens) so it looks and populates identically. */}
+          {currentView === 'day' ? (
             <PlannerView
               loads={visibleLoads}
               drivers={drivers}
