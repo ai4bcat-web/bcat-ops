@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-06-13
+> Last updated: 2026-06-16
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, email/Slack intake, DOT compliance & driver onboarding, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, weekly fleet profitability, email/Slack intake, DOT compliance & driver onboarding, and audit logging.
 
 ## Where it lives
 | | |
@@ -24,7 +24,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 ## Routes / Pages
 | Route | Feature |
 |---|---|
-| `/dashboard` | Operational metrics (KPIs, fuel widget, open tasks, live truck map) |
+| `/dashboard` | Operational metrics (KPIs, fuel widget, open tasks, live truck map, weekly fleet profitability) |
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | Driver management + avatars |
@@ -43,9 +43,9 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/onboard/:token` | Public tokenized driver onboarding portal (outside the authenticated app shell) |
 
 ## Data Models (GraphQL / DynamoDB)
-**Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability`
+**Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability` · `DriverPayPeriod` (biweekly gross pay, Paychex seam)
 
-**Telematics (Motive):** `TruckConfig` · `TruckMileage` · `TruckLocation` · `TruckLocationHistory`
+**Telematics (Motive + Blue Ink Tech):** `TruckConfig` · `TruckMileage` · `TruckLocation` · `TruckLocationHistory` (BIT trucks write into the same mileage/location tables as Motive)
 
 **Intake & audit:** `IntakeItem` · `AuditLog`
 
@@ -66,6 +66,7 @@ Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`.
 - **userManagement** — admin-gated Cognito user CRUD
 - **motive-mileage-sync** — syncs per-truck mileage (WEEK/MONTH) from the Motive API
 - **motive-location-sync** — syncs current truck location + breadcrumb history from Motive (powers the dashboard map)
+- **blueink-sync** — pulls miles + location for Blue Ink Tech (BIT) ELD trucks and writes into the SAME TruckMileage/TruckLocation tables as Motive (location every 10 min, mileage daily); API key in the `BLUE_INK_TECH_API_KEY` Amplify secret
 - **fuel-import** — parses EFS transaction reports → FuelTransaction records
 - **generate-recurring-expenses** — materializes RecurringExpense templates into monthly ExpenseRecords
 - **compliance-scanner** — daily cron (6 AM America/Chicago): scans ComplianceDocuments, upserts ComplianceAlerts, transitions doc statuses, recomputes cached compliance status, and sends escalation emails (Phase 4)
