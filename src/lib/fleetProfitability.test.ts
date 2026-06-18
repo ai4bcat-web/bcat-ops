@@ -116,6 +116,26 @@ describe('calcFleetProfitability', () => {
     expect(r.rollup.revenuePerMile).toBeCloseTo(7.5)
   })
 
+  it('breaks non-fuel expenses into categories consistent with the rollup', () => {
+    const types: ExpenseTypeRecord[] = [
+      { id: 'type-ins', category: 'INSURANCE' },
+      { id: 'type-fin', category: 'FINANCING' },
+    ]
+    // One-time (transactionDate) records in range — counted as-is, not prorated.
+    const expenses: ExpenseRecordInput[] = [
+      { expenseTypeId: 'type-ins', allocationId: null, amount: 300, periodMonth: null, transactionDate: '2026-06-03', directTruckId: TRUCK_530 },
+      { expenseTypeId: 'type-fin', allocationId: null, amount: 900, periodMonth: null, transactionDate: '2026-06-04', directTruckId: TRUCK_685 },
+    ]
+    const r = calcFleetProfitability(RANGE, members, [], [], expenses, noRecurring, allocations, types, [], [], [])
+    // Category breakdown lines up with the dedicated insurance/loan rollup fields…
+    expect(r.rollup.categories.insurance).toBeCloseTo(r.rollup.insurance)
+    expect(r.rollup.categories.financing).toBeCloseTo(r.rollup.loan)
+    expect(r.rollup.categories.maintenance).toBe(0)
+    // …and every category together equals all non-fuel cost (insurance + loan + other).
+    const catSum = Object.values(r.rollup.categories).reduce((a, b) => a + b, 0)
+    expect(catSum).toBeCloseTo(r.rollup.insurance + r.rollup.loan + r.rollup.otherExpenses)
+  })
+
   it('returns null per-mile metrics when there are zero miles', () => {
     const loads: LoadInput[] = [{ truckId: TRUCK_530, rate: 100_000, deliveryAppt: '2026-06-03' }]
     const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], [])

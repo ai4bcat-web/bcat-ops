@@ -359,7 +359,7 @@ interface AppState {
   pendingIntakeItemId: string | null
   filterDriverId: string | null
   searchQuery: string
-  filters: { readyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
+  filters: { readyToInvoice: boolean; notReadyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
   multiStopRender: boolean   // DEPRECATED — always false; per-stop calendar toggle was removed. Kept so views compile.
 
   // ── Initialization ─────────────────────────────────────────────────────────
@@ -451,7 +451,7 @@ export const useAppStore = create<AppState>()(
       pendingIntakeItemId: null,
       filterDriverId: null,
       searchQuery: '',
-      filters: { readyToInvoice: false, split: false, unassigned: false, needsAppt: false },
+      filters: { readyToInvoice: false, notReadyToInvoice: false, split: false, unassigned: false, needsAppt: false },
       multiStopRender: false,
 
       // ── Init ───────────────────────────────────────────────────────────────

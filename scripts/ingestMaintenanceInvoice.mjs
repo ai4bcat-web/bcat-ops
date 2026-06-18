@@ -300,7 +300,7 @@ async function main() {
     const equipmentId = resolveEquipmentId(raw)
 
     const input = {
-      ...(equipmentId && { equipmentId }),
+      equipmentId: equipmentId || 'unassigned',  // schema requires NonNull; use 'unassigned' when unit unknown
       ...(raw.date && { date: raw.date }),
       ...(raw.vendor && { vendor: raw.vendor }),
       ...(raw.description && { description: raw.description }),

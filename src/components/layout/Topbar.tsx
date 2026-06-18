@@ -79,7 +79,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
         </div>
 
         {/* Notifications */}
-        <button style={{
+        <button aria-label="Notifications" style={{
           width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'transparent', border: '1px solid transparent', borderRadius: 7,
           cursor: 'pointer', color: 'var(--ds-t2)', position: 'relative',
@@ -92,7 +92,7 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
         </button>
 
         {/* Settings */}
-        <button style={{
+        <button aria-label="Settings" style={{
           width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'transparent', border: '1px solid transparent', borderRadius: 7,
           cursor: 'pointer', color: 'var(--ds-t2)',

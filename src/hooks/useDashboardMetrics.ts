@@ -17,7 +17,7 @@ export interface DashboardMetrics {
   totalLoadsDelta: number
   activeDrivers: number
   readyToInvoice: number
-  needsInvoice: number     // past-delivered loads not yet marked ready to invoice (all time)
+  needsInvoice: number     // shipments completed (non-TBD delivery) yesterday or earlier, still not ready to invoice
   needsAppt: number        // loads with at least one TBD appointment (all time)
   revenue: number          // sum of load.rate in cents
   revenueConnected: boolean // false when all rates are null
@@ -104,10 +104,15 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
     const totalLoadsDelta = totalLoads - previous.length
     const readyToInvoice  = current.filter((l) => l.readyToInvoice).length
 
-    // Uninvoiced backlog — all loads whose delivery date is in the past and not yet invoiced
+    // Uninvoiced backlog — shipments COMPLETED yesterday or earlier (a real, non-TBD
+    // delivery dated before today) that are still not marked ready to invoice. A still-TBD
+    // delivery isn't "completed", so it's excluded here (it shows under Appts to Book).
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0)
     const needsInvoice = loads.filter(
-      (l) => new Date(l.deliveryAppt) < todayMidnight && !l.readyToInvoice
+      (l) =>
+        l.deliveryApptType !== 'tbd' &&
+        new Date(l.deliveryAppt) < todayMidnight &&
+        !l.readyToInvoice
     ).length
 
     // Appt booking backlog — all loads with at least one TBD appointment

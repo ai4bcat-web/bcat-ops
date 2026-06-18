@@ -136,6 +136,7 @@ export function CalendarPage() {
 
   const visibleLoads = loads.filter((l) => {
     if (filters.readyToInvoice && !l.readyToInvoice) return false
+    if (filters.notReadyToInvoice && l.readyToInvoice) return false
     if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
     if (filters.unassigned && l.pickupDriverId !== null) return false
     if (filters.needsAppt && l.pickupApptType !== 'tbd' && l.deliveryApptType !== 'tbd') return false

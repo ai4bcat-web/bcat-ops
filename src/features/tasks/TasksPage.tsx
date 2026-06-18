@@ -10,6 +10,7 @@ import {
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import {
   listTasks, updateTask,
   type CommandCenterTask,
@@ -114,8 +115,10 @@ export function TasksPage() {
     try {
       const updated = await updateTask(id, { status, actorName: actorEmail })
       applyLocalPatch(id, updated)
+      toast.success('Status updated')
     } catch (err) {
       console.error('[TasksPage] updateTask status failed', err)
+      toast.error('Could not update status')
     }
   }
 
@@ -142,8 +145,10 @@ export function TasksPage() {
         actorName: actorEmail,
       })
       applyLocalPatch(proModalItem.id, updated)
+      toast.success('Marked as done')
     } catch (err) {
       console.error('[TasksPage] markDone failed', err)
+      toast.error('Could not mark as done')
     } finally {
       setProModalItem(null)
     }
@@ -158,8 +163,10 @@ export function TasksPage() {
         reassignedTo: displayName,
       })
       applyLocalPatch(id, updated)
+      toast.success(`Reassigned to ${displayName}`)
     } catch (err) {
       console.error('[TasksPage] reassign failed', err)
+      toast.error('Could not reassign')
     }
   }
 

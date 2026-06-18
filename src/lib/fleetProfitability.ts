@@ -95,6 +95,20 @@ export interface TruckProfitability {
   hasFuelCard:    boolean
 }
 
+/**
+ * Non-fuel expense totals split by category (dollars). The sum of these equals
+ * `rollup.otherExpenses`. Used by the monthly P&L view to break the costs out.
+ */
+export interface ExpenseCategoryBreakdown {
+  insurance:   number
+  financing:   number  // truck / trailer loans
+  lease:       number  // yard / trailer rent & leases
+  maintenance: number
+  permits:     number
+  tolls:       number
+  other:       number
+}
+
 export interface FleetProfitabilityResult {
   range:   DateRange
   trucks:  TruckProfitability[]
@@ -109,6 +123,8 @@ export interface FleetProfitabilityResult {
     net:            number
     revenuePerMile: number | null
     fuelPerMile:    number | null
+    /** Non-fuel expenses split by category; sums to `otherExpenses`. */
+    categories:     ExpenseCategoryBreakdown
   }
 }
 
@@ -236,6 +252,20 @@ export function calcFleetProfitability(
   const otherExpenses = sum((t) => t.otherExpenses)
   const driverCost = sum((t) => t.driverCost)
 
+  // Non-fuel expenses split by category across member trucks (sums to otherExpenses).
+  const categories: ExpenseCategoryBreakdown = { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 }
+  for (const m of members) {
+    const e = expensesByTruck[m.truckId]
+    if (!e) continue
+    categories.insurance   += e.insurance
+    categories.financing   += e.financing
+    categories.lease       += e.lease
+    categories.maintenance += e.maintenance
+    categories.permits     += e.permits
+    categories.tolls       += e.tolls
+    categories.other       += e.other
+  }
+
   return {
     range,
     trucks,
@@ -250,6 +280,7 @@ export function calcFleetProfitability(
       net: revenue - fuel - insurance - loan - otherExpenses - driverCost,
       revenuePerMile: miles > 0 ? revenue / miles : null,
       fuelPerMile:    miles > 0 ? fuel / miles : null,
+      categories,
     },
   }
 }
