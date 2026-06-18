@@ -685,10 +685,9 @@ export const useAppStore = create<AppState>()(
     {
       name: 'bcat-ops-ui-v4',
       // Bump when an existing persisted pref needs a one-time reset across all users.
-      // v1: force the calendar "stops" toggle (multiStopRender) back off for users
-      //     who had it persisted on before it became off-by-default.
-      // v2: the toggle was removed entirely (calendar always renders per-load) — reset
-      //     anyone who had re-enabled it after v1.
+      // v2: the per-stop "Stops" toggle was removed entirely — the calendar always
+      //     renders one item per load — so force multiStopRender off for everyone
+      //     (including anyone who had it persisted on while it was default-on).
       version: 2,
       migrate: (persisted, fromVersion) => {
         const state = (persisted ?? {}) as Record<string, unknown>

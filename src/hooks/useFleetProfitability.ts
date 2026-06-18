@@ -81,7 +81,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
 
   const data = useMemo<FleetProfitabilityResult | null>(() => {
     if (members.length === 0) {
-      return { range, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } } }
+      return { range, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } } }
     }
 
     // Fold MaintenanceInvoice rows (amount in CENTS, attributed to the equipment they
@@ -105,13 +105,14 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       loads.map((l) => ({ truckId: l.truckId, rate: l.rate, deliveryAppt: l.deliveryAppt })),
       fuel.transactions.map((t) => ({ truckId: t.truckId, transactionDate: t.transactionDate, amount: t.amount, itemCategory: t.itemCategory ?? '' })),
       expenseRecords,
+      exp.recurring.map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, monthlyAmount: r.monthlyAmount, startMonth: r.startMonth, endMonth: r.endMonth, active: r.active })),
       exp.allocations.map((a) => ({ id: a.id, expenseTypeId: a.expenseTypeId, allocationMethod: a.allocationMethod, truckIds: a.truckIds ?? [] })),
       expenseTypes,
       mileage.rows.map((m) => ({ truckId: m.truckId, periodStart: m.periodStart, periodType: m.periodType, miles: m.miles })),
       pay.payPeriods.map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay })),
       drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId })),
     )
-  }, [range, members, loads, fuel.transactions, exp.records, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices])
+  }, [range, members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices])
 
   return { data, members, loading, error, refresh }
 }

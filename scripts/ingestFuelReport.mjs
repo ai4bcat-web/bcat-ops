@@ -32,7 +32,10 @@ const CARD_TO_TRUCK = {
   '00031': 'eq-mnevuhxgs5jf',  // Unit 530
   '00007': 'eq-mnevvq8q6tcx',  // Unit 685
   '00023': 'eq-mnevwst30vwt',  // Unit 780
-}
+  '00064': null,              // Unit 0012 — TODO: replace null with equipment ID when truck is added to bcat-ops
+  '00080': null,              // Unit 0012 — TODO: replace null with equipment ID when truck is added to bcat-ops
+  '89510': null,              // Unit 0080 — TODO: replace null with equipment ID when truck is added to bcat-ops
+};
 
 // ─── Parser (same logic as src/lib/parsers/efsTransactionReport.ts) ───────────
 // Kept in sync manually; if the app parser changes, update here too.

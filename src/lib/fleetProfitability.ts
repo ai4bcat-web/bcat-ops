@@ -24,10 +24,11 @@
  * that via the `hasEquipment` / `hasFuelCard` flags so the UI can flag them.
  */
 
-import { getExpensesByTruck } from './expenseAllocation'
+import { getFleetExpenses } from './expenseAllocation'
 import type {
   FuelTxInput,
   ExpenseRecordInput,
+  RecurringInput,
   AllocationRecord,
   ExpenseTypeRecord,
 } from './expenseAllocation'
@@ -83,9 +84,11 @@ export interface TruckProfitability {
   revenue:        number          // dollars
   miles:          number
   fuel:           number          // dollars
-  otherExpenses:  number          // dollars (all non-fuel ExpenseRecord categories)
+  insurance:      number          // dollars (prorated to range)
+  loan:           number          // dollars — FINANCING category (truck loans), prorated
+  otherExpenses:  number          // dollars (lease + maintenance + permits + tolls + other)
   driverCost:     number          // dollars (prorated)
-  net:            number          // revenue - fuel - otherExpenses - driverCost
+  net:            number          // revenue - fuel - insurance - loan - otherExpenses - driverCost
   revenuePerMile: number | null   // null when miles === 0
   fuelPerMile:    number | null   // null when miles === 0
   hasEquipment:   boolean
@@ -113,6 +116,8 @@ export interface FleetProfitabilityResult {
     revenue:        number
     miles:          number
     fuel:           number
+    insurance:      number
+    loan:           number
     otherExpenses:  number
     driverCost:     number
     net:            number
@@ -157,6 +162,7 @@ export function calcFleetProfitability(
   loads: LoadInput[],
   fuelTxs: FuelTxInput[],
   expenseRecords: ExpenseRecordInput[],
+  recurringExpenses: RecurringInput[],
   allocations: AllocationRecord[],
   expenseTypes: ExpenseTypeRecord[],
   mileageDayRows: TruckMileageDayInput[],
@@ -165,9 +171,13 @@ export function calcFleetProfitability(
 ): FleetProfitabilityResult {
   const memberIds = new Set(members.map((m) => m.truckId))
 
-  // ── Expenses (fuel + non-fuel) per truck, reusing the allocation engine ──────
-  const expensesByTruck = getExpensesByTruck(
-    range.start, range.end, fuelTxs, expenseRecords, allocations, expenseTypes,
+  // ── Expenses per truck — SAME shared aggregation the Expenses tab uses: fuel +
+  // manual/auto records + projected recurring (insurance, loans…), monthly costs
+  // prorated to the range so a weekly view shows a week's slice. ────────────────
+  const expensesByTruck = getFleetExpenses(
+    range.start, range.end,
+    { fuelTxs, records: expenseRecords, recurring: recurringExpenses, allocations, expenseTypes },
+    { prorateMonthly: true },
   )
 
   // ── Revenue per truck: full rate → delivery day (dollars) ────────────────────
@@ -205,11 +215,14 @@ export function calcFleetProfitability(
   const trucks: TruckProfitability[] = members.map((m) => {
     const exp = expensesByTruck[m.truckId]
     const fuel = exp?.fuel ?? 0
-    const otherExpenses = exp ? exp.total - exp.fuel : 0
+    const insurance = exp?.insurance ?? 0
+    const loan = exp?.financing ?? 0
+    // Everything else non-fuel/insurance/loan (lease + maintenance + permits + tolls + other).
+    const otherExpenses = exp ? exp.total - exp.fuel - exp.insurance - exp.financing : 0
     const revenue = revenueByTruck[m.truckId] ?? 0
     const miles = milesByTruck[m.truckId] ?? 0
     const driverCost = driverCostByTruck[m.truckId] ?? 0
-    const net = revenue - fuel - otherExpenses - driverCost
+    const net = revenue - fuel - insurance - loan - otherExpenses - driverCost
     return {
       truckId:        m.truckId,
       unitNumber:     m.unitNumber,
@@ -217,6 +230,8 @@ export function calcFleetProfitability(
       revenue,
       miles,
       fuel,
+      insurance,
+      loan,
       otherExpenses,
       driverCost,
       net,
@@ -232,6 +247,8 @@ export function calcFleetProfitability(
   const revenue = sum((t) => t.revenue)
   const miles = sum((t) => t.miles)
   const fuel = sum((t) => t.fuel)
+  const insurance = sum((t) => t.insurance)
+  const loan = sum((t) => t.loan)
   const otherExpenses = sum((t) => t.otherExpenses)
   const driverCost = sum((t) => t.driverCost)
 
@@ -256,9 +273,11 @@ export function calcFleetProfitability(
       revenue,
       miles,
       fuel,
+      insurance,
+      loan,
       otherExpenses,
       driverCost,
-      net: revenue - fuel - otherExpenses - driverCost,
+      net: revenue - fuel - insurance - loan - otherExpenses - driverCost,
       revenuePerMile: miles > 0 ? revenue / miles : null,
       fuelPerMile:    miles > 0 ? fuel / miles : null,
       categories,
