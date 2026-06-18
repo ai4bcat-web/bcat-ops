@@ -245,13 +245,13 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
 
               {/* Identification */}
               <FormSection icon={<Truck size={15} />} title="Identification" subtitle="Unit, make, model & VIN">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="Unit # *"><Input value={form.unitNumber} onChange={(e) => set('unitNumber', e.target.value)} placeholder="e.g. 530" required className="h-9" /></Field>
                   <Field label="Nickname"><Input value={form.nickname} onChange={(e) => set('nickname', e.target.value)} placeholder="Optional" className="h-9" /></Field>
                   <Field label="Make"><Input value={form.make} onChange={(e) => set('make', e.target.value)} placeholder="Freightliner" className="h-9" /></Field>
                   <Field label="Model"><Input value={form.model} onChange={(e) => set('model', e.target.value)} placeholder="Cascadia" className="h-9" /></Field>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: isTruck ? '1fr 1fr 1fr' : '1fr 1fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: isTruck ? 'repeat(3, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="Year"><Input type="number" value={form.year} onChange={(e) => set('year', e.target.value)} placeholder="2022" className="h-9" /></Field>
                   <Field label="Plate"><Input value={form.plate} onChange={(e) => set('plate', e.target.value)} className="h-9" /></Field>
                   {isTruck && <Field label="Mileage"><Input type="number" value={form.mileage} onChange={(e) => set('mileage', e.target.value)} className="h-9" /></Field>}
@@ -261,7 +261,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
 
               {/* Ownership & Telematics */}
               <FormSection icon={<Gauge size={15} />} title="Ownership & Telematics" subtitle="Owner, fleet manager & ELD">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="Ownership">
                     <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.ownership} onChange={(e) => set('ownership', e.target.value)}>
                       <option value="owned">Owned</option>
@@ -280,7 +280,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                 </div>
                 {isTruck && (
                   <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                       <Field label="Fleet Group">
                         <select className="h-9 w-full rounded-md border border-input px-3 text-sm bg-white" value={form.fleetGroup} onChange={(e) => set('fleetGroup', e.target.value)}>
                           <option value="">— Unassigned —</option>
@@ -321,8 +321,8 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
 
               {/* Operating Costs — creates/updates recurring expenses for this truck */}
               {isTruck && (
-                <FormSection icon={<DollarSign size={15} />} title="Operating Costs" subtitle="Loan, insurance, plates — flows into Expenses & Profitability">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <FormSection icon={<DollarSign size={15} />} title="Operating Costs" subtitle="Loan, insurance, plates — flows into Expenses & Profitability" collapsible defaultOpen={false}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                     <Field label="Truck loan ($ / month)">
                       <Input type="number" step="0.01" min="0" value={form.loanMonthly} onChange={(e) => set('loanMonthly', e.target.value)} placeholder="e.g. 1850 — blank if none" className="h-9" />
                     </Field>
@@ -347,7 +347,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
 
               {/* Compliance Dates (collapsed) */}
               <FormSection icon={<FileText size={15} />} title="Compliance Dates" subtitle="DOT, insurance, IFTA & IRP" collapsible defaultOpen={false}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="Last DOT Inspection"><Input type="date" value={form.dotInspectionDate} onChange={(e) => set('dotInspectionDate', e.target.value)} className="h-9" /></Field>
                   <Field label="Insurance Expiry"><Input type="date" value={form.insuranceExpirationDate} onChange={(e) => set('insuranceExpirationDate', e.target.value)} className="h-9" /></Field>
                   {isTruck && (

@@ -329,7 +329,7 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                 <Field label="Email">
                   <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
                 </Field>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="CDL Number"><Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" /></Field>
                   <Field label="CDL Class">
                     <Controller name="driverType" control={control} render={({ field }) => (
