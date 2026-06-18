@@ -13,6 +13,7 @@ import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 // ── Team members ──────────────────────────────────────────────────────────────
@@ -437,7 +438,12 @@ export function IntakePage() {
   }, [items, historySource, historyStatus])
 
   const handleStatusChange = async (id: string, status: IntakeStatus) => {
-    await updateItem(id, { status }, { actorName: actorEmail })
+    try {
+      await updateItem(id, { status }, { actorName: actorEmail })
+      toast.success('Status updated')
+    } catch {
+      toast.error('Could not update status')
+    }
   }
 
   const handleBuildLoad = (item: IntakeItem) => {
@@ -454,21 +460,32 @@ export function IntakePage() {
 
   const handleProConfirm = async (proNumber: string) => {
     if (!proModalItem) return
-    await updateItem(
-      proModalItem.id,
-      { status: 'DONE', proNumber },
-      { actorName: actorEmail, proNumber },
-    )
+    try {
+      await updateItem(
+        proModalItem.id,
+        { status: 'DONE', proNumber },
+        { actorName: actorEmail, proNumber },
+      )
+    } catch {
+      toast.error('Could not mark as done')
+      return
+    }
+    toast.success('Marked as done')
     setProModalItem(null)
   }
 
   const handleAssigneeChange = async (id: string, email: string) => {
     const displayName = assigneeLabel(email)
-    await updateItem(
-      id,
-      { assignedTo: email },
-      { actorName: actorEmail, reassignedTo: displayName },
-    )
+    try {
+      await updateItem(
+        id,
+        { assignedTo: email },
+        { actorName: actorEmail, reassignedTo: displayName },
+      )
+      toast.success(`Reassigned to ${displayName}`)
+    } catch {
+      toast.error('Could not reassign')
+    }
   }
 
   const loadIndex = useMemo(() =>

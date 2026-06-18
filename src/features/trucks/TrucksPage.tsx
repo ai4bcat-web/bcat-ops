@@ -649,7 +649,7 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
           <div className="space-y-1.5">
             {upcoming.map((t) => (
               <div key={t.id} className="flex items-center gap-3 bg-white rounded-lg px-3 py-2 border border-slate-100">
-                <button onClick={() => updateMaintenanceTask(t.id, { status: 'complete' })} className="shrink-0 text-slate-300 hover:text-emerald-500 transition-colors">
+                <button onClick={() => { updateMaintenanceTask(t.id, { status: 'complete' }); toast.success('Task marked complete') }} className="shrink-0 text-slate-300 hover:text-emerald-500 transition-colors">
                   <CheckCircle2 className="size-4" />
                 </button>
                 <div className="flex-1 min-w-0">
@@ -660,7 +660,7 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
                   {t.priority === 'high' ? 'High' : t.priority === 'med' ? 'Med' : 'Low'}
                 </span>
                 <button onClick={() => setTaskModal(t)} className="text-slate-400 hover:text-slate-600"><Pencil className="size-3.5" /></button>
-                <button onClick={() => deleteMaintenanceTask(t.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
+                <button onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
               </div>
             ))}
             {complete.length > 0 && (
@@ -701,7 +701,7 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
                   {inv.date && <span className="text-xs text-slate-400 ml-2">{inv.date}</span>}
                 </div>
                 <span className="text-sm font-semibold text-foreground">{formatCents(inv.amount)}</span>
-                <button onClick={() => deleteMaintenanceInvoice(inv.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
+                <button onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
               </div>
             ))}
           </div>
@@ -1001,6 +1001,7 @@ export function TrucksPage() {
       const id = showForm.id
       const unit = data.unitNumber
       updateEquipment(id, data)
+      toast.success(`Unit ${unit} updated`)
       // Upsert this truck's recurring operating costs (create / update amount / clear).
       if (costs) {
         const { existing } = readTruckCosts(id, expenseData.recurring, expenseData.allocations, expenseData.expenseTypes)
@@ -1010,6 +1011,7 @@ export function TrucksPage() {
       }
     } else {
       const truck = addEquipment(data)
+      toast.success(`Unit ${truck.unitNumber} added`)
       // Provision recurring costs captured on the add-truck form so they flow into
       // Expenses + Profitability. Fire-and-forget.
       if (costs && hasAnyTruckCost(costs)) {
@@ -1024,6 +1026,7 @@ export function TrucksPage() {
   function handleDelete(id: string) {
     if (!confirm('Delete this equipment and all its tasks/invoices?')) return
     deleteEquipment(id)
+    toast.success('Equipment deleted')
   }
 
   return (

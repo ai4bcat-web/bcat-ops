@@ -10,6 +10,7 @@ import {
   CheckCircle2, AlertTriangle, Clock, Wrench, FileText, Trash2, Pencil, X, Plus, Search,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from 'sonner'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -463,7 +464,7 @@ export function MaintenancePage() {
                     <TableRow key={t.id} className={cn(t.status === 'complete' && 'opacity-50')}>
                       <TableCell className="py-4" style={{ boxShadow: `inset 3px 0 0 ${accent}` }}>
                         <button
-                          onClick={() => updateMaintenanceTask(t.id, { status: t.status === 'complete' ? 'upcoming' : 'complete' })}
+                          onClick={() => { const next = t.status === 'complete' ? 'upcoming' : 'complete'; updateMaintenanceTask(t.id, { status: next }); toast.success(next === 'complete' ? 'Task marked complete' : 'Task reopened') }}
                           className={cn('transition-colors', t.status === 'complete' ? 'text-emerald-500' : 'text-slate-300 hover:text-emerald-400')}
                         >
                           <CheckCircle2 className="size-4" />
@@ -502,7 +503,7 @@ export function MaintenancePage() {
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditTask(t)}>
                             <Pencil className="size-3.5" />
                           </Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => deleteMaintenanceTask(t.id)}>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }}>
                             <Trash2 className="size-3.5" />
                           </Button>
                         </div>
@@ -556,7 +557,7 @@ export function MaintenancePage() {
                           <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setEditInvoice(inv)}>
                             <Pencil className="size-3.5" />
                           </Button>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => deleteMaintenanceInvoice(inv.id)}>
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-destructive hover:bg-destructive/5" onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }}>
                             <Trash2 className="size-3.5" />
                           </Button>
                         </div>
@@ -583,7 +584,7 @@ export function MaintenancePage() {
         <TaskModal
           task={editTask}
           equipment={equipment}
-          onSave={(data) => updateMaintenanceTask(editTask.id, data)}
+          onSave={(data) => { updateMaintenanceTask(editTask.id, data); toast.success('Task updated') }}
           onClose={() => setEditTask(null)}
         />
       )}
@@ -591,7 +592,7 @@ export function MaintenancePage() {
         <TaskModal
           task={null}
           equipment={equipment}
-          onSave={(data) => addMaintenanceTask(data)}
+          onSave={(data) => { addMaintenanceTask(data); toast.success('Task created') }}
           onClose={() => setNewTaskOpen(false)}
         />
       )}
@@ -599,7 +600,7 @@ export function MaintenancePage() {
         <InvoiceModal
           invoice={null}
           equipment={equipment}
-          onSave={(data) => addMaintenanceInvoice(data)}
+          onSave={(data) => { addMaintenanceInvoice(data); toast.success('Invoice created') }}
           onClose={() => setNewInvoiceOpen(false)}
         />
       )}
@@ -607,7 +608,7 @@ export function MaintenancePage() {
         <InvoiceModal
           invoice={editInvoice}
           equipment={equipment}
-          onSave={(data) => updateMaintenanceInvoice(editInvoice.id, data)}
+          onSave={(data) => { updateMaintenanceInvoice(editInvoice.id, data); toast.success('Invoice updated') }}
           onClose={() => setEditInvoice(null)}
         />
       )}
