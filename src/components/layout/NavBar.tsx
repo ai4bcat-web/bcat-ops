@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import { UserCog, LogOut, Plus } from 'lucide-react'
+import bcatLogo from '@/assets/bcat-logo.png'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
@@ -53,27 +54,17 @@ export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: ()
 
   return (
     <aside className={`sidebar${open ? ' open' : ''}`}>
-      {/* Logo */}
-      <div style={{ padding: '20px 20px 18px', display: 'flex', alignItems: 'center', gap: 11, borderBottom: '1px solid var(--ds-border)' }}>
+      {/* Logo — real BCAT logo on a black tile (its dark artwork blends in) */}
+      <div style={{ padding: '18px 16px 16px', borderBottom: '1px solid var(--ds-border)' }}>
         <div style={{
-          width: 32, height: 32, borderRadius: 9,
-          background: 'linear-gradient(135deg, #1ea8f3 0%, #0b8fd9 100%)',
+          background: '#000', borderRadius: 11, padding: '13px 16px',
+          boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 0 0 1px rgba(30,168,243,0.3), 0 8px 24px -8px rgba(30,168,243,0.6)',
-          flexShrink: 0,
         }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-            <path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" />
-            <path d="M16 4 Q21 8 21 14 T17 22" stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" fill="none" strokeDasharray="2 2" />
-          </svg>
+          <img src={bcatLogo} alt="BCAT Logistics" style={{ width: '100%', maxWidth: 158, height: 'auto', display: 'block' }} />
         </div>
-        <div>
-          <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>
-            BCAT <span style={{ color: 'var(--ds-blue)' }}>OPS</span>
-          </div>
-          <div style={{ fontSize: 10, color: 'var(--ds-t3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 1 }}>
-            Command Center
-          </div>
+        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--ds-t3)', letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'center' }}>
+          Operations Command Center
         </div>
       </div>
 
