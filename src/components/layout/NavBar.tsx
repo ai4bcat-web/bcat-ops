@@ -152,6 +152,7 @@ export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: ()
         <button
           onClick={() => logout()}
           title="Sign out"
+          aria-label="Sign out"
           style={{
             width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: 'transparent', border: '1px solid transparent', borderRadius: 6,
