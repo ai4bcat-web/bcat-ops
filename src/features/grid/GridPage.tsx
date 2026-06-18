@@ -48,11 +48,12 @@ function SortIcon({ col }: { col: { getIsSorted: () => false | 'asc' | 'desc' } 
   return <ArrowUpDown className="size-3 ml-1 opacity-30" />
 }
 
-type TabId = 'all' | 'ready' | 'unassigned' | 'split'
+type TabId = 'all' | 'ready' | 'notReady' | 'unassigned' | 'split'
 
 const KPI_COLORS: Record<TabId, string> = {
   all:        '#1ea8f3',
   ready:      '#22c55e',
+  notReady:   '#0891b2',
   unassigned: '#f59e0b',
   split:      '#a78bfa',
 }
@@ -78,6 +79,7 @@ export function GridPage() {
   const tabFiltered = useMemo(() => {
     switch (tab) {
       case 'ready':      return loads.filter((l) => l.readyToInvoice)
+      case 'notReady':   return loads.filter((l) => !l.readyToInvoice)
       case 'unassigned': return loads.filter((l) => !l.pickupDriverId)
       case 'split':      return loads.filter((l) => isSplitLoad(l, multiStopRender))
       default:           return loads
@@ -88,6 +90,7 @@ export function GridPage() {
   const counts = useMemo(() => ({
     all:        loads.length,
     ready:      loads.filter((l) => l.readyToInvoice).length,
+    notReady:   loads.filter((l) => !l.readyToInvoice).length,
     unassigned: loads.filter((l) => !l.pickupDriverId).length,
     split:      loads.filter((l) => isSplitLoad(l, multiStopRender)).length,
   }), [loads, multiStopRender])
@@ -317,6 +320,7 @@ export function GridPage() {
   const TABS: { id: TabId; label: string }[] = [
     { id: 'all',        label: 'All' },
     { id: 'ready',      label: 'Ready to Invoice' },
+    { id: 'notReady',   label: 'Not Ready to Invoice' },
     { id: 'unassigned', label: 'Unassigned' },
     { id: 'split',      label: 'Split Loads' },
   ]
@@ -355,7 +359,7 @@ export function GridPage() {
 
       {/* ── KPI strip ──────────────────────────────────────────────────────── */}
       <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+        display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
         gap: 12, padding: '14px 24px', background: 'var(--ds-bg)',
         borderBottom: '1px solid var(--ds-border)', flexShrink: 0,
       }}>
