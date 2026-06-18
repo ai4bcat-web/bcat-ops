@@ -16,10 +16,12 @@ export const FLEET_GROUP_LABELS: Record<FleetGroup, string> = {
  * flags them as "not in truck details". The permanent fix is to create an Equipment
  * record for each with fleetGroup set — at which point it should be removed from here.
  *
- * Units 890 and 89510 are Local but lack Equipment records and fuel cards (June 2026).
+ * Units 890, 0012 and 89510 are Local but lack Equipment records and fuel cards
+ * (June 2026). Their Motive mileage arrives keyed `motive:<unitNumber>`, so the unit
+ * number here must exactly match Motive's vehicle number (leading zeros included).
  */
 export const ORPHAN_UNITS_BY_GROUP: Record<FleetGroup, string[]> = {
-  LOCAL:  ['890', '89510'],
+  LOCAL:  ['890', '0012', '89510'],
   AMAZON: [],
 }
 
