@@ -71,7 +71,7 @@ export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd }: Pro
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Add driver pay</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Biweekly gross — spread across the weeks it covers</div>
           </div>
-          <button onClick={onClose} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+          <button aria-label="Close" onClick={onClose} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
         </div>
 
         <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
