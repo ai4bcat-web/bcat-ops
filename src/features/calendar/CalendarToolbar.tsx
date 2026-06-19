@@ -43,6 +43,11 @@ export function CalendarToolbar({
       flexShrink: 0, flexWrap: 'nowrap', overflowX: 'auto',
     }}>
 
+      {/* ── Today ────────────────────────────────────────────────────────── */}
+      <button onClick={onToday} style={{ ...navBtnStyle, padding: '4px 12px', fontSize: 12.5, fontWeight: 500, flexShrink: 0 }}>
+        Today
+      </button>
+
       {/* ── View tabs ────────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, flexShrink: 0 }}>
         {VIEW_OPTIONS.map(({ value, label }) => {
@@ -76,10 +81,6 @@ export function CalendarToolbar({
           </TooltipTrigger>
           <TooltipContent>Previous</TooltipContent>
         </Tooltip>
-
-        <button onClick={onToday} style={{ ...navBtnStyle, padding: '4px 10px', fontSize: 12.5, fontWeight: 500 }}>
-          Today
-        </button>
 
         <Tooltip>
           <TooltipTrigger asChild>
