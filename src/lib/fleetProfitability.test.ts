@@ -165,6 +165,16 @@ describe('calcFleetProfitability', () => {
     expect(r.revenueLeakage.unattributed).toBe(1000)
   })
 
+  it('counts historical Motive-orphan mileage for a truck that now has an Equipment record', () => {
+    const mileage: TruckMileageDayInput[] = [
+      { truckId: TRUCK_530,      periodStart: '2026-06-02', periodType: 'DAY', miles: 100 }, // canonical
+      { truckId: 'motive:530',   periodStart: '2026-06-02', periodType: 'DAY', miles: 100 }, // stale dup of same day → ignored
+      { truckId: 'motive:530',   periodStart: '2026-06-03', periodType: 'DAY', miles: 250 }, // orphan-only day → counted
+    ]
+    const r = calcFleetProfitability(RANGE, members, [], [], [], noRecurring, allocations, expenseTypes, mileage, [], [])
+    expect(r.trucks.find((t) => t.truckId === TRUCK_530)!.miles).toBe(350)
+  })
+
   it('returns null per-mile metrics when there are zero miles', () => {
     const loads: LoadInput[] = [{ truckId: TRUCK_530, rate: 100_000, deliveryAppt: '2026-06-03' }]
     const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], [])
