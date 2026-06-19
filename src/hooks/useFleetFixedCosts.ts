@@ -13,7 +13,7 @@ import type { DateRange } from '@/lib/fleetProfitability'
  * each one's exact in-range contribution back via getFleetExpenses so the P&L can break the
  * lumped categories apart (truck-loan vs trailer-loan, trailer-lease, yard-rent).
  */
-export type FleetFixedCostKey = 'loanTrailers' | 'trailerLease' | 'yardRent'
+export type FleetFixedCostKey = 'loanTrailers' | 'trailerLease' | 'yardRent' | 'tolls'
 
 interface FixedCostDef { key: FleetFixedCostKey; name: string; label: string; category: ExpenseCategory }
 
@@ -21,6 +21,7 @@ export const FLEET_FIXED_COSTS: FixedCostDef[] = [
   { key: 'loanTrailers', name: 'Loan Trailers', label: 'Loan — trailers', category: 'FINANCING' },
   { key: 'trailerLease', name: 'Trailer Lease', label: 'Trailer lease',   category: 'LEASE' },
   { key: 'yardRent',     name: 'Yard Rent',     label: 'Yard rent',       category: 'OTHER' },
+  { key: 'tolls',        name: 'Tolls',         label: 'Tolls',           category: 'TOLLS' },
 ]
 
 function thisMonth(): string {
@@ -47,7 +48,7 @@ export function useFleetFixedCosts() {
 
   /** Current stored monthly amount per key (0 if never set) — drives the editor inputs. */
   const monthlyAmounts = useMemo(() => {
-    const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0 } as Record<FleetFixedCostKey, number>
+    const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0, tolls: 0 } as Record<FleetFixedCostKey, number>
     for (const def of FLEET_FIXED_COSTS) {
       const typeId = exp.expenseTypes.find((t) => t.name === def.name)?.id
       const rec = typeId ? exp.recurring.find((r) => r.expenseTypeId === typeId && r.active) : undefined
@@ -59,7 +60,7 @@ export function useFleetFixedCosts() {
   /** Each fixed cost's actual contribution to [range] (projected + prorated by the engine). */
   const contributionInRange = useCallback(
     (range: DateRange): Record<FleetFixedCostKey, number> => {
-      const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0 } as Record<FleetFixedCostKey, number>
+      const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0, tolls: 0 } as Record<FleetFixedCostKey, number>
       if (localTruckIds.length === 0) return out
       const allocations = exp.allocations.map((a) => ({ id: a.id, expenseTypeId: a.expenseTypeId, allocationMethod: a.allocationMethod, truckIds: a.truckIds ?? [] }))
       for (const def of FLEET_FIXED_COSTS) {

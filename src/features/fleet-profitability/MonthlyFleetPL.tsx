@@ -114,12 +114,13 @@ export function MonthlyFleetPL() {
     const loanTrailers = contrib.loanTrailers
     const trailerLease = contrib.trailerLease
     const yardRent = contrib.yardRent
+    const tolls = contrib.tolls
     const loanTrucks = Math.max(0, c.financing - loanTrailers)
     const maintenance = c.maintenance + trailerMaintenance
-    const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent)
-    const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + maintenance + c.insurance + c.tolls + c.permits + other
+    const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent) + Math.max(0, c.tolls - tolls)
+    const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + maintenance + c.insurance + tolls + c.permits + other
     const net = r.revenue - totalExpenses
-    return { loanTrucks, loanTrailers, trailerLease, yardRent, maintenance, other, totalExpenses, net }
+    return { loanTrucks, loanTrailers, trailerLease, yardRent, tolls, maintenance, other, totalExpenses, net }
   }, [r, c, contrib, trailerMaintenance])
 
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
@@ -189,7 +190,7 @@ export function MonthlyFleetPL() {
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Yard rent" amount={monthlyAmounts.yardRent} onCommit={handleEdit('yardRent')} /> : <CostRow label="Yard rent" value={lines.yardRent} />}
             <CostRow label="Maintenance" value={lines.maintenance} hint="trucks + all trailers" />
             <CostRow label="Insurance" value={c!.insurance} />
-            <CostRow label="Tolls" value={c!.tolls} />
+            {isLocal && monthOffset === 0 ? <EditableCostRow label="Tolls" amount={monthlyAmounts.tolls} onCommit={handleEdit('tolls')} /> : <CostRow label="Tolls" value={lines.tolls} />}
             <CostRow label="Permits" value={c!.permits} />
             <CostRow label="Other" value={lines.other} />
 
