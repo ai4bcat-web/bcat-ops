@@ -6,11 +6,12 @@
 
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Plus, CheckCircle, Circle, GripVertical, PaintBucket } from 'lucide-react'
-import { formatTime, formatDayHeader, addDays, formatDateTimeInput, fromDateTimeInput, needLabel } from '@/lib/date'
+import { formatTime, formatDayHeader, addDays, needLabel } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
+import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -79,52 +80,8 @@ function apptDate(iso: string | undefined | null): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-// ── Card-move date helpers ────────────────────────────────────────────────────
-
-// Shift an appointment to a new Chicago calendar day, preserving the original time-of-day.
-function shiftApptToDay(isoAppt: string | null | undefined, newDayStr: string): string {
-  const fallback = fromDateTimeInput(`${newDayStr}T08:00`)
-  if (!isoAppt) return fallback
-  const timeStr = formatDateTimeInput(isoAppt).slice(11) // "HH:mm" in Chicago time
-  return fromDateTimeInput(`${newDayStr}T${timeStr}`)
-}
-
-// Add/subtract days from a "YYYY-MM-DD" string, returns "YYYY-MM-DD".
-function offsetDay(dayStr: string, n: number): string {
-  const [y, m, d] = dayStr.split('-').map(Number)
-  const date = new Date(y, m - 1, d + n)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-// Compute the new pickupAppt + deliveryAppt for a card being moved to targetDayStr.
-// same-day: both shift to targetDay
-// pickup card: pickup = targetDay, delivery = targetDay+1 (next-day-delivery pattern)
-// delivery card: delivery = targetDay, pickup = targetDay-1
-function computeMoveDates(load: Load, role: Role, targetDayStr: string) {
-  if (role === 'same-day') {
-    return {
-      pickupAppt:   shiftApptToDay(load.pickupAppt,   targetDayStr),
-      deliveryAppt: shiftApptToDay(load.deliveryAppt, targetDayStr),
-    }
-  }
-  if (role === 'pickup') {
-    return {
-      pickupAppt:   shiftApptToDay(load.pickupAppt,   targetDayStr),
-      deliveryAppt: shiftApptToDay(load.deliveryAppt, offsetDay(targetDayStr, 1)),
-    }
-  }
-  // delivery card
-  return {
-    pickupAppt:   shiftApptToDay(load.pickupAppt,   offsetDay(targetDayStr, -1)),
-    deliveryAppt: shiftApptToDay(load.deliveryAppt, targetDayStr),
-  }
-}
-
-// Multi-stop: dragging a stop card shifts ONLY that stop's appt to the target day.
-// The store re-derives the legacy pickup*/delivery* mirrors from the new stops.
-function computeStopMove(load: Load, stop: Stop, targetDayStr: string): Partial<Load> {
-  return { stops: updateStop(load, stop.id, { appt: shiftApptToDay(stop.appt, targetDayStr) }) }
-}
+// Card-move date helpers (computeMoveDates / computeStopMove / shiftApptToDay)
+// live in '@/lib/calendarMoves' so the planner and grid schedule identically.
 
 // ── Full-detail load card ─────────────────────────────────────────────────────
 
