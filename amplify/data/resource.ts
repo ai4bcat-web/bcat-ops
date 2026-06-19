@@ -127,6 +127,55 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Amazon driver pay ──────────────────────────────────────────────────────
+  // Weekly (7-day) trip-based pay for Amazon drivers. AmazonTrip = one freight load
+  // line; DriverPaySetting = per-driver pay model (% + expense timing + fuel card +
+  // fixed weekly deductions); DriverPayDeduction = per-week one-off charges. Fuel is
+  // pulled live from FuelTransaction by the driver's fuel card. See src/lib/driverPay.ts.
+  AmazonTrip: a
+    .model({
+      driverId:      a.string().required(),
+      periodStart:   a.string().required(),  // YYYY-MM-DD — start of the 7-day pay week
+      loadId:        a.string(),
+      origin:        a.string(),
+      destination:   a.string(),
+      miles:         a.float(),
+      equipment:     a.string(),
+      freightAmount: a.float().required(),   // dollars (gross freight for this load)
+      ratePerMile:   a.float(),
+      dispatcher:    a.string(),
+      status:        a.string(),             // 'Completed' | 'Active' | 'Cancelled' | …
+      notes:         a.string(),
+    })
+    .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    .authorization((allow) => [allow.authenticated()]),
+
+  DriverPaySetting: a
+    .model({
+      driverId:              a.string().required(),
+      payGroup:              a.enum(['AMAZON', 'LOCAL']),
+      payPercent:            a.float().required(),   // 0..1 (e.g. 0.42, 0.88)
+      expensesBeforePercent: a.boolean().required(), // true = % applied AFTER expenses (Chad)
+      email:                 a.string(),             // where the weekly report is sent
+      fuelCardNumber:        a.string(),             // EFS card prefix → pulls weekly fuel
+      fixedExpenses:         a.json(),               // [{ label, amount }] applied every week
+      active:                a.boolean(),
+      notes:                 a.string(),
+    })
+    .secondaryIndexes((index) => [index('driverId')])
+    .authorization((allow) => [allow.authenticated()]),
+
+  DriverPayDeduction: a
+    .model({
+      driverId:    a.string().required(),
+      periodStart: a.string().required(),  // YYYY-MM-DD — the 7-day pay week
+      label:       a.string().required(),
+      amount:      a.float().required(),    // dollars deducted (positive)
+      date:        a.string(),              // YYYY-MM-DD when incurred (display only)
+    })
+    .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    .authorization((allow) => [allow.authenticated()]),
+
   MaintenanceTask: a
     .model({
       equipmentId: a.string().required(),

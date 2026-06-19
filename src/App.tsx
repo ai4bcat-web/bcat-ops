@@ -13,6 +13,7 @@ import { ExpensesPage } from '@/features/expenses/ExpensesPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
+import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/expenses" element={<ExpensesPage />} />
               <Route path="/finances" element={<FinancesPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
+              <Route path="/driver-pay" element={<DriverPayPage />} />
               <Route path="/audit-log" element={<AuditPage />} />
               <Route path="/intake"   element={<IntakePage />} />
               <Route path="/tasks"   element={<TasksPage />} />

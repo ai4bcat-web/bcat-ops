@@ -1235,3 +1235,149 @@ export async function deleteDriverPayPeriod(id: string): Promise<void> {
     variables: { input: { id } },
   })
 }
+
+// ── Amazon driver pay ────────────────────────────────────────────────────────
+
+export interface AmazonTrip {
+  id:            string
+  driverId:      string
+  periodStart:   string
+  loadId?:       string | null
+  origin?:       string | null
+  destination?:  string | null
+  miles?:        number | null
+  equipment?:    string | null
+  freightAmount: number
+  ratePerMile?:  number | null
+  dispatcher?:   string | null
+  status?:       string | null
+  notes?:        string | null
+  createdAt:     string
+  updatedAt:     string
+}
+
+const AMAZON_TRIP_FIELDS = `id driverId periodStart loadId origin destination miles equipment freightAmount ratePerMile dispatcher status notes createdAt updatedAt`
+
+export async function listAmazonTrips(): Promise<AmazonTrip[]> {
+  const result = await client.graphql({
+    query: `query ListAmazonTrips { listAmazonTrips(limit: 10000) { items { ${AMAZON_TRIP_FIELDS} } } }`,
+  }) as { data: { listAmazonTrips: { items: AmazonTrip[] } } }
+  return result.data.listAmazonTrips.items ?? []
+}
+
+export async function createAmazonTrip(input: Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>): Promise<AmazonTrip> {
+  const result = await client.graphql({
+    query: `mutation CreateAmazonTrip($input: CreateAmazonTripInput!) { createAmazonTrip(input: $input) { ${AMAZON_TRIP_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createAmazonTrip: AmazonTrip } }
+  return result.data.createAmazonTrip
+}
+
+export async function updateAmazonTrip(id: string, patch: Partial<Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>>): Promise<AmazonTrip> {
+  const result = await client.graphql({
+    query: `mutation UpdateAmazonTrip($input: UpdateAmazonTripInput!) { updateAmazonTrip(input: $input) { ${AMAZON_TRIP_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateAmazonTrip: AmazonTrip } }
+  return result.data.updateAmazonTrip
+}
+
+export async function deleteAmazonTrip(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteAmazonTrip($input: DeleteAmazonTripInput!) { deleteAmazonTrip(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+export interface FixedExpense { label: string; amount: number }
+
+export interface DriverPaySetting {
+  id:                    string
+  driverId:              string
+  payGroup?:             'AMAZON' | 'LOCAL' | null
+  payPercent:            number
+  expensesBeforePercent: boolean
+  email?:                string | null
+  fuelCardNumber?:       string | null
+  fixedExpenses?:        FixedExpense[] | null
+  active?:               boolean | null
+  notes?:                string | null
+  createdAt:             string
+  updatedAt:             string
+}
+
+const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fixedExpenses active notes createdAt updatedAt`
+
+function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown }): DriverPaySetting {
+  const v = unwrapJson(raw.fixedExpenses)
+  return { ...raw, fixedExpenses: Array.isArray(v) ? v as FixedExpense[] : [] }
+}
+
+export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
+  const result = await client.graphql({
+    query: `query ListDriverPaySettings { listDriverPaySettings(limit: 1000) { items { ${PAY_SETTING_FIELDS} } } }`,
+  }) as { data: { listDriverPaySettings: { items: DriverPaySetting[] } } }
+  return (result.data.listDriverPaySettings.items ?? []).map(normalizePaySetting)
+}
+
+function serializePaySetting<T extends { fixedExpenses?: unknown }>(input: T): T {
+  if (input.fixedExpenses == null) return input
+  return { ...input, fixedExpenses: JSON.stringify(input.fixedExpenses) }
+}
+
+export async function createDriverPaySetting(input: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt'>): Promise<DriverPaySetting> {
+  const result = await client.graphql({
+    query: `mutation CreateDriverPaySetting($input: CreateDriverPaySettingInput!) { createDriverPaySetting(input: $input) { ${PAY_SETTING_FIELDS} } }`,
+    variables: { input: serializePaySetting(input) },
+  }) as { data: { createDriverPaySetting: DriverPaySetting } }
+  return normalizePaySetting(result.data.createDriverPaySetting)
+}
+
+export async function updateDriverPaySetting(id: string, patch: Partial<Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt'>>): Promise<DriverPaySetting> {
+  const result = await client.graphql({
+    query: `mutation UpdateDriverPaySetting($input: UpdateDriverPaySettingInput!) { updateDriverPaySetting(input: $input) { ${PAY_SETTING_FIELDS} } }`,
+    variables: { input: serializePaySetting({ id, ...patch }) },
+  }) as { data: { updateDriverPaySetting: DriverPaySetting } }
+  return normalizePaySetting(result.data.updateDriverPaySetting)
+}
+
+export async function deleteDriverPaySetting(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteDriverPaySetting($input: DeleteDriverPaySettingInput!) { deleteDriverPaySetting(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+export interface DriverPayDeduction {
+  id:          string
+  driverId:    string
+  periodStart: string
+  label:       string
+  amount:      number
+  date?:       string | null
+  createdAt:   string
+  updatedAt:   string
+}
+
+const PAY_DEDUCTION_FIELDS = `id driverId periodStart label amount date createdAt updatedAt`
+
+export async function listDriverPayDeductions(): Promise<DriverPayDeduction[]> {
+  const result = await client.graphql({
+    query: `query ListDriverPayDeductions { listDriverPayDeductions(limit: 10000) { items { ${PAY_DEDUCTION_FIELDS} } } }`,
+  }) as { data: { listDriverPayDeductions: { items: DriverPayDeduction[] } } }
+  return result.data.listDriverPayDeductions.items ?? []
+}
+
+export async function createDriverPayDeduction(input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>): Promise<DriverPayDeduction> {
+  const result = await client.graphql({
+    query: `mutation CreateDriverPayDeduction($input: CreateDriverPayDeductionInput!) { createDriverPayDeduction(input: $input) { ${PAY_DEDUCTION_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createDriverPayDeduction: DriverPayDeduction } }
+  return result.data.createDriverPayDeduction
+}
+
+export async function deleteDriverPayDeduction(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteDriverPayDeduction($input: DeleteDriverPayDeductionInput!) { deleteDriverPayDeduction(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
