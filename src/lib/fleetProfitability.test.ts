@@ -136,6 +136,18 @@ describe('calcFleetProfitability', () => {
     expect(catSum).toBeCloseTo(r.rollup.insurance + r.rollup.loan + r.rollup.otherExpenses)
   })
 
+  it('attributes revenue via the delivery driver’s assigned truck when load.truckId is absent', () => {
+    // Loads carry deliveryDriverId, not truckId — revenue must still land on the truck.
+    const loads: LoadInput[] = [
+      { truckId: null, deliveryDriverId: 'drv-ivan', rate: 250_000, deliveryAppt: '2026-06-03' },
+      { truckId: null, deliveryDriverId: 'drv-none', rate: 999_999, deliveryAppt: '2026-06-03' }, // unassigned driver → dropped
+    ]
+    const assignments: DriverAssignmentInput[] = [{ driverId: 'drv-ivan', assignedTruckId: TRUCK_530 }]
+    const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], assignments)
+    expect(r.trucks.find((t) => t.truckId === TRUCK_530)!.revenue).toBe(2500)
+    expect(r.rollup.revenue).toBe(2500)
+  })
+
   it('returns null per-mile metrics when there are zero miles', () => {
     const loads: LoadInput[] = [{ truckId: TRUCK_530, rate: 100_000, deliveryAppt: '2026-06-03' }]
     const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], [])

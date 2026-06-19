@@ -109,7 +109,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
     return calcFleetProfitability(
       range,
       members,
-      loads.map((l) => ({ truckId: l.truckId, rate: l.rate, deliveryAppt: l.deliveryAppt })),
+      loads.map((l) => ({ truckId: l.truckId, deliveryDriverId: l.deliveryDriverId, rate: l.rate, deliveryAppt: l.deliveryAppt })),
       fuel.transactions.map((t) => ({ truckId: t.truckId, transactionDate: t.transactionDate, amount: t.amount, itemCategory: t.itemCategory ?? '' })),
       expenseRecords,
       exp.recurring.map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, monthlyAmount: r.monthlyAmount, startMonth: r.startMonth, endMonth: r.endMonth, active: r.active })),

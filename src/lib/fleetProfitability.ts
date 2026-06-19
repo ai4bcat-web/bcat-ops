@@ -52,9 +52,11 @@ export interface MemberTruck {
 }
 
 export interface LoadInput {
-  truckId?:      string | null
-  rate?:         number | null   // CENTS
-  deliveryAppt:  string          // ISO datetime or YYYY-MM-DD
+  truckId?:          string | null
+  /** Delivery-leg driver — revenue maps to this driver's assigned truck (loads delivered by each driver). */
+  deliveryDriverId?: string | null
+  rate?:             number | null   // CENTS
+  deliveryAppt:      string          // ISO datetime or YYYY-MM-DD
 }
 
 export interface DriverPayInput {
@@ -180,13 +182,23 @@ export function calcFleetProfitability(
     { prorateMonthly: true },
   )
 
-  // ── Revenue per truck: full rate → delivery day (dollars) ────────────────────
+  // ── Driver → assigned truck map (used for BOTH revenue attribution and pay) ───
+  const truckForDriver = new Map<string, string>()
+  for (const a of driverAssignments) {
+    if (a.assignedTruckId) truckForDriver.set(a.driverId, a.assignedTruckId)
+  }
+
+  // ── Revenue per truck: full rate → delivery day (dollars), attributed to the
+  //    truck of the load's DELIVERY driver (Driver.assignedTruckId), falling back to
+  //    an explicit load.truckId. This is why a truck's revenue follows the driver who
+  //    delivered the load, even though loads carry deliveryDriverId, not truckId. ───
   const revenueByTruck: Record<string, number> = {}
   for (const load of loads) {
-    if (!load.truckId || !memberIds.has(load.truckId)) continue
+    const truckId = load.truckId ?? (load.deliveryDriverId ? truckForDriver.get(load.deliveryDriverId) : undefined)
+    if (!truckId || !memberIds.has(truckId)) continue
     const d = deliveryDate(load)
     if (d < range.start || d > range.end) continue
-    revenueByTruck[load.truckId] = (revenueByTruck[load.truckId] ?? 0) + (load.rate ?? 0) / 100
+    revenueByTruck[truckId] = (revenueByTruck[truckId] ?? 0) + (load.rate ?? 0) / 100
   }
 
   // ── Miles per truck: sum DAY rows in range ───────────────────────────────────
@@ -199,10 +211,6 @@ export function calcFleetProfitability(
   }
 
   // ── Driver cost per truck: prorate biweekly pay, map via assignedTruckId ──────
-  const truckForDriver = new Map<string, string>()
-  for (const a of driverAssignments) {
-    if (a.assignedTruckId) truckForDriver.set(a.driverId, a.assignedTruckId)
-  }
   const driverCostByTruck: Record<string, number> = {}
   for (const pay of driverPay) {
     const truckId = truckForDriver.get(pay.driverId)
