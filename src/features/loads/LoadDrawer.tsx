@@ -62,6 +62,16 @@ function emptyStopForms(preDate?: string, driverId?: string | null): StopFormVal
   ]
 }
 
+// "Split" = the delivery is run by a different driver than the pickup. A load is
+// split when any delivery stop has a driver assigned that differs from the first
+// pickup's driver. New / single-driver loads are not split.
+function deriveSplitFromStops(stops: StopFormValue[]): boolean {
+  const pickupDriver = stops.find((s) => s.type === 'pickup')?.driverId ?? null
+  return stops.some(
+    (s) => s.type === 'delivery' && (s.driverId ?? null) !== null && (s.driverId ?? null) !== pickupDriver,
+  )
+}
+
 // Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
 function stopFormToStop(s: StopFormValue, sequence: number): Stop {
   // FCFS is always date-only; NEED (tbd) is date-only unless the form value includes a time.
@@ -311,11 +321,13 @@ function DriverPicker({
   onChange,
   drivers,
   placeholder = 'Unassigned',
+  disabled = false,
 }: {
   value: string | null
   onChange: (v: string | null) => void
   drivers: Array<{ id: string; name: string }>
   placeholder?: string
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -334,19 +346,22 @@ function DriverPicker({
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        onClick={() => { if (!disabled) setOpen((o) => !o) }}
         style={{
           width: '100%', height: 36, display: 'flex', alignItems: 'center',
           justifyContent: 'space-between', padding: '0 10px',
           border: '1px solid var(--ds-border)', borderRadius: 6,
-          background: 'var(--ds-surface)', cursor: 'pointer',
+          background: disabled ? 'var(--ds-bg)' : 'var(--ds-surface)',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.7 : 1,
           fontSize: 14, color: selected ? 'var(--ds-t1)' : 'var(--ds-t3)',
         }}
       >
         <span>{selected?.name ?? placeholder}</span>
         <ChevronDown style={{ width: 14, height: 14, opacity: 0.5 }} />
       </button>
-      {open && (
+      {open && !disabled && (
         <div style={{
           position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 60,
           background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
@@ -390,6 +405,7 @@ function DriverPicker({
 
 function StopCard({
   index, control, register, errors, drivers, onRemove, canRemove, onCityBlur,
+  stopType, split, onPickupDriverChange,
 }: {
   index: number
   control: Control<LoadFormValues>
@@ -399,6 +415,10 @@ function StopCard({
   onRemove: () => void
   canRemove: boolean
   onCityBlur: () => void
+  stopType: 'pickup' | 'delivery'
+  split: boolean
+  // Called after a pickup stop's driver changes so deliveries can mirror it (non-split).
+  onPickupDriverChange: (value: string | null) => void
 }) {
   const stopErr = errors.stops?.[index]
   return (
@@ -455,14 +475,25 @@ function StopCard({
         )}
       />
 
-      {/* Driver */}
+      {/* Driver — non-split deliveries mirror the pickup driver (read-only). */}
       <div style={{ marginTop: 12 }}>
-        <Field label="Driver">
+        <Field
+          label="Driver"
+          hint={!split && stopType === 'delivery' ? 'Same as pickup — enable Split to assign separately' : undefined}
+        >
           <Controller
             name={`stops.${index}.driverId`}
             control={control}
             render={({ field }) => (
-              <DriverPicker value={field.value} onChange={field.onChange} drivers={drivers} />
+              <DriverPicker
+                value={field.value}
+                onChange={(v) => {
+                  field.onChange(v)
+                  if (!split && stopType === 'pickup') onPickupDriverChange(v)
+                }}
+                drivers={drivers}
+                disabled={!split && stopType === 'delivery'}
+              />
             )}
           />
         </Field>
@@ -506,6 +537,39 @@ function NewLoadDialog({
 
   const { fields: stopFields, append, remove } = useFieldArray({ control, name: 'stops' })
 
+  // Split = pickup & delivery run by different drivers. When off, the delivery
+  // driver mirrors the pickup driver (assigning a pickup driver defaults the
+  // delivery to the same). Turning split on clears deliveries so they default
+  // back to "Unassigned" for separate assignment.
+  const [split, setSplit] = useState(false)
+
+  // Initialise the split toggle from the loaded form values whenever the dialog opens.
+  useEffect(() => {
+    if (!isOpen) return
+    setSplit(deriveSplitFromStops(watch('stops') ?? []))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+
+  // Mirror a chosen pickup driver onto every delivery stop (non-split loads).
+  const syncDeliveriesToDriver = (value: string | null) => {
+    const stops = watch('stops') ?? []
+    stops.forEach((s, j) => {
+      if (s.type === 'delivery') setValue(`stops.${j}.driverId`, value, { shouldDirty: true })
+    })
+  }
+
+  const handleSplitToggle = (next: boolean) => {
+    setSplit(next)
+    if (next) {
+      // Choosing split → deliveries default to "Assign driver" (Unassigned).
+      syncDeliveriesToDriver(null)
+    } else {
+      // Back to single driver → deliveries mirror the first pickup's driver.
+      const stops = watch('stops') ?? []
+      syncDeliveriesToDriver(stops.find((s) => s.type === 'pickup')?.driverId ?? null)
+    }
+  }
+
   // Miles = driving distance from the first pickup's city to the last delivery's city.
   async function calcMiles() {
     const stops = watch('stops') ?? []
@@ -524,8 +588,13 @@ function NewLoadDialog({
   }
 
   const addStop = (type: 'pickup' | 'delivery') => {
+    const stops = watch('stops') ?? []
     const prevDriver = stopFields.length > 0 ? watch(`stops.${stopFields.length - 1}.driverId`) : null
-    append(stopToForm(makeStop({ type, driverId: prevDriver ?? null }, stopFields.length)))
+    // Non-split deliveries mirror the pickup driver; everything else carries the previous stop's driver.
+    const driverId = type === 'delivery' && !split
+      ? (stops.find((s) => s.type === 'pickup')?.driverId ?? null)
+      : (prevDriver ?? null)
+    append(stopToForm(makeStop({ type, driverId }, stopFields.length)))
   }
 
   return (
@@ -573,6 +642,22 @@ function NewLoadDialog({
             <div style={{ marginBottom: 24 }}>
               <SectionHeading>Stops</SectionHeading>
 
+              {/* Split assignment toggle — when off, the delivery driver mirrors the pickup driver. */}
+              <label
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
+                  fontSize: 12.5, color: 'var(--ds-t2)', cursor: 'pointer', userSelect: 'none',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={split}
+                  onChange={(e) => handleSplitToggle(e.target.checked)}
+                  style={{ width: 15, height: 15, cursor: 'pointer' }}
+                />
+                Split assignment — different driver for delivery
+              </label>
+
               {stopFields.map((f, i) => (
                 <StopCard
                   key={f.id}
@@ -584,6 +669,9 @@ function NewLoadDialog({
                   canRemove={stopFields.length > 2}
                   onRemove={() => remove(i)}
                   onCityBlur={calcMiles}
+                  stopType={(watch(`stops.${i}.type`) ?? 'pickup') as 'pickup' | 'delivery'}
+                  split={split}
+                  onPickupDriverChange={syncDeliveriesToDriver}
                 />
               ))}
 
