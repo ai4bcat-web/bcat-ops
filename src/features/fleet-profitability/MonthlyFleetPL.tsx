@@ -1,6 +1,9 @@
-import { useState } from 'react'
-import { ChevronLeft, ChevronRight, RotateCw, Scale } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
+import { useTrucks } from '@/hooks/useTrucks'
+import { useAppStore } from '@/store/useAppStore'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import { monthRange, monthLabel } from './monthRange'
@@ -19,12 +22,14 @@ function netColor(n: number): string {
   return n > 0 ? '#15803d' : n < 0 ? '#dc2626' : 'var(--ds-t2)'
 }
 
-/** One "− $X" cost line in the P&L; muted "(none)" when nothing is allocated. */
-function CostRow({ label, value }: { label: string; value: number }) {
+/** A computed "− $X" cost line; muted "(none)" when zero. */
+function CostRow({ label, value, hint }: { label: string; value: number; hint?: string }) {
   const empty = value === 0
   return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--ds-border-soft, var(--ds-border))' }}>
-      <span style={{ fontSize: 13, color: 'var(--ds-t2)', paddingLeft: 14 }}>{label}</span>
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--ds-border)' }}>
+      <span style={{ fontSize: 13, color: 'var(--ds-t2)', paddingLeft: 14 }}>
+        {label}{hint && <span style={{ fontSize: 11, color: 'var(--ds-t3)', marginLeft: 6 }}>{hint}</span>}
+      </span>
       <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: empty ? 'var(--ds-muted-soft)' : 'var(--ds-t1)' }}>
         {empty ? '(none)' : `− ${money(value)}`}
       </span>
@@ -32,10 +37,49 @@ function CostRow({ label, value }: { label: string; value: number }) {
   )
 }
 
+/** An editable "− $[input]" cost line — edits the fixed monthly amount in place. */
+function EditableCostRow({ label, amount, onCommit }: { label: string; amount: number; onCommit: (n: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const value = draft ?? (amount ? String(amount) : '')
+  const commit = () => {
+    if (draft == null) return
+    const n = Math.max(0, parseFloat(draft) || 0)
+    setDraft(null)
+    if (n !== amount) onCommit(n)
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 0', borderTop: '1px solid var(--ds-border)' }}>
+      <span style={{ fontSize: 13, color: 'var(--ds-t2)', paddingLeft: 14, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        {label}<Pencil size={10} style={{ color: 'var(--ds-muted-soft)' }} />
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--ds-t1)' }}>
+        −
+        <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+          <span style={{ position: 'absolute', left: 8, color: 'var(--ds-t3)', fontSize: 12.5, pointerEvents: 'none' }}>$</span>
+          <input
+            type="number" min="0" step="1" inputMode="decimal"
+            value={value}
+            placeholder="0"
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+            aria-label={`${label} monthly amount`}
+            style={{ width: 96, height: 28, padding: '0 8px 0 18px', textAlign: 'right', borderRadius: 7,
+              border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)',
+              fontSize: 13, fontVariantNumeric: 'tabular-nums', fontFamily: 'inherit', outline: 'none' }}
+          />
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>/mo</span>
+      </span>
+    </div>
+  )
+}
+
 /**
- * Monthly fleet Profit & Loss — Revenue minus fuel, driver pay and every allocated
- * expense category, for one fleet group (defaults to Local / Ivan). Reuses the shared
- * profitability engine over a calendar-month range.
+ * Monthly fleet Profit & Loss — Revenue minus every cost category, for one fleet group
+ * (defaults to Local / Ivan). Loan-Trailers, Trailer-Lease and Yard-Rent are fixed
+ * monthly amounts editable in place; Loan-Trucks comes from each truck's own loan;
+ * Maintenance is logged invoices for Ivan trucks + all trailers. Net includes them all.
  */
 export function MonthlyFleetPL() {
   const [monthOffset, setMonthOffset] = useState(0)
@@ -43,10 +87,43 @@ export function MonthlyFleetPL() {
 
   const range = monthRange(monthOffset)
   const { data, members, loading, refresh } = useFleetProfitability(range, group)
+  const { monthlyAmounts, contributionInRange, setMonthlyAmount } = useFleetFixedCosts()
+  const { equipment } = useTrucks()
+  const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
   const r = data?.rollup
   const c = r?.categories
 
-  const margin = r && r.revenue > 0 ? (r.net / r.revenue) * 100 : null
+  const isLocal = group === 'LOCAL'
+
+  // All-trailer maintenance in range (cents → dollars). Ivan-truck maintenance is already
+  // in c.maintenance via the engine; trailers aren't members so we add them here.
+  const trailerMaintenance = useMemo(() => {
+    const trailerIds = new Set(equipment.filter((e) => e.type === 'trailer').map((e) => e.id))
+    return maintenanceInvoices
+      .filter((inv) => inv.date && inv.date >= range.start && inv.date <= range.end && trailerIds.has(inv.equipmentId))
+      .reduce((s, inv) => s + (inv.amount ?? 0), 0) / 100
+  }, [equipment, maintenanceInvoices, range.start, range.end])
+
+  const contrib = useMemo(() => contributionInRange(range), [contributionInRange, range])
+
+  const handleEdit = (key: FleetFixedCostKey) => (n: number) => { void setMonthlyAmount(key, n) }
+
+  // Derived P&L lines (only the LOCAL fleet has fixed-cost + trailer detail wired).
+  const lines = useMemo(() => {
+    if (!r || !c) return null
+    const loanTrailers = contrib.loanTrailers
+    const trailerLease = contrib.trailerLease
+    const yardRent = contrib.yardRent
+    const tolls = contrib.tolls
+    const loanTrucks = Math.max(0, c.financing - loanTrailers)
+    const maintenance = c.maintenance + trailerMaintenance
+    const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent) + Math.max(0, c.tolls - tolls)
+    const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + maintenance + c.insurance + tolls + c.permits + other
+    const net = r.revenue - totalExpenses
+    return { loanTrucks, loanTrailers, trailerLease, yardRent, tolls, maintenance, other, totalExpenses, net }
+  }, [r, c, contrib, trailerMaintenance])
+
+  const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -61,7 +138,6 @@ export function MonthlyFleetPL() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          {/* Fleet group toggle */}
           <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
             {FLEET_GROUPS.map((g) => {
               const active = g === group
@@ -78,7 +154,6 @@ export function MonthlyFleetPL() {
             })}
           </div>
 
-          {/* Month navigation */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => setMonthOffset((o) => o + 1)} style={navBtn} aria-label="Previous month"><ChevronLeft size={15} /></button>
             <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 120, textAlign: 'center' }}>
@@ -96,10 +171,10 @@ export function MonthlyFleetPL() {
       <div style={{ padding: '16px 20px' }}>
         {loading && !r ? (
           <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
-        ) : !r ? (
+        ) : !r || !lines ? (
           <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No data for this fleet.</div>
         ) : (
-          <>
+          <div style={{ maxWidth: 520 }}>
             {/* Revenue */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 12px' }}>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue</span>
@@ -109,27 +184,33 @@ export function MonthlyFleetPL() {
             {/* Costs */}
             <CostRow label="Fuel" value={r.fuel} />
             <CostRow label="Driver pay" value={r.driverCost} />
-            <CostRow label="Maintenance" value={c!.maintenance} />
+            <CostRow label="Loan — trucks" value={lines.loanTrucks} hint="from each truck" />
+            {isLocal && monthOffset === 0 ? <EditableCostRow label="Loan — trailers" amount={monthlyAmounts.loanTrailers} onCommit={handleEdit('loanTrailers')} /> : <CostRow label="Loan — trailers" value={lines.loanTrailers} />}
+            {isLocal && monthOffset === 0 ? <EditableCostRow label="Trailer lease" amount={monthlyAmounts.trailerLease} onCommit={handleEdit('trailerLease')} /> : <CostRow label="Trailer lease" value={lines.trailerLease} />}
+            {isLocal && monthOffset === 0 ? <EditableCostRow label="Yard rent" amount={monthlyAmounts.yardRent} onCommit={handleEdit('yardRent')} /> : <CostRow label="Yard rent" value={lines.yardRent} />}
+            <CostRow label="Maintenance" value={lines.maintenance} hint="trucks + all trailers" />
             <CostRow label="Insurance" value={c!.insurance} />
-            <CostRow label="Loans — truck & trailer" value={c!.financing} />
-            <CostRow label="Rent / lease — yard & trailer" value={c!.lease} />
-            <CostRow label="Tolls" value={c!.tolls} />
+            {isLocal && monthOffset === 0 ? <EditableCostRow label="Tolls" amount={monthlyAmounts.tolls} onCommit={handleEdit('tolls')} /> : <CostRow label="Tolls" value={lines.tolls} />}
             <CostRow label="Permits" value={c!.permits} />
-            <CostRow label="Other" value={c!.other} />
+            <CostRow label="Other" value={lines.other} />
 
-            {/* Net */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12, paddingTop: 14, borderTop: '2px solid var(--ds-border)' }}>
+            {/* Total + Net */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
+              <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(lines.totalExpenses)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
               <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
-                Net Profit
-                {margin != null && <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{margin.toFixed(1)}% margin</span>}
+                Net profit
+                {margin != null && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{margin.toFixed(0)}% margin</span>}
               </span>
-              <span style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(r.net) }}>{money(r.net)}</span>
+              <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(lines.net) }}>{money(lines.net)}</span>
             </div>
 
             <div style={{ marginTop: 14, fontSize: 11.5, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
-              Maintenance includes logged repair invoices. Trailer, yard-rent and toll costs appear here once allocated to the fleet in Expenses → Manage.
+              Loan-trailers, trailer-lease and yard-rent are fixed monthly amounts — edit them above. Loan-trucks pulls from each truck's loan (Fleet → Operating Costs); maintenance is logged invoices for Ivan trucks + all trailers.
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

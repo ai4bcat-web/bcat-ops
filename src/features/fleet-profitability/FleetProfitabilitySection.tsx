@@ -7,6 +7,7 @@ import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import type { TruckProfitability, DateRange } from '@/lib/fleetProfitability'
 import { weekRange, weekLabel } from './weekRange'
+import { biweeklyPeriodOf } from '@/lib/payPeriods'
 import { DriverPayForm } from './DriverPayForm'
 
 function money(n: number): string {
@@ -41,6 +42,9 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
   const [showPayForm, setShowPayForm] = useState(false)
 
   const range = externalRange ?? weekRange(weekOffset)
+  // Driver pay is entered per 14-day pay period (anchored to 6/8–6/21), independent of
+  // the viewed profitability week — so the entry form defaults to the current period.
+  const payPeriod = biweeklyPeriodOf()
   const { data, loading, refresh: refreshProfitability } = useFleetProfitability(range, group)
   const { payPeriods, createPay, deletePay, refresh: refreshPay } = useDriverPay()
   const { drivers } = useDrivers()
@@ -228,8 +232,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
         <DriverPayForm
           onSave={handleSavePay}
           onClose={() => setShowPayForm(false)}
-          defaultStart={range.start}
-          defaultEnd={range.end}
+          defaultStart={payPeriod.start}
+          defaultEnd={payPeriod.end}
         />
       )}
     </div>
