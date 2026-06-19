@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Plus, TrendingUp, AlertCircle, Trash2 } from
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useDriverPay } from '@/hooks/useDriverPay'
 import { useDrivers } from '@/hooks/useDrivers'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { FLEET_GROUPS, FLEET_GROUP_LABELS, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import type { TruckProfitability, DateRange } from '@/lib/fleetProfitability'
 import { weekRange, weekLabel } from './weekRange'
@@ -68,7 +68,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
     refreshProfitability()
   }
 
-  const driverName = (id: string) => drivers.find((d) => d.id === id)?.name ?? id
+  const driverName = (id: string) =>
+    isCombinedPayDriverId(id) ? `All ${FLEET_GROUP_LABELS[group]} drivers (combined)` : (drivers.find((d) => d.id === id)?.name ?? id)
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -238,6 +239,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           onClose={() => setShowPayForm(false)}
           defaultStart={payPeriod.start}
           defaultEnd={payPeriod.end}
+          fleetGroup={group}
         />
       )}
     </div>

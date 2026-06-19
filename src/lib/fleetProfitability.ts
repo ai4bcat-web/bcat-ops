@@ -64,6 +64,8 @@ export interface DriverPayInput {
   periodStart: string  // YYYY-MM-DD inclusive
   periodEnd:   string  // YYYY-MM-DD inclusive
   grossPay:    number  // dollars
+  /** A single combined entry for the whole fleet — added to fleet driver cost, not a truck. */
+  combined?:   boolean
 }
 
 /** Maps a driver to the truck they were assigned to (Driver.assignedTruckId). */
@@ -257,13 +259,18 @@ export function calcFleetProfitability(
     countedDay.add(`${canonical}|${row.periodStart}`)
   }
 
-  // ── Driver cost per truck: prorate biweekly pay, map via assignedTruckId ──────
+  // ── Driver cost: prorate biweekly pay. Per-driver entries map to a truck via
+  //    assignedTruckId; a `combined` entry is a fleet-wide lump added straight to the
+  //    fleet driver cost (no per-truck attribution). ──────────────────────────────────
   const driverCostByTruck: Record<string, number> = {}
+  let combinedDriverCost = 0
   for (const pay of driverPay) {
+    const amount = proratedPayInRange(pay, range)
+    if (amount <= 0) continue
+    if (pay.combined) { combinedDriverCost += amount; continue }
     const truckId = truckForDriver.get(pay.driverId)
     if (!truckId || !memberIds.has(truckId)) continue
-    const amount = proratedPayInRange(pay, range)
-    if (amount > 0) driverCostByTruck[truckId] = (driverCostByTruck[truckId] ?? 0) + amount
+    driverCostByTruck[truckId] = (driverCostByTruck[truckId] ?? 0) + amount
   }
 
   // ── Assemble per-truck rows ──────────────────────────────────────────────────
@@ -305,7 +312,7 @@ export function calcFleetProfitability(
   const insurance = sum((t) => t.insurance)
   const loan = sum((t) => t.loan)
   const otherExpenses = sum((t) => t.otherExpenses)
-  const driverCost = sum((t) => t.driverCost)
+  const driverCost = sum((t) => t.driverCost) + combinedDriverCost
 
   // Non-fuel expenses split by category across member trucks (sums to otherExpenses).
   const categories: ExpenseCategoryBreakdown = { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 }

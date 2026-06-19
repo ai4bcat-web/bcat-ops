@@ -7,7 +7,7 @@ import { useExpenseData } from './useExpenseData'
 import { useTruckMileage } from './useTruckMileage'
 import { useDriverPay } from './useDriverPay'
 import { driverForTruck } from '@/lib/assignments'
-import { ORPHAN_UNITS_BY_GROUP, orphanTruckId } from '@/lib/fleetGroups'
+import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import { calcFleetProfitability } from '@/lib/fleetProfitability'
 import type { DateRange, MemberTruck, FleetProfitabilityResult } from '@/lib/fleetProfitability'
 import type { ExpenseRecordInput, ExpenseTypeRecord } from '@/lib/expenseAllocation'
@@ -116,7 +116,10 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       exp.allocations.map((a) => ({ id: a.id, expenseTypeId: a.expenseTypeId, allocationMethod: a.allocationMethod, truckIds: a.truckIds ?? [] })),
       expenseTypes,
       mileage.rows.map((m) => ({ truckId: m.truckId, periodStart: m.periodStart, periodType: m.periodType, miles: m.miles })),
-      pay.payPeriods.map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay })),
+      // Per-driver pay + this group's single "combined" entry; other groups' combined entries are excluded.
+      pay.payPeriods
+        .filter((p) => !isCombinedPayDriverId(p.driverId) || p.driverId === combinedPayDriverId(group))
+        .map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay, combined: p.driverId === combinedPayDriverId(group) })),
       drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker' })),
     )
   }, [range, members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices])
