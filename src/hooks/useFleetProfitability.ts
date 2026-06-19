@@ -62,9 +62,16 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       }))
 
     // 2. Orphan Motive-only members (no Equipment record / no fuel card yet).
-    const known = new Set(equipMembers.map((m) => m.unitNumber))
+    //    A unit with ANY truck Equipment record is governed by Equipment.fleetGroup
+    //    (the source of truth) — never bridge it via the orphan list, not even into a
+    //    different group. So exclude every unit that already has an Equipment record,
+    //    not just members of the current group (else a unit reassigned to another
+    //    fleet would still be force-added here).
+    const equipTruckUnits = new Set(
+      equipment.filter((e) => e.type === 'truck').map((e) => e.unitNumber),
+    )
     const orphanMembers: MemberTruck[] = (ORPHAN_UNITS_BY_GROUP[group] ?? [])
-      .filter((unit) => !known.has(unit))
+      .filter((unit) => !equipTruckUnits.has(unit))
       .map((unit) => {
         const truckId = orphanTruckId(unit)
         return {
