@@ -225,13 +225,36 @@ export function calcFleetProfitability(
     }
   }
 
-  // ── Miles per truck: sum DAY rows in range ───────────────────────────────────
+  // ── Miles per truck: sum DAY rows in range. A truck that graduated from a Motive
+  //    orphan (`motive:<unit>`) to an Equipment record still has historical mileage
+  //    keyed by the orphan id, so accept BOTH the member's truckId and
+  //    `motive:<unitNumber>` — preferring the canonical (Equipment) row per day so
+  //    overlapping days during the transition aren't double-counted. ────────────────
+  const canonicalForKey = new Map<string, string>()  // any accepted mileage key → member.truckId
+  for (const m of members) {
+    canonicalForKey.set(m.truckId, m.truckId)
+    canonicalForKey.set(`motive:${m.unitNumber}`, m.truckId)
+  }
+  const inMilesRange = (row: TruckMileageDayInput) =>
+    row.periodType === 'DAY' && row.periodStart >= range.start && row.periodStart <= range.end
   const milesByTruck: Record<string, number> = {}
+  const countedDay = new Set<string>()  // `${canonicalTruckId}|${periodStart}` already counted
+  // Pass 1 — canonical (Equipment / member-id) rows take precedence.
   for (const row of mileageDayRows) {
-    if (row.periodType !== 'DAY') continue
-    if (!memberIds.has(row.truckId)) continue
-    if (row.periodStart < range.start || row.periodStart > range.end) continue
-    milesByTruck[row.truckId] = (milesByTruck[row.truckId] ?? 0) + row.miles
+    if (!inMilesRange(row)) continue
+    const canonical = canonicalForKey.get(row.truckId)
+    if (!canonical || canonical !== row.truckId) continue
+    milesByTruck[canonical] = (milesByTruck[canonical] ?? 0) + row.miles
+    countedDay.add(`${canonical}|${row.periodStart}`)
+  }
+  // Pass 2 — orphan-keyed (`motive:<unit>`) rows fill days the canonical didn't cover.
+  for (const row of mileageDayRows) {
+    if (!inMilesRange(row)) continue
+    const canonical = canonicalForKey.get(row.truckId)
+    if (!canonical || canonical === row.truckId) continue
+    if (countedDay.has(`${canonical}|${row.periodStart}`)) continue
+    milesByTruck[canonical] = (milesByTruck[canonical] ?? 0) + row.miles
+    countedDay.add(`${canonical}|${row.periodStart}`)
   }
 
   // ── Driver cost per truck: prorate biweekly pay, map via assignedTruckId ──────
