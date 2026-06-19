@@ -1,0 +1,44 @@
+import { describe, it, expect } from 'vitest'
+import { parseRows } from './tripCsv'
+
+// Real Amazon Relay "Trips" export header + rows (truncated after Currency), incl. the
+// leading UTF-8 BOM. Locks the column mapping to the actual export format.
+const HEADER = '﻿Block ID,Trip ID,Block/Trip,Trip Stage,Load ID,Facility Sequence,Load Execution Status,Transit Operator Type,Driver Name,Equipment Type,Trailer ID,Tractor Vehicle ID,Estimate Distance,Unit,Rate Type,Estimated Cost,Currency'
+const ROW_CHAD = ",111Y19HML,Trip,Completed,111Y19HML,GYR3->FTW6,Completed,Single Driver,Chad Salerno,53' Trailer,HV2501487,P1343771,1068.61,mi,PER_LOAD,5248.52,USD"
+const ROW_MIKE = ",T-1121TPV6X,Trip,Completed,112Y7ZWKD,TUS2->GEU3,Completed,Single Driver,Michael Bodle,53' Trailer,,ALC324929,150.35,mi,PER_LOAD,97.81,USD"
+
+describe('parseRows — real Amazon Relay export', () => {
+  it('maps the Amazon columns correctly', () => {
+    const rows = parseRows([HEADER, ROW_CHAD, ROW_MIKE].join('\n'))
+    expect(rows).toHaveLength(2)
+
+    const chad = rows[0]
+    expect(chad.driverName).toBe('Chad Salerno')      // routes the master CSV
+    expect(chad.loadId).toBe('111Y19HML')
+    expect(chad.freightAmount).toBe(5248.52)           // ← Estimated Cost
+    expect(chad.miles).toBe(1068.61)                   // ← Estimate Distance
+    expect(chad.equipment).toBe("53' Trailer")
+    expect(chad.origin).toBe('GYR3')                   // ← Facility Sequence split
+    expect(chad.destination).toBe('FTW6')
+    expect(chad.status).toBe('Completed')
+    expect(chad.ratePerMile).toBeCloseTo(5248.52 / 1068.61, 2)  // derived
+
+    expect(rows[1].driverName).toBe('Michael Bodle')
+    expect(rows[1].freightAmount).toBe(97.81)
+    expect(rows[1].origin).toBe('TUS2')
+    expect(rows[1].destination).toBe('GEU3')
+  })
+
+  it('still parses a simple positional paste (no header)', () => {
+    const rows = parseRows("112CRP7T7\tUPRR->ELP1\t\t40.73\t53' Container\t$300.00\t\tLee Lara\tCompleted")
+    expect(rows).toHaveLength(1)
+    expect(rows[0].loadId).toBe('112CRP7T7')
+    expect(rows[0].freightAmount).toBe(300)
+    expect(rows[0].driverName).toBe('Lee Lara')        // dispatcher column when no Driver col
+  })
+
+  it('skips rows with no numeric cost', () => {
+    const rows = parseRows([HEADER, ',,,,,,,,Nobody,,,,,,,,'].join('\n'))
+    expect(rows).toHaveLength(0)
+  })
+})

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
+import { parseRows, type RawTripRow } from '@/lib/tripCsv'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
@@ -93,46 +94,7 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
   )
 }
 
-// ── CSV / paste parsing ─────────────────────────────────────────────────────
-export interface RawTripRow {
-  loadId: string | null; origin: string | null; destination: string | null
-  miles: number | null; equipment: string | null; freightAmount: number
-  ratePerMile: number | null; dispatcher: string | null; status: string | null
-  driverName: string   // the driver/dispatcher column value — used to route master CSVs
-}
-
-/** Parse pasted/CSV text into raw trip rows. Auto-detects a header row; otherwise uses
- *  positional order: Load ID, Origin, Destination, Miles, Equipment, Freight, Rate/mi,
- *  Dispatcher, Status. Rows without a numeric freight value are skipped. */
-export function parseRows(text: string): RawTripRow[] {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-  if (!lines.length) return []
-  const split = (l: string) => (l.includes('\t') ? l.split('\t') : l.split(','))
-  let header: string[] | null = null
-  if (/freight|load\s*id|origin|driver|dispatch/i.test(lines[0]) && !/^\d|^\$|^-?\d/.test(lines[0])) {
-    header = split(lines.shift()!).map((h) => h.trim().toLowerCase())
-  }
-  const findIdx = (...names: string[]) => header ? header.findIndex((h) => names.some((n) => h.includes(n))) : -1
-  const cols = header
-    ? { loadId: findIdx('load'), origin: findIdx('origin'), dest: findIdx('destination', 'dest'), miles: findIdx('mile'), equip: findIdx('equip'), freight: findIdx('freight', 'amount'), rpm: findIdx('rate'), disp: findIdx('dispatch'), driver: findIdx('driver'), status: findIdx('status') }
-    : { loadId: 0, origin: 1, dest: 2, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, driver: -1, status: 8 }
-  const at = (c: string[], i: number) => (i >= 0 && i < c.length ? c[i].trim() : '')
-  const out: RawTripRow[] = []
-  for (const line of lines) {
-    const c = split(line)
-    const freight = num(at(c, cols.freight))
-    if (freight == null) continue
-    const dispatcher = at(c, cols.disp) || null
-    out.push({
-      loadId: at(c, cols.loadId) || null, origin: at(c, cols.origin) || null, destination: at(c, cols.dest) || null,
-      miles: num(at(c, cols.miles)), equipment: at(c, cols.equip) || null, freightAmount: freight,
-      ratePerMile: num(at(c, cols.rpm)), dispatcher, status: at(c, cols.status) || null,
-      driverName: (at(c, cols.driver) || dispatcher || '').trim(),
-    })
-  }
-  return out
-}
-
+// ── CSV / paste parsing (shared, tested in src/lib/tripCsv.test.ts) ──────────
 export function rowToTrip(r: RawTripRow, driverId: string, periodStart: string): TripInput {
   return {
     driverId, periodStart,
@@ -232,7 +194,8 @@ export function MasterImportModal({ periodStart, drivers, onImport, onClose }: {
     <Modal title="Upload master CSV" sub="One file with every driver's trips — routed to each driver for this week" onClose={onClose} width={680}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
         <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
-          Include a <b>Driver</b> (or <b>Dispatcher</b>) column. Each row is matched to a driver below.
+          Upload the raw <b>Amazon Relay “Trips” CSV</b> (columns auto-detected: Driver Name,
+          Estimated Cost, Estimate Distance, Facility Sequence, Equipment…). Each driver is matched below.
         </div>
         <FilePick onText={setText} />
       </div>
