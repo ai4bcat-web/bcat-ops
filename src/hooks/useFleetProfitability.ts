@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useCallback } from 'react'
 import { useLoads } from './useLoads'
 import { useDrivers } from './useDrivers'
 import { useTrucks } from './useTrucks'
@@ -23,6 +23,8 @@ export interface FleetProfitabilityHookResult {
   loading: boolean
   error:   string | null
   refresh: () => void
+  /** Compute the result for any range from the same assembled data (for trend charts). */
+  computeForRange: (range: DateRange) => FleetProfitabilityResult
 }
 
 /**
@@ -86,9 +88,11 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
     return [...equipMembers, ...orphanMembers].sort((a, b) => a.unitNumber.localeCompare(b.unitNumber))
   }, [equipment, drivers, group])
 
-  const data = useMemo<FleetProfitabilityResult | null>(() => {
+  /** Compute the result for ANY range from the already-assembled fleet data (reused to
+   *  draw a week-over-week trend without re-fetching). */
+  const computeForRange = useCallback((cfrRange: DateRange): FleetProfitabilityResult => {
     if (members.length === 0) {
-      return { range, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } }, revenueLeakage: { broker: 0, unattributed: 0 } }
+      return { range: cfrRange, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } }, revenueLeakage: { broker: 0, unattributed: 0 } }
     }
 
     // Fold MaintenanceInvoice rows (amount in CENTS, attributed to the equipment they
@@ -107,7 +111,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
     ]
 
     return calcFleetProfitability(
-      range,
+      cfrRange,
       members,
       loads.map((l) => ({ truckId: l.truckId, deliveryDriverId: l.deliveryDriverId, rate: l.rate, deliveryAppt: l.deliveryAppt })),
       fuel.transactions.map((t) => ({ truckId: t.truckId, transactionDate: t.transactionDate, amount: t.amount, itemCategory: t.itemCategory ?? '' })),
@@ -122,7 +126,9 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
         .map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay, combined: p.driverId === combinedPayDriverId(group) })),
       drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker' })),
     )
-  }, [range, members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices])
+  }, [members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group])
 
-  return { data, members, loading, error, refresh }
+  const data = useMemo<FleetProfitabilityResult | null>(() => computeForRange(range), [computeForRange, range])
+
+  return { data, members, loading, error, refresh, computeForRange }
 }
