@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Plus, Trash2 } from 'lucide-react'
+import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
 
@@ -43,9 +43,15 @@ function Footer({ onClose, onSave, saving, label: lbl = 'Save' }: { onClose: () 
   )
 }
 
-// ── Add a single trip ───────────────────────────────────────────────────────
-export function TripModal({ driverId, periodStart, onSave, onClose }: { driverId: string; periodStart: string; onSave: (t: TripInput) => Promise<void>; onClose: () => void }) {
-  const [f, setF] = useState({ loadId: '', origin: '', destination: '', miles: '', equipment: '', freightAmount: '', ratePerMile: '', dispatcher: '', status: 'Completed' })
+// ── Add / edit a single trip ────────────────────────────────────────────────
+const numStr = (n: number | null | undefined) => (n == null ? '' : String(n))
+export function TripModal({ driverId, periodStart, initial, onSave, onClose }: { driverId: string; periodStart: string; initial?: AmazonTrip; onSave: (t: TripInput) => Promise<void>; onClose: () => void }) {
+  const editing = !!initial
+  const [f, setF] = useState({
+    loadId: initial?.loadId ?? '', origin: initial?.origin ?? '', destination: initial?.destination ?? '',
+    miles: numStr(initial?.miles), equipment: initial?.equipment ?? '', freightAmount: numStr(initial?.freightAmount),
+    ratePerMile: numStr(initial?.ratePerMile), dispatcher: initial?.dispatcher ?? '', status: initial?.status ?? 'Completed',
+  })
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
@@ -65,7 +71,7 @@ export function TripModal({ driverId, periodStart, onSave, onClose }: { driverId
   }
 
   return (
-    <Modal title="Add trip" sub="One freight load for this pay week" onClose={onClose}>
+    <Modal title={editing ? 'Edit trip' : 'Add trip'} sub="One freight load for this pay week" onClose={onClose}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Load ID" half><input style={input} value={f.loadId} onChange={(e) => set('loadId', e.target.value)} placeholder="112CRP7T7" /></Field>
         <Field l="Equipment" half><input style={input} value={f.equipment} onChange={(e) => set('equipment', e.target.value)} placeholder="53' Trailer" /></Field>
@@ -82,56 +88,187 @@ export function TripModal({ driverId, periodStart, onSave, onClose }: { driverId
         <Field l="Dispatcher"><input style={input} value={f.dispatcher} onChange={(e) => set('dispatcher', e.target.value)} /></Field>
       </div>
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
-      <Footer onClose={onClose} onSave={save} saving={saving} label="Add trip" />
+      <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? 'Save trip' : 'Add trip'} />
     </Modal>
   )
 }
 
-// ── Paste / CSV import ──────────────────────────────────────────────────────
-function parseTrips(text: string, driverId: string, periodStart: string): TripInput[] {
+// ── CSV / paste parsing ─────────────────────────────────────────────────────
+export interface RawTripRow {
+  loadId: string | null; origin: string | null; destination: string | null
+  miles: number | null; equipment: string | null; freightAmount: number
+  ratePerMile: number | null; dispatcher: string | null; status: string | null
+  driverName: string   // the driver/dispatcher column value — used to route master CSVs
+}
+
+/** Parse pasted/CSV text into raw trip rows. Auto-detects a header row; otherwise uses
+ *  positional order: Load ID, Origin, Destination, Miles, Equipment, Freight, Rate/mi,
+ *  Dispatcher, Status. Rows without a numeric freight value are skipped. */
+export function parseRows(text: string): RawTripRow[] {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
   if (!lines.length) return []
   const split = (l: string) => (l.includes('\t') ? l.split('\t') : l.split(','))
   let header: string[] | null = null
-  if (/freight|load\s*id|origin/i.test(lines[0]) && !/^\d|\$/.test(lines[0])) { header = split(lines.shift()!).map((h) => h.trim().toLowerCase()) }
+  if (/freight|load\s*id|origin|driver|dispatch/i.test(lines[0]) && !/^\d|^\$|^-?\d/.test(lines[0])) {
+    header = split(lines.shift()!).map((h) => h.trim().toLowerCase())
+  }
   const findIdx = (...names: string[]) => header ? header.findIndex((h) => names.some((n) => h.includes(n))) : -1
   const cols = header
-    ? { loadId: findIdx('load'), origin: findIdx('origin'), dest: findIdx('destination', 'dest'), miles: findIdx('mile'), equip: findIdx('equip'), freight: findIdx('freight', 'amount'), rpm: findIdx('rate'), disp: findIdx('dispatch'), status: findIdx('status') }
-    : { loadId: 0, origin: 1, dest: 2, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, status: 8 }
+    ? { loadId: findIdx('load'), origin: findIdx('origin'), dest: findIdx('destination', 'dest'), miles: findIdx('mile'), equip: findIdx('equip'), freight: findIdx('freight', 'amount'), rpm: findIdx('rate'), disp: findIdx('dispatch'), driver: findIdx('driver'), status: findIdx('status') }
+    : { loadId: 0, origin: 1, dest: 2, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, driver: -1, status: 8 }
   const at = (c: string[], i: number) => (i >= 0 && i < c.length ? c[i].trim() : '')
-  const out: TripInput[] = []
+  const out: RawTripRow[] = []
   for (const line of lines) {
     const c = split(line)
     const freight = num(at(c, cols.freight))
     if (freight == null) continue
+    const dispatcher = at(c, cols.disp) || null
     out.push({
-      driverId, periodStart,
       loadId: at(c, cols.loadId) || null, origin: at(c, cols.origin) || null, destination: at(c, cols.dest) || null,
       miles: num(at(c, cols.miles)), equipment: at(c, cols.equip) || null, freightAmount: freight,
-      ratePerMile: num(at(c, cols.rpm)), dispatcher: at(c, cols.disp) || null, status: at(c, cols.status) || null,
+      ratePerMile: num(at(c, cols.rpm)), dispatcher, status: at(c, cols.status) || null,
+      driverName: (at(c, cols.driver) || dispatcher || '').trim(),
     })
   }
   return out
 }
 
+export function rowToTrip(r: RawTripRow, driverId: string, periodStart: string): TripInput {
+  return {
+    driverId, periodStart,
+    loadId: r.loadId, origin: r.origin, destination: r.destination, miles: r.miles,
+    equipment: r.equipment, freightAmount: r.freightAmount, ratePerMile: r.ratePerMile,
+    dispatcher: r.dispatcher, status: r.status,
+  }
+}
+
+/** Read a chosen .csv/.txt file into the textarea. */
+function FilePick({ onText }: { onText: (t: string) => void }) {
+  return (
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
+      <Upload size={14} /> Choose file…
+      <input type="file" accept=".csv,.tsv,.txt,text/csv" style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then(onText); e.currentTarget.value = '' }} />
+    </label>
+  )
+}
+
+const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--ds-surface)', color: 'var(--ds-t1)', resize: 'vertical', boxSizing: 'border-box' }
+
+// ── Per-driver import (paste or file) ───────────────────────────────────────
 export function ImportModal({ driverId, periodStart, onImport, onClose }: { driverId: string; periodStart: string; onImport: (rows: TripInput[]) => Promise<void>; onClose: () => void }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
-  const parsed = parseTrips(text, driverId, periodStart)
+  const parsed = parseRows(text).map((r) => rowToTrip(r, driverId, periodStart))
 
   return (
-    <Modal title="Import trips" sub="Paste rows straight from your pay spreadsheet" onClose={onClose} width={640}>
-      <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 8, lineHeight: 1.5 }}>
-        Copy the trip rows from Google Sheets and paste below. Expected columns (a header row is auto-detected, otherwise this order):
-        <br /><span style={{ fontFamily: 'monospace', fontSize: 11 }}>Load ID · Origin · Destination · Miles · Equipment · Freight · Rate/mi · Dispatcher · Status</span>
+    <Modal title="Import trips" sub="Upload a CSV or paste rows from your pay spreadsheet" onClose={onClose} width={640}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+          Columns (header auto-detected, else this order):<br />
+          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>Load ID · Origin · Destination · Miles · Equipment · Freight · Rate/mi · Dispatcher · Status</span>
+        </div>
+        <FilePick onText={setText} />
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10}
         placeholder={'112CRP7T7\tUPRR->ELP1\t\t40.73\t53\' Container\t$300.00\t\tLee Lara\tCompleted'}
-        style={{ width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--ds-surface)', color: 'var(--ds-t1)', resize: 'vertical', boxSizing: 'border-box' }} />
+        style={importTextarea} />
       <div style={{ fontSize: 12.5, color: parsed.length ? '#15803d' : 'var(--ds-t3)', marginTop: 8 }}>
-        {parsed.length ? `${parsed.length} trip${parsed.length !== 1 ? 's' : ''} ready to import` : 'Paste rows to preview'}
+        {parsed.length ? `${parsed.length} trip${parsed.length !== 1 ? 's' : ''} ready to import` : 'Upload or paste rows to preview'}
       </div>
       <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
+    </Modal>
+  )
+}
+
+// ── Master import (all drivers in one CSV, routed by driver name) ────────────
+function matchDriver(name: string, drivers: Driver[]): string {
+  const n = name.trim().toLowerCase()
+  if (!n) return ''
+  const exact = drivers.find((d) => d.name.trim().toLowerCase() === n)
+  if (exact) return exact.id
+  // last-name + first-initial (handles "R. Workman" → "Roy Workman")
+  const parts = n.replace(/\./g, '').split(/\s+/)
+  const last = parts[parts.length - 1]
+  const firstInit = parts[0]?.[0]
+  const byLast = drivers.filter((d) => d.name.trim().toLowerCase().split(/\s+/).pop() === last)
+  if (byLast.length === 1) return byLast[0].id
+  const byBoth = byLast.find((d) => d.name.trim().toLowerCase()[0] === firstInit)
+  return byBoth?.id ?? ''
+}
+
+export function MasterImportModal({ periodStart, drivers, onImport, onClose }: {
+  periodStart: string; drivers: Driver[]
+  onImport: (rows: TripInput[]) => Promise<void>; onClose: () => void
+}) {
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const rows = parseRows(text)
+
+  // Group by the driver-name column and seed a best-guess driver mapping.
+  const groups = useState(() => new Map<string, string>())[0]
+  const [mapping, setMapping] = useState<Record<string, string>>({})
+  const names = Array.from(new Set(rows.map((r) => r.driverName).filter(Boolean)))
+  // seed defaults for any newly-seen names
+  for (const name of names) {
+    if (!(name in mapping) && !groups.has(name)) { groups.set(name, matchDriver(name, drivers)) }
+  }
+  const effMap = (name: string) => (name in mapping ? mapping[name] : groups.get(name) ?? '')
+
+  const ready = rows.filter((r) => effMap(r.driverName))
+  const unmatched = names.filter((n) => !effMap(n))
+
+  const doImport = async () => {
+    setSaving(true)
+    try {
+      const trips = rows
+        .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, periodStart) : null })
+        .filter((t): t is TripInput => t !== null)
+      await onImport(trips)
+    } catch { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Upload master CSV" sub="One file with every driver's trips — routed to each driver for this week" onClose={onClose} width={680}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+          Include a <b>Driver</b> (or <b>Dispatcher</b>) column. Each row is matched to a driver below.
+        </div>
+        <FilePick onText={setText} />
+      </div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={7}
+        placeholder={'Load ID,Origin,Destination,Miles,Equipment,Freight,Rate/mi,Dispatcher,Status'}
+        style={importTextarea} />
+
+      {names.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+            Map drivers ({rows.length} rows)
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+            {names.map((name) => {
+              const count = rows.filter((r) => r.driverName === name).length
+              const sel = effMap(name)
+              return (
+                <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ flex: 1, fontSize: 12.5, color: 'var(--ds-t1)' }}>{name} <span style={{ color: 'var(--ds-t3)' }}>· {count}</span></span>
+                  <select value={sel} onChange={(e) => setMapping((p) => ({ ...p, [name]: e.target.value }))}
+                    style={{ ...input, width: 220, height: 32, border: `1px solid ${sel ? 'var(--ds-border)' : '#f59e0b'}` }}>
+                    <option value="">— skip (no match) —</option>
+                    {drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  </select>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 12.5, marginTop: 10, color: ready.length ? '#15803d' : 'var(--ds-t3)' }}>
+        {ready.length ? `${ready.length} of ${rows.length} rows ready` : 'Upload or paste a master CSV to preview'}
+        {unmatched.length > 0 && <span style={{ color: '#b45309' }}> · {unmatched.length} unmatched driver{unmatched.length !== 1 ? 's' : ''} will be skipped</span>}
+      </div>
+      <Footer onClose={onClose} onSave={doImport} saving={saving} label={`Import ${ready.length || ''}`.trim()} />
     </Modal>
   )
 }

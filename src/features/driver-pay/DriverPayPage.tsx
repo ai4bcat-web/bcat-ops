@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
-import { useAmazonPay, type DriverPayRow } from '@/hooks/useAmazonPay'
+import { useAmazonPay, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
+import { useDrivers } from '@/hooks/useDrivers'
 import { tripPayAmount } from '@/lib/driverPay'
 import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
-import { TripModal, ImportModal, DeductionModal, SettingsModal } from './DriverPayForms'
+import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal } from './DriverPayForms'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -51,8 +52,11 @@ export function DriverPayPage() {
   const [periodStart, setPeriodStart] = useState(sundayOf)
   const pay = useAmazonPay(periodStart)
 
+  const { drivers } = useDrivers()
   const [tripModal, setTripModal]   = useState<{ driverId: string } | null>(null)
+  const [editTrip, setEditTrip]     = useState<AmazonTrip | null>(null)
   const [importDriver, setImport]   = useState<string | null>(null)
+  const [masterOpen, setMasterOpen] = useState(false)
   const [dedDriver, setDedDriver]   = useState<string | null>(null)
   const [settingsFor, setSettings]  = useState<Driver | null>(null)
 
@@ -68,9 +72,13 @@ export function DriverPayPage() {
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Amazon weekly pay — trips, expenses &amp; check amount</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button onClick={() => setMasterOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <FileUp size={15} /> Upload master CSV
+            </button>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button style={navBtn} onClick={() => setPeriodStart((p) => shiftWeek(p, -1))} aria-label="Previous week"><ChevronLeft size={16} /></button>
-              <button onClick={() => setPeriodStart(sundayOf())} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-blue)' : 'var(--ds-surface)', color: isThisWeek ? '#fff' : 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>This week</button>
+              <button onClick={() => setPeriodStart(sundayOf())} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-bg)' : 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>This week</button>
               <button style={{ ...navBtn, opacity: isThisWeek ? 0.4 : 1 }} onClick={() => !isThisWeek && setPeriodStart((p) => shiftWeek(p, 1))} disabled={isThisWeek} aria-label="Next week"><ChevronRight size={16} /></button>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 180, textAlign: 'right' }}>{weekLabelLong(periodStart)}</span>
@@ -98,6 +106,7 @@ export function DriverPayPage() {
             onImport={() => setImport(row.driver.id)}
             onAddDeduction={() => setDedDriver(row.driver.id)}
             onSettings={() => setSettings(row.driver)}
+            onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
             onRemoveDeduction={pay.removeDeduction}
             onExport={() => download(`pay-${row.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(row, periodStart))}
@@ -126,6 +135,16 @@ export function DriverPayPage() {
           onSave={async (input) => { await pay.addTrip(input); setTripModal(null) }}
           onClose={() => setTripModal(null)} />
       )}
+      {editTrip && (
+        <TripModal driverId={editTrip.driverId} periodStart={editTrip.periodStart} initial={editTrip}
+          onSave={async (input) => { await pay.updateTrip(editTrip.id, input); setEditTrip(null) }}
+          onClose={() => setEditTrip(null)} />
+      )}
+      {masterOpen && (
+        <MasterImportModal periodStart={periodStart} drivers={drivers}
+          onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setMasterOpen(false) }}
+          onClose={() => setMasterOpen(false)} />
+      )}
       {importDriver && (
         <ImportModal driverId={importDriver} periodStart={periodStart}
           onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setImport(null) }}
@@ -147,9 +166,10 @@ export function DriverPayPage() {
 }
 
 // ── One driver's weekly statement ──────────────────────────────────────────────
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onRemoveTrip, onRemoveDeduction, onExport }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
+  onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
 }) {
   const { driver, setting, trips, statement, oneOffs } = row
@@ -199,20 +219,23 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
             <th style={TH}>Rate/mi</th>
             <th style={{ ...TH, textAlign: 'left' }}>Status</th>
             <th style={TH}>Amount</th>
-            <th style={{ ...TH, width: 28 }}></th>
+            <th style={{ ...TH, width: 56 }}></th>
           </tr></thead>
           <tbody>
             {trips.length === 0 && <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No trips this week — add or import them.</td></tr>}
             {trips.map((t) => (
-              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)' }}>{t.loadId || '—'}</td>
-                <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{[t.origin, t.destination].filter(Boolean).join(' → ') || '—'}</td>
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }} className="dp-trip-row">
+                <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: 'pointer' }} title="Click to edit">{t.loadId || '—'}</td>
+                <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{[t.origin, t.destination].filter(Boolean).join(' → ') || '—'}</td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString() : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
                 <td style={TD}>{t.ratePerMile != null ? `$${t.ratePerMile.toFixed(2)}` : '—'}</td>
                 <td style={{ ...TD, textAlign: 'left', color: t.status === 'Cancelled' ? '#dc2626' : 'var(--ds-t2)' }}>{t.status || '—'}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.freightAmount, setting))}</td>
-                <td style={{ ...TD, padding: '7px 4px' }}><button onClick={() => onRemoveTrip(t.id)} title="Remove trip" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><Trash2 size={13} /></button></td>
+                <td style={{ ...TD, padding: '7px 4px', whiteSpace: 'nowrap' }}>
+                  <button onClick={() => onEditTrip(t)} title="Edit trip" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Pencil size={13} /></button>
+                  <button onClick={() => onRemoveTrip(t.id)} title="Remove trip" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Trash2 size={13} /></button>
+                </td>
               </tr>
             ))}
             {trips.length > 0 && (
