@@ -18,6 +18,7 @@ import { OpenTasksWidget } from './OpenTasksWidget'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { TruckMapWidget } from './TruckMapWidget'
 import { TruckMilesWidget } from './TruckMilesWidget'
+import { PerMileWidget } from './PerMileWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -255,6 +256,9 @@ export function DashboardPage() {
           <TruckMapWidget />
           <TruckMilesWidget />
         </div>
+
+        {/* ── Per-truck revenue & fuel per mile (Ivan fleet) ────────────────── */}
+        <PerMileWidget />
 
         {/* ── Compliance alerts ─────────────────────────────────────────────── */}
         <ComplianceAlertsWidget />
