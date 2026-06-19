@@ -33,3 +33,12 @@ export const ORPHAN_UNITS_BY_GROUP: Record<FleetGroup, string[]> = {
 export function orphanTruckId(unitNumber: string): string {
   return `motive:${unitNumber}`
 }
+
+/**
+ * Sentinel driverId for a single combined driver-pay entry covering ALL of a fleet's
+ * drivers (rather than one DriverPayPeriod per driver). The profitability engine adds
+ * it straight to the fleet's driver cost instead of attributing it to a truck.
+ */
+const COMBINED_PAY_PREFIX = 'fleet-combined:'
+export const combinedPayDriverId = (group: FleetGroup): string => `${COMBINED_PAY_PREFIX}${group}`
+export const isCombinedPayDriverId = (driverId: string): boolean => driverId.startsWith(COMBINED_PAY_PREFIX)
