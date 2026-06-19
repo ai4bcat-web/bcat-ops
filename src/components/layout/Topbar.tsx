@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Bell, Settings, ChevronRight, Search, Menu } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
 
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:   'Dashboard',
@@ -20,7 +21,9 @@ const ROUTE_LABELS: Record<string, string> = {
 
 export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
   const location = useLocation()
-  const [search, setSearch] = useState('')
+  const navigate = useNavigate()
+  const searchQuery = useAppStore((s) => s.searchQuery)
+  const setSearchQuery = useAppStore((s) => s.setSearchQuery)
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
@@ -56,8 +59,10 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
             boxSizing: 'border-box',
           }}
           placeholder="Search loads, drivers, equipment…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && searchQuery.trim()) navigate('/loads') }}
+          aria-label="Search loads"
         />
         <span style={{
           position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',

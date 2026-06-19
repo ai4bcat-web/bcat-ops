@@ -15,6 +15,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { MobileLoadAgenda } from '@/features/calendar/MobileLoadAgenda'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useAppStore } from '@/store/useAppStore'
+import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
@@ -64,10 +65,11 @@ export function GridPage() {
   const multiStopRender = useAppStore((s) => s.multiStopRender)
   const isMobile = useIsMobile()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const searchQuery = useAppStore((s) => s.searchQuery)
+  const setSearchQuery = useAppStore((s) => s.setSearchQuery)
 
   const [tab, setTab] = useState<TabId>('all')
   const [sorting, setSorting] = useState<SortingState>([{ id: 'pickupAppt', desc: false }])
-  const [globalFilter, setGlobalFilter] = useState('')
   const [columnVisibility, setColumnVisibility] = usePersistentColumnVisibility()
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [groupByDay, setGroupByDay] = useState(false)
@@ -85,6 +87,14 @@ export function GridPage() {
       default:           return loads
     }
   }, [loads, tab, multiStopRender])
+
+  // Comprehensive search across ALL load fields (shared with calendar + top-bar search).
+  const searched = useMemo(() => {
+    if (!searchQuery.trim()) return tabFiltered
+    return tabFiltered.filter((l) =>
+      loadMatchesQuery(buildLoadHaystack(l, { driverName: (id) => drivers.find((d) => d.id === id)?.name }), searchQuery),
+    )
+  }, [tabFiltered, searchQuery, drivers])
 
   // Counts for tab badges
   const counts = useMemo(() => ({
@@ -269,18 +279,16 @@ export function GridPage() {
   ], [drivers])
 
   const table = useReactTable<Load>({
-    data: tabFiltered,
+    data: searched,
     columns,
-    state: { sorting, globalFilter, columnVisibility, rowSelection },
+    state: { sorting, columnVisibility, rowSelection },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     enableRowSelection: true,
-    globalFilterFn: 'includesString',
   })
 
   const selectedRows  = table.getSelectedRowModel().rows
@@ -432,8 +440,8 @@ export function GridPage() {
               fontSize: 12.5, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
             }}
             placeholder="Search all fields…"
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
 
@@ -519,7 +527,7 @@ export function GridPage() {
 
       {/* ── Table (desktop) / card agenda (mobile) ──────────────────────────── */}
       {isMobile ? (
-        <MobileLoadAgenda loads={tabFiltered} drivers={drivers} />
+        <MobileLoadAgenda loads={searched} drivers={drivers} />
       ) : (
       <div style={{ flex: 1, overflow: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>

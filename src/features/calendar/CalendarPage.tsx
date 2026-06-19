@@ -10,7 +10,7 @@ import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
-import { getStops } from '@/lib/stops'
+import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
 import type { ViewMode, Load } from '@/types'
 
 const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
@@ -119,20 +119,10 @@ export function CalendarPage() {
   }, [equipment])
 
   // Everything typed in the search box matches against ANY load detail (null-safe).
-  const loadHaystack = useCallback((l: Load): string => {
-    const parts: (string | null | undefined)[] = [
-      l.aljexId, l.tmsId, l.pickupNumber, l.customer, l.notes,
-      l.originName, l.originCity, l.destinationName, l.destinationCity,
-      l.truckId ? truckUnitById.get(l.truckId) : null,
-      l.pickupDriverId ? driverNameById.get(l.pickupDriverId) : null,
-      l.deliveryDriverId ? driverNameById.get(l.deliveryDriverId) : null,
-    ]
-    for (const s of getStops(l)) {
-      parts.push(s.name, s.city)
-      if (s.driverId) parts.push(driverNameById.get(s.driverId))
-    }
-    return parts.filter(Boolean).join(' ').toLowerCase()
-  }, [driverNameById, truckUnitById])
+  const loadHaystack = useCallback(
+    (l: Load): string => buildLoadHaystack(l, { driverName: (id) => driverNameById.get(id), truckUnit: (id) => truckUnitById.get(id) }),
+    [driverNameById, truckUnitById],
+  )
 
   const visibleLoads = loads.filter((l) => {
     if (filters.readyToInvoice && !l.readyToInvoice) return false
@@ -140,12 +130,7 @@ export function CalendarPage() {
     if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
     if (filters.unassigned && l.pickupDriverId !== null) return false
     if (filters.needsAppt && l.pickupApptType !== 'tbd' && l.deliveryApptType !== 'tbd') return false
-    if (searchQuery.trim()) {
-      const hay = loadHaystack(l)
-      // Multi-word: every term must match somewhere (e.g. "ivan chicago").
-      const terms = searchQuery.toLowerCase().split(/\s+/).filter(Boolean)
-      if (!terms.every((t) => hay.includes(t))) return false
-    }
+    if (searchQuery.trim() && !loadMatchesQuery(loadHaystack(l), searchQuery)) return false
     return true
   })
 
