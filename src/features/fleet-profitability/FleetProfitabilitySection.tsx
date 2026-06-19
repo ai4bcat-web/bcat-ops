@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { ChevronLeft, ChevronRight, Plus, TrendingUp, AlertCircle, Trash2 } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useDriverPay } from '@/hooks/useDriverPay'
@@ -27,10 +27,13 @@ function netColor(n: number): string {
 }
 
 /**
- * Weekly fleet profitability. Standalone (dashboard) it manages its own week
- * navigation; when `externalRange` is passed (e.g. embedded in the Expenses tab) it
- * uses that date range instead and hides the week stepper, so it stays in sync with
- * the page's range selector and the Expenses Overview numbers.
+ * Weekly fleet P&L. Revenue is shown per truck (attributed to the truck of each
+ * load's DELIVERY driver); expenses are aggregated fleet-wide and broken out by
+ * category (fuel, driver pay, maintenance, insurance, loans, rent/lease, tolls,
+ * permits, other), then subtracted from revenue → weekly net profit for the fleet.
+ *
+ * Standalone (dashboard) it manages its own week navigation; when `externalRange` is
+ * passed (e.g. embedded in the Expenses tab) it uses that range and hides the stepper.
  */
 export function FleetProfitabilitySection({ externalRange }: { externalRange?: DateRange } = {}) {
   const [weekOffset, setWeekOffset] = useState(0)
@@ -44,6 +47,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
 
   const r = data?.rollup
   const trucks = data?.trucks ?? []
+  const totalExpenses = r ? r.revenue - r.net : 0
 
   async function handleSavePay(input: Parameters<typeof createPay>[0]) {
     await createPay(input)
@@ -67,7 +71,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           <TrendingUp size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{externalRange ? 'Profitability' : 'Weekly Profitability'}</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Revenue − fuel, insurance, loans &amp; driver cost per truck</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Revenue per truck · expenses by category · net for the week</div>
           </div>
         </div>
 
@@ -95,11 +99,11 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           {/* Week navigation — only when self-managed (hidden when a range is supplied) */}
           {!externalRange && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn}><ChevronLeft size={15} /></button>
+              <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn} aria-label="Previous week"><ChevronLeft size={15} /></button>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 150, textAlign: 'center' }}>
                 {weekOffset === 0 ? 'This week' : weekLabel(range)}
               </span>
-              <button onClick={() => setWeekOffset((o) => Math.max(0, o - 1))} disabled={weekOffset === 0} style={{ ...navBtn, opacity: weekOffset === 0 ? 0.4 : 1 }}><ChevronRight size={15} /></button>
+              <button onClick={() => setWeekOffset((o) => Math.max(0, o - 1))} disabled={weekOffset === 0} style={{ ...navBtn, opacity: weekOffset === 0 ? 0.4 : 1 }} aria-label="Next week"><ChevronRight size={15} /></button>
             </div>
           )}
 
@@ -111,21 +115,16 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
 
       {/* Roll-up strip */}
       {r && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 1, background: 'var(--ds-border)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1, background: 'var(--ds-border)', borderBottom: '1px solid var(--ds-border)' }}>
           <Kpi label="Revenue" value={money(r.revenue)} />
-          <Kpi label="Miles" value={miles(r.miles)} />
-          <Kpi label="Fuel" value={money(r.fuel)} />
-          <Kpi label="Insurance" value={money(r.insurance)} />
-          <Kpi label="Loan" value={money(r.loan)} />
-          <Kpi label="Other exp." value={money(r.otherExpenses)} />
-          <Kpi label="Driver cost" value={money(r.driverCost)} />
-          <Kpi label="Net" value={money(r.net)} color={netColor(r.net)} />
+          <Kpi label="Total expenses" value={money(totalExpenses)} />
+          <Kpi label="Net profit" value={money(r.net)} color={netColor(r.net)} />
           <Kpi label="Rev / mi" value={money2(r.revenuePerMile)} />
-          <Kpi label="Fuel / mi" value={money2(r.fuelPerMile)} />
         </div>
       )}
 
-      {/* Per-truck table */}
+      {/* Revenue by truck */}
+      <SectionTitle>Revenue by truck</SectionTitle>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -134,29 +133,63 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
               <th style={{ ...TH, textAlign: 'left' }}>Driver</th>
               <th style={TH}>Revenue</th>
               <th style={TH}>Miles</th>
-              <th style={TH}>Fuel</th>
-              <th style={TH}>Insurance</th>
-              <th style={TH}>Loan</th>
-              <th style={TH}>Other</th>
-              <th style={TH}>Driver $</th>
-              <th style={TH}>Net</th>
               <th style={TH}>Rev / mi</th>
-              <th style={TH}>Fuel / mi</th>
             </tr>
           </thead>
           <tbody>
             {loading && trucks.length === 0 && (
-              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>Loading…</td></tr>
+              <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>Loading…</td></tr>
             )}
             {!loading && trucks.length === 0 && (
-              <tr><td colSpan={12} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{FLEET_GROUP_LABELS[group]}” in Fleet.</td></tr>
+              <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{FLEET_GROUP_LABELS[group]}” in Fleet.</td></tr>
             )}
-            {trucks.map((t) => <TruckRow key={t.truckId} t={t} />)}
+            {trucks.map((t) => <RevenueRow key={t.truckId} t={t} />)}
+            {r && trucks.length > 0 && (
+              <tr style={{ borderTop: '2px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+                <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }} colSpan={2}>Fleet total</td>
+                <td style={{ ...TD, fontWeight: 700 }}>{money(r.revenue)}</td>
+                <td style={{ ...TD, fontWeight: 700 }}>{miles(r.miles)}</td>
+                <td style={{ ...TD, fontWeight: 700 }}>{money2(r.revenuePerMile)}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Driver-pay entries for context */}
+      {/* Weekly P&L — expenses aggregated by category, subtracted from revenue */}
+      <div style={{ borderTop: '1px solid var(--ds-border)' }}>
+        <SectionTitle>Expenses by category · weekly P&amp;L</SectionTitle>
+        {r && (
+          <div style={{ padding: '4px 18px 18px', maxWidth: 480 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0 10px' }}>
+              <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue</span>
+              <span style={{ fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(r.revenue)}</span>
+            </div>
+            <CostRow label="Fuel" value={r.fuel} />
+            <CostRow label="Driver pay" value={r.driverCost} />
+            <CostRow label="Maintenance" value={r.categories.maintenance} />
+            <CostRow label="Insurance" value={r.categories.insurance} />
+            <CostRow label="Loans — truck & trailer" value={r.categories.financing} />
+            <CostRow label="Rent / lease — yard & trailer" value={r.categories.lease} />
+            <CostRow label="Tolls" value={r.categories.tolls} />
+            <CostRow label="Permits" value={r.categories.permits} />
+            <CostRow label="Other" value={r.categories.other} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
+              <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(totalExpenses)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
+                Net profit
+                {r.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{((r.net / r.revenue) * 100).toFixed(0)}% margin</span>}
+              </span>
+              <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(r.net) }}>{money(r.net)}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Driver-pay entries for context (entered per driver, aggregated above) */}
       {payPeriods.length > 0 && (
         <div style={{ borderTop: '1px solid var(--ds-border)', padding: '12px 20px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Driver pay periods</div>
@@ -167,7 +200,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
                 <span style={{ color: 'var(--ds-t3)' }}>{p.periodStart} → {p.periodEnd}</span>
                 <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(p.grossPay)}</span>
                 <span style={{ fontSize: 10, color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '1px 5px' }}>{p.source ?? 'MANUAL'}</span>
-                <button onClick={() => handleDeletePay(p.id)} style={{ marginLeft: 'auto', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }} title="Delete"><Trash2 size={13} /></button>
+                <button onClick={() => handleDeletePay(p.id)} style={{ marginLeft: 'auto', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }} aria-label="Delete pay period"><Trash2 size={13} /></button>
               </div>
             ))}
           </div>
@@ -188,6 +221,12 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
 
 const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
 
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ padding: '12px 18px 6px', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{children}</div>
+  )
+}
+
 function Kpi({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={{ background: 'var(--ds-surface)', padding: '12px 14px' }}>
@@ -197,27 +236,32 @@ function Kpi({ label, value, color }: { label: string; value: string; color?: st
   )
 }
 
-function TruckRow({ t }: { t: TruckProfitability }) {
+/** One "− $X" expense line in the P&L; muted "(none)" when a category has no cost. */
+function CostRow({ label, value }: { label: string; value: number }) {
+  const empty = value === 0
+  return (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderTop: '1px solid var(--ds-border)' }}>
+      <span style={{ fontSize: 13, color: 'var(--ds-t2)', paddingLeft: 12 }}>{label}</span>
+      <span style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums', color: empty ? 'var(--ds-muted-soft)' : 'var(--ds-t1)' }}>
+        {empty ? '(none)' : `− ${money(value)}`}
+      </span>
+    </div>
+  )
+}
+
+function RevenueRow({ t }: { t: TruckProfitability }) {
   return (
     <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
       <td style={{ ...TD, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</span>
           {!t.hasEquipment && <Flag text="not in truck details" />}
-          {t.hasEquipment && !t.hasFuelCard && <Flag text="no fuel card" />}
         </div>
       </td>
       <td style={{ ...TD, textAlign: 'left', color: t.driverName ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t.driverName ?? '—'}</td>
-      <td style={TD}>{money(t.revenue)}</td>
+      <td style={{ ...TD, fontWeight: 600 }}>{money(t.revenue)}</td>
       <td style={TD}>{miles(t.miles)}</td>
-      <td style={{ ...TD, color: t.hasFuelCard ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t.hasFuelCard ? money(t.fuel) : '—'}</td>
-      <td style={TD}>{money(t.insurance)}</td>
-      <td style={TD}>{money(t.loan)}</td>
-      <td style={TD}>{money(t.otherExpenses)}</td>
-      <td style={TD}>{money(t.driverCost)}</td>
-      <td style={{ ...TD, fontWeight: 700, color: netColor(t.net) }}>{money(t.net)}</td>
       <td style={TD}>{money2(t.revenuePerMile)}</td>
-      <td style={TD}>{money2(t.fuelPerMile)}</td>
     </tr>
   )
 }
