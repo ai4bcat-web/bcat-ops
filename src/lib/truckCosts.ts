@@ -4,45 +4,60 @@ import {
 } from '@/lib/apiClient'
 
 /**
- * Optional operating costs captured when a truck is created or edited. Loan is a
- * monthly payment; insurance/plates/other are entered PER YEAR and converted to a
- * monthly recurring amount. Each becomes a single-truck RecurringExpense, so it shows
- * up automatically in Expenses and Weekly Profitability (insurance, loan, etc.).
+ * Optional operating costs captured when a truck is created or edited. Loan and ELD are
+ * monthly payments; insurance/plates/other are entered PER YEAR and converted to a
+ * monthly recurring amount. Each becomes a single-truck RecurringExpense, so it shows up
+ * automatically in Expenses and the Weekly / Monthly profitability views.
  */
 export interface TruckCostInputs {
   loanMonthly?:     number | null   // $/month
   insuranceAnnual?: number | null   // $/year
   platesAnnual?:    number | null   // $/year
+  eldMonthly?:      number | null   // $/month — ELD / telematics subscription
   otherLabel?:      string | null
   otherAnnual?:     number | null   // $/year
 }
 
 type CostCategory = 'FINANCING' | 'INSURANCE' | 'PERMITS' | 'OTHER'
+/** Each per-truck cost occupies a distinct slot. ELD + Other are both OTHER-category, so
+ *  they're separated by slot (and ELD by its canonical type name) rather than category. */
+type CostSlot = 'loan' | 'insurance' | 'plates' | 'eld' | 'other'
 
 /** A truck's currently-active per-truck recurring cost, for prefilling the edit form. */
 export interface ExistingTruckCost {
+  slot:          CostSlot
   category:      CostCategory
   recurringId:   string
   typeName:      string
   monthlyAmount: number
 }
 
-// Canonical per-category expense types reused across trucks (one "Insurance" type,
-// etc.); each truck gets its own single-truck allocation + recurring row.
-const CANONICAL_NAME: Record<'FINANCING' | 'INSURANCE' | 'PERMITS', string> = {
+// Canonical per-category expense types reused across trucks (one "Insurance" type, etc.);
+// each truck gets its own single-truck allocation + recurring row.
+const CANONICAL_NAME = {
   FINANCING: 'Truck Loan',
   INSURANCE: 'Insurance',
   PERMITS:   'Plates / Registration',
-}
+  ELD:       'ELD',
+} as const
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 const thisMonth = () => new Date().toISOString().slice(0, 7)   // "YYYY-MM"
+
+/** Which slot a recurring's (category, type name) belongs to. */
+function slotOf(category: CostCategory, name: string): CostSlot {
+  if (category === 'FINANCING') return 'loan'
+  if (category === 'INSURANCE') return 'insurance'
+  if (category === 'PERMITS')   return 'plates'
+  return name.trim().toLowerCase() === CANONICAL_NAME.ELD.toLowerCase() ? 'eld' : 'other'
+}
 
 export function hasAnyTruckCost(c: TruckCostInputs): boolean {
   return !!(
     (c.loanMonthly && c.loanMonthly > 0) ||
     (c.insuranceAnnual && c.insuranceAnnual > 0) ||
     (c.platesAnnual && c.platesAnnual > 0) ||
+    (c.eldMonthly && c.eldMonthly > 0) ||
     (c.otherAnnual && c.otherAnnual > 0 && c.otherLabel?.trim())
   )
 }
@@ -56,7 +71,7 @@ function isSingleTruckAlloc(a: TruckExpenseAllocationData | undefined, truckId: 
 /**
  * Read a truck's current per-truck recurring costs from already-fetched expense data,
  * for prefilling the edit form. Only single-truck allocations are considered "this
- * truck's" costs; the first OTHER cost is surfaced (extra ones stay in Expenses→Manage).
+ * truck's" costs; the first cost per slot is surfaced (extras stay in Expenses→Manage).
  */
 export function readTruckCosts(
   truckId: string,
@@ -76,11 +91,13 @@ export function readTruckCosts(
     if (!type) continue
     const cat = type.category
     if (cat !== 'FINANCING' && cat !== 'INSURANCE' && cat !== 'PERMITS' && cat !== 'OTHER') continue
-    if (existing.some((e) => e.category === cat)) continue   // first per category
-    existing.push({ category: cat, recurringId: r.id, typeName: type.name, monthlyAmount: r.monthlyAmount })
-    if (cat === 'FINANCING') inputs.loanMonthly = r.monthlyAmount
-    else if (cat === 'INSURANCE') inputs.insuranceAnnual = round2(r.monthlyAmount * 12)
-    else if (cat === 'PERMITS') inputs.platesAnnual = round2(r.monthlyAmount * 12)
+    const slot = slotOf(cat, type.name)
+    if (existing.some((e) => e.slot === slot)) continue   // first per slot
+    existing.push({ slot, category: cat, recurringId: r.id, typeName: type.name, monthlyAmount: r.monthlyAmount })
+    if (slot === 'loan') inputs.loanMonthly = r.monthlyAmount
+    else if (slot === 'insurance') inputs.insuranceAnnual = round2(r.monthlyAmount * 12)
+    else if (slot === 'plates') inputs.platesAnnual = round2(r.monthlyAmount * 12)
+    else if (slot === 'eld') inputs.eldMonthly = r.monthlyAmount
     else { inputs.otherLabel = type.name; inputs.otherAnnual = round2(r.monthlyAmount * 12) }
   }
   return { inputs, existing }
@@ -106,12 +123,13 @@ async function createCost(
   })
 }
 
-function targetsFor(costs: TruckCostInputs): { category: CostCategory; name: string; monthly: number }[] {
+function targetsFor(costs: TruckCostInputs): { slot: CostSlot; category: CostCategory; name: string; monthly: number }[] {
   return [
-    { category: 'FINANCING', name: CANONICAL_NAME.FINANCING, monthly: costs.loanMonthly || 0 },
-    { category: 'INSURANCE', name: CANONICAL_NAME.INSURANCE, monthly: (costs.insuranceAnnual || 0) / 12 },
-    { category: 'PERMITS',   name: CANONICAL_NAME.PERMITS,   monthly: (costs.platesAnnual || 0) / 12 },
-    { category: 'OTHER',     name: costs.otherLabel?.trim() || 'Other', monthly: (costs.otherAnnual || 0) / 12 },
+    { slot: 'loan',      category: 'FINANCING', name: CANONICAL_NAME.FINANCING, monthly: costs.loanMonthly || 0 },
+    { slot: 'insurance', category: 'INSURANCE', name: CANONICAL_NAME.INSURANCE, monthly: (costs.insuranceAnnual || 0) / 12 },
+    { slot: 'plates',    category: 'PERMITS',   name: CANONICAL_NAME.PERMITS,   monthly: (costs.platesAnnual || 0) / 12 },
+    { slot: 'eld',       category: 'OTHER',     name: CANONICAL_NAME.ELD,       monthly: costs.eldMonthly || 0 },
+    { slot: 'other',     category: 'OTHER',     name: costs.otherLabel?.trim() || 'Other', monthly: (costs.otherAnnual || 0) / 12 },
   ]
 }
 
@@ -129,7 +147,7 @@ export async function provisionTruckCosts(
   let created = 0
   for (const it of items) {
     try { await createCost(truckId, unitNumber, it.category, it.name, it.monthly, types, startMonth); created++ }
-    catch (err) { console.error(`[provisionTruckCosts] ${it.category} failed for unit ${unitNumber}:`, err) }
+    catch (err) { console.error(`[provisionTruckCosts] ${it.slot} failed for unit ${unitNumber}:`, err) }
   }
   return created
 }
@@ -143,10 +161,10 @@ export async function applyTruckCosts(
 ): Promise<void> {
   const types = await listExpenseTypes()
   const startMonth = thisMonth()
-  const byCat = new Map(existing.map((e) => [e.category, e]))
+  const bySlot = new Map(existing.map((e) => [e.slot, e]))
   for (const tg of targetsFor(costs)) {
     try {
-      const ex = byCat.get(tg.category)
+      const ex = bySlot.get(tg.slot)
       if (tg.monthly > 0) {
         if (ex) await updateRecurringExpense(ex.recurringId, { monthlyAmount: round2(tg.monthly) })
         else    await createCost(truckId, unitNumber, tg.category, tg.name, tg.monthly, types, startMonth)
@@ -154,7 +172,7 @@ export async function applyTruckCosts(
         await updateRecurringExpense(ex.recurringId, { active: false })   // cleared → stop billing
       }
     } catch (err) {
-      console.error(`[applyTruckCosts] ${tg.category} failed for unit ${unitNumber}:`, err)
+      console.error(`[applyTruckCosts] ${tg.slot} failed for unit ${unitNumber}:`, err)
     }
   }
 }

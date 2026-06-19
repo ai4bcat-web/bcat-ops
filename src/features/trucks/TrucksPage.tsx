@@ -174,6 +174,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
     loanMonthly:             initialCosts?.loanMonthly != null ? String(initialCosts.loanMonthly) : '',
     insuranceAnnual:         initialCosts?.insuranceAnnual != null ? String(initialCosts.insuranceAnnual) : '',
     platesAnnual:            initialCosts?.platesAnnual != null ? String(initialCosts.platesAnnual) : '',
+    eldMonthly:              initialCosts?.eldMonthly != null ? String(initialCosts.eldMonthly) : '',
     otherLabel:              initialCosts?.otherLabel ?? '',
     otherAnnual:             initialCosts?.otherAnnual != null ? String(initialCosts.otherAnnual) : '',
     notes:                   initial?.notes ?? '',
@@ -218,6 +219,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
       loanMonthly:     parseFloat(form.loanMonthly)     || null,
       insuranceAnnual: parseFloat(form.insuranceAnnual) || null,
       platesAnnual:    parseFloat(form.platesAnnual)    || null,
+      eldMonthly:      parseFloat(form.eldMonthly)      || null,
       otherLabel:      form.otherLabel.trim() || null,
       otherAnnual:     parseFloat(form.otherAnnual)     || null,
     } : undefined)
@@ -331,6 +333,9 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                     </Field>
                     <Field label="Plates / registration ($ / year)">
                       <Input type="number" step="0.01" min="0" value={form.platesAnnual} onChange={(e) => set('platesAnnual', e.target.value)} placeholder="e.g. 1800" className="h-9" />
+                    </Field>
+                    <Field label="ELD ($ / month)">
+                      <Input type="number" step="0.01" min="0" value={form.eldMonthly} onChange={(e) => set('eldMonthly', e.target.value)} placeholder="e.g. 35 per truck" className="h-9" />
                     </Field>
                     <Field label="Other recurring ($ / year)">
                       <Input type="number" step="0.01" min="0" value={form.otherAnnual} onChange={(e) => set('otherAnnual', e.target.value)} placeholder="optional" className="h-9" />
