@@ -392,6 +392,77 @@ Expected response:
 
 ---
 
+## Section 9 — Tasks Email Intake (tasks@ → dashboard task + #intake-ivan)
+
+Emails to **tasks@bcatcorp.com** (seen in the **ai4bcat@gmail.com** inbox) become a task
+in the dashboard **Open Tasks** + the **Tasks** page, and post a message to the Slack
+**#intake-ivan** channel. Handled by the `gmail-task-intake` Lambda.
+
+### 9a — Forwarding + Gmail filter
+1. Forward **tasks@bcatcorp.com → ai4bcat@gmail.com** (in the distro / Google Group settings).
+2. Gmail → **Settings → Filters → Create**: `To: tasks@bcatcorp.com` → **Apply label** `tasks-intake`.
+
+### 9b — Lambda Function URL + env var
+1. After the deploy, copy the **`GmailTaskIntakeFunctionUrl`** output (CloudFormation → Outputs, or the deploy log).
+2. Amplify Console → the app's environment variables → add **`INTAKE_IVAN_CHANNEL_ID`** = the #intake-ivan channel ID
+   (Slack → channel → **View channel details** → bottom shows the `C…` ID), then redeploy so the Lambda picks it up.
+3. Confirm the existing secrets are set: **`SLACK_BOT_TOKEN`** (bot needs `chat:write`, and must be invited to #intake-ivan)
+   and **`INTAKE_WEBHOOK_SECRET`** (the shared secret from Section 1).
+
+### 9c — Apps Script additions
+Add to the **BCAT Intake Bridge** Apps Script (alongside the existing constants/functions):
+
+```javascript
+const TASK_INTAKE_WEBHOOK_URL = 'PASTE_GmailTaskIntakeFunctionUrl_HERE';
+const TASK_LABEL              = 'tasks-intake';
+const TASK_PROCESSED_LABEL    = 'tasks-processed';
+
+function processTaskEmails() {
+  const label = GmailApp.getUserLabelByName(TASK_LABEL);
+  if (!label) { console.log('Label tasks-intake not found — skipping'); return; }
+  const processed = GmailApp.getUserLabelByName(TASK_PROCESSED_LABEL)
+    || GmailApp.createLabel(TASK_PROCESSED_LABEL);
+
+  label.getThreads(0, 15).forEach(function (thread) {
+    if (thread.getLabels().map(function (l) { return l.getName(); }).includes(TASK_PROCESSED_LABEL)) return;
+    thread.getMessages().forEach(function (message) {
+      const payload = {
+        secret:     WEBHOOK_SECRET,                 // same shared secret as the other bridges
+        messageId:  message.getId(),
+        subject:    message.getSubject(),
+        from:       message.getFrom(),
+        body:       message.getPlainBody() || '',
+        receivedAt: message.getDate().toISOString(),
+      };
+      try {
+        const res  = UrlFetchApp.fetch(TASK_INTAKE_WEBHOOK_URL, {
+          method: 'post', contentType: 'application/json',
+          payload: JSON.stringify(payload), muteHttpExceptions: true,
+        });
+        const code = res.getResponseCode();
+        console.log('[TASKS] Lambda response:', code, res.getContentText());
+        if (code === 200) thread.addLabel(processed);
+      } catch (e) { console.error('[TASKS] fetch error:', e); }
+    });
+  });
+}
+```
+
+Add a **time-driven trigger** for `processTaskEmails` → **Every 5 minutes**.
+
+### 9d — Test
+```bash
+curl -X POST 'PASTE_GmailTaskIntakeFunctionUrl_HERE' \
+  -H "Content-Type: application/json" \
+  -d '{ "secret": "PASTE_INTAKE_WEBHOOK_SECRET", "messageId": "test-task-001",
+        "subject": "Call back the broker on PRO 12345", "from": "ops@bcatcorp.com",
+        "body": "Follow up before EOD" }'
+```
+Expected: `{ "ok": true, "id": "gmailtask-…" }`, a task in **Open Tasks**, and a **#intake-ivan** message.
+Re-running the same `messageId` returns `{ "ok": true, "duplicate": true }` (dedup).
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
