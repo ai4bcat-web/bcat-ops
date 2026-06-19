@@ -104,7 +104,7 @@ function TaskModal({ task, equipment, onSave, onClose }: { task: MaintenanceTask
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
           <h2 className="text-base font-semibold">{isEdit ? 'Edit Task' : 'New Task'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
+          <button aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
           <div className="space-y-1.5">
@@ -202,7 +202,7 @@ function InvoiceModal({ invoice, equipment, onSave, onClose }: { invoice: Mainte
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
           <h2 className="text-base font-semibold">{isEdit ? 'Edit Invoice' : 'New Invoice'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
+          <button aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
         </div>
         <form onSubmit={submit} className="px-6 py-5 space-y-4">
           <div className="space-y-1.5">

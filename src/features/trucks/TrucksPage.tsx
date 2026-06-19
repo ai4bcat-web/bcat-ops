@@ -425,7 +425,7 @@ function TaskForm({ equipmentId, initial, onSave, onClose }: TaskFormProps) {
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
           <h2 className="text-base font-semibold">{initial?.id ? 'Edit Task' : 'Add Maintenance Task'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
+          <button aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); onSave({ equipmentId, title: form.title.trim(), dueDate: form.dueDate || undefined, priority: form.priority, status: form.status, notes: form.notes.trim() || undefined, autoDot: form.autoDot, assignee: form.assignee || undefined }) }} className="px-6 py-5 space-y-4">
           <div className="space-y-1.5">
@@ -508,7 +508,7 @@ function InvoiceForm({ equipmentId, initial, onSave, onClose }: InvoiceFormProps
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg">
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-slate-100">
           <h2 className="text-base font-semibold">{initial?.id ? 'Edit Invoice' : 'Add Invoice'}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
+          <button aria-label="Close" onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="size-4" /></button>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); onSave({ equipmentId, date: form.date || undefined, vendor: form.vendor.trim() || undefined, description: form.description.trim() || undefined, amount: Math.round(parseFloat(form.amount || '0') * 100), invoiceNumber: form.invoiceNumber.trim() || undefined, paymentMethod: form.paymentMethod || undefined, paymentDate: form.paymentDate || undefined, assignee: form.assignee || undefined }) }} className="px-6 py-5 space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -659,8 +659,8 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
                 <span className={cn('text-xs font-semibold px-2 py-0.5 rounded-full border', priorityColor(t.priority))}>
                   {t.priority === 'high' ? 'High' : t.priority === 'med' ? 'Med' : 'Low'}
                 </span>
-                <button onClick={() => setTaskModal(t)} className="text-slate-400 hover:text-slate-600"><Pencil className="size-3.5" /></button>
-                <button onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
+                <button aria-label="Edit task" onClick={() => setTaskModal(t)} className="text-slate-400 hover:text-slate-600"><Pencil className="size-3.5" /></button>
+                <button aria-label="Delete task" onClick={() => { deleteMaintenanceTask(t.id); toast.success('Task deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
               </div>
             ))}
             {complete.length > 0 && (
@@ -701,7 +701,7 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
                   {inv.date && <span className="text-xs text-slate-400 ml-2">{inv.date}</span>}
                 </div>
                 <span className="text-sm font-semibold text-foreground">{formatCents(inv.amount)}</span>
-                <button onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
+                <button aria-label="Delete invoice" onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }} className="text-slate-400 hover:text-red-500"><Trash2 className="size-3.5" /></button>
               </div>
             ))}
           </div>

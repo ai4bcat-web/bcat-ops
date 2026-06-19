@@ -125,7 +125,7 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
               Active
             </label>
             <div className="flex gap-2 ml-auto">
-              <Button size="sm" variant="outline" className="h-7" onClick={() => { setAdding(false); setEditId(null) }}><X className="size-3.5" /></Button>
+              <Button size="sm" variant="outline" className="h-7" aria-label="Cancel" onClick={() => { setAdding(false); setEditId(null) }}><X className="size-3.5" /></Button>
               <Button size="sm" className="h-7 gap-1" disabled={saving} onClick={save}>
                 {saving ? <RefreshCw className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save
               </Button>
@@ -160,8 +160,8 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
                 <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate">{t.notes || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5 justify-end">
-                    <button onClick={() => openEdit(t)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
-                    <button onClick={() => del(t.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Edit expense type" onClick={() => openEdit(t)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
+                    <button aria-label="Delete expense type" onClick={() => del(t.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
                   </div>
                 </td>
               </tr>
@@ -289,7 +289,7 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
             </div>
           </div>
           <div className="flex gap-2 justify-end">
-            <Button size="sm" variant="outline" className="h-7" onClick={() => { setAdding(false); setEditId(null) }}><X className="size-3.5" /></Button>
+            <Button size="sm" variant="outline" className="h-7" aria-label="Cancel" onClick={() => { setAdding(false); setEditId(null) }}><X className="size-3.5" /></Button>
             <Button size="sm" className="h-7 gap-1" disabled={saving} onClick={save}>
               {saving ? <RefreshCw className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save
             </Button>
@@ -327,8 +327,8 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
                 <td className="px-4 py-3 text-muted-foreground max-w-[160px] truncate">{a.notes || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5 justify-end">
-                    <button onClick={() => openEdit(a)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
-                    <button onClick={() => del(a.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Edit allocation" onClick={() => openEdit(a)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
+                    <button aria-label="Delete allocation" onClick={() => del(a.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
                   </div>
                 </td>
               </tr>
@@ -452,7 +452,7 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
               Active
             </label>
             <div className="flex gap-2 ml-auto">
-              <Button size="sm" variant="outline" className="h-7" onClick={() => { setAdding(false); setEditId(null) }}><X className="size-3.5" /></Button>
+              <Button size="sm" variant="outline" className="h-7" aria-label="Cancel" onClick={() => { setAdding(false); setEditId(null) }}><X className="size-3.5" /></Button>
               <Button size="sm" className="h-7 gap-1" disabled={saving} onClick={save}>
                 {saving ? <RefreshCw className="size-3.5 animate-spin" /> : <Check className="size-3.5" />} Save
               </Button>
@@ -491,8 +491,8 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
                 <td className="px-4 py-3 text-muted-foreground max-w-[140px] truncate">{r.notes || '—'}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5 justify-end">
-                    <button onClick={() => openEdit(r)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
-                    <button onClick={() => del(r.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
+                    <button aria-label="Edit recurring expense" onClick={() => openEdit(r)} className="p-1 rounded hover:bg-slate-100 text-muted-foreground hover:text-foreground transition-colors"><Pencil className="size-3.5" /></button>
+                    <button aria-label="Delete recurring expense" onClick={() => del(r.id)} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors"><Trash2 className="size-3.5" /></button>
                   </div>
                 </td>
               </tr>
@@ -633,7 +633,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
                         <td className="px-4 py-3 text-muted-foreground">{truckNum ? `#${truckNum}` : '—'}</td>
                         <td className="px-4 py-3 text-muted-foreground max-w-[140px] truncate">{r.notes || '—'}</td>
                         <td className="px-4 py-3">
-                          <button onClick={() => { if (confirm('Delete?')) data.deleteRecord(r.id) }} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors">
+                          <button aria-label="Delete record" onClick={() => { if (confirm('Delete?')) data.deleteRecord(r.id) }} className="p-1 rounded hover:bg-red-50 text-muted-foreground hover:text-red-600 transition-colors">
                             <Trash2 className="size-3.5" />
                           </button>
                         </td>

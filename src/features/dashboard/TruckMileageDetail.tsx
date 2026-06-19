@@ -68,7 +68,7 @@ export function TruckMileageDetail({ truck, periodType, onClose }: Props) {
             <Gauge size={16} />
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Unit {truck.unitNumber} — Mileage</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', padding: 4 }}><X size={18} /></button>
+          <button aria-label="Close" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', padding: 4 }}><X size={18} /></button>
         </div>
 
         {/* Current totals */}
