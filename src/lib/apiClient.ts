@@ -510,6 +510,31 @@ export async function deleteIntakeItem(id: string): Promise<void> {
   })
 }
 
+/** Create a task/intake item by hand (externalSource 'manual'); shows in Tasks + the dashboard Open Tasks. */
+export async function createIntakeItem(input: {
+  source: 'IVAN_CARTAGE' | 'BCAT_LOGISTICS'
+  subject: string
+  assignedTo?: string | null
+  bodyText?: string | null
+}): Promise<IntakeItem> {
+  const result = await client.graphql({
+    query: `mutation CreateIntakeItem($input: CreateIntakeItemInput!) { createIntakeItem(input: $input) { ${INTAKE_FIELDS} } }`,
+    variables: {
+      input: {
+        source: input.source,
+        status: 'NEW',
+        subject: input.subject,
+        assignedTo: input.assignedTo ?? null,
+        bodyText: input.bodyText ?? null,
+        externalSource: 'manual',
+        externalId: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        receivedAt: new Date().toISOString(),
+      },
+    },
+  }) as { data: { createIntakeItem: IntakeItem } }
+  return result.data.createIntakeItem
+}
+
 export async function notifySlackStatusChange(args: {
   intakeItemId: string
   oldStatus?: string | null

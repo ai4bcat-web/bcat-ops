@@ -169,7 +169,7 @@ const schema = a.schema({
       bodyText:             a.string(),
       bodyHtml:             a.string(),
       s3KeyPdfAttachments:  a.string().array(),
-      externalSource:       a.enum(['gmail', 'slack']),   // platform origin
+      externalSource:       a.enum(['gmail', 'slack', 'manual']),   // platform origin
       externalId:           a.string(),        // dedup key: "channelId:ts" or legacy gmailMessageId
       externalUrl:          a.string(),        // Slack permalink or Gmail link
       slackChannelId:       a.string(),        // Slack channel ID (slack only)
