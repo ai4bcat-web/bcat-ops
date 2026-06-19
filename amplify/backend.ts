@@ -9,6 +9,7 @@ import { data } from './data/resource'
 import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
+import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
@@ -25,6 +26,7 @@ const backend = defineBackend({
   storage,
   userManagement,
   slackIntakeWebhook,
+  gmailTaskIntake,
   slackStatusNotifier,
   fuelImport,
   generateRecurringExpenses,
@@ -88,6 +90,32 @@ const slackWebhookUrl = new FunctionUrl(webhookFn.stack, 'SlackIntakeWebhookUrl'
 new CfnOutput(webhookFn.stack, 'SlackIntakeWebhookFunctionUrl', {
   value:       slackWebhookUrl.url,
   description: 'Paste into Slack App → Event Subscriptions → Request URL',
+})
+
+// ── gmailTaskIntake Lambda (tasks@ email → IntakeItem + Slack #intake-ivan) ──
+
+const gmailTaskFn = backend.gmailTaskIntake.resources.lambda as LambdaFunction
+
+backend.gmailTaskIntake.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:PutItem'],   // dedup via conditional put
+    resources: [intakeTable.tableArn],
+  })
+)
+
+gmailTaskFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
+// Plain env var (not a secret) so a missing channel never blocks the deploy — set
+// INTAKE_IVAN_CHANNEL_ID in the Amplify Console env to enable the Slack post.
+gmailTaskFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? '')
+
+const gmailTaskUrl = new FunctionUrl(gmailTaskFn.stack, 'GmailTaskIntakeUrl', {
+  function: gmailTaskFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+
+new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
+  value:       gmailTaskUrl.url,
+  description: 'POST tasks@ emails here from the Apps Script (JSON with the shared secret)',
 })
 
 // ── slackStatusNotifier Lambda (custom AppSync mutation handler) ───────────
