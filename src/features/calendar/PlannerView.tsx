@@ -19,6 +19,7 @@ import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
+import { computeMoveDates, computeStopMove, type MoveRole } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, ApptType, Stop } from '@/types'
@@ -901,15 +902,52 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
     return m
   }, [entriesByDay, unscheduledEntries])
 
+  // Map row key → full entry (role/stop) so a drop onto a day can compute the new appt.
+  const keyToEntry = useMemo(() => {
+    const m = new Map<string, DayEntry>()
+    for (const arr of entriesByDay.values()) for (const e of arr) m.set(e.key, e)
+    for (const e of unscheduledEntries) m.set(e.key, e)
+    return m
+  }, [entriesByDay, unscheduledEntries])
+
   // Per-day local drag-to-reorder (session state, keys are DayEntry.key)
   const [dayOrder, setDayOrder]     = useState<Map<string, string[]>>(new Map())
   const dragKey  = useRef<string | null>(null)
   const dragDay  = useRef<string | null>(null)
+  const dragFromUnsched = useRef(false)
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+  const [dropDay, setDropDay] = useState<string | null>(null)
 
   const handleDragStart = useCallback((day: string, key: string) => {
-    dragKey.current = key; dragDay.current = day
+    dragKey.current = key; dragDay.current = day; dragFromUnsched.current = false
   }, [])
+
+  // Dragging a parked load out of the Unscheduled section.
+  const handleUnschedDragStart = useCallback((key: string) => {
+    dragKey.current = key; dragDay.current = null; dragFromUnsched.current = true
+  }, [])
+
+  // Drop a load onto a day → schedule it there (unscheduled: false + shift its appt).
+  // Within-day drops are reorders and are handled by handleDragEnd instead.
+  const handleDayDrop = useCallback((targetDayStr: string) => {
+    const key = dragKey.current
+    setDropDay(null)
+    if (!key) return
+    const fromUnsched = dragFromUnsched.current
+    const sameDay = dragDay.current === targetDayStr
+    if (!fromUnsched && sameDay) return // pure reorder — leave to handleDragEnd
+    const entry = keyToEntry.get(key)
+    if (!entry) return
+    const load = loads.find((l) => l.id === entry.load.id)
+    if (load) {
+      const patch = entry.stop
+        ? computeStopMove(load, entry.stop, targetDayStr)
+        : computeMoveDates(load, entry.role as MoveRole, targetDayStr)
+      updateLoad(load.id, { unscheduled: false, sortOrder: null, ...patch })
+    }
+    dragKey.current = null; dragDay.current = null; dragFromUnsched.current = false
+    setDragOverKey(null); setDayOrder(new Map())
+  }, [keyToEntry, loads, updateLoad])
 
   const handleDragEnter = useCallback((day: string, key: string) => {
     if (dragKey.current === key || dragDay.current !== day) return
@@ -944,7 +982,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         }
       }
     }
-    dragKey.current = null; dragDay.current = null; setDragOverKey(null)
+    dragKey.current = null; dragDay.current = null; dragFromUnsched.current = false; setDragOverKey(null)
     setDayOrder((prev) => {
       if (!day || !prev.has(day)) return prev
       const next = new Map(prev); next.delete(day); return next
@@ -1023,9 +1061,9 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
             dragOver={false}
             selected={selectedLoadIds.includes(entry.load.id)}
             selectedIds={selectedLoadIds}
-            onDragStart={() => {}}
+            onDragStart={(k) => handleUnschedDragStart(k)}
             onDragEnter={() => {}}
-            onDragEnd={() => {}}
+            onDragEnd={handleDragEnd}
             onSelect={handleSelect}
           />
         ))}
@@ -1050,7 +1088,24 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         const isToday   = dayStr === todayStr
         const dayStrips = availStripsByDay.get(dayStr ?? '') ?? []
         return (
-          <div key={di} className="shrink-0" style={{ borderBottom: '1px solid var(--ds-border)' }}>
+          <div
+            key={di}
+            className="shrink-0"
+            style={{
+              borderBottom: '1px solid var(--ds-border)',
+              background: dropDay === dayStr ? 'rgba(34,197,94,0.08)' : undefined,
+              outline: dropDay === dayStr ? '2px solid #22c55e' : undefined, outlineOffset: -2,
+            }}
+            onDragOver={(e) => {
+              // Only show the schedule target for cross-day / unscheduled drags.
+              if (!dragKey.current) return
+              if (!dragFromUnsched.current && dragDay.current === dayStr) return
+              e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+              if (dropDay !== dayStr) setDropDay(dayStr ?? null)
+            }}
+            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropDay(null) }}
+            onDrop={(e) => { e.preventDefault(); handleDayDrop(dayStr ?? '') }}
+          >
             <div
               className="flex items-center gap-2 px-2 sticky z-10"
               style={{
