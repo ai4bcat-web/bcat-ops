@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
@@ -68,19 +68,20 @@ export function FleetPLTrendChart() {
 
       <div style={{ padding: '16px 12px 8px' }}>
         <ResponsiveContainer width="100%" height={260}>
-          <LineChart data={series} margin={{ top: 6, right: 16, bottom: 0, left: 4 }}>
+          <BarChart data={series} margin={{ top: 6, right: 16, bottom: 0, left: 4 }} barGap={2} barCategoryGap="22%">
             <CartesianGrid stroke="rgba(15,23,42,0.05)" strokeDasharray="3 4" vertical={false} />
             <XAxis dataKey="label" tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} />
             <YAxis tickFormatter={(v) => usdCompact.format(v)} tick={{ fill: '#6b7588', fontSize: 11 }} axisLine={false} tickLine={false} width={56} />
             <Tooltip
+              cursor={{ fill: 'rgba(15,23,42,0.04)' }}
               formatter={(value) => usd0.format(Number(value))}
               contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, boxShadow: 'var(--sh-md)' }}
             />
-            <Legend wrapperStyle={{ fontSize: 12 }} iconType="plainline" />
-            <Line type="monotone" dataKey="revenue"  name="Revenue"  stroke={COLORS.revenue}  strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-            <Line type="monotone" dataKey="expenses" name="Expenses" stroke={COLORS.expenses} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-            <Line type="monotone" dataKey="profit"   name="Profit"   stroke={COLORS.profit}   strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-          </LineChart>
+            <Legend wrapperStyle={{ fontSize: 12 }} iconType="rect" />
+            <Bar dataKey="revenue"  name="Revenue"  fill={COLORS.revenue}  radius={[3, 3, 0, 0]} />
+            <Bar dataKey="expenses" name="Expenses" fill={COLORS.expenses} radius={[3, 3, 0, 0]} />
+            <Bar dataKey="profit"   name="Profit"   fill={COLORS.profit}   radius={[3, 3, 0, 0]} />
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
