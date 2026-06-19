@@ -12,6 +12,7 @@ const ROUTE_LABELS: Record<string, string> = {
   trucks:      'Fleet',
   maintenance: 'Maintenance',
   expenses:    'Expenses',
+  finances:    'Finances',
   schedule:    'Schedules',
   'audit-log': 'Audit Log',
   users:       'Users',

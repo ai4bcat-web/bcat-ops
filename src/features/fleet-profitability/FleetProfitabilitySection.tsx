@@ -156,6 +156,23 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
         </table>
       </div>
 
+      {/* Revenue that didn't land on a truck — broker-covered (excluded) + unassigned */}
+      {data?.revenueLeakage && (data.revenueLeakage.unattributed > 0 || data.revenueLeakage.broker > 0) && (
+        <div style={{ padding: '8px 18px', borderTop: '1px solid var(--ds-border)', display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12, color: 'var(--ds-t3)' }}>
+          {data.revenueLeakage.unattributed > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} title="Delivered by a company driver who has no assigned truck — assign a truck in Drivers to capture this.">
+              <AlertCircle size={12} style={{ color: '#b45309' }} />
+              Unattributed (no truck assigned): <strong style={{ color: '#b45309', fontVariantNumeric: 'tabular-nums' }}>{money(data.revenueLeakage.unattributed)}</strong>
+            </span>
+          )}
+          {data.revenueLeakage.broker > 0 && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} title="Loads covered by a broker / 3PL — intentionally excluded from truck revenue.">
+              Broker-covered (excluded): <strong style={{ color: 'var(--ds-t2)', fontVariantNumeric: 'tabular-nums' }}>{money(data.revenueLeakage.broker)}</strong>
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Weekly P&L — expenses aggregated by category, subtracted from revenue */}
       <div style={{ borderTop: '1px solid var(--ds-border)' }}>
         <SectionTitle>Expenses by category · weekly P&amp;L</SectionTitle>

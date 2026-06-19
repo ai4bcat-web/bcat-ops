@@ -18,8 +18,6 @@ import { OpenTasksWidget } from './OpenTasksWidget'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { TruckMapWidget } from './TruckMapWidget'
 import { TruckMilesWidget } from './TruckMilesWidget'
-import { FleetProfitabilitySection } from '@/features/fleet-profitability/FleetProfitabilitySection'
-import { MonthlyFleetPL } from '@/features/fleet-profitability/MonthlyFleetPL'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -258,13 +256,7 @@ export function DashboardPage() {
           <TruckMilesWidget />
         </div>
 
-        {/* ── Weekly fleet profitability (under fleet tracking) ─────────────── */}
-        <FleetProfitabilitySection />
-
-        {/* ── Monthly fleet P&L (Ivan/Local by default) ────────────────────── */}
-        <MonthlyFleetPL />
-
-        {/* ── Compliance alerts (under profitability) ───────────────────────── */}
+        {/* ── Compliance alerts ─────────────────────────────────────────────── */}
         <ComplianceAlertsWidget />
 
         {/* ── Charts row ───────────────────────────────────────────────────── */}

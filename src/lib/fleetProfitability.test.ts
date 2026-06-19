@@ -148,6 +148,23 @@ describe('calcFleetProfitability', () => {
     expect(r.rollup.revenue).toBe(2500)
   })
 
+  it('excludes broker-covered revenue from trucks and surfaces leakage buckets', () => {
+    const loads: LoadInput[] = [
+      { truckId: null, deliveryDriverId: 'drv-ivan',   rate: 200_000, deliveryAppt: '2026-06-03' }, // → 530
+      { truckId: null, deliveryDriverId: 'drv-broker', rate: 500_000, deliveryAppt: '2026-06-03' }, // broker → excluded
+      { truckId: null, deliveryDriverId: 'drv-orphan', rate: 100_000, deliveryAppt: '2026-06-03' }, // company, no truck → unattributed
+    ]
+    const assignments: DriverAssignmentInput[] = [
+      { driverId: 'drv-ivan',   assignedTruckId: TRUCK_530 },
+      { driverId: 'drv-broker', assignedTruckId: null, isBroker: true },
+      { driverId: 'drv-orphan', assignedTruckId: null },
+    ]
+    const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], assignments)
+    expect(r.rollup.revenue).toBe(2000)            // only the 530 load
+    expect(r.revenueLeakage.broker).toBe(5000)     // broker excluded from trucks
+    expect(r.revenueLeakage.unattributed).toBe(1000)
+  })
+
   it('returns null per-mile metrics when there are zero miles', () => {
     const loads: LoadInput[] = [{ truckId: TRUCK_530, rate: 100_000, deliveryAppt: '2026-06-03' }]
     const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], [])

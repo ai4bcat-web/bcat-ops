@@ -70,6 +70,8 @@ export interface DriverPayInput {
 export interface DriverAssignmentInput {
   driverId:        string
   assignedTruckId?: string | null
+  /** Broker / 3PL driver — their covered loads are excluded from truck revenue. */
+  isBroker?:       boolean
 }
 
 export interface TruckMileageDayInput {
@@ -128,6 +130,12 @@ export interface FleetProfitabilityResult {
     /** Non-fuel expenses split by category; sums to `otherExpenses`. */
     categories:     ExpenseCategoryBreakdown
   }
+  /**
+   * Delivered-load revenue (in range) that did NOT land on a member truck:
+   *  • broker — covered by a broker/3PL driver (intentionally excluded from trucks)
+   *  • unattributed — a company driver delivered it but has no assigned truck
+   */
+  revenueLeakage: { broker: number; unattributed: number }
 }
 
 /** A load's delivery DATE (YYYY-MM-DD), tolerant of full ISO datetimes. */
@@ -184,21 +192,37 @@ export function calcFleetProfitability(
 
   // ── Driver → assigned truck map (used for BOTH revenue attribution and pay) ───
   const truckForDriver = new Map<string, string>()
+  const brokerDrivers = new Set<string>()
   for (const a of driverAssignments) {
     if (a.assignedTruckId) truckForDriver.set(a.driverId, a.assignedTruckId)
+    if (a.isBroker) brokerDrivers.add(a.driverId)
   }
 
   // ── Revenue per truck: full rate → delivery day (dollars), attributed to the
   //    truck of the load's DELIVERY driver (Driver.assignedTruckId), falling back to
-  //    an explicit load.truckId. This is why a truck's revenue follows the driver who
-  //    delivered the load, even though loads carry deliveryDriverId, not truckId. ───
+  //    an explicit load.truckId. Loads covered by a BROKER are excluded from trucks
+  //    (tracked as broker leakage); company-driver loads with no assigned truck are
+  //    tracked as unattributed leakage so dispatch gaps are visible. ────────────────
   const revenueByTruck: Record<string, number> = {}
+  let brokerRevenue = 0
+  let unattributedRevenue = 0
   for (const load of loads) {
-    const truckId = load.truckId ?? (load.deliveryDriverId ? truckForDriver.get(load.deliveryDriverId) : undefined)
-    if (!truckId || !memberIds.has(truckId)) continue
     const d = deliveryDate(load)
     if (d < range.start || d > range.end) continue
-    revenueByTruck[truckId] = (revenueByTruck[truckId] ?? 0) + (load.rate ?? 0) / 100
+    const rev = (load.rate ?? 0) / 100
+    const driverId = load.deliveryDriverId ?? undefined
+
+    // Broker-covered loads never count toward a truck's revenue.
+    if (driverId && brokerDrivers.has(driverId)) { brokerRevenue += rev; continue }
+
+    const truckId = load.truckId ?? (driverId ? truckForDriver.get(driverId) : undefined)
+    if (truckId && memberIds.has(truckId)) {
+      revenueByTruck[truckId] = (revenueByTruck[truckId] ?? 0) + rev
+    } else if (driverId && !truckForDriver.has(driverId)) {
+      // A company driver delivered it but has no assigned truck at all → unattributed.
+      // (Loads on trucks in OTHER fleet groups are left to that group, not counted here.)
+      unattributedRevenue += rev
+    }
   }
 
   // ── Miles per truck: sum DAY rows in range ───────────────────────────────────
@@ -290,5 +314,6 @@ export function calcFleetProfitability(
       fuelPerMile:    miles > 0 ? fuel / miles : null,
       categories,
     },
+    revenueLeakage: { broker: brokerRevenue, unattributed: unattributedRevenue },
   }
 }

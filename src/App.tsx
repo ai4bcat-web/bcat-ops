@@ -10,6 +10,7 @@ import { GridPage } from '@/features/grid/GridPage'
 import { DriversPage } from '@/features/drivers/DriversPage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { ExpensesPage } from '@/features/expenses/ExpensesPage'
+import { FinancesPage } from '@/features/finances/FinancesPage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/trucks" element={<TrucksPage />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/expenses" element={<ExpensesPage />} />
+              <Route path="/finances" element={<FinancesPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/audit-log" element={<AuditPage />} />
               <Route path="/intake"   element={<IntakePage />} />
