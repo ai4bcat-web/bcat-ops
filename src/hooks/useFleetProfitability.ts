@@ -88,7 +88,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
 
   const data = useMemo<FleetProfitabilityResult | null>(() => {
     if (members.length === 0) {
-      return { range, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } } }
+      return { range, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } }, revenueLeakage: { broker: 0, unattributed: 0 } }
     }
 
     // Fold MaintenanceInvoice rows (amount in CENTS, attributed to the equipment they
@@ -117,7 +117,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       expenseTypes,
       mileage.rows.map((m) => ({ truckId: m.truckId, periodStart: m.periodStart, periodType: m.periodType, miles: m.miles })),
       pay.payPeriods.map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay })),
-      drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId })),
+      drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker' })),
     )
   }, [range, members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices])
 

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, DollarSign, MessageSquare, History,
-  ShieldCheck, ClipboardCheck, type LucideIcon,
+  ShieldCheck, ClipboardCheck, LineChart, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -38,6 +38,7 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: '/trucks',      label: 'Fleet',        icon: Truck,           pageKey: 'trucks' },
     { to: '/maintenance', label: 'Maintenance',  icon: Wrench,          pageKey: 'maintenance',     badgeKey: 'maintenance' },
     { to: '/expenses',    label: 'Expenses',     icon: DollarSign,      pageKey: 'expenses' },
+    { to: '/finances',    label: 'Finances',     icon: LineChart,       pageKey: 'finances' },
   ],
   [
     { to: '/compliance',        label: 'Compliance',   icon: ShieldCheck,    pageKey: 'compliance' },
