@@ -87,7 +87,7 @@ export function MonthlyFleetPL() {
 
   const range = monthRange(monthOffset)
   const { data, members, loading, refresh } = useFleetProfitability(range, group)
-  const { monthlyAmounts, contributionInRange, setMonthlyAmount } = useFleetFixedCosts()
+  const { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount } = useFleetFixedCosts()
   const { equipment } = useTrucks()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
   const r = data?.rollup
@@ -105,6 +105,7 @@ export function MonthlyFleetPL() {
   }, [equipment, maintenanceInvoices, range.start, range.end])
 
   const contrib = useMemo(() => contributionInRange(range), [contributionInRange, range])
+  const eld = useMemo(() => eldInRange(range), [eldInRange, range])
 
   const handleEdit = (key: FleetFixedCostKey) => (n: number) => { void setMonthlyAmount(key, n) }
 
@@ -117,11 +118,11 @@ export function MonthlyFleetPL() {
     const tolls = contrib.tolls
     const loanTrucks = Math.max(0, c.financing - loanTrailers)
     const maintenance = c.maintenance + trailerMaintenance
-    const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent) + Math.max(0, c.tolls - tolls)
-    const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + maintenance + c.insurance + tolls + c.permits + other
+    const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent - eld) + Math.max(0, c.tolls - tolls)
+    const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + eld + maintenance + c.insurance + tolls + c.permits + other
     const net = r.revenue - totalExpenses
-    return { loanTrucks, loanTrailers, trailerLease, yardRent, tolls, maintenance, other, totalExpenses, net }
-  }, [r, c, contrib, trailerMaintenance])
+    return { loanTrucks, loanTrailers, trailerLease, yardRent, tolls, eld, maintenance, other, totalExpenses, net }
+  }, [r, c, contrib, eld, trailerMaintenance])
 
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
 
@@ -188,6 +189,7 @@ export function MonthlyFleetPL() {
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Loan — trailers" amount={monthlyAmounts.loanTrailers} onCommit={handleEdit('loanTrailers')} /> : <CostRow label="Loan — trailers" value={lines.loanTrailers} />}
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Trailer lease" amount={monthlyAmounts.trailerLease} onCommit={handleEdit('trailerLease')} /> : <CostRow label="Trailer lease" value={lines.trailerLease} />}
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Yard rent" amount={monthlyAmounts.yardRent} onCommit={handleEdit('yardRent')} /> : <CostRow label="Yard rent" value={lines.yardRent} />}
+            <CostRow label="ELD" value={lines.eld} hint="per-truck, set in Fleet" />
             <CostRow label="Maintenance" value={lines.maintenance} hint="trucks + all trailers" />
             <CostRow label="Insurance" value={c!.insurance} />
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Tolls" amount={monthlyAmounts.tolls} onCommit={handleEdit('tolls')} /> : <CostRow label="Tolls" value={lines.tolls} />}
