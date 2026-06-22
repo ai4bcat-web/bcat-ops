@@ -2,6 +2,7 @@ import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction } from '@/types'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
+import { fuelDedupKey } from '@/lib/driverFuel'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
@@ -390,9 +391,10 @@ export async function deleteFuelTransaction(id: string): Promise<void> {
 }
 
 /**
- * One-time cleanup: finds and deletes duplicate FuelTransaction records.
- * Keeps the oldest record (smallest createdAt) for each dedup key.
- * Dedup key: transactionDate|cardNumber|invoiceNumber|fuelType|amount
+ * One-time cleanup: finds and deletes duplicate FuelTransaction records, keeping the
+ * oldest (smallest createdAt) of each. Uses the shared invoice-agnostic identity
+ * (date|card|fuelType|amount|gallons) so the same fill re-imported with a different
+ * invoice number is recognised as a duplicate.
  *
  * Returns counts of removed vs kept records.
  */
@@ -405,29 +407,27 @@ export async function cleanupDuplicateFuelTransactions(): Promise<{ removed: num
   const sorted = [...all].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 
   for (const tx of sorted) {
-    const key = `${tx.transactionDate}|${tx.cardNumber}|${tx.invoiceNumber ?? ''}|${tx.fuelType}|${tx.amount}`
-    if (seen.has(key)) {
-      toDelete.push(tx.id)
-    } else {
-      seen.set(key, tx)
-    }
+    const key = fuelDedupKey(tx)
+    if (seen.has(key)) toDelete.push(tx.id)
+    else seen.set(key, tx)
   }
 
   console.log(`[cleanupDuplicates] ${all.length} total, ${toDelete.length} duplicates to remove`)
-  for (const id of toDelete) {
-    await deleteFuelTransaction(id)
-    console.log(`[cleanupDuplicates] deleted ${id}`)
-  }
-
+  for (const id of toDelete) await deleteFuelTransaction(id)
   return { removed: toDelete.length, kept: seen.size }
 }
 
-/** Check for existing transactions matching the dedup key to skip duplicates */
+/**
+ * Is this fill already stored? Matches on the invoice-agnostic identity
+ * (date + card + fuelType + amount + gallons) so the same fill re-uploaded with a
+ * different invoice number is still skipped.
+ */
 export async function checkFuelTxExists(
   transactionDate: string,
   cardNumber: string,
-  invoiceNumber: string,
   fuelType: string,
+  amount: number,
+  quantity: number,
 ): Promise<boolean> {
   const result = await client.graphql({
     query: `query ListFuelTransactions($filter: ModelFuelTransactionFilterInput) {
@@ -437,8 +437,9 @@ export async function checkFuelTxExists(
       filter: {
         transactionDate: { eq: transactionDate },
         cardNumber:      { eq: cardNumber },
-        invoiceNumber:   { eq: invoiceNumber },
         fuelType:        { eq: fuelType },
+        amount:          { eq: amount },
+        quantity:        { eq: quantity },
       },
     },
   }) as { data: { listFuelTransactions: { items: { id: string }[] } } }

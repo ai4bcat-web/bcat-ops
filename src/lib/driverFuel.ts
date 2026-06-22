@@ -37,8 +37,11 @@ export function isFuelTx(tx: Pick<FuelTransaction, 'itemCategory' | 'fuelType'>)
  * the duplicate through. Date + card + fuel type + amount + gallons fingerprints a
  * fill on its own; two genuinely separate fills (e.g. a second stop the same day)
  * differ in amount or gallons and are kept.
+ *
+ * Shared by the per-driver fuel match, the import-time skip, and the duplicate
+ * cleanup so they all agree on what "the same transaction" means.
  */
-function fuelKey(tx: FuelTransaction): string {
+export function fuelDedupKey(tx: Pick<FuelTransaction, 'transactionDate' | 'cardNumber' | 'fuelType' | 'amount' | 'quantity'>): string {
   return `${tx.transactionDate}|${normalizeCard(tx.cardNumber)}|${tx.fuelType}|${tx.amount}|${tx.quantity}`
 }
 
@@ -60,7 +63,7 @@ export function matchedFuelForCard(
     if (normalizeCard(tx.cardNumber) !== want) continue
     if (!isFuelTx(tx)) continue
     if (tx.transactionDate < startIso || tx.transactionDate > endIso) continue
-    const key = fuelKey(tx)
+    const key = fuelDedupKey(tx)
     if (seen.has(key)) continue
     seen.add(key)
     out.push(tx)

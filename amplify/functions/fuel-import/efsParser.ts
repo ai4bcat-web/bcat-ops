@@ -273,6 +273,8 @@ export function parseEfsReport(text: string): ParsedFuelTransaction[] {
   return transactions
 }
 
-export function dedupKey(tx: Pick<ParsedFuelTransaction, 'transactionDate' | 'cardNumber' | 'invoiceNumber' | 'fuelType'>): string {
-  return `${tx.transactionDate}|${tx.cardNumber}|${tx.invoiceNumber}|${tx.fuelType}`
+// Invoice-agnostic: the same fill re-imported from two reports can carry different
+// invoice numbers, so identity is date|card|fuelType|amount|gallons instead.
+export function dedupKey(tx: Pick<ParsedFuelTransaction, 'transactionDate' | 'cardNumber' | 'fuelType' | 'amount' | 'quantity'>): string {
+  return `${tx.transactionDate}|${tx.cardNumber}|${tx.fuelType}|${tx.amount}|${tx.quantity}`
 }

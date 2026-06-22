@@ -5,13 +5,14 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { parseEfsTransactionReport, fuelTxDedupKey } from '@/lib/parsers/efsTransactionReport'
 import type { ItemCategory } from '@/lib/parsers/efsTransactionReport'
-import { createFuelTransaction, checkFuelTxExists } from '@/lib/apiClient'
+import { createFuelTransaction, checkFuelTxExists, cleanupDuplicateFuelTransactions } from '@/lib/apiClient'
 import type { FuelTransaction } from '@/lib/apiClient'
 import type { Equipment } from '@/types/equipment'
 
 interface Props {
   trucks: Equipment[]
   onImported: (added: FuelTransaction[]) => void
+  onChanged?: () => void   // refetch after a non-import change (duplicate cleanup)
   onClose: () => void
 }
 
@@ -48,7 +49,7 @@ function fmtMoney(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 }
 
-export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
+export function FuelUploadModal({ trucks, onImported, onChanged, onClose }: Props) {
   const [step, setStep] = useState<'select' | 'preview' | 'importing' | 'done'>('select')
   const [dragOver, setDragOver] = useState(false)
   const [preview, setPreview] = useState<PreviewRow[]>([])
@@ -57,7 +58,21 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
   const [parseError, setParseError] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
   const [importProgress, setImportProgress] = useState(0)
+  const [cleaning, setCleaning] = useState(false)
+  const [cleanupMsg, setCleanupMsg] = useState<string | null>(null)
   const fileRef = useRef<File | null>(null)
+
+  const runCleanup = useCallback(async () => {
+    if (!window.confirm('Scan all fuel transactions and delete duplicate fills (same date, card, fuel type, amount and gallons)? The original of each is kept. This can\'t be undone.')) return
+    setCleaning(true); setCleanupMsg(null)
+    try {
+      const { removed, kept } = await cleanupDuplicateFuelTransactions()
+      setCleanupMsg(removed === 0 ? `No duplicates found — ${kept} transactions are all unique.` : `Removed ${removed} duplicate${removed === 1 ? '' : 's'}; ${kept} unique transactions kept.`)
+      if (removed > 0) onChanged?.()
+    } catch (err) {
+      setCleanupMsg(`Cleanup failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally { setCleaning(false) }
+  }, [onChanged])
 
   const processFile = useCallback(async (file: File) => {
     setParseError(null)
@@ -98,7 +113,7 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
       const checked: PreviewRow[] = []
       for (const row of rows) {
         const exists = await checkFuelTxExists(
-          row.transactionDate, row.cardNumber, row.invoiceNumber, row.fuelType,
+          row.transactionDate, row.cardNumber, row.fuelType, row.amount, row.quantity,
         )
         if (exists) { dupes++; continue }
         checked.push(row)
@@ -226,6 +241,22 @@ export function FuelUploadModal({ trucks, onImported, onClose }: Props) {
                   <pre className="whitespace-pre-wrap font-sans">{parseError}</pre>
                 </div>
               )}
+
+              {/* Maintenance: one-click duplicate cleanup */}
+              <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+                <div className="text-xs text-muted-foreground">
+                  Already imported the same report twice? Remove duplicate fills.
+                  {cleanupMsg && <span className="block mt-1 text-foreground font-medium">{cleanupMsg}</span>}
+                </div>
+                <button
+                  onClick={runCleanup}
+                  disabled={cleaning}
+                  className="shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                >
+                  {cleaning ? <Loader2 className="size-3.5 animate-spin" /> : <AlertTriangle className="size-3.5" />}
+                  {cleaning ? 'Cleaning…' : 'Remove duplicates'}
+                </button>
+              </div>
             </div>
           )}
 
