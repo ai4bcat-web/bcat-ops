@@ -434,16 +434,14 @@ payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS 
 // ── paychexPaySync Lambda (weekly Paychex Flex → DriverPayPeriod) ───────────
 
 const paychexFn      = backend.paychexPaySync.resources.lambda as LambdaFunction
-const driverTable    = backend.data.resources.tables['Driver']
 const driverPayTable = backend.data.resources.tables['DriverPayPeriod']
 backend.paychexPaySync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
-    resources: [driverTable.tableArn, driverPayTable.tableArn],
+    actions:   ['dynamodb:PutItem'],
+    resources: [driverPayTable.tableArn],
   })
 )
-paychexFn.addEnvironment('DRIVER_TABLE_NAME', driverTable.tableName)
-paychexFn.addEnvironment('PAY_TABLE_NAME',    driverPayTable.tableName)
+paychexFn.addEnvironment('PAY_TABLE_NAME', driverPayTable.tableName)
 // Paychex company id is an account number (not a secret) — set as a plain env var.
 paychexFn.addEnvironment('PAYCHEX_COMPANY_ID', process.env.PAYCHEX_COMPANY_ID ?? '')
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
