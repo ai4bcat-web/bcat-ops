@@ -11,14 +11,12 @@ import {
 import { KpiCard } from '@/components/ui/kpi-card'
 import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
-import { useFuelTransactions } from '@/hooks/useFuelTransactions'
 import { useAppStore } from '@/store/useAppStore'
-import { FuelWidget } from './FuelWidget'
-import { OpenTasksWidget } from './OpenTasksWidget'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { TruckMapWidget } from './TruckMapWidget'
 import { TruckMilesWidget } from './TruckMilesWidget'
 import { PerMileWidget } from './PerMileWidget'
+import { DieselPriceWidget } from './DieselPriceWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -139,7 +137,6 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 export function DashboardPage() {
   const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-month')
   const metrics = useDashboardMetrics(rangeKey)
-  const { transactions: fuelTxs, loading: fuelLoading } = useFuelTransactions()
   const loads = useAppStore((s) => s.loads)
   const navigate = useNavigate()
   const isMobile = useIsMobile()
@@ -256,6 +253,9 @@ export function DashboardPage() {
           <TruckMapWidget />
           <TruckMilesWidget />
         </div>
+
+        {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
+        <DieselPriceWidget />
 
         {/* ── Per-truck revenue & fuel per mile (Ivan fleet) ────────────────── */}
         <PerMileWidget />
@@ -488,12 +488,6 @@ export function DashboardPage() {
               </div>
             </div>
           </Card>
-        </div>
-
-        {/* ── Bottom row: Fuel · Open Tasks ─────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? 'repeat(2, minmax(0, 1fr))', gap: 16 }}>
-          <FuelWidget transactions={fuelTxs} loading={fuelLoading} />
-          <OpenTasksWidget />
         </div>
 
       </div>
