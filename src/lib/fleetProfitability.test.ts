@@ -175,6 +175,15 @@ describe('calcFleetProfitability', () => {
     expect(r.trucks.find((t) => t.truckId === TRUCK_530)!.miles).toBe(350)
   })
 
+  it('adds a combined fleet pay entry to driver cost without per-truck attribution', () => {
+    const pay: DriverPayInput[] = [
+      { driverId: 'fleet-combined:LOCAL', periodStart: '2026-06-01', periodEnd: '2026-06-14', grossPay: 2800, combined: true },
+    ]
+    const r = calcFleetProfitability(RANGE, members, [], [], [], noRecurring, allocations, expenseTypes, [], pay, [])
+    expect(r.rollup.driverCost).toBeCloseTo(1400)                 // 2800 × 7/14 days, fleet-level
+    expect(r.trucks.every((t) => t.driverCost === 0)).toBe(true)  // not attributed to any truck
+  })
+
   it('returns null per-mile metrics when there are zero miles', () => {
     const loads: LoadInput[] = [{ truckId: TRUCK_530, rate: 100_000, deliveryAppt: '2026-06-03' }]
     const r = calcFleetProfitability(RANGE, members, loads, [], [], noRecurring, allocations, expenseTypes, [], [], [])

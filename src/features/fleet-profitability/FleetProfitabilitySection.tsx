@@ -3,11 +3,12 @@ import { ChevronLeft, ChevronRight, Plus, TrendingUp, AlertCircle, Trash2 } from
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useDriverPay } from '@/hooks/useDriverPay'
 import { useDrivers } from '@/hooks/useDrivers'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { FLEET_GROUPS, FLEET_GROUP_LABELS, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import type { TruckProfitability, DateRange } from '@/lib/fleetProfitability'
 import { weekRange, weekLabel } from './weekRange'
 import { biweeklyPeriodOf } from '@/lib/payPeriods'
+import { useFleetFixedCosts } from '@/hooks/useFleetFixedCosts'
 import { DriverPayForm } from './DriverPayForm'
 
 function money(n: number): string {
@@ -45,6 +46,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
   // Driver pay is entered per 14-day pay period (anchored to 6/8–6/21), independent of
   // the viewed profitability week — so the entry form defaults to the current period.
   const payPeriod = biweeklyPeriodOf()
+  const { eldInRange } = useFleetFixedCosts()
+  const eld = eldInRange(range)
   const { data, loading, refresh: refreshProfitability } = useFleetProfitability(range, group)
   const { payPeriods, createPay, deletePay, refresh: refreshPay } = useDriverPay()
   const { drivers } = useDrivers()
@@ -65,7 +68,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
     refreshProfitability()
   }
 
-  const driverName = (id: string) => drivers.find((d) => d.id === id)?.name ?? id
+  const driverName = (id: string) =>
+    isCombinedPayDriverId(id) ? `All ${FLEET_GROUP_LABELS[group]} drivers (combined)` : (drivers.find((d) => d.id === id)?.name ?? id)
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -194,7 +198,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
             <CostRow label="Rent / lease — yard & trailer" value={r.categories.lease} />
             <CostRow label="Tolls" value={r.categories.tolls} />
             <CostRow label="Permits" value={r.categories.permits} />
-            <CostRow label="Other" value={r.categories.other} />
+            <CostRow label="ELD" value={eld} />
+            <CostRow label="Other" value={Math.max(0, r.categories.other - eld)} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
               <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(totalExpenses)}</span>
@@ -234,6 +239,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           onClose={() => setShowPayForm(false)}
           defaultStart={payPeriod.start}
           defaultEnd={payPeriod.end}
+          fleetGroup={group}
         />
       )}
     </div>

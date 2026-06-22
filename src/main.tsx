@@ -1,4 +1,6 @@
 import { Amplify } from 'aws-amplify'
+import { cognitoUserPoolsTokenProvider } from 'aws-amplify/auth/cognito'
+import { defaultStorage } from 'aws-amplify/utils'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
@@ -8,6 +10,12 @@ import App from './App'
 // For local dev, run: npx ampx sandbox
 import outputs from '../amplify_outputs.json'
 Amplify.configure(outputs as Parameters<typeof Amplify.configure>[0])
+
+// Persist the auth session in localStorage (NOT sessionStorage) so users stay logged
+// in across browser restarts/tab closes on mobile and desktop — until they explicitly
+// log out. The session lasts as long as the Cognito refresh token (60 days; set on the
+// user-pool client in amplify/backend.ts), refreshing the short-lived tokens silently.
+cognitoUserPoolsTokenProvider.setKeyValueStorage(defaultStorage)
 
 createRoot(document.getElementById('root')!).render(
   <App />

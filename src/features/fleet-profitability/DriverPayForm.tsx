@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import { useDrivers } from '@/hooks/useDrivers'
 import { driverPaySchema } from '@/lib/schemas'
+import { combinedPayDriverId, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import type { FleetGroup } from '@/types/equipment'
 import type { DriverPayPeriod } from '@/hooks/useDriverPay'
 
 interface Props {
@@ -10,13 +12,15 @@ interface Props {
   /** Prefill the period to the currently-viewed week. */
   defaultStart?: string
   defaultEnd?: string
+  /** Fleet the entry is for — enables a single "all {fleet} drivers combined" option. */
+  fleetGroup?: FleetGroup
 }
 
 const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.06em' }
 const inputStyle: React.CSSProperties = { height: 36, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)' }
 
 /** Manual biweekly driver-pay entry. `source` is fixed to MANUAL (Paychex is the seam). */
-export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd }: Props) {
+export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleetGroup = 'LOCAL' }: Props) {
   const { drivers } = useDrivers()
   const [form, setForm] = useState({
     driverId:    '',
@@ -76,9 +80,10 @@ export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd }: Pro
 
         <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <label style={labelStyle}>Driver *</label>
+            <label style={labelStyle}>Driver / fleet *</label>
             <select value={form.driverId} onChange={(e) => set('driverId', e.target.value)} style={inputStyle}>
               <option value="">— Select driver —</option>
+              <option value={combinedPayDriverId(fleetGroup)}>All {FLEET_GROUP_LABELS[fleetGroup]} drivers (combined)</option>
               {activeDrivers.map((d) => (
                 <option key={d.id} value={d.id}>{d.name}{d.assignedTruckId ? '' : ' (no truck assigned)'}</option>
               ))}

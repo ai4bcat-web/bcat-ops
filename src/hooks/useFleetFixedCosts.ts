@@ -13,7 +13,7 @@ import type { DateRange } from '@/lib/fleetProfitability'
  * each one's exact in-range contribution back via getFleetExpenses so the P&L can break the
  * lumped categories apart (truck-loan vs trailer-loan, trailer-lease, yard-rent).
  */
-export type FleetFixedCostKey = 'loanTrailers' | 'trailerLease' | 'yardRent'
+export type FleetFixedCostKey = 'loanTrailers' | 'trailerLease' | 'yardRent' | 'tolls'
 
 interface FixedCostDef { key: FleetFixedCostKey; name: string; label: string; category: ExpenseCategory }
 
@@ -21,6 +21,7 @@ export const FLEET_FIXED_COSTS: FixedCostDef[] = [
   { key: 'loanTrailers', name: 'Loan Trailers', label: 'Loan — trailers', category: 'FINANCING' },
   { key: 'trailerLease', name: 'Trailer Lease', label: 'Trailer lease',   category: 'LEASE' },
   { key: 'yardRent',     name: 'Yard Rent',     label: 'Yard rent',       category: 'OTHER' },
+  { key: 'tolls',        name: 'Tolls',         label: 'Tolls',           category: 'TOLLS' },
 ]
 
 function thisMonth(): string {
@@ -47,7 +48,7 @@ export function useFleetFixedCosts() {
 
   /** Current stored monthly amount per key (0 if never set) — drives the editor inputs. */
   const monthlyAmounts = useMemo(() => {
-    const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0 } as Record<FleetFixedCostKey, number>
+    const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0, tolls: 0 } as Record<FleetFixedCostKey, number>
     for (const def of FLEET_FIXED_COSTS) {
       const typeId = exp.expenseTypes.find((t) => t.name === def.name)?.id
       const rec = typeId ? exp.recurring.find((r) => r.expenseTypeId === typeId && r.active) : undefined
@@ -56,31 +57,47 @@ export function useFleetFixedCosts() {
     return out
   }, [exp.expenseTypes, exp.recurring])
 
+  /** Sum one expense type's projected + prorated contribution to [range] over the LOCAL fleet. */
+  const sumTypeOverFleet = useCallback(
+    (range: DateRange, typeId: string, category: ExpenseCategory): number => {
+      if (localTruckIds.length === 0) return 0
+      const allocations = exp.allocations.map((a) => ({ id: a.id, expenseTypeId: a.expenseTypeId, allocationMethod: a.allocationMethod, truckIds: a.truckIds ?? [] }))
+      const recurring = exp.recurring
+        .filter((r) => r.expenseTypeId === typeId)
+        .map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, monthlyAmount: r.monthlyAmount, startMonth: r.startMonth, endMonth: r.endMonth, active: r.active }))
+      const records = exp.records
+        .filter((r) => r.expenseTypeId === typeId)
+        .map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, amount: r.amount, periodMonth: r.periodMonth, transactionDate: r.transactionDate, directTruckId: r.directTruckId }))
+      const byTruck = getFleetExpenses(
+        range.start, range.end,
+        { fuelTxs: [], records, recurring, allocations, expenseTypes: [{ id: typeId, category }] },
+        { prorateMonthly: true },
+      )
+      return localTruckIds.reduce((s, id) => s + (byTruck[id]?.total ?? 0), 0)
+    },
+    [exp.allocations, exp.recurring, exp.records, localTruckIds],
+  )
+
   /** Each fixed cost's actual contribution to [range] (projected + prorated by the engine). */
   const contributionInRange = useCallback(
     (range: DateRange): Record<FleetFixedCostKey, number> => {
-      const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0 } as Record<FleetFixedCostKey, number>
-      if (localTruckIds.length === 0) return out
-      const allocations = exp.allocations.map((a) => ({ id: a.id, expenseTypeId: a.expenseTypeId, allocationMethod: a.allocationMethod, truckIds: a.truckIds ?? [] }))
+      const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0, tolls: 0 } as Record<FleetFixedCostKey, number>
       for (const def of FLEET_FIXED_COSTS) {
         const typeId = exp.expenseTypes.find((t) => t.name === def.name)?.id
-        if (!typeId) continue
-        const recurring = exp.recurring
-          .filter((r) => r.expenseTypeId === typeId)
-          .map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, monthlyAmount: r.monthlyAmount, startMonth: r.startMonth, endMonth: r.endMonth, active: r.active }))
-        const records = exp.records
-          .filter((r) => r.expenseTypeId === typeId)
-          .map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, amount: r.amount, periodMonth: r.periodMonth, transactionDate: r.transactionDate, directTruckId: r.directTruckId }))
-        const byTruck = getFleetExpenses(
-          range.start, range.end,
-          { fuelTxs: [], records, recurring, allocations, expenseTypes: [{ id: typeId, category: def.category }] },
-          { prorateMonthly: true },
-        )
-        out[def.key] = localTruckIds.reduce((s, id) => s + (byTruck[id]?.total ?? 0), 0)
+        if (typeId) out[def.key] = sumTypeOverFleet(range, typeId, def.category)
       }
       return out
     },
-    [exp.allocations, exp.expenseTypes, exp.recurring, exp.records, localTruckIds],
+    [exp.expenseTypes, sumTypeOverFleet],
+  )
+
+  /** The LOCAL fleet's combined per-truck ELD subscription cost for [range]. */
+  const eldInRange = useCallback(
+    (range: DateRange): number => {
+      const eldType = exp.expenseTypes.find((t) => t.name.trim().toLowerCase() === 'eld')
+      return eldType ? sumTypeOverFleet(range, eldType.id, 'OTHER') : 0
+    },
+    [exp.expenseTypes, sumTypeOverFleet],
   )
 
   /** Upsert a fixed monthly amount (auto-creating its type + fleet allocation on first edit). */
@@ -106,5 +123,5 @@ export function useFleetFixedCosts() {
     [exp, localTruckIds],
   )
 
-  return { monthlyAmounts, contributionInRange, setMonthlyAmount, typeIdFor }
+  return { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount, typeIdFor }
 }
