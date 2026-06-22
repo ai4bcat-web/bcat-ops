@@ -39,7 +39,7 @@ export const handler = async (event: { arguments: Args }) => {
   const filename = (a.filename?.trim() || 'pay-statement.pdf').replace(/[\r\n"]/g, '')
   const body =
     a.bodyText?.trim() ||
-    `Hi ${driverName.split(' ')[0]},\n\nAttached is your pay statement${periodLabel ? ` for ${periodLabel}` : ''}.\n\nReply to this email with any questions.\n\n— BCAT Logistics`
+    `Hi ${driverName.split(' ')[0]},\n\nAttached is your pay statement${periodLabel ? ` for ${periodLabel}` : ''}.\n\nReply to this email with any questions.\n\n— Ivan Cartage`
 
   const boundary = `=_bcatpay_${Date.now().toString(36)}`
   const raw =

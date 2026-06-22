@@ -10,7 +10,12 @@ import autoTable from 'jspdf-autotable'
 import type { DriverPayRow } from '@/hooks/useAmazonPay'
 import { tripPayAmount } from '@/lib/driverPay'
 import { weekLabelLong } from '@/features/driver-pay/week'
-import bcatLogo from '@/assets/bcat-logo.png'
+
+// Branding for the statement. To use an image logo instead of the text wordmark:
+// drop the file in src/assets, `import ivanLogo from '@/assets/ivan-cartage-logo.png'`
+// and set PAY_LOGO = ivanLogo below.
+const COMPANY_NAME = 'IVAN CARTAGE'
+const PAY_LOGO: string | null = null
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -40,12 +45,22 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   // ── Header band ────────────────────────────────────────────────────────────
   doc.setFillColor(0, 0, 0)
   doc.rect(0, 0, W, 70, 'F')
-  try {
-    const img = await loadImage(bcatLogo)
-    const h = 34
-    const w = (img.width / img.height) * h
-    doc.addImage(img, 'PNG', M, 18, w, h)
-  } catch { /* logo optional — header still renders */ }
+  if (PAY_LOGO) {
+    try {
+      const img = await loadImage(PAY_LOGO)
+      const h = 34
+      const w = (img.width / img.height) * h
+      doc.addImage(img, 'PNG', M, 18, w, h)
+    } catch { /* logo optional — wordmark fallback below */ }
+  }
+  if (!PAY_LOGO) {
+    doc.setTextColor(255, 255, 255)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(20)
+    doc.setCharSpace(1.5)
+    doc.text(COMPANY_NAME, M, 44)
+    doc.setCharSpace(0)
+  }
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(13)
@@ -61,7 +76,7 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(17)
   doc.text(driver.name, M, y)
-  const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross − expenses`
+  const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross - expenses`
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
   doc.setTextColor(107, 114, 128)
@@ -81,7 +96,7 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
     head: [['Load', 'Route', 'Miles', 'Freight', 'Rate/mi', 'Status', 'Amount']],
     body: trips.map((t) => [
       t.loadId || '—',
-      [t.origin, t.destination].filter(Boolean).join(' → ') || '—',
+      [t.origin, t.destination].filter(Boolean).join('  ->  ') || '—',
       t.miles != null ? t.miles.toLocaleString() : '—',
       money(t.freightAmount),
       t.ratePerMile != null ? `$${t.ratePerMile.toFixed(2)}` : '—',
@@ -152,7 +167,7 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   doc.setTextColor(156, 163, 175)
-  doc.text('BCAT Logistics — Operations Command Center', M, doc.internal.pageSize.getHeight() - 28)
+  doc.text('Ivan Cartage — driver settlement', M, doc.internal.pageSize.getHeight() - 28)
 
   return doc
 }

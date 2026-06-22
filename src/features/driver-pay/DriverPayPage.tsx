@@ -278,7 +278,7 @@ export function DriverPayPage() {
             defaultTo={r.setting.email || r.driver.email || ''}
             defaultCc={PAY_EMAIL_CC}
             defaultSubject={`Settlement — ${weekLabelLong(periodStart)}`}
-            defaultBody={`Hi ${firstName},\n\nPlease find your settlements for weeks ${start} through ${end} attached.\n\n— BCAT Logistics`}
+            defaultBody={`Hi ${firstName},\n\nPlease find your settlements for weeks ${start} through ${end} attached.\n\n— Ivan Cartage`}
             onSend={(fields) => handleSendEmail(r, fields)}
             onClose={() => setEmailFor(null)}
           />
