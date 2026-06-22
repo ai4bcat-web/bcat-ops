@@ -396,6 +396,28 @@ body {
 }
 .sidebar-logout:hover { background: var(--ds-bg-3); color: var(--foreground); }
 
+/* Collapse toggle — full-width rail button above the user footer. */
+.sidebar-collapse-btn {
+  display: flex; align-items: center; gap: 8px;
+  margin: 4px 10px 6px; padding: 7px 10px;
+  border: 1px solid var(--ds-border); border-radius: 8px; background: none;
+  color: var(--ds-muted); font-size: 12px; font-weight: 500; font-family: inherit;
+  cursor: pointer; flex-shrink: 0; transition: background 0.1s, color 0.1s;
+}
+.sidebar-collapse-btn:hover { background: var(--ds-bg-3); color: var(--foreground); }
+
+/* ── Collapsed rail (desktop only) ───────────────────────────────────────── */
+@media (min-width: 769px) {
+  .sidebar { transition: width 0.18s ease; }
+  .sidebar.collapsed { width: 64px; }
+  .sidebar.collapsed .sidebar-link {
+    justify-content: center; gap: 0;
+    padding-left: 0; padding-right: 0;
+    border-left-color: transparent;
+  }
+  .sidebar.collapsed .sidebar-collapse-btn { justify-content: center; padding-left: 0; padding-right: 0; }
+}
+
 /* ── Mobile drawer + responsive shell (≤768px) ───────────────────────────── */
 
 /* Backdrop behind the drawer; only rendered on mobile when the menu is open. */
@@ -431,6 +453,9 @@ body {
     box-shadow: 8px 0 28px rgba(0, 0, 0, 0.18);
   }
   .sidebar.open { transform: translateX(0); }
+
+  /* Collapse is a desktop affordance; the mobile drawer always shows full labels. */
+  .sidebar-collapse-btn { display: none; }
 
   .topbar { height: 56px; padding: 0 12px; }
 
