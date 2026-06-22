@@ -2,6 +2,7 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend'
 import { userManagement } from '../functions/userManagement/resource'
 import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
 import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
+import { driverPayEmailer } from '../functions/driver-pay-emailer/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -692,6 +693,24 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(onboardingEmailer)),
+
+  // Email a driver their weekly pay statement as a PDF attachment. The frontend
+  // builds the branded PDF (jsPDF) and passes it as base64; the Lambda wraps it in
+  // a MIME message and sends via SES.
+  sendDriverPayEmail: a
+    .mutation()
+    .arguments({
+      to:          a.string().required(),
+      driverName:  a.string(),
+      periodLabel: a.string(),
+      subject:     a.string(),
+      bodyText:    a.string(),
+      filename:    a.string(),
+      pdfBase64:   a.string().required(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(driverPayEmailer)),
 })
 
 export type Schema = ClientSchema<typeof schema>
