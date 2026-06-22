@@ -16,7 +16,10 @@ export const paychexPaySync = defineFunction({
   entry: './handler.ts',
   resourceGroupName: 'data',
   timeoutSeconds: 120,
-  schedule: 'every week',
+  // Payroll runs Wednesday → sync Thursday 13:00 UTC (~8am CT), once payroll is
+  // processed and the period reads as closed. Weekly + idempotent (off weeks just
+  // re-confirm the latest closed period).
+  schedule: '0 13 ? * 5 *',
   environment: {
     PAYCHEX_CLIENT_ID:     secret('PAYCHEX_CLIENT_ID'),
     PAYCHEX_CLIENT_SECRET: secret('PAYCHEX_CLIENT_SECRET'),
