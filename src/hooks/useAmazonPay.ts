@@ -38,6 +38,8 @@ export interface AmazonPayState {
   loading:     boolean
   error:       string | null
   rows:        DriverPayRow[]
+  /** Trips filed in the current pay week (across all drivers). */
+  tripCount:   number
   /** Drivers that don't yet have a pay setting (so you can configure them). */
   unconfigured: Driver[]
   refresh:     () => void
@@ -45,6 +47,8 @@ export interface AmazonPayState {
   addTrip:        (input: Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateTrip:     (id: string, patch: Partial<Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<void>
   removeTrip:     (id: string) => Promise<void>
+  /** Delete every trip in the current pay week. Returns how many were removed. */
+  clearWeek:      () => Promise<number>
   saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => Promise<void>
   addDeduction:   (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   removeDeduction:(id: string) => Promise<void>
@@ -121,6 +125,8 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
   }, [settings, drivers, trips, deductions, fuelTxs, periodStart, end])
 
+  const tripCount = useMemo(() => trips.filter((t) => t.periodStart === periodStart).length, [trips, periodStart])
+
   const unconfigured = useMemo(() => {
     const configured = new Set(settings.map((s) => s.driverId))
     return drivers.filter((d) => d.active !== false && !configured.has(d.id))
@@ -139,6 +145,12 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
     await deleteAmazonTrip(id)
     setTrips((p) => p.filter((t) => t.id !== id))
   }, [])
+  const clearWeek = useCallback(async () => {
+    const ids = trips.filter((t) => t.periodStart === periodStart).map((t) => t.id)
+    for (const id of ids) await deleteAmazonTrip(id)
+    setTrips((p) => p.filter((t) => t.periodStart !== periodStart))
+    return ids.length
+  }, [trips, periodStart])
   const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => {
     const existing = settings.find((s) => s.driverId === driverId)
     if (existing) {
@@ -158,5 +170,5 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
     setDeductions((p) => p.filter((d) => d.id !== id))
   }, [])
 
-  return { loading, error, rows, unconfigured, refresh: load, addTrip, updateTrip, removeTrip, saveSetting, addDeduction, removeDeduction }
+  return { loading, error, rows, tripCount, unconfigured, refresh: load, addTrip, updateTrip, removeTrip, clearWeek, saveSetting, addDeduction, removeDeduction }
 }
