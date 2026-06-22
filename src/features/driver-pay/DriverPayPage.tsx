@@ -68,6 +68,17 @@ export function DriverPayPage() {
 
   const isThisWeek = periodStart === sundayOf()
 
+  const handleClearWeek = async () => {
+    if (pay.tripCount === 0) return
+    if (!window.confirm(`Delete all ${pay.tripCount} trip${pay.tripCount !== 1 ? 's' : ''} filed under ${weekLabelLong(periodStart)}?\n\nThis only clears trips for this week — settings, fuel and expenses are untouched. You can then re-upload the CSV to the correct week.`)) return
+    try {
+      const n = await pay.clearWeek()
+      toast.success(`Cleared ${n} trip${n !== 1 ? 's' : ''} from ${weekLabelLong(periodStart)}`)
+    } catch (e) {
+      toast.error(`Couldn't clear the week: ${e instanceof Error ? e.message : 'unknown error'}`)
+    }
+  }
+
   const handlePdf = async (row: DriverPayRow) => {
     try {
       const doc = await buildPayStatementPdf(row, periodStart)
@@ -117,6 +128,12 @@ export function DriverPayPage() {
               style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
               <FileUp size={15} /> Upload master CSV
             </button>
+            {pay.tripCount > 0 && (
+              <button onClick={handleClearWeek} title="Delete all trips for this week"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-red, #dc2626)', background: 'var(--ds-surface)', color: 'var(--ds-red, #dc2626)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <Trash2 size={15} /> Clear week ({pay.tripCount})
+              </button>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button style={navBtn} onClick={() => setPeriodStart((p) => shiftWeek(p, -1))} aria-label="Previous week"><ChevronLeft size={16} /></button>
               <button onClick={() => setPeriodStart(sundayOf())} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-bg)' : 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>This week</button>
