@@ -10,6 +10,7 @@ import { weekRange, weekLabel } from './weekRange'
 import { biweeklyPeriodOf } from '@/lib/payPeriods'
 import { useFleetFixedCosts } from '@/hooks/useFleetFixedCosts'
 import { DriverPayForm } from './DriverPayForm'
+import { AmazonProfitPanel } from '@/features/finances/AmazonDriverProfit'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -79,7 +80,9 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           <TrendingUp size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{externalRange ? 'Profitability' : 'Weekly Profitability'}</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Revenue per truck · expenses by category · net for the week</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
+              {group === 'AMAZON' ? 'Per driver · gross, expenses & profit to the company by week' : 'Revenue per truck · expenses by category · net for the week'}
+            </div>
           </div>
         </div>
 
@@ -88,24 +91,21 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
             {FLEET_GROUPS.map((g) => {
               const active = g === group
-              const stub = g === 'AMAZON'
               return (
                 <button
                   key={g}
-                  onClick={() => !stub && setGroup(g)}
-                  disabled={stub}
-                  title={stub ? 'Amazon fleet — coming soon' : undefined}
-                  style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: stub ? 'not-allowed' : 'pointer',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: stub ? 'var(--ds-t3)' : active ? 'var(--ds-t1)' : 'var(--ds-t2)',
-                    boxShadow: active ? 'var(--sh-sm)' : 'none', opacity: stub ? 0.55 : 1 }}>
-                  {FLEET_GROUP_LABELS[g]}{stub ? ' ·soon' : ''}
+                  onClick={() => setGroup(g)}
+                  style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)',
+                    boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                  {FLEET_GROUP_LABELS[g]}
                 </button>
               )
             })}
           </div>
 
-          {/* Week navigation — only when self-managed (hidden when a range is supplied) */}
-          {!externalRange && (
+          {/* Week navigation — LOCAL only (Amazon tab shows all weeks) */}
+          {!externalRange && group !== 'AMAZON' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn} aria-label="Previous week"><ChevronLeft size={15} /></button>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 150, textAlign: 'center' }}>
@@ -115,12 +115,17 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
             </div>
           )}
 
-          <button onClick={() => setShowPayForm(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
-            <Plus size={13} /> Driver pay
-          </button>
+          {group !== 'AMAZON' && (
+            <button onClick={() => setShowPayForm(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
+              <Plus size={13} /> Driver pay
+            </button>
+          )}
         </div>
       </div>
 
+      {group === 'AMAZON' && <AmazonProfitPanel />}
+
+      {group !== 'AMAZON' && (<>
       {/* Roll-up strip */}
       {r && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1, background: 'var(--ds-border)', borderBottom: '1px solid var(--ds-border)' }}>
@@ -232,6 +237,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           </div>
         </div>
       )}
+      </>)}
 
       {showPayForm && (
         <DriverPayForm
