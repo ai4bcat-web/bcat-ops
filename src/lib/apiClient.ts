@@ -566,6 +566,33 @@ export async function getIntakePdfUrl(s3Key: string): Promise<string> {
   return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
 }
 
+/** Email a driver their weekly pay statement (PDF attachment built client-side). */
+export async function sendDriverPayEmail(args: {
+  to: string
+  driverName?: string
+  periodLabel?: string
+  subject?: string
+  bodyText?: string
+  filename?: string
+  pdfBase64: string
+}): Promise<{ sent: boolean; to?: string; error?: string }> {
+  const res = await client.graphql({
+    query: `mutation SendDriverPayEmail(
+      $to: String!, $driverName: String, $periodLabel: String,
+      $subject: String, $bodyText: String, $filename: String, $pdfBase64: String!
+    ) {
+      sendDriverPayEmail(
+        to: $to, driverName: $driverName, periodLabel: $periodLabel,
+        subject: $subject, bodyText: $bodyText, filename: $filename, pdfBase64: $pdfBase64
+      )
+    }`,
+    variables: args,
+  })
+  // The mutation returns AWSJSON — already parsed by the client into an object.
+  const data = (res as { data?: { sendDriverPayEmail?: unknown } }).data?.sendDriverPayEmail
+  return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; error?: string }
+}
+
 // ── User management ───────────────────────────────────────────────────────────
 
 export interface CognitoUser {

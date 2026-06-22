@@ -19,6 +19,7 @@ import { blueinkSync } from './functions/blueink-sync/resource'
 import { complianceScanner } from './functions/compliance-scanner/resource'
 import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
+import { driverPayEmailer } from './functions/driver-pay-emailer/resource'
 
 const backend = defineBackend({
   auth,
@@ -36,6 +37,7 @@ const backend = defineBackend({
   complianceScanner,
   onboardingPortalApi,
   onboardingEmailer,
+  driverPayEmailer,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -418,6 +420,14 @@ backend.onboardingEmailer.resources.lambda.addToRolePolicy(
 emailerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.tableName)
 emailerFn.addEnvironment('DRIVER_TABLE_NAME',   driverTable.tableName)
 emailerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTable.tableName)
+
+// ── driverPayEmailer Lambda (SES raw — PDF statement attachment) ────────────
+
+const payEmailerFn = backend.driverPayEmailer.resources.lambda as LambdaFunction
+backend.driverPayEmailer.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
+)
+payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'pay@bcatcorp.com')
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────

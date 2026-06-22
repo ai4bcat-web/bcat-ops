@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp } from 'lucide-react'
+import { toast } from 'sonner'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAmazonPay, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
 import { useDrivers } from '@/hooks/useDrivers'
 import { tripPayAmount } from '@/lib/driverPay'
+import { buildPayStatementPdf, payPdfFilename, pdfToBase64 } from '@/lib/payPdf'
+import { sendDriverPayEmail } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
@@ -62,6 +65,40 @@ export function DriverPayPage() {
 
   const isThisWeek = periodStart === sundayOf()
 
+  const handlePdf = async (row: DriverPayRow) => {
+    try {
+      const doc = await buildPayStatementPdf(row, periodStart)
+      doc.save(payPdfFilename(row, periodStart))
+    } catch (e) {
+      toast.error(`Couldn't build PDF: ${e instanceof Error ? e.message : 'unknown error'}`)
+    }
+  }
+
+  const handleEmail = async (row: DriverPayRow) => {
+    const to = row.setting.email || row.driver.email
+    if (!to) {
+      toast.error(`No email on file for ${row.driver.name} — add one in Settings.`)
+      return
+    }
+    const send = (async () => {
+      const doc = await buildPayStatementPdf(row, periodStart)
+      const res = await sendDriverPayEmail({
+        to,
+        driverName: row.driver.name,
+        periodLabel: weekLabelLong(periodStart),
+        filename: payPdfFilename(row, periodStart),
+        pdfBase64: pdfToBase64(doc),
+      })
+      if (!res.sent) throw new Error(res.error || 'Send failed')
+      return res
+    })()
+    await toast.promise(send, {
+      loading: `Emailing ${row.driver.name}'s statement…`,
+      success: `Sent to ${to}`,
+      error: (e) => `Email failed: ${e instanceof Error ? e.message : 'unknown error'}`,
+    })
+  }
+
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
       {/* Header */}
@@ -110,6 +147,8 @@ export function DriverPayPage() {
             onRemoveTrip={pay.removeTrip}
             onRemoveDeduction={pay.removeDeduction}
             onExport={() => download(`pay-${row.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(row, periodStart))}
+            onPdf={() => handlePdf(row)}
+            onEmail={() => handleEmail(row)}
           />
         ))}
 
@@ -168,12 +207,14 @@ export function DriverPayPage() {
 }
 
 // ── One driver's weekly statement ──────────────────────────────────────────────
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
+  onPdf: () => void; onEmail: () => Promise<void>
 }) {
+  const [emailing, setEmailing] = useState(false)
   const { driver, setting, trips, statement, oneOffs } = row
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross − expenses`
@@ -205,7 +246,15 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         {iconBtn(onAddTrip, Plus, 'Add trip')}
         {iconBtn(onImport, Upload, 'Import')}
         {iconBtn(onAddDeduction, Plus, 'Add expense')}
-        {iconBtn(onExport, Download, 'Export')}
+        {iconBtn(onExport, Download, 'CSV')}
+        {iconBtn(onPdf, FileText, 'PDF')}
+        <button
+          onClick={async () => { setEmailing(true); try { await onEmail() } finally { setEmailing(false) } }}
+          disabled={emailing}
+          title="Email PDF to driver" aria-label="Email PDF to driver"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: emailing ? 'default' : 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', opacity: emailing ? 0.6 : 1 }}>
+          <Mail size={13} /> {emailing ? 'Sending…' : 'Email'}
+        </button>
         <div style={{ flex: 1 }} />
         {iconBtn(onSettings, Settings, 'Settings')}
       </div>
