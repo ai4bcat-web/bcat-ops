@@ -76,11 +76,13 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(17)
   doc.text(driver.name, M, y)
-  const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross - expenses`
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(10)
-  doc.setTextColor(107, 114, 128)
-  doc.text(modeLabel + (setting.email ? `  ·  ${setting.email}` : ''), M, y + 16)
+  const driverEmail = setting.email || driver.email || ''
+  if (driverEmail) {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    doc.setTextColor(107, 114, 128)
+    doc.text(driverEmail, M, y + 16)
+  }
 
   doc.setFontSize(9)
   doc.setTextColor(107, 114, 128)
