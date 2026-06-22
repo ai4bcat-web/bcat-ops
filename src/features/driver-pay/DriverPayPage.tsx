@@ -133,9 +133,14 @@ export function DriverPayPage() {
     }
   }
 
-  // Send the statement with the (possibly edited) fields from the email modal.
-  const handleSendEmail = async (row: DriverPayRow, fields: { to: string; cc: string; subject: string; bodyText: string }) => {
+  // Build the statement PDF for the modal preview + attachment.
+  const preparePdf = async (row: DriverPayRow) => {
     const doc = await buildPayStatementPdf(row, periodStart)
+    return { base64: pdfToBase64(doc), blobUrl: doc.output('bloburl').toString() }
+  }
+
+  // Send the statement with the (possibly edited) fields + the previewed PDF.
+  const handleSendEmail = async (row: DriverPayRow, fields: { to: string; cc: string; subject: string; bodyText: string; pdfBase64: string }) => {
     const res = await sendDriverPayEmail({
       to: fields.to,
       cc: fields.cc || undefined,
@@ -144,7 +149,7 @@ export function DriverPayPage() {
       driverName: row.driver.name,
       periodLabel: weekLabelLong(periodStart),
       filename: payPdfFilename(row, periodStart),
-      pdfBase64: pdfToBase64(doc),
+      pdfBase64: fields.pdfBase64,
     })
     if (!res.sent) throw new Error(res.error || 'The email service rejected the message')
     toast.success(`Sent to ${fields.to}${fields.cc ? ` (cc ${fields.cc})` : ''}`)
@@ -314,6 +319,8 @@ export function DriverPayPage() {
             defaultCc={PAY_EMAIL_CC}
             defaultSubject={`Settlement — ${weekLabelLong(periodStart)}`}
             defaultBody={`Hi ${firstName},\n\nPlease find your settlements for weeks ${start} through ${end} attached.\n\n— Ivan Cartage`}
+            filename={payPdfFilename(r, periodStart)}
+            preparePdf={() => preparePdf(r)}
             onSend={(fields) => handleSendEmail(r, fields)}
             onClose={() => setEmailFor(null)}
           />
