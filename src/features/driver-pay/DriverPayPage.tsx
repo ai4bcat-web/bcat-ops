@@ -143,11 +143,13 @@ export function DriverPayPage() {
       {masterOpen && (
         <MasterImportModal periodStart={periodStart} drivers={drivers}
           onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setMasterOpen(false) }}
+          onSetPeriod={setPeriodStart}
           onClose={() => setMasterOpen(false)} />
       )}
       {importDriver && (
         <ImportModal driverId={importDriver} periodStart={periodStart}
           onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setImport(null) }}
+          onSetPeriod={setPeriodStart}
           onClose={() => setImport(null)} />
       )}
       {dedDriver && (

@@ -19,12 +19,35 @@ export interface RawTripRow {
   dispatcher: string | null
   status: string | null
   driverName: string   // Driver/Dispatcher column — used to route a master CSV per driver
+  date: string | null  // trip start date (YYYY-MM-DD) — drives which pay week it lands in
 }
 
 /** Parse a money/number string ("$5,248.52" → 5248.52); null if not numeric. */
 function num(s: string): number | null {
   const n = parseFloat(s.replace(/[$,\s]/g, ''))
   return isFinite(n) ? n : null
+}
+
+/**
+ * Extract a calendar date (YYYY-MM-DD) from a trip's date/time cell. Handles ISO
+ * ("2026-06-08 14:30 PDT"), US ("6/8/2026", "06/08/26") and falls back to Date.parse.
+ */
+export function parseDate(s: string): string | null {
+  const v = (s ?? '').trim()
+  if (!v) return null
+  let m = v.match(/(\d{4})-(\d{2})-(\d{2})/)        // ISO / YYYY-MM-DD
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
+  m = v.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)    // M/D/YYYY or M/D/YY
+  if (m) {
+    const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3])
+    return `${yr}-${String(Number(m[1])).padStart(2, '0')}-${String(Number(m[2])).padStart(2, '0')}`
+  }
+  const t = Date.parse(v)
+  if (!Number.isNaN(t)) {
+    const d = new Date(t)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  return null
 }
 
 /** Quote-aware split of one CSV line (handles "fields, with commas" and "" escapes). */
@@ -58,8 +81,12 @@ export function parseRows(text: string): RawTripRow[] {
         miles: idx('estimate distance', 'distance', 'mile'), equip: idx('equipment'),
         freight: idx('estimated cost', 'cost', 'freight', 'amount'), rpm: idx('rate per mile', 'rate/mi'),
         disp: idx('dispatch'), driver: idx('driver'), status: idx('execution status', 'trip stage', 'status'),
+        // Prefer a true start column; fall back through other date-bearing columns.
+        date: [['scheduled start', 'trip start', 'actual start', 'start time'], ['start'], ['departure', 'depart'],
+               ['appointment', 'appt'], ['pickup', 'pick up'], ['date']]
+              .map((tier) => idx(...tier)).find((i) => i >= 0) ?? -1,
       }
-    : { loadId: 0, origin: 1, dest: 2, sequence: -1, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, driver: -1, status: 8 }
+    : { loadId: 0, origin: 1, dest: 2, sequence: -1, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, driver: -1, status: 8, date: -1 }
 
   const at = (c: string[], i: number) => (i >= 0 && i < c.length ? c[i].trim() : '')
   const out: RawTripRow[] = []
@@ -85,6 +112,7 @@ export function parseRows(text: string): RawTripRow[] {
       miles, equipment: at(c, cols.equip) || null, freightAmount: freight,
       ratePerMile, dispatcher, status: at(c, cols.status) || null,
       driverName: (at(c, cols.driver) || dispatcher || '').trim(),
+      date: cols.date >= 0 ? parseDate(at(c, cols.date)) : null,
     })
   }
   return out

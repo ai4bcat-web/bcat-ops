@@ -41,4 +41,20 @@ describe('parseRows — real Amazon Relay export', () => {
     const rows = parseRows([HEADER, ',,,,,,,,Nobody,,,,,,,,'].join('\n'))
     expect(rows).toHaveLength(0)
   })
+
+  it('extracts the trip start date when the export carries one', () => {
+    const H = 'Driver Name,Estimated Cost,Scheduled Start Time,Facility Sequence'
+    const rows = parseRows([
+      H,
+      'Lee Lara,300.00,2026-06-08 14:30 PDT,UPRR->ELP1',
+      'Mike Bodle,97.81,6/9/2026 06:00,TUS2->GEU3',
+    ].join('\n'))
+    expect(rows[0].date).toBe('2026-06-08')
+    expect(rows[1].date).toBe('2026-06-09')
+  })
+
+  it('leaves date null when no date column exists', () => {
+    const rows = parseRows([HEADER, ROW_CHAD].join('\n'))
+    expect(rows[0].date).toBeNull()
+  })
 })
