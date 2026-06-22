@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { UserCog, LogOut, Plus } from 'lucide-react'
+import { UserCog, LogOut, Plus, Truck, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import bcatLogo from '@/assets/bcat-logo.png'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
@@ -26,7 +26,17 @@ function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
   )
 }
 
-export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: () => void } = {}) {
+export function NavBar({
+  open = false,
+  onClose,
+  collapsed = false,
+  onToggleCollapse,
+}: {
+  open?: boolean
+  onClose?: () => void
+  collapsed?: boolean
+  onToggleCollapse?: () => void
+} = {}) {
   const { user, logout, isOwner, hasPageAccess } = useAuth()
   const loads = useAppStore(s => s.loads)
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
@@ -53,26 +63,33 @@ export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: ()
     : 'U'
 
   return (
-    <aside className={`sidebar${open ? ' open' : ''}`}>
-      {/* Logo — real BCAT logo on a black tile (its dark artwork blends in) */}
-      <div style={{ padding: '18px 16px 16px', borderBottom: '1px solid var(--ds-border)' }}>
+    <aside className={`sidebar${open ? ' open' : ''}${collapsed ? ' collapsed' : ''}`}>
+      {/* Logo — real BCAT logo on a black tile (its dark artwork blends in).
+          Collapsed: a compact square mark so the rail stays 64px wide. */}
+      <div style={{ padding: collapsed ? '14px 10px 12px' : '18px 16px 16px', borderBottom: '1px solid var(--ds-border)' }}>
         <div style={{
-          background: '#000', borderRadius: 11, padding: '13px 16px',
+          background: '#000', borderRadius: 11, padding: collapsed ? 0 : '13px 16px',
+          height: collapsed ? 44 : undefined,
           boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.06)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <img src={bcatLogo} alt="BCAT Logistics" style={{ width: '100%', maxWidth: 158, height: 'auto', display: 'block' }} />
+          {collapsed
+            ? <Truck size={20} color="#fff" />
+            : <img src={bcatLogo} alt="BCAT Logistics" style={{ width: '100%', maxWidth: 158, height: 'auto', display: 'block' }} />}
         </div>
-        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--ds-t3)', letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'center' }}>
-          Operations Command Center
-        </div>
+        {!collapsed && (
+          <div style={{ marginTop: 8, fontSize: 10, color: 'var(--ds-t3)', letterSpacing: '0.08em', textTransform: 'uppercase', textAlign: 'center' }}>
+            Operations Command Center
+          </div>
+        )}
       </div>
 
       {/* Quick Add */}
-      <div style={{ padding: '14px 14px 10px' }}>
+      <div style={{ padding: collapsed ? '12px 10px 8px' : '14px 14px 10px' }}>
         <NavLink
           to="/loads"
           onClick={onClose}
+          title={collapsed ? 'Quick Add' : undefined}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             height: 34, borderRadius: 8, fontSize: 13, fontWeight: 600,
@@ -80,7 +97,7 @@ export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: ()
             border: 'none', cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
-          <Plus size={14} /> Quick Add
+          <Plus size={14} /> {!collapsed && 'Quick Add'}
         </NavLink>
       </div>
 
@@ -100,11 +117,12 @@ export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: ()
                     key={to}
                     to={to}
                     onClick={onClose}
+                    title={collapsed ? label : undefined}
                     className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
                   >
                     <Icon size={16} style={{ flexShrink: 0 }} />
-                    <span style={{ flex: 1 }}>{label}</span>
-                    {badge != null && <NavBadge count={badge} toneKey={badgeKey!} />}
+                    {!collapsed && <span style={{ flex: 1 }}>{label}</span>}
+                    {!collapsed && badge != null && <NavBadge count={badge} toneKey={badgeKey!} />}
                   </NavLink>
                 )
               })}
@@ -117,29 +135,50 @@ export function NavBar({ open = false, onClose }: { open?: boolean; onClose?: ()
             <NavLink
               to="/users"
               onClick={onClose}
+              title={collapsed ? 'Users' : undefined}
               className={({ isActive }) => `sidebar-link${isActive ? ' active' : ''}`}
             >
               <UserCog size={16} style={{ flexShrink: 0 }} />
-              <span>Users</span>
+              {!collapsed && <span>Users</span>}
             </NavLink>
           </>
         )}
       </nav>
 
-      {/* User footer */}
-      <div style={{ padding: '14px 16px', borderTop: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{
+      {/* Collapse / expand the rail (desktop only — hidden on mobile via CSS) */}
+      {onToggleCollapse && (
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="sidebar-collapse-btn"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? <ChevronsRight size={16} /> : <><ChevronsLeft size={16} /> Collapse</>}
+        </button>
+      )}
+
+      {/* User footer — avatar + logout stack vertically when collapsed */}
+      <div style={{
+        padding: collapsed ? '12px 10px' : '14px 16px', borderTop: '1px solid var(--ds-border)',
+        display: 'flex', alignItems: 'center', gap: collapsed ? 8 : 10,
+        flexDirection: collapsed ? 'column' : 'row',
+      }}>
+        <div title={collapsed ? (user?.email ?? 'dispatch') : undefined} style={{
           width: 30, height: 30, borderRadius: '50%', background: 'var(--ds-blue)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0,
         }}>
           {initials}
         </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {user?.email ?? 'dispatch'}
+        {!collapsed && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user?.email ?? 'dispatch'}
+            </div>
           </div>
-        </div>
+        )}
         <button
           onClick={() => logout()}
           title="Sign out"
