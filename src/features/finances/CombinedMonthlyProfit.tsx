@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Wallet } from 'lucide-react'
 import { useFleetMonthlyNet } from '@/hooks/useFleetMonthlyNet'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { monthRange, monthLabel } from '@/features/fleet-profitability/monthRange'
 
 const money = (n: number) =>
@@ -14,6 +15,7 @@ const navBtn: React.CSSProperties = { width: 28, height: 28, display: 'flex', al
  * the company), summed for the month. Uses the same math as the Monthly P&L cards.
  */
 export function CombinedMonthlyProfit() {
+  const isMobile = useIsMobile()
   const [monthOffset, setMonthOffset] = useState(0)
   const range = monthRange(monthOffset)
   const ivan = useFleetMonthlyNet(range)
@@ -52,12 +54,16 @@ export function CombinedMonthlyProfit() {
         {loading ? (
           <div style={{ padding: '12px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 24, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: isMobile ? 'stretch' : 'flex-end', flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 16 : 24 }}>
             <div style={{ minWidth: 200 }}>
               <div style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Combined profit</div>
-              <div style={{ fontSize: 34, fontWeight: 800, lineHeight: 1.1, marginTop: 2, color: netColor(combined), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{money(combined)}</div>
+              <div style={{ fontSize: isMobile ? 30 : 34, fontWeight: 800, lineHeight: 1.1, marginTop: 2, color: netColor(combined), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{money(combined)}</div>
             </div>
-            <div style={{ display: 'flex', gap: 24, flex: 1, minWidth: 260, borderLeft: '1px solid var(--ds-border)', paddingLeft: 24 }}>
+            <div style={{
+              display: 'flex', gap: 24, flex: 1, minWidth: 220,
+              borderLeft: isMobile ? 'none' : '1px solid var(--ds-border)', paddingLeft: isMobile ? 0 : 24,
+              borderTop: isMobile ? '1px solid var(--ds-border)' : 'none', paddingTop: isMobile ? 14 : 0,
+            }}>
               <Part label="Ivan (fleet net)" value={ivan.net} />
               <Part label="Amazon (profit)" value={amazon.profit} />
             </div>
