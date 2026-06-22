@@ -3,7 +3,8 @@ import { listAmazonTrips, listDriverPaySettings, listDriverPayDeductions } from 
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { normalizeCard, periodEnd } from './useAmazonPay'
+import { periodEnd } from './useAmazonPay'
+import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { calcDriverPay } from '@/lib/driverPay'
 
 /** One driver's company economics for one pay week. */
@@ -69,18 +70,8 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
         const driverTrips = trips.filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
         if (driverTrips.length === 0) continue
 
-        // Fuel for the window (tolerant card match — see useAmazonPay).
-        let fuel = 0
-        const wantCard = normalizeCard(setting.fuelCardNumber)
-        if (wantCard) {
-          for (const tx of fuelTxs) {
-            if (normalizeCard(tx.cardNumber) !== wantCard) continue
-            if ((tx.itemCategory ?? 'FUEL') !== 'FUEL') continue
-            if (tx.transactionDate < periodStart || tx.transactionDate > end) continue
-            fuel += tx.amount
-          }
-        }
-        fuel = Math.round(fuel * 100) / 100
+        // Fuel for the window — real fuel only, de-duplicated (shared helper).
+        const fuel = sumFuel(matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end))
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
         const ded = [

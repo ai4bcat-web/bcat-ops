@@ -339,6 +339,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
   onPdf: () => void; onEmail: () => void
 }) {
   const { driver, setting, trips, statement, oneOffs } = row
+  const [showFuel, setShowFuel] = useState(false)
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross − expenses`
 
@@ -441,6 +442,29 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* Fuel breakdown — itemized so the pulled figure is auditable */}
+        {row.fuelTxns.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setShowFuel((v) => !v)}
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--ds-blue)', fontFamily: 'inherit' }}>
+              {showFuel ? '▾' : '▸'} Fuel detail · {row.fuelTxns.length} fill{row.fuelTxns.length !== 1 ? 's' : ''} · {money(row.fuel)}
+            </button>
+            {showFuel && (
+              <div style={{ marginTop: 6, border: '1px solid var(--ds-border)', borderRadius: 8, overflow: 'hidden' }}>
+                {row.fuelTxns.map((tx) => (
+                  <div key={tx.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 10px', fontSize: 12, borderBottom: '1px solid var(--ds-border)' }}>
+                    <span style={{ width: 42, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>{fmtShortDate(tx.transactionDate)}</span>
+                    <span style={{ width: 52, color: 'var(--ds-t2)' }}>{tx.fuelType}</span>
+                    <span style={{ flex: 1, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[tx.locationName, tx.state].filter(Boolean).join(', ') || '—'}</span>
+                    <span style={{ width: 64, textAlign: 'right', color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>{tx.quantity ? `${tx.quantity.toFixed(1)} gal` : ''}</span>
+                    <span style={{ width: 72, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(tx.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
