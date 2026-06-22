@@ -151,6 +151,24 @@ const schema = a.schema({
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
     .authorization((allow) => [allow.authenticated()]),
 
+  // Archive of uploaded master CSVs (the raw file lives in S3 at s3Key). One row per
+  // upload so the source files are kept and downloadable.
+  AmazonPayMaster: a
+    .model({
+      fileName:    a.string().required(),
+      periodStart: a.string().required(),   // pay week the upload was filed to
+      s3Key:       a.string().required(),
+      uploadedAt:  a.string().required(),    // ISO timestamp
+      uploadedBy:  a.string(),               // user email
+      rowCount:    a.integer(),              // parsed rows in the file
+      tripCount:   a.integer(),              // trips actually imported
+      driverCount: a.integer(),              // distinct drivers imported
+      sizeBytes:   a.integer(),
+      notes:       a.string(),
+    })
+    .secondaryIndexes((index) => [index('periodStart')])
+    .authorization((allow) => [allow.authenticated()]),
+
   DriverPaySetting: a
     .model({
       driverId:              a.string().required(),
