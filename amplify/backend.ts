@@ -427,7 +427,7 @@ const payEmailerFn = backend.driverPayEmailer.resources.lambda as LambdaFunction
 backend.driverPayEmailer.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
-payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'pay@bcatcorp.com')
+payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'ai4bcat@gmail.com')
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────

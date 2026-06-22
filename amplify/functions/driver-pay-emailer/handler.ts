@@ -8,7 +8,7 @@
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 
 const ses = new SESv2Client({})
-const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'pay@bcatcorp.com'
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
 
 interface Args {
   to: string

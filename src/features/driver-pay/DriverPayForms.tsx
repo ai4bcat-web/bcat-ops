@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
@@ -295,13 +295,16 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
 }
 
 // ── Email a statement ───────────────────────────────────────────────────────
-export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, defaultBody, onSend, onClose }: {
+export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, defaultBody, filename, preparePdf, onSend, onClose }: {
   driverName: string
   defaultTo: string
   defaultCc: string
   defaultSubject: string
   defaultBody: string
-  onSend: (fields: { to: string; cc: string; subject: string; bodyText: string }) => Promise<void>
+  filename: string
+  /** Build the statement PDF for preview + attachment. Returns base64 + a blob URL. */
+  preparePdf: () => Promise<{ base64: string; blobUrl: string }>
+  onSend: (fields: { to: string; cc: string; subject: string; bodyText: string; pdfBase64: string }) => Promise<void>
   onClose: () => void
 }) {
   const [to, setTo] = useState(defaultTo)
@@ -310,13 +313,27 @@ export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, d
   const [body, setBody] = useState(defaultBody)
   const [err, setErr] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [pdf, setPdf] = useState<{ base64: string; blobUrl: string } | null>(null)
+  const [pdfErr, setPdfErr] = useState<string | null>(null)
+
+  // Build the PDF once on open for the preview + attachment.
+  useEffect(() => {
+    let url: string | null = null
+    let alive = true
+    preparePdf()
+      .then((p) => { if (alive) { url = p.blobUrl; setPdf(p) } else { URL.revokeObjectURL(p.blobUrl) } })
+      .catch((e) => alive && setPdfErr(e instanceof Error ? e.message : String(e)))
+    return () => { alive = false; if (url) URL.revokeObjectURL(url) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const send = async () => {
     if (!to.trim()) { setErr('A recipient email is required'); return }
+    if (!pdf) { setErr('The PDF is still preparing — try again in a moment'); return }
     setErr(null)
     setSending(true)
     try {
-      await onSend({ to: to.trim(), cc: cc.trim(), subject: subject.trim(), bodyText: body })
+      await onSend({ to: to.trim(), cc: cc.trim(), subject: subject.trim(), bodyText: body, pdfBase64: pdf.base64 })
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
       setSending(false)
@@ -324,17 +341,34 @@ export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, d
   }
 
   return (
-    <Modal title={`Email ${driverName}'s statement`} sub="The PDF statement is attached automatically" onClose={onClose} width={560}>
+    <Modal title={`Email ${driverName}'s statement`} sub="Review the draft and the attached PDF, then send" onClose={onClose} width={720}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="To" half><input style={input} value={to} onChange={(e) => setTo(e.target.value)} placeholder="driver@example.com" /></Field>
         <Field l="Cc" half><input style={input} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="ryne@bcatcorp.com" /></Field>
         <Field l="Subject"><input style={input} value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
         <Field l="Message">
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6}
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={5}
             style={{ ...input, height: 'auto', padding: 10, resize: 'vertical', lineHeight: 1.5 }} />
         </Field>
       </div>
-      <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 8 }}>📎 Statement PDF attached</div>
+
+      {/* Attachment preview */}
+      <div style={{ marginTop: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={label}>Attachment · {filename}</span>
+          {pdf && <a href={pdf.blobUrl} target="_blank" rel="noopener" style={{ fontSize: 11.5, color: 'var(--ds-blue)' }}>Open in new tab</a>}
+        </div>
+        <div style={{ border: '1px solid var(--ds-border)', borderRadius: 8, overflow: 'hidden', background: 'var(--ds-bg)', height: 320 }}>
+          {pdfErr ? (
+            <div style={{ padding: 20, fontSize: 12.5, color: '#dc2626' }}>Couldn't build the PDF: {pdfErr}</div>
+          ) : pdf ? (
+            <iframe src={pdf.blobUrl} title="Statement preview" style={{ width: '100%', height: '100%', border: 'none' }} />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12.5, color: 'var(--ds-t3)' }}>Building preview…</div>
+          )}
+        </div>
+      </div>
+
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={send} saving={sending} label={sending ? 'Sending…' : 'Send email'} />
     </Modal>
