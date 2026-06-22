@@ -105,13 +105,13 @@ export function rowToTrip(r: RawTripRow, driverId: string, periodStart: string):
   }
 }
 
-/** Read a chosen .csv/.txt file into the textarea. */
-function FilePick({ onText }: { onText: (t: string) => void }) {
+/** Read a chosen .csv/.txt file into the textarea (passes the file name too). */
+function FilePick({ onText }: { onText: (t: string, fileName?: string) => void }) {
   return (
     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600 }}>
       <Upload size={14} /> Choose file…
       <input type="file" accept=".csv,.tsv,.txt,text/csv" style={{ display: 'none' }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then(onText); e.currentTarget.value = '' }} />
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) f.text().then((t) => onText(t, f.name)); e.currentTarget.value = '' }} />
     </label>
   )
 }
@@ -165,11 +165,15 @@ function matchDriver(name: string, drivers: Driver[]): string {
   return byBoth?.id ?? ''
 }
 
-export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod, onClose }: {
+export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod, onArchive, onClose }: {
   periodStart: string; drivers: Driver[]
-  onImport: (rows: TripInput[]) => Promise<void>; onSetPeriod?: (week: string) => void; onClose: () => void
+  onImport: (rows: TripInput[]) => Promise<void>
+  onSetPeriod?: (week: string) => void
+  onArchive?: (m: { fileName: string; text: string; periodStart: string; rowCount: number; tripCount: number; driverCount: number }) => Promise<void>
+  onClose: () => void
 }) {
   const [text, setText] = useState('')
+  const [fileName, setFileName] = useState('')
   const [saving, setSaving] = useState(false)
   const [weekOverride, setWeekOverride] = useState<string | null>(null)
   const rows = parseRows(text)
@@ -203,6 +207,17 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
         .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, targetWeek) : null })
         .filter((t): t is TripInput => t !== null)
       await onImport(trips)
+      // Archive the source file (best-effort — never block the import on it).
+      try {
+        await onArchive?.({
+          fileName: fileName || `master-${targetWeek}.csv`,
+          text,
+          periodStart: targetWeek,
+          rowCount: rows.length,
+          tripCount: trips.length,
+          driverCount: new Set(trips.map((t) => t.driverId)).size,
+        })
+      } catch { /* archive failure shouldn't fail the import */ }
       onSetPeriod?.(targetWeek) // jump to the week the trips landed in
     } catch { setSaving(false) }
   }
@@ -214,11 +229,12 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
           Upload the raw <b>Amazon Relay “Trips” CSV</b> (columns auto-detected: Driver Name,
           Estimated Cost, Estimate Distance, Facility Sequence, Equipment…). Each driver is matched below.
         </div>
-        <FilePick onText={setText} />
+        <FilePick onText={(t, name) => { setText(t); if (name) setFileName(name) }} />
       </div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={7}
+      <textarea value={text} onChange={(e) => { setText(e.target.value); setFileName('') }} rows={7}
         placeholder={'Load ID,Origin,Destination,Miles,Equipment,Freight,Rate/mi,Dispatcher,Status'}
         style={importTextarea} />
+      {fileName && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 4 }}>File: {fileName} — archived on import</div>}
 
       {rows.length > 0 && (
         <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>

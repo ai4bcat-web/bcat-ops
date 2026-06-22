@@ -9,6 +9,10 @@ export const storage = defineStorage({
     'driver-photos/*': [
       allow.authenticated.to(['read', 'write', 'delete']),
     ],
+    // Archived Amazon driver-pay master CSV uploads.
+    'driver-pay-masters/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+    ],
     // Intake PDFs uploaded by the webhook Lambda; authenticated users can read (for preview)
     'intake-pdfs/*': [
       allow.authenticated.to(['read']),

@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAmazonPay, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
+import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
+import { useAuth } from '@/hooks/useAuth'
 import { useDrivers } from '@/hooks/useDrivers'
 import { tripPayAmount } from '@/lib/driverPay'
 import { buildPayStatementPdf, payPdfFilename, pdfToBase64 } from '@/lib/payPdf'
@@ -57,6 +59,8 @@ function download(name: string, text: string) {
 export function DriverPayPage() {
   const [periodStart, setPeriodStart] = useState(sundayOf)
   const pay = useAmazonPay(periodStart)
+  const masters = useAmazonPayMasters()
+  const { user } = useAuth()
 
   const { drivers } = useDrivers()
   const [tripModal, setTripModal]   = useState<{ driverId: string } | null>(null)
@@ -188,6 +192,8 @@ export function DriverPayPage() {
             </div>
           </div>
         )}
+
+        <MasterUploadsCard masters={masters} />
       </div>
 
       {tripModal && (
@@ -204,6 +210,10 @@ export function DriverPayPage() {
         <MasterImportModal periodStart={periodStart} drivers={drivers}
           onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setMasterOpen(false) }}
           onSetPeriod={setPeriodStart}
+          onArchive={async (m) => {
+            try { await masters.archive({ ...m, uploadedBy: user?.email ?? null }) }
+            catch (e) { toast.error(`Saved trips, but couldn't archive the file: ${e instanceof Error ? e.message : 'unknown error'}`) }
+          }}
           onClose={() => setMasterOpen(false)} />
       )}
       {importDriver && (
@@ -359,6 +369,82 @@ function Total({ label, value, negative, strong, color }: { label: string; value
     <div style={{ textAlign: 'right' }}>
       <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
       <div style={{ fontSize: strong ? 18 : 14, fontWeight: strong ? 700 : 600, color: color ?? (negative ? '#dc2626' : 'var(--ds-t1)'), fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>{negative ? `(${value})` : value}</div>
+    </div>
+  )
+}
+
+// ── Master uploads archive ──────────────────────────────────────────────────────
+function fmtBytes(n?: number | null): string {
+  if (!n) return '—'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+function MasterUploadsCard({ masters }: { masters: ReturnType<typeof useAmazonPayMasters> }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const items = [...masters.masters].sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : -1))
+
+  const onDelete = async (m: AmazonPayMaster) => {
+    if (!window.confirm(`Delete the archived file "${m.fileName}"?\n\nThis removes the stored CSV only — imported trips stay.`)) return
+    setBusy(m.id)
+    try { await masters.remove(m) } catch (e) { toast.error(`Couldn't delete: ${e instanceof Error ? e.message : 'unknown error'}`) } finally { setBusy(null) }
+  }
+  const onDownload = async (m: AmazonPayMaster) => {
+    setBusy(m.id)
+    try { await masters.download(m) } catch (e) { toast.error(`Couldn't open file: ${e instanceof Error ? e.message : 'unknown error'}`) } finally { setBusy(null) }
+  }
+
+  return (
+    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
+        <FileSpreadsheet size={16} style={{ color: 'var(--ds-blue)' }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Master uploads</div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>Every uploaded master CSV, archived and downloadable</div>
+        </div>
+        {items.length > 0 && <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{items.length} file{items.length !== 1 ? 's' : ''}</span>}
+      </div>
+
+      {masters.loading && items.length === 0 ? (
+        <div style={{ padding: '22px 16px', textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>Loading…</div>
+      ) : items.length === 0 ? (
+        <div style={{ padding: '22px 16px', textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>No uploads yet — files you import with “Upload master CSV” are kept here.</div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+              <th style={{ ...TH, textAlign: 'left' }}>File</th>
+              <th style={{ ...TH, textAlign: 'left' }}>Pay week</th>
+              <th style={{ ...TH, textAlign: 'left' }}>Uploaded</th>
+              <th style={TH}>Trips</th>
+              <th style={TH}>Drivers</th>
+              <th style={TH}>Size</th>
+              <th style={{ ...TH, width: 84 }}></th>
+            </tr></thead>
+            <tbody>
+              {items.map((m) => (
+                <tr key={m.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                  <td style={{ ...TD, textAlign: 'left', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }} title={m.fileName}>{m.fileName}</td>
+                  <td style={{ ...TD, textAlign: 'left' }}>{weekLabelLong(m.periodStart)}</td>
+                  <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>{fmtDateTime(m.uploadedAt)}{m.uploadedBy ? ` · ${m.uploadedBy}` : ''}</td>
+                  <td style={TD}>{m.tripCount ?? '—'}</td>
+                  <td style={TD}>{m.driverCount ?? '—'}</td>
+                  <td style={{ ...TD, color: 'var(--ds-t3)' }}>{fmtBytes(m.sizeBytes)}</td>
+                  <td style={{ ...TD, padding: '7px 8px', whiteSpace: 'nowrap' }}>
+                    <button onClick={() => onDownload(m)} disabled={busy === m.id} title="Download CSV" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}><Download size={14} /></button>
+                    <button onClick={() => onDelete(m)} disabled={busy === m.id} title="Delete archived file" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}><Trash2 size={14} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

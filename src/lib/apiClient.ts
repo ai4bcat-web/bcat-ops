@@ -740,6 +740,24 @@ export async function deleteRateConfirm(key: string): Promise<void> {
   await remove({ path: key })
 }
 
+// ── S3 driver-pay master CSV archive ───────────────────────────────────────────
+
+export async function uploadPayMasterFile(periodStart: string, fileName: string, text: string): Promise<{ key: string; size: number }> {
+  const safe = (fileName || 'master.csv').replace(/[^\w.\-]+/g, '_')
+  const key = `driver-pay-masters/${periodStart}/${Date.now()}-${safe}`
+  await uploadData({ path: key, data: text, options: { contentType: 'text/csv' } }).result
+  return { key, size: new Blob([text]).size }
+}
+
+export async function getPayMasterUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+export async function deletePayMasterFile(key: string): Promise<void> {
+  await remove({ path: key })
+}
+
 // ── S3 driver photos ──────────────────────────────────────────────────────────
 
 export async function uploadDriverPhoto(driverId: string, file: File): Promise<string> {
@@ -1337,6 +1355,48 @@ export async function updateAmazonTrip(id: string, patch: Partial<Omit<AmazonTri
 export async function deleteAmazonTrip(id: string): Promise<void> {
   await client.graphql({
     query: `mutation DeleteAmazonTrip($input: DeleteAmazonTripInput!) { deleteAmazonTrip(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Amazon pay master uploads (archive of source CSVs) ──────────────────────────
+
+export interface AmazonPayMaster {
+  id:           string
+  fileName:     string
+  periodStart:  string
+  s3Key:        string
+  uploadedAt:   string
+  uploadedBy?:  string | null
+  rowCount?:    number | null
+  tripCount?:   number | null
+  driverCount?: number | null
+  sizeBytes?:   number | null
+  notes?:       string | null
+  createdAt:    string
+  updatedAt:    string
+}
+
+const PAY_MASTER_FIELDS = `id fileName periodStart s3Key uploadedAt uploadedBy rowCount tripCount driverCount sizeBytes notes createdAt updatedAt`
+
+export async function listAmazonPayMasters(): Promise<AmazonPayMaster[]> {
+  const result = await client.graphql({
+    query: `query ListAmazonPayMasters { listAmazonPayMasters(limit: 1000) { items { ${PAY_MASTER_FIELDS} } } }`,
+  }) as { data: { listAmazonPayMasters: { items: AmazonPayMaster[] } } }
+  return result.data.listAmazonPayMasters.items ?? []
+}
+
+export async function createAmazonPayMaster(input: Omit<AmazonPayMaster, 'id' | 'createdAt' | 'updatedAt'>): Promise<AmazonPayMaster> {
+  const result = await client.graphql({
+    query: `mutation CreateAmazonPayMaster($input: CreateAmazonPayMasterInput!) { createAmazonPayMaster(input: $input) { ${PAY_MASTER_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createAmazonPayMaster: AmazonPayMaster } }
+  return result.data.createAmazonPayMaster
+}
+
+export async function deleteAmazonPayMaster(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteAmazonPayMaster($input: DeleteAmazonPayMasterInput!) { deleteAmazonPayMaster(input: $input) { id } }`,
     variables: { input: { id } },
   })
 }
