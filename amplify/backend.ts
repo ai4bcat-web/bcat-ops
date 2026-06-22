@@ -38,6 +38,21 @@ const backend = defineBackend({
   onboardingEmailer,
 })
 
+// ── Auth session lifetime ──────────────────────────────────────────────────
+// Stay logged in (mobile + desktop) until explicit logout, for up to 60 days. The
+// refresh token controls the overall session length; access/id tokens are short-lived
+// and refresh silently in the background. Token revocation stays on so logout works.
+const cfnUserPoolClient = backend.auth.resources.cfnResources.cfnUserPoolClient
+cfnUserPoolClient.refreshTokenValidity = 60
+cfnUserPoolClient.accessTokenValidity = 1
+cfnUserPoolClient.idTokenValidity = 1
+cfnUserPoolClient.tokenValidityUnits = {
+  refreshToken: 'days',
+  accessToken:  'hours',
+  idToken:      'hours',
+}
+cfnUserPoolClient.enableTokenRevocation = true
+
 // ── userManagement Lambda ──────────────────────────────────────────────────
 
 backend.userManagement.resources.lambda.addToRolePolicy(
