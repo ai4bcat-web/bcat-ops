@@ -12,6 +12,11 @@ import type { Driver } from '@/types'
 
 export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense }
 
+/** Card key for matching — digits only, leading zeros stripped ("00049" → "49"). */
+export function normalizeCard(card: string | null | undefined): string {
+  return (card ?? '').replace(/\D/g, '').replace(/^0+/, '')
+}
+
 /** Inclusive 7-day window from a period start (YYYY-MM-DD). */
 export function periodEnd(periodStart: string): string {
   const d = new Date(`${periodStart}T12:00:00Z`)
@@ -81,10 +86,14 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         const driverTrips = trips.filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
 
         // Fuel pulled live from the driver's EFS card for this 7-day window.
+        // Match the card tolerantly: EFS cards are stored 5-digit zero-padded
+        // ("00049"), so compare on digits with leading zeros stripped so "49",
+        // "0049" and "00049" all match.
         let fuel = 0
-        if (setting.fuelCardNumber) {
+        const wantCard = normalizeCard(setting.fuelCardNumber)
+        if (wantCard) {
           for (const tx of fuelTxs) {
-            if (tx.cardNumber !== setting.fuelCardNumber) continue
+            if (normalizeCard(tx.cardNumber) !== wantCard) continue
             if ((tx.itemCategory ?? 'FUEL') !== 'FUEL') continue
             if (tx.transactionDate < periodStart || tx.transactionDate > end) continue
             fuel += tx.amount

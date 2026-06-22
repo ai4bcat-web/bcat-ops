@@ -3,7 +3,7 @@ import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
 import { parseRows, type RawTripRow } from '@/lib/tripCsv'
-import { weekStartOfISO, weekLabel, modeOf } from './week'
+import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
@@ -171,15 +171,17 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
 }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [weekOverride, setWeekOverride] = useState<string | null>(null)
   const rows = parseRows(text)
 
-  // Auto-detect the pay week from the trip dates in the file. Each trip is filed to
-  // the pay-week of its own date; rows without a date fall back to the detected week
-  // (or the currently-viewed week). The page jumps to the dominant week after import.
+  // Auto-detect the pay week from the trip dates in the file; the whole upload is
+  // filed to ONE pay week (Sunday→Saturday). The detected week is just the default —
+  // adjust the stepper to force a specific week if the export has no/odd dates.
   const rowWeek = (r: RawTripRow) => (r.date ? weekStartOfISO(r.date) : null)
   const detectedWeeks = Array.from(new Set(rows.map(rowWeek).filter((w): w is string => !!w)))
   const dominantWeek = modeOf(rows.map(rowWeek).filter((w): w is string => !!w))
-  const periodFor = (r: RawTripRow) => rowWeek(r) ?? dominantWeek ?? periodStart
+  const targetWeek = weekOverride ?? dominantWeek ?? periodStart
+  const isManual = weekOverride != null
 
   // Group by the driver-name column and seed a best-guess driver mapping.
   const groups = useState(() => new Map<string, string>())[0]
@@ -198,10 +200,10 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
     setSaving(true)
     try {
       const trips = rows
-        .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, periodFor(r)) : null })
+        .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, targetWeek) : null })
         .filter((t): t is TripInput => t !== null)
       await onImport(trips)
-      if (dominantWeek) onSetPeriod?.(dominantWeek) // jump to the week the trips landed in
+      onSetPeriod?.(targetWeek) // jump to the week the trips landed in
     } catch { setSaving(false) }
   }
 
@@ -219,14 +221,27 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
         style={importTextarea} />
 
       {rows.length > 0 && (
-        <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
-          background: detectedWeeks.length ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-amber-bg, #fff7ed)',
-          color: detectedWeeks.length ? 'var(--ds-blue-dark, #0369a1)' : '#b45309', border: '1px solid var(--ds-border)' }}>
-          {detectedWeeks.length === 1
-            ? <>Detected pay week <b>{weekLabel(detectedWeeks[0])}</b> — trips will be filed there automatically.</>
-            : detectedWeeks.length > 1
-              ? <>Spans <b>{detectedWeeks.length} weeks</b> ({detectedWeeks.sort().map(weekLabel).join(', ')}) — each trip is filed to its own week.</>
-              : <>No trip dates found in this file — trips will be filed to the week you’re viewing. Use the date column from the Amazon export to auto-place them.</>}
+        <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>File all trips to pay week</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button type="button" onClick={() => setWeekOverride(shiftWeek(targetWeek, -1))} aria-label="Previous week"
+                style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', lineHeight: 1 }}>‹</button>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 110, textAlign: 'center' }}>{weekLabel(targetWeek)}</span>
+              <button type="button" onClick={() => setWeekOverride(shiftWeek(targetWeek, 1))} aria-label="Next week"
+                style={{ width: 26, height: 26, borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', lineHeight: 1 }}>›</button>
+            </div>
+            <span style={{ fontSize: 11.5, color: isManual ? '#b45309' : 'var(--ds-t3)' }}>
+              {isManual
+                ? <>manual — <button type="button" onClick={() => setWeekOverride(null)} style={{ color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 11.5, textDecoration: 'underline' }}>reset to detected</button></>
+                : dominantWeek ? 'auto-detected from the trip dates' : 'no dates in file — set the week manually'}
+            </span>
+          </div>
+          {detectedWeeks.length > 1 && (
+            <div style={{ fontSize: 11.5, color: '#b45309', marginTop: 6 }}>
+              Heads up: this file spans {detectedWeeks.length} weeks ({detectedWeeks.sort().map(weekLabel).join(', ')}). All trips will go to {weekLabel(targetWeek)}.
+            </div>
+          )}
         </div>
       )}
 

@@ -569,6 +569,7 @@ export async function getIntakePdfUrl(s3Key: string): Promise<string> {
 /** Email a driver their weekly pay statement (PDF attachment built client-side). */
 export async function sendDriverPayEmail(args: {
   to: string
+  cc?: string
   driverName?: string
   periodLabel?: string
   subject?: string
@@ -578,11 +579,11 @@ export async function sendDriverPayEmail(args: {
 }): Promise<{ sent: boolean; to?: string; error?: string }> {
   const res = await client.graphql({
     query: `mutation SendDriverPayEmail(
-      $to: String!, $driverName: String, $periodLabel: String,
+      $to: String!, $cc: String, $driverName: String, $periodLabel: String,
       $subject: String, $bodyText: String, $filename: String, $pdfBase64: String!
     ) {
       sendDriverPayEmail(
-        to: $to, driverName: $driverName, periodLabel: $periodLabel,
+        to: $to, cc: $cc, driverName: $driverName, periodLabel: $periodLabel,
         subject: $subject, bodyText: $bodyText, filename: $filename, pdfBase64: $pdfBase64
       )
     }`,

@@ -701,6 +701,7 @@ const schema = a.schema({
     .mutation()
     .arguments({
       to:          a.string().required(),
+      cc:          a.string(),
       driverName:  a.string(),
       periodLabel: a.string(),
       subject:     a.string(),
