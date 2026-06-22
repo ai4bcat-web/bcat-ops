@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, GripVertical, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, AlertTriangle } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
@@ -90,11 +90,15 @@ export function DriverPayPage() {
   const dragId = useRef<string | null>(null)
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
 
   const orderedRows = useMemo(() => {
     const idx = (id: string) => { const i = rowOrder.indexOf(id); return i === -1 ? Infinity : i }
     return [...pay.rows].sort((a, b) => idx(a.driver.id) - idx(b.driver.id) || a.driver.name.localeCompare(b.driver.name))
   }, [pay.rows, rowOrder])
+
+  // Tab selection — keep the chosen driver across weeks; fall back to the first.
+  const selectedRow = orderedRows.find((r) => r.driver.id === selectedDriverId) ?? orderedRows[0] ?? null
 
   const onRowDragStart = (id: string) => { dragId.current = id; setDraggingId(id) }
   const onRowDragEnter = (targetId: string) => {
@@ -188,28 +192,59 @@ export function DriverPayPage() {
           </div>
         )}
 
-        {orderedRows.map((row) => (
+        {/* Driver tabs — click to switch, drag to reorder */}
+        {orderedRows.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {orderedRows.map((r) => {
+              const active = selectedRow?.driver.id === r.driver.id
+              const color = getColor(r.driver.colorKey)
+              const dups = r.duplicateTripIds.size > 0
+              return (
+                <button
+                  key={r.driver.id}
+                  draggable
+                  onDragStart={() => onRowDragStart(r.driver.id)}
+                  onDragEnter={() => onRowDragEnter(r.driver.id)}
+                  onDragEnd={onRowDragEnd}
+                  onDragOver={(e) => e.preventDefault()}
+                  onClick={() => setSelectedDriverId(r.driver.id)}
+                  title={r.driver.name}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 10,
+                    border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                    background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
+                    cursor: 'grab', fontFamily: 'inherit', boxShadow: active ? 'var(--sh-sm)' : 'none',
+                    opacity: draggingId === r.driver.id ? 0.45 : 1,
+                    outline: overId === r.driver.id ? '2px solid var(--ds-blue)' : 'none', outlineOffset: -2,
+                  }}
+                >
+                  <Avatar src={r.driver.photoUrl} initials={getInitials(r.driver.name)} size="xs" style={{ background: color.avatarBg, color: '#fff' }} />
+                  <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: 'var(--ds-t1)' }}>{r.driver.name}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: r.statement.checkAmount >= 0 ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{money(r.statement.checkAmount)}</span>
+                  {dups && <AlertTriangle size={12} style={{ color: '#dc2626' }} aria-label="Has possible duplicate trips" />}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {selectedRow && (
           <StatementCard
-            key={row.driver.id}
-            row={row}
+            key={selectedRow.driver.id}
+            row={selectedRow}
             periodStart={periodStart}
-            dragging={draggingId === row.driver.id}
-            dragOver={overId === row.driver.id}
-            onDragStart={() => onRowDragStart(row.driver.id)}
-            onDragEnter={() => onRowDragEnter(row.driver.id)}
-            onDragEnd={onRowDragEnd}
-            onAddTrip={() => setTripModal({ driverId: row.driver.id })}
-            onImport={() => setImport(row.driver.id)}
-            onAddDeduction={() => setDedDriver(row.driver.id)}
-            onSettings={() => setSettings(row.driver)}
+            onAddTrip={() => setTripModal({ driverId: selectedRow.driver.id })}
+            onImport={() => setImport(selectedRow.driver.id)}
+            onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
+            onSettings={() => setSettings(selectedRow.driver)}
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
             onRemoveDeduction={pay.removeDeduction}
-            onExport={() => download(`pay-${row.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(row, periodStart))}
-            onPdf={() => handlePdf(row)}
-            onEmail={() => setEmailFor(row)}
+            onExport={() => download(`pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
+            onPdf={() => handlePdf(selectedRow)}
+            onEmail={() => setEmailFor(selectedRow)}
           />
-        ))}
+        )}
 
         {/* Unconfigured drivers */}
         {pay.unconfigured.length > 0 && (
@@ -289,10 +324,8 @@ export function DriverPayPage() {
 }
 
 // ── One driver's weekly statement ──────────────────────────────────────────────
-function StatementCard({ row, dragging, dragOver, onDragStart, onDragEnter, onDragEnd, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
   row: DriverPayRow; periodStart: string
-  dragging: boolean; dragOver: boolean
-  onDragStart: () => void; onDragEnter: () => void; onDragEnd: () => void
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
@@ -310,19 +343,9 @@ function StatementCard({ row, dragging, dragOver, onDragStart, onDragEnter, onDr
   )
 
   return (
-    <div
-      onDragEnter={onDragEnter}
-      onDragOver={(e) => e.preventDefault()}
-      style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)',
-        opacity: dragging ? 0.45 : 1, outline: dragOver ? '2px solid var(--ds-blue)' : 'none', outlineOffset: -2, transition: 'opacity .12s' }}>
-      {/* Header — drag handle reorders the cards */}
-      <div
-        draggable
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)', cursor: 'grab' }}
-      >
-        <GripVertical size={16} style={{ color: 'var(--ds-t3)', flexShrink: 0 }} aria-label="Drag to reorder" />
+    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
         <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{driver.name}</div>
