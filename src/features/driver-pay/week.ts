@@ -6,6 +6,26 @@ export function sundayOf(ref: Date = new Date()): string {
   return x.toISOString().slice(0, 10)
 }
 
+/** Pay-week start (Sunday) for a YYYY-MM-DD date string. */
+export function weekStartOfISO(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay())
+  return d.toISOString().slice(0, 10)
+}
+
+/** Most common value in a list (first-seen wins ties); null if empty. */
+export function modeOf(values: string[]): string | null {
+  const counts = new Map<string, number>()
+  let best: string | null = null
+  let bestN = 0
+  for (const v of values) {
+    const n = (counts.get(v) ?? 0) + 1
+    counts.set(v, n)
+    if (n > bestN) { bestN = n; best = v }
+  }
+  return best
+}
+
 export function shiftWeek(periodStart: string, weeks: number): string {
   const d = new Date(`${periodStart}T12:00:00Z`)
   d.setUTCDate(d.getUTCDate() + weeks * 7)

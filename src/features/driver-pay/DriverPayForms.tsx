@@ -3,6 +3,7 @@ import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
 import { parseRows, type RawTripRow } from '@/lib/tripCsv'
+import { weekStartOfISO, weekLabel, modeOf } from './week'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
@@ -118,10 +119,13 @@ function FilePick({ onText }: { onText: (t: string) => void }) {
 const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--ds-surface)', color: 'var(--ds-t1)', resize: 'vertical', boxSizing: 'border-box' }
 
 // ── Per-driver import (paste or file) ───────────────────────────────────────
-export function ImportModal({ driverId, periodStart, onImport, onClose }: { driverId: string; periodStart: string; onImport: (rows: TripInput[]) => Promise<void>; onClose: () => void }) {
+export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onClose }: { driverId: string; periodStart: string; onImport: (rows: TripInput[]) => Promise<void>; onSetPeriod?: (week: string) => void; onClose: () => void }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
-  const parsed = parseRows(text).map((r) => rowToTrip(r, driverId, periodStart))
+  const raw = parseRows(text)
+  const parsed = raw.map((r) => rowToTrip(r, driverId, r.date ? weekStartOfISO(r.date) : periodStart))
+  const detectedWeeks = Array.from(new Set(raw.map((r) => (r.date ? weekStartOfISO(r.date) : null)).filter((w): w is string => !!w)))
+  const dominantWeek = modeOf(raw.map((r) => (r.date ? weekStartOfISO(r.date) : null)).filter((w): w is string => !!w))
 
   return (
     <Modal title="Import trips" sub="Upload a CSV or paste rows from your pay spreadsheet" onClose={onClose} width={640}>
@@ -137,8 +141,10 @@ export function ImportModal({ driverId, periodStart, onImport, onClose }: { driv
         style={importTextarea} />
       <div style={{ fontSize: 12.5, color: parsed.length ? '#15803d' : 'var(--ds-t3)', marginTop: 8 }}>
         {parsed.length ? `${parsed.length} trip${parsed.length !== 1 ? 's' : ''} ready to import` : 'Upload or paste rows to preview'}
+        {detectedWeeks.length === 1 && <span style={{ color: 'var(--ds-t3)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
+        {detectedWeeks.length > 1 && <span style={{ color: '#b45309' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
       </div>
-      <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
+      <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
     </Modal>
   )
 }
@@ -159,13 +165,21 @@ function matchDriver(name: string, drivers: Driver[]): string {
   return byBoth?.id ?? ''
 }
 
-export function MasterImportModal({ periodStart, drivers, onImport, onClose }: {
+export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod, onClose }: {
   periodStart: string; drivers: Driver[]
-  onImport: (rows: TripInput[]) => Promise<void>; onClose: () => void
+  onImport: (rows: TripInput[]) => Promise<void>; onSetPeriod?: (week: string) => void; onClose: () => void
 }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
   const rows = parseRows(text)
+
+  // Auto-detect the pay week from the trip dates in the file. Each trip is filed to
+  // the pay-week of its own date; rows without a date fall back to the detected week
+  // (or the currently-viewed week). The page jumps to the dominant week after import.
+  const rowWeek = (r: RawTripRow) => (r.date ? weekStartOfISO(r.date) : null)
+  const detectedWeeks = Array.from(new Set(rows.map(rowWeek).filter((w): w is string => !!w)))
+  const dominantWeek = modeOf(rows.map(rowWeek).filter((w): w is string => !!w))
+  const periodFor = (r: RawTripRow) => rowWeek(r) ?? dominantWeek ?? periodStart
 
   // Group by the driver-name column and seed a best-guess driver mapping.
   const groups = useState(() => new Map<string, string>())[0]
@@ -184,9 +198,10 @@ export function MasterImportModal({ periodStart, drivers, onImport, onClose }: {
     setSaving(true)
     try {
       const trips = rows
-        .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, periodStart) : null })
+        .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, periodFor(r)) : null })
         .filter((t): t is TripInput => t !== null)
       await onImport(trips)
+      if (dominantWeek) onSetPeriod?.(dominantWeek) // jump to the week the trips landed in
     } catch { setSaving(false) }
   }
 
@@ -202,6 +217,18 @@ export function MasterImportModal({ periodStart, drivers, onImport, onClose }: {
       <textarea value={text} onChange={(e) => setText(e.target.value)} rows={7}
         placeholder={'Load ID,Origin,Destination,Miles,Equipment,Freight,Rate/mi,Dispatcher,Status'}
         style={importTextarea} />
+
+      {rows.length > 0 && (
+        <div style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12.5,
+          background: detectedWeeks.length ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-amber-bg, #fff7ed)',
+          color: detectedWeeks.length ? 'var(--ds-blue-dark, #0369a1)' : '#b45309', border: '1px solid var(--ds-border)' }}>
+          {detectedWeeks.length === 1
+            ? <>Detected pay week <b>{weekLabel(detectedWeeks[0])}</b> — trips will be filed there automatically.</>
+            : detectedWeeks.length > 1
+              ? <>Spans <b>{detectedWeeks.length} weeks</b> ({detectedWeeks.sort().map(weekLabel).join(', ')}) — each trip is filed to its own week.</>
+              : <>No trip dates found in this file — trips will be filed to the week you’re viewing. Use the date column from the Amazon export to auto-place them.</>}
+        </div>
+      )}
 
       {names.length > 0 && (
         <div style={{ marginTop: 12 }}>
