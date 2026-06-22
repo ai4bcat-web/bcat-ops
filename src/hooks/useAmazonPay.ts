@@ -32,6 +32,8 @@ export interface DriverPayRow {
   deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
   oneOffs:    DriverPayDeduction[]
   statement:  DriverPayStatement
+  /** Ids of this week's trips whose Load ID also appears in the previous week (likely a duplicate import). */
+  duplicateTripIds: Set<string>
 }
 
 export interface AmazonPayState {
@@ -79,6 +81,13 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
 
   const end = periodEnd(periodStart)
 
+  // Start of the previous pay week — used to flag duplicate trips re-imported from it.
+  const prevStart = useMemo(() => {
+    const d = new Date(`${periodStart}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - 7)
+    return d.toISOString().slice(0, 10)
+  }, [periodStart])
+
   const rows = useMemo<DriverPayRow[]>(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
     return settings
@@ -88,6 +97,15 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         if (!driver) return null
 
         const driverTrips = trips.filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
+
+        // Load IDs this driver ran last week → flag any that reappear this week.
+        const prevLoadIds = new Set(
+          trips.filter((t) => t.driverId === setting.driverId && t.periodStart === prevStart && t.loadId)
+            .map((t) => t.loadId as string),
+        )
+        const duplicateTripIds = new Set(
+          driverTrips.filter((t) => t.loadId && prevLoadIds.has(t.loadId)).map((t) => t.id),
+        )
 
         // Fuel pulled live from the driver's EFS card for this 7-day window.
         // Match the card tolerantly: EFS cards are stored 5-digit zero-padded
@@ -119,11 +137,11 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           ded,
         )
 
-        return { driver, setting, trips: driverTrips, fuel, deductions: ded, oneOffs, statement }
+        return { driver, setting, trips: driverTrips, fuel, deductions: ded, oneOffs, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, trips, deductions, fuelTxs, periodStart, end])
+  }, [settings, drivers, trips, deductions, fuelTxs, periodStart, prevStart, end])
 
   const tripCount = useMemo(() => trips.filter((t) => t.periodStart === periodStart).length, [trips, periodStart])
 
