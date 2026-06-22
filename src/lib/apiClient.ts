@@ -589,8 +589,10 @@ export async function sendDriverPayEmail(args: {
     }`,
     variables: args,
   })
-  // The mutation returns AWSJSON — already parsed by the client into an object.
-  const data = (res as { data?: { sendDriverPayEmail?: unknown } }).data?.sendDriverPayEmail
+  // The mutation returns AWSJSON, which the client hands back as a JSON *string* —
+  // parse it so callers can read { sent, to, error }.
+  let data: unknown = (res as { data?: { sendDriverPayEmail?: unknown } }).data?.sendDriverPayEmail
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave as-is */ } }
   return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; error?: string }
 }
 
