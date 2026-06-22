@@ -248,11 +248,11 @@ export const handler = async (event: LambdaEvent) => {
   do {
     const scanResult = await dynamo.send(new ScanCommand({
       TableName: TABLE_NAME,
-      ProjectionExpression: 'transactionDate, cardNumber, invoiceNumber, fuelType',
+      ProjectionExpression: 'transactionDate, cardNumber, fuelType, amount, quantity',
       ExclusiveStartKey: lastKey,
     }))
     for (const item of scanResult.Items ?? []) {
-      const k = `${item.transactionDate}|${item.cardNumber}|${item.invoiceNumber ?? ''}|${item.fuelType}`
+      const k = `${item.transactionDate}|${item.cardNumber}|${item.fuelType}|${item.amount}|${item.quantity}`
       existingKeys.add(k)
     }
     lastKey = scanResult.LastEvaluatedKey as Record<string, unknown> | undefined

@@ -725,6 +725,7 @@ function FuelTab({
         <FuelUploadModal
           trucks={equipment.filter((e) => e.type === 'truck')}
           onImported={(added) => { addTransactions(added); setShowUpload(false) }}
+          onChanged={refresh}
           onClose={() => setShowUpload(false)}
         />
       )}
