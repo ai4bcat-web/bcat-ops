@@ -1,21 +1,22 @@
 /**
  * Driver-pay PDF statement — branded weekly statement for one driver.
  *
- * Renders the BCAT logo on a black header band (the logo artwork is light, so it
- * reads on black, matching the app), then the trips table, deductions and the
- * check amount. Used for the "Download PDF" button and as the email attachment.
+ * Renders the Ivan Cartage logo on a black header band, then the trips table,
+ * deductions and the check amount. The logo artwork has black elements (the
+ * "CARTAGE CO." banner and diagonal accents), so it sits on a white chip to read
+ * on the black band. Used for the "Download PDF" button and the email attachment.
  */
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { DriverPayRow } from '@/hooks/useAmazonPay'
 import { tripPayAmount } from '@/lib/driverPay'
 import { weekLabelLong } from '@/features/driver-pay/week'
+import ivanLogo from '@/assets/ivan-cartage-logo.png'
 
-// Branding for the statement. To use an image logo instead of the text wordmark:
-// drop the file in src/assets, `import ivanLogo from '@/assets/ivan-cartage-logo.png'`
-// and set PAY_LOGO = ivanLogo below.
+// Branding for the statement. PAY_LOGO is the image logo; if it fails to load we
+// fall back to the COMPANY_NAME text wordmark below.
 const COMPANY_NAME = 'IVAN CARTAGE'
-const PAY_LOGO: string | null = null
+const PAY_LOGO: string | null = ivanLogo
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -50,6 +51,9 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
       const img = await loadImage(PAY_LOGO)
       const h = 34
       const w = (img.width / img.height) * h
+      // The logo has black elements, so back it with a white chip to read on the black band.
+      doc.setFillColor(255, 255, 255)
+      doc.roundedRect(M - 8, 13, w + 16, 44, 5, 5, 'F')
       doc.addImage(img, 'PNG', M, 18, w, h)
     } catch { /* logo optional — wordmark fallback below */ }
   }
