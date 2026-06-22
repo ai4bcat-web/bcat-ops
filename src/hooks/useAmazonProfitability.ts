@@ -7,6 +7,27 @@ import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { calcDriverPay } from '@/lib/driverPay'
 
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+
+/** Aggregate of driver-week rows whose pay-week start falls in [startIso, endIso]. */
+export interface AmazonAgg {
+  revenue:   number   // gross billed
+  driverPay: number
+  expenses:  number   // fuel + fixed + one-offs
+  profit:    number   // to the company
+  rows:      DriverWeekProfit[]
+}
+export function aggregateAmazon(rows: DriverWeekProfit[], startIso: string, endIso: string): AmazonAgg {
+  const inRange = rows.filter((r) => r.periodStart >= startIso && r.periodStart <= endIso)
+  return {
+    revenue:   round2(inRange.reduce((s, r) => s + r.gross, 0)),
+    driverPay: round2(inRange.reduce((s, r) => s + r.driverPay, 0)),
+    expenses:  round2(inRange.reduce((s, r) => s + r.expenses, 0)),
+    profit:    round2(inRange.reduce((s, r) => s + r.profit, 0)),
+    rows:      inRange,
+  }
+}
+
 /** One driver's company economics for one pay week. */
 export interface DriverWeekProfit {
   periodStart: string
