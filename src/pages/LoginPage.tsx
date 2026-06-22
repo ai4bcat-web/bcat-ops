@@ -1,16 +1,53 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { useAuth } from '@/hooks/useAuth'
 import bcatLogo from '@/assets/bcat-logo.png'
 
-const BRAND_STATS = [
-  { v: '44', l: 'loads / mo' },
-  { v: '16', l: 'units' },
-  { v: '92%', l: 'on-time' },
+/**
+ * LoginPage — "Control Tower"
+ *
+ * The command center, seen from the tower: a calm night-ops canvas with the fleet
+ * plotted across the country — city hubs, route arcs, live GPS pings and a unit
+ * tracing a lane — sitting behind a single pane of frosted glass you sign in
+ * through. The map is the signature; everything on the glass stays quiet.
+ *
+ * Palette  ink #060A12 · panel #0B1322 · glass rgba(13,20,34,.62) · signal #38BDF8
+ * Type     geometric sans for voice · mono as the instrument face (telemetry/data)
+ */
+
+// Hubs positioned roughly like US geography on a 1000×560 canvas (slice-cropped).
+type Hub = { code: string; x: number; y: number; ping?: boolean }
+const HUBS: Hub[] = [
+  { code: 'SEA', x: 132, y: 86 },
+  { code: 'LAX', x: 118, y: 360, ping: true },
+  { code: 'DEN', x: 372, y: 250 },
+  { code: 'DAL', x: 486, y: 404 },
+  { code: 'CHI', x: 626, y: 176, ping: true },
+  { code: 'ATL', x: 736, y: 360, ping: true },
+  { code: 'NYC', x: 872, y: 150 },
+  { code: 'MIA', x: 832, y: 486 },
 ]
+
+// Lanes between hubs (by index). The first two carry a moving unit.
+const LANES: [number, number][] = [
+  [4, 5], // CHI → ATL
+  [1, 3], // LAX → DAL
+  [2, 4], // DEN → CHI
+  [4, 6], // CHI → NYC
+  [3, 5], // DAL → ATL
+  [0, 2], // SEA → DEN
+]
+
+// Quadratic arc between two hubs, lifted toward the top for a great-circle feel.
+function arc(a: Hub, b: Hub): string {
+  const mx = (a.x + b.x) / 2
+  const my = (a.y + b.y) / 2
+  const dist = Math.hypot(b.x - a.x, b.y - a.y)
+  return `M ${a.x} ${a.y} Q ${mx} ${my - dist * 0.22} ${b.x} ${b.y}`
+}
+
+const usCT = () =>
+  new Date().toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: '2-digit', minute: '2-digit', hour12: false })
 
 export function LoginPage() {
   const { login, completeNewPassword, needsNewPassword } = useAuth()
@@ -22,6 +59,18 @@ export function LoginPage() {
   const [keepSignedIn, setKeepSignedIn] = useState(true)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [clock, setClock] = useState(usCT)
+
+  // Honor reduced-motion for the moving unit (SMIL can't be media-gated in CSS).
+  const reduced = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    [],
+  )
+
+  useEffect(() => {
+    const t = setInterval(() => setClock(usCT()), 20_000)
+    return () => clearInterval(t)
+  }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -54,130 +103,256 @@ export function LoginPage() {
   }
 
   return (
-    <div
-      className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
-      style={{ background: 'radial-gradient(1200px 600px at 50% -10%, #e6f4fd 0%, #f4f7fb 55%, #eef2f8 100%)' }}
-    >
-      {/* faint blue blobs */}
-      <div style={{ position: 'absolute', top: -140, left: '12%', width: 380, height: 380, borderRadius: '50%', background: 'rgba(30,168,243,0.16)', filter: 'blur(110px)', pointerEvents: 'none' }} />
-      <div style={{ position: 'absolute', bottom: -160, right: '10%', width: 420, height: 420, borderRadius: '50%', background: 'rgba(30,168,243,0.10)', filter: 'blur(120px)', pointerEvents: 'none' }} />
+    <div style={S.canvas}>
+      <style>{CSS}</style>
 
-      <div
-        className="relative z-10 grid w-full max-w-[1000px] grid-cols-1 overflow-hidden md:grid-cols-2"
-        style={{ minHeight: 580, borderRadius: 22, boxShadow: '0 30px 80px rgba(15,23,42,0.18), 0 8px 24px rgba(15,23,42,0.06)', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)' }}
-      >
-        {/* ── Left brand panel — solid black so the logo blends ─────────────── */}
-        <div className="relative hidden flex-col justify-between overflow-hidden md:flex" style={{ background: '#000', padding: 48 }}>
-          {/* blue ambient glow */}
-          <div style={{ position: 'absolute', top: '18%', left: '50%', width: 460, height: 460, transform: 'translateX(-50%)', borderRadius: '50%', background: 'radial-gradient(circle, rgba(30,168,243,0.32) 0%, rgba(30,168,243,0) 65%)', pointerEvents: 'none' }} />
-          {/* faint road-grid */}
-          <div style={{ position: 'absolute', inset: 0, opacity: 0.06, pointerEvents: 'none', backgroundImage: 'linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)', backgroundSize: '34px 34px' }} />
+      {/* ── Signature: live fleet map ─────────────────────────────────────── */}
+      <svg style={S.map} viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid slice" aria-hidden>
+        {/* graticule */}
+        <g stroke="rgba(56,189,248,0.08)" strokeWidth={1}>
+          {[80, 160, 240, 320, 400, 480].map((y) => (
+            <line key={`h${y}`} x1={0} y1={y} x2={1000} y2={y} />
+          ))}
+          {[140, 280, 420, 560, 700, 840].map((x) => (
+            <line key={`v${x}`} x1={x} y1={0} x2={x} y2={560} />
+          ))}
+        </g>
 
-          {/* spacer top */}
-          <div />
+        {/* lanes */}
+        {LANES.map(([i, j], k) => (
+          <path
+            key={`lane${k}`}
+            id={`lane-${k}`}
+            d={arc(HUBS[i], HUBS[j])}
+            fill="none"
+            stroke="rgba(56,189,248,0.22)"
+            strokeWidth={1.25}
+            className={k < 3 ? 'lg-dash' : undefined}
+            style={k < 3 ? { animationDelay: `${k * 1.1}s` } : undefined}
+          />
+        ))}
 
-          {/* centered logo + copy */}
-          <div className="relative flex flex-col items-center text-center">
-            <img src={bcatLogo} alt="BCAT Logistics" style={{ width: '78%', maxWidth: 320, height: 'auto', display: 'block' }} />
-            <div style={{ marginTop: 22, fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)' }}>
-              Operations Command Center
-            </div>
-            <p style={{ marginTop: 14, maxWidth: 320, fontSize: 13.5, lineHeight: 1.6, color: 'rgba(255,255,255,0.6)' }}>
-              Dispatch, intake, fleet compliance and financials — every load, driver and dollar in one place.
-            </p>
-          </div>
+        {/* moving units on the first two lanes */}
+        {!reduced &&
+          [0, 1].map((k) => (
+            <circle key={`unit${k}`} r={3.4} fill="#7dd3fc">
+              <animateMotion dur={`${7 + k * 2}s`} repeatCount="indefinite" rotate="auto" begin={`${k * 2}s`}>
+                <mpath href={`#lane-${k}`} />
+              </animateMotion>
+            </circle>
+          ))}
 
-          {/* footer stats split by hairlines */}
-          <div className="relative flex items-stretch" style={{ borderTop: '1px solid rgba(255,255,255,0.10)', paddingTop: 20 }}>
-            {BRAND_STATS.map((s, i) => (
-              <div key={s.l} style={{ flex: 1, textAlign: 'center', borderLeft: i === 0 ? 'none' : '1px solid rgba(255,255,255,0.10)' }}>
-                <div style={{ fontSize: 20, fontWeight: 600, color: '#60c5ff', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{s.v}</div>
-                <div style={{ marginTop: 2, fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>{s.l}</div>
-              </div>
-            ))}
-          </div>
+        {/* hubs + pings */}
+        {HUBS.map((h) => (
+          <g key={h.code} transform={`translate(${h.x} ${h.y})`}>
+            {h.ping && (
+              <>
+                <circle r={6} fill="none" stroke="#38bdf8" strokeWidth={1.5} className="lg-ping" />
+                <circle r={6} fill="none" stroke="#38bdf8" strokeWidth={1.5} className="lg-ping" style={{ animationDelay: '1.4s' }} />
+              </>
+            )}
+            <circle r={h.ping ? 3 : 2} fill={h.ping ? '#38bdf8' : 'rgba(125,211,252,0.55)'} />
+            <text x={8} y={4} fill="rgba(148,166,192,0.5)" fontSize={11} style={{ fontFamily: 'var(--font-mono, monospace)', letterSpacing: '0.08em' }}>
+              {h.code}
+            </text>
+          </g>
+        ))}
+      </svg>
+
+      {/* depth: vignette + top/bottom fades keep the glass legible */}
+      <div style={S.vignette} aria-hidden />
+
+      {/* ── The glass ─────────────────────────────────────────────────────── */}
+      <div style={S.card} className="lg-card">
+        {/* status rail */}
+        <div style={S.statusRow}>
+          <span style={S.live}>
+            <span style={S.liveDot} className={reduced ? undefined : 'lg-pulse'} /> LIVE
+          </span>
+          <span style={S.statusMeta}>{clock} CT · 16 UNITS ROLLING</span>
         </div>
 
-        {/* ── Right form panel ────────────────────────────────────────────── */}
-        <div className="flex flex-col justify-center" style={{ padding: '52px 48px' }}>
-          <h1 style={{ fontSize: 23, fontWeight: 600, letterSpacing: '-0.02em', marginBottom: 6 }}>
-            {needsNewPassword ? 'Set new password' : 'Welcome back'}
-          </h1>
-          <p style={{ fontSize: 13.5, color: 'var(--ds-t3)', marginBottom: 28 }}>
-            {needsNewPassword ? 'Choose a password to finish your setup' : 'Sign in to your BCAT Ops account'}
+        <div style={S.body}>
+          <img src={bcatLogo} alt="BCAT Logistics" style={S.logo} />
+          <div style={S.eyebrow}>Operations Command Center</div>
+
+          <h1 style={S.h1}>{needsNewPassword ? 'Set new password' : 'Welcome back'}</h1>
+          <p style={S.sub}>
+            {needsNewPassword ? 'Choose a password to finish your setup' : 'Sign in to the command center'}
           </p>
 
           {!needsNewPassword ? (
-            <form onSubmit={handleLogin} className="flex flex-col gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Email Address</Label>
-                <div className="relative">
-                  <Mail size={15} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-muted-soft)', pointerEvents: 'none' }} />
-                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@bcatcorp.com" required autoFocus className="h-11 pl-10" />
+            <form onSubmit={handleLogin} style={S.form}>
+              <Fieldset label="Email address">
+                <div style={S.inputWrap}>
+                  <Mail size={15} style={S.inputIcon} />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@bcatcorp.com" required autoFocus className="lg-input" style={S.input} />
                 </div>
-              </div>
+              </Fieldset>
 
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Password</Label>
-                  <a href="mailto:ryne@bcatcorp.com?subject=BCAT%20Ops%20password%20help" style={{ fontSize: 11.5, color: 'var(--ds-blue)' }}>Forgot?</a>
+              <Fieldset label="Password" aside={<a href="mailto:ryne@bcatcorp.com?subject=BCAT%20Ops%20password%20help" className="lg-link">Forgot?</a>}>
+                <div style={S.inputWrap}>
+                  <Lock size={15} style={S.inputIcon} />
+                  <input type={showPw ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••••••" required className="lg-input" style={{ ...S.input, paddingRight: 42 }} />
+                  <PwToggle on={showPw} toggle={() => setShowPw((s) => !s)} />
                 </div>
-                <div className="relative">
-                  <Lock size={15} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-muted-soft)', pointerEvents: 'none' }} />
-                  <Input type={showPw ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••••••" required className="h-11 pl-10 pr-11" />
-                  <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}
-                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer', padding: 4, display: 'flex' }}>
-                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </div>
+              </Fieldset>
 
-              <label className="flex items-center gap-2" style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>
-                <input type="checkbox" checked={keepSignedIn} onChange={(e) => setKeepSignedIn(e.target.checked)} style={{ accentColor: 'var(--ds-blue)' }} />
+              <label style={S.check}>
+                <input type="checkbox" checked={keepSignedIn} onChange={(e) => setKeepSignedIn(e.target.checked)} style={{ accentColor: '#38bdf8' }} />
                 Keep me signed in on this device
               </label>
 
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              {error && <p style={S.error}>{error}</p>}
 
-              <Button type="submit" className="mt-2 w-full gap-2 text-sm font-semibold" style={{ height: 46 }} disabled={loading}>
+              <button type="submit" className="lg-btn" disabled={loading}>
                 {loading ? 'Signing in…' : <>Sign in <ArrowRight size={16} /></>}
-              </Button>
+              </button>
             </form>
           ) : (
-            <form onSubmit={handleNewPassword} className="flex flex-col gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">New Password</Label>
-                <div className="relative">
-                  <Lock size={15} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-muted-soft)', pointerEvents: 'none' }} />
-                  <Input type={showPw ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 8 chars, upper, lower, number, symbol" required autoFocus className="h-11 pl-10 pr-11" />
-                  <button type="button" onClick={() => setShowPw((s) => !s)} aria-label={showPw ? 'Hide password' : 'Show password'}
-                    style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--ds-t3)', cursor: 'pointer', padding: 4, display: 'flex' }}>
-                    {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+            <form onSubmit={handleNewPassword} style={S.form}>
+              <Fieldset label="New password">
+                <div style={S.inputWrap}>
+                  <Lock size={15} style={S.inputIcon} />
+                  <input type={showPw ? 'text' : 'password'} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Min 8 chars · upper, lower, number, symbol" required autoFocus className="lg-input" style={{ ...S.input, paddingRight: 42 }} />
+                  <PwToggle on={showPw} toggle={() => setShowPw((s) => !s)} />
                 </div>
-              </div>
+              </Fieldset>
 
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Confirm Password</Label>
-                <div className="relative">
-                  <Lock size={15} style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-muted-soft)', pointerEvents: 'none' }} />
-                  <Input type={showPw ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat new password" required className="h-11 pl-10" />
+              <Fieldset label="Confirm password">
+                <div style={S.inputWrap}>
+                  <Lock size={15} style={S.inputIcon} />
+                  <input type={showPw ? 'text' : 'password'} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repeat new password" required className="lg-input" style={S.input} />
                 </div>
-              </div>
+              </Fieldset>
 
-              {error && <p className="text-xs text-destructive">{error}</p>}
+              {error && <p style={S.error}>{error}</p>}
 
-              <Button type="submit" className="mt-2 w-full gap-2 text-sm font-semibold" style={{ height: 46 }} disabled={loading}>
+              <button type="submit" className="lg-btn" disabled={loading}>
                 {loading ? 'Saving…' : <>Set password &amp; sign in <ArrowRight size={16} /></>}
-              </Button>
+              </button>
             </form>
           )}
 
-          <div className="mt-8 border-t pt-5 text-center" style={{ borderColor: 'var(--ds-border)', fontSize: 11.5, color: 'var(--ds-t3)' }}>
-            Need access? Contact <a href="mailto:ryne@bcatcorp.com" style={{ color: 'var(--ds-blue)' }}>ryne@bcatcorp.com</a>
+          <div style={S.footer}>
+            Need access? Contact{' '}
+            <a href="mailto:ryne@bcatcorp.com" className="lg-link">ryne@bcatcorp.com</a>
           </div>
         </div>
+
+        {/* instrument footer — a real coordinate, quietly */}
+        <div style={S.coords}>41.8781° N · 87.6298° W — CHI HUB</div>
       </div>
     </div>
   )
 }
+
+function Fieldset({ label, aside, children }: { label: string; aside?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={S.label}>{label}</span>
+        {aside}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function PwToggle({ on, toggle }: { on: boolean; toggle: () => void }) {
+  return (
+    <button type="button" onClick={toggle} aria-label={on ? 'Hide password' : 'Show password'} style={S.pwToggle}>
+      {on ? <EyeOff size={16} /> : <Eye size={16} />}
+    </button>
+  )
+}
+
+const CYAN = '#38bdf8'
+const T1 = '#e8eef8'
+const T2 = '#93a6c0'
+const T3 = '#5e6f8a'
+
+const S: Record<string, React.CSSProperties> = {
+  canvas: {
+    position: 'relative', minHeight: '100svh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    padding: 24, overflow: 'hidden',
+    background: 'radial-gradient(1100px 700px at 50% -10%, #0d1b30 0%, #08101e 45%, #060a12 100%)',
+    color: T1,
+  },
+  map: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' },
+  vignette: {
+    position: 'absolute', inset: 0, pointerEvents: 'none',
+    background:
+      'radial-gradient(900px 520px at 50% 50%, rgba(6,10,18,0) 0%, rgba(6,10,18,0.55) 70%, rgba(6,10,18,0.9) 100%),' +
+      'linear-gradient(180deg, rgba(6,10,18,0.55) 0%, rgba(6,10,18,0) 22%, rgba(6,10,18,0) 78%, rgba(6,10,18,0.7) 100%)',
+  },
+  card: {
+    position: 'relative', zIndex: 10, width: '100%', maxWidth: 432,
+    borderRadius: 18, overflow: 'hidden',
+    background: 'rgba(13,20,34,0.62)',
+    backdropFilter: 'blur(18px) saturate(140%)', WebkitBackdropFilter: 'blur(18px) saturate(140%)',
+    border: '1px solid rgba(120,160,210,0.14)',
+    boxShadow: '0 1px 0 rgba(255,255,255,0.05) inset, 0 30px 80px rgba(2,6,14,0.6), 0 0 0 1px rgba(56,189,248,0.04)',
+  },
+  statusRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    padding: '11px 20px', borderBottom: '1px solid rgba(120,160,210,0.10)',
+    background: 'linear-gradient(180deg, rgba(56,189,248,0.06), rgba(56,189,248,0))',
+  },
+  live: { display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5, letterSpacing: '0.18em', color: CYAN, fontWeight: 600 },
+  liveDot: { width: 6, height: 6, borderRadius: '50%', background: CYAN, boxShadow: `0 0 8px ${CYAN}` },
+  statusMeta: { fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5, letterSpacing: '0.1em', color: T3 },
+  body: { padding: '30px 34px 26px' },
+  logo: { width: 150, height: 'auto', display: 'block', marginBottom: 18, opacity: 0.96 },
+  eyebrow: { fontSize: 10.5, letterSpacing: '0.2em', textTransform: 'uppercase', color: T3, marginBottom: 14 },
+  h1: { fontSize: 25, fontWeight: 600, letterSpacing: '-0.02em', margin: 0, color: T1 },
+  sub: { fontSize: 13.5, color: T2, margin: '6px 0 24px' },
+  form: { display: 'flex', flexDirection: 'column', gap: 17 },
+  label: { fontSize: 10.5, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: T2 },
+  inputWrap: { position: 'relative', display: 'flex', alignItems: 'center' },
+  inputIcon: { position: 'absolute', left: 13, color: T3, pointerEvents: 'none' },
+  input: {
+    width: '100%', height: 46, paddingLeft: 38, paddingRight: 14,
+    background: 'rgba(7,12,22,0.6)', border: '1px solid rgba(120,160,210,0.16)', borderRadius: 11,
+    color: T1, fontSize: 14, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+    transition: 'border-color .15s, box-shadow .15s, background .15s',
+  },
+  pwToggle: { position: 'absolute', right: 10, background: 'none', border: 'none', color: T3, cursor: 'pointer', padding: 5, display: 'flex' },
+  check: { display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: T2, marginTop: -2 },
+  error: { fontSize: 12.5, color: '#fca5a5', margin: 0 },
+  footer: { marginTop: 24, paddingTop: 18, borderTop: '1px solid rgba(120,160,210,0.10)', textAlign: 'center', fontSize: 12, color: T3 },
+  coords: { padding: '10px 20px', borderTop: '1px solid rgba(120,160,210,0.08)', fontFamily: 'var(--font-mono, monospace)', fontSize: 10, letterSpacing: '0.08em', color: 'rgba(94,111,138,0.7)', textAlign: 'center' },
+}
+
+const CSS = `
+.lg-card { animation: lg-fadeup .6s cubic-bezier(.2,.7,.2,1) both; }
+.lg-input::placeholder { color: ${T3}; }
+.lg-input:focus { border-color: rgba(56,189,248,0.6); box-shadow: 0 0 0 3px rgba(56,189,248,0.14); background: rgba(7,12,22,0.85); }
+.lg-link { font-size: 11.5px; color: ${CYAN}; text-decoration: none; }
+.lg-link:hover { text-decoration: underline; }
+.lg-btn {
+  margin-top: 6px; height: 48px; width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: none; border-radius: 12px; cursor: pointer;
+  font-size: 14px; font-weight: 600; font-family: inherit; color: #03121f; letter-spacing: 0.01em;
+  background: linear-gradient(180deg, #7dd3fc, #38bdf8);
+  box-shadow: 0 8px 24px rgba(56,189,248,0.28), 0 1px 0 rgba(255,255,255,0.4) inset;
+  transition: transform .12s, box-shadow .15s, filter .15s;
+}
+.lg-btn:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 10px 30px rgba(56,189,248,0.4); }
+.lg-btn:active:not(:disabled) { transform: translateY(1px); }
+.lg-btn:disabled { opacity: .6; cursor: default; }
+.lg-input:focus-visible, .lg-btn:focus-visible, .lg-link:focus-visible, .lg-card a:focus-visible {
+  outline: 2px solid ${CYAN}; outline-offset: 2px;
+}
+.lg-ping { transform-origin: center; animation: lg-ping 3s ease-out infinite; }
+.lg-dash { stroke-dasharray: 5 9; animation: lg-dash 2.4s linear infinite; }
+.lg-pulse { animation: lg-pulse 1.8s ease-in-out infinite; }
+@keyframes lg-ping { 0% { transform: scale(.5); opacity: .9; } 100% { transform: scale(3.6); opacity: 0; } }
+@keyframes lg-dash { to { stroke-dashoffset: -28; } }
+@keyframes lg-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes lg-fadeup { from { opacity: 0; transform: translateY(10px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .lg-card, .lg-ping, .lg-dash, .lg-pulse { animation: none !important; }
+}
+`
