@@ -7,6 +7,7 @@ import { useTrucks } from '@/hooks/useTrucks'
 import { useAppStore } from '@/store/useAppStore'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
+import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import { monthRange, monthLabel } from './monthRange'
 
 function money(n: number): string {
@@ -115,19 +116,10 @@ export function MonthlyFleetPL() {
   const handleEdit = (key: FleetFixedCostKey) => (n: number) => { void setMonthlyAmount(key, n) }
 
   // Derived P&L lines (only the LOCAL fleet has fixed-cost + trailer detail wired).
-  const lines = useMemo(() => {
-    if (!r || !c) return null
-    const loanTrailers = contrib.loanTrailers
-    const trailerLease = contrib.trailerLease
-    const yardRent = contrib.yardRent
-    const tolls = contrib.tolls
-    const loanTrucks = Math.max(0, c.financing - loanTrailers)
-    const maintenance = c.maintenance + trailerMaintenance
-    const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent - eld) + Math.max(0, c.tolls - tolls)
-    const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + eld + maintenance + c.insurance + tolls + c.permits + other
-    const net = r.revenue - totalExpenses
-    return { loanTrucks, loanTrailers, trailerLease, yardRent, tolls, eld, maintenance, other, totalExpenses, net }
-  }, [r, c, contrib, eld, trailerMaintenance])
+  const lines = useMemo(
+    () => (r && c ? computeFleetMonthlyLines(r, c, contrib, eld, trailerMaintenance) : null),
+    [r, c, contrib, eld, trailerMaintenance],
+  )
 
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
 
