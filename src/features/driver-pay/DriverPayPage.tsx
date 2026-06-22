@@ -12,6 +12,9 @@ import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
 import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal } from './DriverPayForms'
 
+// Owner is CC'd on every pay statement that goes out to a driver.
+const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
+
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 }
@@ -84,6 +87,7 @@ export function DriverPayPage() {
       const doc = await buildPayStatementPdf(row, periodStart)
       const res = await sendDriverPayEmail({
         to,
+        cc: PAY_EMAIL_CC,
         driverName: row.driver.name,
         periodLabel: weekLabelLong(periodStart),
         filename: payPdfFilename(row, periodStart),
@@ -94,7 +98,7 @@ export function DriverPayPage() {
     })()
     await toast.promise(send, {
       loading: `Emailing ${row.driver.name}'s statement…`,
-      success: `Sent to ${to}`,
+      success: `Sent to ${to} (cc ${PAY_EMAIL_CC})`,
       error: (e) => `Email failed: ${e instanceof Error ? e.message : 'unknown error'}`,
     })
   }

@@ -12,6 +12,7 @@ const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'pay@bcatcorp.com'
 
 interface Args {
   to: string
+  cc?: string
   driverName?: string
   periodLabel?: string
   subject?: string
@@ -28,6 +29,7 @@ function wrap76(b64: string): string {
 export const handler = async (event: { arguments: Args }) => {
   const a = event.arguments
   const to = (a.to ?? '').trim()
+  const cc = (a.cc ?? '').trim()
   if (!to) return { sent: false, error: 'no-recipient' }
   if (!a.pdfBase64) return { sent: false, error: 'no-pdf' }
 
@@ -43,6 +45,7 @@ export const handler = async (event: { arguments: Args }) => {
   const raw =
     `From: ${FROM_ADDRESS}\r\n` +
     `To: ${to}\r\n` +
+    (cc ? `Cc: ${cc}\r\n` : '') +
     `Subject: ${subject}\r\n` +
     `MIME-Version: 1.0\r\n` +
     `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
@@ -64,7 +67,7 @@ export const handler = async (event: { arguments: Args }) => {
   try {
     await ses.send(new SendEmailCommand({
       FromEmailAddress: FROM_ADDRESS,
-      Destination: { ToAddresses: [to] },
+      Destination: { ToAddresses: [to], CcAddresses: cc ? [cc] : undefined },
       Content: { Raw: { Data: new TextEncoder().encode(raw) } },
     }))
   } catch (err) {
