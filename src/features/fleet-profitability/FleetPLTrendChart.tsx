@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
+import { sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import { weekRange } from './weekRange'
@@ -23,21 +25,33 @@ function weekTickLabel(startIso: string): string {
 export function FleetPLTrendChart() {
   const [group, setGroup] = useState<FleetGroup>('LOCAL')
   const { computeForRange } = useFleetProfitability(weekRange(0), group)
+  const { rows: amzRows } = useAmazonProfitability()
 
   const series = useMemo(() => {
     const rows: { label: string; revenue: number; expenses: number; profit: number }[] = []
     for (let i = WEEKS - 1; i >= 0; i--) {       // oldest → newest
-      const range = weekRange(i)
-      const r = computeForRange(range).rollup
-      rows.push({
-        label: weekTickLabel(range.start),
-        revenue: Math.round(r.revenue),
-        expenses: Math.round(r.revenue - r.net),
-        profit: Math.round(r.net),
-      })
+      if (group === 'AMAZON') {
+        const ws = shiftWeek(sundayOf(), -i)       // Sunday pay week
+        const a = aggregateAmazon(amzRows, ws, ws)
+        rows.push({
+          label: weekTickLabel(ws),
+          revenue: Math.round(a.revenue),
+          expenses: Math.round(a.driverPay + a.expenses), // driver pay + operating costs
+          profit: Math.round(a.profit),
+        })
+      } else {
+        const range = weekRange(i)
+        const r = computeForRange(range).rollup
+        rows.push({
+          label: weekTickLabel(range.start),
+          revenue: Math.round(r.revenue),
+          expenses: Math.round(r.revenue - r.net),
+          profit: Math.round(r.net),
+        })
+      }
     }
     return rows
-  }, [computeForRange])
+  }, [computeForRange, group, amzRows])
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -52,14 +66,12 @@ export function FleetPLTrendChart() {
         <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
           {FLEET_GROUPS.map((g) => {
             const active = g === group
-            const stub = g === 'AMAZON'
             return (
-              <button key={g} onClick={() => !stub && setGroup(g)} disabled={stub}
-                title={stub ? 'Amazon fleet — coming soon' : undefined}
-                style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: stub ? 'not-allowed' : 'pointer',
-                  background: active ? 'var(--ds-surface)' : 'transparent', color: stub ? 'var(--ds-t3)' : active ? 'var(--ds-t1)' : 'var(--ds-t2)',
-                  boxShadow: active ? 'var(--sh-sm)' : 'none', opacity: stub ? 0.55 : 1 }}>
-                {FLEET_GROUP_LABELS[g]}{stub ? ' ·soon' : ''}
+              <button key={g} onClick={() => setGroup(g)}
+                style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)',
+                  boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                {FLEET_GROUP_LABELS[g]}
               </button>
             )
           })}

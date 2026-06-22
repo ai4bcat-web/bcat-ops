@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useAppStore } from '@/store/useAppStore'
@@ -87,6 +88,10 @@ export function MonthlyFleetPL() {
 
   const range = monthRange(monthOffset)
   const { data, members, loading, refresh } = useFleetProfitability(range, group)
+  const { rows: amzRows, loading: amzLoading } = useAmazonProfitability()
+  const amzAgg = useMemo(() => aggregateAmazon(amzRows, range.start, range.end), [amzRows, range.start, range.end])
+  const amzDrivers = useMemo(() => new Set(amzAgg.rows.map((r) => r.driverId)).size, [amzAgg])
+  const isAmazon = group === 'AMAZON'
   const { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount } = useFleetFixedCosts()
   const { equipment } = useTrucks()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -134,7 +139,9 @@ export function MonthlyFleetPL() {
           <Scale size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly Profit &amp; Loss</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{members.length} truck{members.length === 1 ? '' : 's'} · {monthLabel(range)}</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'}` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
+            </div>
           </div>
         </div>
 
@@ -142,14 +149,12 @@ export function MonthlyFleetPL() {
           <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
             {FLEET_GROUPS.map((g) => {
               const active = g === group
-              const stub = g === 'AMAZON'
               return (
-                <button key={g} onClick={() => !stub && setGroup(g)} disabled={stub}
-                  title={stub ? 'Amazon fleet — coming soon' : undefined}
-                  style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: stub ? 'not-allowed' : 'pointer',
-                    background: active ? 'var(--ds-surface)' : 'transparent', color: stub ? 'var(--ds-t3)' : active ? 'var(--ds-t1)' : 'var(--ds-t2)',
-                    boxShadow: active ? 'var(--sh-sm)' : 'none', opacity: stub ? 0.55 : 1 }}>
-                  {FLEET_GROUP_LABELS[g]}{stub ? ' ·soon' : ''}
+                <button key={g} onClick={() => setGroup(g)}
+                  style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)',
+                    boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                  {FLEET_GROUP_LABELS[g]}
                 </button>
               )
             })}
@@ -170,7 +175,33 @@ export function MonthlyFleetPL() {
 
       {/* P&L body */}
       <div style={{ padding: '16px 20px' }}>
-        {loading && !r ? (
+        {isAmazon ? (
+          amzLoading && amzAgg.rows.length === 0 ? (
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+          ) : amzAgg.rows.length === 0 ? (
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No Amazon driver pay this month.</div>
+          ) : (
+            <div style={{ maxWidth: 520 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 12px' }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)' }}>(gross billed)</span></span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(amzAgg.revenue)}</span>
+              </div>
+              <CostRow label="Driver pay" value={amzAgg.driverPay} />
+              <CostRow label="Operating expenses" value={amzAgg.expenses} hint="fuel + fixed" />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
+                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(amzAgg.driverPay + amzAgg.expenses)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
+                  Profit to company
+                  {amzAgg.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{((amzAgg.profit / amzAgg.revenue) * 100).toFixed(0)}% margin</span>}
+                </span>
+                <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(amzAgg.profit) }}>{money(amzAgg.profit)}</span>
+              </div>
+            </div>
+          )
+        ) : loading && !r ? (
           <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
         ) : !r || !lines ? (
           <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No data for this fleet.</div>
