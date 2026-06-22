@@ -20,6 +20,7 @@ import { complianceScanner } from './functions/compliance-scanner/resource'
 import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
 import { driverPayEmailer } from './functions/driver-pay-emailer/resource'
+import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 
 const backend = defineBackend({
   auth,
@@ -38,6 +39,7 @@ const backend = defineBackend({
   onboardingPortalApi,
   onboardingEmailer,
   driverPayEmailer,
+  paychexPaySync,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -428,6 +430,22 @@ backend.driverPayEmailer.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
 payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'ai4bcat@gmail.com')
+
+// ── paychexPaySync Lambda (weekly Paychex Flex → DriverPayPeriod) ───────────
+
+const paychexFn      = backend.paychexPaySync.resources.lambda as LambdaFunction
+const driverTable    = backend.data.resources.tables['Driver']
+const driverPayTable = backend.data.resources.tables['DriverPayPeriod']
+backend.paychexPaySync.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:GetItem'],
+    resources: [driverTable.tableArn, driverPayTable.tableArn],
+  })
+)
+paychexFn.addEnvironment('DRIVER_TABLE_NAME', driverTable.tableName)
+paychexFn.addEnvironment('PAY_TABLE_NAME',    driverPayTable.tableName)
+// Paychex company id is an account number (not a secret) — set as a plain env var.
+paychexFn.addEnvironment('PAYCHEX_COMPANY_ID', process.env.PAYCHEX_COMPANY_ID ?? '')
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────
