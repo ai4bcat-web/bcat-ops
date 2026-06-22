@@ -3,19 +3,16 @@ import {
   listAmazonTrips, createAmazonTrip, updateAmazonTrip, deleteAmazonTrip,
   listDriverPaySettings, createDriverPaySetting, updateDriverPaySetting,
   listDriverPayDeductions, createDriverPayDeduction, deleteDriverPayDeduction,
-  type AmazonTrip, type DriverPaySetting, type DriverPayDeduction, type FixedExpense,
+  type AmazonTrip, type DriverPaySetting, type DriverPayDeduction, type FixedExpense, type FuelTransaction,
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { calcDriverPay, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import type { Driver } from '@/types'
 
-export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense }
-
-/** Card key for matching — digits only, leading zeros stripped ("00049" → "49"). */
-export function normalizeCard(card: string | null | undefined): string {
-  return (card ?? '').replace(/\D/g, '').replace(/^0+/, '')
-}
+export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense, FuelTransaction }
+export { normalizeCard }
 
 /** Inclusive 7-day window from a period start (YYYY-MM-DD). */
 export function periodEnd(periodStart: string): string {
@@ -29,6 +26,7 @@ export interface DriverPayRow {
   setting:    DriverPaySetting
   trips:      AmazonTrip[]
   fuel:       number
+  fuelTxns:   FuelTransaction[]      // the individual fuel lines that make up `fuel`
   deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
   oneOffs:    DriverPayDeduction[]
   statement:  DriverPayStatement
@@ -107,21 +105,10 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           driverTrips.filter((t) => t.loadId && prevLoadIds.has(t.loadId)).map((t) => t.id),
         )
 
-        // Fuel pulled live from the driver's EFS card for this 7-day window.
-        // Match the card tolerantly: EFS cards are stored 5-digit zero-padded
-        // ("00049"), so compare on digits with leading zeros stripped so "49",
-        // "0049" and "00049" all match.
-        let fuel = 0
-        const wantCard = normalizeCard(setting.fuelCardNumber)
-        if (wantCard) {
-          for (const tx of fuelTxs) {
-            if (normalizeCard(tx.cardNumber) !== wantCard) continue
-            if ((tx.itemCategory ?? 'FUEL') !== 'FUEL') continue
-            if (tx.transactionDate < periodStart || tx.transactionDate > end) continue
-            fuel += tx.amount
-          }
-        }
-        fuel = Math.round(fuel * 100) / 100
+        // Fuel pulled live from the driver's EFS card for this 7-day window —
+        // real fuel only, de-duplicated, itemized (see matchedFuelForCard).
+        const fuelTxns = matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end)
+        const fuel = sumFuel(fuelTxns)
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
@@ -137,7 +124,7 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           ded,
         )
 
-        return { driver, setting, trips: driverTrips, fuel, deductions: ded, oneOffs, statement, duplicateTripIds }
+        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
