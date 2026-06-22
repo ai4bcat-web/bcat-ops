@@ -1,6 +1,7 @@
 import { FleetPLTrendChart } from '@/features/fleet-profitability/FleetPLTrendChart'
 import { FleetProfitabilitySection } from '@/features/fleet-profitability/FleetProfitabilitySection'
 import { MonthlyFleetPL } from '@/features/fleet-profitability/MonthlyFleetPL'
+import { AmazonDriverProfit } from './AmazonDriverProfit'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 /**
@@ -26,6 +27,7 @@ export function FinancesPage() {
         <FleetPLTrendChart />
         <FleetProfitabilitySection />
         <MonthlyFleetPL />
+        <AmazonDriverProfit />
       </div>
     </div>
   )
