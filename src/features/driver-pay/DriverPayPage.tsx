@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
-import { useAmazonPay, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
+import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -12,10 +12,15 @@ import { sendDriverPayEmail } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
-import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal } from './DriverPayForms'
+import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal } from './DriverPayForms'
 
 // Owner is CC'd on every pay statement that goes out to a driver.
 const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
+
+// "6/7" style short date for a YYYY-MM-DD (UTC-safe).
+function fmtShortDate(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+}
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -69,6 +74,7 @@ export function DriverPayPage() {
   const [masterOpen, setMasterOpen] = useState(false)
   const [dedDriver, setDedDriver]   = useState<string | null>(null)
   const [settingsFor, setSettings]  = useState<Driver | null>(null)
+  const [emailFor, setEmailFor]     = useState<DriverPayRow | null>(null)
 
   const isThisWeek = periodStart === sundayOf()
 
@@ -92,30 +98,22 @@ export function DriverPayPage() {
     }
   }
 
-  const handleEmail = async (row: DriverPayRow) => {
-    const to = row.setting.email || row.driver.email
-    if (!to) {
-      toast.error(`No email on file for ${row.driver.name} — add one in Settings.`)
-      return
-    }
-    const send = (async () => {
-      const doc = await buildPayStatementPdf(row, periodStart)
-      const res = await sendDriverPayEmail({
-        to,
-        cc: PAY_EMAIL_CC,
-        driverName: row.driver.name,
-        periodLabel: weekLabelLong(periodStart),
-        filename: payPdfFilename(row, periodStart),
-        pdfBase64: pdfToBase64(doc),
-      })
-      if (!res.sent) throw new Error(res.error || 'Send failed')
-      return res
-    })()
-    await toast.promise(send, {
-      loading: `Emailing ${row.driver.name}'s statement…`,
-      success: `Sent to ${to} (cc ${PAY_EMAIL_CC})`,
-      error: (e) => `Email failed: ${e instanceof Error ? e.message : 'unknown error'}`,
+  // Send the statement with the (possibly edited) fields from the email modal.
+  const handleSendEmail = async (row: DriverPayRow, fields: { to: string; cc: string; subject: string; bodyText: string }) => {
+    const doc = await buildPayStatementPdf(row, periodStart)
+    const res = await sendDriverPayEmail({
+      to: fields.to,
+      cc: fields.cc || undefined,
+      subject: fields.subject || undefined,
+      bodyText: fields.bodyText || undefined,
+      driverName: row.driver.name,
+      periodLabel: weekLabelLong(periodStart),
+      filename: payPdfFilename(row, periodStart),
+      pdfBase64: pdfToBase64(doc),
     })
+    if (!res.sent) throw new Error(res.error || 'The email service rejected the message')
+    toast.success(`Sent to ${fields.to}${fields.cc ? ` (cc ${fields.cc})` : ''}`)
+    setEmailFor(null)
   }
 
   return (
@@ -173,7 +171,7 @@ export function DriverPayPage() {
             onRemoveDeduction={pay.removeDeduction}
             onExport={() => download(`pay-${row.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(row, periodStart))}
             onPdf={() => handlePdf(row)}
-            onEmail={() => handleEmail(row)}
+            onEmail={() => setEmailFor(row)}
           />
         ))}
 
@@ -233,6 +231,23 @@ export function DriverPayPage() {
           onSave={async (patch) => { await pay.saveSetting(settingsFor.id, patch); setSettings(null) }}
           onClose={() => setSettings(null)} />
       )}
+      {emailFor && (() => {
+        const r = emailFor
+        const firstName = r.driver.name.trim().split(/\s+/)[0] || 'there'
+        const start = fmtShortDate(periodStart)
+        const end = fmtShortDate(periodEnd(periodStart))
+        return (
+          <EmailModal
+            driverName={r.driver.name}
+            defaultTo={r.setting.email || r.driver.email || ''}
+            defaultCc={PAY_EMAIL_CC}
+            defaultSubject={`Settlement — ${weekLabelLong(periodStart)}`}
+            defaultBody={`Hi ${firstName},\n\nPlease find your settlements for weeks ${start} through ${end} attached.\n\n— BCAT Logistics`}
+            onSend={(fields) => handleSendEmail(r, fields)}
+            onClose={() => setEmailFor(null)}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -243,9 +258,8 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
-  onPdf: () => void; onEmail: () => Promise<void>
+  onPdf: () => void; onEmail: () => void
 }) {
-  const [emailing, setEmailing] = useState(false)
   const { driver, setting, trips, statement, oneOffs } = row
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross − expenses`
@@ -279,13 +293,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         {iconBtn(onAddDeduction, Plus, 'Add expense')}
         {iconBtn(onExport, Download, 'CSV')}
         {iconBtn(onPdf, FileText, 'PDF')}
-        <button
-          onClick={async () => { setEmailing(true); try { await onEmail() } finally { setEmailing(false) } }}
-          disabled={emailing}
-          title="Email PDF to driver" aria-label="Email PDF to driver"
-          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: emailing ? 'default' : 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', opacity: emailing ? 0.6 : 1 }}>
-          <Mail size={13} /> {emailing ? 'Sending…' : 'Email'}
-        </button>
+        {iconBtn(onEmail, Mail, 'Email')}
         <div style={{ flex: 1 }} />
         {iconBtn(onSettings, Settings, 'Settings')}
       </div>

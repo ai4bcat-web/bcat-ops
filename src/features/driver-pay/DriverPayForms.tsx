@@ -294,6 +294,53 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
   )
 }
 
+// ── Email a statement ───────────────────────────────────────────────────────
+export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, defaultBody, onSend, onClose }: {
+  driverName: string
+  defaultTo: string
+  defaultCc: string
+  defaultSubject: string
+  defaultBody: string
+  onSend: (fields: { to: string; cc: string; subject: string; bodyText: string }) => Promise<void>
+  onClose: () => void
+}) {
+  const [to, setTo] = useState(defaultTo)
+  const [cc, setCc] = useState(defaultCc)
+  const [subject, setSubject] = useState(defaultSubject)
+  const [body, setBody] = useState(defaultBody)
+  const [err, setErr] = useState<string | null>(null)
+  const [sending, setSending] = useState(false)
+
+  const send = async () => {
+    if (!to.trim()) { setErr('A recipient email is required'); return }
+    setErr(null)
+    setSending(true)
+    try {
+      await onSend({ to: to.trim(), cc: cc.trim(), subject: subject.trim(), bodyText: body })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+      setSending(false)
+    }
+  }
+
+  return (
+    <Modal title={`Email ${driverName}'s statement`} sub="The PDF statement is attached automatically" onClose={onClose} width={560}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field l="To" half><input style={input} value={to} onChange={(e) => setTo(e.target.value)} placeholder="driver@example.com" /></Field>
+        <Field l="Cc" half><input style={input} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="ryne@bcatcorp.com" /></Field>
+        <Field l="Subject"><input style={input} value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
+        <Field l="Message">
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6}
+            style={{ ...input, height: 'auto', padding: 10, resize: 'vertical', lineHeight: 1.5 }} />
+        </Field>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 8 }}>📎 Statement PDF attached</div>
+      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      <Footer onClose={onClose} onSave={send} saving={sending} label={sending ? 'Sending…' : 'Send email'} />
+    </Modal>
+  )
+}
+
 // ── One-off deduction ───────────────────────────────────────────────────────
 export function DeductionModal({ driverId, periodStart, onSave, onClose }: { driverId: string; periodStart: string; onSave: (d: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>; onClose: () => void }) {
   const [f, setF] = useState({ label: '', amount: '', date: '' })
