@@ -30,10 +30,15 @@ describe('matchedFuelForCard', () => {
     expect(sumFuel(matchedFuelForCard(txs, '49', '2026-06-07', '2026-06-13'))).toBe(180)
   })
 
-  it('de-duplicates a transaction that landed twice', () => {
-    const dup = { transactionDate: '2026-06-10', cardNumber: '00049', invoiceNumber: 'INV9', fuelType: 'ULSD', amount: 185.6 }
-    const txs = [tx({ ...dup, id: '1' }), tx({ ...dup, id: '2' }), tx({ invoiceNumber: 'INV10', amount: 100 })]
-    expect(sumFuel(matchedFuelForCard(txs, '49', '2026-06-07', '2026-06-13'))).toBe(285.6)
+  it('de-dups the same fill even when the copies have different invoice numbers', () => {
+    // Real case (Chad 6/9): the same $185.60 / 35.7 gal fill imported twice with
+    // different invoices, plus a genuine second fill the same day that must be kept.
+    const txs = [
+      tx({ id: '1', transactionDate: '2026-06-09', invoiceNumber: 'A1', fuelType: 'ULSD', amount: 185.6, quantity: 35.7 }),
+      tx({ id: '2', transactionDate: '2026-06-09', invoiceNumber: 'B2', fuelType: 'ULSD', amount: 185.6, quantity: 35.7 }), // dup
+      tx({ id: '3', transactionDate: '2026-06-09', invoiceNumber: 'C3', fuelType: 'ULSD', amount: 617.57, quantity: 136.7 }), // real 2nd fill
+    ]
+    expect(sumFuel(matchedFuelForCard(txs, '49', '2026-06-07', '2026-06-13'))).toBe(803.17) // 185.60 + 617.57
   })
 
   it('respects the date window', () => {

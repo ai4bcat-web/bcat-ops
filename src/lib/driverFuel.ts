@@ -29,9 +29,17 @@ export function isFuelTx(tx: Pick<FuelTransaction, 'itemCategory' | 'fuelType'>)
   return FUEL_ITEM_TYPES.has((tx.fuelType ?? '').toUpperCase().trim())
 }
 
-/** Stable identity of an EFS line — same key ⇒ same physical transaction. */
+/**
+ * Stable identity of an EFS fuel line — same key ⇒ same physical fill.
+ *
+ * Deliberately does NOT use the invoice number: the same fill re-imported from two
+ * different reports can carry different invoice numbers, so keying on invoice lets
+ * the duplicate through. Date + card + fuel type + amount + gallons fingerprints a
+ * fill on its own; two genuinely separate fills (e.g. a second stop the same day)
+ * differ in amount or gallons and are kept.
+ */
 function fuelKey(tx: FuelTransaction): string {
-  return `${tx.transactionDate}|${normalizeCard(tx.cardNumber)}|${tx.invoiceNumber ?? ''}|${tx.fuelType}|${tx.amount}`
+  return `${tx.transactionDate}|${normalizeCard(tx.cardNumber)}|${tx.fuelType}|${tx.amount}|${tx.quantity}`
 }
 
 /**
