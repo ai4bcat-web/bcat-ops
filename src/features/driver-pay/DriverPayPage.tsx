@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, GripVertical } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, GripVertical, AlertTriangle } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
@@ -361,9 +361,14 @@ function StatementCard({ row, dragging, dragOver, onDragStart, onDragEnter, onDr
           </tr></thead>
           <tbody>
             {trips.length === 0 && <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No trips this week — add or import them.</td></tr>}
-            {trips.map((t) => (
-              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }} className="dp-trip-row">
-                <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: 'pointer' }} title="Click to edit">{t.loadId || '—'}</td>
+            {trips.map((t) => {
+              const dup = row.duplicateTripIds.has(t.id)
+              return (
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)', background: dup ? 'var(--ds-red-bg, #fef2f2)' : undefined }} className="dp-trip-row">
+                <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: 'pointer', color: dup ? '#dc2626' : undefined, fontWeight: dup ? 700 : undefined }} title={dup ? 'Duplicate — this Load ID also ran last week' : 'Click to edit'}>
+                  {dup && <AlertTriangle size={12} style={{ color: '#dc2626', verticalAlign: '-1px', marginRight: 4 }} />}
+                  {t.loadId || '—'}
+                </td>
                 <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{[t.origin, t.destination].filter(Boolean).join(' → ') || '—'}</td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString() : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
@@ -375,7 +380,7 @@ function StatementCard({ row, dragging, dragOver, onDragStart, onDragEnter, onDr
                   <button onClick={() => onRemoveTrip(t.id)} title="Remove trip" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Trash2 size={13} /></button>
                 </td>
               </tr>
-            ))}
+            )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
                 <td style={{ ...TD, textAlign: 'left' }} colSpan={3}>Gross / driver share ({pct(setting.payPercent)})</td>
