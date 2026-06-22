@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, GripVertical } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
@@ -20,6 +20,12 @@ const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
 // "6/7" style short date for a YYYY-MM-DD (UTC-safe).
 function fmtShortDate(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+}
+
+// Custom row order for the driver cards (drag-to-reorder), remembered per browser.
+const ROW_ORDER_KEY = 'bcat.driverpay.order'
+function loadRowOrder(): string[] {
+  try { const v = JSON.parse(localStorage.getItem(ROW_ORDER_KEY) || '[]'); return Array.isArray(v) ? v : [] } catch { return [] }
 }
 
 function money(n: number): string {
@@ -77,6 +83,31 @@ export function DriverPayPage() {
   const [emailFor, setEmailFor]     = useState<DriverPayRow | null>(null)
 
   const isThisWeek = periodStart === sundayOf()
+
+  // ── Drag-to-reorder the driver cards (persisted per browser) ────────────────
+  const [rowOrder, setRowOrder] = useState<string[]>(loadRowOrder)
+  useEffect(() => { try { localStorage.setItem(ROW_ORDER_KEY, JSON.stringify(rowOrder)) } catch { /* ignore */ } }, [rowOrder])
+  const dragId = useRef<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+
+  const orderedRows = useMemo(() => {
+    const idx = (id: string) => { const i = rowOrder.indexOf(id); return i === -1 ? Infinity : i }
+    return [...pay.rows].sort((a, b) => idx(a.driver.id) - idx(b.driver.id) || a.driver.name.localeCompare(b.driver.name))
+  }, [pay.rows, rowOrder])
+
+  const onRowDragStart = (id: string) => { dragId.current = id; setDraggingId(id) }
+  const onRowDragEnter = (targetId: string) => {
+    const d = dragId.current
+    if (!d || d === targetId) return
+    setOverId(targetId)
+    const ids = orderedRows.map((r) => r.driver.id)
+    const from = ids.indexOf(d), to = ids.indexOf(targetId)
+    if (from === -1 || to === -1 || from === to) return
+    const next = [...ids]; next.splice(from, 1); next.splice(to, 0, d)
+    setRowOrder(next)
+  }
+  const onRowDragEnd = () => { dragId.current = null; setDraggingId(null); setOverId(null) }
 
   const handleClearWeek = async () => {
     if (pay.tripCount === 0) return
@@ -157,11 +188,16 @@ export function DriverPayPage() {
           </div>
         )}
 
-        {pay.rows.map((row) => (
+        {orderedRows.map((row) => (
           <StatementCard
             key={row.driver.id}
             row={row}
             periodStart={periodStart}
+            dragging={draggingId === row.driver.id}
+            dragOver={overId === row.driver.id}
+            onDragStart={() => onRowDragStart(row.driver.id)}
+            onDragEnter={() => onRowDragEnter(row.driver.id)}
+            onDragEnd={onRowDragEnd}
             onAddTrip={() => setTripModal({ driverId: row.driver.id })}
             onImport={() => setImport(row.driver.id)}
             onAddDeduction={() => setDedDriver(row.driver.id)}
@@ -253,8 +289,10 @@ export function DriverPayPage() {
 }
 
 // ── One driver's weekly statement ──────────────────────────────────────────────
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
+function StatementCard({ row, dragging, dragOver, onDragStart, onDragEnter, onDragEnd, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
   row: DriverPayRow; periodStart: string
+  dragging: boolean; dragOver: boolean
+  onDragStart: () => void; onDragEnter: () => void; onDragEnd: () => void
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
@@ -272,9 +310,19 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
   )
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)' }}>
+    <div
+      onDragEnter={onDragEnter}
+      onDragOver={(e) => e.preventDefault()}
+      style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)',
+        opacity: dragging ? 0.45 : 1, outline: dragOver ? '2px solid var(--ds-blue)' : 'none', outlineOffset: -2, transition: 'opacity .12s' }}>
+      {/* Header — drag handle reorders the cards */}
+      <div
+        draggable
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', borderBottom: '1px solid var(--ds-border)', cursor: 'grab' }}
+      >
+        <GripVertical size={16} style={{ color: 'var(--ds-t3)', flexShrink: 0 }} aria-label="Drag to reorder" />
         <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{driver.name}</div>
