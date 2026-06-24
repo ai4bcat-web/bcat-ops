@@ -49,6 +49,7 @@ function Footer({ onClose, onSave, saving, label: lbl = 'Save' }: { onClose: () 
 export function TripModal({ driverId, periodStart, initial, onSave, onClose }: { driverId: string; periodStart: string; initial?: BoxTruckTrip; onSave: (t: TripInput) => Promise<void>; onClose: () => void }) {
   const editing = !!initial
   const [f, setF] = useState({
+    date: initial?.date ?? periodStart, aljexPro: initial?.aljexPro ?? '',
     proNumber: initial?.proNumber ?? '', customer: initial?.customer ?? '', salesRep: initial?.salesRep ?? '',
     loadDesc: initial?.loadDesc ?? '', customerRate: numStr(initial?.customerRate), carrierCost: numStr(initial?.carrierCost),
     grossProfit: numStr(initial?.grossProfit), status: initial?.status ?? 'RELEASED',
@@ -64,6 +65,7 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
     try {
       await onSave({
         driverId, periodStart,
+        loadId: initial?.loadId ?? null, date: f.date || null, aljexPro: f.aljexPro.trim() || null,
         proNumber: f.proNumber.trim() || null, customer: f.customer.trim() || null, salesRep: f.salesRep.trim() || null,
         loadDesc: f.loadDesc.trim() || null, customerRate: num(f.customerRate), carrierCost: num(f.carrierCost),
         grossProfit: gp, status: f.status || null,
@@ -74,7 +76,9 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
   return (
     <Modal title={editing ? 'Edit shipment' : 'Add shipment'} sub="One shipment for this pay period" onClose={onClose}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Field l="PRO #" half><input style={input} value={f.proNumber} onChange={(e) => set('proNumber', e.target.value)} placeholder="13599" /></Field>
+        <Field l="Date" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
+        <Field l="Aljex PRO #" half><input style={input} value={f.aljexPro} onChange={(e) => set('aljexPro', e.target.value)} placeholder="FR-407930" /></Field>
+        <Field l="PU / TMS #" half><input style={input} value={f.proNumber} onChange={(e) => set('proNumber', e.target.value)} placeholder="13599" /></Field>
         <Field l="Customer" half><input style={input} value={f.customer} onChange={(e) => set('customer', e.target.value)} placeholder="THE ROYAL GROUP" /></Field>
         <Field l="Sales rep" half><input style={input} value={f.salesRep} onChange={(e) => set('salesRep', e.target.value)} /></Field>
         <Field l="Load description" half><input style={input} value={f.loadDesc} onChange={(e) => set('loadDesc', e.target.value)} placeholder="POD RCVD-FAK" /></Field>
@@ -96,6 +100,7 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
 export function rowToTrip(r: RawBoxTruckRow, driverId: string, periodStart: string): TripInput {
   return {
     driverId, periodStart,
+    loadId: null, date: null, aljexPro: null,
     proNumber: r.proNumber, customer: r.customer, salesRep: r.salesRep, loadDesc: r.loadDesc,
     customerRate: r.customerRate, carrierCost: r.carrierCost, grossProfit: r.grossProfit, status: r.status,
   }

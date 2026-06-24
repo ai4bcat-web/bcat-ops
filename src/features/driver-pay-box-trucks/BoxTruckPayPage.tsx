@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, Pencil, FileText, Mail, Boxes, CalendarDays } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, Pencil, FileText, Mail, Boxes, CalendarDays, GripVertical, DownloadCloud } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
-import { useBoxTruckPay, type BoxTruckPayRow, type BoxTruckTrip, type StatementShipment } from '@/hooks/useBoxTruckPay'
+import { useBoxTruckPay, type BoxTruckPayRow, type BoxTruckTrip } from '@/hooks/useBoxTruckPay'
 import { tripPayAmount } from '@/lib/driverPay'
+import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildBoxTruckPayStatementPdf, boxTruckPdfFilename, pdfToBase64 } from '@/lib/payPdfBoxTruck'
 import { sendDriverPayEmail } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
@@ -16,7 +17,7 @@ const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 const pct = (n: number) => `${Math.round(n * 100)}%`
-const fmtShort = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+const fmtShort = (iso: string) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' }) : '—')
 
 const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
 const TH: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
@@ -26,11 +27,11 @@ function statementCsv(row: BoxTruckPayRow, periodStart: string): string {
   const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const L: string[] = []
   L.push(q(`${row.driver.name} — pay period ${periodLabelLong(periodStart)}`)); L.push('')
-  L.push(['Source', 'PRO #', 'Customer', 'Sales Rep', 'Status', 'Gross Profit', 'Driver Amount'].map(q).join(','))
-  for (const s of row.shipments) {
-    L.push([s.source, s.proNumber, s.customer, s.salesRep, s.status, s.grossProfit, tripPayAmount(s.grossProfit, row.setting)].map(q).join(','))
+  L.push(['Source', 'Date', 'Aljex PRO #', 'PU / TMS #', 'Customer', 'Status', 'Gross Profit', 'Driver Amount'].map(q).join(','))
+  for (const t of row.trips) {
+    L.push([t.loadId ? 'calendar' : 'manual', t.date, t.aljexPro, t.proNumber, t.customer, t.status, t.grossProfit, tripPayAmount(t.grossProfit, row.setting)].map(q).join(','))
   }
-  L.push(['', '', '', '', q('Gross'), q(row.statement.gross), q(row.statement.driverAmount)].join(','))
+  L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), q(row.statement.driverAmount)].join(','))
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
@@ -61,12 +62,21 @@ export function BoxTruckPayPage() {
 
   const handleClearPeriod = async () => {
     if (pay.tripCount === 0) return
-    if (!window.confirm(`Delete all ${pay.tripCount} MANUAL shipment${pay.tripCount !== 1 ? 's' : ''} filed under ${periodLabelLong(periodStart)}?\n\nCalendar-sourced loads are not affected (they come from the loads page). Settings, fuel and expenses are untouched.`)) return
+    if (!window.confirm(`Delete all ${pay.tripCount} shipment${pay.tripCount !== 1 ? 's' : ''} filed under ${periodLabelLong(periodStart)}?\n\nSettings, fuel and expenses are untouched. You can re-pull from the calendar afterward.`)) return
     try {
       const n = await pay.clearPeriod()
-      toast.success(`Cleared ${n} manual shipment${n !== 1 ? 's' : ''} from ${periodLabelLong(periodStart)}`)
+      toast.success(`Cleared ${n} shipment${n !== 1 ? 's' : ''} from ${periodLabelLong(periodStart)}`)
     } catch (e) {
       toast.error(`Couldn't clear the period: ${e instanceof Error ? e.message : 'unknown error'}`)
+    }
+  }
+
+  const handlePull = async (driverId: string) => {
+    try {
+      const n = await pay.pullFromCalendar(driverId)
+      toast.success(n ? `Pulled ${n} load${n !== 1 ? 's' : ''} from the calendar` : 'No new loads to pull for this period')
+    } catch (e) {
+      toast.error(`Couldn't pull from the calendar: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
   }
 
@@ -94,13 +104,13 @@ export function BoxTruckPayPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '20px 32px 12px', flexWrap: 'wrap' }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}><Boxes size={20} /> Driver Pay — Box Trucks</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Biweekly (Wed→Tue) — loads each driver delivered, pulled from the calendar · % of net after expenses</p>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Biweekly (Wed→Tue) — pull each driver's delivered loads from the calendar, then edit/reorder · % of net after expenses</p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {pay.tripCount > 0 && (
-              <button onClick={handleClearPeriod} title="Delete manual shipments for this period"
+              <button onClick={handleClearPeriod} title="Delete all shipments for this period"
                 style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-red, #dc2626)', background: 'var(--ds-surface)', color: 'var(--ds-red, #dc2626)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                <Trash2 size={15} /> Clear manual ({pay.tripCount})
+                <Trash2 size={15} /> Clear period ({pay.tripCount})
               </button>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -146,6 +156,7 @@ export function BoxTruckPayPage() {
           <StatementCard
             key={selectedRow.driver.id}
             row={selectedRow}
+            onPull={() => handlePull(selectedRow.driver.id)}
             onAddTrip={() => setTripModal({ driverId: selectedRow.driver.id })}
             onImport={() => setImport(selectedRow.driver.id)}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
@@ -153,6 +164,7 @@ export function BoxTruckPayPage() {
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
             onRemoveDeduction={pay.removeDeduction}
+            onUpdateTrip={(id, patch) => { void pay.updateTrip(id, patch) }}
             onExport={() => download(`pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
             onPdf={() => handlePdf(selectedRow)}
             onEmail={() => setEmailFor(selectedRow)}
@@ -195,24 +207,41 @@ export function BoxTruckPayPage() {
 }
 
 // ── One driver's biweekly statement ─────────────────────────────────────────
-function SourceBadge({ source }: { source: StatementShipment['source'] }) {
-  const calendar = source === 'calendar'
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, fontWeight: 600, padding: '2px 7px', borderRadius: 999,
-      color: calendar ? 'var(--ds-blue)' : 'var(--ds-t3)', background: calendar ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-bg)', border: `1px solid ${calendar ? 'var(--ds-blue)' : 'var(--ds-border)'}` }}>
-      {calendar ? <CalendarDays size={11} /> : <Pencil size={10} />}{calendar ? 'Calendar' : 'Manual'}
-    </span>
-  )
-}
-
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
+function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: BoxTruckPayRow
-  onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
+  onPull: () => void; onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onEditTrip: (t: BoxTruckTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
   onPdf: () => void; onEmail: () => void
+  onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
-  const { driver, setting, statement, oneOffs, shipments } = row
+  const { driver, setting, statement, oneOffs } = row
+  const dragId = useRef<string | null>(null)
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const trips = useMemo(() => {
+    if (!dragOrder) return row.trips
+    const byId = new Map(row.trips.map((t) => [t.id, t]))
+    return dragOrder.map((id) => byId.get(id)).filter(Boolean) as typeof row.trips
+  }, [row.trips, dragOrder])
+
+  const onTripDragStart = (id: string) => { dragId.current = id; setDragOrder(row.trips.map((t) => t.id)) }
+  const onTripDragEnter = (targetId: string) => {
+    const d = dragId.current
+    if (!d || d === targetId) return
+    setOverId(targetId)
+    setDragOrder((prev) => {
+      const ids = prev ?? row.trips.map((t) => t.id)
+      const from = ids.indexOf(d), to = ids.indexOf(targetId)
+      if (from < 0 || to < 0 || from === to) return ids
+      const next = [...ids]; next.splice(from, 1); next.splice(to, 0, d); return next
+    })
+  }
+  const onTripDragEnd = () => {
+    if (dragOrder) persistDragOrder(dragOrder, (id) => row.trips.find((t) => t.id === id)?.sortOrder, onUpdateTrip)
+    dragId.current = null; setOverId(null); setDragOrder(null)
+  }
+
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} of net (after expenses)` : `${pct(setting.payPercent)} of gross − expenses`
   const iconBtn = (onClick: () => void, Icon: typeof Plus, lbl: string) => (
@@ -225,7 +254,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{driver.name}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel} · {row.calendarCount} from calendar{row.manualCount ? ` · ${row.manualCount} manual` : ''}{setting.email ? ` · ${setting.email}` : ''}</div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel}{setting.email ? ` · ${setting.email}` : ''}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Check amount</div>
@@ -234,6 +263,10 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+        <button onClick={onPull} title="Pull this driver's delivered loads for the period"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+          <DownloadCloud size={14} /> Pull from calendar{row.unpulledLoadCount ? ` (${row.unpulledLoadCount})` : ''}
+        </button>
         {iconBtn(onAddTrip, Plus, 'Add shipment')}
         {iconBtn(onImport, Upload, 'Import')}
         {iconBtn(onAddDeduction, Plus, 'Add expense')}
@@ -247,40 +280,43 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-            <th style={{ ...TH, textAlign: 'left' }}>Source</th>
-            <th style={{ ...TH, textAlign: 'left' }}>PRO #</th>
+            <th style={{ ...TH, textAlign: 'left' }}>Date</th>
+            <th style={{ ...TH, textAlign: 'left' }}>Aljex PRO #</th>
+            <th style={{ ...TH, textAlign: 'left' }}>PU / TMS #</th>
             <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
             <th style={{ ...TH, textAlign: 'left' }}>Status</th>
             <th style={TH}>Gross Profit</th>
             <th style={TH}>Amount</th>
-            <th style={{ ...TH, width: 56 }}></th>
+            <th style={{ ...TH, width: 64 }}></th>
           </tr></thead>
           <tbody>
-            {shipments.length === 0 && <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No loads delivered this period. They'll appear here from the calendar, or add one manually.</td></tr>}
-            {shipments.map((s) => {
-              const manual = s.source === 'manual'
+            {trips.length === 0 && <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No shipments yet. Click <b>Pull from calendar</b> to load what {driver.name} delivered this period, or add one manually.</td></tr>}
+            {trips.map((t) => {
+              const fromCal = !!t.loadId
               return (
-                <tr key={s.key} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                  <td style={{ ...TD, textAlign: 'left' }}><SourceBadge source={s.source} /></td>
-                  <td onClick={() => manual && s.trip && onEditTrip(s.trip)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: manual ? 'pointer' : 'default' }}>{s.proNumber || '—'}</td>
-                  <td onClick={() => manual && s.trip && onEditTrip(s.trip)} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', cursor: manual ? 'pointer' : 'default' }}>{s.customer || '—'}</td>
-                  <td style={{ ...TD, textAlign: 'left', color: s.status === 'COVERED' ? '#b45309' : 'var(--ds-t2)' }}>{s.status || '—'}</td>
-                  <td style={TD}>{money(s.grossProfit)}</td>
-                  <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(s.grossProfit, setting))}</td>
-                  <td style={{ ...TD, padding: '7px 6px', whiteSpace: 'nowrap' }}>
-                    {manual && s.trip ? (
-                      <>
-                        <button onClick={() => onEditTrip(s.trip!)} title="Edit shipment" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Pencil size={13} /></button>
-                        <button onClick={() => onRemoveTrip(s.trip!.id)} title="Remove shipment" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Trash2 size={13} /></button>
-                      </>
-                    ) : <span style={{ fontSize: 11, color: 'var(--ds-t3)' }} title="From the loads calendar — edit it there">loads</span>}
+                <tr key={t.id} onDragEnter={() => onTripDragEnter(t.id)} onDragOver={(e) => e.preventDefault()}
+                  style={{ borderBottom: '1px solid var(--ds-border)', background: overId === t.id ? 'var(--ds-blue-bg, #eff6ff)' : undefined, opacity: dragId.current === t.id && dragOrder ? 0.5 : 1 }}>
+                  <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', cursor: 'pointer' }}>
+                    {fromCal && <CalendarDays size={11} style={{ color: 'var(--ds-blue)', verticalAlign: '-1px', marginRight: 4 }} aria-label="From calendar" />}
+                    {fmtShort(t.date ?? '')}
+                  </td>
+                  <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600, cursor: 'pointer' }}>{t.aljexPro || '—'}</td>
+                  <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', color: 'var(--ds-t2)', cursor: 'pointer' }}>{t.proNumber || '—'}</td>
+                  <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{t.customer || '—'}</td>
+                  <td style={{ ...TD, textAlign: 'left', color: t.status === 'COVERED' ? '#b45309' : 'var(--ds-t2)' }}>{t.status || '—'}</td>
+                  <td style={TD}>{money(t.grossProfit)}</td>
+                  <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.grossProfit, setting))}</td>
+                  <td style={{ ...TD, padding: '7px 4px', whiteSpace: 'nowrap' }}>
+                    <span draggable onDragStart={() => onTripDragStart(t.id)} onDragEnd={onTripDragEnd} title="Drag to reorder" aria-label="Drag to reorder" style={{ display: 'inline-flex', cursor: 'grab', color: 'var(--ds-t3)', padding: '0 2px', verticalAlign: 'middle' }}><GripVertical size={13} /></span>
+                    <button onClick={() => onEditTrip(t)} title="Edit shipment" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Pencil size={13} /></button>
+                    <button onClick={() => onRemoveTrip(t.id)} title="Remove shipment" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Trash2 size={13} /></button>
                   </td>
                 </tr>
               )
             })}
-            {shipments.length > 0 && (
+            {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={4}>Gross profit / driver share ({pct(setting.payPercent)})</td>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={5}>Gross profit / driver share ({pct(setting.payPercent)})</td>
                 <td style={TD}>{money(statement.gross)}</td>
                 <td style={TD}>{money(statement.driverAmount)}</td><td></td>
               </tr>
