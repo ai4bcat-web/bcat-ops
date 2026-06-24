@@ -147,6 +147,7 @@ const schema = a.schema({
       dispatcher:    a.string(),
       status:        a.string(),             // 'Completed' | 'Active' | 'Cancelled' | …
       notes:         a.string(),
+      sortOrder:     a.float(),              // manual drag order within a driver's week
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
     .authorization((allow) => [allow.authenticated()]),

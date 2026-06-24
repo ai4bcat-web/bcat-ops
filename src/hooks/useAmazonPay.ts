@@ -9,6 +9,7 @@ import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { calcDriverPay, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
+import { compareByOrder } from '@/lib/calendarOrder'
 import type { Driver } from '@/types'
 
 export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense, FuelTransaction }
@@ -94,7 +95,9 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         const driver = driverById.get(setting.driverId)
         if (!driver) return null
 
-        const driverTrips = trips.filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
+        const driverTrips = trips
+          .filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
+          .sort(compareByOrder((t) => t.sortOrder, (t) => t.createdAt))
 
         // Load IDs this driver ran last week → flag any that reappear this week.
         const prevLoadIds = new Set(
