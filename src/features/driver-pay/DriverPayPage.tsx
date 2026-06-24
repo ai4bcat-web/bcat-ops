@@ -333,6 +333,11 @@ export function DriverPayPage() {
 }
 
 // ── One driver's weekly statement ──────────────────────────────────────────────
+// Below this $/mi a trip looks like a multi-load BLOCK leg imported at base rate
+// from Relay's "Trips" export (~$0.65/mi), not a real single-load freight ($3–5/mi).
+// Used only to FLAG a possibly-understated week for review — never to auto-change pay.
+const BLOCK_LEG_RATE_CEILING = 1.5
+
 function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
@@ -343,6 +348,13 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
 }) {
   const { driver, setting, statement, oneOffs } = row
   const [showFuel, setShowFuel] = useState(false)
+
+  // Heuristic audit — surface a week whose trips look like understated block legs
+  // (base ~$0.65/mi) so every affected driver/week is visible without re-importing.
+  const suspectLegs = row.trips.filter(
+    (t) => t.status !== 'Cancelled' && t.ratePerMile != null && t.ratePerMile < BLOCK_LEG_RATE_CEILING,
+  )
+  const suspectIds = new Set(suspectLegs.map((t) => t.id))
 
   // Drag-to-reorder the trip rows. dragOrder holds the working order during a drag.
   const dragId = useRef<string | null>(null)
@@ -410,6 +422,17 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         {iconBtn(onSettings, Settings, 'Settings')}
       </div>
 
+      {/* Possibly-understated multi-load block legs (heuristic audit) */}
+      {suspectLegs.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 16px', borderBottom: '1px solid var(--ds-border)', background: '#fffbeb', color: '#92400e', fontSize: 12, lineHeight: 1.5 }}>
+          <AlertTriangle size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+          <span>
+            <b>{suspectLegs.length} trip{suspectLegs.length !== 1 ? 's' : ''} look like multi-load block legs</b> imported at base rate (&lt; ${BLOCK_LEG_RATE_CEILING.toFixed(2)}/mi).
+            Relay's “Trips” export doesn’t carry block pay, so this week’s gross may be understated — verify these against the Relay <b>Payments / Settlement</b> report.
+          </span>
+        </div>
+      )}
+
       {/* Trips */}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -441,7 +464,11 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
                 <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', cursor: 'pointer' }}>{[t.origin, t.destination].filter(Boolean).join(' → ') || '—'}</td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString() : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
-                <td style={TD}>{t.ratePerMile != null ? `$${t.ratePerMile.toFixed(2)}` : '—'}</td>
+                <td style={{ ...TD, color: suspectIds.has(t.id) ? '#b45309' : undefined, fontWeight: suspectIds.has(t.id) ? 700 : undefined }}
+                    title={suspectIds.has(t.id) ? 'Low $/mi — looks like a multi-load block leg; verify against Relay Payments' : undefined}>
+                  {suspectIds.has(t.id) && <AlertTriangle size={11} style={{ verticalAlign: '-1px', marginRight: 3 }} />}
+                  {t.ratePerMile != null ? `$${t.ratePerMile.toFixed(2)}` : '—'}
+                </td>
                 <td style={{ ...TD, textAlign: 'left', color: t.status === 'Cancelled' ? '#dc2626' : 'var(--ds-t2)' }}>{t.status || '—'}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.freightAmount, setting))}</td>
                 <td style={{ ...TD, padding: '7px 4px', whiteSpace: 'nowrap' }}>
