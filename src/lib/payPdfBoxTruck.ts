@@ -19,7 +19,7 @@ export function boxTruckPdfFilename(row: BoxTruckPayRow, periodStart: string): s
 export { pdfToBase64 } from '@/lib/payPdf'
 
 export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodStart: string): Promise<jsPDF> {
-  const { driver, setting, trips, statement, deductions } = row
+  const { driver, setting, shipments, statement, deductions } = row
   const doc = new jsPDF({ unit: 'pt', format: 'letter' })
   const W = doc.internal.pageSize.getWidth()
   const M = 40
@@ -43,10 +43,10 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   // Shipments table
   autoTable(doc, {
     startY: 122,
-    head: [['PRO #', 'Customer', 'Sales Rep', 'Status', 'Gross Profit', 'Driver Amt']],
-    body: trips.map((t) => [
-      t.proNumber ?? '—', t.customer ?? '—', t.salesRep ?? '—', t.status ?? '—',
-      money(t.grossProfit), money(tripPayAmount(t.grossProfit, setting)),
+    head: [['Source', 'PRO #', 'Customer', 'Status', 'Gross Profit', 'Driver Amt']],
+    body: shipments.map((s) => [
+      s.source === 'calendar' ? 'Calendar' : 'Manual', s.proNumber ?? '—', s.customer ?? '—', s.status ?? '—',
+      money(s.grossProfit), money(tripPayAmount(s.grossProfit, setting)),
     ]),
     foot: [['', '', '', 'Gross', money(statement.gross), money(statement.driverAmount)]],
     styles: { fontSize: 9, cellPadding: 4 },
