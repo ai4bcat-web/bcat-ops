@@ -19,7 +19,7 @@ export function boxTruckPdfFilename(row: BoxTruckPayRow, periodStart: string): s
 export { pdfToBase64 } from '@/lib/payPdf'
 
 export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodStart: string): Promise<jsPDF> {
-  const { driver, setting, shipments, statement, deductions } = row
+  const { driver, setting, trips, statement, deductions } = row
   const doc = new jsPDF({ unit: 'pt', format: 'letter' })
   const W = doc.internal.pageSize.getWidth()
   const M = 40
@@ -41,18 +41,19 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   doc.text(`${periodLabelLong(periodStart)}  ·  ${pct(setting.payPercent)} of net after expenses`, M, 108)
 
   // Shipments table
+  const fmtDate = (d?: string | null) => (d ? d.slice(5, 10) : '—')
   autoTable(doc, {
     startY: 122,
-    head: [['Source', 'PRO #', 'Customer', 'Status', 'Gross Profit', 'Driver Amt']],
-    body: shipments.map((s) => [
-      s.source === 'calendar' ? 'Calendar' : 'Manual', s.proNumber ?? '—', s.customer ?? '—', s.status ?? '—',
-      money(s.grossProfit), money(tripPayAmount(s.grossProfit, setting)),
+    head: [['Date', 'Aljex PRO #', 'PU / TMS #', 'Customer', 'Status', 'Gross Profit', 'Driver Amt']],
+    body: trips.map((t) => [
+      fmtDate(t.date), t.aljexPro ?? '—', t.proNumber ?? '—', t.customer ?? '—', t.status ?? '—',
+      money(t.grossProfit), money(tripPayAmount(t.grossProfit, setting)),
     ]),
-    foot: [['', '', '', 'Gross', money(statement.gross), money(statement.driverAmount)]],
+    foot: [['', '', '', '', 'Gross', money(statement.gross), money(statement.driverAmount)]],
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [17, 24, 39], textColor: 255 },
     footStyles: { fillColor: [243, 244, 246], textColor: [11, 13, 18], fontStyle: 'bold' },
-    columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
+    columnStyles: { 5: { halign: 'right' }, 6: { halign: 'right' } },
     margin: { left: M, right: M },
   })
 

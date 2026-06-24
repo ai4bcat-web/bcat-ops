@@ -1429,7 +1429,10 @@ export interface BoxTruckTrip {
   id:            string
   driverId:      string
   periodStart:   string
-  proNumber?:    string | null
+  loadId?:       string | null   // source Load.id when pulled from the calendar
+  date?:         string | null   // YYYY-MM-DD shipment/delivery date
+  aljexPro?:     string | null   // Aljex PRO # (Load.aljexId)
+  proNumber?:    string | null   // PU / TMS #
   customer?:     string | null
   salesRep?:     string | null
   loadDesc?:     string | null
@@ -1444,10 +1447,15 @@ export interface BoxTruckTrip {
 }
 
 const BOX_TRUCK_FIELDS_BASE = `id driverId periodStart proNumber customer salesRep loadDesc customerRate carrierCost grossProfit status notes createdAt updatedAt`
-// sortOrder is added by the same migration as the model; fall back until it deploys.
-let boxTruckHasSortOrder = true
-const boxTruckFields = () => (boxTruckHasSortOrder ? `${BOX_TRUCK_FIELDS_BASE} sortOrder` : BOX_TRUCK_FIELDS_BASE)
-const isMissingBtSortOrder = (err: unknown) => /sortOrder/i.test(JSON.stringify(err ?? ''))
+// These ship in the same migration as the model; fall back if the backend predates them.
+const BOX_TRUCK_FIELDS_EXT = `sortOrder loadId date aljexPro`
+let boxTruckHasExt = true
+const boxTruckFields = () => (boxTruckHasExt ? `${BOX_TRUCK_FIELDS_BASE} ${BOX_TRUCK_FIELDS_EXT}` : BOX_TRUCK_FIELDS_BASE)
+const isMissingBtExt = (err: unknown) => /sortOrder|loadId|aljexPro|\bdate\b/i.test(JSON.stringify(err ?? ''))
+const stripBtExt = <T extends object>(o: T): Record<string, unknown> => {
+  const { sortOrder: _s, loadId: _l, date: _d, aljexPro: _a, ...rest } = o as Record<string, unknown>
+  return rest
+}
 
 export async function listBoxTruckTrips(): Promise<BoxTruckTrip[]> {
   try {
@@ -1456,9 +1464,9 @@ export async function listBoxTruckTrips(): Promise<BoxTruckTrip[]> {
     }) as { data: { listBoxTruckTrips: { items: BoxTruckTrip[] } } }
     return result.data.listBoxTruckTrips.items ?? []
   } catch (err) {
-    if (boxTruckHasSortOrder && isMissingBtSortOrder(err)) {
-      console.warn("[apiClient] BoxTruckTrip 'sortOrder' not deployed yet — querying without it")
-      boxTruckHasSortOrder = false
+    if (boxTruckHasExt && isMissingBtExt(err)) {
+      console.warn('[apiClient] BoxTruckTrip extended fields not deployed yet — querying without them')
+      boxTruckHasExt = false
       return listBoxTruckTrips()
     }
     throw err
@@ -1466,8 +1474,7 @@ export async function listBoxTruckTrips(): Promise<BoxTruckTrip[]> {
 }
 
 export async function createBoxTruckTrip(input: Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>): Promise<BoxTruckTrip> {
-  const { sortOrder: _so, ...rest } = input
-  const safeInput = boxTruckHasSortOrder ? input : rest
+  const safeInput = boxTruckHasExt ? input : stripBtExt(input)
   const result = await client.graphql({
     query: `mutation CreateBoxTruckTrip($input: CreateBoxTruckTripInput!) { createBoxTruckTrip(input: $input) { ${boxTruckFields()} } }`,
     variables: { input: safeInput },
@@ -1476,8 +1483,7 @@ export async function createBoxTruckTrip(input: Omit<BoxTruckTrip, 'id' | 'creat
 }
 
 export async function updateBoxTruckTrip(id: string, patch: Partial<Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>>): Promise<BoxTruckTrip> {
-  const { sortOrder: _so, ...rest } = patch
-  const safePatch = boxTruckHasSortOrder ? patch : rest
+  const safePatch = boxTruckHasExt ? patch : stripBtExt(patch)
   const result = await client.graphql({
     query: `mutation UpdateBoxTruckTrip($input: UpdateBoxTruckTripInput!) { updateBoxTruckTrip(input: $input) { ${boxTruckFields()} } }`,
     variables: { input: { id, ...safePatch } },

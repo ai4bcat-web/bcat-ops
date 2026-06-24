@@ -178,16 +178,19 @@ const schema = a.schema({
     .model({
       driverId:     a.string().required(),
       periodStart:  a.string().required(),   // YYYY-MM-DD — Wednesday start of the 14-day period
-      proNumber:    a.string(),              // shipment_pro
+      loadId:       a.string(),              // source Load.id when pulled from the calendar (dedup key)
+      date:         a.string(),              // YYYY-MM-DD — the shipment/delivery date
+      aljexPro:     a.string(),              // our Aljex PRO # (Load.aljexId)
+      proNumber:    a.string(),              // PU / TMS # (Load.pickupNumber / tmsId; or shipment_pro)
       customer:     a.string(),              // customer name
       salesRep:     a.string(),              // sales rep name
       loadDesc:     a.string(),              // shipment_load_des
       customerRate: a.float(),               // shipment_customer_total_rates
       carrierCost:  a.float(),               // shipment_carrier_total_rates
-      grossProfit:  a.float().required(),    // shipment_gross_profit — the pay basis
-      status:       a.string(),              // shipment_status: 'RELEASED' | 'COVERED' | …
+      grossProfit:  a.float().required(),    // gross profit — the pay basis (Load.rate/100 or shipment_gross_profit)
+      status:       a.string(),              // 'Delivered' | 'RELEASED' | 'COVERED' | …
       notes:        a.string(),
-      sortOrder:    a.float(),               // manual drag order within a driver's period
+      sortOrder:    a.float(),               // drag order within a driver's period
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
     .authorization((allow) => [allow.authenticated()]),

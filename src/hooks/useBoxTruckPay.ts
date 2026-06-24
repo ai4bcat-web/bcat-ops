@@ -17,50 +17,32 @@ import type { Driver, Load } from '@/types'
 export type { BoxTruckTrip, DriverPaySetting, DriverPayDeduction, FixedExpense, FuelTransaction }
 export { normalizeCard }
 
-/**
- * A row in a driver's statement. Two sources:
- *  • 'calendar' — a load the driver DELIVERED in the period (revenue = rate/100,
- *    matching the fleet-profitability model). Read-only; reflects the calendar.
- *  • 'manual'   — a BoxTruckTrip added/imported by hand (editable). One-offs and
- *    anything not on the calendar.
- */
-export interface StatementShipment {
-  key:         string
-  source:      'calendar' | 'manual'
-  proNumber:   string | null
-  customer:    string | null
-  salesRep:    string | null
-  status:      string | null
-  grossProfit: number
-  loadId?:     string         // calendar source — the Load id
-  trip?:       BoxTruckTrip    // manual source — for edit/remove
-}
-
 export interface BoxTruckPayRow {
-  driver:        Driver
-  setting:       DriverPaySetting
-  shipments:     StatementShipment[]
-  calendarCount: number
-  manualCount:   number
-  fuel:          number
-  fuelTxns:      FuelTransaction[]
-  deductions:    PayDeductionInput[]
-  oneOffs:       DriverPayDeduction[]
-  statement:     DriverPayStatement
+  driver:     Driver
+  setting:    DriverPaySetting
+  trips:      BoxTruckTrip[]   // every shipment row — calendar-sourced (loadId set) or manual
+  fuel:       number
+  fuelTxns:   FuelTransaction[]
+  deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
+  oneOffs:    DriverPayDeduction[]
+  statement:  DriverPayStatement
+  /** Loads the driver delivered this period that aren't yet pulled in (count). */
+  unpulledLoadCount: number
 }
 
 export interface BoxTruckPayState {
   loading:     boolean
   error:       string | null
   rows:        BoxTruckPayRow[]
-  /** Manual shipments filed in the current period (across all box-truck drivers). */
   tripCount:   number
   unconfigured: Driver[]
   refresh:     () => void
+  /** Materialize a driver's delivered loads for this period into editable rows (idempotent by loadId). Returns # created. */
+  pullFromCalendar: (driverId: string) => Promise<number>
   addTrip:        (input: Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateTrip:     (id: string, patch: Partial<Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<void>
   removeTrip:     (id: string) => Promise<void>
-  /** Delete every MANUAL shipment in the current period. Returns how many were removed. */
+  /** Delete every shipment in the current period. Returns how many were removed. */
   clearPeriod:    () => Promise<number>
   saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => Promise<void>
   addDeduction:   (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
@@ -102,6 +84,12 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     [drivers],
   )
 
+  /** Loads a driver DELIVERED inside the period (excludes broker-covered). */
+  const deliveredLoadsFor = useCallback((driverId: string): Load[] => {
+    if (brokerIds.has(driverId)) return []
+    return loads.filter((l) => l.deliveryDriverId === driverId && deliveryDate(l) >= periodStart && deliveryDate(l) <= end)
+  }, [loads, brokerIds, periodStart, end])
+
   const rows = useMemo<BoxTruckPayRow[]>(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
     return settings
@@ -110,42 +98,14 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
         const driver = driverById.get(setting.driverId)
         if (!driver || brokerIds.has(driver.id)) return null
 
-        // ── Calendar source: loads this driver DELIVERED inside the period ──────
-        const calendarShipments: StatementShipment[] = loads
-          .filter((l) => l.deliveryDriverId === driver.id && deliveryDate(l) >= periodStart && deliveryDate(l) <= end)
-          .map((l) => ({
-            key: `cal:${l.id}`,
-            source: 'calendar' as const,
-            proNumber: l.pickupNumber || l.aljexId || null,
-            customer: l.customer ?? null,
-            salesRep: null,
-            status: 'Delivered',
-            grossProfit: (l.rate ?? 0) / 100,   // rate is stored in CENTS
-            loadId: l.id,
-          }))
-          .sort((a, b) => (a.proNumber ?? '').localeCompare(b.proNumber ?? ''))
-
-        // ── Manual source: hand-added/imported shipments for this period ────────
-        const calendarPros = new Set(calendarShipments.map((s) => s.proNumber).filter(Boolean) as string[])
-        const manualShipments: StatementShipment[] = trips
+        const driverTrips = trips
           .filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
-          // De-dup: a manual row that matches a calendar PRO is the same load — calendar wins.
-          .filter((t) => !(t.proNumber && calendarPros.has(t.proNumber)))
           .sort(compareByOrder((t) => t.sortOrder, (t) => t.createdAt))
-          .map((t) => ({
-            key: `man:${t.id}`,
-            source: 'manual' as const,
-            proNumber: t.proNumber ?? null,
-            customer: t.customer ?? null,
-            salesRep: t.salesRep ?? null,
-            status: t.status ?? null,
-            grossProfit: t.grossProfit,
-            trip: t,
-          }))
 
-        const shipments = [...calendarShipments, ...manualShipments]
+        // How many delivered loads aren't materialized yet (so the UI can prompt a pull).
+        const pulledLoadIds = new Set(driverTrips.map((t) => t.loadId).filter(Boolean) as string[])
+        const unpulledLoadCount = deliveredLoadsFor(setting.driverId).filter((l) => !pulledLoadIds.has(l.id)).length
 
-        // Fuel pulled live from the driver's EFS card for this 14-day window.
         const fuelTxns = matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end)
         const fuel = sumFuel(fuelTxns)
 
@@ -159,20 +119,16 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
 
         // Gross = Σ gross profit. Pay model is the driver's setting (Zak = 50% after expenses).
         const statement = calcDriverPay(
-          shipments.map((s) => ({ freightAmount: s.grossProfit, status: s.status })),
+          driverTrips.map((t) => ({ freightAmount: t.grossProfit, status: t.status })),
           { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
           ded,
         )
 
-        return {
-          driver, setting, shipments,
-          calendarCount: calendarShipments.length, manualCount: manualShipments.length,
-          fuel, fuelTxns, deductions: ded, oneOffs, statement,
-        }
+        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, statement, unpulledLoadCount }
       })
       .filter((r): r is BoxTruckPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, brokerIds, loads, trips, deductions, fuelTxs, periodStart, end])
+  }, [settings, drivers, brokerIds, deliveredLoadsFor, trips, deductions, fuelTxs, periodStart, end])
 
   const tripCount = useMemo(() => trips.filter((t) => t.periodStart === periodStart).length, [trips, periodStart])
 
@@ -181,7 +137,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     return drivers.filter((d) => d.active !== false && d.type !== 'broker' && !boxConfigured.has(d.id))
   }, [drivers, settings])
 
-  // ── Mutations (manual shipments only; calendar rows reflect the loads page) ──
+  // ── Mutations (optimistic) ──────────────────────────────────────────────────
   const addTrip = useCallback(async (input: Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>) => {
     const created = await createBoxTruckTrip(input)
     setTrips((p) => [...p, created])
@@ -200,6 +156,36 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     setTrips((p) => p.filter((t) => t.periodStart !== periodStart))
     return ids.length
   }, [trips, periodStart])
+
+  // Materialize a driver's delivered loads → editable BoxTruckTrip rows (skip already-pulled by loadId).
+  const pullFromCalendar = useCallback(async (driverId: string) => {
+    const existing = trips.filter((t) => t.driverId === driverId && t.periodStart === periodStart)
+    const pulledLoadIds = new Set(existing.map((t) => t.loadId).filter(Boolean) as string[])
+    const toCreate = deliveredLoadsFor(driverId).filter((l) => !pulledLoadIds.has(l.id))
+    let order = existing.reduce((m, t) => Math.max(m, t.sortOrder ?? 0), 0)
+    const created: BoxTruckTrip[] = []
+    for (const l of toCreate) {
+      const c = await createBoxTruckTrip({
+        driverId, periodStart,
+        loadId: l.id,
+        date: deliveryDate(l),
+        aljexPro: l.aljexId || null,
+        proNumber: l.pickupNumber || l.tmsId || null,
+        customer: l.customer ?? null,
+        salesRep: null,
+        loadDesc: null,
+        customerRate: null,
+        carrierCost: null,
+        grossProfit: (l.rate ?? 0) / 100,   // rate stored in CENTS
+        status: 'Delivered',
+        sortOrder: ++order,
+      })
+      created.push(c)
+    }
+    if (created.length) setTrips((p) => [...p, ...created])
+    return created.length
+  }, [trips, periodStart, deliveredLoadsFor])
+
   const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => {
     const existing = settings.find((s) => s.driverId === driverId && s.payGroup === 'BOX_TRUCK')
     if (existing) {
@@ -219,5 +205,5 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     setDeductions((p) => p.filter((d) => d.id !== id))
   }, [])
 
-  return { loading, error, rows, tripCount, unconfigured, refresh: load, addTrip, updateTrip, removeTrip, clearPeriod, saveSetting, addDeduction, removeDeduction }
+  return { loading, error, rows, tripCount, unconfigured, refresh: load, pullFromCalendar, addTrip, updateTrip, removeTrip, clearPeriod, saveSetting, addDeduction, removeDeduction }
 }
