@@ -27,7 +27,8 @@ export { normalizeCard }
 export interface StatementShipment {
   key:         string
   source:      'calendar' | 'manual'
-  proNumber:   string | null
+  aljexPro:    string | null   // our Aljex PRO # (calendar loads)
+  proNumber:   string | null   // PU # / TMS #
   customer:    string | null
   salesRep:    string | null
   status:      string | null
@@ -116,7 +117,8 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
           .map((l) => ({
             key: `cal:${l.id}`,
             source: 'calendar' as const,
-            proNumber: l.pickupNumber || l.aljexId || null,
+            aljexPro: l.aljexId || null,
+            proNumber: l.pickupNumber || l.tmsId || null,
             customer: l.customer ?? null,
             salesRep: null,
             status: 'Delivered',
@@ -135,6 +137,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
           .map((t) => ({
             key: `man:${t.id}`,
             source: 'manual' as const,
+            aljexPro: null,
             proNumber: t.proNumber ?? null,
             customer: t.customer ?? null,
             salesRep: t.salesRep ?? null,

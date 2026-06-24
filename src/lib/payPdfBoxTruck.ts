@@ -43,16 +43,16 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   // Shipments table
   autoTable(doc, {
     startY: 122,
-    head: [['Source', 'PRO #', 'Customer', 'Status', 'Gross Profit', 'Driver Amt']],
+    head: [['Source', 'Aljex PRO #', 'PU / TMS #', 'Customer', 'Status', 'Gross Profit', 'Driver Amt']],
     body: shipments.map((s) => [
-      s.source === 'calendar' ? 'Calendar' : 'Manual', s.proNumber ?? '—', s.customer ?? '—', s.status ?? '—',
+      s.source === 'calendar' ? 'Calendar' : 'Manual', s.aljexPro ?? '—', s.proNumber ?? '—', s.customer ?? '—', s.status ?? '—',
       money(s.grossProfit), money(tripPayAmount(s.grossProfit, setting)),
     ]),
-    foot: [['', '', '', 'Gross', money(statement.gross), money(statement.driverAmount)]],
+    foot: [['', '', '', '', 'Gross', money(statement.gross), money(statement.driverAmount)]],
     styles: { fontSize: 9, cellPadding: 4 },
     headStyles: { fillColor: [17, 24, 39], textColor: 255 },
     footStyles: { fillColor: [243, 244, 246], textColor: [11, 13, 18], fontStyle: 'bold' },
-    columnStyles: { 4: { halign: 'right' }, 5: { halign: 'right' } },
+    columnStyles: { 5: { halign: 'right' }, 6: { halign: 'right' } },
     margin: { left: M, right: M },
   })
 

@@ -26,11 +26,11 @@ function statementCsv(row: BoxTruckPayRow, periodStart: string): string {
   const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const L: string[] = []
   L.push(q(`${row.driver.name} — pay period ${periodLabelLong(periodStart)}`)); L.push('')
-  L.push(['Source', 'PRO #', 'Customer', 'Sales Rep', 'Status', 'Gross Profit', 'Driver Amount'].map(q).join(','))
+  L.push(['Source', 'Aljex PRO #', 'PU / TMS #', 'Customer', 'Sales Rep', 'Status', 'Gross Profit', 'Driver Amount'].map(q).join(','))
   for (const s of row.shipments) {
-    L.push([s.source, s.proNumber, s.customer, s.salesRep, s.status, s.grossProfit, tripPayAmount(s.grossProfit, row.setting)].map(q).join(','))
+    L.push([s.source, s.aljexPro, s.proNumber, s.customer, s.salesRep, s.status, s.grossProfit, tripPayAmount(s.grossProfit, row.setting)].map(q).join(','))
   }
-  L.push(['', '', '', '', q('Gross'), q(row.statement.gross), q(row.statement.driverAmount)].join(','))
+  L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), q(row.statement.driverAmount)].join(','))
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
@@ -248,7 +248,8 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
             <th style={{ ...TH, textAlign: 'left' }}>Source</th>
-            <th style={{ ...TH, textAlign: 'left' }}>PRO #</th>
+            <th style={{ ...TH, textAlign: 'left' }}>Aljex PRO #</th>
+            <th style={{ ...TH, textAlign: 'left' }}>PU / TMS #</th>
             <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
             <th style={{ ...TH, textAlign: 'left' }}>Status</th>
             <th style={TH}>Gross Profit</th>
@@ -256,13 +257,14 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
             <th style={{ ...TH, width: 56 }}></th>
           </tr></thead>
           <tbody>
-            {shipments.length === 0 && <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No loads delivered this period. They'll appear here from the calendar, or add one manually.</td></tr>}
+            {shipments.length === 0 && <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No loads delivered this period. They'll appear here from the calendar, or add one manually.</td></tr>}
             {shipments.map((s) => {
               const manual = s.source === 'manual'
               return (
                 <tr key={s.key} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                   <td style={{ ...TD, textAlign: 'left' }}><SourceBadge source={s.source} /></td>
-                  <td onClick={() => manual && s.trip && onEditTrip(s.trip)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: manual ? 'pointer' : 'default' }}>{s.proNumber || '—'}</td>
+                  <td onClick={() => manual && s.trip && onEditTrip(s.trip)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600, cursor: manual ? 'pointer' : 'default' }}>{s.aljexPro || '—'}</td>
+                  <td onClick={() => manual && s.trip && onEditTrip(s.trip)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', color: 'var(--ds-t2)', cursor: manual ? 'pointer' : 'default' }}>{s.proNumber || '—'}</td>
                   <td onClick={() => manual && s.trip && onEditTrip(s.trip)} style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', cursor: manual ? 'pointer' : 'default' }}>{s.customer || '—'}</td>
                   <td style={{ ...TD, textAlign: 'left', color: s.status === 'COVERED' ? '#b45309' : 'var(--ds-t2)' }}>{s.status || '—'}</td>
                   <td style={TD}>{money(s.grossProfit)}</td>
@@ -280,7 +282,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
             })}
             {shipments.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={4}>Gross profit / driver share ({pct(setting.payPercent)})</td>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={5}>Gross profit / driver share ({pct(setting.payPercent)})</td>
                 <td style={TD}>{money(statement.gross)}</td>
                 <td style={TD}>{money(statement.driverAmount)}</td><td></td>
               </tr>
