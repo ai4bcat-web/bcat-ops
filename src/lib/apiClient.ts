@@ -1423,12 +1423,81 @@ export async function deleteAmazonPayMaster(id: string): Promise<void> {
   })
 }
 
+// ── Box-truck driver pay (Ivan Cartage biweekly shipments) ──────────────────────
+
+export interface BoxTruckTrip {
+  id:            string
+  driverId:      string
+  periodStart:   string
+  proNumber?:    string | null
+  customer?:     string | null
+  salesRep?:     string | null
+  loadDesc?:     string | null
+  customerRate?: number | null
+  carrierCost?:  number | null
+  grossProfit:   number
+  status?:       string | null
+  notes?:        string | null
+  sortOrder?:    number | null
+  createdAt:     string
+  updatedAt:     string
+}
+
+const BOX_TRUCK_FIELDS_BASE = `id driverId periodStart proNumber customer salesRep loadDesc customerRate carrierCost grossProfit status notes createdAt updatedAt`
+// sortOrder is added by the same migration as the model; fall back until it deploys.
+let boxTruckHasSortOrder = true
+const boxTruckFields = () => (boxTruckHasSortOrder ? `${BOX_TRUCK_FIELDS_BASE} sortOrder` : BOX_TRUCK_FIELDS_BASE)
+const isMissingBtSortOrder = (err: unknown) => /sortOrder/i.test(JSON.stringify(err ?? ''))
+
+export async function listBoxTruckTrips(): Promise<BoxTruckTrip[]> {
+  try {
+    const result = await client.graphql({
+      query: `query ListBoxTruckTrips { listBoxTruckTrips(limit: 10000) { items { ${boxTruckFields()} } } }`,
+    }) as { data: { listBoxTruckTrips: { items: BoxTruckTrip[] } } }
+    return result.data.listBoxTruckTrips.items ?? []
+  } catch (err) {
+    if (boxTruckHasSortOrder && isMissingBtSortOrder(err)) {
+      console.warn("[apiClient] BoxTruckTrip 'sortOrder' not deployed yet — querying without it")
+      boxTruckHasSortOrder = false
+      return listBoxTruckTrips()
+    }
+    throw err
+  }
+}
+
+export async function createBoxTruckTrip(input: Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>): Promise<BoxTruckTrip> {
+  const { sortOrder: _so, ...rest } = input
+  const safeInput = boxTruckHasSortOrder ? input : rest
+  const result = await client.graphql({
+    query: `mutation CreateBoxTruckTrip($input: CreateBoxTruckTripInput!) { createBoxTruckTrip(input: $input) { ${boxTruckFields()} } }`,
+    variables: { input: safeInput },
+  }) as { data: { createBoxTruckTrip: BoxTruckTrip } }
+  return result.data.createBoxTruckTrip
+}
+
+export async function updateBoxTruckTrip(id: string, patch: Partial<Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>>): Promise<BoxTruckTrip> {
+  const { sortOrder: _so, ...rest } = patch
+  const safePatch = boxTruckHasSortOrder ? patch : rest
+  const result = await client.graphql({
+    query: `mutation UpdateBoxTruckTrip($input: UpdateBoxTruckTripInput!) { updateBoxTruckTrip(input: $input) { ${boxTruckFields()} } }`,
+    variables: { input: { id, ...safePatch } },
+  }) as { data: { updateBoxTruckTrip: BoxTruckTrip } }
+  return result.data.updateBoxTruckTrip
+}
+
+export async function deleteBoxTruckTrip(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteBoxTruckTrip($input: DeleteBoxTruckTripInput!) { deleteBoxTruckTrip(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
 export interface FixedExpense { label: string; amount: number }
 
 export interface DriverPaySetting {
   id:                    string
   driverId:              string
-  payGroup?:             'AMAZON' | 'LOCAL' | null
+  payGroup?:             'AMAZON' | 'LOCAL' | 'BOX_TRUCK' | null
   payPercent:            number
   expensesBeforePercent: boolean
   email?:                string | null
