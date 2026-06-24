@@ -1326,11 +1326,12 @@ export interface AmazonTrip {
   dispatcher?:   string | null
   status?:       string | null
   notes?:        string | null
+  sortOrder?:    number | null
   createdAt:     string
   updatedAt:     string
 }
 
-const AMAZON_TRIP_FIELDS = `id driverId periodStart loadId origin destination miles equipment freightAmount ratePerMile dispatcher status notes createdAt updatedAt`
+const AMAZON_TRIP_FIELDS = `id driverId periodStart loadId origin destination miles equipment freightAmount ratePerMile dispatcher status notes sortOrder createdAt updatedAt`
 
 export async function listAmazonTrips(): Promise<AmazonTrip[]> {
   const result = await client.graphql({

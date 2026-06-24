@@ -1,12 +1,13 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, AlertTriangle, GripVertical } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDrivers } from '@/hooks/useDrivers'
 import { tripPayAmount } from '@/lib/driverPay'
+import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildPayStatementPdf, payPdfFilename, pdfToBase64 } from '@/lib/payPdf'
 import { sendDriverPayEmail } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
@@ -245,6 +246,7 @@ export function DriverPayPage() {
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
             onRemoveDeduction={pay.removeDeduction}
+            onUpdateTrip={(id, patch) => { void pay.updateTrip(id, patch) }}
             onExport={() => download(`pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
             onPdf={() => handlePdf(selectedRow)}
             onEmail={() => setEmailFor(selectedRow)}
@@ -331,15 +333,46 @@ export function DriverPayPage() {
 }
 
 // ── One driver's weekly statement ──────────────────────────────────────────────
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
   onPdf: () => void; onEmail: () => void
+  onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
-  const { driver, setting, trips, statement, oneOffs } = row
+  const { driver, setting, statement, oneOffs } = row
   const [showFuel, setShowFuel] = useState(false)
+
+  // Drag-to-reorder the trip rows. dragOrder holds the working order during a drag.
+  const dragId = useRef<string | null>(null)
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null)
+  const [overId, setOverId] = useState<string | null>(null)
+  const trips = useMemo(() => {
+    if (!dragOrder) return row.trips
+    const byId = new Map(row.trips.map((t) => [t.id, t]))
+    return dragOrder.map((id) => byId.get(id)).filter(Boolean) as typeof row.trips
+  }, [row.trips, dragOrder])
+
+  const onTripDragStart = (id: string) => { dragId.current = id; setDragOrder(row.trips.map((t) => t.id)) }
+  const onTripDragEnter = (targetId: string) => {
+    const d = dragId.current
+    if (!d || d === targetId) return
+    setOverId(targetId)
+    setDragOrder((prev) => {
+      const ids = prev ?? row.trips.map((t) => t.id)
+      const from = ids.indexOf(d), to = ids.indexOf(targetId)
+      if (from < 0 || to < 0 || from === to) return ids
+      const next = [...ids]; next.splice(from, 1); next.splice(to, 0, d)
+      return next
+    })
+  }
+  const onTripDragEnd = () => {
+    if (dragOrder) {
+      persistDragOrder(dragOrder, (id) => row.trips.find((t) => t.id === id)?.sortOrder, onUpdateTrip)
+    }
+    dragId.current = null; setOverId(null); setDragOrder(null)
+  }
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross − expenses`
 
@@ -395,7 +428,12 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
             {trips.map((t) => {
               const dup = row.duplicateTripIds.has(t.id)
               return (
-              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)', background: dup ? 'var(--ds-red-bg, #fef2f2)' : undefined }} className="dp-trip-row">
+              <tr key={t.id} className="dp-trip-row"
+                onDragEnter={() => onTripDragEnter(t.id)}
+                onDragOver={(e) => e.preventDefault()}
+                style={{ borderBottom: '1px solid var(--ds-border)',
+                  background: overId === t.id ? 'var(--ds-blue-bg, #eff6ff)' : dup ? 'var(--ds-red-bg, #fef2f2)' : undefined,
+                  opacity: dragId.current === t.id && dragOrder ? 0.5 : 1 }}>
                 <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: 'pointer', color: dup ? '#dc2626' : undefined, fontWeight: dup ? 700 : undefined }} title={dup ? 'Duplicate — this Load ID also ran last week' : 'Click to edit'}>
                   {dup && <AlertTriangle size={12} style={{ color: '#dc2626', verticalAlign: '-1px', marginRight: 4 }} />}
                   {t.loadId || '—'}
@@ -407,6 +445,11 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
                 <td style={{ ...TD, textAlign: 'left', color: t.status === 'Cancelled' ? '#dc2626' : 'var(--ds-t2)' }}>{t.status || '—'}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.freightAmount, setting))}</td>
                 <td style={{ ...TD, padding: '7px 4px', whiteSpace: 'nowrap' }}>
+                  <span draggable onDragStart={() => onTripDragStart(t.id)} onDragEnd={onTripDragEnd}
+                    title="Drag to reorder" aria-label="Drag to reorder"
+                    style={{ display: 'inline-flex', cursor: 'grab', color: 'var(--ds-t3)', padding: '0 2px', verticalAlign: 'middle' }}>
+                    <GripVertical size={13} />
+                  </span>
                   <button onClick={() => onEditTrip(t)} title="Edit trip" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Pencil size={13} /></button>
                   <button onClick={() => onRemoveTrip(t.id)} title="Remove trip" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Trash2 size={13} /></button>
                 </td>
