@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { useAppStore } from '@/store/useAppStore'
 import { driverForTruck } from '@/lib/assignments'
+import { FleetMiniMap } from './FleetMiniMap'
 
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
@@ -98,7 +99,8 @@ export function TruckMapWidget() {
             No truck positions yet. Locations sync from Motive every 10 minutes.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
             {/* Header row */}
             <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 110px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               <div>Unit</div>
@@ -170,6 +172,12 @@ export function TruckMapWidget() {
                 </div>
               )
             })}
+          </div>
+
+          {/* Mini map of current truck positions, beside the table */}
+          <div style={{ flex: '1 1 320px', minWidth: 280, borderLeft: '1px solid var(--ds-border)' }}>
+            <FleetMiniMap locations={rows} />
+          </div>
           </div>
         )}
       </div>
