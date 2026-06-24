@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
-import { parseRows, type RawTripRow } from '@/lib/tripCsv'
+import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv'
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
@@ -95,6 +95,20 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
   )
 }
 
+// Amber warning shown when a "Trips" export contains multi-load blocks, whose
+// per-leg Estimated Cost understates the block's real pay (see detectMultiLoadBlocks).
+function BlockWarning({ rows }: { rows: RawTripRow[] }) {
+  const { blockTripIds, legRows } = detectMultiLoadBlocks(rows)
+  if (!blockTripIds.length) return null
+  return (
+    <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, border: '1px solid #f59e0b', background: '#fffbeb', fontSize: 12, color: '#92400e', lineHeight: 1.5 }}>
+      ⚠ {blockTripIds.length} multi-load block{blockTripIds.length !== 1 ? 's' : ''} detected ({legRows} legs, e.g. {blockTripIds.slice(0, 3).join(', ')}{blockTripIds.length > 3 ? '…' : ''}).
+      The Relay <b>“Trips”</b> export only carries each leg’s base <b>Estimated Cost</b> — it does <b>not</b> include the block’s negotiated pay, so importing it <b>understates the driver’s gross</b>.
+      Import the <b>Payments / Settlement</b> export for accurate block freight, or correct these trips by hand.
+    </div>
+  )
+}
+
 // ── CSV / paste parsing (shared, tested in src/lib/tripCsv.test.ts) ──────────
 export function rowToTrip(r: RawTripRow, driverId: string, periodStart: string): TripInput {
   return {
@@ -144,6 +158,7 @@ export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onCl
         {detectedWeeks.length === 1 && <span style={{ color: 'var(--ds-t3)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
         {detectedWeeks.length > 1 && <span style={{ color: '#b45309' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
       </div>
+      <BlockWarning rows={raw} />
       <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
     </Modal>
   )
@@ -235,6 +250,7 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
         placeholder={'Load ID,Origin,Destination,Miles,Equipment,Freight,Rate/mi,Dispatcher,Status'}
         style={importTextarea} />
       {fileName && <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 4 }}>File: {fileName} — archived on import</div>}
+      <BlockWarning rows={rows} />
 
       {rows.length > 0 && (
         <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>

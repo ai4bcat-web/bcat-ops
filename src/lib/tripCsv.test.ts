@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseRows } from './tripCsv'
+import { parseRows, detectMultiLoadBlocks } from './tripCsv'
 
 // Real Amazon Relay "Trips" export header + rows (truncated after Currency), incl. the
 // leading UTF-8 BOM. Locks the column mapping to the actual export format.
@@ -56,5 +56,39 @@ describe('parseRows — real Amazon Relay export', () => {
   it('leaves date null when no date column exists', () => {
     const rows = parseRows([HEADER, ROW_CHAD].join('\n'))
     expect(rows[0].date).toBeNull()
+  })
+
+  it('captures the Trip ID column', () => {
+    const rows = parseRows([HEADER, ROW_CHAD, ROW_MIKE].join('\n'))
+    expect(rows[0].tripId).toBe('111Y19HML')
+    expect(rows[1].tripId).toBe('T-1121TPV6X')
+  })
+})
+
+describe('detectMultiLoadBlocks — guardrail for understated block pay', () => {
+  it('flags a "T-" trip id as a block', () => {
+    const rows = parseRows([HEADER, ROW_CHAD, ROW_MIKE].join('\n'))
+    const b = detectMultiLoadBlocks(rows)
+    expect(b.blockTripIds).toEqual(['T-1121TPV6X'])
+    expect(b.legRows).toBe(1)
+  })
+
+  it('flags a repeated trip id (multiple loads, no T- prefix) as a block', () => {
+    const H = 'Trip ID,Load ID,Estimated Cost,Driver Name'
+    const rows = parseRows([
+      H,
+      'BLOCK9,L1,76.72,Michael Bodle',
+      'BLOCK9,L2,33.26,Michael Bodle',
+      '111SOLO,111SOLO,533.88,Michael Bodle',
+    ].join('\n'))
+    const b = detectMultiLoadBlocks(rows)
+    expect(b.blockTripIds).toEqual(['BLOCK9'])
+    expect(b.legRows).toBe(2)
+  })
+
+  it('returns no blocks for all single loads', () => {
+    const H = 'Trip ID,Load ID,Estimated Cost,Driver Name'
+    const rows = parseRows([H, '111SOLO,111SOLO,533.88,Mike', '112SOLO,112SOLO,410.69,Mike'].join('\n'))
+    expect(detectMultiLoadBlocks(rows).blockTripIds).toEqual([])
   })
 })

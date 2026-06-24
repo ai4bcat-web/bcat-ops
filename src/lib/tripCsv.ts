@@ -20,6 +20,7 @@ export interface RawTripRow {
   status: string | null
   driverName: string   // Driver/Dispatcher column — used to route a master CSV per driver
   date: string | null  // trip start date (YYYY-MM-DD) — drives which pay week it lands in
+  tripId: string | null // Relay "Trip ID" — a "T-" prefix or a repeated value marks a multi-load block
 }
 
 /** Parse a money/number string ("$5,248.52" → 5248.52); null if not numeric. */
@@ -81,12 +82,13 @@ export function parseRows(text: string): RawTripRow[] {
         miles: idx('estimate distance', 'distance', 'mile'), equip: idx('equipment'),
         freight: idx('estimated cost', 'cost', 'freight', 'amount'), rpm: idx('rate per mile', 'rate/mi'),
         disp: idx('dispatch'), driver: idx('driver'), status: idx('execution status', 'trip stage', 'status'),
+        tripId: idx('trip id'),
         // Prefer a true start column; fall back through other date-bearing columns.
         date: [['scheduled start', 'trip start', 'actual start', 'start time'], ['start'], ['departure', 'depart'],
                ['appointment', 'appt'], ['pickup', 'pick up'], ['date']]
               .map((tier) => idx(...tier)).find((i) => i >= 0) ?? -1,
       }
-    : { loadId: 0, origin: 1, dest: 2, sequence: -1, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, driver: -1, status: 8, date: -1 }
+    : { loadId: 0, origin: 1, dest: 2, sequence: -1, miles: 3, equip: 4, freight: 5, rpm: 6, disp: 7, driver: -1, status: 8, date: -1, tripId: -1 }
 
   const at = (c: string[], i: number) => (i >= 0 && i < c.length ? c[i].trim() : '')
   const out: RawTripRow[] = []
@@ -113,7 +115,38 @@ export function parseRows(text: string): RawTripRow[] {
       ratePerMile, dispatcher, status: at(c, cols.status) || null,
       driverName: (at(c, cols.driver) || dispatcher || '').trim(),
       date: cols.date >= 0 ? parseDate(at(c, cols.date)) : null,
+      tripId: at(c, cols.tripId) || null,
     })
   }
   return out
+}
+
+/**
+ * Detect Amazon Relay multi-load BLOCKS in a parsed "Trips" export. A block is a
+ * trip with more than one load — its Trip ID is prefixed "T-" and/or appears on
+ * several rows. The "Trips" export only carries each leg's base **Estimated Cost**
+ * (≈ base $/mi), NOT the block's negotiated pay, so importing it understates the
+ * driver's gross. When blocks are present the UI warns to import the
+ * Payments/Settlement export instead (which carries true block pay).
+ */
+export interface BlockSummary {
+  blockTripIds: string[]  // distinct Trip IDs that are multi-load blocks
+  legRows: number         // total rows belonging to those blocks
+}
+
+export function detectMultiLoadBlocks(rows: RawTripRow[]): BlockSummary {
+  const counts = new Map<string, number>()
+  for (const r of rows) {
+    const t = r.tripId?.trim()
+    if (t) counts.set(t, (counts.get(t) ?? 0) + 1)
+  }
+  const blockTripIds: string[] = []
+  let legRows = 0
+  for (const [tripId, count] of counts) {
+    if (tripId.toUpperCase().startsWith('T-') || count > 1) {
+      blockTripIds.push(tripId)
+      legRows += count
+    }
+  }
+  return { blockTripIds, legRows }
 }
