@@ -3,9 +3,16 @@ import { Gauge, Table2, LineChart as LineChartIcon } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { monthRange, monthLabel } from '@/features/fleet-profitability/monthRange'
+import { weekRange, weekLabel } from '@/features/fleet-profitability/weekRange'
 
 const money2 = (n: number | null) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+
+const money0 = (n: number | null) =>
+  n == null || n === 0 ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+
+const miles0 = (n: number | null) =>
+  n == null || n === 0 ? '—' : Math.round(n).toLocaleString('en-US')
 
 const round2 = (n: number | null) => (n == null ? null : Math.round(n * 100) / 100)
 
@@ -22,7 +29,9 @@ const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: 
  */
 export function PerMileWidget() {
   const [view, setView] = useState<'table' | 'graph'>('table')
-  const range = monthRange(0)
+  const [period, setPeriod] = useState<'week' | 'month'>('month')
+  const range = period === 'week' ? weekRange(0) : monthRange(0)
+  const rangeLabel = period === 'week' ? weekLabel(range) : monthLabel(range)
   const { data, loading, computeForRange } = useFleetProfitability(range, 'LOCAL')
 
   // Every truck with activity this month — revenue OR miles (keeps drivers like
@@ -53,21 +62,38 @@ export function PerMileWidget() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue &amp; fuel per mile</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              Ivan fleet · {view === 'table' ? `Per truck · ${monthLabel(range)}` : `Monthly trend · last ${MONTHS_BACK} months`}
+              Ivan fleet · {view === 'table' ? `Per truck · ${rangeLabel}` : `Monthly trend · last ${MONTHS_BACK} months`}
             </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
-          {([['table', Table2], ['graph', LineChartIcon]] as const).map(([v, Icon]) => {
-            const active = view === v
-            return (
-              <button key={v} onClick={() => setView(v)} aria-label={v === 'table' ? 'Table view' : 'Graph view'}
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                  background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
-                <Icon size={13} /> {v}
-              </button>
-            )
-          })}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {/* Week / month period — applies to the table */}
+          {view === 'table' && (
+            <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+              {(['week', 'month'] as const).map((p) => {
+                const active = period === p
+                return (
+                  <button key={p} onClick={() => setPeriod(p)}
+                    style={{ padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
+                      background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                    {p}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+            {([['table', Table2], ['graph', LineChartIcon]] as const).map(([v, Icon]) => {
+              const active = view === v
+              return (
+                <button key={v} onClick={() => setView(v)} aria-label={v === 'table' ? 'Table view' : 'Graph view'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
+                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                  <Icon size={13} /> {v}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -97,6 +123,9 @@ export function PerMileWidget() {
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 <th style={{ ...TH, textAlign: 'left' }}>Truck</th>
                 <th style={{ ...TH, textAlign: 'left' }}>Driver</th>
+                <th style={TH}>Miles</th>
+                <th style={TH}>Total rev</th>
+                <th style={TH}>Total fuel</th>
                 <th style={TH}>Rev / mi</th>
                 <th style={TH}>Fuel / mi</th>
               </tr>
@@ -106,7 +135,10 @@ export function PerMileWidget() {
                 <tr key={t.truckId} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                   <td style={{ ...TD, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</td>
                   <td style={{ ...TD, textAlign: 'left', color: t.driverName ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t.driverName ?? '—'}</td>
-                  <td style={{ ...TD, color: COLORS.rev, fontWeight: 600 }}>{money2(t.revenuePerMile)}</td>
+                  <td style={{ ...TD, color: t.miles ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{miles0(t.miles)}</td>
+                  <td style={{ ...TD, color: COLORS.rev, fontWeight: 600 }}>{money0(t.revenue)}</td>
+                  <td style={{ ...TD, color: t.hasFuelCard ? COLORS.fuel : 'var(--ds-t3)' }}>{t.hasFuelCard ? money0(t.fuel) : '—'}</td>
+                  <td style={{ ...TD, color: COLORS.rev }}>{money2(t.revenuePerMile)}</td>
                   <td style={{ ...TD, color: t.hasFuelCard ? COLORS.fuel : 'var(--ds-t3)' }}>{t.hasFuelCard ? money2(t.fuelPerMile) : '—'}</td>
                 </tr>
               ))}
@@ -114,7 +146,10 @@ export function PerMileWidget() {
             {fleet && (
               <tfoot>
                 <tr style={{ borderTop: '2px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                  <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }} colSpan={2}>Fleet average</td>
+                  <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }} colSpan={2}>Fleet total / average</td>
+                  <td style={{ ...TD, fontWeight: 700 }}>{miles0(fleet.miles)}</td>
+                  <td style={{ ...TD, color: COLORS.rev, fontWeight: 700 }}>{money0(fleet.revenue)}</td>
+                  <td style={{ ...TD, color: COLORS.fuel, fontWeight: 700 }}>{money0(fleet.fuel)}</td>
                   <td style={{ ...TD, color: COLORS.rev, fontWeight: 700 }}>{money2(fleet.revenuePerMile)}</td>
                   <td style={{ ...TD, color: COLORS.fuel, fontWeight: 700 }}>{money2(fleet.fuelPerMile)}</td>
                 </tr>

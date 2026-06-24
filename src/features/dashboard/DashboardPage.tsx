@@ -14,10 +14,8 @@ import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetr
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { TruckMapWidget } from './TruckMapWidget'
-import { TruckMilesWidget } from './TruckMilesWidget'
 import { PerMileWidget } from './PerMileWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
-import { FuelByTruckWidget } from './FuelByTruckWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -250,19 +248,13 @@ export function DashboardPage() {
         </div>
 
         {/* ── Fleet tracking (Motive ELD) ──────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1.6fr 1fr', gap: 16 }}>
-          <TruckMapWidget />
-          <TruckMilesWidget />
-        </div>
-
-        {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
-        <DieselPriceWidget />
-
-        {/* ── Fuel spend by truck (Ivan fleet) ──────────────────────────────── */}
-        <FuelByTruckWidget />
+        <TruckMapWidget />
 
         {/* ── Per-truck revenue & fuel per mile (Ivan fleet) ────────────────── */}
         <PerMileWidget />
+
+        {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
+        <DieselPriceWidget />
 
         {/* ── Compliance alerts ─────────────────────────────────────────────── */}
         <ComplianceAlertsWidget />
