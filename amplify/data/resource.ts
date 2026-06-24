@@ -170,10 +170,32 @@ const schema = a.schema({
     .secondaryIndexes((index) => [index('periodStart')])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Box-truck driver pay (Ivan Cartage) ─────────────────────────────────────
+  // Biweekly (14-day Wed→Tue) shipment-based pay for box-truck drivers (e.g. Zak).
+  // One row per shipment from the Ivan Cartage "Trips" spreadsheet. Pay reuses the
+  // Chad model (% of gross − expenses); gross = Σ grossProfit. See src/lib/driverPay.ts.
+  BoxTruckTrip: a
+    .model({
+      driverId:     a.string().required(),
+      periodStart:  a.string().required(),   // YYYY-MM-DD — Wednesday start of the 14-day period
+      proNumber:    a.string(),              // shipment_pro
+      customer:     a.string(),              // customer name
+      salesRep:     a.string(),              // sales rep name
+      loadDesc:     a.string(),              // shipment_load_des
+      customerRate: a.float(),               // shipment_customer_total_rates
+      carrierCost:  a.float(),               // shipment_carrier_total_rates
+      grossProfit:  a.float().required(),    // shipment_gross_profit — the pay basis
+      status:       a.string(),              // shipment_status: 'RELEASED' | 'COVERED' | …
+      notes:        a.string(),
+      sortOrder:    a.float(),               // manual drag order within a driver's period
+    })
+    .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    .authorization((allow) => [allow.authenticated()]),
+
   DriverPaySetting: a
     .model({
       driverId:              a.string().required(),
-      payGroup:              a.enum(['AMAZON', 'LOCAL']),
+      payGroup:              a.enum(['AMAZON', 'LOCAL', 'BOX_TRUCK']),
       payPercent:            a.float().required(),   // 0..1 (e.g. 0.42, 0.88)
       expensesBeforePercent: a.boolean().required(), // true = % applied AFTER expenses (Chad)
       email:                 a.string(),             // where the weekly report is sent
