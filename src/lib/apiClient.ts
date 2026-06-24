@@ -1331,27 +1331,45 @@ export interface AmazonTrip {
   updatedAt:     string
 }
 
-const AMAZON_TRIP_FIELDS = `id driverId periodStart loadId origin destination miles equipment freightAmount ratePerMile dispatcher status notes sortOrder createdAt updatedAt`
+const AMAZON_TRIP_FIELDS_BASE = `id driverId periodStart loadId origin destination miles equipment freightAmount ratePerMile dispatcher status notes createdAt updatedAt`
+// sortOrder is a newer field; until the backend schema deploys it, querying it errors.
+// Detect that once and fall back so existing settlements never disappear during a deploy.
+let amazonHasSortOrder = true
+const amazonTripFields = () => (amazonHasSortOrder ? `${AMAZON_TRIP_FIELDS_BASE} sortOrder` : AMAZON_TRIP_FIELDS_BASE)
+const isMissingSortOrder = (err: unknown) => /sortOrder/i.test(JSON.stringify(err ?? ''))
 
 export async function listAmazonTrips(): Promise<AmazonTrip[]> {
-  const result = await client.graphql({
-    query: `query ListAmazonTrips { listAmazonTrips(limit: 10000) { items { ${AMAZON_TRIP_FIELDS} } } }`,
-  }) as { data: { listAmazonTrips: { items: AmazonTrip[] } } }
-  return result.data.listAmazonTrips.items ?? []
+  try {
+    const result = await client.graphql({
+      query: `query ListAmazonTrips { listAmazonTrips(limit: 10000) { items { ${amazonTripFields()} } } }`,
+    }) as { data: { listAmazonTrips: { items: AmazonTrip[] } } }
+    return result.data.listAmazonTrips.items ?? []
+  } catch (err) {
+    if (amazonHasSortOrder && isMissingSortOrder(err)) {
+      console.warn("[apiClient] AmazonTrip 'sortOrder' not deployed yet — querying without it")
+      amazonHasSortOrder = false
+      return listAmazonTrips()
+    }
+    throw err
+  }
 }
 
 export async function createAmazonTrip(input: Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>): Promise<AmazonTrip> {
+  const { sortOrder: _so, ...rest } = input
+  const safeInput = amazonHasSortOrder ? input : rest // drop sortOrder until the field exists
   const result = await client.graphql({
-    query: `mutation CreateAmazonTrip($input: CreateAmazonTripInput!) { createAmazonTrip(input: $input) { ${AMAZON_TRIP_FIELDS} } }`,
-    variables: { input },
+    query: `mutation CreateAmazonTrip($input: CreateAmazonTripInput!) { createAmazonTrip(input: $input) { ${amazonTripFields()} } }`,
+    variables: { input: safeInput },
   }) as { data: { createAmazonTrip: AmazonTrip } }
   return result.data.createAmazonTrip
 }
 
 export async function updateAmazonTrip(id: string, patch: Partial<Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>>): Promise<AmazonTrip> {
+  const { sortOrder: _so, ...rest } = patch
+  const safePatch = amazonHasSortOrder ? patch : rest // skip sortOrder writes until the field exists
   const result = await client.graphql({
-    query: `mutation UpdateAmazonTrip($input: UpdateAmazonTripInput!) { updateAmazonTrip(input: $input) { ${AMAZON_TRIP_FIELDS} } }`,
-    variables: { input: { id, ...patch } },
+    query: `mutation UpdateAmazonTrip($input: UpdateAmazonTripInput!) { updateAmazonTrip(input: $input) { ${amazonTripFields()} } }`,
+    variables: { input: { id, ...safePatch } },
   }) as { data: { updateAmazonTrip: AmazonTrip } }
   return result.data.updateAmazonTrip
 }
