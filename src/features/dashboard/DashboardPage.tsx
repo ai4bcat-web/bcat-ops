@@ -17,6 +17,7 @@ import { TruckMapWidget } from './TruckMapWidget'
 import { TruckMilesWidget } from './TruckMilesWidget'
 import { PerMileWidget } from './PerMileWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
+import { FuelByTruckWidget } from './FuelByTruckWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -256,6 +257,9 @@ export function DashboardPage() {
 
         {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
         <DieselPriceWidget />
+
+        {/* ── Fuel spend by truck (Ivan fleet) ──────────────────────────────── */}
+        <FuelByTruckWidget />
 
         {/* ── Per-truck revenue & fuel per mile (Ivan fleet) ────────────────── */}
         <PerMileWidget />
