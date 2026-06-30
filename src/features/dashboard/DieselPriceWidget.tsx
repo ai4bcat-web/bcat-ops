@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Fuel, ArrowUp, ArrowDown } from 'lucide-react'
+import { Fuel, ArrowUp, ArrowDown, Table2, LineChart as LineChartIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransactions'
 import { listDriverPaySettings } from '@/lib/apiClient'
@@ -27,16 +27,33 @@ function monthLabel(key: string): string {
   return new Date(`${key}-01T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })
 }
 
+const navBtn = (disabled: boolean): React.CSSProperties => ({
+  display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
+  borderRadius: 6, border: 'none', background: 'transparent', padding: 0,
+  cursor: disabled ? 'default' : 'pointer',
+  color: disabled ? 'var(--ds-t3)' : 'var(--ds-t1)', opacity: disabled ? 0.4 : 1,
+})
+
+const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '8px 16px', textAlign: 'right', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+
 type View = 'week' | 'month'
+type Mode = 'graph' | 'table'
 
 /**
  * Current average diesel price for the Ivan/fleet trucks — gallons-weighted from our own
- * fuel purchases, by week or by month. Amazon drivers' cards are excluded.
+ * fuel purchases, by week or by month. Amazon drivers' cards are excluded. The window can
+ * be paged back through history (prev/next) and viewed as a chart or a table.
  */
 export function DieselPriceWidget() {
   const { transactions, loading } = useFuelTransactions()
   const [view, setView] = useState<View>('week')
+  const [mode, setMode] = useState<Mode>('graph')
+  const [offset, setOffset] = useState(0)   // 0 = window ending now, 1 = one period earlier, …
   const [amazonCards, setAmazonCards] = useState<Set<string>>(new Set())
+
+  // Switching the period unit makes the offset ambiguous — jump back to current.
+  const changeView = (v: View) => { setView(v); setOffset(0) }
 
   // Amazon driver fuel cards — excluded from the fleet diesel average.
   useEffect(() => {
@@ -72,14 +89,14 @@ export function DieselPriceWidget() {
       byPeriod.set(p, acc)
     }
 
-    // Ordered period buckets (oldest → newest).
+    // Ordered period buckets (oldest → newest), shifted back by `offset` periods.
     const buckets: { id: string; label: string }[] = []
     if (view === 'week') {
-      for (let i = WEEKS - 1; i >= 0; i--) { const ws = shiftWeek(sundayOf(), -i); buckets.push({ id: ws, label: weekLabel(ws) }) }
+      for (let i = WEEKS - 1; i >= 0; i--) { const ws = shiftWeek(sundayOf(), -(i + offset)); buckets.push({ id: ws, label: weekLabel(ws) }) }
     } else {
       const now = new Date()
       for (let i = MONTHS - 1; i >= 0; i--) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+        const d = new Date(now.getFullYear(), now.getMonth() - i - offset, 1)
         const id = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
         buckets.push({ id, label: monthLabel(id) })
       }
@@ -87,14 +104,27 @@ export function DieselPriceWidget() {
 
     const series = buckets.map(({ id, label }) => {
       const acc = byPeriod.get(id)
-      return { period: label, price: acc && acc.qty > 0 ? Math.round((acc.amount / acc.qty) * 1000) / 1000 : null }
+      return {
+        period: label,
+        price: acc && acc.qty > 0 ? Math.round((acc.amount / acc.qty) * 1000) / 1000 : null,
+        gallons: acc ? acc.qty : 0,
+      }
     })
     const withData = series.filter((s) => s.price != null)
     const current = withData.length ? withData[withData.length - 1].price : null
     const prev = withData.length >= 2 ? withData[withData.length - 2].price : null
     const delta = current != null && prev != null ? current - prev : null
     return { series, current, delta }
-  }, [transactions, amazonCards, view])
+  }, [transactions, amazonCards, view, offset])
+
+  // Newest-first rows for the table, each with its change vs the prior (older) period.
+  const rows = useMemo(
+    () => series.map((s, i) => ({
+      ...s,
+      change: i > 0 && s.price != null && series[i - 1].price != null ? s.price - (series[i - 1].price as number) : null,
+    })).reverse(),
+    [series],
+  )
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -103,7 +133,9 @@ export function DieselPriceWidget() {
           <Fuel size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Diesel price</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Fleet average $/gal · by {view}</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+              Fleet average $/gal · last {view === 'week' ? WEEKS : MONTHS} {view}s{offset > 0 ? ' (history)' : ''}
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -119,11 +151,29 @@ export function DieselPriceWidget() {
               )}
             </div>
           )}
+          {/* History navigation — page the window through previous periods */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {offset > 0 && (
+              <button onClick={() => setOffset(0)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', fontFamily: 'inherit', padding: '0 2px' }}>
+                Now
+              </button>
+            )}
+            <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+              <button onClick={() => setOffset((o) => o + 1)} aria-label="Earlier periods" style={navBtn(false)}>
+                <ChevronLeft size={15} />
+              </button>
+              <button onClick={() => setOffset((o) => Math.max(0, o - 1))} disabled={offset === 0} aria-label="Later periods" style={navBtn(offset === 0)}>
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          </div>
+          {/* Week / month period */}
           <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
             {(['week', 'month'] as View[]).map((v) => {
               const active = view === v
               return (
-                <button key={v} onClick={() => setView(v)}
+                <button key={v} onClick={() => changeView(v)}
                   style={{ padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
                     background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
                   {v}
@@ -131,15 +181,28 @@ export function DieselPriceWidget() {
               )
             })}
           </div>
+          {/* Graph / table view */}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+            {([['table', Table2], ['graph', LineChartIcon]] as const).map(([m, Icon]) => {
+              const active = mode === m
+              return (
+                <button key={m} onClick={() => setMode(m)} aria-label={m === 'table' ? 'Table view' : 'Graph view'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
+                    background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                  <Icon size={13} /> {m}
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
-      <div style={{ padding: '12px 12px 6px' }}>
-        {loading && current == null ? (
-          <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
-        ) : current == null ? (
-          <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No fleet diesel purchases recorded yet.</div>
-        ) : (
+      {loading && current == null ? (
+        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+      ) : current == null ? (
+        <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No fleet diesel purchases recorded for this window.</div>
+      ) : mode === 'graph' ? (
+        <div style={{ padding: '12px 12px 6px' }}>
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={series} margin={{ top: 8, right: 20, bottom: 4, left: 4 }}>
               <CartesianGrid stroke="rgba(15,23,42,0.05)" strokeDasharray="3 4" vertical={false} />
@@ -150,8 +213,33 @@ export function DieselPriceWidget() {
               <Line type="monotone" dataKey="price" name="Avg $/gal" stroke="#1ea8f3" strokeWidth={2} dot={{ r: 3 }} connectNulls />
             </LineChart>
           </ResponsiveContainer>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                <th style={{ ...TH, textAlign: 'left' }}>{view === 'week' ? 'Week of' : 'Month'}</th>
+                <th style={TH}>Gallons</th>
+                <th style={TH}>Avg $/gal</th>
+                <th style={TH}>Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                  <td style={{ ...TD, textAlign: 'left', fontWeight: 600 }}>{r.period}</td>
+                  <td style={{ ...TD, color: r.gallons ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{r.gallons ? Math.round(r.gallons).toLocaleString('en-US') : '—'}</td>
+                  <td style={{ ...TD, fontWeight: 600, color: r.price == null ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>{r.price == null ? '—' : perGal.format(r.price)}</td>
+                  <td style={{ ...TD, color: r.change == null || Math.abs(r.change) < 0.001 ? 'var(--ds-t3)' : r.change < 0 ? '#15803d' : '#dc2626' }}>
+                    {r.change == null || Math.abs(r.change) < 0.001 ? '—' : `${r.change < 0 ? '−' : '+'}${perGal.format(Math.abs(r.change))}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
