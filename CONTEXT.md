@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-06-18
+> Last updated: 2026-07-01
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, weekly fleet profitability, email/Slack intake, DOT compliance & driver onboarding, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, weekly fleet profitability, finances, driver pay (Amazon + box-truck), email/Slack intake, DOT compliance & driver onboarding, and audit logging.
 
 ## Where it lives
 | | |
@@ -17,7 +17,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 > Note: This is a different project from the WordPress site `bestcareautotransport.com` and from the Python `MultiAgent_Operations` folder. bcat-ops is the React/AWS dispatch app.
 
 ## Tech Stack
-**Frontend:** React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui (Radix primitives) · Zustand · React Router v7 · FullCalendar v6 (resource-timeline) · TanStack Table · react-hook-form + Zod · Recharts · `@vis.gl/react-google-maps` (dashboard truck map) · sonner · date-fns
+**Frontend:** React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui (Radix primitives) · Zustand · React Router v7 · FullCalendar v6 (resource-timeline) · TanStack Table · react-hook-form + Zod · Recharts · `@vis.gl/react-google-maps` (dashboard truck map) · d3-geo / topojson-client / us-atlas (US map geometry) · jsPDF + jspdf-autotable (driver pay statement PDFs) · sonner · date-fns
 
 **Backend (AWS Amplify Gen 2):** AppSync GraphQL API · Cognito auth (userPool) · DynamoDB (via `a.model`) · S3 (confirmation/compliance docs) · Lambda functions · SES (onboarding/escalation email)
 
@@ -31,7 +31,10 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/trucks` | Truck/equipment registry |
 | `/maintenance` | Maintenance tasks + invoices |
 | `/expenses` | Expense + fuel tracking, EFS upload |
+| `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
 | `/schedule` | Driver schedule view |
+| `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
+| `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay |
 | `/audit-log` | Audit trail (legacy `/audit` redirects) |
 | `/intake` | Email/Slack intake queue |
 | `/tasks` | Task/todo board |
@@ -43,7 +46,9 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/onboard/:token` | Public tokenized driver onboarding portal (outside the authenticated app shell) |
 
 ## Data Models (GraphQL / DynamoDB)
-**Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability` · `DriverPayPeriod` (biweekly gross pay, Paychex seam)
+**Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability`
+
+**Driver pay:** `DriverPayPeriod` (biweekly gross pay, Paychex seam) · `AmazonTrip` (weekly trip-based Amazon pay lines) · `AmazonPayMaster` (archive of uploaded master CSVs, raw file in S3) · `BoxTruckTrip` (biweekly box-truck shipment lines) · `DriverPaySetting` (per-driver pay model: %, expense timing, fuel card, fixed deductions) · `DriverPayDeduction` (per-week one-off charges)
 
 **Telematics (Motive + Blue Ink Tech):** `TruckConfig` · `TruckMileage` · `TruckLocation` · `TruckLocationHistory` (BIT trucks write into the same mileage/location tables as Motive)
 
@@ -57,11 +62,13 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 - `notifySlackStatusChange` (mutation) — posts to Slack when an IntakeItem status changes → `slackStatusNotifier`
 - `manageUsers` (query) — admin-gated Cognito user CRUD → `userManagement`
 - `sendOnboardingEmail` (mutation) — driver-facing onboarding email via SES (invite/rejected/complete), honors kill switch → `onboardingEmailer`
+- `sendDriverPayEmail` (mutation) — emails a driver their weekly pay statement PDF (built client-side, passed as base64) via SES → `driverPayEmailer`
 
 Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`. Default auth mode is Cognito `userPool`. The driver portal has no AppSync access — it goes through the `onboarding-portal-api` Lambda, which validates the invite token server-side.
 
 ## Lambda Functions (`amplify/functions/`)
 - **slack-intake-webhook** — receives forwarded Slack/email messages → creates IntakeItem records
+- **gmail-task-intake** — called by the Gmail Apps Script bridge for mail to the tasks@ distro → creates an IntakeItem (deduped by Gmail message id) and posts to #intake-ivan Slack
 - **slack-status-notifier** — posts to Slack when an intake status changes
 - **userManagement** — admin-gated Cognito user CRUD
 - **motive-mileage-sync** — syncs per-truck mileage (WEEK/MONTH) from the Motive API
@@ -69,6 +76,9 @@ Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`.
 - **blueink-sync** — pulls miles + location for Blue Ink Tech (BIT) ELD trucks and writes into the SAME TruckMileage/TruckLocation tables as Motive (location every 10 min, mileage daily); API key in the `BLUE_INK_TECH_API_KEY` Amplify secret
 - **fuel-import** — parses EFS transaction reports → FuelTransaction records
 - **generate-recurring-expenses** — materializes RecurringExpense templates into monthly ExpenseRecords
+- **paychex-pay-sync** — pulls the latest closed Paychex pay period and writes ONE combined fleet driver-cost record into DriverPayPeriod (idempotent per period); feeds fleet driver cost in Finances
+- **driver-pay-emailer** — custom AppSync mutation (`sendDriverPayEmail`); wraps the client-built pay-statement PDF in a MIME message and sends via SES
+- **broker-load-alert** — DynamoDB stream consumer on the Load table; when a load is assigned to the "Broker Need to Cover" driver, creates a deduped IntakeItem task for Arcie and posts a heads-up to the BCAT global Slack channel
 - **compliance-scanner** — daily cron (6 AM America/Chicago): scans ComplianceDocuments, upserts ComplianceAlerts, transitions doc statuses, recomputes cached compliance status, and sends escalation emails (Phase 4)
 - **onboarding-emailer** — sends driver onboarding emails (invite/rejected/complete) via SES
 - **onboarding-portal-api** — Function URL backing the public driver portal; validates invite token, scopes all reads/writes to the invite's driverId
