@@ -151,7 +151,11 @@ async function handleLoad(newImage: LoadImage, oldImage: LoadImage | undefined, 
         externalId,
         builtLoadId:         loadId,
         s3KeyPdfAttachments: [],
-        extractedMetadata:   JSON.stringify({ loadId, aljexId: newImage.aljexId, tmsId: newImage.tmsId, lane: path }),
+        // NB: do NOT write extractedMetadata here. It's an AWSJSON (a.json) field; the app
+        // always leaves it NULL, and a raw JSON *string* is a shape AppSync's AWSJSON reader
+        // rejects — which made it error on this record and silently drop it from every
+        // listIntakeItems query (invisible in /intake + the dashboard). loadId lives in
+        // builtLoadId and the lane/refs are already in subject/bodyText, so it's not needed.
         createdAt:           now,
         updatedAt:           now,
       }, { removeUndefinedValues: true }),
