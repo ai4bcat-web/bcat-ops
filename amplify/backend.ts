@@ -525,7 +525,12 @@ brokerAlertFn.addEnvironment('BROKER_DRIVER_ID',     process.env.BROKER_DRIVER_I
 // SLACK_GLOBAL_CHANNEL_ID in the Amplify Console env to enable the Slack post.
 brokerAlertFn.addEnvironment('SLACK_GLOBAL_CHANNEL_ID', process.env.SLACK_GLOBAL_CHANNEL_ID ?? '')
 
-new EventSourceMapping(Stack.of(loadTable), 'BrokerLoadStreamMapping', {
+// Create the mapping in the Lambda's OWN stack (the `data` stack, via resourceGroupName),
+// NOT in Stack.of(loadTable) — the Load table sits in a child nested stack, and scoping the
+// mapping there made the child reference the parent's Lambda while the Lambda's policy
+// referenced the child's stream ARN → CloudFormation circular dependency (deploy #227).
+// Scoping to brokerAlertFn keeps every cross-stack reference one-directional (data → Load).
+new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   target:            brokerAlertFn,
   eventSourceArn:    loadTable.tableStreamArn,
   startingPosition:  StartingPosition.LATEST,
