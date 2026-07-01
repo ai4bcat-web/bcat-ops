@@ -1,9 +1,9 @@
 import { defineBackend } from '@aws-amplify/backend'
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod } from 'aws-cdk-lib/aws-lambda'
+import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { CfnOutput, Duration } from 'aws-cdk-lib'
+import { CfnOutput, Duration, Stack } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { storage } from './storage/resource'
@@ -21,6 +21,7 @@ import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
 import { driverPayEmailer } from './functions/driver-pay-emailer/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
+import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 
 const backend = defineBackend({
   auth,
@@ -40,6 +41,7 @@ const backend = defineBackend({
   onboardingEmailer,
   driverPayEmailer,
   paychexPaySync,
+  brokerLoadAlert,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -484,3 +486,49 @@ complianceScannerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.
 complianceScannerFn.addEnvironment('AUDIT_TABLE_NAME',    auditLogTable.tableName)
 complianceScannerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
+
+// ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
+// Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
+// IntakeItem task for Arcie and posts to the BCAT global Slack channel.
+
+const brokerAlertFn = backend.brokerLoadAlert.resources.lambda as LambdaFunction
+const loadTable     = backend.data.resources.tables['Load']
+
+// Read the Load table's DynamoDB stream (the trigger source).
+brokerAlertFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+    resources: [loadTable.tableStreamArn!],
+  })
+)
+// Resolve the broker driver by name (Scan) + write the IntakeItem task (conditional put).
+brokerAlertFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan'],
+    resources: [driverTable.tableArn],
+  })
+)
+brokerAlertFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:PutItem'],
+    resources: [intakeTable.tableArn],
+  })
+)
+
+brokerAlertFn.addEnvironment('TABLE_NAME',        intakeTable.tableName)   // IntakeItem
+brokerAlertFn.addEnvironment('DRIVER_TABLE_NAME', driverTable.tableName)
+brokerAlertFn.addEnvironment('BROKER_TASK_ASSIGNEE', 'arcie@bcatcorp.com')
+brokerAlertFn.addEnvironment('BROKER_DRIVER_NAME',   process.env.BROKER_DRIVER_NAME ?? 'Broker Need to Cover')
+// Optional hard override if the driver is ever renamed — set the driver id in the Console.
+brokerAlertFn.addEnvironment('BROKER_DRIVER_ID',     process.env.BROKER_DRIVER_ID ?? '')
+// Plain env var (not a secret) so a missing channel never blocks the deploy — set
+// SLACK_GLOBAL_CHANNEL_ID in the Amplify Console env to enable the Slack post.
+brokerAlertFn.addEnvironment('SLACK_GLOBAL_CHANNEL_ID', process.env.SLACK_GLOBAL_CHANNEL_ID ?? '')
+
+new EventSourceMapping(Stack.of(loadTable), 'BrokerLoadStreamMapping', {
+  target:            brokerAlertFn,
+  eventSourceArn:    loadTable.tableStreamArn,
+  startingPosition:  StartingPosition.LATEST,
+  batchSize:         10,
+  retryAttempts:     2,
+})
