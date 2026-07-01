@@ -33,8 +33,10 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
   return { DynamoDBClient, ScanCommand, PutItemCommand }
 })
 
-// Slack fetch — default OK; tests can override.
-const fetchMock = vi.fn(async () => ({ json: async () => ({ ok: true }) }))
+// Slack fetch — default OK; tests can override. Params are typed so tsc (the Amplify
+// backend type check runs real tsc over amplify/**, unlike vitest's esbuild) can index
+// into mock.calls[n][1] for the request init.
+const fetchMock = vi.fn(async (_url: unknown, _init?: { body?: string }) => ({ json: async () => ({ ok: true }) }))
 vi.stubGlobal('fetch', fetchMock)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -96,7 +98,7 @@ describe('broker-load-alert handler', () => {
     expect(puts[0].input.Item.externalId.S).toBe('brokerload:load-1')
 
     expect(fetchMock).toHaveBeenCalledOnce()
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body)
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body!)
     expect(body.channel).toBe('C_GLOBAL')
     expect(body.text).toContain('New load to broker')
   })
