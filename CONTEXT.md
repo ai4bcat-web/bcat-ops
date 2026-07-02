@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-01
+> Last updated: 2026-07-02
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, weekly fleet profitability, finances, driver pay (Amazon + box-truck), email/Slack intake, DOT compliance & driver onboarding, and audit logging.
@@ -24,7 +24,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 ## Routes / Pages
 | Route | Feature |
 |---|---|
-| `/dashboard` | Operational metrics (KPIs, fuel widget, open tasks, live truck map, weekly fleet profitability) |
+| `/dashboard` | Operational metrics (KPIs, fuel widget, open tasks, live truck map, weekly fleet profitability, month-over-month comparison widget) |
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | Driver management + avatars |
