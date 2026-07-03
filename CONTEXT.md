@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-02
+> Last updated: 2026-07-03
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, weekly fleet profitability, finances, driver pay (Amazon + box-truck), email/Slack intake, DOT compliance & driver onboarding, and audit logging.
@@ -28,11 +28,13 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | Driver management + avatars |
-| `/trucks` | Truck/equipment registry |
+| `/trucks` | Truck/equipment registry (Fleet) |
+| `/truck-docs` | Truck document tracking (insurance, IFTA, IRP, DOT inspection) — shares the compliance backend |
 | `/maintenance` | Maintenance tasks + invoices |
-| `/expenses` | Expense + fuel tracking, EFS upload |
+| `/fuel` | Fuel transaction tracking, EFS report upload (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
 | `/schedule` | Driver schedule view |
+| `/time-off` | Driver time-off / availability management |
 | `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
 | `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay |
 | `/audit-log` | Audit trail (legacy `/audit` redirects) |
