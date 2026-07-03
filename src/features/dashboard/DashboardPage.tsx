@@ -16,6 +16,7 @@ import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { TruckMapWidget } from './TruckMapWidget'
 import { PerMileWidget } from './PerMileWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
+import { MonthlyComparisonWidget } from './MonthlyComparisonWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -249,6 +250,9 @@ export function DashboardPage() {
 
         {/* ── Fleet tracking (Motive ELD) ──────────────────────────────────── */}
         <TruckMapWidget />
+
+        {/* ── Monthly recap + month-over-month comparison ──────────────────── */}
+        <MonthlyComparisonWidget />
 
         {/* ── Per-truck revenue & fuel per mile (Ivan fleet) ────────────────── */}
         <PerMileWidget />

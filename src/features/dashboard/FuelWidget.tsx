@@ -71,7 +71,7 @@ export function FuelWidget({ transactions, loading }: Props) {
 
   return (
     <div
-      onClick={() => navigate('/expenses?range=this-week')}
+      onClick={() => navigate('/fuel?range=this-week')}
       className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6 space-y-4 cursor-pointer hover:shadow-md transition-shadow"
     >
       <div className="flex items-start justify-between">

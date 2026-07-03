@@ -260,6 +260,13 @@ export async function createComplianceDocument(
   return data.createComplianceDocument
 }
 
+export async function deleteComplianceDocument(id: string): Promise<void> {
+  await gql(
+    `mutation ($input: DeleteComplianceDocumentInput!) { deleteComplianceDocument(input: $input) { id } }`,
+    { input: { id } },
+  )
+}
+
 export async function updateComplianceDocument(
   id: string,
   patch: Partial<Omit<ComplianceDocument, 'id' | 'createdAt' | 'updatedAt'>>,

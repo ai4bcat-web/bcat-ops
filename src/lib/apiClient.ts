@@ -718,6 +718,17 @@ export async function createDriverAvailability(
   return result.data.createDriverAvailability
 }
 
+export async function updateDriverAvailability(
+  id: string,
+  patch: Partial<Omit<DriverAvailability, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<DriverAvailability> {
+  const result = await client.graphql({
+    query: `mutation UpdateDriverAvailability($input: UpdateDriverAvailabilityInput!) { updateDriverAvailability(input: $input) { ${DA_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateDriverAvailability: DriverAvailability } }
+  return result.data.updateDriverAvailability
+}
+
 export async function deleteDriverAvailability(id: string): Promise<void> {
   await client.graphql({
     query: `mutation DeleteDriverAvailability($input: DeleteDriverAvailabilityInput!) { deleteDriverAvailability(input: $input) { id } }`,

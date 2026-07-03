@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
+import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
 import { NAV_GROUPS } from '@/lib/navItems'
 
@@ -14,6 +15,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   tasks:       { bg: 'var(--ds-amber-soft)',       color: '#b45309' },
   maintenance: { bg: 'var(--ds-red-soft)',         color: '#dc2626' },
   review:      { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
+  truckDocs:   { bg: 'var(--ds-red-soft)',          color: '#dc2626' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
@@ -42,6 +44,7 @@ export function NavBar({
   const maintenanceTasks = useAppStore(s => s.maintenanceTasks)
   const { items: intakeItems } = useIntakeItems()
   const { pendingCount: reviewCount } = useReviewQueue()
+  const { outOfDateCount: truckDocAlerts } = useTruckDocAlerts()
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
@@ -54,6 +57,7 @@ export function NavBar({
     if (key === 'intake') return activeIntakeCount || null
     if (key === 'tasks') return activeIntakeCount || null
     if (key === 'review') return reviewCount || null
+    if (key === 'truckDocs') return truckDocAlerts || null
     return null
   }
 

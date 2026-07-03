@@ -9,10 +9,12 @@ import { CalendarPage } from '@/features/calendar/CalendarPage'
 import { GridPage } from '@/features/grid/GridPage'
 import { DriversPage } from '@/features/drivers/DriversPage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
-import { ExpensesPage } from '@/features/expenses/ExpensesPage'
+import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
+import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
+import { TimeOffPage } from '@/features/time-off/TimeOffPage'
 import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
 import { BoxTruckPayPage } from '@/features/driver-pay-box-trucks/BoxTruckPayPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
@@ -43,10 +45,12 @@ export default function App() {
               <Route path="/loads" element={<GridPage />} />
               <Route path="/drivers" element={<DriversPage />} />
               <Route path="/trucks" element={<TrucksPage />} />
+              <Route path="/truck-docs" element={<TruckDocumentsPage />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
-              <Route path="/expenses" element={<ExpensesPage />} />
+              <Route path="/fuel" element={<FuelPage />} />
               <Route path="/finances" element={<FinancesPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
+              <Route path="/time-off" element={<TimeOffPage />} />
               <Route path="/driver-pay" element={<DriverPayPage />} />
               <Route path="/driver-pay-box-trucks" element={<BoxTruckPayPage />} />
               <Route path="/audit-log" element={<AuditPage />} />
@@ -59,6 +63,7 @@ export default function App() {
               <Route path="/compliance/driver/:driverId" element={<DriverComplianceDetailPage />} />
               <Route path="/compliance/truck/:truckId" element={<TruckOnboardingWizardPage />} />
               {/* legacy redirects */}
+              <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
               <Route path="/audit" element={<Navigate to="/audit-log" replace />} />
                 </Route>

@@ -22,10 +22,19 @@ export function useDriverAvailability() {
     return created
   }, [])
 
+  const updateAvailability = useCallback(async (
+    id: string,
+    patch: Partial<Omit<api.DriverAvailability, 'id' | 'createdAt' | 'updatedAt'>>
+  ) => {
+    const updated = await api.updateDriverAvailability(id, patch)
+    setAvailabilities((prev) => prev.map((a) => (a.id === id ? updated : a)))
+    return updated
+  }, [])
+
   const deleteAvailability = useCallback(async (id: string) => {
     await api.deleteDriverAvailability(id)
     setAvailabilities((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
-  return { availabilities, loading, createAvailability, deleteAvailability }
+  return { availabilities, loading, createAvailability, updateAvailability, deleteAvailability }
 }

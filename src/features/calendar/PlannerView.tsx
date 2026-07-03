@@ -173,8 +173,13 @@ function DriverPicker({ loadId, load, stop, role, currentId, field, drivers, onC
         } else if (role === 'same-day') {
           for (const s of stops) targetIds.add(s.id)   // single-driver load → all stops
         } else {
-          const first = stops.find((s) => s.type === 'pickup') ?? stops[0]
-          if (first) targetIds.add(first.id)
+          // Assigning the PICKUP driver defaults the delivery driver to the same person,
+          // unless the load is already split (a delivery has a different driver on purpose).
+          const pickup = stops.find((s) => s.type === 'pickup') ?? stops[0]
+          const prevPickupDriver = pickup?.driverId ?? null
+          const split = stops.some((s) => s.type === 'delivery' && (s.driverId ?? null) !== null && (s.driverId ?? null) !== prevPickupDriver)
+          if (pickup) targetIds.add(pickup.id)
+          if (!split) for (const s of stops) targetIds.add(s.id)
         }
         await updateLoad(loadId, { stops: stops.map((s) => (targetIds.has(s.id) ? { ...s, driverId } : s)) })
       } else {
