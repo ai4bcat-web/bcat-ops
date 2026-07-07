@@ -14,7 +14,7 @@
 
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
-import { addDays, formatDayHeader, formatTime, formatDateShort, formatDateTimeInput, needLabel } from '@/lib/date'
+import { addDays, formatDayHeader, formatApptTime, formatDateShort, formatDateTimeInput, needLabel } from '@/lib/date'
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -62,8 +62,8 @@ function chicagoDateStr(iso: string | null | undefined): string | null {
 }
 
 // ── Appt cell (date + time stacked) ──────────────────────────────────────────
-function ApptCell({ iso, type, colorCls, yard, city }: {
-  iso?: string; type?: string; colorCls: string; yard?: boolean; city?: string
+function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
+  iso?: string; type?: string; apptEnd?: string; colorCls: string; yard?: boolean; city?: string
 }) {
   const w = COL.puAppt
 
@@ -84,7 +84,7 @@ function ApptCell({ iso, type, colorCls, yard, city }: {
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
       <span className="text-[11px] font-medium truncate">
-        {isSpecial ? specialLabel : formatTime(iso)}
+        {isSpecial ? specialLabel : formatApptTime(iso, type, apptEnd)}
       </span>
     </div>
   )
@@ -541,9 +541,11 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
   // in the matching column (the other column renders an em dash, no Yard half-leg).
   const puIso  = stopMode ? (role === 'pickup'   ? stop!.appt     : undefined) : load.pickupAppt
   const puType = stopMode ? (role === 'pickup'   ? stop!.apptType : undefined) : load.pickupApptType
+  const puEnd  = stopMode ? (role === 'pickup'   ? stop!.apptEnd  : undefined) : load.pickupApptEnd
   const puYard = stopMode ? false : isDeliveryDay
   const deIso  = stopMode ? (role === 'delivery' ? stop!.appt     : undefined) : load.deliveryAppt
   const deType = stopMode ? (role === 'delivery' ? stop!.apptType : undefined) : load.deliveryApptType
+  const deEnd  = stopMode ? (role === 'delivery' ? stop!.apptEnd  : undefined) : load.deliveryApptEnd
   const deYard = stopMode ? false : (role === 'pickup')
 
   // Route text
@@ -653,6 +655,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         <ApptCell
           iso={puIso}
           type={puType}
+          apptEnd={puEnd}
           colorCls="text-blue-600"
           yard={puYard}
           city={puYard ? load.destinationCity : undefined}
@@ -676,6 +679,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         <ApptCell
           iso={deIso}
           type={deType}
+          apptEnd={deEnd}
           colorCls="text-violet-600"
           yard={deYard}
           city={deYard ? load.destinationCity : undefined}

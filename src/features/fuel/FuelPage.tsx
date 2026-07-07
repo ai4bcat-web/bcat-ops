@@ -5,7 +5,6 @@ import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths }
 import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransactions'
-import { useTruckMileage } from '@/hooks/useTruckMileage'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { DieselPriceWidget } from '@/features/dashboard/DieselPriceWidget'
 import { FuelUploadModal } from '@/features/expenses/FuelUploadModal'
@@ -21,7 +20,6 @@ function isFuel(t: FuelTransaction): boolean {
   return FUEL_TYPES.has((t.fuelType ?? '').toUpperCase())
 }
 
-const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 const money2 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const gal = (n: number) => `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(n)} gal`
@@ -80,7 +78,6 @@ export function FuelPage() {
   const equipment = useAppStore((s) => s.equipment)
   const drivers = useAppStore((s) => s.drivers)
   const updateEquipment = useAppStore((s) => s.updateEquipment)
-  const { rows: mileageRows } = useTruckMileage()
   const isMobile = useIsMobile()
 
   const [assignSel, setAssignSel] = useState<Record<string, string>>({})
@@ -173,46 +170,20 @@ export function FuelPage() {
     else map.set(key, { spend: t.amount, gallons: t.quantity, count: 1 })
   }
 
-  // Miles per truck for the range (daily mileage records) and revenue per truck (loads).
-  const milesByTruck = useMemo(() => {
-    const startStr = ymd(range[0]); const endStr = ymd(range[1])
-    const m = new Map<string, number>()
-    for (const r of mileageRows) {
-      if (r.periodStart >= startStr && r.periodStart <= endStr) m.set(r.truckId, (m.get(r.truckId) ?? 0) + r.miles)
-    }
-    return m
-  }, [mileageRows, range])
-
-  // Every truck in the fleet, even with $0 fuel this period — with miles and MPG.
+  // Every truck in the fleet, even with $0 fuel this period.
   const byTruck = useMemo(() => {
     const agg = new Map<string, Agg>()
     for (const t of current) { const tr = truckForTx(t); addTo(agg, tr ? tr.id : '__unmapped__', t) }
     const rows: TruckFuelRow[] = trucks.filter((tr) => !excludedTruckIds.has(tr.id)).map((tr) => {
       const a = agg.get(tr.id) ?? { spend: 0, gallons: 0, count: 0 }
-      const miles = milesByTruck.get(tr.id) ?? 0
       const dn = driverNameForTruck(tr.id)
-      return {
-        label: `#${tr.unitNumber}`, driver: dn, noDriver: !dn,
-        spend: a.spend, gallons: a.gallons, miles,
-        mpg: a.gallons > 0 && miles > 0 ? miles / a.gallons : null,
-      }
+      return { label: `#${tr.unitNumber}`, driver: dn, noDriver: !dn, spend: a.spend, gallons: a.gallons }
     })
     const um = agg.get('__unmapped__')
-    if (um && um.spend > 0) rows.push({ label: 'Unmapped', driver: 'card not matched to a truck', noDriver: true, spend: um.spend, gallons: um.gallons, miles: 0, mpg: null })
+    if (um && um.spend > 0) rows.push({ label: 'Unmapped', driver: 'card not matched to a truck', noDriver: true, spend: um.spend, gallons: um.gallons })
     return rows.sort((a, b) => b.spend - a.spend)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, trucks, truckById, driverById, cardToTruck, milesByTruck, excludedTruckIds])
-
-  // Miles per fleet (for fleet MPG) — sum each truck's range miles by its fleet group.
-  const fleetMiles = useMemo(() => {
-    const g = { AMAZON: 0, LOCAL: 0, UNKNOWN: 0 }
-    for (const tr of trucks) {
-      if (excludedTruckIds.has(tr.id)) continue
-      const key = tr.fleetGroup === 'AMAZON' ? 'AMAZON' : tr.fleetGroup === 'LOCAL' ? 'LOCAL' : 'UNKNOWN'
-      g[key] += milesByTruck.get(tr.id) ?? 0
-    }
-    return g
-  }, [trucks, milesByTruck, excludedTruckIds])
+  }, [current, trucks, truckById, driverById, cardToTruck, excludedTruckIds])
 
   const trucksFueled = byTruck.filter((r) => r.spend > 0).length
   const trucksNoDriver = trucks.filter((t) => t.active !== false && !driverByTruckId.has(t.id))
@@ -330,8 +301,6 @@ export function FuelPage() {
               ...(byFleet.UNKNOWN.spend > 0 ? [{ key: 'UNKNOWN', label: 'Unassigned truck', color: '#94a3b8', agg: byFleet.UNKNOWN }] : []),
             ] as const).map((f) => {
               const perGal = f.agg.gallons > 0 ? f.agg.spend / f.agg.gallons : 0
-              const miles = fleetMiles[f.key as keyof typeof fleetMiles]
-              const mpg = f.agg.gallons > 0 && miles > 0 ? miles / f.agg.gallons : null
               return (
                 <div key={f.key} style={{ background: 'var(--ds-surface)', padding: '16px 20px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10 }}>
@@ -345,7 +314,6 @@ export function FuelPage() {
                   <div style={{ marginTop: 8, display: 'flex', gap: 16, fontSize: 12, color: 'var(--ds-t2)', flexWrap: 'wrap' }}>
                     <span><span style={{ color: 'var(--ds-t3)' }}>Spend</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{money(f.agg.spend)}</b></span>
                     <span><span style={{ color: 'var(--ds-t3)' }}>Gallons</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{gal(f.agg.gallons)}</b></span>
-                    <span><span style={{ color: 'var(--ds-t3)' }}>MPG</span> <b style={{ fontVariantNumeric: 'tabular-nums' }}>{mpg == null ? '—' : mpg.toFixed(1)}</b></span>
                   </div>
                 </div>
               )
@@ -474,13 +442,10 @@ function StatCard({ label, value, sub, accent, right }: { label: string; value: 
 
 interface TruckFuelRow {
   label: string; driver?: string; noDriver: boolean
-  spend: number; gallons: number; miles: number
-  mpg: number | null
+  spend: number; gallons: number
 }
 
 function FuelByTruckTable({ rows, loading }: { rows: TruckFuelRow[]; loading: boolean }) {
-  const mpgFmt = (n: number | null) => (n == null ? '—' : n.toFixed(1))
-  const milesFmt = (n: number) => (n > 0 ? Math.round(n).toLocaleString('en-US') : '—')
   const th: React.CSSProperties = { padding: '8px 16px', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }
   const td: React.CSSProperties = { padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }
   return (
@@ -488,33 +453,28 @@ function FuelByTruckTable({ rows, loading }: { rows: TruckFuelRow[]; loading: bo
       <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
         <TruckIcon size={15} style={{ color: 'var(--ds-t3)' }} />
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel by Truck</span>
-        <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>· miles &amp; MPG</span>
       </div>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 720 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
               <th style={{ ...th, textAlign: 'left' }}>Truck</th>
               <th style={{ ...th, textAlign: 'left' }}>Driver</th>
               <th style={{ ...th, textAlign: 'right' }}>Fuel $</th>
               <th style={{ ...th, textAlign: 'right' }}>Gallons</th>
-              <th style={{ ...th, textAlign: 'right' }}>Miles</th>
-              <th style={{ ...th, textAlign: 'right' }}>MPG</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={6} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
+              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={6} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>No trucks</td></tr>
+              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>No trucks</td></tr>
             ) : rows.map((r) => (
               <tr key={r.label} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{r.label}</td>
                 <td style={{ padding: '9px 16px', color: r.noDriver ? '#b45309' : 'var(--ds-t2)', fontWeight: r.noDriver ? 600 : 400 }}>{r.driver ?? '—'}</td>
                 <td style={{ ...td, fontWeight: 600, color: 'var(--ds-t1)' }}>{money(r.spend)}</td>
                 <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.gallons > 0 ? gal(r.gallons) : '—'}</td>
-                <td style={{ ...td, color: 'var(--ds-t2)' }}>{milesFmt(r.miles)}</td>
-                <td style={{ ...td, color: r.mpg == null ? 'var(--ds-t3)' : 'var(--ds-t1)', fontWeight: 600 }}>{mpgFmt(r.mpg)}</td>
               </tr>
             ))}
           </tbody>
