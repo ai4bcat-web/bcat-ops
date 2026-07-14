@@ -4,6 +4,7 @@ import { slackStatusNotifier } from '../functions/slack-status-notifier/resource
 import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
 import { driverPayEmailer } from '../functions/driver-pay-emailer/resource'
 import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource'
+import { googleReviews } from '../functions/google-reviews/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -772,6 +773,14 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(vehicleQuoteEmailer)),
+
+  // Live Google rating + review count for the Best Care Auto Transport listing,
+  // shown as a CTA in the quote email. Returns { configured, ok, rating, total, url }.
+  getGoogleReviews: a
+    .query()
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(googleReviews)),
 })
 
 export type Schema = ClientSchema<typeof schema>

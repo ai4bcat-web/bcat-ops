@@ -77,16 +77,74 @@ function sectionHeading(title: string): string {
     <div style="height:2px;background:${RED};width:100%;margin:0 0 16px;font-size:0;line-height:0;">&nbsp;</div>`
 }
 
+// ── Google reviews CTA ──────────────────────────────────────────────────────
+
+export interface GoogleReviews {
+  ok: boolean
+  rating: number | null
+  total: number | null
+  url: string | null
+}
+
+const STAR_GOLD = '#fbbc04'
+const STAR_EMPTY = '#d3d8e0'
+
+function renderStars(rating: number): string {
+  const full = Math.max(0, Math.min(5, Math.round(rating)))
+  let out = ''
+  for (let i = 0; i < 5; i++) out += `<span style="color:${i < full ? STAR_GOLD : STAR_EMPTY};">&#9733;</span>`
+  return out
+}
+
+/**
+ * A "★ 4.9 · 127 reviews on Google" pill linking to the listing's reviews page.
+ * Renders nothing without a URL; falls back to a plain "Read our Google reviews"
+ * link when the live numbers aren't available.
+ */
+function buildReviewsBlock(reviews?: GoogleReviews | null): string {
+  if (!reviews || !reviews.url) return ''
+  const hasNums = reviews.ok && reviews.rating != null
+  const stars = renderStars(hasNums ? (reviews.rating as number) : 5)
+
+  const inner = hasNums
+    ? `<span style="font-weight:700;color:${TEXT};">${(reviews.rating as number).toFixed(1)}</span>` +
+      `<span style="color:${MUTED};">&nbsp;&middot;&nbsp;</span>` +
+      `<span style="color:${TEXT};">${reviews.total != null ? `${reviews.total.toLocaleString('en-US')} reviews on Google` : 'reviews on Google'}</span>`
+    : `<span style="color:${TEXT};font-weight:600;">Read our Google reviews</span>`
+
+  return `
+          <tr>
+            <td align="center" style="background:${CARD};padding:18px 32px;">
+              <a href="${esc(reviews.url)}" target="_blank" style="text-decoration:none;display:inline-block;background:#ffffff;border:1px solid ${LINE};border-radius:999px;padding:11px 22px;">
+                <span style="font:600 14px/1 Arial,Helvetica,sans-serif;white-space:nowrap;">
+                  <span style="font-size:16px;letter-spacing:1px;vertical-align:middle;">${stars}</span>
+                  <span style="vertical-align:middle;">&nbsp;&nbsp;${inner}</span>
+                </span>
+              </a>
+            </td>
+          </tr>`
+}
+
 /**
  * Build the full quote email HTML.
  *
- * `logoSrc` is the header logo source. On screen the page passes the imported
+ * `opts.logoSrc` is the header logo source. On screen the page passes the imported
  * asset URL; when we add a real Best Care logo image it can be a hosted URL or a
- * `data:`/`cid:` reference. Pass `undefined` to render the red text wordmark that
- * matches the screenshot exactly (the reliable default).
+ * `data:`/`cid:` reference. Omit it to render the red text wordmark that matches
+ * the screenshot exactly (the reliable default).
+ *
+ * `opts.reviews` are the live Google numbers; when present a "★ 4.9 · N reviews on
+ * Google" CTA is rendered above the footer.
  */
-export function buildQuoteEmailHtml(f: QuoteFields, logoSrc?: string): string {
+export interface QuoteEmailOptions {
+  logoSrc?: string
+  reviews?: GoogleReviews | null
+}
+
+export function buildQuoteEmailHtml(f: QuoteFields, opts: QuoteEmailOptions = {}): string {
+  const { logoSrc, reviews } = opts
   const quote = formatQuote(f.estimatedQuote)
+  const reviewsRow = buildReviewsBlock(reviews)
 
   const logo = logoSrc
     ? `<img src="${esc(logoSrc)}" alt="Best Care Auto Transport" width="220" style="display:block;margin:0 auto;max-width:220px;height:auto;" />`
@@ -166,6 +224,9 @@ export function buildQuoteEmailHtml(f: QuoteFields, logoSrc?: string): string {
 
             </td>
           </tr>
+
+          <!-- Google reviews CTA -->
+          ${reviewsRow}
 
           <!-- Footer -->
           <tr>

@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { Car, Send, Loader2, Eye } from 'lucide-react'
-import { buildQuoteEmailHtml, buildQuoteSubject, type QuoteFields } from '@/lib/quoteEmail'
-import { sendVehicleQuoteEmail } from '@/lib/apiClient'
+import { Car, Send, Loader2, Eye, Star } from 'lucide-react'
+import { buildQuoteEmailHtml, buildQuoteSubject, type QuoteFields, type GoogleReviews } from '@/lib/quoteEmail'
+import { sendVehicleQuoteEmail, getGoogleReviews } from '@/lib/apiClient'
 
 const BCC = 'cars@bcatcorp.com'
 const FROM = 'ruben@bcatcorp.com'
@@ -51,6 +51,17 @@ export function VehicleQuotePage() {
   const [to, setTo] = useState('')
   const [subject, setSubject] = useState('')
   const [sending, setSending] = useState(false)
+  const [reviews, setReviews] = useState<GoogleReviews | null>(null)
+
+  // Pull the live Google rating + count once on mount; baked into the preview and
+  // every sent quote. Silent no-op if the Places API isn't configured yet.
+  useEffect(() => {
+    let alive = true
+    getGoogleReviews()
+      .then((r) => { if (alive && r.configured) setReviews({ ok: r.ok, rating: r.rating, total: r.total, url: r.url }) })
+      .catch(() => { /* leave the CTA hidden */ })
+    return () => { alive = false }
+  }, [])
 
   const set = <K extends keyof QuoteFields>(key: K, value: QuoteFields[K]) =>
     setF((prev) => ({ ...prev, [key]: value }))
@@ -59,7 +70,7 @@ export function VehicleQuotePage() {
   const [toTouched, setToTouched] = useState(false)
   const effectiveTo = toTouched ? to : (to || f.customerEmail)
 
-  const previewHtml = useMemo(() => buildQuoteEmailHtml(f), [f])
+  const previewHtml = useMemo(() => buildQuoteEmailHtml(f, { reviews }), [f, reviews])
   const effectiveSubject = subject.trim() || buildQuoteSubject(f)
 
   const canSend = /.+@.+\..+/.test(effectiveTo.trim()) && !!f.estimatedQuote.trim() && !sending
@@ -75,7 +86,7 @@ export function VehicleQuotePage() {
       const res = await sendVehicleQuoteEmail({
         to: effectiveTo.trim(),
         subject: effectiveSubject,
-        html: buildQuoteEmailHtml(f),
+        html: buildQuoteEmailHtml(f, { reviews }),
         replyTo: FROM,
       })
       if (!res.sent) throw new Error(res.error || 'The email service rejected the message')
@@ -235,11 +246,19 @@ export function VehicleQuotePage() {
 
         {/* ── Live preview ── */}
         <div style={{ flex: '1 1 560px', minWidth: 360, position: 'sticky', top: 92 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, color: 'var(--ds-t3)' }}>
-            <Eye size={14} />
-            <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Live email preview
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: 'var(--ds-t3)' }}>
+              <Eye size={14} />
+              <span style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Live email preview
+              </span>
+            </div>
+            {reviews?.ok && reviews.rating != null && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--ds-t3)' }}>
+                <Star size={12} fill="#fbbc04" color="#fbbc04" />
+                {reviews.rating.toFixed(1)}{reviews.total != null ? ` · ${reviews.total.toLocaleString('en-US')} Google reviews` : ''}
+              </span>
+            )}
           </div>
           <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, overflow: 'hidden', background: '#eef1f5' }}>
             <iframe

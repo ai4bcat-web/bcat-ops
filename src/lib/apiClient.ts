@@ -623,6 +623,23 @@ export async function sendVehicleQuoteEmail(args: {
   return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; bcc?: string; error?: string }
 }
 
+export interface GoogleReviewsResult {
+  configured: boolean
+  ok: boolean
+  rating: number | null
+  total: number | null
+  url: string | null
+  error?: string
+}
+
+/** Live Google rating + review count for the Best Care Auto Transport listing. */
+export async function getGoogleReviews(): Promise<GoogleReviewsResult> {
+  const res = await client.graphql({ query: `query GetGoogleReviews { getGoogleReviews }` })
+  let data: unknown = (res as { data?: { getGoogleReviews?: unknown } }).data?.getGoogleReviews
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave as-is */ } }
+  return (data ?? { configured: false, ok: false, rating: null, total: null, url: null }) as GoogleReviewsResult
+}
+
 // ── User management ───────────────────────────────────────────────────────────
 
 export interface CognitoUser {

@@ -21,6 +21,7 @@ import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
 import { driverPayEmailer } from './functions/driver-pay-emailer/resource'
 import { vehicleQuoteEmailer } from './functions/vehicle-quote-emailer/resource'
+import { googleReviews } from './functions/google-reviews/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 
@@ -42,6 +43,7 @@ const backend = defineBackend({
   onboardingEmailer,
   driverPayEmailer,
   vehicleQuoteEmailer,
+  googleReviews,
   paychexPaySync,
   brokerLoadAlert,
 })
@@ -446,6 +448,14 @@ backend.vehicleQuoteEmailer.resources.lambda.addToRolePolicy(
 )
 quoteEmailerFn.addEnvironment('FROM_ADDRESS', process.env.QUOTE_FROM_ADDRESS ?? 'ruben@bcatcorp.com')
 quoteEmailerFn.addEnvironment('BCC_ADDRESS',  process.env.QUOTE_BCC_ADDRESS ?? 'cars@bcatcorp.com')
+
+// ── googleReviews Lambda (live Google rating + count for the quote CTA) ─────
+// Plain env vars (not secrets) so a missing value never blocks the deploy — set
+// both in the Amplify Console to activate the "★ reviews on Google" CTA. Until
+// then the Lambda returns { configured: false } and the CTA is hidden.
+const googleReviewsFn = backend.googleReviews.resources.lambda as LambdaFunction
+googleReviewsFn.addEnvironment('GOOGLE_PLACES_API_KEY', process.env.GOOGLE_PLACES_API_KEY ?? '')
+googleReviewsFn.addEnvironment('GOOGLE_PLACE_ID',       process.env.GOOGLE_PLACE_ID ?? '')
 
 // ── paychexPaySync Lambda (weekly Paychex Flex → DriverPayPeriod) ───────────
 
