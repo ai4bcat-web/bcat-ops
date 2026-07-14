@@ -107,14 +107,20 @@ export function NavBar({
 
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 10px 16px' }}>
-        {NAV_GROUPS.map((group, gi) => (
-          <div key={gi}>
-            {gi > 0 && (
-              <div style={{ height: 1, background: 'var(--ds-border)', margin: '8px 6px' }} />
-            )}
-            {group
-              .filter(({ pageKey }) => hasPageAccess(pageKey))
-              .map(({ to, label, icon: Icon, badgeKey }) => {
+        {NAV_GROUPS.map((group, gi) => {
+          const items = group.items.filter(({ pageKey }) => hasPageAccess(pageKey))
+          if (items.length === 0) return null
+          return (
+            <div key={gi} style={{ marginTop: gi > 0 ? 14 : 4 }}>
+              {/* Section header — a thin divider stands in for the label when collapsed */}
+              {collapsed ? (
+                gi > 0 && <div style={{ height: 1, background: 'var(--ds-border)', margin: '4px 8px 8px' }} />
+              ) : (
+                <div style={{ padding: '0 10px 4px', fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+                  {group.title}
+                </div>
+              )}
+              {items.map(({ to, label, icon: Icon, badgeKey }) => {
                 const badge = getBadgeCount(badgeKey)
                 return (
                   <NavLink
@@ -130,8 +136,9 @@ export function NavBar({
                   </NavLink>
                 )
               })}
-          </div>
-        ))}
+            </div>
+          )
+        })}
 
         {isOwner && (
           <>
