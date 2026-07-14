@@ -54,11 +54,12 @@ export function VehicleQuotePage() {
   const [reviews, setReviews] = useState<GoogleReviews | null>(null)
 
   // Pull the live Google rating + count once on mount; baked into the preview and
-  // every sent quote. Silent no-op if the Places API isn't configured yet.
+  // every sent quote. The reviews link shows as soon as a URL is available; the
+  // numbers appear once the Places API key is configured.
   useEffect(() => {
     let alive = true
     getGoogleReviews()
-      .then((r) => { if (alive && r.configured) setReviews({ ok: r.ok, rating: r.rating, total: r.total, url: r.url }) })
+      .then((r) => { if (alive && r.url) setReviews({ ok: r.ok, rating: r.rating, total: r.total, url: r.url }) })
       .catch(() => { /* leave the CTA hidden */ })
     return () => { alive = false }
   }, [])

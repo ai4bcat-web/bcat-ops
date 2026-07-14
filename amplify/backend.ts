@@ -456,6 +456,9 @@ quoteEmailerFn.addEnvironment('BCC_ADDRESS',  process.env.QUOTE_BCC_ADDRESS ?? '
 const googleReviewsFn = backend.googleReviews.resources.lambda as LambdaFunction
 googleReviewsFn.addEnvironment('GOOGLE_PLACES_API_KEY', process.env.GOOGLE_PLACES_API_KEY ?? '')
 googleReviewsFn.addEnvironment('GOOGLE_PLACE_ID',       process.env.GOOGLE_PLACE_ID ?? '')
+// Optional overrides — the handler defaults these to the Best Care listing.
+googleReviewsFn.addEnvironment('GOOGLE_PLACE_QUERY',    process.env.GOOGLE_PLACE_QUERY ?? '')
+googleReviewsFn.addEnvironment('GOOGLE_REVIEWS_URL',    process.env.GOOGLE_REVIEWS_URL ?? '')
 
 // ── paychexPaySync Lambda (weekly Paychex Flex → DriverPayPeriod) ───────────
 
