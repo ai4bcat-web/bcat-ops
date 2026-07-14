@@ -597,6 +597,32 @@ export async function sendDriverPayEmail(args: {
   return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; error?: string }
 }
 
+// ── Vehicle quote email (Best Care Auto Transport) ─────────────────────────────
+
+/**
+ * Send the branded HTML vehicle-transport quote. `html` is built on the frontend
+ * (src/lib/quoteEmail.ts) so the preview and the sent email match. The Lambda sends
+ * from ruben@bcatcorp.com and always BCCs cars@bcatcorp.com.
+ */
+export async function sendVehicleQuoteEmail(args: {
+  to: string
+  subject: string
+  html: string
+  replyTo?: string
+}): Promise<{ sent: boolean; to?: string; bcc?: string; error?: string }> {
+  const res = await client.graphql({
+    query: `mutation SendVehicleQuoteEmail(
+      $to: String!, $subject: String!, $html: String!, $replyTo: String
+    ) {
+      sendVehicleQuoteEmail(to: $to, subject: $subject, html: $html, replyTo: $replyTo)
+    }`,
+    variables: args,
+  })
+  let data: unknown = (res as { data?: { sendVehicleQuoteEmail?: unknown } }).data?.sendVehicleQuoteEmail
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave as-is */ } }
+  return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; bcc?: string; error?: string }
+}
+
 // ── User management ───────────────────────────────────────────────────────────
 
 export interface CognitoUser {

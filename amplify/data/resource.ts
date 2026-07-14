@@ -3,6 +3,7 @@ import { userManagement } from '../functions/userManagement/resource'
 import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
 import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
 import { driverPayEmailer } from '../functions/driver-pay-emailer/resource'
+import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -756,6 +757,21 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(driverPayEmailer)),
+
+  // Email a customer their Best Care Auto Transport vehicle quote as branded HTML.
+  // The frontend builds the HTML (identical to the on-screen preview); the Lambda
+  // sends it from ruben@bcatcorp.com and always BCCs cars@bcatcorp.com.
+  sendVehicleQuoteEmail: a
+    .mutation()
+    .arguments({
+      to:      a.string().required(),
+      subject: a.string().required(),
+      html:    a.string().required(),
+      replyTo: a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(vehicleQuoteEmailer)),
 })
 
 export type Schema = ClientSchema<typeof schema>

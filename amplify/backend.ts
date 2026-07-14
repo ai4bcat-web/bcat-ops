@@ -20,6 +20,7 @@ import { complianceScanner } from './functions/compliance-scanner/resource'
 import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
 import { driverPayEmailer } from './functions/driver-pay-emailer/resource'
+import { vehicleQuoteEmailer } from './functions/vehicle-quote-emailer/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 
@@ -40,6 +41,7 @@ const backend = defineBackend({
   onboardingPortalApi,
   onboardingEmailer,
   driverPayEmailer,
+  vehicleQuoteEmailer,
   paychexPaySync,
   brokerLoadAlert,
 })
@@ -432,6 +434,18 @@ backend.driverPayEmailer.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
 payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS ?? 'ai4bcat@gmail.com')
+
+// ── vehicleQuoteEmailer Lambda (SES — HTML vehicle-transport quote) ─────────
+// Sends the customer-facing Best Care Auto Transport quote from ruben@bcatcorp.com
+// and always BCCs cars@bcatcorp.com. bcatcorp.com is domain-verified in SES (see
+// the note below), so no per-address verification is needed.
+
+const quoteEmailerFn = backend.vehicleQuoteEmailer.resources.lambda as LambdaFunction
+backend.vehicleQuoteEmailer.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })
+)
+quoteEmailerFn.addEnvironment('FROM_ADDRESS', process.env.QUOTE_FROM_ADDRESS ?? 'ruben@bcatcorp.com')
+quoteEmailerFn.addEnvironment('BCC_ADDRESS',  process.env.QUOTE_BCC_ADDRESS ?? 'cars@bcatcorp.com')
 
 // ── paychexPaySync Lambda (weekly Paychex Flex → DriverPayPeriod) ───────────
 

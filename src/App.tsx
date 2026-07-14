@@ -26,6 +26,7 @@ import { ReviewQueuePage } from '@/features/compliance-review/ReviewQueuePage'
 import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplianceDetailPage'
 import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
+import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
 
 export default function App() {
   return (
@@ -57,6 +58,7 @@ export default function App() {
               <Route path="/intake"   element={<IntakePage />} />
               <Route path="/tasks"   element={<TasksPage />} />
               <Route path="/users" element={<UsersPage />} />
+              <Route path="/vehicle-quote" element={<VehicleQuotePage />} />
               {/* Compliance & onboarding */}
               <Route path="/compliance" element={<CompliancePage />} />
               <Route path="/compliance/review" element={<ReviewQueuePage />} />
