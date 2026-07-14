@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, Fuel, MessageSquare, History,
-  ShieldCheck, ClipboardCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Car, type LucideIcon,
+  ShieldCheck, ClipboardCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, Scale, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -38,9 +38,11 @@ export const NAV_GROUPS: NavItem[][] = [
     { to: '/schedule',    label: 'Schedules',    icon: MessageSquare,   pageKey: 'schedule' },
     { to: '/driver-pay',            label: 'Driver Pay - Amazon',     icon: Wallet, pageKey: 'driverPay' },
     { to: '/driver-pay-box-trucks', label: 'Driver Pay - Box Trucks', icon: Boxes,  pageKey: 'driverPayBoxTrucks' },
+    { to: '/disputes',              label: 'Amazon Disputes',         icon: Scale,  pageKey: 'disputes' },
     { to: '/trucks',      label: 'Fleet',        icon: Truck,           pageKey: 'trucks' },
     { to: '/truck-docs',  label: 'Truck Documents', icon: FileText,     pageKey: 'truckDocs',       badgeKey: 'truckDocs' },
     { to: '/maintenance', label: 'Maintenance',  icon: Wrench,          pageKey: 'maintenance',     badgeKey: 'maintenance' },
+    { to: '/invoices',    label: 'Invoices',     icon: Receipt,         pageKey: 'invoices' },
     { to: '/fuel',        label: 'Fuel',         icon: Fuel,            pageKey: 'fuel' },
     { to: '/finances',    label: 'Finances',     icon: LineChart,       pageKey: 'finances' },
   ],

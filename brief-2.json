@@ -1,0 +1,50 @@
+{
+  "title": "I'm probably never hiring another ops employee again.",
+  "modeledOn": "Dan Koe / Liam Ottley — DFY positioning with quantified ops pain",
+  "whyItWorks": "Recasts the ops hiring crisis through agent-first lens. Gym owners, contractors, and salon owners are buried in scheduling, quotes, and follow-up. Admitting an agent replaced a hire is a stronger signal than any case study stat.",
+  "enabledPlatforms": ["linkedin", "tiktok", "youtube"],
+  "platforms": {
+    "linkedin": {
+      "hook": "I'm probably never hiring another ops employee again.",
+      "format": "video reel + text post with screenshot of weekly ops log",
+      "description": "Talk into camera, show the ops task list before and after agents, mention BCAT and JobsDone Labs as the proof point. Vulnerability over polish.",
+      "caption": "I'm probably never hiring another ops employee again.\n\nLast March I posted a job for a third dispatcher. 47 applicants. None of them could keep up with the RFQ volume we were throwing at them.\n\nI hired one anyway.\n\nFour months later, that same person was drowning in follow-up emails, carrier confirmations, and appointment scheduling. So I made a deal with them: let the agents handle the first 80% of the admin, and you handle the exceptions.\n\nQuit rate dropped to zero. Output went up 42%.\n\nHere's the thing: nobody talks about the turnover cost of bad ops hires.\nIt's not just salary. It's training, retraining, missed loads, and burnout.\n\nI'd rather build a system that works than keep re-recruiting for the same broken process.\n\nIf your business runs on willpower and spreadsheets, we should talk.\n\nDM me 'OPS' and I'll walk you through what the agent stack actually handles day-to-day.",
+      "aiCreativePrompt": "Left side: grainy photo of 'Help Wanted' sign or job posting. Right side: smooth agent dashboard on #0B0D12 with cream #F4EFE3 stats and #1466FF accent highlights.",
+      "scriptSparknotes": [
+        "On-camera opener: 'I'm probably never hiring another ops employee again.'",
+        "Cut to job posting screenshot with '47 applicants' overlay.",
+        "Split screen: applicant spreadsheets vs agent task list.",
+        "Stat: '42% output increase, zero turnover.'",
+        "Soft CTA: DM 'OPS' for walkthrough."
+      ]
+    },
+    "tiktok": {
+      "hook": "I fired my ops hire before I even hired them.",
+      "format": "talking-head short with text overlays",
+      "description": "Hook twist means more scroll-stopping. Show before/after ops task list.",
+      "caption": "I fired my ops hire before I even hired them.\n\n47 applicants, not one could keep up.\nSo I built the agent stack instead.\n\n42% more output. Zero turnover.\n\nWillpower and spreadsheets aren't a strategy.\n\nDM 'OPS' for the setup.",
+      "aiCreativePrompt": "Split frame: left shows stack of resumes with red block, right shows clean agent dashboard on #0B0D12 with byte-sized #F4EFE3 stats and #1466FF checkmarks.",
+      "scriptSparknotes": [
+        "Hook text: 'I fired my ops hire before I hired them.'",
+        "Resume pile cutaway.",
+        "Agent dashboard reveal.",
+        "Stat: 42% more, zero turnover.",
+        "DM CTA."
+      ]
+    },
+    "youtube": {
+      "hook": "I'm probably never hiring another ops employee again.",
+      "format": "short",
+      "description": "Talking head with split-screen showing ops task reduction.",
+      "caption": "Willpower and spreadsheets aren't a strategy.\n\n[video]",
+      "aiCreativePrompt": "Dark #0B0D12 background with cream #F4EFE3 type, #1466FF agent indicators. Left shows messy ops list, right shows clean automated queue.",
+      "scriptSparknotes": [
+        "Opener direct to lens.",
+        "Messy ops task list graphic.",
+        "Clean agent queue graphic.",
+        "Overlay: '42% output, zero turnover.'",
+        "End card: DM 'OPS'."
+      ]
+    }
+  }
+}

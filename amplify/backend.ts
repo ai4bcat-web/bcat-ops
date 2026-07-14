@@ -24,6 +24,7 @@ import { vehicleQuoteEmailer } from './functions/vehicle-quote-emailer/resource'
 import { googleReviews } from './functions/google-reviews/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
+import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 
 const backend = defineBackend({
   auth,
@@ -46,6 +47,7 @@ const backend = defineBackend({
   googleReviews,
   paychexPaySync,
   brokerLoadAlert,
+  amazonDisputeIntake,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -141,6 +143,30 @@ const gmailTaskUrl = new FunctionUrl(gmailTaskFn.stack, 'GmailTaskIntakeUrl', {
 new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
   value:       gmailTaskUrl.url,
   description: 'POST tasks@ emails here from the Apps Script (JSON with the shared secret)',
+})
+
+// ── amazonDisputeIntake Lambda (Google Form → AmazonDispute) ────────────────
+
+const disputeFn = backend.amazonDisputeIntake.resources.lambda as LambdaFunction
+const disputeTable = backend.data.resources.tables['AmazonDispute']
+
+backend.amazonDisputeIntake.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:PutItem'],   // dedup via conditional put
+    resources: [disputeTable.tableArn],
+  })
+)
+
+disputeFn.addEnvironment('TABLE_NAME', disputeTable.tableName)
+
+const disputeIntakeUrl = new FunctionUrl(disputeFn.stack, 'AmazonDisputeIntakeUrl', {
+  function: disputeFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+
+new CfnOutput(disputeFn.stack, 'AmazonDisputeIntakeFunctionUrl', {
+  value:       disputeIntakeUrl.url,
+  description: 'Paste into the Google-Form Apps Script (DISPUTE_WEBHOOK_URL) — see amazon-dispute-intake/APPS_SCRIPT.md',
 })
 
 // ── slackStatusNotifier Lambda (custom AppSync mutation handler) ───────────

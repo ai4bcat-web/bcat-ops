@@ -122,7 +122,7 @@ async function handleLoad(newImage: LoadImage, oldImage: LoadImage | undefined, 
   const now = new Date().toISOString()
   const subject = `Broker load — ${ref}${path ? ` · ${path}` : ''}`.slice(0, 120)
   const bodyText = [
-    'RC, you have a new load that we need to broker. Please use the details in E2 Open to verify the appointment times and load details. Reach out to Ruben if you have any questions.',
+    '@here, you have a new load that we need to broker. Please use the details in E2 Open to verify the appointment times and load details. Reach out to Ruben if you have any questions.',
     '',
     `PRO/Aljex: ${newImage.aljexId ?? '—'}`,
     `TMS #: ${newImage.tmsId ?? '—'}`,
@@ -172,7 +172,8 @@ async function handleLoad(newImage: LoadImage, oldImage: LoadImage | undefined, 
   try {
     await postToGlobalChannel(
       `:truck: *New load to broker* — ${ref}${path ? ` · ${path}` : ''}\n` +
-      'RC, you have a new load that we need to broker. Please use the details in E2 Open to verify the ' +
+      // <!here> is Slack's mention token — renders as "@here" AND pings the channel.
+      '<!here> you have a new load that we need to broker. Please use the details in E2 Open to verify the ' +
       'appointment times and load details. Reach out to Ruben if you have any questions.'
     )
   } catch (err) {

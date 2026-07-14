@@ -19,9 +19,7 @@ import {
   Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
   CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck, Gauge, DollarSign,
 } from 'lucide-react'
-import {
-  Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
-} from '@/components/ui/table'
+import { thBase, tdBase } from '@/features/maintenance/maintenanceUi'
 import { cn } from '@/lib/utils'
 import { driverForTruck } from '@/lib/assignments'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, FleetGroup, TaskPriority, TaskStatus } from '@/types/equipment'
@@ -802,12 +800,13 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
 
   return (
     <>
-      <TableRow
-        className={cn('cursor-pointer hover:bg-slate-50/80 transition-colors', !equip.active && 'opacity-50', expanded && 'bg-slate-50')}
+      <tr
+        className="maint-row"
+        style={{ cursor: 'pointer', opacity: !equip.active ? 0.55 : 1, background: expanded ? 'var(--ds-bg-2)' : undefined }}
         onClick={() => setExpanded((v) => !v)}
       >
         {/* Equipment — icon box + unit# (+ ownership) + year · make/model subtitle */}
-        <TableCell className="py-3">
+        <td style={tdBase}>
           <div className="flex items-center gap-3">
             <div
               className="flex items-center justify-center shrink-0"
@@ -830,20 +829,20 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
               </div>
             </div>
           </div>
-        </TableCell>
+        </td>
 
         {/* Plate */}
-        <TableCell className="py-3 text-xs font-mono text-foreground">
-          {equip.plate || <span className="text-muted-foreground/40">—</span>}
-        </TableCell>
+        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t1)' }}>
+          {equip.plate || <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+        </td>
 
         {/* Compliance — worst-of pill + DOT/IFTA/IRP/INS chips */}
-        <TableCell className="py-3 min-w-[180px]">
+        <td style={tdBase}>
           <ComplianceCell equip={equip} isTruck={isTruck} />
-        </TableCell>
+        </td>
 
         {/* Assignment — driver + "fleet manager · tollway" subtitle */}
-        <TableCell className="py-3">
+        <td style={tdBase}>
           {isTruck ? (
             <>
               <div className="text-sm font-medium text-foreground">
@@ -856,10 +855,10 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
           ) : (
             <span className="text-muted-foreground/40 text-xs">—</span>
           )}
-        </TableCell>
+        </td>
 
         {/* Open Tasks */}
-        <TableCell className="py-3">
+        <td style={tdBase}>
           {upcomingTasks.length === 0
             ? <span className="text-xs text-muted-foreground/40">None</span>
             : highTasks.length > 0
@@ -869,15 +868,15 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
               : <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600">
                   <Wrench className="size-3" />{upcomingTasks.length} open
                 </span>}
-        </TableCell>
+        </td>
 
         {/* Repair Spend */}
-        <TableCell className="py-3 text-xs font-mono font-semibold text-foreground text-right">
-          {repairSpend > 0 ? formatCents(repairSpend) : <span className="text-muted-foreground/40">—</span>}
-        </TableCell>
+        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: 'var(--ds-t1)', textAlign: 'right' }}>
+          {repairSpend > 0 ? formatCents(repairSpend) : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+        </td>
 
         {/* Actions */}
-        <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
+        <td style={{ ...tdBase, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-1 justify-end">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -907,15 +906,15 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
               {expanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
             </Button>
           </div>
-        </TableCell>
-      </TableRow>
+        </td>
+      </tr>
 
       {expanded && (
-        <TableRow className="hover:bg-transparent">
-          <TableCell colSpan={colSpan} className="p-0 border-b border-slate-100">
+        <tr>
+          <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
             <DetailPanel equip={equip} tasks={tasks} invoices={invoices} driverName={driverName} />
-          </TableCell>
-        </TableRow>
+          </td>
+        </tr>
       )}
     </>
   )
@@ -1148,40 +1147,47 @@ export function TrucksPage() {
               })}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent bg-slate-50/60">
-                  <TableHead className="py-3 text-xs min-w-[220px]">Equipment</TableHead>
-                  <TableHead className="py-3 text-xs">Plate</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[180px]">Compliance</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[140px]">Assignment</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[120px]">Open Tasks</TableHead>
-                  <TableHead className="py-3 text-xs min-w-[100px] text-right">Repair Spend</TableHead>
-                  <TableHead className="py-3 w-24" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((e) => {
-                  const driver = driverForTruck(e.id, drivers)
-                  const tasks  = maintenanceTasks.filter((t) => t.equipmentId === e.id)
-                  const invs   = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id)
-                  return (
-                    <EquipRow
-                      key={e.id}
-                      equip={e}
-                      tasks={tasks}
-                      invoices={invs}
-                      driverName={driver?.name}
-                      colSpan={7}
-                      ownershipType={truckConfigs.get(e.id)?.ownershipType}
-                      onOwnershipChange={handleOwnershipChange}
-                      onEdit={setShowForm}
-                      onDelete={handleDelete}
-                    />
-                  )
-                })}
-              </TableBody>
-            </Table>
+            <div style={{ maxHeight: 'calc(100vh - 360px)', overflowY: 'auto', overflowX: 'hidden' }}>
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                <colgroup>
+                  <col />
+                  <col style={{ width: 96 }} />
+                  <col style={{ width: 200 }} />
+                  <col style={{ width: 150 }} />
+                  <col style={{ width: 130 }} />
+                  <col style={{ width: 112 }} />
+                  <col style={{ width: 132 }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    {['Equipment', 'Plate', 'Compliance', 'Assignment', 'Open Tasks', 'Repair Spend', ''].map((h, i) => (
+                      <th key={i} style={{ ...thBase, textAlign: i === 5 ? 'right' : 'left' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((e) => {
+                    const driver = driverForTruck(e.id, drivers)
+                    const tasks  = maintenanceTasks.filter((t) => t.equipmentId === e.id)
+                    const invs   = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id)
+                    return (
+                      <EquipRow
+                        key={e.id}
+                        equip={e}
+                        tasks={tasks}
+                        invoices={invs}
+                        driverName={driver?.name}
+                        colSpan={7}
+                        ownershipType={truckConfigs.get(e.id)?.ownershipType}
+                        onOwnershipChange={handleOwnershipChange}
+                        onEdit={setShowForm}
+                        onDelete={handleDelete}
+                      />
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

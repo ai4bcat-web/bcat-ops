@@ -44,6 +44,7 @@ export interface MaintenanceTask {
   dueDate?: string                  // YYYY-MM-DD
   priority: TaskPriority
   status: TaskStatus
+  completedDate?: string | null     // YYYY-MM-DD — stamped when marked complete, cleared on reopen
   notes?: string
   autoDot: boolean
   assignee?: string
@@ -62,6 +63,7 @@ export interface MaintenanceInvoice {
   paymentMethod?: string
   paymentDate?: string
   assignee?: string
+  source?: string | null            // 'EMAIL' (repairs@ pipeline) | 'MANUAL'
   createdAt: string
   updatedAt: string
 }

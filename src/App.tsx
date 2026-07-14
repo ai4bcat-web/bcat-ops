@@ -18,6 +18,7 @@ import { TimeOffPage } from '@/features/time-off/TimeOffPage'
 import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
 import { BoxTruckPayPage } from '@/features/driver-pay-box-trucks/BoxTruckPayPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
+import { InvoicesPage } from '@/features/invoices/InvoicesPage'
 import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
 import { TasksPage } from '@/features/tasks/TasksPage'
@@ -27,6 +28,7 @@ import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplian
 import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
+import { DisputesPage } from '@/features/disputes/DisputesPage'
 
 export default function App() {
   return (
@@ -48,12 +50,14 @@ export default function App() {
               <Route path="/trucks" element={<TrucksPage />} />
               <Route path="/truck-docs" element={<TruckDocumentsPage />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
+              <Route path="/invoices" element={<InvoicesPage />} />
               <Route path="/fuel" element={<FuelPage />} />
               <Route path="/finances" element={<FinancesPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
               <Route path="/time-off" element={<TimeOffPage />} />
               <Route path="/driver-pay" element={<DriverPayPage />} />
               <Route path="/driver-pay-box-trucks" element={<BoxTruckPayPage />} />
+              <Route path="/disputes" element={<DisputesPage />} />
               <Route path="/audit-log" element={<AuditPage />} />
               <Route path="/intake"   element={<IntakePage />} />
               <Route path="/tasks"   element={<TasksPage />} />

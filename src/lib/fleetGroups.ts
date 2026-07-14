@@ -25,8 +25,26 @@ export const FLEET_GROUP_LABELS: Record<FleetGroup, string> = {
  * the Amazon fleet via its Equipment record, so it's no longer bridged as a Local orphan).
  */
 export const ORPHAN_UNITS_BY_GROUP: Record<FleetGroup, string[]> = {
-  LOCAL:  ['890', '89510'],
+  LOCAL:  ['89510'],
   AMAZON: [],
+}
+
+/**
+ * Some trucks report to Motive/BIT under more than one vehicle number (e.g. a legacy
+ * profile that was never removed). Map each alias number → the canonical fleet unit so
+ * the truck collapses to ONE row everywhere (locations, mileage, rev/fuel per mile).
+ * `890` is the same physical truck as `3890`.
+ */
+export const UNIT_ALIASES: Record<string, string> = { '890': '3890' }
+
+/** Canonical fleet unit number for a (possibly aliased) unit number. */
+export function canonicalUnit(unit: string): string {
+  return UNIT_ALIASES[unit] ?? unit
+}
+
+/** Alias unit numbers that map TO the given canonical unit (reverse of UNIT_ALIASES). */
+export function aliasUnitsFor(canonical: string): string[] {
+  return Object.entries(UNIT_ALIASES).filter(([, c]) => c === canonical).map(([a]) => a)
 }
 
 /** The synthetic truckId the Motive mileage sync assigns to an un-matched unit. */

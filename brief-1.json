@@ -1,0 +1,50 @@
+{
+  "title": "Most freight brokers are scaling the wrong thing.",
+  "modeledOn": "Greg Isenberg — pain-naming + short declaratives",
+  "whyItWorks": "Directly names the 86-89% pilot failure rate from briefing intel. Freight brokers default to adding headcount instead of building agent-first workflows. This reframes 'scaling' as an ops design problem, not a hiring problem.",
+  "enabledPlatforms": ["linkedin", "x", "youtube"],
+  "platforms": {
+    "linkedin": {
+      "hook": "Most freight brokers are scaling the wrong thing.",
+      "format": "text post with screenshot of pilot-failure stat + on-camera reel",
+      "description": "Lead with the 86% pilot failure number, then pivot to what 'scaling' actually looks like in 2026. Mention BCAT Logistics headcount vs. output ratio and JobsDone Labs integrations naturally.",
+      "caption": "Most freight brokers are scaling the wrong thing.\n\n86% of enterprise AI agent pilots fail.\nBut for the freight world, that stat isn't about tech. It's about ops.\n\nWe kept adding people — dispatchers, carrier reps, operations managers — while our quote-to-book cycle stayed stuck at 48 hours.\n\nScaling headcount is easy. Scaling speed is hard.\n\nThe brokers winning 2026 aren't the ones with the biggest team.\nThey're the ones who stopped doing dumb shit manually.\n\nLead scoring. Carrier vetting. Auto-follow-up on open RFQs.\n\nThe tool stack replaces the busywork. Your reps close the lanes.\n\nIf your gross profit is flat and headcount keeps growing, you're scaling the wrong thing.\n\nDM me 'SCALE' if you want to see what our agent stack handles for BCAT.",
+      "aiCreativePrompt": "Background: dark #0B0D12 dashboard with cream #F4EFE3 text. Left side shows org-chart with red X on headcount icon. Right side shows #1466FF agent stack icons with green checkmarks. Slow zoom to the agent stack.",
+      "scriptSparknotes": [
+        "Opener: 'Most freight brokers are scaling the wrong thing.'",
+        "Show the 86% failure stat graphic.",
+        "Cut to BCAT dashboard showing flat headcount vs rising shipments.",
+        "Name the three agent workflows: scoring, vetting, follow-up.",
+        "Mic drop: 'Scaling speed, not headcount.'"
+      ]
+    },
+    "x": {
+      "hook": "Most freight brokers are scaling the wrong thing.",
+      "format": "Thread with 4-5 tweets + video clip",
+      "description": "Tight thread with a repurposed talking-head clip under the first tweet.",
+      "caption": "1/\nMost freight brokers are scaling the wrong thing.\n86% of enterprise AI agent pilots fail.\nIn freight, the issue isn't tech. It's ops. We kept adding people while our quote-to-book stayed stuck at 48 hours.\n\n2/\nScaling headcount is easy. Scaling speed is hard.\nThe brokers winning 2026 aren't the ones with the biggest team.\nThey're the ones who stopped doing dumb shit manually.\n\n3/\nLead scoring. Carrier vetting. Auto-follow-up on open RFQs.\nThe tool stack replaces busywork. Your reps close lanes.\n\n4/\nIf your gross profit is flat and headcount keeps growing, you're scaling the wrong thing.\nDM me 'SCALE' and I'll show you what the agent stack does for BCAT.",
+      "aiCreativePrompt": "Dark #0B0D12 background, cream #F4EFE3 type, #1466FF accent bar on stat card. Close-up on 86% figure transitioning to agent stack icon grid.",
+      "scriptSparknotes": [
+        "Hook delivered direct to lens.",
+        "Stat graphic: 86% failure rate.",
+        "BCAT dashboard screen record.",
+        "Three agent workflow icons fill screen.",
+        "Close: DM 'SCALE' CTA."
+      ]
+    },
+    "youtube": {
+      "hook": "Most freight brokers are scaling the wrong thing.",
+      "format": "short",
+      "description": "Talking head with cutaway to pilot-failure stat and BCAT dashboard.",
+      "caption": "Stop adding headcount. Start adding speed.\n\n[video]",
+      "aiCreativePrompt": "Dark #0B0D12 studio background, cream #F4EFE3 text overlay, #1466FF accent on 'speed' keyword. Split screen: org chart vs agent stack.",
+      "scriptSparknotes": [
+        "Opener direct to camera.",
+        "Cut to 86% pilot failure graphic.",
+        "BCAT dashboard screen record.",
+        "Text overlay: 'Scale speed, not headcount.'",
+        "DM 'SCALE' end card."
+      ]
+    }
+  }
+}

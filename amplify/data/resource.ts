@@ -154,6 +154,32 @@ const schema = a.schema({
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Amazon driver disputes ─────────────────────────────────────────────────
+  // A driver-submitted claim that Amazon underpaid / owes money on a trip (detention,
+  // TONU, cancellations, etc.). Rows originate from a Google Form → its linked Sheet →
+  // an Apps Script that POSTs each submission to the amazon-dispute-intake Lambda, which
+  // writes here (source GOOGLE_FORM). Staff can also add rows by hand (source MANUAL).
+  // Workflow: PENDING (new) → POSTED (filed with Amazon) → PAID (recovered) | REJECTED.
+  AmazonDispute: a
+    .model({
+      driverName:      a.string().required(),  // "Driver Name"
+      tripNumber:      a.string(),             // "What is the Trip Number?"
+      shipmentDate:    a.string(),             // "On what day was this shipment?" (YYYY-MM-DD or raw)
+      payPeriod:       a.string(),             // "What 7 day period" e.g. "4/19 - 4/25"
+      amountPaid:      a.float(),              // "How much was paid on this by Amazon?" (dollars)
+      amountRequested: a.float(),              // "What amount should we request from Amazon?" (dollars)
+      description:     a.string(),             // "Provide a short description of what happened"
+      photoUrl:        a.string(),             // "Upload photos for proof" — Google Drive link
+      status:          a.enum(['PENDING', 'POSTED', 'PAID', 'REJECTED']),
+      resolvedAmount:  a.float(),              // dollars actually recovered when PAID
+      submittedAt:     a.string(),             // ISO — the Google Form timestamp
+      source:          a.enum(['GOOGLE_FORM', 'MANUAL']),
+      externalId:      a.string(),             // dedup key from the form submission
+      notes:           a.string(),             // internal staff notes
+    })
+    .secondaryIndexes((index) => [index('externalId')])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Archive of uploaded master CSVs (the raw file lives in S3 at s3Key). One row per
   // upload so the source files are kept and downloadable.
   AmazonPayMaster: a
@@ -227,12 +253,13 @@ const schema = a.schema({
     .model({
       equipmentId: a.string().required(),
       title:       a.string().required(),
-      dueDate:     a.string(),                         // YYYY-MM-DD
-      priority:    a.string(),                         // 'high' | 'med' | 'low'
-      status:      a.string(),                         // 'upcoming' | 'complete'
-      notes:       a.string(),
-      autoDot:     a.boolean(),
-      assignee:    a.string(),
+      dueDate:      a.string(),                        // YYYY-MM-DD
+      priority:     a.string(),                        // 'high' | 'med' | 'low'
+      status:       a.string(),                        // 'upcoming' | 'complete'
+      completedDate: a.string(),                       // YYYY-MM-DD — set when marked complete, cleared when reopened
+      notes:        a.string(),
+      autoDot:      a.boolean(),
+      assignee:     a.string(),
     })
     .secondaryIndexes((index) => [index('equipmentId')])
     .authorization((allow) => [allow.authenticated()]),
@@ -248,6 +275,7 @@ const schema = a.schema({
       paymentMethod: a.string(),
       paymentDate:   a.string(),
       assignee:      a.string(),
+      source:        a.string(),                       // 'EMAIL' (repairs@ pipeline) | 'MANUAL'
     })
     .secondaryIndexes((index) => [index('equipmentId')])
     .authorization((allow) => [allow.authenticated()]),

@@ -309,6 +309,7 @@ async function main() {
       ...(raw.paymentMethod && { paymentMethod: raw.paymentMethod }),
       ...(raw.paymentDate && { paymentDate: raw.paymentDate }),
       ...(raw.assignee && { assignee: raw.assignee }),
+      source: 'EMAIL',   // ingested from the repairs@bcatcorp.com pipeline
     }
 
     // Skip if nothing useful

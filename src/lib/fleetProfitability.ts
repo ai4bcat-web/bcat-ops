@@ -25,6 +25,7 @@
  */
 
 import { getFleetExpenses } from './expenseAllocation'
+import { aliasUnitsFor } from './fleetGroups'
 import type {
   FuelTxInput,
   ExpenseRecordInput,
@@ -236,6 +237,11 @@ export function calcFleetProfitability(
   for (const m of members) {
     canonicalForKey.set(m.truckId, m.truckId)
     canonicalForKey.set(`motive:${m.unitNumber}`, m.truckId)
+    // Also accept mileage reported under an alias number (e.g. 890 → 3890) so a truck
+    // that reports to Motive under two numbers rolls into one member.
+    for (const alias of aliasUnitsFor(m.unitNumber)) {
+      canonicalForKey.set(`motive:${alias}`, m.truckId)
+    }
   }
   const inMilesRange = (row: TruckMileageDayInput) =>
     row.periodType === 'DAY' && row.periodStart >= range.start && row.periodStart <= range.end

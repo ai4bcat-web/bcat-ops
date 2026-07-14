@@ -1,0 +1,49 @@
+{
+  "title": "I almost didn't survive the 2024 freight crash. Here's what kept BCAT alive.",
+  "modeledOn": "Codie Sanchez / Colby Baskin — contrarian retelling of risk and reward with Midwestern dry humor",
+  "whyItWorks": "Personal near-crisis + macro freight-market read. Hits the 2026 market-cycle narrative while anchoring to BCAT history. Naming the survival lever (agent-first quoting, not luck) builds authority for JobsDone Labs.",
+  "enabledPlatforms": ["linkedin", "tiktok", "x"],
+  "platforms": {
+    "linkedin": {
+      "hook": "I almost didn't survive the 2024 freight crash. Here's what kept BCAT alive.",
+      "format": "long-form text post + companion reel",
+      "description": "Open with near-exit context, 3 hard lessons about the freight cycle and operator's advantage, pivot to building JobsDone Labs as the next evolution. Vulnerability over polish.",
+      "caption": "I almost didn't survive the 2024 freight crash.\n\nIt was early 2024, margins were thin enough to make your eyes water, and I seriously thought walking away was the smart play.\n\nI didn't. Not because I'm tough. Because I realized I was treating the symptom — rate volatility — instead of the cause: operational speed.\n\nIf we could outrun the rate swings with smarter quoting, faster carrier outreach, and tighter follow-up, the cycle was secondary.\n\nSo we built. Agent-first integrations. Lead scoring. Auto-follow-up sequences.\n\nSame headcount. 2.3x more accepted shipments.\n\nThe lesson: adversity is usually telling you where to invest, not when to exit.\n\n2026 is the year agent-first logistics becomes table stakes — and I'm not selling. I'm building it.\n\nDM me 'BCAT' if you're building freight ops for the next market cycle.",
+      "aiCreativePrompt": "Montage: BCAT office at night with warm lamp light, then green shipping-label stamp on cream paper, then agent dashboard with rising curve on #0B0D12 screen. Cream #F4EFE3 text with #1466FF accent grain over top.",
+      "scriptSparknotes": [
+        "Opener: 'I almost didn't survive the 2024 freight crash.'",
+        "Context: thin margins and macro downward.",
+        "Action: built agent stack instead of selling.",
+        "Result: 2.3x more accepted shipments, same headcount.",
+        "Meta lesson: adversity is an investment signal."
+      ]
+    },
+    "tiktok": {
+      "hook": "I almost sold my freight company in 2024.",
+      "format": "talking-head short with quick cuts",
+      "description": "Condensed near-exit story with agent-stack reveal. Text overlays emphasize the pivot.",
+      "caption": "I almost sold my freight company in 2024.\n\nMargins were brutal. I was done.\nThen I realized: the market doesn't kill bad luck.\nIt kills slow operators.\n\nSame headcount. 2.3x more shipments.\n\nWe built the agent stack instead of selling.\n\nDM 'BCAT' if you're building for the next cycle.",
+      "aiCreativePrompt": "Split screen: left shows dark #0B0D12 storm cloud, right shows cream #F4EFE3 text '2.3x more shipments' with #1466FF arrow trending up. Grainy vintage freight photo overlay.",
+      "scriptSparknotes": [
+        "Hook: 'I almost sold my freight company in 2024.'",
+        "Old office clip / storm imagery.",
+        "Agent stack dashboard reveal.",
+        "Stat overlay: 'Same headcount. 2.3x more.'",
+        "CTA: DM 'BCAT'."
+      ]
+    },
+    "x": {
+      "hook": "I almost didn't survive the 2024 freight crash.",
+      "format": "Thread with video clip",
+      "description": "4-tweet thread with on-camera opener clip.",
+      "caption": "1/\nI almost didn't survive the 2024 freight crash.\nMargins were brutal. I thought walking away was the smart play.\n\n2/\nI didn't because I realized the market doesn't kill bad luck.\nIt kills slow operators.\n\n3/\nWe built the agent stack instead of hiring our way out.\nSame headcount. 2.3x more accepted shipments.\n\n4/\n2026 is the year agent-first logistics becomes table stakes.\nDM me 'BCAT' if you're building for the next cycle.",
+      "aiCreativePrompt": "Dark #0B0D12 with cream #F4EFE3 type. Thread header card with red 'near exit' stamp, then #1466FF up-trend line for stack output.",
+      "scriptSparknotes": [
+        "Tweet 1: hook via on-camera clip.",
+        "Tweet 2: pivot from exit to speed.",
+        "Tweet 3: agent stack + 2.3x stat.",
+        "Tweet 4: CTA for next-cycle builders."
+      ]
+    }
+  }
+}

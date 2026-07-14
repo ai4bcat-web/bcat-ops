@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { useAppStore } from '@/store/useAppStore'
 import { driverForTruck } from '@/lib/assignments'
+import { canonicalUnit } from '@/lib/fleetGroups'
 import { FleetMiniMap } from './FleetMiniMap'
 
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
@@ -53,23 +54,24 @@ export function TruckMapWidget() {
     return () => { active = false; clearInterval(id) }
   }, [])
 
-  // A truck can briefly have two location rows for the same unit — an Equipment-keyed
-  // row plus a stale `motive:`/`blueink:` orphan key from before its Equipment record
-  // existed. Collapse to one row per unit, preferring the Equipment-keyed (real id) and
-  // then the freshest fix, so the list never shows the same unit twice.
+  // A truck can have two location rows for one unit — an Equipment-keyed row plus a stale
+  // `motive:`/`blueink:` orphan key, OR the same physical truck reporting under two vehicle
+  // numbers (e.g. 890 + 3890). Collapse by CANONICAL unit number, preferring the
+  // Equipment-keyed (real id) then the freshest fix, so a truck never shows twice.
   const rows = useMemo(() => {
     const isOrphanKey = (id: string) => id.startsWith('motive:') || id.startsWith('blueink:')
     const byUnit = new Map<string, TruckLocation>()
     for (const loc of locations) {
-      const prev = byUnit.get(loc.unitNumber)
-      if (!prev) { byUnit.set(loc.unitNumber, loc); continue }
+      const key = canonicalUnit(loc.unitNumber)
+      const prev = byUnit.get(key)
+      if (!prev) { byUnit.set(key, loc); continue }
       const prevOrphan = isOrphanKey(prev.truckId)
       const locOrphan  = isOrphanKey(loc.truckId)
       const better = prevOrphan !== locOrphan ? !locOrphan : loc.locatedAt > prev.locatedAt
-      if (better) byUnit.set(loc.unitNumber, loc)
+      if (better) byUnit.set(key, loc)
     }
     return [...byUnit.values()].sort((a, b) =>
-      a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
+      canonicalUnit(a.unitNumber).localeCompare(canonicalUnit(b.unitNumber), undefined, { numeric: true }))
   }, [locations])
 
   const freshest = useMemo(() => {
@@ -113,9 +115,10 @@ export function TruckMapWidget() {
             {rows.map((loc) => {
               const stale = now - new Date(loc.locatedAt).getTime() > STALE_MS
               const { text: motionText, moving } = motionLabel(loc)
-              // Match this Motive truck to a fleet truck by unit number (works whether
-              // the location's truckId is an Equipment id or a `motive:<n>` fallback).
-              const equip = equipment.find((e) => e.type === 'truck' && e.unitNumber === loc.unitNumber)
+              const unit = canonicalUnit(loc.unitNumber)
+              // Match this Motive truck to a fleet truck by (canonical) unit number — works
+              // whether the location's truckId is an Equipment id or a `motive:<n>` fallback.
+              const equip = equipment.find((e) => e.type === 'truck' && e.unitNumber === unit)
               const assigned = equip ? driverForTruck(equip.id, drivers) : undefined
               return (
                 <div
@@ -128,7 +131,7 @@ export function TruckMapWidget() {
                   }}
                 >
                   <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>
-                    {loc.unitNumber}
+                    {unit}
                   </div>
                   <div style={{ color: 'var(--ds-t1)' }}>
                     {cityState(loc.description)}
@@ -152,8 +155,8 @@ export function TruckMapWidget() {
                       <button
                         type="button"
                         onClick={() => {
-                          addEquipment({ type: 'truck', unitNumber: loc.unitNumber, make: '', model: '', active: true, insured: true, onTollwayAccount: false, ownership: 'owned', eldSource: 'motive' })
-                          toast('Added to fleet', { description: `Unit ${loc.unitNumber} — set details in Fleet` })
+                          addEquipment({ type: 'truck', unitNumber: unit, make: '', model: '', active: true, insured: true, onTollwayAccount: false, ownership: 'owned', eldSource: 'motive' })
+                          toast('Added to fleet', { description: `Unit ${unit} — set details in Fleet` })
                         }}
                         style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 9px', borderRadius: 6, border: '1px dashed var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-blue)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
                       >

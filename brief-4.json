@@ -1,0 +1,50 @@
+{
+  "title": "Voice is the wrong place to use AI right now.",
+  "modeledOn": "Leila Hormozi / Dan Koe — inversion hook with emotional plea framing",
+  "whyItWorks": "Addresses the 60% consumer turnoff at 'AI' brand messaging from briefing intel. Service businesses (HVAC, gyms, auto repair) are the worst offenders. Pivot to naming the stack ('the tool that handles scheduling') instead of the technology.",
+  "enabledPlatforms": ["linkedin", "youtube", "tiktok"],
+  "platforms": {
+    "linkedin": {
+      "hook": "Voice is the wrong place to use AI right now.",
+      "format": "text post + reel with on-camera confession",
+      "description": "Name the briefing stat (60% turnoff), then invert it: the problem isn't AI, it's how service businesses talk about it. Show BCAT/JobsDone Labs as the counter-example.",
+      "caption": "Voice is the wrong place to use AI right now.\n\n60% of consumers say 'AI' in brand messaging is a turnoff.\nSo why are HVAC companies, gyms, and auto shops leading with 'We use artificial intelligence' on their Instagram bios?\n\nBecause nobody taught them the middle layer.\n\nCustomers don't want to hear about neural networks.\nThey want to hear: 'Your car gets picked up in 12 minutes or you get a discount.' 'Your appointment is confirmed and your tech is on the way.' 'Your quote is ready before you hang up.'\n\nThat's the stack. Not the tech.\n\nI don't lead with 'AI.' I lead with the result.\n\nIf you're a service business owner still leading with tech jargon, you're losing trust before you've earned it.\n\nDM me 'STACK' and I'll show you how JobsDone Labs names our integrations so clients actually buy them.",
+      "aiCreativePrompt": "Background: dark #0B0D12. Center: red X over 'AI' wordmark in 80s computer font. Right side: cream #F4EFE3 text showing real customer outcome in plain English. Bottom: #1466FF ribbon reading 'Results first, tech never.'",
+      "scriptSparknotes": [
+        "On-camera hook: 'Voice is the wrong place to use AI right now.'",
+        "Cut to bulky 'WE USE AI' graphic with red X.",
+        "Show customer-facing text: plain English outcomes.",
+        "Stat: '60% consumer turnoff.'",
+        "Soft CTA: DM 'STACK' for positioning template."
+      ]
+    },
+    "youtube": {
+      "hook": "I'm begging service businesses to stop saying 'we use AI' to customers.",
+      "format": "short",
+      "description": "Talking head with text overlays showing good vs bad messaging.",
+      "caption": "Say this instead.\n\n[video]",
+      "aiCreativePrompt": "Dark #0B0D12 background. Top half: red block over 'AI' wordmark. Bottom half: cream #F4EFE3 plain-English outcome card with #1466FF checkmark.",
+      "scriptSparknotes": [
+        "Opener direct to lens.",
+        "Red X graphic over bad messaging.",
+        "Plain-English outcome card reveal.",
+        "Text overlay: '60% turnoff → 0% when results lead.'",
+        "End card: DM 'STACK'."
+      ]
+    },
+    "tiktok": {
+      "hook": "Stop saying 'we use AI' before you lose your next customer.",
+      "format": "talking-head short with text overlay",
+      "description": "Fast-cut reel using the inversion + emotional plea structure.",
+      "caption": "60% of consumers tap out when they see 'AI' in your bio.\n\nReplace it with the result.\nYour car gets picked up in 12 minutes.\nYour appointment is confirmed.\nYour quote is ready before you hang up.\n\nThat's the stack. Not the tech.\n\nDM 'STACK' for the playbook.",
+      "aiCreativePrompt": "Dark #0B0D12 vertical frame. Top: red slash over 'AI' text. Middle: cream #F4EFE3 customer outcome in large font. Bottom: #1466FF arrow pointing to JobsDone Labs brand mark.",
+      "scriptSparknotes": [
+        "Hook text: 'Stop saying 'we use AI''",
+        "Bad bio reveal with red slash.",
+        "Good outcome cards flash rapidly.",
+        "Stat: '60% turnoff' appears.",
+        "CTA: DM 'STACK'."
+      ]
+    }
+  }
+}

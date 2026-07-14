@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { Driver, Load, AuditLogEntry, ViewMode, EntityType, AuditAction } from '@/types'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import type { Expense } from '@/types/expense'
+import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
 import { withDerivedLegacy } from '@/lib/stops'
@@ -347,6 +348,8 @@ interface AppState {
   maintenanceTasks: MaintenanceTask[]
   maintenanceInvoices: MaintenanceInvoice[]
   fleetSeeded: boolean   // true once the local fleet has been migrated up to the backend
+  // ── Amazon disputes (backend-persisted; empty until first load) ────────────
+  amazonDisputes: AmazonDispute[]
   // ── Expenses (no backend yet — Zustand only) ───────────────────────────────
   expenses: Expense[]
 
@@ -391,6 +394,11 @@ interface AppState {
   addMaintenanceInvoice: (i: Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>) => void
   updateMaintenanceInvoice: (id: string, patch: Partial<Omit<MaintenanceInvoice, 'id' | 'createdAt'>>) => void
   deleteMaintenanceInvoice: (id: string) => void
+
+  // ── Amazon dispute actions (optimistic local update + write-through) ───────
+  addAmazonDispute: (d: Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
+  updateAmazonDispute: (id: string, patch: Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<void>
+  deleteAmazonDispute: (id: string) => Promise<void>
 
   // ── Expense actions (local) ────────────────────────────────────────────────
   addExpense: (e: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>) => void
@@ -441,6 +449,7 @@ export const useAppStore = create<AppState>()(
       maintenanceTasks: SEED_TASKS,
       maintenanceInvoices: SEED_INVOICES,
       fleetSeeded: false,
+      amazonDisputes: [],
       expenses: SEED_EXPENSES,
 
       viewMode: 'compact' as ViewMode,
@@ -498,6 +507,16 @@ export const useAppStore = create<AppState>()(
           }
         } catch (err) {
           console.warn('[store] Fleet backend unavailable — using local data until the Amplify deploy', err)
+        }
+
+        // ── Amazon disputes ─────────────────────────────────────────────────
+        // Non-fatal: if the AmazonDispute model isn't deployed yet, keep the page
+        // usable (empty) until the Amplify deploy lands.
+        try {
+          const amazonDisputes = await api.listAmazonDisputes()
+          set({ amazonDisputes })
+        } catch (err) {
+          console.warn('[store] AmazonDispute backend unavailable — disputes empty until deploy', err)
         }
 
         // ── Real-time subscriptions — keep all clients in sync ──────────────
@@ -625,13 +644,20 @@ export const useAppStore = create<AppState>()(
 
       // ── Maintenance tasks ──────────────────────────────────────────────────
       addMaintenanceTask: (t) => {
+        const today = nowIso().slice(0, 10)
         const task: MaintenanceTask = { ...t, id: `task-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
+        if (task.status === 'complete' && !task.completedDate) task.completedDate = today
         set((s) => ({ maintenanceTasks: [...s.maintenanceTasks, task] }))
         api.createMaintenanceTask(task).catch((err) => console.error('[store] createMaintenanceTask failed', err))
       },
       updateMaintenanceTask: (id, patch) => {
-        set((s) => ({ maintenanceTasks: s.maintenanceTasks.map((t) => t.id === id ? { ...t, ...patch, updatedAt: nowIso() } : t) }))
-        api.updateMaintenanceTask(id, patch as Partial<Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>>)
+        // Auto-manage completion date on any status transition (checkbox, reopen, or modal).
+        const existing = get().maintenanceTasks.find((t) => t.id === id)
+        const finalPatch: Partial<Omit<MaintenanceTask, 'id' | 'createdAt'>> = { ...patch }
+        if (patch.status === 'complete' && !existing?.completedDate) finalPatch.completedDate = nowIso().slice(0, 10)
+        if (patch.status === 'upcoming') finalPatch.completedDate = null
+        set((s) => ({ maintenanceTasks: s.maintenanceTasks.map((t) => t.id === id ? { ...t, ...finalPatch, updatedAt: nowIso() } : t) }))
+        api.updateMaintenanceTask(id, finalPatch as Partial<Omit<MaintenanceTask, 'id' | 'createdAt' | 'updatedAt'>>)
           .catch((err) => console.error('[store] updateMaintenanceTask failed', err))
       },
       deleteMaintenanceTask: (id) => {
@@ -653,6 +679,33 @@ export const useAppStore = create<AppState>()(
       deleteMaintenanceInvoice: (id) => {
         set((s) => ({ maintenanceInvoices: s.maintenanceInvoices.filter((i) => i.id !== id) }))
         api.deleteMaintenanceInvoice(id).catch((err) => console.error('[store] deleteMaintenanceInvoice failed', err))
+      },
+
+      // ── Amazon disputes ────────────────────────────────────────────────────
+      // Optimistic where possible; create awaits the server so we store the real id.
+      addAmazonDispute: async (d) => {
+        const dispute = await api.createAmazonDispute(d)
+        set((s) => ({ amazonDisputes: [...s.amazonDisputes, dispute] }))
+      },
+      updateAmazonDispute: async (id, patch) => {
+        // Optimistic local update, then persist. Amplify manages updatedAt server-side.
+        set((s) => ({ amazonDisputes: s.amazonDisputes.map((d) => d.id === id ? { ...d, ...patch, updatedAt: nowIso() } : d) }))
+        try {
+          const after = await api.updateAmazonDispute(id, patch)
+          set((s) => ({ amazonDisputes: s.amazonDisputes.map((d) => d.id === id ? after : d) }))
+        } catch (err) {
+          console.error('[store] updateAmazonDispute failed', err)
+        }
+      },
+      deleteAmazonDispute: async (id) => {
+        const before = get().amazonDisputes
+        set((s) => ({ amazonDisputes: s.amazonDisputes.filter((d) => d.id !== id) }))
+        try {
+          await api.deleteAmazonDispute(id)
+        } catch (err) {
+          console.error('[store] deleteAmazonDispute failed', err)
+          set({ amazonDisputes: before })  // rollback on failure
+        }
       },
 
       // ── Expenses ───────────────────────────────────────────────────────────

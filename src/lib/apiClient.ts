@@ -779,6 +779,51 @@ export async function deleteDriverAvailability(id: string): Promise<void> {
   })
 }
 
+// ── Amazon disputes ─────────────────────────────────────────────────────────────
+
+import type { AmazonDispute } from '@/types/dispute'
+
+const DISPUTE_FIELDS = `
+  id driverName tripNumber shipmentDate payPeriod amountPaid amountRequested
+  description photoUrl status resolvedAmount submittedAt source externalId notes
+  createdAt updatedAt
+`
+
+export async function listAmazonDisputes(): Promise<AmazonDispute[]> {
+  const result = await client.graphql({
+    query: `query ListAmazonDisputes { listAmazonDisputes(limit: 5000) { items { ${DISPUTE_FIELDS} } } }`,
+  }) as { data: { listAmazonDisputes: { items: AmazonDispute[] } } }
+  return result.data.listAmazonDisputes.items ?? []
+}
+
+export async function createAmazonDispute(
+  input: Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<AmazonDispute> {
+  const result = await client.graphql({
+    query: `mutation CreateAmazonDispute($input: CreateAmazonDisputeInput!) { createAmazonDispute(input: $input) { ${DISPUTE_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createAmazonDispute: AmazonDispute } }
+  return result.data.createAmazonDispute
+}
+
+export async function updateAmazonDispute(
+  id: string,
+  patch: Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>,
+): Promise<AmazonDispute> {
+  const result = await client.graphql({
+    query: `mutation UpdateAmazonDispute($input: UpdateAmazonDisputeInput!) { updateAmazonDispute(input: $input) { ${DISPUTE_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateAmazonDispute: AmazonDispute } }
+  return result.data.updateAmazonDispute
+}
+
+export async function deleteAmazonDispute(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteAmazonDispute($input: DeleteAmazonDisputeInput!) { deleteAmazonDispute(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
 // ── S3 rate confirmations ─────────────────────────────────────────────────────
 
 export async function uploadRateConfirm(loadId: string, file: File): Promise<string> {
@@ -1150,7 +1195,7 @@ export async function deleteEquipment(id: string): Promise<void> {
 // ── Maintenance tasks ───────────────────────────────────────────────────────────
 
 const MAINT_TASK_FIELDS = `
-  id equipmentId title dueDate priority status notes autoDot assignee createdAt updatedAt
+  id equipmentId title dueDate priority status completedDate notes autoDot assignee createdAt updatedAt
 `
 
 export async function listMaintenanceTasks(): Promise<MaintenanceTask[]> {
@@ -1189,7 +1234,7 @@ export async function deleteMaintenanceTask(id: string): Promise<void> {
 // ── Maintenance invoices ──────────────────────────────────────────────────────────
 
 const MAINT_INVOICE_FIELDS = `
-  id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate assignee createdAt updatedAt
+  id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate assignee source createdAt updatedAt
 `
 
 export async function listMaintenanceInvoices(): Promise<MaintenanceInvoice[]> {

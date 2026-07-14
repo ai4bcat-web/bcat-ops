@@ -13,6 +13,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
+import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { TruckMapWidget } from './TruckMapWidget'
 import { PerMileWidget } from './PerMileWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
@@ -260,8 +261,11 @@ export function DashboardPage() {
         {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
         <DieselPriceWidget />
 
-        {/* ── Compliance alerts ─────────────────────────────────────────────── */}
-        <ComplianceAlertsWidget />
+        {/* ── Compliance alerts + recent repair invoices ────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1fr', gap: 16 }}>
+          <ComplianceAlertsWidget />
+          <RepairInvoicesWidget />
+        </div>
 
         {/* ── Charts row ───────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: col1 ?? '1fr 1.4fr', gap: 16 }}>

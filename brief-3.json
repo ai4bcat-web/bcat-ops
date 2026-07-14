@@ -1,0 +1,49 @@
+{
+  "title": "Every RMA backorder I used to chase for hours now shows up in my phone first.",
+  "modeledOn": "Matt Shumer — case study format with quantified time savings",
+  "whyItWorks": "Manufacturing RMA and supplier lead-time crunch is a real ops pain-point. Specific quantification (hours-to-minutes) beats generic 'AI saves time.' Pre-frames ARDS/MCP relevance for manufacturing tool integration.",
+  "enabledPlatforms": ["linkedin", "x", "youtube"],
+  "platforms": {
+    "linkedin": {
+      "hook": "Every RMA backorder I used to chase for hours now shows up in my phone first.",
+      "format": "text post + video reel showing phone dashboard",
+      "description": "Start with the quantified pain, then show the manufacturing dashboard. Mention BCAT and JobsDone Labs as the builders of the integration, keep the focus on the ops win.",
+      "caption": "Every RMA backorder I used to chase for hours now shows up in my phone first.\n\nIn manufacturing, RMA and supplier lead-time chaos is the silent margin killer.\n\nWe were spending 12+ hours a week chasing backorders, calling vendors, updating spreadsheets, and praying the parts showed up before the customer churned.\n\nNow the supplier dashboard pushes the exception to my phone before I ask for it.\n\nMCP + ARDS standards make the tools talk to each other. The agent flags the late shipment, suggests the backup supplier, and drafts the email to the customer service lead.\n\nTime spent on RMA: 12 hours → 45 minutes a week.\n\nIf you're still running manufacturing on spreadsheets and prayer, you're leaving money on the table.\n\nDM me 'RMA' if you want to see the stack.\n\n#manufacturing #supplychain #ops",
+      "aiCreativePrompt": "Background: dark #0B0D12 with cream #F4EFE3 icons. Left shows old: clipboard and phone with red X. Right shows new: sleek dashboard on phone with #1466FF alert bubble. Slow zoom to phone screen.",
+      "scriptSparknotes": [
+        "On-camera hook: 'Every RMA backorder...'",
+        "Montage of old process: emails, spreadsheets, phone calls.",
+        "Dashboard screen record: phone gets push alert first.",
+        "Stat overlay: '12 hrs → 45 min.'",
+        "Soft CTA: DM 'RMA' for stack."
+      ]
+    },
+    "x": {
+      "hook": "RMA backorders used to cost us 12 hours a week. Now it's 45 minutes.",
+      "format": "Thread + phone-recorded video",
+      "description": "Lead with the time-savings stat to stop scrollers, then explain the agent-dashboard stack.",
+      "caption": "1/\nRMA backorders used to cost us 12 hours a week.\nChasing vendors. Updating spreadsheets. Calling customers.\nNow it's 45 minutes.\n\n2/\nHow?\nAgent dashboard flags late shipments before I ask for it.\nSuggests backup suppliers.\nDrafts the customer email.\n\n3/\nMCP + ARDS make our tools talk. The agent handles the exceptions.\n\n4/\nIf you're still running manufacturing on spreadsheets and prayer, DM me 'RMA' and I'll show you the stack.",
+      "aiCreativePrompt": "Dark #0B0D12 background with cream #F4EFE3 bold stat '12 hrs → 45 min', #1466FF accent line, then phone dashboard reveal.",
+      "scriptSparknotes": [
+        "First tweet: 12 hrs → 45 min hook.",
+        "Short video clip: phone alert + dashboard.",
+        "Tweet 2-3: break down the agent workflows.",
+        "Final tweet: CTA with DM prompt."
+      ]
+    },
+    "youtube": {
+      "hook": "I cut RMA chase time from 12 hours to 45 minutes a week.",
+      "format": "short",
+      "description": "Talking head with phone dashboard cutaway.",
+      "caption": "From 12 hours to 45 minutes.\n\n[video]",
+      "aiCreativePrompt": "Dark #0B0D12 background, cream #F4EFE3 text, #1466FF accent. Side-by-side: old clipboard/phone vs new dashboard alert on phone.",
+      "scriptSparknotes": [
+        "Opener: '12 hours to 45 minutes.'",
+        "Old process quick montage.",
+        "New phone alert reveal.",
+        "Overlay: 'Suppliers, backups, drafts — agent handles exceptions.'",
+        "DM 'RMA' end card."
+      ]
+    }
+  }
+}
