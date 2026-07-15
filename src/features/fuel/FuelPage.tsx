@@ -271,7 +271,7 @@ export function FuelPage() {
         </div>
 
         {/* KPI strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0,1fr))' : 'repeat(4, minmax(0,1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 16 }}>
           <StatCard label="Fuel Spend" value={loading ? '—' : money(spend)} accent="#f59e0b"
             right={spendDelta != null && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 12, fontWeight: 600, color: spendDelta > 0 ? '#dc2626' : '#16a34a' }}>

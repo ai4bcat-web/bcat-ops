@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { Avatar } from '@/components/ui/avatar'
 import { AlertTriangle, Wrench, CheckCircle2, Trash2, Pencil, Plus, Search, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
@@ -118,6 +119,8 @@ type Tab = 'tasks' | 'completed'
 type SortKey = 'title' | 'equipment' | 'dueDate' | 'completedDate' | 'priority' | 'status'
 
 export function MaintenancePage() {
+  const isMobile = useIsMobile()
+  const padX = isMobile ? 14 : 32
   const equipment            = useAppStore((s) => s.equipment)
   const maintenanceTasks     = useAppStore((s) => s.maintenanceTasks)
   const addMaintenanceTask       = useAppStore((s) => s.addMaintenanceTask)
@@ -185,11 +188,12 @@ export function MaintenancePage() {
   const completedCount = maintenanceTasks.filter((t) => t.status === 'complete').length
   const highOpenCount  = maintenanceTasks.filter((t) => t.status !== 'complete' && t.priority === 'high').length
 
+  // Each KPI applies the matching tab + filters when clicked.
   const MAINT_KPIS = [
-    { label: 'Open Tasks',    value: String(upcomingCount),  color: '#1ea8f3', pulse: false },
-    { label: 'Overdue',       value: String(overdueCount),   color: '#ef4444', pulse: overdueCount > 0 },
-    { label: 'Completed',     value: String(completedCount), color: '#22c55e', pulse: false },
-    { label: 'High Priority', value: String(highOpenCount),  color: '#a78bfa', pulse: false },
+    { label: 'Open Tasks',    value: String(upcomingCount),  color: '#1ea8f3', pulse: false,               onClick: () => { setTab('tasks'); setTimeFilter('all'); setPriority('all') } },
+    { label: 'Overdue',       value: String(overdueCount),   color: '#ef4444', pulse: overdueCount > 0,     onClick: () => { setTab('tasks'); setTimeFilter('overdue'); setPriority('all') } },
+    { label: 'Completed',     value: String(completedCount), color: '#22c55e', pulse: false,               onClick: () => { setTab('completed'); setPriority('all') } },
+    { label: 'High Priority', value: String(highOpenCount),  color: '#a78bfa', pulse: false,               onClick: () => { setTab('tasks'); setTimeFilter('all'); setPriority('high') } },
   ]
 
   const TABS_LIST = [
@@ -221,7 +225,7 @@ export function MaintenancePage() {
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Maintenance</h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Fleet maintenance tasks</p>
@@ -242,9 +246,9 @@ export function MaintenancePage() {
         </div>
 
         {/* KPI strip — left-border accent */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '0 32px 12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 12, padding: `0 ${padX}px 12px` }}>
           {MAINT_KPIS.map((k) => (
-            <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
+            <div key={k.label} onClick={k.onClick} title={`Filter to ${k.label.toLowerCase()}`} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px', cursor: 'pointer' }}>
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginLeft: 4 }}>
                 {k.label}
@@ -256,7 +260,7 @@ export function MaintenancePage() {
         </div>
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', padding: '0 32px', gap: 0 }}>
+        <div style={{ display: 'flex', padding: `0 ${padX}px`, gap: 0 }}>
           {TABS_LIST.map(({ key, label, Icon }) => {
             const active = tab === key
             return (
@@ -279,7 +283,7 @@ export function MaintenancePage() {
         </div>
       </div>
 
-      <div style={{ padding: '24px 32px', maxWidth: 1200 }}>
+      <div style={{ padding: isMobile ? '16px 12px' : '24px 32px', maxWidth: 1200 }}>
         {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
@@ -327,8 +331,8 @@ export function MaintenancePage() {
               </p>
             </div>
           ) : (
-            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'hidden' }}>
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: isCompletedTab ? 1040 : 940 }}>
                 <colgroup>
                   <col style={{ width: 44 }} />
                   <col style={{ width: 180 }} />

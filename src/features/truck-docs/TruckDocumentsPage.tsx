@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { FileText, Upload, Eye, RefreshCw, ShieldCheck, CheckCircle2, AlertTriangle, Ban, RotateCcw } from 'lucide-react'
+import { FileText, Upload, Eye, RefreshCw, ShieldCheck, CheckCircle2, AlertTriangle, Ban, RotateCcw, ArrowUp, ArrowDown } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -36,6 +36,13 @@ export function TruckDocumentsPage() {
   const [busy, setBusy] = useState<Set<string>>(new Set())
   // after a file is picked, confirm/set the expiration before saving
   const [pending, setPending] = useState<{ truckId: string; spec: TruckDocSpec; file: File; expiration: string } | null>(null)
+  // Sorting: 'truck' | 'assignee' | a doc spec key.
+  const [sortKey, setSortKey] = useState<string>('truck')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  function toggleSort(k: string) {
+    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(k); setSortDir(k === 'truck' || k === 'assignee' ? 'asc' : 'desc') }
+  }
 
   const fileRef = useRef<HTMLInputElement>(null)
   const target = useRef<{ truckId: string; spec: TruckDocSpec } | null>(null)
@@ -63,6 +70,26 @@ export function TruckDocumentsPage() {
   }, [docs])
 
   const docFor = (truckId: string, key: string) => latest.get(`${truckId}::${key}`)
+
+  // Sort order for the doc columns — worst status first when sorting descending.
+  const DOC_RANK: Record<DocState, number> = { EXPIRED: 4, MISSING: 3, EXPIRING_SOON: 2, VALID: 1, WAIVED: 0 }
+  const sortedTrucks = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    const byUnit = (a: typeof trucks[number], b: typeof trucks[number]) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })
+    const spec = TRUCK_DOC_SPECS.find((s) => s.key === sortKey)
+    return [...trucks].sort((a, b) => {
+      let cmp = 0
+      if (sortKey === 'truck') cmp = byUnit(a, b)
+      else if (sortKey === 'assignee') cmp = (a.fleetManagerAssignee ?? '').localeCompare(b.fleetManagerAssignee ?? '')
+      else if (spec) cmp = DOC_RANK[evaluateTruckDoc(a, spec, docFor(a.id, spec.key)).state] - DOC_RANK[evaluateTruckDoc(b, spec, docFor(b.id, spec.key)).state]
+      return cmp * dir || byUnit(a, b)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trucks, sortKey, sortDir, latest])
+
+  function setAssignee(truckId: string, value: string) {
+    updateEquipment(truckId, { fleetManagerAssignee: value || undefined })
+  }
 
   const fullyDocumented = useMemo(
     () => trucks.filter((t) => TRUCK_DOC_SPECS.every((spec) => {
@@ -233,24 +260,36 @@ export function TruckDocumentsPage() {
         {/* Matrix */}
         <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 860 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                  <th style={{ ...thStyle, minWidth: 180 }}>Truck</th>
-                  {TRUCK_DOC_SPECS.map((d) => (
-                    <th key={d.key} style={thStyle}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)', textTransform: 'none', letterSpacing: 0 }}>{d.label}</div>
-                      <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', fontWeight: 500, textTransform: 'none', letterSpacing: 0, marginTop: 1 }}>{d.sub}</div>
-                    </th>
-                  ))}
+                  {(() => {
+                    const arrow = (k: string) => sortKey === k ? (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />) : null
+                    return (
+                      <>
+                        <th style={{ ...thStyle, minWidth: 180, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('truck')}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: sortKey === 'truck' ? 'var(--ds-t1)' : undefined }}>Truck {arrow('truck')}</span>
+                        </th>
+                        <th style={{ ...thStyle, minWidth: 120, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('assignee')}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: sortKey === 'assignee' ? 'var(--ds-t1)' : undefined }}>Assignee {arrow('assignee')}</span>
+                        </th>
+                        {TRUCK_DOC_SPECS.map((d) => (
+                          <th key={d.key} style={{ ...thStyle, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(d.key)}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: sortKey === d.key ? 'var(--ds-t1)' : 'var(--ds-t1)', textTransform: 'none', letterSpacing: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{d.label} {arrow(d.key)}</div>
+                            <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', fontWeight: 500, textTransform: 'none', letterSpacing: 0, marginTop: 1 }}>{d.sub}</div>
+                          </th>
+                        ))}
+                      </>
+                    )
+                  })()}
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>Loading…</td></tr>
-                ) : trucks.length === 0 ? (
-                  <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>No trucks in the fleet yet. Add trucks on the Fleet page.</td></tr>
-                ) : trucks.map((t) => (
+                  <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>Loading…</td></tr>
+                ) : sortedTrucks.length === 0 ? (
+                  <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>No trucks in the fleet yet. Add trucks on the Fleet page.</td></tr>
+                ) : sortedTrucks.map((t) => (
                   <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                     {/* Truck identity */}
                     <td style={{ padding: '10px 16px', verticalAlign: 'top' }}>
@@ -266,6 +305,20 @@ export function TruckDocumentsPage() {
                       <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 2 }}>
                         {t.nickname || `${t.make} ${t.model}`.trim() || '—'}
                       </div>
+                    </td>
+
+                    {/* Assignee — Jason / Ryne (fleet manager on the truck record) */}
+                    <td style={{ padding: '10px 16px', verticalAlign: 'top' }}>
+                      <select
+                        value={t.fleetManagerAssignee ?? ''}
+                        onChange={(e) => setAssignee(t.id, e.target.value)}
+                        title="Who's responsible for this truck's documents"
+                        style={{ height: 30, width: '100%', maxWidth: 120, padding: '0 8px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: t.fleetManagerAssignee ? 'var(--ds-t1)' : 'var(--ds-t3)', fontSize: 12.5, fontFamily: 'inherit', textTransform: 'capitalize' }}
+                      >
+                        <option value="">— Unassigned —</option>
+                        <option value="jason">Jason</option>
+                        <option value="ryne">Ryne</option>
+                      </select>
                     </td>
 
                     {/* One cell per required document */}

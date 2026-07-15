@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
-import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown } from 'lucide-react'
+import { useIsMobile } from '@/hooks/useIsMobile'
+import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Equipment, MaintenanceInvoice } from '@/types/equipment'
 import {
@@ -179,8 +180,11 @@ function EquipMultiSelect({ equipment, included, onChange }: {
 // ── Page ────────────────────────────────────────────────────────────────────────
 
 type Tab = 'invoices' | 'history'
+type InvSortKey = 'date' | 'equipment' | 'source' | 'vendor' | 'invoiceNumber' | 'amount'
 
 export function InvoicesPage() {
+  const isMobile = useIsMobile()
+  const padX = isMobile ? 14 : 32
   const equipment                = useAppStore((s) => s.equipment)
   const maintenanceInvoices      = useAppStore((s) => s.maintenanceInvoices)
   const maintenanceTasks         = useAppStore((s) => s.maintenanceTasks)
@@ -195,6 +199,25 @@ export function InvoicesPage() {
   const [search, setSearch]           = useState('')
   const [newOpen, setNewOpen]         = useState(false)
   const [editInvoice, setEditInvoice] = useState<MaintenanceInvoice | null>(null)
+  const [sortKey, setSortKey]         = useState<InvSortKey>('date')
+  const [sortDir, setSortDir]         = useState<'asc' | 'desc'>('desc')
+
+  function toggleSort(k: InvSortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(k); setSortDir(k === 'amount' || k === 'date' ? 'desc' : 'asc') }
+  }
+  // Sortable header cell (plain render fn so it doesn't remount).
+  const invTh = (label: string, k: InvSortKey, align?: 'right') => {
+    const active = sortKey === k
+    return (
+      <th key={k} style={{ ...thBase, textAlign: align ?? 'left', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(k)}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--ds-t1)' : undefined }}>
+          {label}
+          {active && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+        </span>
+      </th>
+    )
+  }
 
   function equipName(id: string) {
     const e = equipment.find((eq) => eq.id === id)
@@ -217,7 +240,19 @@ export function InvoicesPage() {
       )
     }
     return true
-  }).sort((a, b) => ((b.date ?? '') < (a.date ?? '') ? -1 : 1))
+  }).sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    let cmp = 0
+    switch (sortKey) {
+      case 'date':          cmp = (a.date ?? '').localeCompare(b.date ?? ''); break
+      case 'equipment':     cmp = equipUnit(a.equipmentId).localeCompare(equipUnit(b.equipmentId), undefined, { numeric: true }); break
+      case 'source':        cmp = (a.source ?? '').localeCompare(b.source ?? ''); break
+      case 'vendor':        cmp = (a.vendor ?? '').localeCompare(b.vendor ?? ''); break
+      case 'invoiceNumber': cmp = (a.invoiceNumber ?? '').localeCompare(b.invoiceNumber ?? '', undefined, { numeric: true }); break
+      case 'amount':        cmp = a.amount - b.amount; break
+    }
+    return cmp * dir
+  })
 
   // Maintenance history — completed tasks + repair invoices, newest first.
   const history = useMemo(() => {
@@ -268,7 +303,7 @@ export function InvoicesPage() {
 
       {/* Page header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Invoices</h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Repair invoices &amp; service history · from repairs@bcatcorp.com</p>
@@ -291,13 +326,13 @@ export function InvoicesPage() {
         </div>
 
         {/* Equipment scope for the totals below — multi-select (all / some / exclude) */}
-        <div style={{ padding: '0 32px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ padding: `0 ${padX}px 10px`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Totals for</span>
           <EquipMultiSelect equipment={equipment} included={includedEquip} onChange={setIncludedEquip} />
         </div>
 
         {/* KPI strip */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, padding: '0 32px 12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 12, padding: `0 ${padX}px 12px` }}>
           {KPIS.map((k) => (
             <div key={k.label} style={{ position: 'relative', overflow: 'hidden', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: k.color }} />
@@ -308,7 +343,7 @@ export function InvoicesPage() {
         </div>
 
         {/* Tab bar */}
-        <div style={{ display: 'flex', padding: '0 32px', gap: 0 }}>
+        <div style={{ display: 'flex', padding: `0 ${padX}px`, gap: 0, overflowX: 'auto' }}>
           {[{ key: 'invoices' as const, label: 'Invoices', Icon: Receipt }, { key: 'history' as const, label: 'Maintenance History', Icon: History }].map(({ key, label, Icon }) => {
             const active = tab === key
             return (
@@ -331,7 +366,7 @@ export function InvoicesPage() {
         </div>
       </div>
 
-      <div style={{ padding: '24px 32px', maxWidth: 1200 }}>
+      <div style={{ padding: isMobile ? '16px 12px' : '24px 32px', maxWidth: 1200 }}>
         {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
           <div style={{ position: 'relative' }}>
@@ -359,8 +394,8 @@ export function InvoicesPage() {
               <p className="text-xs text-slate-400">Invoices arrive automatically from repairs@bcatcorp.com, or add one manually.</p>
             </div>
           ) : (
-            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'hidden' }}>
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: 1000 }}>
                 <colgroup>
                   <col style={{ width: 100 }} />
                   <col style={{ width: 108 }} />
@@ -374,9 +409,15 @@ export function InvoicesPage() {
                 </colgroup>
                 <thead>
                   <tr>
-                    {['Date', 'Equipment', 'Source', 'Vendor', 'Description', 'Invoice #', 'Payment', 'Amount', ''].map((h, i) => (
-                      <th key={i} style={{ ...thBase, textAlign: i === 7 || i === 8 ? 'right' : 'left' }}>{h}</th>
-                    ))}
+                    {invTh('Date', 'date')}
+                    {invTh('Equipment', 'equipment')}
+                    {invTh('Source', 'source')}
+                    {invTh('Vendor', 'vendor')}
+                    <th style={{ ...thBase }}>Description</th>
+                    {invTh('Invoice #', 'invoiceNumber')}
+                    <th style={{ ...thBase }}>Payment</th>
+                    {invTh('Amount', 'amount', 'right')}
+                    <th style={{ ...thBase, textAlign: 'right' }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -434,8 +475,8 @@ export function InvoicesPage() {
               <p className="text-xs text-slate-400">Completed tasks and repair invoices appear here per truck.</p>
             </div>
           ) : (
-            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'hidden' }}>
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+            <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: 640 }}>
                 <colgroup>
                   <col style={{ width: 116 }} />
                   <col style={{ width: 116 }} />

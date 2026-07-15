@@ -16,7 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton } from '@/components/ui/sheet'
 import { FormSection, Field } from '@/components/ui/form-section'
 import {
-  Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp,
+  Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp, ArrowUp, ArrowDown,
   CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck, Gauge, DollarSign,
 } from 'lucide-react'
 import { thBase, tdBase } from '@/features/maintenance/maintenanceUi'
@@ -924,6 +924,8 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
 
 export function TrucksPage() {
   const isMobile            = useIsMobile()
+  const padX                = isMobile ? 14 : 32
+  const navigate            = useNavigate()
   const equipment           = useAppStore((s) => s.equipment)
   const maintenanceTasks    = useAppStore((s) => s.maintenanceTasks)
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -938,6 +940,13 @@ export function TrucksPage() {
   const [search, setSearch]               = useState('')
   const [showForm, setShowForm]           = useState<Equipment | 'new' | null>(null)
   const [truckConfigs, setTruckConfigs]   = useState<Map<string, TruckConfig>>(new Map())
+  const [sortKey, setSortKey]             = useState<'equipment' | 'plate' | 'compliance' | 'assignment' | 'openTasks' | 'repairSpend'>('equipment')
+  const [sortDir, setSortDir]             = useState<'asc' | 'desc'>('asc')
+
+  function toggleSort(k: typeof sortKey) {
+    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(k); setSortDir(k === 'openTasks' || k === 'repairSpend' || k === 'compliance' ? 'desc' : 'asc') }
+  }
 
   useEffect(() => {
     listTruckConfigs()
@@ -962,6 +971,20 @@ export function TrucksPage() {
     }
   }
 
+  // Per-truck values used for both display and column sorting.
+  const taskCountOf = (e: Equipment) => maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
+  const repairOf    = (e: Equipment) => maintenanceInvoices.filter((inv) => inv.equipmentId === e.id).reduce((s, inv) => s + inv.amount, 0)
+  const driverNameOf = (e: Equipment) => driverForTruck(e.id, drivers)?.name ?? ''
+  const complianceRankOf = (e: Equipment) => {
+    const isTruck = e.type === 'truck'
+    const states: ExpiryState[] = [
+      dotInspectionState(e.dotInspectionDate),
+      chipExpiryState(e.insuranceExpirationDate),
+      ...(isTruck ? [chipExpiryState(e.iftaExpirationDate), chipExpiryState(e.irpExpirationDate)] : []),
+    ]
+    return states.reduce((w, s) => Math.max(w, SEVERITY_ORDER[s]), 0)
+  }
+
   const filtered = equipment.filter((e) => {
     if (typeFilter !== 'all' && e.type !== typeFilter) return false
     if (search) {
@@ -975,6 +998,18 @@ export function TrucksPage() {
       )
     }
     return true
+  }).sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    let cmp = 0
+    switch (sortKey) {
+      case 'equipment':   cmp = a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }); break
+      case 'plate':       cmp = (a.plate ?? '').localeCompare(b.plate ?? ''); break
+      case 'compliance':  cmp = complianceRankOf(a) - complianceRankOf(b); break
+      case 'assignment':  cmp = driverNameOf(a).localeCompare(driverNameOf(b)); break
+      case 'openTasks':   cmp = taskCountOf(a) - taskCountOf(b); break
+      case 'repairSpend': cmp = repairOf(a) - repairOf(b); break
+    }
+    return cmp * dir
   })
 
   const trucks        = equipment.filter((e) => e.type === 'truck')
@@ -986,12 +1021,12 @@ export function TrucksPage() {
   ).length
   const openTaskCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length
 
-  const FLEET_KPIS = [
+  const FLEET_KPIS: { label: string; value: number; color: string; icon: React.ReactNode; to?: string }[] = [
     { label: 'Total Units',       value: equipment.length, color: '#1ea8f3', icon: <Truck size={14} /> },
     { label: 'Trucks',            value: trucks.length,    color: '#0369a1', icon: <Truck size={14} /> },
     { label: 'Trailers',          value: trailers.length,  color: '#a78bfa', icon: <Container size={14} /> },
-    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} /> },
-    { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} /> },
+    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} />, to: '/compliance' },
+    { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} />, to: '/maintenance' },
   ]
 
   const TABS = [
@@ -1038,7 +1073,7 @@ export function TrucksPage() {
 
       {/* ── Page header ──────────────────────────────────────────────────── */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Fleet</h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Equipment, compliance &amp; maintenance</p>
@@ -1053,10 +1088,15 @@ export function TrucksPage() {
           </div>
         </div>
 
-        {/* KPI strip — icon cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, padding: '0 32px 16px' }}>
+        {/* KPI strip — icon cards (Compliance Alerts / Open Tasks link out) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: isMobile ? 10 : 12, padding: `0 ${padX}px 16px` }}>
           {FLEET_KPIS.map((k) => (
-            <div key={k.label} style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px' }}>
+            <div
+              key={k.label}
+              onClick={k.to ? () => navigate(k.to!) : undefined}
+              title={k.to ? `View ${k.label.toLowerCase()}` : undefined}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10, padding: '12px 16px', cursor: k.to ? 'pointer' : 'default' }}
+            >
               <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--ds-bg)', color: k.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {k.icon}
               </div>
@@ -1069,7 +1109,7 @@ export function TrucksPage() {
         </div>
       </div>
 
-      <div style={{ padding: '24px 32px' }}>
+      <div style={{ padding: isMobile ? '16px 12px' : '24px 32px' }}>
         {/* Toolbar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
@@ -1160,9 +1200,25 @@ export function TrucksPage() {
                 </colgroup>
                 <thead>
                   <tr>
-                    {['Equipment', 'Plate', 'Compliance', 'Assignment', 'Open Tasks', 'Repair Spend', ''].map((h, i) => (
-                      <th key={i} style={{ ...thBase, textAlign: i === 5 ? 'right' : 'left' }}>{h}</th>
-                    ))}
+                    {([
+                      ['Equipment', 'equipment'], ['Plate', 'plate'], ['Compliance', 'compliance'],
+                      ['Assignment', 'assignment'], ['Open Tasks', 'openTasks'], ['Repair Spend', 'repairSpend'],
+                    ] as const).map(([label, k], i) => {
+                      const active = sortKey === k
+                      return (
+                        <th
+                          key={k}
+                          onClick={() => toggleSort(k)}
+                          style={{ ...thBase, textAlign: i === 5 ? 'right' : 'left', cursor: 'pointer', userSelect: 'none' }}
+                        >
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: active ? 'var(--ds-t1)' : undefined }}>
+                            {label}
+                            {active && (sortDir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
+                          </span>
+                        </th>
+                      )
+                    })}
+                    <th style={{ ...thBase, textAlign: 'right' }}></th>
                   </tr>
                 </thead>
                 <tbody>
