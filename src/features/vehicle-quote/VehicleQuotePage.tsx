@@ -3,6 +3,11 @@ import { toast } from 'sonner'
 import { Car, Send, Loader2, Eye, Star } from 'lucide-react'
 import { buildQuoteEmailHtml, buildQuoteSubject, type QuoteFields, type GoogleReviews } from '@/lib/quoteEmail'
 import { sendVehicleQuoteEmail, getGoogleReviews } from '@/lib/apiClient'
+import bestCareLogo from '@/assets/best-care-logo.png'
+
+// Inline-image CID the emailer Lambda embeds the logo under. The on-screen
+// preview uses the bundled asset URL; the sent email references this CID.
+const LOGO_CID = 'cid:bestcarelogo'
 
 const BCC = 'cars@bcatcorp.com'
 const FROM = 'ruben@bcatcorp.com'
@@ -71,7 +76,7 @@ export function VehicleQuotePage() {
   const [toTouched, setToTouched] = useState(false)
   const effectiveTo = toTouched ? to : (to || f.customerEmail)
 
-  const previewHtml = useMemo(() => buildQuoteEmailHtml(f, { reviews }), [f, reviews])
+  const previewHtml = useMemo(() => buildQuoteEmailHtml(f, { reviews, logoSrc: bestCareLogo }), [f, reviews])
   const effectiveSubject = subject.trim() || buildQuoteSubject(f)
 
   const canSend = /.+@.+\..+/.test(effectiveTo.trim()) && !!f.estimatedQuote.trim() && !sending
@@ -87,7 +92,7 @@ export function VehicleQuotePage() {
       const res = await sendVehicleQuoteEmail({
         to: effectiveTo.trim(),
         subject: effectiveSubject,
-        html: buildQuoteEmailHtml(f, { reviews }),
+        html: buildQuoteEmailHtml(f, { reviews, logoSrc: LOGO_CID }),
         replyTo: FROM,
       })
       if (!res.sent) throw new Error(res.error || 'The email service rejected the message')
