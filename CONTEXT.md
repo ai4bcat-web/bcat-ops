@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-13
+> Last updated: 2026-07-15
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, expense/fuel tracking, weekly fleet profitability, finances, driver pay (Amazon + box-truck), email/Slack intake, DOT compliance & driver onboarding, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, weekly fleet profitability, finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Best Care Auto Transport vehicle-quote emailer, and audit logging.
 
 ## Where it lives
 | | |
@@ -30,17 +30,20 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/drivers` | Driver management + avatars |
 | `/trucks` | Truck/equipment registry (Fleet) |
 | `/truck-docs` | Truck document tracking (insurance, IFTA, IRP, DOT inspection) — shares the compliance backend |
-| `/maintenance` | Maintenance tasks + invoices |
+| `/maintenance` | Maintenance tasks |
+| `/invoices` | Maintenance invoices |
 | `/fuel` | Fuel transaction tracking, EFS report upload (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
 | `/schedule` | Driver schedule view |
 | `/time-off` | Driver time-off / availability management |
 | `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
 | `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay |
+| `/disputes` | Amazon driver disputes (underpaid/owed trips) — Google Form ingest + manual entry |
 | `/audit-log` | Audit trail (legacy `/audit` redirects) |
 | `/intake` | Email/Slack intake queue |
 | `/tasks` | Task/todo board |
 | `/users` | User management (admin-only) |
+| `/vehicle-quote` | Best Care Auto Transport vehicle-quote emailer |
 | `/compliance` | DOT compliance dashboard (drivers & trucks) |
 | `/compliance/review` | Compliance document review queue |
 | `/compliance/driver/:driverId` | Per-driver compliance detail |
@@ -51,6 +54,8 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 **Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability`
 
 **Driver pay:** `DriverPayPeriod` (biweekly gross pay, Paychex seam) · `AmazonTrip` (weekly trip-based Amazon pay lines) · `AmazonPayMaster` (archive of uploaded master CSVs, raw file in S3) · `BoxTruckTrip` (biweekly box-truck shipment lines) · `DriverPaySetting` (per-driver pay model: %, expense timing, fuel card, fixed deductions) · `DriverPayDeduction` (per-week one-off charges)
+
+**Disputes:** `AmazonDispute` (driver claims that Amazon underpaid/owes on a trip; Google Form → intake Lambda, source `GOOGLE_FORM`, plus `MANUAL`; workflow PENDING → POSTED → PAID | REJECTED)
 
 **Telematics (Motive + Blue Ink Tech):** `TruckConfig` · `TruckMileage` · `TruckLocation` · `TruckLocationHistory` (BIT trucks write into the same mileage/location tables as Motive)
 
@@ -65,6 +70,8 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 - `manageUsers` (query) — admin-gated Cognito user CRUD → `userManagement`
 - `sendOnboardingEmail` (mutation) — driver-facing onboarding email via SES (invite/rejected/complete), honors kill switch → `onboardingEmailer`
 - `sendDriverPayEmail` (mutation) — emails a driver their weekly pay statement PDF (built client-side, passed as base64) via SES → `driverPayEmailer`
+- `sendVehicleQuoteEmail` (mutation) — emails a customer their Best Care Auto Transport vehicle quote as branded HTML, sent from ruben@bcatcorp.com and always BCC'd to cars@bcatcorp.com → `vehicleQuoteEmailer`
+- `getGoogleReviews` (query) — live Google rating + review count for the Best Care Auto Transport listing (CTA in the quote email) → `googleReviews`
 
 Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`. Default auth mode is Cognito `userPool`. The driver portal has no AppSync access — it goes through the `onboarding-portal-api` Lambda, which validates the invite token server-side.
 
@@ -80,6 +87,9 @@ Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`.
 - **generate-recurring-expenses** — materializes RecurringExpense templates into monthly ExpenseRecords
 - **paychex-pay-sync** — pulls the latest closed Paychex pay period and writes ONE combined fleet driver-cost record into DriverPayPeriod (idempotent per period); feeds fleet driver cost in Finances
 - **driver-pay-emailer** — custom AppSync mutation (`sendDriverPayEmail`); wraps the client-built pay-statement PDF in a MIME message and sends via SES
+- **vehicle-quote-emailer** — custom AppSync mutation (`sendVehicleQuoteEmail`); sends the client-built Best Care Auto Transport quote HTML from ruben@bcatcorp.com, always BCC'ing cars@bcatcorp.com
+- **google-reviews** — custom AppSync query (`getGoogleReviews`); returns the live Google rating + review count for the Best Care listing, shown as a CTA in the quote email
+- **amazon-dispute-intake** — Function URL called by the Google Form Apps Script bridge; writes each dispute-form submission into an `AmazonDispute` record (deduped by `externalId`, source `GOOGLE_FORM`)
 - **broker-load-alert** — DynamoDB stream consumer on the Load table; when a load is assigned to the "Broker Need to Cover" driver, creates a deduped IntakeItem task for Arcie and posts a heads-up to the BCAT global Slack channel
 - **compliance-scanner** — daily cron (6 AM America/Chicago): scans ComplianceDocuments, upserts ComplianceAlerts, transitions doc statuses, recomputes cached compliance status, and sends escalation emails (Phase 4)
 - **onboarding-emailer** — sends driver onboarding emails (invite/rejected/complete) via SES
