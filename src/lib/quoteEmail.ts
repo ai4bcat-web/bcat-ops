@@ -36,6 +36,12 @@ const MUTED = '#8a94a6'      // labels / secondary
 const LINE = '#e7ebf0'       // hairlines
 const CARD = '#f4f6f9'       // contact card background
 
+// ── Best Care contact (shown in the email footer) ───────────────────────────
+const CONTACT_NAME = 'Ruben Vargas'
+const CONTACT_PHONE = '(224) 414-2700'
+const CONTACT_PHONE_TEL = '+12244142700'
+const CONTACT_EMAIL = 'cars@bcatcorp.com'
+
 function esc(s: string): string {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -230,9 +236,17 @@ export function buildQuoteEmailHtml(f: QuoteFields, opts: QuoteEmailOptions = {}
 
           <!-- Footer -->
           <tr>
-            <td align="center" style="background:${INK};padding:20px 32px;">
+            <td align="center" style="background:${INK};padding:24px 32px;">
+              <div style="font:700 11px/1.4 Arial,Helvetica,sans-serif;letter-spacing:0.1em;text-transform:uppercase;color:#8b93a3;padding-bottom:9px;">Your Best Care Contact</div>
+              <div style="font:700 15px/1.4 Arial,Helvetica,sans-serif;color:#ffffff;">${CONTACT_NAME}</div>
+              <div style="font:400 13px/1.7 Arial,Helvetica,sans-serif;padding-top:4px;">
+                <a href="tel:${CONTACT_PHONE_TEL}" style="color:#ff6b73;text-decoration:none;">${CONTACT_PHONE}</a>
+                <span style="color:#5c6373;">&nbsp;&middot;&nbsp;</span>
+                <a href="mailto:${CONTACT_EMAIL}" style="color:#ff6b73;text-decoration:none;">${CONTACT_EMAIL}</a>
+              </div>
+              <div style="height:1px;background:#2a2e37;max-width:190px;margin:16px auto;font-size:0;line-height:0;">&nbsp;</div>
               <div style="font:400 12px/1.6 Arial,Helvetica,sans-serif;color:#c3cad6;">This quote was prepared for you by <strong style="color:#ffffff;">Best Care Auto Transport</strong>.</div>
-              <div style="font:400 11px/1.6 Arial,Helvetica,sans-serif;color:#7f8798;padding-top:4px;">Questions? Just reply to this email &mdash; we&rsquo;re happy to help.</div>
+              <div style="font:400 11px/1.6 Arial,Helvetica,sans-serif;color:#7f8798;padding-top:4px;">Or just reply to this email &mdash; we&rsquo;re happy to help.</div>
             </td>
           </tr>
 
