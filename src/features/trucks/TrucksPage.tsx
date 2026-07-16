@@ -1025,7 +1025,7 @@ export function TrucksPage() {
     { label: 'Total Units',       value: equipment.length, color: '#1ea8f3', icon: <Truck size={14} /> },
     { label: 'Trucks',            value: trucks.length,    color: '#0369a1', icon: <Truck size={14} /> },
     { label: 'Trailers',          value: trailers.length,  color: '#a78bfa', icon: <Container size={14} /> },
-    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} />, to: '/compliance' },
+    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} />, to: '/truck-docs' },
     { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} />, to: '/maintenance' },
   ]
 

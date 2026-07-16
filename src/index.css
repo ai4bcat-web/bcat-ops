@@ -407,7 +407,7 @@ body {
 .sidebar-collapse-btn:hover { background: var(--ds-bg-3); color: var(--foreground); }
 
 /* ── Collapsed rail (desktop only) ───────────────────────────────────────── */
-@media (min-width: 769px) {
+@media (min-width: 901px) {
   .sidebar { transition: width 0.18s ease; }
   .sidebar.collapsed { width: 64px; }
   .sidebar.collapsed .sidebar-link {
@@ -418,7 +418,7 @@ body {
   .sidebar.collapsed .sidebar-collapse-btn { justify-content: center; padding-left: 0; padding-right: 0; }
 }
 
-/* ── Mobile drawer + responsive shell (≤768px) ───────────────────────────── */
+/* ── Mobile + tablet-portrait drawer + responsive shell (≤900px) ──────────── */
 
 /* Backdrop behind the drawer; only rendered on mobile when the menu is open. */
 .app-backdrop {
@@ -439,7 +439,7 @@ body {
 /* Horizontal-scroll wrapper for tables that can't fully restructure on mobile. */
 .mobile-scroll-x { overflow-x: visible; }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .menu-btn { display: flex; }
   .mobile-only { display: revert; }
   .desktop-only { display: none !important; }

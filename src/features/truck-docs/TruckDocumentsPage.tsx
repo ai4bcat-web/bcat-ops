@@ -36,13 +36,15 @@ export function TruckDocumentsPage() {
   const [busy, setBusy] = useState<Set<string>>(new Set())
   // after a file is picked, confirm/set the expiration before saving
   const [pending, setPending] = useState<{ truckId: string; spec: TruckDocSpec; file: File; expiration: string } | null>(null)
-  // Sorting: 'truck' | 'assignee' | a doc spec key.
-  const [sortKey, setSortKey] = useState<string>('truck')
+  // Sorting: 'truck' | 'assignee' | a doc spec key. Default: assignee, Jason first.
+  const [sortKey, setSortKey] = useState<string>('assignee')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   function toggleSort(k: string) {
     if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else { setSortKey(k); setSortDir(k === 'truck' || k === 'assignee' ? 'asc' : 'desc') }
   }
+  // Assignee order: Jason first, then Ryne, then Unassigned.
+  const ASSIGNEE_RANK = (a?: string) => (a === 'jason' ? 0 : a === 'ryne' ? 1 : 2)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const target = useRef<{ truckId: string; spec: TruckDocSpec } | null>(null)
@@ -80,7 +82,7 @@ export function TruckDocumentsPage() {
     return [...trucks].sort((a, b) => {
       let cmp = 0
       if (sortKey === 'truck') cmp = byUnit(a, b)
-      else if (sortKey === 'assignee') cmp = (a.fleetManagerAssignee ?? '').localeCompare(b.fleetManagerAssignee ?? '')
+      else if (sortKey === 'assignee') cmp = ASSIGNEE_RANK(a.fleetManagerAssignee) - ASSIGNEE_RANK(b.fleetManagerAssignee)
       else if (spec) cmp = DOC_RANK[evaluateTruckDoc(a, spec, docFor(a.id, spec.key)).state] - DOC_RANK[evaluateTruckDoc(b, spec, docFor(b.id, spec.key)).state]
       return cmp * dir || byUnit(a, b)
     })

@@ -17,11 +17,11 @@ export function AppLayout() {
     () => typeof localStorage !== 'undefined' && localStorage.getItem(COLLAPSE_KEY) === '1',
   )
   const [isDesktop, setIsDesktop] = useState(
-    () => typeof window === 'undefined' || window.matchMedia('(min-width: 769px)').matches,
+    () => typeof window === 'undefined' || window.matchMedia('(min-width: 901px)').matches,
   )
 
   useEffect(() => {
-    const mq = window.matchMedia('(min-width: 769px)')
+    const mq = window.matchMedia('(min-width: 901px)')
     const onChange = () => setIsDesktop(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)

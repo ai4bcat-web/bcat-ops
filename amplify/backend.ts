@@ -469,8 +469,10 @@ payEmailerFn.addEnvironment('FROM_ADDRESS', process.env.DRIVER_PAY_FROM_ADDRESS 
 // the note below), so no per-address verification is needed.
 
 const quoteEmailerFn = backend.vehicleQuoteEmailer.resources.lambda as LambdaFunction
+// SendRawEmail is required because the quote email is sent as raw MIME whenever it
+// embeds the inline logo (Content.Raw in SESv2 maps to the ses:SendRawEmail action).
 backend.vehicleQuoteEmailer.resources.lambda.addToRolePolicy(
-  new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })
+  new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
 quoteEmailerFn.addEnvironment('FROM_ADDRESS', process.env.QUOTE_FROM_ADDRESS ?? 'ruben@bcatcorp.com')
 quoteEmailerFn.addEnvironment('BCC_ADDRESS',  process.env.QUOTE_BCC_ADDRESS ?? 'cars@bcatcorp.com')
