@@ -1187,8 +1187,8 @@ export function TrucksPage() {
               })}
             </div>
           ) : (
-            <div style={{ maxHeight: 'calc(100vh - 360px)', overflowY: 'auto', overflowX: 'hidden' }}>
-              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+            <div style={{ maxHeight: 'calc(100vh - 360px)', overflowY: 'auto', overflowX: 'auto' }}>
+              <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', minWidth: 1000 }}>
                 <colgroup>
                   <col />
                   <col style={{ width: 96 }} />
