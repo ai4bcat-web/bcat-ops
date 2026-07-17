@@ -29,6 +29,7 @@ import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboarding
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
+import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 
 export default function App() {
   return (
@@ -42,32 +43,32 @@ export default function App() {
             <AuthGuard>
               <Routes>
                 <Route element={<AppLayout />}>
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/calendar" element={<CalendarPage />} />
-              <Route path="/loads" element={<GridPage />} />
-              <Route path="/drivers" element={<DriversPage />} />
-              <Route path="/trucks" element={<TrucksPage />} />
-              <Route path="/truck-docs" element={<TruckDocumentsPage />} />
-              <Route path="/maintenance" element={<MaintenancePage />} />
-              <Route path="/invoices" element={<InvoicesPage />} />
-              <Route path="/fuel" element={<FuelPage />} />
-              <Route path="/finances" element={<FinancesPage />} />
-              <Route path="/schedule" element={<SchedulePage />} />
-              <Route path="/time-off" element={<TimeOffPage />} />
-              <Route path="/driver-pay" element={<DriverPayPage />} />
-              <Route path="/driver-pay-box-trucks" element={<BoxTruckPayPage />} />
-              <Route path="/disputes" element={<DisputesPage />} />
-              <Route path="/audit-log" element={<AuditPage />} />
-              <Route path="/intake"   element={<IntakePage />} />
-              <Route path="/tasks"   element={<TasksPage />} />
-              <Route path="/users" element={<UsersPage />} />
-              <Route path="/vehicle-quote" element={<VehicleQuotePage />} />
+              <Route index element={<LandingRedirect />} />
+              <Route path="/dashboard" element={<RequirePage page="dashboard"><DashboardPage /></RequirePage>} />
+              <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
+              <Route path="/loads" element={<RequirePage page="loads"><GridPage /></RequirePage>} />
+              <Route path="/drivers" element={<RequirePage page="drivers"><DriversPage /></RequirePage>} />
+              <Route path="/trucks" element={<RequirePage page="trucks"><TrucksPage /></RequirePage>} />
+              <Route path="/truck-docs" element={<RequirePage page="truckDocs"><TruckDocumentsPage /></RequirePage>} />
+              <Route path="/maintenance" element={<RequirePage page="maintenance"><MaintenancePage /></RequirePage>} />
+              <Route path="/invoices" element={<RequirePage page="invoices"><InvoicesPage /></RequirePage>} />
+              <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
+              <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
+              <Route path="/schedule" element={<RequirePage page="schedule"><SchedulePage /></RequirePage>} />
+              <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
+              <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
+              <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
+              <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
+              <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
+              <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
+              <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
+              <Route path="/users" element={<RequireOwner><UsersPage /></RequireOwner>} />
+              <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
               {/* Compliance & onboarding */}
-              <Route path="/compliance" element={<CompliancePage />} />
-              <Route path="/compliance/review" element={<ReviewQueuePage />} />
-              <Route path="/compliance/driver/:driverId" element={<DriverComplianceDetailPage />} />
-              <Route path="/compliance/truck/:truckId" element={<TruckOnboardingWizardPage />} />
+              <Route path="/compliance" element={<RequirePage page="compliance"><CompliancePage /></RequirePage>} />
+              <Route path="/compliance/review" element={<RequirePage page="complianceReview"><ReviewQueuePage /></RequirePage>} />
+              <Route path="/compliance/driver/:driverId" element={<RequirePage page="compliance"><DriverComplianceDetailPage /></RequirePage>} />
+              <Route path="/compliance/truck/:truckId" element={<RequirePage page="compliance"><TruckOnboardingWizardPage /></RequirePage>} />
               {/* legacy redirects */}
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
