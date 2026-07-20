@@ -494,7 +494,7 @@ const schema = a.schema({
       description: a.string(),              // human-readable, e.g. "4.5 mi NE of Tucson, AZ"
       motion:      a.string(),              // 'MOVING' | 'STATIONARY' (derived from speed)
       motionSince: a.string(),              // ISO timestamp the truck entered its current motion state
-      odometer:    a.integer(),             // latest odometer (miles) from Motive, if reported
+      odometer:    a.float(),               // latest odometer (miles) from Motive, if reported (fractional)
       source:      a.string().required(),   // 'motive'
       syncedAt:    a.datetime().required(),
     })
