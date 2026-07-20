@@ -1155,7 +1155,7 @@ const EQUIPMENT_FIELDS = `
   ownership insured active
   dotInspectionDate iftaExpirationDate irpExpirationDate insuranceExpirationDate bobtailInsuranceDate
   assignedDriverId fleetManagerAssignee onTollwayAccount fuelCardNumbers
-  eldSource eldSerialNumber fleetGroup notes
+  eldSource eldSerialNumber fleetGroup lastPmDate lastPmMileage notes
   createdAt updatedAt
 `
 
@@ -1326,13 +1326,14 @@ export interface TruckLocation {
   description:  string | null
   motion:       string | null   // 'MOVING' | 'STATIONARY'
   motionSince:  string | null   // ISO timestamp the truck entered its current motion state
+  odometer:     number | null   // latest odometer (miles) from Motive, if reported
   source:       string
   syncedAt:     string
   createdAt:    string
   updatedAt:    string
 }
 
-const TRUCK_LOCATION_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description motion motionSince source syncedAt createdAt updatedAt`
+const TRUCK_LOCATION_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description motion motionSince odometer source syncedAt createdAt updatedAt`
 
 /** Current location of every truck (one row per truck, latest fix). */
 export async function listTruckLocations(): Promise<TruckLocation[]> {

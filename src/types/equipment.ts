@@ -32,6 +32,8 @@ export interface Equipment {
   eldSource?: EldSource         // 'motive' (auto-sync) | 'manual' (own ELD); default motive
   eldSerialNumber?: string      // own-ELD device serial (manual trucks)
   fleetGroup?: FleetGroup | null // LOCAL (Ivan) | AMAZON — source of truth for profitability grouping
+  lastPmDate?: string           // YYYY-MM-DD of the last preventive-maintenance service
+  lastPmMileage?: number        // odometer (mi) at the last PM — next PM due at +25k
   notes?: string
   createdAt: string
   updatedAt: string

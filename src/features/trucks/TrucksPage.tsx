@@ -167,6 +167,8 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
     eldSource:               (initial?.eldSource ?? 'motive') as EldSource,
     eldSerialNumber:         initial?.eldSerialNumber ?? '',
     fleetGroup:              (initial?.fleetGroup ?? '') as '' | FleetGroup,
+    lastPmDate:              initial?.lastPmDate ?? '',
+    lastPmMileage:           initial?.lastPmMileage?.toString() ?? '',
     fuelCard:                (initial?.fuelCardNumbers ?? []).join(', '),
     // Operating costs — prefilled from existing recurring expenses when editing.
     loanMonthly:             initialCosts?.loanMonthly != null ? String(initialCosts.loanMonthly) : '',
@@ -209,6 +211,9 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
       // Fleet group + fuel card (trucks only) — drive profitability grouping and the
       // data-backed fuel-card → truck mapping (no code edit needed to add a truck).
       fleetGroup: isTruck ? (form.fleetGroup || null) : null,
+      // Preventive-maintenance history (trucks only) — powers the PM countdown.
+      lastPmDate: isTruck ? (form.lastPmDate || undefined) : undefined,
+      lastPmMileage: isTruck && form.lastPmMileage ? parseInt(form.lastPmMileage) : undefined,
       fuelCardNumbers: isTruck
         ? (form.fuelCard.split(',').map((c) => c.trim()).filter(Boolean))
         : undefined,
@@ -256,6 +261,12 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                   <Field label="Plate"><Input value={form.plate} onChange={(e) => set('plate', e.target.value)} className="h-9" /></Field>
                   {isTruck && <Field label="Mileage"><Input type="number" value={form.mileage} onChange={(e) => set('mileage', e.target.value)} className="h-9" /></Field>}
                 </div>
+                {isTruck && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
+                    <Field label="Last PM date"><Input type="date" value={form.lastPmDate} onChange={(e) => set('lastPmDate', e.target.value)} className="h-9" /></Field>
+                    <Field label="Last PM odometer (mi)"><Input type="number" value={form.lastPmMileage} onChange={(e) => set('lastPmMileage', e.target.value)} placeholder="e.g. 512000" className="h-9" /></Field>
+                  </div>
+                )}
                 <Field label="VIN"><Input value={form.vin} onChange={(e) => set('vin', e.target.value)} placeholder="17-character VIN" className="h-9" /></Field>
               </FormSection>
 

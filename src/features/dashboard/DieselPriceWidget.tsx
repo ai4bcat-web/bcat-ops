@@ -5,6 +5,7 @@ import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransa
 import { listDriverPaySettings } from '@/lib/apiClient'
 import { fuelDedupKey, normalizeCard } from '@/lib/driverFuel'
 import { sundayOf, shiftWeek } from '@/features/driver-pay/week'
+import { useAppStore } from '@/store/useAppStore'
 
 // Diesel + blends only — excludes DEF, discount/cardlock, scale, cash.
 const DIESEL_TYPES = new Set(['ULSD', 'FUEL', 'B5', 'B20', 'REG', 'PREM', 'DSL', 'BIO'])
@@ -14,6 +15,7 @@ const WEEKS = 12
 const MONTHS = 12
 const perGal = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 3, maximumFractionDigits: 3 })
 const perGal2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 
 function weekStartISO(iso: string): string {
   const d = new Date(`${iso}T12:00:00Z`)
@@ -44,13 +46,36 @@ type Mode = 'graph' | 'table'
  * Current average diesel price for the Ivan/fleet trucks — gallons-weighted from our own
  * fuel purchases, by week or by month. Amazon drivers' cards are excluded. The window can
  * be paged back through history (prev/next) and viewed as a chart or a table.
+ *
+ * `perTruck` (Fleet Manager Dashboard) adds a truck selector so the price/gallons/spend
+ * can be filtered to a single truck, plus a Spend column in the table view. When a
+ * specific truck is chosen the Amazon-card exclusion is bypassed (you asked for THAT truck).
  */
-export function DieselPriceWidget() {
+export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } = {}) {
   const { transactions, loading } = useFuelTransactions()
+  const equipment = useAppStore((s) => s.equipment)
   const [view, setView] = useState<View>('week')
   const [mode, setMode] = useState<Mode>('graph')
   const [offset, setOffset] = useState(0)   // 0 = window ending now, 1 = one period earlier, …
   const [amazonCards, setAmazonCards] = useState<Set<string>>(new Set())
+  const [truckId, setTruckId] = useState<string>('all')
+
+  const trucks = useMemo(
+    () => equipment.filter((e) => e.type === 'truck').sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
+    [equipment],
+  )
+
+  // Matcher for the selected truck: by truckId, unit number, or one of its fuel cards.
+  const truckMatch = useMemo(() => {
+    if (truckId === 'all') return null
+    const eq = equipment.find((e) => e.id === truckId)
+    if (!eq) return null
+    const cards = new Set((eq.fuelCardNumbers ?? []).map(normalizeCard).filter(Boolean))
+    return (t: FuelTransaction) =>
+      t.truckId === eq.id ||
+      (!!eq.unitNumber && t.unitNumber === eq.unitNumber) ||
+      cards.has(normalizeCard(t.cardNumber))
+  }, [truckId, equipment])
 
   // Switching the period unit makes the offset ambiguous — jump back to current.
   const changeView = (v: View) => { setView(v); setOffset(0) }
@@ -79,7 +104,10 @@ export function DieselPriceWidget() {
     const byPeriod = new Map<string, { amount: number; qty: number }>()
     for (const t of transactions) {
       if (!isDiesel(t) || !(t.quantity > 0)) continue
-      if (amazonCards.has(normalizeCard(t.cardNumber))) continue
+      // Filtering to one truck? Keep only its fills (and don't apply the Amazon exclusion —
+      // the manager explicitly asked for THIS truck). Otherwise exclude Amazon driver cards.
+      if (truckMatch) { if (!truckMatch(t)) continue }
+      else if (amazonCards.has(normalizeCard(t.cardNumber))) continue
       const k = fuelDedupKey(t)
       if (seen.has(k)) continue
       seen.add(k)
@@ -108,6 +136,7 @@ export function DieselPriceWidget() {
         period: label,
         price: acc && acc.qty > 0 ? Math.round((acc.amount / acc.qty) * 1000) / 1000 : null,
         gallons: acc ? acc.qty : 0,
+        spend: acc ? acc.amount : 0,
       }
     })
     const withData = series.filter((s) => s.price != null)
@@ -115,7 +144,7 @@ export function DieselPriceWidget() {
     const prev = withData.length >= 2 ? withData[withData.length - 2].price : null
     const delta = current != null && prev != null ? current - prev : null
     return { series, current, delta }
-  }, [transactions, amazonCards, view, offset])
+  }, [transactions, amazonCards, view, offset, truckMatch])
 
   // Newest-first rows for the table, each with its change vs the prior (older) period.
   const rows = useMemo(
@@ -132,13 +161,26 @@ export function DieselPriceWidget() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <Fuel size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Diesel price</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Diesel price{perTruck && truckId !== 'all' ? ` · #${equipment.find((e) => e.id === truckId)?.unitNumber ?? ''}` : ''}</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              Fleet average $/gal · last {view === 'week' ? WEEKS : MONTHS} {view}s{offset > 0 ? ' (history)' : ''}
+              {truckId === 'all' ? 'Fleet average' : 'Truck average'} $/gal · last {view === 'week' ? WEEKS : MONTHS} {view}s{offset > 0 ? ' (history)' : ''}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {perTruck && (
+            <select
+              value={truckId}
+              onChange={(e) => { setTruckId(e.target.value); setOffset(0) }}
+              aria-label="Filter by truck"
+              style={{ height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontSize: 12.5, padding: '0 8px', fontFamily: 'inherit', cursor: 'pointer' }}
+            >
+              <option value="all">All fleet trucks</option>
+              {trucks.map((t) => (
+                <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>
+              ))}
+            </select>
+          )}
           {current != null && (
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em', lineHeight: 1 }}>
@@ -221,6 +263,7 @@ export function DieselPriceWidget() {
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 <th style={{ ...TH, textAlign: 'left' }}>{view === 'week' ? 'Week of' : 'Month'}</th>
                 <th style={TH}>Gallons</th>
+                {perTruck && <th style={TH}>Spend</th>}
                 <th style={TH}>Avg $/gal</th>
                 <th style={TH}>Change</th>
               </tr>
@@ -230,6 +273,7 @@ export function DieselPriceWidget() {
                 <tr key={i} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                   <td style={{ ...TD, textAlign: 'left', fontWeight: 600 }}>{r.period}</td>
                   <td style={{ ...TD, color: r.gallons ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{r.gallons ? Math.round(r.gallons).toLocaleString('en-US') : '—'}</td>
+                  {perTruck && <td style={{ ...TD, color: r.spend ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{r.spend ? usd0.format(r.spend) : '—'}</td>}
                   <td style={{ ...TD, fontWeight: 600, color: r.price == null ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>{r.price == null ? '—' : perGal.format(r.price)}</td>
                   <td style={{ ...TD, color: r.change == null || Math.abs(r.change) < 0.001 ? 'var(--ds-t3)' : r.change < 0 ? '#15803d' : '#dc2626' }}>
                     {r.change == null || Math.abs(r.change) < 0.001 ? '—' : `${r.change < 0 ? '−' : '+'}${perGal.format(Math.abs(r.change))}`}

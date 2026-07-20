@@ -108,6 +108,11 @@ const schema = a.schema({
       // records read null and are treated as "ungrouped" by the profitability view.
       // This is the SOURCE OF TRUTH for fleet membership (no hardcoded unit lists).
       fleetGroup:              a.enum(['LOCAL', 'AMAZON']),
+      // Preventive-maintenance (PM) tracking — Ivan/LOCAL fleet runs a PM every 25k mi.
+      // lastPmMileage is the odometer reading at the last PM service; the Fleet Manager
+      // Dashboard counts down to the next PM (lastPmMileage + 25000) using live mileage.
+      lastPmDate:              a.string(),   // YYYY-MM-DD of the last PM service
+      lastPmMileage:           a.integer(),  // odometer at the last PM
       notes:                   a.string(),
     })
     .authorization((allow) => [allow.authenticated()]),
@@ -489,6 +494,7 @@ const schema = a.schema({
       description: a.string(),              // human-readable, e.g. "4.5 mi NE of Tucson, AZ"
       motion:      a.string(),              // 'MOVING' | 'STATIONARY' (derived from speed)
       motionSince: a.string(),              // ISO timestamp the truck entered its current motion state
+      odometer:    a.integer(),             // latest odometer (miles) from Motive, if reported
       source:      a.string().required(),   // 'motive'
       syncedAt:    a.datetime().required(),
     })

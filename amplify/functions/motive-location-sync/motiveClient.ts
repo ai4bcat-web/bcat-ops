@@ -23,6 +23,7 @@ export interface MotiveLocation {
   bearing:     number | null
   speed:       number | null // mph (metric_units=false); often null when parked
   description: string | null // human-readable, e.g. "4.5 mi NE of Tucson, AZ"
+  odometer:    number | null // miles (metric_units=false); absent on some plans/fixes
 }
 
 interface PaginationMeta {
@@ -42,6 +43,7 @@ interface RawLocationRow {
       bearing?:     number | null
       speed?:       number | null
       description?: string | null
+      odometer?:    number | null
     } | null
   }
 }
@@ -91,6 +93,7 @@ export async function fetchVehicleLocations(apiKey: string): Promise<MotiveLocat
         bearing:     loc.bearing ?? null,
         speed:       loc.speed ?? null,
         description: loc.description ?? null,
+        odometer:    typeof loc.odometer === 'number' ? loc.odometer : null,
       })
     }
     const { total, per_page } = data.pagination

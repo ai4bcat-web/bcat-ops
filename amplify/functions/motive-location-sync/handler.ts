@@ -106,6 +106,7 @@ export const handler = async (): Promise<void> => {
       description: loc.description,
       motion,
       motionSince,
+      odometer:    loc.odometer,
       source:      'motive',
       syncedAt:    now,
     }

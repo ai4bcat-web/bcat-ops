@@ -15,6 +15,25 @@ function firstAccessiblePath(hasPageAccess: (k: string) => boolean): string | nu
   return NAV_ITEMS.find((i) => hasPageAccess(i.pageKey))?.to ?? null
 }
 
+/**
+ * Where "/" (and the "no access to this page" fallback) sends a user. We prefer a
+ * home-style landing page — the general Dashboard, then the Fleet Manager Dashboard
+ * for fleet managers who lack the general one — before falling back to whatever page
+ * comes first in nav order. This keeps admins on the main Dashboard while a fleet
+ * manager (granted only fleet pages) lands on their own dashboard instead of Time Off.
+ */
+const LANDING_PRIORITY = ['dashboard', 'fleetManagerDashboard']
+
+function preferredLandingPath(hasPageAccess: (k: string) => boolean): string | null {
+  for (const key of LANDING_PRIORITY) {
+    if (hasPageAccess(key)) {
+      const item = NAV_ITEMS.find((i) => i.pageKey === key)
+      if (item) return item.to
+    }
+  }
+  return firstAccessiblePath(hasPageAccess)
+}
+
 function NoAccess() {
   const { logout, user } = useAuth()
   return (
@@ -39,7 +58,7 @@ function NoAccess() {
 export function RequirePage({ page, children }: { page: string; children: ReactNode }) {
   const { hasPageAccess } = useAuth()
   if (hasPageAccess(page)) return <>{children}</>
-  const fallback = firstAccessiblePath(hasPageAccess)
+  const fallback = preferredLandingPath(hasPageAccess)
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
 }
 
@@ -47,13 +66,13 @@ export function RequirePage({ page, children }: { page: string; children: ReactN
 export function RequireOwner({ children }: { children: ReactNode }) {
   const { isOwner, hasPageAccess } = useAuth()
   if (isOwner) return <>{children}</>
-  const fallback = firstAccessiblePath(hasPageAccess)
+  const fallback = preferredLandingPath(hasPageAccess)
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
 }
 
-/** Sends "/" to the first page the user can open. */
+/** Sends "/" to the user's preferred landing page (dashboard-style if available). */
 export function LandingRedirect() {
   const { hasPageAccess } = useAuth()
-  const fallback = firstAccessiblePath(hasPageAccess)
+  const fallback = preferredLandingPath(hasPageAccess)
   return fallback ? <Navigate to={fallback} replace /> : <NoAccess />
 }

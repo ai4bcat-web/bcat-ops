@@ -28,6 +28,7 @@ import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplian
 import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
+import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManagerDashboardPage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 
@@ -48,6 +49,7 @@ export default function App() {
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
               <Route path="/loads" element={<RequirePage page="loads"><GridPage /></RequirePage>} />
               <Route path="/drivers" element={<RequirePage page="drivers"><DriversPage /></RequirePage>} />
+              <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />
               <Route path="/trucks" element={<RequirePage page="trucks"><TrucksPage /></RequirePage>} />
               <Route path="/truck-docs" element={<RequirePage page="truckDocs"><TruckDocumentsPage /></RequirePage>} />
               <Route path="/maintenance" element={<RequirePage page="maintenance"><MaintenancePage /></RequirePage>} />

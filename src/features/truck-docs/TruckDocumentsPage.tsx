@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { FileText, Upload, Eye, RefreshCw, ShieldCheck, CheckCircle2, AlertTriangle, Ban, RotateCcw, ArrowUp, ArrowDown } from 'lucide-react'
+import { FileText, Upload, Eye, RefreshCw, ShieldCheck, CheckCircle2, AlertTriangle, Ban, RotateCcw, ArrowUp, ArrowDown, Container } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -10,9 +10,17 @@ import {
   deleteComplianceDocument, uploadComplianceDocument, getComplianceDocUrl, isAcceptedDoc,
 } from '@/lib/complianceClient'
 import {
-  TRUCK_DOC_SPECS, evaluateTruckDoc, defaultExpiration, iso,
+  TRUCK_DOC_SPECS, evaluateTruckDoc, defaultExpiration, iso, addMonthsStr,
   statusFromExpiration, type TruckDocSpec, type DocState,
 } from '@/lib/truckDocs'
+
+// Trailers carry a DOT inspection on a fixed 12-month cadence (no IFTA/IRP/insurance rows).
+const TRAILER_DOT_MONTHS = 12
+function trailerDotEval(dotDate?: string): { state: DocState; nextDue: string | null } {
+  if (!dotDate) return { state: 'MISSING', nextDue: null }
+  const nextDue = addMonthsStr(dotDate, TRAILER_DOT_MONTHS)
+  return { state: statusFromExpiration(nextDue), nextDue }
+}
 import type { ComplianceDocument } from '@/types'
 
 const STATUS_STYLE: Record<DocState, { bg: string; fg: string; label: string }> = {
@@ -58,6 +66,11 @@ export function TruckDocumentsPage() {
 
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck').sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
+    [equipment],
+  )
+
+  const trailers = useMemo(
+    () => equipment.filter((e) => e.type === 'trailer').sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
     [equipment],
   )
 
@@ -213,10 +226,10 @@ export function TruckDocumentsPage() {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
-              <FileText size={19} style={{ color: 'var(--ds-t3)' }} /> Truck Documents
+              <FileText size={19} style={{ color: 'var(--ds-t3)' }} /> Asset Documents
             </h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-              Insurance, IFTA, IRP &amp; DOT inspection for every truck
+              Insurance, IFTA, IRP &amp; DOT for trucks · DOT inspection for trailers
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 10 }}>
@@ -384,9 +397,58 @@ export function TruckDocumentsPage() {
           </div>
         </div>
 
+        {/* Trailers — plate + DOT inspection (12-month cadence) */}
+        <div>
+          <h2 style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)', margin: '4px 2px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Container size={17} style={{ color: 'var(--ds-t3)' }} /> Trailers
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ds-t3)' }}>· DOT inspection every 12 months</span>
+          </h2>
+          <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                    <th style={{ ...thStyle, minWidth: 160 }}>Trailer</th>
+                    <th style={{ ...thStyle, minWidth: 120 }}>License Plate</th>
+                    <th style={{ ...thStyle, minWidth: 150 }}>Last DOT</th>
+                    <th style={{ ...thStyle, minWidth: 120 }}>Next DOT Due</th>
+                    <th style={{ ...thStyle, minWidth: 130 }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trailers.length === 0 ? (
+                    <tr><td colSpan={5} style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>No trailers on file.</td></tr>
+                  ) : trailers.map((t) => {
+                    const { state, nextDue } = trailerDotEval(t.dotInspectionDate)
+                    const st = STATUS_STYLE[state]
+                    return (
+                      <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                        <td style={{ padding: '10px 16px', fontSize: 13 }}>
+                          <span style={{ fontWeight: 700, color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>#{t.unitNumber}</span>
+                          {(t.make || t.model) && <span style={{ color: 'var(--ds-t3)', marginLeft: 8 }}>{[t.year, t.make, t.model].filter(Boolean).join(' ')}</span>}
+                        </td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, color: t.plate ? 'var(--ds-t1)' : 'var(--ds-t3)', fontFamily: 'var(--font-mono)' }}>{t.plate || '—'}</td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <input type="date" value={t.dotInspectionDate ?? ''} onChange={(e) => setDotDate(t.id, e.target.value)} title="Last DOT inspection (syncs with Fleet)" style={dateInputStyle} />
+                        </td>
+                        <td style={{ padding: '10px 16px', fontSize: 13, color: nextDue ? 'var(--ds-t1)' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+                          {nextDue ? new Date(`${nextDue}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                        </td>
+                        <td style={{ padding: '10px 16px' }}>
+                          <span style={chipStyle(st.bg, st.fg)}>{st.label}</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
         <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', margin: '0 2px' }}>
-          DOT inspection dates come from each truck’s record on the Fleet tab and drive the next-due date automatically
-          (Amazon fleet every 2 months, Ivan yearly). Uploaded files are stored on the truck’s compliance record. Accepted: PDF, JPG, PNG.
+          DOT inspection dates come from each unit’s record on the Fleet tab and drive the next-due date automatically
+          (trucks: Amazon fleet every 2 months, Ivan yearly · trailers: every 12 months). Uploaded files are stored on the truck’s compliance record. Accepted: PDF, JPG, PNG.
         </p>
       </div>
 
