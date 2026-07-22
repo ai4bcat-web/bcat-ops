@@ -18,6 +18,38 @@ function shortDate(d: string): string {
   return new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+const editSelect: React.CSSProperties = {
+  height: 26, maxWidth: 150, padding: '0 6px', borderRadius: 6, border: '1px solid var(--ds-border)',
+  background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontSize: 12, fontFamily: 'inherit',
+}
+
+/** Inline editable rate ($). Commits cents on blur / Enter; Esc reverts. */
+function RateCell({ cents, onCommit }: { cents: number; onCommit: (cents: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const value = draft ?? (cents ? (cents / 100).toString() : '')
+  const commit = () => {
+    if (draft == null) return
+    const dollars = parseFloat(draft)
+    const nextCents = isNaN(dollars) || draft.trim() === '' ? 0 : Math.round(dollars * 100)
+    setDraft(null)
+    if (nextCents !== cents) onCommit(nextCents)
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end' }}>
+      <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>$</span>
+      <input
+        type="number" step="0.01" min="0"
+        value={value}
+        placeholder="0.00"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(null); e.currentTarget.blur() } }}
+        style={{ width: 82, height: 26, textAlign: 'right', padding: '0 6px', borderRadius: 6, border: '1px solid var(--ds-border)', background: cents ? 'var(--ds-surface)' : '#fffbeb', color: 'var(--ds-t1)', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}
+      />
+    </span>
+  )
+}
+
 // Display order + labels/tones for each bucket.
 const BUCKETS: { key: AuditBucket; label: string; hint: string; tone: string; countsToward: boolean }[] = [
   { key: 'counted',      label: 'Counted — on a fleet truck',     hint: 'Delivered this month on this fleet’s truck.',                          tone: '#15803d', countsToward: true },
@@ -40,6 +72,13 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
   const assignTruckToDriver = useAppStore((s) => s.assignTruckToDriver)
+  const updateLoad = useAppStore((s) => s.updateLoad)
+
+  const loadById = useMemo(() => new Map(loads.map((l) => [l.id, l])), [loads])
+  const driverOptions = useMemo(
+    () => [...drivers].filter((d) => d.active !== false).sort((a, b) => a.name.localeCompare(b.name)),
+    [drivers],
+  )
 
   const audit: RevenueAudit = useMemo(
     () => auditFleetRevenue({ loads, drivers, equipment, range, group }),
@@ -182,16 +221,47 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((r) => (
+                        {rows.map((r) => {
+                          const load = loadById.get(r.id)
+                          return (
                           <tr key={r.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                             <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{r.ref}</td>
-                            <td style={{ padding: '6px 12px', color: 'var(--ds-t2)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.route}</td>
-                            <td style={{ padding: '6px 12px', color: r.driverName ? 'var(--ds-t2)' : 'var(--ds-muted-soft)', whiteSpace: 'nowrap' }}>{r.driverName ?? '—'}</td>
-                            <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: r.truckLabel ? 'var(--ds-t2)' : 'var(--ds-muted-soft)', whiteSpace: 'nowrap' }}>{r.truckLabel ?? '—'}</td>
+                            <td style={{ padding: '6px 12px', color: 'var(--ds-t2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.route}</td>
+                            {/* Driver — editable (fixes broker/no-driver misattribution) */}
+                            <td style={{ padding: '5px 12px', whiteSpace: 'nowrap' }}>
+                              <select
+                                value={load?.deliveryDriverId ?? ''}
+                                onChange={(e) => updateLoad(r.id, { deliveryDriverId: e.target.value || null })}
+                                style={editSelect}
+                              >
+                                <option value="">— Unassigned —</option>
+                                {driverOptions.map((d) => (
+                                  <option key={d.id} value={d.id}>{d.name}{d.type === 'broker' ? ' (broker)' : ''}</option>
+                                ))}
+                              </select>
+                            </td>
+                            {/* Truck — editable; sets load.truckId (overrides the driver's truck) */}
+                            <td style={{ padding: '5px 12px', whiteSpace: 'nowrap' }}>
+                              <select
+                                value={load?.truckId ?? ''}
+                                onChange={(e) => updateLoad(r.id, { truckId: e.target.value || null })}
+                                title={load?.truckId ? undefined : r.truckLabel ? `Inheriting ${r.truckLabel} from the driver` : undefined}
+                                style={{ ...editSelect, color: load?.truckId ? 'var(--ds-t1)' : 'var(--ds-t3)' }}
+                              >
+                                <option value="">{r.truckLabel ? `(driver's ${r.truckLabel})` : '— none —'}</option>
+                                {fleetTrucks.map((t) => (
+                                  <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>
+                                ))}
+                              </select>
+                            </td>
                             <td style={{ padding: '6px 12px', fontFamily: 'var(--font-mono)', color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{shortDate(r.deliveryDate)}</td>
-                            <td style={{ padding: '6px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{money2(r.rate)}</td>
+                            {/* Rate — editable inline */}
+                            <td style={{ padding: '5px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              <RateCell cents={load?.rate ?? 0} onCommit={(c) => updateLoad(r.id, { rate: c })} />
+                            </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                         {rows.length === 0 && (
                           <tr><td colSpan={6} style={{ padding: '10px 12px', textAlign: 'center', color: 'var(--ds-t3)' }}>No loads match “{q}”.</td></tr>
                         )}
