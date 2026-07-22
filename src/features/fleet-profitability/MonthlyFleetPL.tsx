@@ -5,12 +5,11 @@ import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfit
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useAppStore } from '@/store/useAppStore'
+import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import { monthRange, monthLabel } from './monthRange'
 import { RevenueAuditPanel } from './RevenueAuditPanel'
-import { BoxTruckPLPanel } from './BoxTruckPLPanel'
-import { useBoxTruckMonth } from '@/hooks/useBoxTruckMonth'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -85,25 +84,16 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
  * monthly amounts editable in place; Loan-Trucks comes from each truck's own loan;
  * Maintenance is logged invoices for Ivan trucks + all trailers. Net includes them all.
  */
-type PLView = 'LOCAL' | 'BOXTRUCK' | 'AMAZON'
-const PL_VIEWS: { key: PLView; label: string }[] = [
-  { key: 'LOCAL',    label: 'Local (Ivan)' },
-  { key: 'BOXTRUCK', label: 'Box Truck' },
-  { key: 'AMAZON',   label: 'Amazon' },
-]
-
 export function MonthlyFleetPL() {
   const [monthOffset, setMonthOffset] = useState(0)
-  const [view, setView] = useState<PLView>('LOCAL')
-  const group: FleetGroup = view === 'AMAZON' ? 'AMAZON' : 'LOCAL'
-  const isAmazon = view === 'AMAZON'
-  const isBoxTruck = view === 'BOXTRUCK'
+  const [group, setGroup] = useState<FleetGroup>('LOCAL')
 
   const range = monthRange(monthOffset)
   const { data, members, loading, refresh } = useFleetProfitability(range, group)
   const { rows: amzRows, loading: amzLoading } = useAmazonProfitability()
   const amzAgg = useMemo(() => aggregateAmazon(amzRows, range.start, range.end), [amzRows, range.start, range.end])
   const amzDrivers = useMemo(() => new Set(amzAgg.rows.map((r) => r.driverId)).size, [amzAgg])
+  const isAmazon = group === 'AMAZON'
   const { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount } = useFleetFixedCosts()
   const { equipment } = useTrucks()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -134,9 +124,6 @@ export function MonthlyFleetPL() {
 
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
 
-  // Ivan trucks (now excludes #3890) vs the box truck — for the comparison strip.
-  const box = useBoxTruckMonth(range)
-
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       {/* Header */}
@@ -146,21 +133,21 @@ export function MonthlyFleetPL() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly Profit &amp; Loss</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              {isBoxTruck ? '#3890 · box-truck settlements' : isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'}` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
+              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'}` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
-            {PL_VIEWS.map((v) => {
-              const active = v.key === view
+            {FLEET_GROUPS.map((g) => {
+              const active = g === group
               return (
-                <button key={v.key} onClick={() => setView(v.key)}
+                <button key={g} onClick={() => setGroup(g)}
                   style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                     background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)',
                     boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
-                  {v.label}
+                  {FLEET_GROUP_LABELS[g]}
                 </button>
               )
             })}
@@ -181,37 +168,7 @@ export function MonthlyFleetPL() {
 
       {/* P&L body */}
       <div style={{ padding: '16px 20px' }}>
-        {/* Ivan trucks vs Box Truck — side-by-side comparison (they no longer overlap). */}
-        {!isAmazon && r && lines && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-            {([
-              { key: 'ivan' as const, label: 'Ivan Trucks', hint: 'owned fleet', revenue: r.revenue, profit: lines.net, active: !isBoxTruck },
-              { key: 'box'  as const, label: 'Box Truck #3890', hint: 'brokered', revenue: box.agg?.revenue ?? null, profit: box.agg?.profit ?? null, active: isBoxTruck },
-            ]).map((s) => {
-              const m = s.revenue && s.revenue > 0 && s.profit != null ? (s.profit / s.revenue) * 100 : null
-              return (
-                <button key={s.key} onClick={() => setView(s.key === 'box' ? 'BOXTRUCK' : 'LOCAL')}
-                  style={{ textAlign: 'left', cursor: 'pointer', background: s.active ? 'var(--ds-blue-bg)' : 'var(--ds-bg)', border: `1px solid ${s.active ? '#bae6fd' : 'var(--ds-border)'}`, borderRadius: 10, padding: '12px 14px', fontFamily: 'inherit' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {s.label} <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· {s.hint}</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: s.profit == null ? 'var(--ds-muted-soft)' : netColor(s.profit) }}>
-                      {s.profit == null ? '—' : money(s.profit)}
-                    </span>
-                    <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>profit{m != null ? ` · ${m.toFixed(0)}% margin` : ''}</span>
-                  </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                    {s.revenue == null ? (box.configured ? 'no shipments' : 'not set up') : `${money(s.revenue)} revenue`}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        )}
-        {isBoxTruck ? (
-          <BoxTruckPLPanel range={range} />
-        ) : isAmazon ? (
+        {isAmazon ? (
           amzLoading && amzAgg.rows.length === 0 ? (
             <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
           ) : amzAgg.rows.length === 0 ? (

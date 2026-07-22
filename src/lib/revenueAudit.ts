@@ -4,14 +4,12 @@
 import type { Equipment, FleetGroup } from '@/types/equipment'
 import type { Load, Driver } from '@/types'
 import { ORPHAN_UNITS_BY_GROUP, orphanTruckId } from './fleetGroups'
-import { isBoxTruckUnit } from './boxTruckProfit'
 import type { DateRange } from './fleetProfitability'
 
 export type AuditBucket =
   | 'counted'        // on a member truck of THIS fleet → in the revenue total
   | 'zeroRate'       // on a member truck but rate is null/0 (counts as $0)
   | 'unattributed'   // company driver, no assigned truck at all
-  | 'boxTruck'       // on a brokered box truck (#3890) — shown separately in Box Truck P&L
   | 'otherFleet'     // resolved to a truck that isn't in THIS fleet (e.g. Amazon)
   | 'broker'         // broker/3PL covered — intentionally excluded
   | 'outOfRange'     // delivered outside the month (see deliveredElsewhere)
@@ -50,13 +48,10 @@ export function auditFleetRevenue(params: {
 }): RevenueAudit {
   const { loads, drivers, equipment, range, group } = params
 
-  // ── Members of THIS fleet — same rule as useFleetProfitability (box trucks excluded) ──
+  // ── Members of THIS fleet — same rule as useFleetProfitability ────────────────
   const memberIds = new Set<string>()
-  const boxTruckIds = new Set<string>()   // equipment ids for #3890 etc. (for bucketing)
   for (const e of equipment) {
-    if (e.type !== 'truck') continue
-    if (isBoxTruckUnit(e.unitNumber)) { boxTruckIds.add(e.id); continue }
-    if (e.fleetGroup === group) memberIds.add(e.id)
+    if (e.type === 'truck' && e.fleetGroup === group) memberIds.add(e.id)
   }
   const equipTruckUnits = new Set(equipment.filter((e) => e.type === 'truck').map((e) => e.unitNumber))
   for (const unit of ORPHAN_UNITS_BY_GROUP[group] ?? []) {
@@ -81,7 +76,7 @@ export function auditFleetRevenue(params: {
 
   const buckets: Record<AuditBucket, { total: number; rows: AuditRow[] }> = {
     counted: emptyBucket(), zeroRate: emptyBucket(), unattributed: emptyBucket(),
-    boxTruck: emptyBucket(), otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(),
+    otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(),
   }
   let pickedUpThisMonthDeliveredLater = 0
   let pickedUpThisMonthDeliveredLaterCount = 0
@@ -111,9 +106,6 @@ export function auditFleetRevenue(params: {
       bucket = 'broker'
     } else if (resolvedTruck && memberIds.has(resolvedTruck)) {
       bucket = rev === 0 ? 'zeroRate' : 'counted'
-    } else if (resolvedTruck && boxTruckIds.has(resolvedTruck)) {
-      // Brokered box truck (#3890) — its P&L is the separate Box Truck view.
-      bucket = 'boxTruck'
     } else if (driverId && !truckForDriver.has(driverId)) {
       // Company driver with NO assigned truck → engine counts this as unattributed
       // leakage, even if the load carried an explicit (non-member) truckId.

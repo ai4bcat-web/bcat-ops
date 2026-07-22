@@ -55,7 +55,6 @@ const BUCKETS: { key: AuditBucket; label: string; hint: string; tone: string; co
   { key: 'counted',      label: 'Counted — on a fleet truck',     hint: 'Delivered this month on this fleet’s truck.',                          tone: '#15803d', countsToward: true },
   { key: 'zeroRate',     label: 'On a fleet truck, but $0 rate',  hint: 'Would count, but the load has no rate entered.',                       tone: '#b45309', countsToward: true },
   { key: 'unattributed', label: 'No truck assigned',              hint: 'A company driver delivered it but has no truck assigned (Drivers page).', tone: '#b45309', countsToward: false },
-  { key: 'boxTruck',     label: 'Box truck #3890 (separate)',     hint: 'Brokered box truck — its P&L is the separate Box Truck view, not Local.',    tone: '#6d28d9', countsToward: false },
   { key: 'otherFleet',   label: 'On another fleet / no driver',   hint: 'Delivered on a truck in a different fleet, or with no resolvable driver/truck.', tone: 'var(--ds-t3)', countsToward: false },
   { key: 'broker',       label: 'Broker-covered (excluded)',      hint: 'Run by a broker / 3PL — intentionally excluded from truck revenue.',   tone: 'var(--ds-t3)', countsToward: false },
 ]
