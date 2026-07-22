@@ -9,6 +9,7 @@ import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import { monthRange, monthLabel } from './monthRange'
+import { RevenueAuditPanel } from './RevenueAuditPanel'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -200,10 +201,12 @@ export function MonthlyFleetPL() {
         ) : (
           <div style={{ maxWidth: 520 }}>
             {/* Revenue */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 6px' }}>
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue</span>
               <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(r.revenue)}</span>
             </div>
+            <RevenueAuditPanel range={range} group={group} expectedRevenue={r.revenue} />
+            <div style={{ height: 12 }} />
 
             {/* Costs */}
             <CostRow label="Fuel" value={r.fuel} />
