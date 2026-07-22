@@ -1,14 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useAppStore } from '@/store/useAppStore'
-import { useFuelTransactions } from '@/hooks/useFuelTransactions'
-import {
-  listBoxTruckTrips, listDriverPaySettings, listDriverPayDeductions,
-  type BoxTruckTrip, type DriverPaySetting, type DriverPayDeduction,
-} from '@/lib/apiClient'
-import { aggregateBoxTruckMonth } from '@/lib/boxTruckProfit'
+import { useBoxTruckMonth, BOX_TRUCK_UNIT } from '@/hooks/useBoxTruckMonth'
 import type { DateRange } from '@/lib/fleetProfitability'
-
-const BOX_TRUCK_UNIT = '3890'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -38,45 +29,12 @@ function CostRow({ label, value, hint }: { label: string; value: number; hint?: 
  * the Local number (3890's loads still roll into Local too, by design).
  */
 export function BoxTruckPLPanel({ range }: { range: DateRange }) {
-  const equipment = useAppStore((s) => s.equipment)
-  const drivers = useAppStore((s) => s.drivers)
-  const { transactions: fuelTxs } = useFuelTransactions()
+  const { agg, driverName, payPercent, loading, configured } = useBoxTruckMonth(range)
 
-  const [trips, setTrips] = useState<BoxTruckTrip[]>([])
-  const [settings, setSettings] = useState<DriverPaySetting[]>([])
-  const [deductions, setDeductions] = useState<DriverPayDeduction[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let alive = true
-    Promise.all([listBoxTruckTrips(), listDriverPaySettings(), listDriverPayDeductions()])
-      .then(([t, s, d]) => { if (alive) { setTrips(t); setSettings(s); setDeductions(d) } })
-      .catch((e) => console.error('[box-truck P&L] load', e))
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [])
-
-  // The box-truck driver = whoever is assigned to unit 3890 and has a BOX_TRUCK setting.
-  // Fall back to the only BOX_TRUCK-configured driver if the truck link isn't set.
-  const setting = useMemo(() => {
-    const boxSettings = settings.filter((s) => s.payGroup === 'BOX_TRUCK' && s.active !== false)
-    const truck = equipment.find((e) => e.type === 'truck' && e.unitNumber === BOX_TRUCK_UNIT)
-    const assignedDriver = truck ? drivers.find((d) => d.assignedTruckId === truck.id) : undefined
-    return (assignedDriver && boxSettings.find((s) => s.driverId === assignedDriver.id))
-      ?? (boxSettings.length === 1 ? boxSettings[0] : undefined)
-  }, [settings, equipment, drivers])
-
-  const driverName = setting ? drivers.find((d) => d.id === setting.driverId)?.name ?? null : null
-
-  const agg = useMemo(
-    () => setting ? aggregateBoxTruckMonth({ trips, setting, fuelTxs, deductions, start: range.start, end: range.end }) : null,
-    [setting, trips, fuelTxs, deductions, range.start, range.end],
-  )
-
-  if (loading && trips.length === 0) {
+  if (loading && !agg) {
     return <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
   }
-  if (!setting || !agg) {
+  if (!configured || !agg) {
     return (
       <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>
         No box-truck settlement set up for #{BOX_TRUCK_UNIT}. Configure it on the Box Truck Settlements page.
@@ -105,7 +63,7 @@ export function BoxTruckPLPanel({ range }: { range: DateRange }) {
       </div>
 
       {/* Costs against gross profit */}
-      <CostRow label="Driver pay" value={agg.driverPay} hint={`${Math.round(setting.payPercent * 100)}%`} />
+      <CostRow label="Driver pay" value={agg.driverPay} hint={payPercent != null ? `${Math.round(payPercent * 100)}%` : undefined} />
       <CostRow label="Fuel" value={agg.fuel} />
       <CostRow label="Other expenses" value={agg.otherExp} hint="fixed + one-off" />
 

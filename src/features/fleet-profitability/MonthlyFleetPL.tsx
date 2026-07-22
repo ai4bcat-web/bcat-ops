@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
@@ -10,6 +10,7 @@ import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import { monthRange, monthLabel } from './monthRange'
 import { RevenueAuditPanel } from './RevenueAuditPanel'
 import { BoxTruckPLPanel } from './BoxTruckPLPanel'
+import { useBoxTruckMonth } from '@/hooks/useBoxTruckMonth'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -133,6 +134,9 @@ export function MonthlyFleetPL() {
 
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
 
+  // Ivan trucks (now excludes #3890) vs the box truck — for the comparison strip.
+  const box = useBoxTruckMonth(range)
+
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       {/* Header */}
@@ -177,15 +181,32 @@ export function MonthlyFleetPL() {
 
       {/* P&L body */}
       <div style={{ padding: '16px 20px' }}>
-        {/* Overlap indicator — #3890 is counted in BOTH Local and Box Truck. */}
-        {!isAmazon && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 12px', marginBottom: 14, background: 'var(--ds-blue-bg)', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 12, color: 'var(--ds-blue-dark)', lineHeight: 1.5 }}>
-            <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>
-              {isBoxTruck
-                ? <>Box Truck <b>#3890</b> is <b>also included</b> in the Local (Ivan) total — this tab breaks it out on its own. <b>Don’t add Box Truck + Local together</b> (it double-counts #3890).</>
-                : <>Local includes Box Truck <b>#3890</b>’s freight. The <b>Box Truck</b> tab shows #3890’s standalone P&amp;L. <b>Don’t add the two tabs together</b> — #3890 is in both.</>}
-            </span>
+        {/* Ivan trucks vs Box Truck — side-by-side comparison (they no longer overlap). */}
+        {!isAmazon && r && lines && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            {([
+              { key: 'ivan' as const, label: 'Ivan Trucks', hint: 'owned fleet', revenue: r.revenue, profit: lines.net, active: !isBoxTruck },
+              { key: 'box'  as const, label: 'Box Truck #3890', hint: 'brokered', revenue: box.agg?.revenue ?? null, profit: box.agg?.profit ?? null, active: isBoxTruck },
+            ]).map((s) => {
+              const m = s.revenue && s.revenue > 0 && s.profit != null ? (s.profit / s.revenue) * 100 : null
+              return (
+                <button key={s.key} onClick={() => setView(s.key === 'box' ? 'BOXTRUCK' : 'LOCAL')}
+                  style={{ textAlign: 'left', cursor: 'pointer', background: s.active ? 'var(--ds-blue-bg)' : 'var(--ds-bg)', border: `1px solid ${s.active ? '#bae6fd' : 'var(--ds-border)'}`, borderRadius: 10, padding: '12px 14px', fontFamily: 'inherit' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {s.label} <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>· {s.hint}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: s.profit == null ? 'var(--ds-muted-soft)' : netColor(s.profit) }}>
+                      {s.profit == null ? '—' : money(s.profit)}
+                    </span>
+                    <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>profit{m != null ? ` · ${m.toFixed(0)}% margin` : ''}</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                    {s.revenue == null ? (box.configured ? 'no shipments' : 'not set up') : `${money(s.revenue)} revenue`}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
         {isBoxTruck ? (

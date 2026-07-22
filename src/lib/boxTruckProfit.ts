@@ -6,6 +6,12 @@ import { calcDriverPay, type PayDeductionInput } from './driverPay'
 import { matchedFuelForCard, sumFuel } from './driverFuel'
 import type { BoxTruckTrip, DriverPaySetting, DriverPayDeduction, FuelTransaction } from './apiClient'
 
+// Trucks run as BROKERED box trucks — their economics come from Box Truck Settlements
+// (customer rate − carrier cost), not the owned-truck engine. They are EXCLUDED from
+// the owned-fleet (Local) profitability so the two don't overlap.
+export const BOX_TRUCK_UNITS = new Set(['3890'])
+export const isBoxTruckUnit = (unit: string | null | undefined): boolean => !!unit && BOX_TRUCK_UNITS.has(unit)
+
 export interface BoxTruckMonth {
   revenue:     number   // Σ customer rate (billed to customers)
   carrierCost: number   // Σ carrier cost (paid to the hauling carrier)

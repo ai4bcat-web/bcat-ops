@@ -8,6 +8,7 @@ import { useTruckMileage } from './useTruckMileage'
 import { useDriverPay } from './useDriverPay'
 import { driverForTruck } from '@/lib/assignments'
 import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
+import { isBoxTruckUnit } from '@/lib/boxTruckProfit'
 import { calcFleetProfitability } from '@/lib/fleetProfitability'
 import type { DateRange, MemberTruck, FleetProfitabilityResult } from '@/lib/fleetProfitability'
 import type { ExpenseRecordInput, ExpenseTypeRecord } from '@/lib/expenseAllocation'
@@ -52,9 +53,11 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
   )
 
   const members = useMemo<MemberTruck[]>(() => {
-    // 1. Equipment-backed members — fleetGroup is the source of truth.
+    // 1. Equipment-backed members — fleetGroup is the source of truth. Brokered box
+    //    trucks (e.g. #3890) are EXCLUDED — their P&L lives in Box Truck Settlements,
+    //    so they never count in the owned-fleet (Local) engine.
     const equipMembers: MemberTruck[] = equipment
-      .filter((e) => e.type === 'truck' && e.fleetGroup === group)
+      .filter((e) => e.type === 'truck' && e.fleetGroup === group && !isBoxTruckUnit(e.unitNumber))
       .map((e) => ({
         truckId:      e.id,
         unitNumber:   e.unitNumber,
