@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { useParams } from 'react-router-dom'
 import { Upload, FileText, CheckCircle2, Clock, AlertTriangle, PenLine } from 'lucide-react'
 import { portal, uploadFile, usingMock, PortalError, type OnboardingState, type ChecklistItem } from './portalApi'
@@ -10,16 +10,39 @@ import type { DriverApplicationDraft } from '@/lib/schemas'
 const CONTACT_PHONE = '(847) 450-0899'
 const CONTACT_EMAIL = 'onboarding@bcatcorp.com'
 
+// ── Shared styles (design-system tokens, matching the admin app) ────────────────
+const cardStyle: CSSProperties = {
+  background: 'var(--ds-surface)',
+  border: '1px solid var(--ds-border)',
+  borderRadius: 12,
+  boxShadow: 'var(--sh-sm)',
+  padding: 14,
+}
+const btnPrimary: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  borderRadius: 8, padding: '8px 16px', fontSize: 14, fontWeight: 600,
+  background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
+}
+const btnSuccess: CSSProperties = { ...btnPrimary, background: 'var(--ds-green)' }
+const inputStyle: CSSProperties = {
+  borderRadius: 6, border: '1px solid var(--ds-border)', padding: '6px 10px',
+  fontSize: 14, background: 'var(--ds-surface)', color: 'var(--ds-t1)', outline: 'none',
+}
+const chipBase: CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 4,
+  borderRadius: 999, padding: '3px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+}
+
 function statusChip(item: ChecklistItem) {
   if (item.status === 'COMPLETE' || item.status === 'WAIVED')
-    return <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"><CheckCircle2 size={13} /> Approved</span>
+    return <span style={{ ...chipBase, background: 'var(--ds-green-bg)', color: 'var(--ds-green)' }}><CheckCircle2 size={13} /> Approved</span>
   if (item.status === 'PENDING_REVIEW')
-    return <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700"><Clock size={13} /> Awaiting review</span>
+    return <span style={{ ...chipBase, background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}><Clock size={13} /> Awaiting review</span>
   if (item.rejectionReason)
-    return <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"><AlertTriangle size={13} /> Needs attention</span>
+    return <span style={{ ...chipBase, background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}><AlertTriangle size={13} /> Needs attention</span>
   if (item.status === 'NOT_APPLICABLE')
-    return <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500">N/A</span>
-  return <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">To do</span>
+    return <span style={{ ...chipBase, background: 'var(--ds-bg-3)', color: 'var(--ds-t3)' }}>N/A</span>
+  return <span style={{ ...chipBase, background: 'var(--ds-bg-3)', color: 'var(--ds-t2)' }}>To do</span>
 }
 
 export function DriverPortalPage() {
@@ -50,11 +73,11 @@ export function DriverPortalPage() {
     return (
       <Shell>
         <div className="mx-auto max-w-md px-4 py-16 text-center">
-          <AlertTriangle className="mx-auto mb-4 text-amber-500" size={40} />
-          <h1 className="mb-2 text-xl font-semibold text-slate-800">{loadError}</h1>
-          <p className="text-slate-500">
+          <AlertTriangle className="mx-auto mb-4" size={40} style={{ color: 'var(--ds-amber)' }} />
+          <h1 className="mb-2 text-xl font-semibold" style={{ color: 'var(--ds-t1)' }}>{loadError}</h1>
+          <p style={{ color: 'var(--ds-t3)' }}>
             Please contact Ivan Cartage to get a new link:<br />
-            <span className="font-medium text-slate-700">{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
+            <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
           </p>
         </div>
       </Shell>
@@ -62,7 +85,7 @@ export function DriverPortalPage() {
   }
 
   if (!state) {
-    return <Shell><div className="px-4 py-16 text-center text-slate-400">Loading…</div></Shell>
+    return <Shell><div className="px-4 py-16 text-center" style={{ color: 'var(--ds-t3)' }}>Loading…</div></Shell>
   }
 
   if (view === 'application') {
@@ -93,25 +116,28 @@ export function DriverPortalPage() {
     <Shell>
       <div className="mx-auto max-w-xl px-4 py-6">
         {usingMock && (
-          <div className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <div className="mb-3 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
             Demo mode — running on local mock data (no backend configured).
           </div>
         )}
-        <h1 className="text-2xl font-bold text-slate-800">Welcome {state.firstName} — let's get you on the road.</h1>
-        <p className="mt-1 text-slate-500">Complete the items below. Most drivers finish in about 20 minutes.</p>
+        <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>Welcome {state.firstName} — let's get you on the road.</h1>
+        <p className="mt-1" style={{ color: 'var(--ds-t3)' }}>Complete the items below. Most drivers finish in about 20 minutes.</p>
 
         {/* Progress */}
         <div className="mt-4 mb-6">
-          <div className="mb-1 flex justify-between text-sm text-slate-500"><span>Your progress</span><span>{state.progressPct}%</span></div>
-          <div className="h-2.5 overflow-hidden rounded-full bg-slate-200">
-            <div className="h-full bg-sky-500 transition-all" style={{ width: `${state.progressPct}%` }} />
+          <div className="mb-1.5 flex justify-between text-sm" style={{ color: 'var(--ds-t3)' }}>
+            <span>Your progress</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t2)', fontWeight: 600 }}>{state.progressPct}%</span>
+          </div>
+          <div style={{ height: 8, overflow: 'hidden', borderRadius: 999, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
+            <div style={{ height: '100%', width: `${state.progressPct}%`, background: state.progressPct === 100 ? 'var(--ds-green)' : 'var(--ds-blue)', transition: 'width 200ms' }} />
           </div>
         </div>
 
         {Object.entries(groups).map(([cat, items]) => (
           <div key={cat} className="mb-5">
-            <div className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{cat}</div>
-            <div className="space-y-2">
+            <div className="mb-2 text-xs font-bold uppercase" style={{ color: 'var(--ds-t3)', letterSpacing: '0.05em' }}>{cat}</div>
+            <div className="space-y-2.5">
               {items.map((item) => (
                 <ChecklistRow key={item.requirementKey} item={item} token={token} appStatus={state.application.status}
                   onOpenApplication={() => setView('application')} onChanged={load} />
@@ -159,14 +185,17 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+    <div style={cardStyle}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-medium text-slate-800">{item.label}{item.required && <span className="ml-1.5 text-xs text-rose-500">required</span>}</div>
-          {req?.helpText && <div className="mt-0.5 text-sm text-slate-500">{req.helpText}</div>}
+          <div style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>
+            {item.label}
+            {item.required && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--ds-red)' }}>required</span>}
+          </div>
+          {req?.helpText && <div className="mt-0.5 text-sm" style={{ color: 'var(--ds-t3)' }}>{req.helpText}</div>}
           {item.rejectionReason && (
-            <div className="mt-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-sm text-amber-700">
-              <span className="font-medium">Needs attention:</span> {item.rejectionReason}
+            <div className="mt-2 rounded-md px-2.5 py-1.5 text-sm" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
+              <span style={{ fontWeight: 600 }}>Needs attention:</span> {item.rejectionReason}
             </div>
           )}
         </div>
@@ -175,7 +204,7 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
 
       {/* Actions */}
       {isApplication && appStatus !== 'APPROVED' && (
-        <button onClick={onOpenApplication} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-white">
+        <button onClick={onOpenApplication} className="mt-3" style={btnPrimary}>
           <FileText size={15} /> {appStatus === 'SUBMITTED' ? 'Review application' : 'Start application'}
         </button>
       )}
@@ -183,12 +212,12 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
       {!isApplication && canUpload && (!isDone || item.rejectionReason) && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {item.requiresExpiration && (
-            <label className="text-sm text-slate-600">
-              Expiration <input type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} className="ml-1 rounded-md border border-slate-300 px-2 py-1 text-sm" />
+            <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--ds-t2)' }}>
+              Expiration <input type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} style={inputStyle} />
             </label>
           )}
           <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
-          <button disabled={busy} onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          <button disabled={busy} onClick={() => fileRef.current?.click()} style={{ ...btnPrimary, opacity: busy ? 0.5 : 1 }}>
             <Upload size={15} /> {item.rejectionReason ? 'Re-upload' : 'Upload photo or PDF'}
           </button>
         </div>
@@ -197,13 +226,13 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
       {!isApplication && canSign && (!isDone || item.rejectionReason) && (
         <div className="mt-3">
           {!showSign ? (
-            <button onClick={() => setShowSign(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-500 px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={() => setShowSign(true)} style={btnPrimary}>
               <PenLine size={15} /> Acknowledge & sign
             </button>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
-              <input value={signName} onChange={(e) => setSignName(e.target.value)} placeholder="Type your full name" className="rounded-md border border-slate-300 px-3 py-2 text-sm" />
-              <button disabled={busy || !signName.trim()} onClick={handleSign} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Sign</button>
+              <input value={signName} onChange={(e) => setSignName(e.target.value)} placeholder="Type your full name" style={{ ...inputStyle, padding: '8px 12px' }} />
+              <button disabled={busy || !signName.trim()} onClick={handleSign} style={{ ...btnSuccess, opacity: busy || !signName.trim() ? 0.5 : 1 }}>Sign</button>
             </div>
           )}
         </div>
@@ -214,14 +243,14 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
+    <div style={{ minHeight: '100vh', background: 'var(--ds-bg)' }}>
+      <header style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
         <div className="mx-auto flex max-w-xl items-center gap-2.5 px-4 py-3.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, #1ea8f3 0%, #0b8fd9 100%)' }}>
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
           </div>
-          <div className="text-sm font-bold text-slate-800">IVAN <span className="text-sky-500">CARTAGE</span></div>
-          <div className="ml-auto text-xs text-slate-400">Driver onboarding</div>
+          <div className="text-sm font-bold" style={{ color: 'var(--ds-t1)' }}>IVAN <span style={{ color: 'var(--ds-blue)' }}>CARTAGE</span></div>
+          <div className="ml-auto text-xs" style={{ color: 'var(--ds-t3)' }}>Driver onboarding</div>
         </div>
       </header>
       {children}
