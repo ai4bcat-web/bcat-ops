@@ -470,6 +470,7 @@ function buildTemplateTaskInput(params: {
       sortOrder,
       phase,
       owner: entry.owner,
+      assignee: entry.assignee ?? null,
       dueDate: computeDueDate(phaseStart, entry.dueDaysFromPhaseStart),
       templateId,
       catalogVersion: CATALOG_VERSION,
@@ -551,6 +552,38 @@ export async function generateTruckTasksFromTemplate(params: {
     created: created.length,
     tasks: [...existing, ...created].sort((a, b) => a.sortOrder - b.sortOrder),
   }
+}
+
+export async function deleteOnboardingTask(id: string): Promise<void> {
+  await gql(`mutation ($input: DeleteOnboardingTaskInput!) { deleteOnboardingTask(input: $input) { id } }`, { input: { id } })
+}
+
+export async function deleteOnboardingInvite(id: string): Promise<void> {
+  await gql(`mutation ($input: DeleteOnboardingInviteInput!) { deleteOnboardingInvite(input: $input) { id } }`, { input: { id } })
+}
+
+export async function deleteDriverApplication(id: string): Promise<void> {
+  await gql(`mutation ($input: DeleteDriverApplicationInput!) { deleteDriverApplication(input: $input) { id } }`, { input: { id } })
+}
+
+/**
+ * Hard-delete every onboarding record tied to a driver: tasks, invites, the application,
+ * and uploaded compliance documents. Truck-entity tasks (on the assigned truck) are left
+ * intact — they belong to the truck, not the candidate.
+ */
+export async function purgeCandidateOnboarding(driverId: string): Promise<void> {
+  const [tasks, invites, docs, app] = await Promise.all([
+    listOnboardingTasks('DRIVER', driverId),
+    listOnboardingInvitesByDriver(driverId),
+    listComplianceDocuments('DRIVER', driverId),
+    getApplicationByDriver(driverId),
+  ])
+  await Promise.all([
+    ...tasks.map((t) => deleteOnboardingTask(t.id)),
+    ...invites.map((i) => deleteOnboardingInvite(i.id)),
+    ...docs.map((d) => deleteComplianceDocument(d.id)),
+    ...(app ? [deleteDriverApplication(app.id)] : []),
+  ])
 }
 
 /** Set a task's status and stamp completion when terminal. */

@@ -28,6 +28,8 @@ export interface TemplateEntry {
   dueDaysFromPhaseStart?: number
   /** Record the task lives on. Default 'DRIVER'. 'TRUCK' tasks link to assignedTruckId. */
   entity?: 'DRIVER' | 'TRUCK'
+  /** Default assignee written onto the generated task (e.g. "Ivan Cartage HR"). */
+  assignee?: string
 }
 
 export interface OnboardingPhase {
@@ -52,6 +54,7 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
       phase: 1,
       title: 'Application, Documents, MVR & Drug Test',
       entries: [
+        // Driver-provided (49 CFR 391.21 application + supporting docs)
         { key: 'employment_application', owner: 'DRIVER', dueDaysFromPhaseStart: 3 },
         { key: 'cdl_copy', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 3 },
         { key: 'medical_card', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 5 },
@@ -59,11 +62,18 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
         { key: 'mvr_drug_consent_form', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 3 },
         { key: 'pre_employment_drug_test', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },
         { key: 'occ_acc_or_workers_comp', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },
-        { key: 'amazon_relay_access', owner: 'OFFICE', requiresDocument: false },
         { key: 'amazon_relay_course', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },
-        { key: 'mvr_initial', owner: 'OFFICE', requiresDocument: true },
-        { key: 'med_examiner_registry_check', owner: 'OFFICE', requiresDocument: false },
-        { key: 'clearinghouse_pre_employment', owner: 'OFFICE', requiresDocument: false },
+        { key: 'eldt_verification', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },       // 49 CFR 380 (CDL after 2/7/2022)
+        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 5 }, // 49 CFR 382.601
+        // Ivan Cartage HR — FMCSA Driver Qualification File (49 CFR 391.51) & drug/alcohol program (Part 382)
+        { key: 'mvr_initial', owner: 'OFFICE', requiresDocument: true, assignee: 'Ivan Cartage HR' },                 // 391.23 — MVR from each licensing state
+        { key: 'prev_employer_inquiry', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },      // 391.23(d)(e) — prior-employer safety investigation
+        { key: 'road_test_cert', owner: 'OFFICE', requiresDocument: true, assignee: 'Ivan Cartage HR' },              // 391.31/.33 — road test or CDL equivalency
+        { key: 'med_examiner_registry_check', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },// 391.43 — examiner on National Registry
+        { key: 'clearinghouse_pre_employment', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },// 382.701 — full Clearinghouse query
+        { key: 'random_testing_enrollment', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },  // Part 382 — random D&A consortium
+        { key: 'amazon_relay_access', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },
+        { key: 'dq_file_complete', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },           // 391.51 — HR certifies the DQ file
       ],
     },
     {
