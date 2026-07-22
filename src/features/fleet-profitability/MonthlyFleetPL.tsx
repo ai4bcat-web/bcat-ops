@@ -5,11 +5,11 @@ import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfit
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useAppStore } from '@/store/useAppStore'
-import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import { monthRange, monthLabel } from './monthRange'
 import { RevenueAuditPanel } from './RevenueAuditPanel'
+import { BoxTruckPLPanel } from './BoxTruckPLPanel'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -84,16 +84,25 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
  * monthly amounts editable in place; Loan-Trucks comes from each truck's own loan;
  * Maintenance is logged invoices for Ivan trucks + all trailers. Net includes them all.
  */
+type PLView = 'LOCAL' | 'BOXTRUCK' | 'AMAZON'
+const PL_VIEWS: { key: PLView; label: string }[] = [
+  { key: 'LOCAL',    label: 'Local (Ivan)' },
+  { key: 'BOXTRUCK', label: 'Box Truck' },
+  { key: 'AMAZON',   label: 'Amazon' },
+]
+
 export function MonthlyFleetPL() {
   const [monthOffset, setMonthOffset] = useState(0)
-  const [group, setGroup] = useState<FleetGroup>('LOCAL')
+  const [view, setView] = useState<PLView>('LOCAL')
+  const group: FleetGroup = view === 'AMAZON' ? 'AMAZON' : 'LOCAL'
+  const isAmazon = view === 'AMAZON'
+  const isBoxTruck = view === 'BOXTRUCK'
 
   const range = monthRange(monthOffset)
   const { data, members, loading, refresh } = useFleetProfitability(range, group)
   const { rows: amzRows, loading: amzLoading } = useAmazonProfitability()
   const amzAgg = useMemo(() => aggregateAmazon(amzRows, range.start, range.end), [amzRows, range.start, range.end])
   const amzDrivers = useMemo(() => new Set(amzAgg.rows.map((r) => r.driverId)).size, [amzAgg])
-  const isAmazon = group === 'AMAZON'
   const { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount } = useFleetFixedCosts()
   const { equipment } = useTrucks()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -133,21 +142,21 @@ export function MonthlyFleetPL() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly Profit &amp; Loss</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'}` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
+              {isBoxTruck ? '#3890 · box-truck settlements' : isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'}` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
-            {FLEET_GROUPS.map((g) => {
-              const active = g === group
+            {PL_VIEWS.map((v) => {
+              const active = v.key === view
               return (
-                <button key={g} onClick={() => setGroup(g)}
+                <button key={v.key} onClick={() => setView(v.key)}
                   style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                     background: active ? 'var(--ds-surface)' : 'transparent', color: active ? 'var(--ds-t1)' : 'var(--ds-t2)',
                     boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
-                  {FLEET_GROUP_LABELS[g]}
+                  {v.label}
                 </button>
               )
             })}
@@ -168,7 +177,9 @@ export function MonthlyFleetPL() {
 
       {/* P&L body */}
       <div style={{ padding: '16px 20px' }}>
-        {isAmazon ? (
+        {isBoxTruck ? (
+          <BoxTruckPLPanel range={range} />
+        ) : isAmazon ? (
           amzLoading && amzAgg.rows.length === 0 ? (
             <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
           ) : amzAgg.rows.length === 0 ? (
