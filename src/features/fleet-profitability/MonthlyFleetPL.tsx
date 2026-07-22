@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
+import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil, Info } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
@@ -177,6 +177,17 @@ export function MonthlyFleetPL() {
 
       {/* P&L body */}
       <div style={{ padding: '16px 20px' }}>
+        {/* Overlap indicator — #3890 is counted in BOTH Local and Box Truck. */}
+        {!isAmazon && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 12px', marginBottom: 14, background: 'var(--ds-blue-bg)', border: '1px solid #bae6fd', borderRadius: 8, fontSize: 12, color: 'var(--ds-blue-dark)', lineHeight: 1.5 }}>
+            <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              {isBoxTruck
+                ? <>Box Truck <b>#3890</b> is <b>also included</b> in the Local (Ivan) total — this tab breaks it out on its own. <b>Don’t add Box Truck + Local together</b> (it double-counts #3890).</>
+                : <>Local includes Box Truck <b>#3890</b>’s freight. The <b>Box Truck</b> tab shows #3890’s standalone P&amp;L. <b>Don’t add the two tabs together</b> — #3890 is in both.</>}
+            </span>
+          </div>
+        )}
         {isBoxTruck ? (
           <BoxTruckPLPanel range={range} />
         ) : isAmazon ? (

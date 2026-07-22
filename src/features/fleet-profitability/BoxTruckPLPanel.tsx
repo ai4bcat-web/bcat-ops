@@ -119,8 +119,7 @@ export function BoxTruckPLPanel({ range }: { range: DateRange }) {
       </div>
 
       <div style={{ marginTop: 12, fontSize: 11, color: 'var(--ds-t3)' }}>
-        {driverName ? `${driverName} · ` : ''}{agg.tripCount} shipment{agg.tripCount === 1 ? '' : 's'} · from Box Truck Settlements.
-        Note: #{BOX_TRUCK_UNIT}’s freight also counts in the Local total — this is a standalone box-truck P&L.
+        {driverName ? `${driverName} · ` : ''}{agg.tripCount} shipment{agg.tripCount === 1 ? '' : 's'} · pulled from Box Truck Settlements.
       </div>
     </div>
   )
