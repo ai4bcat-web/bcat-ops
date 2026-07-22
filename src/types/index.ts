@@ -25,6 +25,7 @@ export interface Driver {
   driverType?: DriverType | null      // null = Unclassified
   onboardingStatus?: DriverOnboardingStatus | null
   complianceStatus?: ComplianceStatus | null   // cached, updated by scanner
+  onboardingTemplateId?: string | null  // phased onboarding template in effect (e.g. Amazon)
   createdAt: string
   updatedAt: string
 }
@@ -118,6 +119,8 @@ export interface ComplianceDocument {
 export type OnboardingTaskStatus =
   | 'PENDING' | 'AWAITING_DRIVER' | 'PENDING_REVIEW' | 'COMPLETE' | 'WAIVED' | 'NOT_APPLICABLE'
 
+export type OnboardingTaskOwner = 'DRIVER' | 'OFFICE'
+
 export interface OnboardingTask {
   id: string
   entityType: ComplianceEntityType
@@ -135,6 +138,13 @@ export interface OnboardingTask {
   completedAt?: string | null
   complianceDocumentId?: string | null
   sortOrder: number
+  // ── Phased-template fields (all optional; legacy tasks read null) ──
+  phase?: number | null            // 1-based phase index within the template
+  owner?: OnboardingTaskOwner | null   // who is responsible (DRIVER vs OFFICE)
+  assignee?: string | null         // specific staff/driver assigned
+  dueDate?: string | null          // YYYY-MM-DD
+  templateId?: string | null       // OnboardingTemplate.id this task came from
+  catalogVersion?: string | null   // CATALOG_VERSION at generation time
   createdAt: string
   updatedAt: string
 }

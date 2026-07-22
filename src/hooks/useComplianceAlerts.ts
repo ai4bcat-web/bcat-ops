@@ -41,7 +41,20 @@ export function useComplianceAlerts() {
     [user?.email],
   )
 
+  /**
+   * Resolve alerts non-destructively: stamp resolvedAt so they drop off the open list
+   * (the record is kept for audit). Accepts one or many ids.
+   */
+  const resolve = useCallback(async (ids: string | string[]) => {
+    const list = Array.isArray(ids) ? ids : [ids]
+    const resolvedAt = new Date().toISOString()
+    const updated = await Promise.all(list.map((id) => updateComplianceAlert(id, { resolvedAt })))
+    const byId = new Map(updated.map((a) => [a.id, a]))
+    setAlerts((prev) => prev.map((a) => byId.get(a.id) ?? a))
+    return updated
+  }, [])
+
   const openAlerts = alerts.filter((a) => !a.acknowledged && !a.resolvedAt)
 
-  return { alerts, openAlerts, loading, refresh: load, acknowledge }
+  return { alerts, openAlerts, loading, refresh: load, acknowledge, resolve }
 }

@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-06-12.1'
+export const CATALOG_VERSION = '2026-07-22.1'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -563,6 +563,151 @@ export const TRUCK_REQUIREMENTS: readonly ComplianceRequirement[] = [
   },
 ] as const
 
+// ── Amazon Relay onboarding requirements ──────────────────────────────────────
+// Requirement definitions used ONLY by the phased Amazon driver onboarding template
+// (see src/lib/onboardingTemplates.ts). These are intentionally NOT returned by
+// getDriverRequirements/getTruckRequirements, so Ivan/Local driver and truck checklists
+// are unaffected. They ARE registered in getRequirement()'s BY_KEY map so the template
+// generator, document cards, and review queue can resolve labels/categories/help text.
+//
+// Note: driverVisible/driverActionable here are internal defaults. The template generator
+// derives portal visibility from each entry's `owner` (DRIVER vs OFFICE), not from these
+// flags, so an item's portal behavior always follows the template — not the catalog.
+
+export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
+  {
+    key: 'amazon_relay_access',
+    label: 'Amazon Relay account access granted',
+    category: 'Amazon Relay',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office provisions the driver’s Amazon Relay account so they can be added to loads.',
+    internalNotes: 'Office task — request/enable Relay access in the Amazon Relay carrier portal.',
+  },
+  {
+    key: 'amazon_relay_course',
+    label: 'Amazon Relay onboarding course completed',
+    category: 'Amazon Relay',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Complete the Amazon Relay onboarding course in the Relay app, then check this off.',
+  },
+  {
+    key: 'amazon_relay_driver',
+    label: 'Driver registered in Amazon Relay',
+    category: 'Amazon Relay',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office registers the driver profile in Amazon Relay so they can be dispatched.',
+    internalNotes: 'Office task — add the driver in the Relay carrier portal (final step).',
+  },
+  {
+    key: 'amazon_relay_truck',
+    label: 'Truck registered in Amazon Relay',
+    category: 'Amazon Relay',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office registers the truck/trailer in Amazon Relay so it can be dispatched.',
+    internalNotes: 'Office task — add the tractor in the Relay carrier portal (final step).',
+  },
+  {
+    key: 'uia_port_authority_driver',
+    label: 'Driver added to UIIA / Port Authority',
+    category: 'Permits & Authority',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office registers the driver with the UIIA / port authority as required for intermodal moves.',
+    internalNotes: 'Office task — driver-level UIIA registration.',
+  },
+  {
+    key: 'uia_port_authority_truck',
+    label: 'Truck added to UIIA / Port Authority',
+    category: 'Permits & Authority',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office registers the truck with the UIIA / port authority as required for intermodal moves.',
+    internalNotes: 'Office task — equipment-level UIIA registration.',
+  },
+  {
+    key: 'cargo_insurance_add',
+    label: 'Truck added to cargo insurance policy',
+    category: 'Insurance',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    defaultExpirationMonths: 12,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office adds the truck to the cargo insurance policy and files the updated certificate.',
+    internalNotes: 'Office task — endorse the unit onto the cargo policy; upload the revised COI.',
+  },
+  {
+    key: 'identity_doc_ssc_passport',
+    label: 'Identity document (SSC / passport)',
+    category: 'Application',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Upload a government identity document — Social Security card or passport (used to verify work eligibility).',
+  },
+  {
+    key: 'mvr_drug_consent_form',
+    label: 'MVR & drug-test consent form signed',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Sign and upload the consent form authorizing us to pull your MVR and schedule your DOT drug test.',
+  },
+  {
+    key: 'nm_permits',
+    label: 'New Mexico permits obtained',
+    category: 'Permits & Authority',
+    appliesTo: ALL_TRUCKS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationRule: 'PLUS_N_MONTHS',
+    defaultExpirationMonths: 12,
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'The office obtains the New Mexico weight-distance / access permits for the truck and files them.',
+    internalNotes: 'Office task — NM permit application; upload the permit document.',
+  },
+] as const
+
 // ── Lookups ───────────────────────────────────────────────────────────────────
 
 export function getDriverRequirements(driverType: DriverType): ComplianceRequirement[] {
@@ -573,8 +718,10 @@ export function getTruckRequirements(ownershipType: TruckOwnershipType): Complia
   return TRUCK_REQUIREMENTS.filter((r) => r.appliesTo.includes(ownershipType))
 }
 
+// AMAZON_REQUIREMENTS are registered here (so getRequirement() resolves them) but are
+// deliberately excluded from getDriverRequirements/getTruckRequirements above.
 const BY_KEY: ReadonlyMap<string, ComplianceRequirement> = new Map(
-  [...DRIVER_REQUIREMENTS, ...TRUCK_REQUIREMENTS].map((r) => [r.key, r]),
+  [...DRIVER_REQUIREMENTS, ...TRUCK_REQUIREMENTS, ...AMAZON_REQUIREMENTS].map((r) => [r.key, r]),
 )
 
 export function getRequirement(key: string): ComplianceRequirement | undefined {

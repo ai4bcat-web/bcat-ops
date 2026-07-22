@@ -11,6 +11,7 @@ import { InvitePanel } from './InvitePanel'
 import { ComplianceDocumentsCard } from './ComplianceDocumentsCard'
 import { DriverApplicationView } from './DriverApplicationView'
 import { OnboardingKickoffDialog } from './OnboardingKickoffDialog'
+import { PhasedOnboardingSection } from './PhasedOnboardingSection'
 
 export function DriverComplianceDetailPage() {
   const { driverId = '' } = useParams()
@@ -31,7 +32,10 @@ export function DriverComplianceDetailPage() {
   const classificationLabel = driver.driverType === 'COMPANY' ? 'Company Driver'
     : driver.driverType === 'OWNER_OPERATOR' ? 'Owner-Operator' : 'Unclassified'
 
-  // Group tasks by category for display
+  // Phased (Amazon) drivers get the phase-gated view; everyone else keeps the flat checklist.
+  const isPhased = !!driver.onboardingTemplateId
+
+  // Group tasks by category for display (flat checklist only)
   const byCategory = tasks.reduce<Record<string, typeof tasks>>((acc, t) => {
     (acc[t.category] ??= []).push(t)
     return acc
@@ -68,8 +72,11 @@ export function DriverComplianceDetailPage() {
           </Card>
         )}
 
-        {/* Checklist */}
-        {tasks.length > 0 && (
+        {/* Phased (Amazon) onboarding */}
+        {isPhased && <PhasedOnboardingSection driver={driver} />}
+
+        {/* Flat checklist (non-phased drivers) */}
+        {!isPhased && tasks.length > 0 && (
           <Card title="Checklist" sub={`${tasks.length} items`} noPad>
             <div style={{ padding: '8px 0' }}>
               {Object.entries(byCategory).map(([cat, items]) => (

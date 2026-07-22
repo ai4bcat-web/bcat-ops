@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, Fuel, History,
-  ShieldCheck, ClipboardCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, type LucideIcon,
+  ShieldCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Rocket, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -78,8 +78,8 @@ export const NAV_GROUPS: NavSection[] = [
   {
     title: 'Compliance',
     items: [
-      { to: '/compliance',        label: 'Compliance',   icon: ShieldCheck,    pageKey: 'compliance' },
-      { to: '/compliance/review', label: 'Review Queue', icon: ClipboardCheck, pageKey: 'complianceReview', badgeKey: 'review' },
+      { to: '/compliance',            label: 'Compliance', icon: ShieldCheck, pageKey: 'compliance' },
+      { to: '/compliance/onboarding', label: 'Onboarding', icon: Rocket,      pageKey: 'complianceOnboarding', badgeKey: 'review' },
     ],
   },
   {

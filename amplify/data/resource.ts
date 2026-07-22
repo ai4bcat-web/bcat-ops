@@ -71,6 +71,9 @@ const schema = a.schema({
       driverType:         a.enum(['COMPANY', 'OWNER_OPERATOR']),
       onboardingStatus:   a.enum(['NOT_STARTED', 'INVITED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETE']),
       complianceStatus:   a.enum(['COMPLIANT', 'EXPIRING_SOON', 'NON_COMPLIANT', 'UNKNOWN']), // cached, updated by scanner
+      // Phased onboarding template in effect for this driver (e.g. Amazon Relay). Optional:
+      // legacy/Ivan/Local drivers read null and keep the flat (non-phased) checklist behavior.
+      onboardingTemplateId: a.string(),
     })
     .authorization((allow) => [allow.authenticated()]),
 
@@ -651,6 +654,14 @@ const schema = a.schema({
       completedAt:          a.datetime(),
       complianceDocumentId: a.string(),               // optional link
       sortOrder:            a.integer().required(),
+      // ── Phased-template onboarding (all optional; legacy tasks read null) ──
+      // Added for the Amazon driver onboarding flow. Ivan/Local tasks leave these null.
+      phase:               a.integer(),               // 1-based phase index within the template
+      owner:               a.enum(['DRIVER', 'OFFICE']),  // who is responsible for the task
+      assignee:            a.string(),                // specific staff/driver assigned
+      dueDate:             a.string(),                // YYYY-MM-DD
+      templateId:          a.string(),                // OnboardingTemplate.id
+      catalogVersion:      a.string(),                // CATALOG_VERSION at generation time
     })
     .secondaryIndexes((index) => [
       index('entityId'),

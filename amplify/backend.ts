@@ -454,6 +454,10 @@ backend.onboardingEmailer.resources.lambda.addToRolePolicy(
 emailerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.tableName)
 emailerFn.addEnvironment('DRIVER_TABLE_NAME',   driverTable.tableName)
 emailerFn.addEnvironment('SETTINGS_TABLE_NAME', complianceSettingsTable.tableName)
+// Invite links must point at the deployed app, not the caller's browser origin (which is
+// localhost when an admin kicks off an invite from `npm run dev`). Same prod origin the
+// scanner uses. Overrides the client-supplied portalBaseUrl in the handler.
+emailerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
 
 // ── driverPayEmailer Lambda (SES raw — PDF statement attachment) ────────────
 
@@ -475,7 +479,8 @@ backend.vehicleQuoteEmailer.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
 quoteEmailerFn.addEnvironment('FROM_ADDRESS', process.env.QUOTE_FROM_ADDRESS ?? 'ruben@bcatcorp.com')
-quoteEmailerFn.addEnvironment('BCC_ADDRESS',  process.env.QUOTE_BCC_ADDRESS ?? 'cars@bcatcorp.com')
+// cars@ is CC'd (visible to the customer), not BCC'd.
+quoteEmailerFn.addEnvironment('CC_ADDRESS',   process.env.QUOTE_CC_ADDRESS ?? process.env.QUOTE_BCC_ADDRESS ?? 'cars@bcatcorp.com')
 
 // ── googleReviews Lambda (live Google rating + count for the quote CTA) ─────
 // Plain env vars (not secrets) so a missing value never blocks the deploy — set
