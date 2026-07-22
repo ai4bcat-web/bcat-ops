@@ -268,6 +268,9 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                       <Input {...register('phone')} placeholder="(312) 555-0100" type="tel" className={cn('h-9', errors.phone && 'border-destructive')} />
                       {errors.phone && <p className="text-xs text-destructive mt-1">{errors.phone.message}</p>}
                     </Field>
+                    <Field label="Email" hint="for onboarding portal invite">
+                      <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
+                    </Field>
                   </div>
                 </div>
 
@@ -326,9 +329,6 @@ function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
 
               {/* ── Compliance & Documents (collapsed) ─────────────────────── */}
               <FormSection icon={<ShieldCheck size={15} />} title="Compliance & Documents" subtitle="CDL, med card, drug test" collapsible defaultOpen={false}>
-                <Field label="Email">
-                  <Input {...register('email')} placeholder="driver@example.com" className="h-9" type="email" />
-                </Field>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="CDL Number"><Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" /></Field>
                   <Field label="CDL Class">

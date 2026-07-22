@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, ExternalLink, Mail } from 'lucide-react'
+import { Check, ExternalLink, Mail, CheckCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,12 +19,14 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = { EXPIRED: 0, CRITICAL: 1,
 export function CompliancePage() {
   const navigate = useNavigate()
   const { isOwner } = useAuth()
-  const { alerts, loading, acknowledge } = useComplianceAlerts()
+  const { alerts, loading, acknowledge, resolve } = useComplianceAlerts()
   const [severity, setSeverity] = useState<AlertSeverity | 'ALL'>('ALL')
   const [entityType, setEntityType] = useState<ComplianceEntityType | 'ALL'>('ALL')
   const [showAcked, setShowAcked] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [historyAlert, setHistoryAlert] = useState<ComplianceAlert | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [resolving, setResolving] = useState(false)
 
   const visible = useMemo(() => {
     return alerts
@@ -50,6 +52,25 @@ export function CompliancePage() {
     try { await acknowledge(a.id); toast.success('Acknowledged') }
     catch (e) { console.error(e); toast.error('Failed') }
     finally { setBusyId(null) }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function resolveAlerts(ids: string[]) {
+    if (ids.length === 0) return
+    setResolving(true)
+    try {
+      await resolve(ids)
+      setSelected(new Set())
+      toast.success(`Resolved ${ids.length} alert${ids.length === 1 ? '' : 's'}`)
+    } catch (e) { console.error(e); toast.error('Could not resolve alerts') }
+    finally { setResolving(false) }
   }
 
   function goToEntity(a: ComplianceAlert) {
@@ -97,11 +118,35 @@ export function CompliancePage() {
           </label>
         </div>
 
-        <Card title="Alerts" sub={loading ? 'Loading…' : `${visible.length} shown`} noPad>
+        <Card
+          title="Alerts"
+          sub={loading ? 'Loading…' : `${visible.length} shown`}
+          right={
+            visible.length > 0 ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button size="sm" variant="outline" disabled={resolving || selected.size === 0} onClick={() => resolveAlerts([...selected])}>
+                  <CheckCheck size={14} /> Resolve selected{selected.size > 0 ? ` (${selected.size})` : ''}
+                </Button>
+                <Button size="sm" variant="outline" disabled={resolving} onClick={() => resolveAlerts(visible.map((a) => a.id))}>
+                  Resolve all shown
+                </Button>
+              </div>
+            ) : undefined
+          }
+          noPad
+        >
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                  <th style={{ padding: '8px 16px', width: 32 }}>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all shown"
+                      checked={visible.length > 0 && visible.every((a) => selected.has(a.id))}
+                      onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((a) => a.id)) : new Set())}
+                    />
+                  </th>
                   {['Entity', 'Document', 'Severity', 'Expiration', ''].map((h, i) => (
                     <th key={h} style={{ padding: '8px 16px', textAlign: i === 4 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
                   ))}
@@ -109,10 +154,13 @@ export function CompliancePage() {
               </thead>
               <tbody>
                 {!loading && visible.length === 0 && (
-                  <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--ds-t3)' }}>No alerts. All clear. ✅</td></tr>
+                  <tr><td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--ds-t3)' }}>No alerts. All clear. ✅</td></tr>
                 )}
                 {visible.map((a) => (
-                  <tr key={a.id} style={{ borderBottom: '1px solid var(--ds-border)', opacity: a.acknowledged ? 0.6 : 1 }}>
+                  <tr key={a.id} style={{ borderBottom: '1px solid var(--ds-border)', opacity: a.acknowledged ? 0.6 : 1, background: selected.has(a.id) ? 'rgba(30,168,243,0.05)' : undefined }}>
+                    <td style={{ padding: '10px 16px' }}>
+                      <input type="checkbox" aria-label="Select alert" checked={selected.has(a.id)} onChange={() => toggleSelect(a.id)} />
+                    </td>
                     <td style={{ padding: '10px 16px' }}>
                       <span style={{ fontWeight: 500, color: 'var(--ds-t1)' }}>{a.entityName ?? a.entityId}</span>
                       <Badge variant="secondary" className="ml-2">{a.entityType === 'DRIVER' ? 'Driver' : 'Truck'}</Badge>

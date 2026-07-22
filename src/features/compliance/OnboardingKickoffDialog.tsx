@@ -10,9 +10,14 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useStartOnboarding } from '@/hooks/useStartOnboarding'
 import { useOnboardingInvites } from '@/hooks/useOnboardingInvites'
+import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
-import { buildPortalUrl } from '@/lib/complianceClient'
+import { buildPortalUrl, generateTemplateChecklist, writeComplianceAudit } from '@/lib/complianceClient'
+import { ONBOARDING_TEMPLATES, getOnboardingTemplate } from '@/lib/onboardingTemplates'
 import type { Driver, DriverType } from '@/types'
+
+// null = the standard flat Ivan/Local checklist; otherwise a phased template id.
+const STANDARD = 'STANDARD'
 
 interface Props {
   driver: Driver
@@ -23,9 +28,11 @@ interface Props {
 export function OnboardingKickoffDialog({ driver, open, onOpenChange }: Props) {
   const { startOnboarding, isStarting } = useStartOnboarding()
   const { createInvite } = useOnboardingInvites(driver.id)
+  const { user } = useAuth()
   const updateDriver = useAppStore((s) => s.updateDriver)
 
   const [classification, setClassification] = useState<DriverType>(driver.driverType ?? 'COMPANY')
+  const [templateId, setTemplateId] = useState<string>(driver.onboardingTemplateId ?? STANDARD)
   const [email, setEmail] = useState(driver.email ?? '')
   const [internalOnly, setInternalOnly] = useState(false)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
@@ -39,11 +46,22 @@ export function OnboardingKickoffDialog({ driver, open, onOpenChange }: Props) {
     }
     setBusy(true)
     try {
-      await startOnboarding({ entityType: 'DRIVER', entityId: driver.id, classification })
+      const template = templateId === STANDARD ? null : getOnboardingTemplate(templateId)
+      if (template) {
+        const { created } = await generateTemplateChecklist({ driverId: driver.id, driverType: classification, template })
+        await writeComplianceAudit({
+          entityType: 'DRIVER', entityId: driver.id, action: 'onboarding_started',
+          user: user?.email ?? 'unknown',
+          changes: { classification, templateId: template.id, created },
+        })
+      } else {
+        await startOnboarding({ entityType: 'DRIVER', entityId: driver.id, classification })
+      }
       await updateDriver(driver.id, {
         driverType: classification,
         email: email.trim() || driver.email,
         onboardingStatus: internalOnly ? 'IN_PROGRESS' : 'INVITED',
+        onboardingTemplateId: template ? template.id : null,
       })
       if (internalOnly) {
         toast.success(`Checklist generated for ${driver.name} (internal only)`)
@@ -86,6 +104,26 @@ export function OnboardingKickoffDialog({ driver, open, onOpenChange }: Props) {
             </DialogHeader>
 
             <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Onboarding template</Label>
+                <select
+                  value={templateId}
+                  onChange={(e) => setTemplateId(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm"
+                >
+                  <option value={STANDARD}>Standard (Ivan / Local — flat checklist)</option>
+                  {ONBOARDING_TEMPLATES.map((t) => (
+                    <option key={t.id} value={t.id}>{t.label} — {t.phases.length}-phase</option>
+                  ))}
+                </select>
+                {templateId !== STANDARD && (
+                  <p className="text-xs text-slate-500">
+                    Phased flow: the driver only sees the current phase; truck tasks generate on the assigned
+                    truck once Phase 2 completes.
+                  </p>
+                )}
+              </div>
+
               <div className="space-y-1.5">
                 <Label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Classification</Label>
                 <div className="flex gap-2">

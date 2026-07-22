@@ -125,7 +125,9 @@ export const handler = async (event: { arguments: Args }) => {
   }
 
   const firstName = String(driver?.name ?? 'there').split(' ')[0]
-  const base = portalBaseUrl ?? ''
+  // Prefer the deployed prod origin (PORTAL_BASE_URL) so links never point at a caller's
+  // localhost dev server. Fall back to the caller-supplied origin only if the env is unset.
+  const base = (process.env.PORTAL_BASE_URL || portalBaseUrl || '').replace(/\/+$/, '')
   const link = invite?.token ? `${base}/onboard/${invite.token}` : base
   const expiresAt = invite?.expiresAt ? new Date(String(invite.expiresAt)).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : undefined
 

@@ -6,10 +6,17 @@ import { uploadData, getUrl } from 'aws-amplify/storage'
 import {
   getDriverRequirements,
   getTruckRequirements,
+  getRequirement,
+  CATALOG_VERSION,
   type ComplianceRequirement,
   type DriverType,
   type TruckOwnershipType,
 } from '@/lib/complianceRequirements'
+import {
+  type OnboardingTemplate,
+  type TemplateEntry,
+  type TaskOwner,
+} from '@/lib/onboardingTemplates'
 import type {
   ComplianceEntityType,
   OnboardingInvite,
@@ -60,7 +67,8 @@ const DOCUMENT_FIELDS = `
 const TASK_FIELDS = `
   id entityType entityId requirementKey label category required requiresDocument
   requiresExpiration driverVisible driverActionable status completedBy completedAt
-  complianceDocumentId sortOrder createdAt updatedAt
+  complianceDocumentId sortOrder phase owner assignee dueDate templateId catalogVersion
+  createdAt updatedAt
 `
 
 const ALERT_FIELDS = `
@@ -96,6 +104,14 @@ export async function listOnboardingInvitesByDriver(driverId: string): Promise<O
     { driverId },
   )
   return data.listOnboardingInviteByDriverId.items ?? []
+}
+
+/** Every OnboardingInvite. Used by the onboarding pipeline roster to show invite status. */
+export async function listAllOnboardingInvites(): Promise<OnboardingInvite[]> {
+  const data = await gql<{ listOnboardingInvites: { items: OnboardingInvite[] } }>(
+    `query { listOnboardingInvites(limit: 5000) { items { ${INVITE_FIELDS} } } }`,
+  )
+  return data.listOnboardingInvites.items ?? []
 }
 
 export async function getInviteByToken(token: string): Promise<OnboardingInvite | null> {
@@ -297,6 +313,14 @@ export async function listOnboardingTasks(
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
+/** Every OnboardingTask (both entities). Used by the onboarding pipeline roster. */
+export async function listAllOnboardingTasks(): Promise<OnboardingTask[]> {
+  const data = await gql<{ listOnboardingTasks: { items: OnboardingTask[] } }>(
+    `query { listOnboardingTasks(limit: 5000) { items { ${TASK_FIELDS} } } }`,
+  )
+  return data.listOnboardingTasks.items ?? []
+}
+
 export async function createOnboardingTask(
   input: Omit<OnboardingTask, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<OnboardingTask> {
@@ -372,6 +396,161 @@ export async function generateChecklist(params: {
     )
   }
   return { created: created.length, total: requirements.length, tasks: [...existing, ...created].sort((a, b) => a.sortOrder - b.sortOrder) }
+}
+
+// ── Phased template generation (Amazon driver onboarding) ────────────────────────
+// These generate OnboardingTask records from an OnboardingTemplate. Unlike the flat
+// generateChecklist(), a task here is keyed by (phase + requirementKey), so the same
+// requirement can appear in two phases (e.g. occ_acc_or_workers_comp). Idempotent:
+// re-running skips template tasks that already exist for that (phase, requirementKey).
+
+function templateTaskKey(phase: number, requirementKey: string): string {
+  return `${phase}:${requirementKey}`
+}
+
+/** Existing template-generated tasks, keyed by (phase, requirementKey), for idempotent regen. */
+function existingTemplateKeys(tasks: OnboardingTask[]): Set<string> {
+  const keys = new Set<string>()
+  for (const t of tasks) {
+    if (typeof t.phase === 'number') keys.add(templateTaskKey(t.phase, t.requirementKey))
+  }
+  return keys
+}
+
+function initialTemplateStatus(req: ComplianceRequirement, owner: TaskOwner): OnboardingTaskStatus {
+  if (!req.required) return 'NOT_APPLICABLE'
+  return owner === 'DRIVER' ? 'AWAITING_DRIVER' : 'PENDING'
+}
+
+function computeDueDate(phaseStart: string, days?: number): string | null {
+  if (typeof days !== 'number') return null
+  const d = new Date(`${phaseStart}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+interface BuiltTaskInput {
+  input: Omit<OnboardingTask, 'id' | 'createdAt' | 'updatedAt'>
+  phase: number
+  requirementKey: string
+}
+
+/** Build the OnboardingTask input for one template entry, or null if the key is unknown. */
+function buildTemplateTaskInput(params: {
+  entityType: ComplianceEntityType
+  entityId: string
+  phase: number
+  entry: TemplateEntry
+  templateId: string
+  sortOrder: number
+  phaseStart: string
+}): BuiltTaskInput | null {
+  const { entityType, entityId, phase, entry, templateId, sortOrder, phaseStart } = params
+  const req = getRequirement(entry.key)
+  if (!req) {
+    console.error('[buildTemplateTaskInput] unknown requirement key', entry.key)
+    return null
+  }
+  const driverVisible = entityType === 'DRIVER' && entry.owner === 'DRIVER'
+  return {
+    phase,
+    requirementKey: entry.key,
+    input: {
+      entityType,
+      entityId,
+      requirementKey: entry.key,
+      label: req.label,
+      category: req.category,
+      required: req.required,
+      requiresDocument: entry.requiresDocument ?? req.requiresDocument,
+      requiresExpiration: req.requiresExpiration,
+      driverVisible,
+      driverActionable: driverVisible,
+      status: initialTemplateStatus(req, entry.owner),
+      sortOrder,
+      phase,
+      owner: entry.owner,
+      dueDate: computeDueDate(phaseStart, entry.dueDaysFromPhaseStart),
+      templateId,
+      catalogVersion: CATALOG_VERSION,
+    },
+  }
+}
+
+/**
+ * Generate a driver's phased checklist from a template. Only DRIVER-entity entries are
+ * created here; TRUCK-entity entries are deferred to generateTruckTasksFromTemplate()
+ * once Phase 2 completes. Idempotent by (phase, requirementKey).
+ */
+export async function generateTemplateChecklist(params: {
+  driverId: string
+  driverType: DriverType
+  template: OnboardingTemplate
+  phaseStart?: string
+}): Promise<{ created: number; tasks: OnboardingTask[] }> {
+  const { driverId, driverType, template } = params
+  const phaseStart = params.phaseStart ?? new Date().toISOString().slice(0, 10)
+
+  const existing = await listOnboardingTasks('DRIVER', driverId)
+  const seen = existingTemplateKeys(existing)
+
+  const created: OnboardingTask[] = []
+  let sortOrder = 0
+  for (const p of template.phases) {
+    for (const entry of p.entries) {
+      if ((entry.entity ?? 'DRIVER') !== 'DRIVER') continue
+      if (entry.appliesToDriverType && entry.appliesToDriverType !== driverType) continue
+      const built = buildTemplateTaskInput({
+        entityType: 'DRIVER', entityId: driverId, phase: p.phase, entry,
+        templateId: template.id, sortOrder: sortOrder++, phaseStart,
+      })
+      if (!built) continue
+      if (seen.has(templateTaskKey(built.phase, built.requirementKey))) continue
+      created.push(await createOnboardingTask(built.input))
+    }
+  }
+  return {
+    created: created.length,
+    tasks: [...existing, ...created].sort((a, b) => a.sortOrder - b.sortOrder),
+  }
+}
+
+/**
+ * Generate the template's TRUCK-entity tasks against a truck. Called when a driver's
+ * Phase 2 completes (the truck-link step). Idempotent by (phase, requirementKey).
+ */
+export async function generateTruckTasksFromTemplate(params: {
+  truckId: string
+  driverType: DriverType
+  template: OnboardingTemplate
+  phaseStart?: string
+}): Promise<{ created: number; tasks: OnboardingTask[] }> {
+  const { truckId, driverType, template } = params
+  const phaseStart = params.phaseStart ?? new Date().toISOString().slice(0, 10)
+
+  const existing = await listOnboardingTasks('TRUCK', truckId)
+  const seen = existingTemplateKeys(existing)
+
+  const created: OnboardingTask[] = []
+  // Continue sortOrder above any existing tasks so truck tasks sort after seed items.
+  let sortOrder = existing.reduce((max, t) => Math.max(max, t.sortOrder ?? 0), 0) + 1
+  for (const p of template.phases) {
+    for (const entry of p.entries) {
+      if ((entry.entity ?? 'DRIVER') !== 'TRUCK') continue
+      if (entry.appliesToDriverType && entry.appliesToDriverType !== driverType) continue
+      const built = buildTemplateTaskInput({
+        entityType: 'TRUCK', entityId: truckId, phase: p.phase, entry,
+        templateId: template.id, sortOrder: sortOrder++, phaseStart,
+      })
+      if (!built) continue
+      if (seen.has(templateTaskKey(built.phase, built.requirementKey))) continue
+      created.push(await createOnboardingTask(built.input))
+    }
+  }
+  return {
+    created: created.length,
+    tasks: [...existing, ...created].sort((a, b) => a.sortOrder - b.sortOrder),
+  }
 }
 
 /** Set a task's status and stamp completion when terminal. */

@@ -16,7 +16,12 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-export function ReviewQueuePage() {
+/**
+ * The "Needs review" worklist: portal-submitted documents (PENDING_REVIEW) and
+ * SUBMITTED applications awaiting approval. Rendered as a section inside the merged
+ * Onboarding page (no page chrome of its own).
+ */
+export function ReviewQueueSection() {
   const { items, pendingCount, loading, approveDocument, rejectDocument, approveApplication, rejectApplication } = useReviewQueue()
   const [previewItem, setPreviewItem] = useState<ReviewQueueItem | null>(null)
   const [rejectItem, setRejectItem] = useState<ReviewQueueItem | null>(null)
@@ -47,16 +52,8 @@ export function ReviewQueuePage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Compliance review queue</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-            Portal-submitted documents and applications awaiting your approval.
-          </p>
-        </div>
-
-        <Card title="Awaiting review" sub={loading ? 'Loading…' : `${pendingCount} item${pendingCount === 1 ? '' : 's'}`} noPad>
+    <>
+      <Card title="Needs review" sub={loading ? 'Loading…' : `${pendingCount} item${pendingCount === 1 ? '' : 's'} awaiting approval`} noPad>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -92,7 +89,6 @@ export function ReviewQueuePage() {
             </table>
           </div>
         </Card>
-      </div>
 
       {/* Preview */}
       <Sheet open={!!previewItem} onOpenChange={(o) => !o && setPreviewItem(null)}>
@@ -125,6 +121,6 @@ export function ReviewQueuePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

@@ -23,7 +23,7 @@ import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
 import { TasksPage } from '@/features/tasks/TasksPage'
 import { CompliancePage } from '@/features/compliance/CompliancePage'
-import { ReviewQueuePage } from '@/features/compliance-review/ReviewQueuePage'
+import { OnboardingPage } from '@/features/compliance/OnboardingPage'
 import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplianceDetailPage'
 import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
@@ -70,7 +70,9 @@ export default function App() {
               <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
               {/* Compliance & onboarding */}
               <Route path="/compliance" element={<RequirePage page="compliance"><CompliancePage /></RequirePage>} />
-              <Route path="/compliance/review" element={<RequirePage page="complianceReview"><ReviewQueuePage /></RequirePage>} />
+              <Route path="/compliance/onboarding" element={<RequirePage page="complianceOnboarding"><OnboardingPage /></RequirePage>} />
+              {/* Review Queue merged into the Onboarding hub */}
+              <Route path="/compliance/review" element={<Navigate to="/compliance/onboarding" replace />} />
               <Route path="/compliance/driver/:driverId" element={<RequirePage page="compliance"><DriverComplianceDetailPage /></RequirePage>} />
               <Route path="/compliance/truck/:truckId" element={<RequirePage page="compliance"><TruckOnboardingWizardPage /></RequirePage>} />
               {/* legacy redirects */}
