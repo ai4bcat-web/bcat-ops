@@ -63,6 +63,24 @@ const removeBtn: CSSProperties = { ...linkBtn, color: 'var(--ds-red)' }
 
 function Req() { return <span style={{ color: 'var(--ds-red)', marginLeft: 3 }} title="Required">*</span> }
 
+// The schema accepts a real date, null, or undefined — but NOT an empty string. Date
+// inputs emit '' when cleared (blank "to" = present job/residence), so coerce '' → undefined.
+// Also default the required booleans that only get set on user interaction.
+function normalizeForSubmit(d: Draft): Draft {
+  const blank = (v?: string | null) => (v ? v : undefined)
+  return {
+    ...d,
+    cdlIssuedAfterFeb2022: d.cdlIssuedAfterFeb2022 ?? false,
+    addressHistory: (d.addressHistory ?? []).map((a) => ({ ...a, toDate: blank(a.toDate) })),
+    employmentHistory: (d.employmentHistory ?? []).map((e) => ({
+      ...e,
+      toDate: blank(e.toDate),
+      subjectToFMCSR: e.subjectToFMCSR ?? false,
+      safetySensitive: e.safetySensitive ?? false,
+    })),
+  }
+}
+
 function Labeled({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return <div><label style={labelStyle}>{label}{required && <Req />}</label>{children}</div>
 }
@@ -75,6 +93,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
     violations: [],
     endorsements: [],
     ...initial,
+    cdlIssuedAfterFeb2022: initial?.cdlIssuedAfterFeb2022 ?? false,
     // Required list sections start with one blank row so the fields are visible up front.
     addressHistory: initial?.addressHistory?.length ? initial.addressHistory : [{ ...BLANK_ADDRESS }],
     employmentHistory: initial?.employmentHistory?.length ? initial.employmentHistory : [{ ...BLANK_EMPLOYMENT }],
@@ -110,20 +129,21 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
   ][step]
 
   async function goTo(next: number) {
-    await onSaveDraft(data)
+    await onSaveDraft(normalizeForSubmit(data))
     setStep(next)
     setErrors([])
   }
 
   async function handleSubmit() {
-    const parsed = driverApplicationSubmitSchema.safeParse(data)
+    const payload = normalizeForSubmit(data)
+    const parsed = driverApplicationSubmitSchema.safeParse(payload)
     const problems: string[] = []
     if (!parsed.success) problems.push(...parsed.error.issues.map((i) => i.message))
     if (!employmentCovered) problems.push(`Employment history must cover at least ${requiredYears} years`)
     if (unexplainedGaps.length > 0) problems.push('Explain each employment gap longer than 30 days')
-    if (problems.length) { setErrors(problems); return }
+    if (problems.length) { setErrors([...new Set(problems)]); return }
     setSubmitting(true)
-    try { await onSubmit(data) }
+    try { await onSubmit(payload) }
     finally { setSubmitting(false) }
   }
 
