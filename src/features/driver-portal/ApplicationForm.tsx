@@ -63,15 +63,29 @@ const removeBtn: CSSProperties = { ...linkBtn, color: 'var(--ds-red)' }
 
 function Req() { return <span style={{ color: 'var(--ds-red)', marginLeft: 3 }} title="Required">*</span> }
 
+// Derive the required `currentAddress` string from the current residence in address
+// history (the entry with no move-out date, else the most recent), so we don't ask twice.
+function deriveCurrentAddress(addrs: { street?: string; city?: string; state?: string; zip?: string; fromDate?: string; toDate?: string | null }[]): string | undefined {
+  if (!addrs.length) return undefined
+  const sorted = [...addrs].sort((a, b) => (b.fromDate ?? '').localeCompare(a.fromDate ?? ''))
+  const cur = sorted.find((a) => !a.toDate) ?? sorted[0]
+  const cityState = [cur.city, cur.state].filter(Boolean).join(', ')
+  const line = [cur.street, [cityState, cur.zip].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+  return line || undefined
+}
+
 // The schema accepts a real date, null, or undefined — but NOT an empty string. Date
 // inputs emit '' when cleared (blank "to" = present job/residence), so coerce '' → undefined.
-// Also default the required booleans that only get set on user interaction.
+// Also default the required booleans that only get set on user interaction, and fill
+// currentAddress from the current residence.
 function normalizeForSubmit(d: Draft): Draft {
   const blank = (v?: string | null) => (v ? v : undefined)
+  const addressHistory = (d.addressHistory ?? []).map((a) => ({ ...a, toDate: blank(a.toDate) }))
   return {
     ...d,
+    currentAddress: d.currentAddress?.trim() || deriveCurrentAddress(addressHistory),
     cdlIssuedAfterFeb2022: d.cdlIssuedAfterFeb2022 ?? false,
-    addressHistory: (d.addressHistory ?? []).map((a) => ({ ...a, toDate: blank(a.toDate) })),
+    addressHistory,
     employmentHistory: (d.employmentHistory ?? []).map((e) => ({
       ...e,
       toDate: blank(e.toDate),
@@ -121,7 +135,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
   // What must be completed on the current step — shown as a clear banner.
   const stepNote = [
     'Every field on this step is required.',
-    'List where you\'ve lived over the last 3 years (49 CFR 391.21). Street, city, state, ZIP and the move-in date are required for each address.',
+    'Start with your current address, then list where else you\'ve lived over the last 3 years (49 CFR 391.21). Street, city, state, ZIP and the move-in date are required for each.',
     'CDL number, state, class and expiration are required. Tap any endorsements you hold — leave them all off if you have none.',
     `At least one employer is required, and your history must cover the last ${requiredYears} years. Explain any gap longer than 30 days.`,
     'Optional — list any accidents or traffic violations from the last 3 years. Leave this step empty if you have none.',
@@ -175,7 +189,6 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
           <Labeled label="Date of birth" required><input type="date" style={inputStyle} value={data.dob ?? ''} onChange={(e) => set('dob', e.target.value)} /></Labeled>
           <Labeled label="SSN — last 4 digits only" required><input inputMode="numeric" maxLength={4} style={inputStyle} value={data.ssnLast4 ?? ''} onChange={(e) => set('ssnLast4', e.target.value.replace(/\D/g, ''))} /></Labeled>
           <Labeled label="Phone" required><input type="tel" style={inputStyle} value={data.phone ?? ''} onChange={(e) => set('phone', e.target.value)} /></Labeled>
-          <Labeled label="Current address" required><input style={inputStyle} value={data.currentAddress ?? ''} onChange={(e) => set('currentAddress', e.target.value)} /></Labeled>
         </div>
       )}
 
