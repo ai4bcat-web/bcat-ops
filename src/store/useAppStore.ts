@@ -368,6 +368,10 @@ interface AppState {
   // ── Initialization ─────────────────────────────────────────────────────────
   initializeData: (userEmail: string) => Promise<void>
   setCurrentUser: (email: string) => void
+  // Lightweight re-fetch of the calendar's shared data (loads + drivers) — used by the
+  // periodic calendar poll so every client converges on the same server state. Does NOT
+  // re-run initializeData (which would re-open subscriptions).
+  refreshCalendarData: () => Promise<void>
 
   // ── Driver actions ─────────────────────────────────────────────────────────
   addDriver: (d: Omit<Driver, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Driver>
@@ -535,6 +539,17 @@ export const useAppStore = create<AppState>()(
             loads: s.loads.filter((l) => l.id !== id),
           })),
         })
+      },
+
+      // Poll-friendly refetch of the calendar's shared data. Non-fatal on error so a
+      // transient network blip doesn't blank the calendar.
+      refreshCalendarData: async () => {
+        try {
+          const [loads, drivers] = await Promise.all([api.listLoads(), api.listDrivers()])
+          set({ loads, drivers })
+        } catch (err) {
+          console.warn('[store] refreshCalendarData failed', err)
+        }
       },
 
       // ── Drivers ────────────────────────────────────────────────────────────

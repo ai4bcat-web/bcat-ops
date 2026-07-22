@@ -32,7 +32,7 @@ export function CalendarPage() {
   const { loads }   = useLoads()
   const { drivers } = useDrivers()
   const equipment   = useAppStore((s) => s.equipment)
-  const { availabilities, createAvailability, deleteAvailability } = useDriverAvailability()
+  const { availabilities, refresh: refreshAvailability, createAvailability, deleteAvailability } = useDriverAvailability()
 
   const [showAvailModal, setShowAvailModal] = useState(false)
 
@@ -103,6 +103,26 @@ export function CalendarPage() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [navDays])
+
+  // ── Periodic refresh ────────────────────────────────────────────────────────
+  // Real-time subscriptions keep clients in sync, but a periodic full refetch is a
+  // safety net so every open calendar converges on the current server state even if a
+  // subscription event was missed (sleep/wake, dropped socket, etc.). Pauses while the
+  // tab is hidden and does an immediate catch-up refresh when it becomes visible again.
+  useEffect(() => {
+    const REFRESH_MS = 60_000
+    const refreshAll = () => { void useAppStore.getState().refreshCalendarData(); void refreshAvailability() }
+    let timer = window.setInterval(refreshAll, REFRESH_MS)
+    const onVisibility = () => {
+      window.clearInterval(timer)
+      if (document.visibilityState === 'visible') {
+        refreshAll()
+        timer = window.setInterval(refreshAll, REFRESH_MS)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
+  }, [refreshAvailability])
 
   // ── Filter loads ──────────────────────────────────────────────────────────
 

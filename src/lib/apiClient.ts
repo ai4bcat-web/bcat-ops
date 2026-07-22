@@ -779,6 +779,46 @@ export async function deleteDriverAvailability(id: string): Promise<void> {
   })
 }
 
+/**
+ * Real-time driver-availability changes — keeps every open calendar in sync when any
+ * user adds, edits, or removes a time-off / availability entry. Mirrors
+ * subscribeToLoadChanges. Returns an unsubscribe function.
+ */
+export function subscribeToDriverAvailabilityChanges(callbacks: {
+  onCreate?: (a: DriverAvailability) => void
+  onUpdate?: (a: DriverAvailability) => void
+  onDelete?: (id: string) => void
+}): () => void {
+  const handles: SubscriptionHandle[] = []
+  function wire<T>(query: string, pick: (data: T) => void) {
+    const handle = (client.graphql({ query }) as unknown as Subscribable<T>)
+      .subscribe({ next: ({ data }) => pick(data), error: (e) => console.warn('[subscription] error:', e) })
+    handles.push(handle)
+  }
+  if (callbacks.onCreate) {
+    const cb = callbacks.onCreate
+    wire<{ onCreateDriverAvailability: DriverAvailability }>(
+      `subscription OnCreateDriverAvailability { onCreateDriverAvailability { ${DA_FIELDS} } }`,
+      (d) => { if (d.onCreateDriverAvailability) cb(d.onCreateDriverAvailability) },
+    )
+  }
+  if (callbacks.onUpdate) {
+    const cb = callbacks.onUpdate
+    wire<{ onUpdateDriverAvailability: DriverAvailability }>(
+      `subscription OnUpdateDriverAvailability { onUpdateDriverAvailability { ${DA_FIELDS} } }`,
+      (d) => { if (d.onUpdateDriverAvailability) cb(d.onUpdateDriverAvailability) },
+    )
+  }
+  if (callbacks.onDelete) {
+    const cb = callbacks.onDelete
+    wire<{ onDeleteDriverAvailability: { id: string } }>(
+      `subscription OnDeleteDriverAvailability { onDeleteDriverAvailability { id } }`,
+      (d) => { if (d.onDeleteDriverAvailability?.id) cb(d.onDeleteDriverAvailability.id) },
+    )
+  }
+  return () => handles.forEach((h) => h.unsubscribe())
+}
+
 // ── Amazon disputes ─────────────────────────────────────────────────────────────
 
 import type { AmazonDispute } from '@/types/dispute'

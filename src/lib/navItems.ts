@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, Fuel, History,
-  ShieldCheck, ClipboardCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, Scale, Gauge, type LucideIcon,
+  ShieldCheck, ClipboardCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -46,6 +46,7 @@ export const NAV_GROUPS: NavSection[] = [
     title: 'Sales',
     items: [
       { to: '/vehicle-quote', label: 'Vehicle Quote', icon: Car, pageKey: 'vehicleQuote' },
+      { to: '/vehicle-confirmation', label: 'Booking Confirmation', icon: CalendarCheck, pageKey: 'vehicleConfirmation' },
     ],
   },
   {

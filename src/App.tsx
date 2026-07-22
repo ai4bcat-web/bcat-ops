@@ -28,6 +28,7 @@ import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplian
 import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
+import { VehicleConfirmationPage } from '@/features/vehicle-confirmation/VehicleConfirmationPage'
 import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManagerDashboardPage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
               <Route path="/users" element={<RequireOwner><UsersPage /></RequireOwner>} />
               <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
+              <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
               {/* Compliance & onboarding */}
               <Route path="/compliance" element={<RequirePage page="compliance"><CompliancePage /></RequirePage>} />
               <Route path="/compliance/review" element={<RequirePage page="complianceReview"><ReviewQueuePage /></RequirePage>} />

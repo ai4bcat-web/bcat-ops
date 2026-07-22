@@ -7,11 +7,26 @@ export function useDriverAvailability() {
   const [availabilities, setAvailabilities] = useState<api.DriverAvailability[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Poll-friendly refetch (used by the calendar's periodic refresh). Non-fatal on error.
+  const refresh = useCallback(async () => {
+    try { setAvailabilities(await api.listDriverAvailabilities()) }
+    catch (err) { console.warn('[availability] refresh failed', err) }
+  }, [])
+
   useEffect(() => {
     api.listDriverAvailabilities()
       .then((items) => setAvailabilities(items))
       .catch(console.error)
       .finally(() => setLoading(false))
+
+    // Live-sync: reflect any user's availability changes on every open calendar.
+    // Upsert on create/update (dedupe by id so our own optimistic write isn't doubled).
+    const unsubscribe = api.subscribeToDriverAvailabilityChanges({
+      onCreate: (a) => setAvailabilities((prev) => (prev.some((x) => x.id === a.id) ? prev.map((x) => (x.id === a.id ? a : x)) : [...prev, a])),
+      onUpdate: (a) => setAvailabilities((prev) => prev.map((x) => (x.id === a.id ? a : x))),
+      onDelete: (id) => setAvailabilities((prev) => prev.filter((x) => x.id !== id)),
+    })
+    return unsubscribe
   }, [])
 
   const createAvailability = useCallback(async (
@@ -36,5 +51,5 @@ export function useDriverAvailability() {
     setAvailabilities((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
-  return { availabilities, loading, createAvailability, updateAvailability, deleteAvailability }
+  return { availabilities, loading, refresh, createAvailability, updateAvailability, deleteAvailability }
 }
