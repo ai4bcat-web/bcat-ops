@@ -65,12 +65,11 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
         { key: 'cdl_copy', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 3 },
         { key: 'medical_card', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 5 },
         { key: 'identity_doc_ssc_passport', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 5 },
-        { key: 'mvr_drug_consent_form', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 3 },
-        { key: 'pre_employment_drug_test', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },
+        { key: 'psp_disclosure_authorization', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 3 }, // driver downloads/prints/uploads
+        { key: 'pre_employment_drug_test', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },   // checkbox + date completed
         { key: 'occ_acc_or_workers_comp', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },
         { key: 'amazon_relay_course', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },
         { key: 'eldt_verification', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },       // 49 CFR 380 (CDL after 2/7/2022)
-        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 5 }, // 49 CFR 382.601
         // Ivan Cartage HR — FMCSA Driver Qualification File (49 CFR 391.51) & drug/alcohol program (Part 382)
         { key: 'mvr_initial', owner: 'OFFICE', requiresDocument: true, assignee: 'Ivan Cartage HR' },                 // 391.23 — MVR from each licensing state
         { key: 'prev_employer_inquiry', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },      // 391.23(d)(e) — prior-employer safety investigation
@@ -84,9 +83,8 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       phase: 2,
-      title: 'Lease & IRS',
+      title: 'IRS Forms',
       entries: [
-        { key: 'lease_agreement', owner: 'DRIVER', requiresDocument: true },
         { key: 'i9_w4', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'COMPANY' },
         { key: 'w9', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'OWNER_OPERATOR' },
         { key: 'occ_acc_or_workers_comp', owner: 'OFFICE', requiresDocument: true },
@@ -114,11 +112,13 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       phase: 4,
-      title: 'Inspection & Relay',
+      title: 'Inspection, Relay, Policies & Lease',
       entries: [
         { key: 'annual_dot_inspection', owner: 'DRIVER', requiresDocument: true },
         { key: 'amazon_relay_truck', owner: 'OFFICE', requiresDocument: false, entity: 'TRUCK' },
         { key: 'amazon_relay_driver', owner: 'OFFICE', requiresDocument: false },
+        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false }, // read policies + acknowledge/sign
+        { key: 'lease_agreement', owner: 'DRIVER', requiresDocument: true },              // FINAL step — signed lease upload
       ],
     },
   ],
