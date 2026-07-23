@@ -181,6 +181,15 @@ export const handler = async (event: FnUrlEvent) => {
         const docs = await getDriverDocs(driverId)
         const app = await getApplication(driverId)
 
+        // Phase-gating is judged over the driver's tasks PLUS the assigned truck's tasks
+        // (Phase 3–4 truck setup), matching the staff pipeline's currentPhaseNumber so both
+        // sides agree. Truck tasks are never shown to the driver — only used for gating.
+        const assignedTruckId = driver?.assignedTruckId ? String(driver.assignedTruckId) : ''
+        const truckTasks = assignedTruckId
+          ? await scan(TASK_TABLE, 'entityType = :t AND entityId = :id', {}, { ':t': 'TRUCK', ':id': assignedTruckId })
+          : []
+        const gatingTasks = [...tasks, ...truckTasks]
+
         const latestRejectedByType = new Map<string, string>()
         for (const d of docs.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))) {
           if (d.status === 'REJECTED' && d.rejectionReason) latestRejectedByType.set(String(d.documentType), String(d.rejectionReason))
@@ -193,12 +202,26 @@ export const handler = async (event: FnUrlEvent) => {
         const done = required.filter((t) => t.status === 'COMPLETE' || t.status === 'WAIVED' || t.status === 'PENDING_REVIEW').length
         const progressPct = required.length ? Math.round((done / required.length) * 100) : 0
 
+        // ── Phase gating: the driver sees every phase, but only the CURRENT phase is
+        // actionable; earlier phases are done and later phases are locked. currentPhase
+        // is the lowest phase with a required task not yet finalized. A phase's own
+        // completion is judged over ALL driver-entity tasks (office + driver), so the
+        // next phase unlocks only once staff finalize the prior phase. PENDING_REVIEW is
+        // deliberately NOT "done" — a phase stays current until its work is approved.
+        const DONE = new Set(['COMPLETE', 'WAIVED', 'NOT_APPLICABLE'])
+        const phaseDone = (p: number) =>
+          gatingTasks.filter((t) => Number(t.phase) === p && t.required).every((t) => DONE.has(String(t.status)))
+        const phaseSet = [...new Set(gatingTasks.map((t) => (t.phase != null ? Number(t.phase) : NaN)).filter((n) => !Number.isNaN(n)))].sort((a, b) => a - b)
+        let currentPhase = phaseSet.length ? phaseSet[phaseSet.length - 1] : 1
+        for (const p of phaseSet) { if (!phaseDone(p)) { currentPhase = p; break } }
+
         const checklist = visible
           .sort((a, b) => Number(a.sortOrder) - Number(b.sortOrder))
           .map((t) => ({
             requirementKey: t.requirementKey,
             label: t.label,
             category: t.category,
+            phase: t.phase != null ? Number(t.phase) : null,
             status: t.status,
             required: t.required,
             requiresDocument: t.requiresDocument,
@@ -215,6 +238,8 @@ export const handler = async (event: FnUrlEvent) => {
           firstName,
           driverType: invite.driverType ?? driver?.driverType ?? null,
           progressPct,
+          currentPhase,
+          templateId: (tasks.find((t) => t.templateId)?.templateId as string | undefined) ?? null,
           application: app ? { status: app.status, draft: parseAppJson(app) } : { status: 'DRAFT', draft: null },
           checklist,
         }, origin)

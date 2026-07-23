@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { useParams } from 'react-router-dom'
-import { Upload, FileText, CheckCircle2, Clock, AlertTriangle, PenLine, ExternalLink, CalendarCheck } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, Clock, AlertTriangle, PenLine, ExternalLink, CalendarCheck, Lock } from 'lucide-react'
 import { portal, uploadFile, usingMock, PortalError, type OnboardingState, type ChecklistItem } from './portalApi'
 import { ApplicationForm } from './ApplicationForm'
 import { getRequirement } from '@/lib/complianceRequirements'
+import { getOnboardingTemplate } from '@/lib/onboardingTemplates'
 import type { DriverApplicationDraft } from '@/lib/schemas'
 
 // Driver-facing contact info shown on the expired/error page.
@@ -106,11 +107,21 @@ export function DriverPortalPage() {
     )
   }
 
-  // Group checklist by category
-  const groups = state.checklist.reduce<Record<string, ChecklistItem[]>>((acc, c) => {
-    (acc[c.category] ??= []).push(c)
-    return acc
-  }, {})
+  // Group the checklist by phase. Drivers see the whole road ahead, but only the
+  // current phase is actionable — earlier phases are done, later phases are locked
+  // until the office finalizes the phase before them.
+  const isPhased = state.checklist.some((c) => c.phase != null)
+  const currentPhase = state.currentPhase ?? 1
+  const template = state.templateId ? getOnboardingTemplate(state.templateId) : undefined
+  const phaseTitle = (n: number) => template?.phases.find((p) => p.phase === n)?.title ?? `Phase ${n}`
+
+  // Phased → group by phase (ascending); flat/legacy → groups keyed by category.
+  const phaseGroups: { phase: number; title: string; items: ChecklistItem[] }[] = isPhased
+    ? [...new Set(state.checklist.map((c) => c.phase ?? 1))].sort((a, b) => a - b)
+        .map((n) => ({ phase: n, title: phaseTitle(n), items: state.checklist.filter((c) => (c.phase ?? 1) === n) }))
+    : Object.entries(
+        state.checklist.reduce<Record<string, ChecklistItem[]>>((acc, c) => { (acc[c.category] ??= []).push(c); return acc }, {}),
+      ).map(([cat, items], i) => ({ phase: i + 1, title: cat, items }))
 
   return (
     <Shell>
@@ -144,27 +155,47 @@ export function DriverPortalPage() {
             </div>
           </div>
         ) : (
-          Object.entries(groups).map(([cat, items]) => (
-            <div key={cat} className="mb-5">
-              <div className="mb-2 text-xs font-bold uppercase" style={{ color: 'var(--ds-t3)', letterSpacing: '0.05em' }}>{cat}</div>
-              <div className="space-y-2.5">
-                {items.map((item) => (
-                  <ChecklistRow key={item.requirementKey} item={item} token={token} appStatus={state.application.status}
-                    onOpenApplication={() => setView('application')} onChanged={load} />
-                ))}
+          phaseGroups.map((g) => {
+            const title = g.title
+            const locked = isPhased && g.phase > currentPhase
+            const isDonePhase = isPhased && g.phase < currentPhase
+            const isCurrent = isPhased && g.phase === currentPhase
+            return (
+              <div key={g.phase} className="mb-5" style={{ opacity: locked ? 0.55 : 1 }}>
+                <div className="mb-2 flex items-center gap-2">
+                  <div className="text-xs font-bold uppercase" style={{ color: 'var(--ds-t3)', letterSpacing: '0.05em' }}>
+                    {isPhased ? `Phase ${g.phase} · ` : ''}{title}
+                  </div>
+                  {locked && <span style={{ ...chipBase, background: 'var(--ds-bg-3)', color: 'var(--ds-t3)' }}><Lock size={12} /> Locked</span>}
+                  {isDonePhase && <span style={{ ...chipBase, background: 'var(--ds-green-bg)', color: 'var(--ds-green)' }}><CheckCircle2 size={12} /> Done</span>}
+                  {isCurrent && <span style={{ ...chipBase, background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}>Current step</span>}
+                </div>
+                {locked && (
+                  <div className="mb-2 text-sm" style={{ color: 'var(--ds-t3)' }}>
+                    Unlocks once Phase {g.phase - 1} is approved.
+                  </div>
+                )}
+                <div className="space-y-2.5">
+                  {g.items.map((item) => (
+                    <ChecklistRow key={item.requirementKey} item={item} token={token} appStatus={state.application.status}
+                      locked={locked} onOpenApplication={() => setView('application')} onChanged={load} />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </Shell>
   )
 }
 
-function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: {
+function ChecklistRow({ item, token, appStatus, locked: phaseLocked = false, onOpenApplication, onChanged }: {
   item: ChecklistItem
   token: string
   appStatus: string
+  /** True when this item's phase isn't unlocked yet — render read-only, no actions. */
+  locked?: boolean
   onOpenApplication: () => void
   onChanged: () => Promise<void>
 }) {
@@ -177,9 +208,9 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
   const [showSign, setShowSign] = useState(false)
 
   const inReview = item.status === 'PENDING_REVIEW'
-  // Locked only once a reviewer finalizes it. While pending review the driver can still replace it.
-  const locked = item.status === 'COMPLETE' || item.status === 'WAIVED' || item.status === 'NOT_APPLICABLE'
-  const editable = !locked  // AWAITING_DRIVER, PENDING, PENDING_REVIEW, or rejected
+  // Locked once a reviewer finalizes it, OR when its phase isn't unlocked yet.
+  const statusLocked = item.status === 'COMPLETE' || item.status === 'WAIVED' || item.status === 'NOT_APPLICABLE'
+  const editable = !statusLocked && !phaseLocked  // AWAITING_DRIVER, PENDING, PENDING_REVIEW, or rejected — in the current phase
   const isApplication = item.requirementKey === 'employment_application'
   const canUpload = item.driverActionable && item.requiresDocument
   // Checkbox item that records a completion date (e.g. the drug test).
@@ -241,7 +272,7 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
       </div>
 
       {/* Actions */}
-      {isApplication && appStatus !== 'APPROVED' && (
+      {isApplication && appStatus !== 'APPROVED' && !phaseLocked && (
         <button onClick={onOpenApplication} className="mt-3" style={btnPrimary}>
           <FileText size={15} /> {appStatus === 'SUBMITTED' ? 'Review application' : 'Start application'}
         </button>

@@ -602,14 +602,14 @@ export async function sendDriverPayEmail(args: {
 /**
  * Send the branded HTML vehicle-transport quote. `html` is built on the frontend
  * (src/lib/quoteEmail.ts) so the preview and the sent email match. The Lambda sends
- * from ruben@bcatcorp.com and always BCCs cars@bcatcorp.com.
+ * from ruben@bcatcorp.com and always CCs cars@bcatcorp.com (visible to the customer).
  */
 export async function sendVehicleQuoteEmail(args: {
   to: string
   subject: string
   html: string
   replyTo?: string
-}): Promise<{ sent: boolean; to?: string; bcc?: string; error?: string }> {
+}): Promise<{ sent: boolean; to?: string; cc?: string; error?: string }> {
   const res = await client.graphql({
     query: `mutation SendVehicleQuoteEmail(
       $to: String!, $subject: String!, $html: String!, $replyTo: String
@@ -620,7 +620,7 @@ export async function sendVehicleQuoteEmail(args: {
   })
   let data: unknown = (res as { data?: { sendVehicleQuoteEmail?: unknown } }).data?.sendVehicleQuoteEmail
   if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave as-is */ } }
-  return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; bcc?: string; error?: string }
+  return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; cc?: string; error?: string }
 }
 
 export interface GoogleReviewsResult {

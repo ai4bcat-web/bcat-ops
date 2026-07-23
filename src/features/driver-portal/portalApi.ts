@@ -2,12 +2,20 @@
 // VITE_ONBOARDING_API_URL is set; otherwise falls back to an in-memory mock so the
 // whole loop can be walked on localhost (route /onboard/MOCK) without a deployed backend.
 import { getDriverRequirements } from '@/lib/complianceRequirements'
+import { AMAZON_DRIVER_TEMPLATE } from '@/lib/onboardingTemplates'
 import type { DriverApplicationDraft } from '@/lib/schemas'
+
+// requirementKey → phase, from the Amazon template (drives the mock's phase grouping).
+const MOCK_PHASE_BY_KEY: Record<string, number> = Object.fromEntries(
+  AMAZON_DRIVER_TEMPLATE.phases.flatMap((p) => p.entries.map((e) => [e.key, p.phase])),
+)
 
 export interface ChecklistItem {
   requirementKey: string
   label: string
   category: string
+  /** 1-based onboarding phase; null for legacy/flat (non-phased) checklists. */
+  phase?: number | null
   status: string
   required: boolean
   requiresDocument: boolean
@@ -21,6 +29,10 @@ export interface OnboardingState {
   firstName: string
   driverType: 'COMPANY' | 'OWNER_OPERATOR' | null
   progressPct: number
+  /** Lowest phase not yet finalized — the only actionable phase; later phases are locked. */
+  currentPhase?: number
+  /** OnboardingTemplate.id, so the portal can label phases; null for flat checklists. */
+  templateId?: string | null
   application: { status: string; draft: Partial<DriverApplicationDraft> | null }
   checklist: ChecklistItem[]
 }
@@ -93,6 +105,7 @@ function seedMock(): MockState {
       requirementKey: r.key,
       label: r.label,
       category: r.category,
+      phase: MOCK_PHASE_BY_KEY[r.key] ?? 1,
       status: r.required ? (r.driverActionable ? 'AWAITING_DRIVER' : 'PENDING') : 'NOT_APPLICABLE',
       required: r.required,
       requiresDocument: r.requiresDocument,
@@ -110,6 +123,17 @@ function progress(state: MockState): number {
   return required.length ? Math.round((done / required.length) * 100) : 0
 }
 
+// Lowest phase with a required item not yet finalized (mirrors the Lambda's gating).
+function mockCurrentPhase(state: MockState): number {
+  const DONE = ['COMPLETE', 'WAIVED', 'NOT_APPLICABLE']
+  const phases = [...new Set(state.checklist.map((c) => c.phase ?? 1))].sort((a, b) => a - b)
+  for (const p of phases) {
+    const req = state.checklist.filter((c) => (c.phase ?? 1) === p && c.required)
+    if (!req.every((c) => DONE.includes(c.status))) return p
+  }
+  return phases[phases.length - 1] ?? 1
+}
+
 async function mockPortal<T>(token: string, action: string, payload?: Record<string, unknown>): Promise<T> {
   await new Promise((r) => setTimeout(r, 120)) // simulate latency
   if (token === 'EXPIRED') throw new PortalError(410, 'This link has expired')
@@ -122,6 +146,8 @@ async function mockPortal<T>(token: string, action: string, payload?: Record<str
         firstName: mock.firstName,
         driverType: mock.driverType,
         progressPct: progress(mock),
+        currentPhase: mockCurrentPhase(mock),
+        templateId: AMAZON_DRIVER_TEMPLATE.id,
         application: mock.application,
         checklist: mock.checklist,
       } as T
