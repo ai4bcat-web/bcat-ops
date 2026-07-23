@@ -1,25 +1,100 @@
 import { useMemo, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, ExternalLink, Mail, CheckCheck } from 'lucide-react'
+import { Check, ExternalLink, Mail, CheckCheck, Truck, Container, User } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet'
 import { useComplianceAlerts } from '@/hooks/useComplianceAlerts'
 import { useAuth } from '@/hooks/useAuth'
+import { useAppStore } from '@/store/useAppStore'
 import { listEscalationEmailLogsByAlert } from '@/lib/complianceClient'
-import { SeverityBadge, daysRemainingLabel, Card } from './components'
+import { daysUntil } from '@/lib/complianceStatus'
+import { daysRemainingLabel, Card } from './components'
 import { EmailSettingsCard } from './EmailSettingsCard'
 import { EscalationRulesCard } from './EscalationRulesCard'
 import { BackfillOnboardingCard } from './BackfillOnboardingCard'
 import type { AlertSeverity, ComplianceAlert, ComplianceEntityType, EscalationEmailLog } from '@/types'
+import type { Equipment } from '@/types/equipment'
+import type { Driver } from '@/types'
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = { EXPIRED: 0, CRITICAL: 1, URGENT: 2, UPCOMING: 3 }
+
+// KPI accents (3px left bar) — deep hues for contrast on white.
+const KPI: { sev: AlertSeverity; label: string; color: string; soft: string }[] = [
+  { sev: 'EXPIRED', label: 'Expired', color: '#b91c1c', soft: 'rgba(185,28,28,0.35)' },
+  { sev: 'CRITICAL', label: 'Critical', color: '#b91c1c', soft: 'rgba(185,28,28,0.35)' },
+  { sev: 'URGENT', label: 'Urgent', color: '#b45309', soft: 'rgba(180,83,9,0.35)' },
+  { sev: 'UPCOMING', label: 'Upcoming', color: '#1ea8f3', soft: 'rgba(30,168,243,0.35)' },
+]
+
+const SEV_PILL: Record<AlertSeverity, { bg: string; fg: string; label: string; pulse: boolean }> = {
+  EXPIRED: { bg: 'var(--ds-red-bg)', fg: '#b91c1c', label: 'Expired', pulse: true },
+  CRITICAL: { bg: 'var(--ds-red-bg)', fg: '#b91c1c', label: 'Critical', pulse: true },
+  URGENT: { bg: 'var(--ds-amber-bg)', fg: '#b45309', label: 'Urgent', pulse: false },
+  UPCOMING: { bg: 'var(--ds-blue-bg)', fg: '#0369a1', label: 'Upcoming', pulse: false },
+}
+
+function SeverityPill({ severity }: { severity: AlertSeverity }) {
+  const s = SEV_PILL[severity]
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 999, padding: '3px 10px', fontSize: 12, fontWeight: 600, background: s.bg, color: s.fg, whiteSpace: 'nowrap' }}>
+      <span className={s.pulse ? 'dot-pulse' : undefined} style={{ width: 7, height: 7, borderRadius: '50%', background: s.fg, flexShrink: 0 }} />
+      {s.label}
+    </span>
+  )
+}
+
+function EntityTile({ alert, equipment, drivers }: { alert: ComplianceAlert; equipment: Equipment[]; drivers: Driver[] }) {
+  let icon = <User size={15} />
+  let tint = { fg: '#6d28d9', bg: 'var(--ds-violet-bg)' } // driver/trailer = violet
+  let monoId = ''
+  let name: string
+  let sub: string
+
+  if (alert.entityType === 'TRUCK') {
+    const eq = equipment.find((e) => e.id === alert.entityId)
+    const isTrailer = eq?.type === 'trailer'
+    // NEVER show the raw eq-… UUID — resolve to the unit number.
+    name = eq ? `#${eq.unitNumber}${eq.nickname ? ` · ${eq.nickname}` : ''}` : (alert.entityName ?? 'Unit')
+    monoId = eq?.unitNumber ? `#${eq.unitNumber}` : ''
+    if (isTrailer) { icon = <Container size={15} />; tint = { fg: '#6d28d9', bg: 'var(--ds-violet-bg)' }; sub = 'Trailer' }
+    else { icon = <Truck size={15} />; tint = { fg: '#1ea8f3', bg: 'var(--ds-blue-bg)' }; sub = 'Truck' }
+  } else {
+    const d = drivers.find((x) => x.id === alert.entityId)
+    name = d?.name ?? alert.entityName ?? 'Driver'
+    sub = 'Driver'
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 9, background: tint.bg, color: tint.fg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{icon}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</div>
+        <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+          {monoId && <span style={{ fontFamily: 'var(--font-mono)' }}>{monoId} · </span>}{sub}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ExpirationCell({ date }: { date?: string | null }) {
+  const d = daysUntil(date)
+  const color = d == null ? 'var(--ds-t3)' : d < 0 ? '#b91c1c' : d <= 7 ? '#b45309' : 'var(--ds-t2)'
+  return (
+    <div style={{ whiteSpace: 'nowrap' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color, fontWeight: d != null && d <= 7 ? 600 : 400 }}>{date ?? '—'}</div>
+      <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{daysRemainingLabel(date)}</div>
+    </div>
+  )
+}
 
 export function CompliancePage() {
   const navigate = useNavigate()
   const { isOwner } = useAuth()
   const { alerts, loading, acknowledge, resolve } = useComplianceAlerts()
+  const equipment = useAppStore((s) => s.equipment)
+  const drivers = useAppStore((s) => s.drivers)
   const [severity, setSeverity] = useState<AlertSeverity | 'ALL'>('ALL')
   const [entityType, setEntityType] = useState<ComplianceEntityType | 'ALL'>('ALL')
   const [showAcked, setShowAcked] = useState(false)
@@ -77,27 +152,32 @@ export function CompliancePage() {
     navigate(a.entityType === 'DRIVER' ? `/compliance/driver/${a.entityId}` : `/compliance/truck/${a.entityId}`)
   }
 
+  const allShownSelected = visible.length > 0 && visible.every((a) => selected.has(a.id))
+
   return (
     <div className="h-full overflow-y-auto">
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', margin: 0 }}>Compliance alerts</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Compliance alerts</h1>
           <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>Expiring and expired DOT documents across drivers and trucks.</p>
         </div>
 
-        {/* Counts */}
+        {/* KPI cards — 3px left accent */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-          {([['EXPIRED', '#dc2626'], ['CRITICAL', '#dc2626'], ['URGENT', '#f59e0b'], ['UPCOMING', '#1ea8f3']] as [AlertSeverity, string][]).map(([sev, color]) => (
-            <button key={sev} onClick={() => setSeverity(severity === sev ? 'ALL' : sev)}
-              style={{ textAlign: 'left', background: 'var(--ds-surface)', border: `1px solid ${severity === sev ? color : 'var(--ds-border)'}`, borderRadius: 12, padding: '14px 16px', cursor: 'pointer' }}>
-              <div style={{ fontSize: 26, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{counts[sev]}</div>
-              <div style={{ fontSize: 12, color: 'var(--ds-t3)', textTransform: 'capitalize' }}>{sev.toLowerCase()}</div>
-            </button>
-          ))}
+          {KPI.map(({ sev, label, color, soft }) => {
+            const active = severity === sev
+            return (
+              <button key={sev} onClick={() => setSeverity(active ? 'ALL' : sev)}
+                style={{ textAlign: 'left', background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderLeft: `3px solid ${color}`, borderRadius: 12, padding: '14px 16px', cursor: 'pointer', boxShadow: active ? `0 0 0 2px ${soft}` : 'var(--sh-sm)' }}>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ds-t3)' }}>{label}</div>
+                <div style={{ fontSize: 30, fontWeight: 600, color, letterSpacing: '-0.02em', lineHeight: 1.1, marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{counts[sev]}</div>
+              </button>
+            )
+          })}
         </div>
 
-        {/* Filters */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Filter row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <select value={entityType} onChange={(e) => setEntityType(e.target.value as ComplianceEntityType | 'ALL')}
             className="h-9 rounded-md border border-input bg-white px-3 text-sm">
             <option value="ALL">All entities</option>
@@ -116,11 +196,14 @@ export function CompliancePage() {
             <input type="checkbox" checked={showAcked} onChange={(e) => setShowAcked(e.target.checked)} />
             Show acknowledged
           </label>
+          <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+            {loading ? 'Loading…' : `${visible.length} alert${visible.length === 1 ? '' : 's'}`}
+          </span>
         </div>
 
         <Card
           title="Alerts"
-          sub={loading ? 'Loading…' : `${visible.length} shown`}
+          sub={loading ? undefined : `${visible.length} shown`}
           right={
             visible.length > 0 ? (
               <div style={{ display: 'flex', gap: 8 }}>
@@ -135,56 +218,50 @@ export function CompliancePage() {
           }
           noPad
         >
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                  <th style={{ padding: '8px 16px', width: 32 }}>
-                    <input
-                      type="checkbox"
-                      aria-label="Select all shown"
-                      checked={visible.length > 0 && visible.every((a) => selected.has(a.id))}
-                      onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((a) => a.id)) : new Set())}
-                    />
-                  </th>
-                  {['Entity', 'Document', 'Severity', 'Expiration', ''].map((h, i) => (
-                    <th key={h} style={{ padding: '8px 16px', textAlign: i === 4 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {!loading && visible.length === 0 && (
-                  <tr><td colSpan={6} style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--ds-t3)' }}>No alerts. All clear. ✅</td></tr>
-                )}
-                {visible.map((a) => (
-                  <tr key={a.id} style={{ borderBottom: '1px solid var(--ds-border)', opacity: a.acknowledged ? 0.6 : 1, background: selected.has(a.id) ? 'rgba(30,168,243,0.05)' : undefined }}>
-                    <td style={{ padding: '10px 16px' }}>
-                      <input type="checkbox" aria-label="Select alert" checked={selected.has(a.id)} onChange={() => toggleSelect(a.id)} />
-                    </td>
-                    <td style={{ padding: '10px 16px' }}>
-                      <span style={{ fontWeight: 500, color: 'var(--ds-t1)' }}>{a.entityName ?? a.entityId}</span>
-                      <Badge variant="secondary" className="ml-2">{a.entityType === 'DRIVER' ? 'Driver' : 'Truck'}</Badge>
-                    </td>
-                    <td style={{ padding: '10px 16px', color: 'var(--ds-t2)' }}>{a.documentTitle ?? a.documentType}</td>
-                    <td style={{ padding: '10px 16px' }}><SeverityBadge severity={a.severity} /></td>
-                    <td style={{ padding: '10px 16px', color: 'var(--ds-t2)' }}>
-                      {a.expirationDate ?? '—'}<span style={{ marginLeft: 6, fontSize: 11.5, color: 'var(--ds-t3)' }}>({daysRemainingLabel(a.expirationDate)})</span>
-                    </td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <Button size="sm" variant="ghost" onClick={() => setHistoryAlert(a)} title="Email history"><Mail size={14} /></Button>
-                      <Button size="sm" variant="ghost" onClick={() => goToEntity(a)}><ExternalLink size={14} /> Open</Button>
-                      {!a.acknowledged && <Button size="sm" variant="outline" disabled={busyId === a.id} onClick={() => ack(a)}><Check size={14} /> Acknowledge</Button>}
-                    </td>
-                  </tr>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+            <thead style={{ background: 'var(--ds-bg-2)' }}>
+              <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                <th style={{ padding: '9px 16px', width: 38 }}>
+                  <input type="checkbox" aria-label="Select all shown" checked={allShownSelected}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(visible.map((a) => a.id)) : new Set())} />
+                </th>
+                {[['Entity', 'auto'], ['Document', 'auto'], ['Severity', '130px'], ['Expiration', '150px'], ['', '190px']].map(([h, w], i) => (
+                  <th key={h || i} style={{ padding: '9px 16px', width: w, textAlign: i === 4 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </tr>
+            </thead>
+            <tbody>
+              {!loading && visible.length === 0 && (
+                <tr><td colSpan={6} style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--ds-t3)' }}>No alerts. All clear. ✅</td></tr>
+              )}
+              {visible.map((a) => (
+                <tr key={a.id} className="hover:bg-slate-50/60"
+                  style={{ borderBottom: '1px solid var(--ds-border)', opacity: a.acknowledged ? 0.6 : 1, background: selected.has(a.id) ? 'rgba(30,168,243,0.05)' : undefined }}>
+                  <td style={{ padding: '10px 16px' }}>
+                    <input type="checkbox" aria-label="Select alert" checked={selected.has(a.id)} onChange={() => toggleSelect(a.id)} />
+                  </td>
+                  <td style={{ padding: '10px 16px' }}><EntityTile alert={a} equipment={equipment} drivers={drivers} /></td>
+                  <td style={{ padding: '10px 16px', color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.documentTitle ?? a.documentType}</td>
+                  <td style={{ padding: '10px 16px' }}><SeverityPill severity={a.severity} /></td>
+                  <td style={{ padding: '10px 16px' }}><ExpirationCell date={a.expirationDate} /></td>
+                  <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <Button size="sm" variant="ghost" onClick={() => setHistoryAlert(a)} title="Email history" aria-label="Email history"><Mail size={14} /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => goToEntity(a)}><ExternalLink size={14} /> Open</Button>
+                    {!a.acknowledged && <Button size="sm" variant="outline" disabled={busyId === a.id} onClick={() => ack(a)}><Check size={14} /> Ack</Button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
 
         {isOwner && <BackfillOnboardingCard />}
-        <EscalationRulesCard />
-        <EmailSettingsCard />
+
+        {/* Two-up: escalation rules + email settings */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+          <EscalationRulesCard />
+          <EmailSettingsCard />
+        </div>
       </div>
 
       <AlertEmailHistorySheet alert={historyAlert} onClose={() => setHistoryAlert(null)} />
