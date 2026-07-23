@@ -206,11 +206,11 @@ export function CompliancePage() {
           sub={loading ? undefined : `${visible.length} shown`}
           right={
             visible.length > 0 ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Button size="sm" variant="outline" disabled={resolving || selected.size === 0} onClick={() => resolveAlerts([...selected])}>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <Button size="sm" style={{ paddingInline: 16 }} disabled={resolving || selected.size === 0} onClick={() => resolveAlerts([...selected])}>
                   <CheckCheck size={14} /> Resolve selected{selected.size > 0 ? ` (${selected.size})` : ''}
                 </Button>
-                <Button size="sm" variant="outline" disabled={resolving} onClick={() => resolveAlerts(visible.map((a) => a.id))}>
+                <Button size="sm" variant="outline" style={{ paddingInline: 16 }} disabled={resolving} onClick={() => resolveAlerts(visible.map((a) => a.id))}>
                   Resolve all shown
                 </Button>
               </div>
@@ -244,10 +244,12 @@ export function CompliancePage() {
                   <td style={{ padding: '10px 16px', color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.documentTitle ?? a.documentType}</td>
                   <td style={{ padding: '10px 16px' }}><SeverityPill severity={a.severity} /></td>
                   <td style={{ padding: '10px 16px' }}><ExpirationCell date={a.expirationDate} /></td>
-                  <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    <Button size="sm" variant="ghost" onClick={() => setHistoryAlert(a)} title="Email history" aria-label="Email history"><Mail size={14} /></Button>
-                    <Button size="sm" variant="ghost" onClick={() => goToEntity(a)}><ExternalLink size={14} /> Open</Button>
-                    {!a.acknowledged && <Button size="sm" variant="outline" disabled={busyId === a.id} onClick={() => ack(a)}><Check size={14} /> Ack</Button>}
+                  <td style={{ padding: '10px 16px' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+                      <Button size="sm" variant="ghost" style={{ paddingInline: 12 }} onClick={() => setHistoryAlert(a)} title="Email history" aria-label="Email history"><Mail size={14} /></Button>
+                      <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={() => goToEntity(a)}><ExternalLink size={14} /> Open</Button>
+                      {!a.acknowledged && <Button size="sm" style={{ paddingInline: 16 }} disabled={busyId === a.id} onClick={() => ack(a)}><Check size={14} /> Ack</Button>}
+                    </div>
                   </td>
                 </tr>
               ))}

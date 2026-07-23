@@ -51,7 +51,7 @@ export function EmailSettingsCard() {
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 6 }}>Manager recipients (escalation, comma-separated)</div>
             <div style={{ display: 'flex', gap: 8 }}>
               <Input value={managerEmails} onChange={(e) => setManagerEmails(e.target.value)} placeholder="ops@bcatcorp.com, safety@bcatcorp.com" className="h-9" />
-              <Button size="sm" variant="outline" onClick={saveManagers}>Save</Button>
+              <Button size="sm" variant="outline" style={{ paddingInline: 18 }} onClick={saveManagers}>Save</Button>
             </div>
           </div>
         </div>

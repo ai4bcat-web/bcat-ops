@@ -41,7 +41,7 @@ export function EscalationRulesCard() {
     <Card
       title="Escalation rules"
       sub="When to email about expiring documents"
-      right={rules.length === 0 ? <Button size="sm" variant="outline" disabled={busy} onClick={seed}><Plus size={14} /> Seed defaults</Button> : undefined}
+      right={rules.length === 0 ? <Button size="sm" variant="outline" style={{ paddingInline: 16 }} disabled={busy} onClick={seed}><Plus size={14} /> Seed defaults</Button> : undefined}
     >
       {loading ? (
         <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
