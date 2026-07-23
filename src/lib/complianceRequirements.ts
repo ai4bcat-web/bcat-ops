@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-23.5'
+export const CATALOG_VERSION = '2026-07-23.6'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -298,8 +298,8 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Download the IRS Form W-9 below, complete and sign it for your business or yourself, then upload the completed form.',
-    links: [{ label: 'Download IRS Form W-9', url: 'https://www.irs.gov/pub/irs-pdf/fw9.pdf' }],
+      'Download the W-9 form below, complete and sign it for your business or yourself, then upload the completed form.',
+    links: [{ label: 'Download the W-9 form', url: 'https://drive.google.com/file/d/1Z7voKxDUMI90wcJAD5D-HTWjNb1qVUnE/view?usp=sharing' }],
   },
   {
     key: 'equipment_receipt',
