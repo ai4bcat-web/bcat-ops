@@ -134,6 +134,12 @@ function serializeAppJson(input: Record<string, unknown>): Record<string, unknow
   return out
 }
 
+// OnboardingTask.links is stored as AWSJSON (a JSON string). Parse to an array for the portal.
+function parseLinks(v: unknown): { label: string; url: string }[] | null {
+  if (!v) return null
+  try { const a = typeof v === 'string' ? JSON.parse(v) : v; return Array.isArray(a) ? a : null } catch { return null }
+}
+
 async function getDriverTasks(driverId: string) {
   return scan(TASK_TABLE, 'entityType = :d AND entityId = :id', {}, { ':d': 'DRIVER', ':id': driverId })
 }
@@ -182,7 +188,9 @@ export const handler = async (event: FnUrlEvent) => {
 
         const visible = tasks.filter((t) => t.driverVisible)
         const required = visible.filter((t) => t.required && t.status !== 'NOT_APPLICABLE')
-        const done = required.filter((t) => t.status === 'COMPLETE' || t.status === 'WAIVED').length
+        // Count submitted (pending-review) items as progress too, so the bar moves as the
+        // driver uploads — not only after staff approve.
+        const done = required.filter((t) => t.status === 'COMPLETE' || t.status === 'WAIVED' || t.status === 'PENDING_REVIEW').length
         const progressPct = required.length ? Math.round((done / required.length) * 100) : 0
 
         const checklist = visible
@@ -196,6 +204,7 @@ export const handler = async (event: FnUrlEvent) => {
             requiresDocument: t.requiresDocument,
             requiresExpiration: t.requiresExpiration,
             driverActionable: t.driverActionable,
+            links: parseLinks(t.links),
             rejectionReason:
               t.requirementKey === 'employment_application' && app?.status === 'REJECTED'
                 ? app?.rejectionReason ?? null

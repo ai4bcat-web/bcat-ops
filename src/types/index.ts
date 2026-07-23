@@ -145,6 +145,7 @@ export interface OnboardingTask {
   dueDate?: string | null          // YYYY-MM-DD
   templateId?: string | null       // OnboardingTemplate.id this task came from
   catalogVersion?: string | null   // CATALOG_VERSION at generation time
+  links?: { label: string; url: string }[] | null   // form/policy links shown in the portal
   createdAt: string
   updatedAt: string
 }

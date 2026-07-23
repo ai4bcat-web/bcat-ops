@@ -134,17 +134,28 @@ export function DriverPortalPage() {
           </div>
         </div>
 
-        {Object.entries(groups).map(([cat, items]) => (
-          <div key={cat} className="mb-5">
-            <div className="mb-2 text-xs font-bold uppercase" style={{ color: 'var(--ds-t3)', letterSpacing: '0.05em' }}>{cat}</div>
-            <div className="space-y-2.5">
-              {items.map((item) => (
-                <ChecklistRow key={item.requirementKey} item={item} token={token} appStatus={state.application.status}
-                  onOpenApplication={() => setView('application')} onChanged={load} />
-              ))}
+        {state.checklist.length === 0 ? (
+          <div style={{ ...cardStyle, textAlign: 'center' }}>
+            <AlertTriangle className="mx-auto mb-3" size={28} style={{ color: 'var(--ds-amber)' }} />
+            <div style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>Your onboarding isn’t set up yet.</div>
+            <div className="mt-1 text-sm" style={{ color: 'var(--ds-t3)' }}>
+              Please contact Ivan Cartage so we can get you started:<br />
+              <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>{CONTACT_PHONE}</span> · {CONTACT_EMAIL}
             </div>
           </div>
-        ))}
+        ) : (
+          Object.entries(groups).map(([cat, items]) => (
+            <div key={cat} className="mb-5">
+              <div className="mb-2 text-xs font-bold uppercase" style={{ color: 'var(--ds-t3)', letterSpacing: '0.05em' }}>{cat}</div>
+              <div className="space-y-2.5">
+                {items.map((item) => (
+                  <ChecklistRow key={item.requirementKey} item={item} token={token} appStatus={state.application.status}
+                    onOpenApplication={() => setView('application')} onChanged={load} />
+                ))}
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </Shell>
   )
@@ -165,13 +176,17 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
   const [busy, setBusy] = useState(false)
   const [showSign, setShowSign] = useState(false)
 
-  const isDone = item.status === 'COMPLETE' || item.status === 'WAIVED' || item.status === 'PENDING_REVIEW' || item.status === 'NOT_APPLICABLE'
+  const inReview = item.status === 'PENDING_REVIEW'
+  // Locked only once a reviewer finalizes it. While pending review the driver can still replace it.
+  const locked = item.status === 'COMPLETE' || item.status === 'WAIVED' || item.status === 'NOT_APPLICABLE'
+  const editable = !locked  // AWAITING_DRIVER, PENDING, PENDING_REVIEW, or rejected
   const isApplication = item.requirementKey === 'employment_application'
   const canUpload = item.driverActionable && item.requiresDocument
   // Checkbox item that records a completion date (e.g. the drug test).
   const needsDate = !!req?.requiresCompletionDate && item.driverActionable && !item.requiresDocument && !isApplication
   const canSign = item.driverActionable && !item.requiresDocument && !isApplication && !needsDate
-  const links = (req?.links ?? []).filter((l) => l.url)
+  // Edited task links win; fall back to the catalog default links.
+  const links = ((item.links ?? req?.links) ?? []).filter((l) => l.url)
 
   async function handleFile(file: File) {
     setBusy(true)
@@ -232,7 +247,13 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
         </button>
       )}
 
-      {!isApplication && canUpload && (!isDone || item.rejectionReason) && (
+      {inReview && (
+        <div className="mt-2 text-xs" style={{ color: 'var(--ds-t3)' }}>
+          Submitted for review — you can still change it here until we review it.
+        </div>
+      )}
+
+      {!isApplication && canUpload && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {item.requiresExpiration && (
             <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--ds-t2)' }}>
@@ -241,16 +262,16 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
           )}
           <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.heif" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
           <button disabled={busy} onClick={() => fileRef.current?.click()} style={{ ...btnPrimary, opacity: busy ? 0.5 : 1 }}>
-            <Upload size={15} /> {item.rejectionReason ? 'Re-upload' : 'Upload photo or PDF'}
+            <Upload size={15} /> {inReview ? 'Replace file' : item.rejectionReason ? 'Re-upload' : 'Upload photo or PDF'}
           </button>
         </div>
       )}
 
-      {!isApplication && canSign && (!isDone || item.rejectionReason) && (
+      {!isApplication && canSign && editable && (
         <div className="mt-3">
           {!showSign ? (
             <button onClick={() => setShowSign(true)} style={btnPrimary}>
-              <PenLine size={15} /> Acknowledge & sign
+              <PenLine size={15} /> {inReview ? 'Re-sign' : 'Acknowledge & sign'}
             </button>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
@@ -261,14 +282,14 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
         </div>
       )}
 
-      {!isApplication && needsDate && (!isDone || item.rejectionReason) && (
+      {!isApplication && needsDate && editable && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--ds-t2)' }}>
             Date drug test completed
             <input type="date" value={completedDate} onChange={(e) => setCompletedDate(e.target.value)} style={inputStyle} />
           </label>
           <button disabled={busy || !completedDate} onClick={handleMarkComplete} style={{ ...btnSuccess, opacity: busy || !completedDate ? 0.5 : 1 }}>
-            <CalendarCheck size={15} /> Mark complete
+            <CalendarCheck size={15} /> {inReview ? 'Update date' : 'Mark complete'}
           </button>
         </div>
       )}

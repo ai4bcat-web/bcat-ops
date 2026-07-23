@@ -663,6 +663,7 @@ const schema = a.schema({
       dueDate:             a.string(),                // YYYY-MM-DD
       templateId:          a.string(),                // OnboardingTemplate.id
       catalogVersion:      a.string(),                // CATALOG_VERSION at generation time
+      links:               a.json(),                  // [{label,url}] form/policy links shown in the portal (editable)
     })
     .secondaryIndexes((index) => [
       index('entityId'),

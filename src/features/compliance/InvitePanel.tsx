@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useOnboardingInvites } from '@/hooks/useOnboardingInvites'
+import { useOnboardingTasks } from '@/hooks/useOnboardingTasks'
 import { buildPortalUrl } from '@/lib/complianceClient'
 import { daysRemainingLabel, Card } from './components'
 import type { Driver, OnboardingInviteStatus } from '@/types'
@@ -24,6 +25,9 @@ function fmtDateTime(iso?: string | null): string {
 
 export function InvitePanel({ driver }: { driver: Driver }) {
   const { activeInvite, loading, createInvite, revokeInvite, resendInvite, extendInvite } = useOnboardingInvites(driver.id)
+  const { tasks } = useOnboardingTasks('DRIVER', driver.id)
+  // An invite with no checklist behind it hands the driver an empty portal — block it.
+  const hasChecklist = tasks.length > 0
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -52,12 +56,17 @@ export function InvitePanel({ driver }: { driver: Driver }) {
           <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>No active invite for this driver.</div>
           <Button
             size="sm"
-            disabled={busy || !driver.email}
+            disabled={busy || !driver.email || !hasChecklist}
             onClick={() => withBusy(() => createInvite(driver.email!, driver.driverType ?? 'COMPANY'), 'Invite created')}
           >
             <Mail size={14} /> Create invite
           </Button>
           {!driver.email && <div style={{ fontSize: 12, color: '#dc2626' }}>Add an email to the driver first.</div>}
+          {!hasChecklist && (
+            <div style={{ fontSize: 12, color: '#b45309' }}>
+              No checklist yet — use <strong>Start onboarding</strong> above to generate the steps first, or the driver gets an empty portal.
+            </div>
+          )}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

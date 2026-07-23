@@ -149,6 +149,7 @@ export function OnboardingTemplateEditor() {
                 {phase.entries.map((entry, ei) => {
                   const req = getRequirement(entry.key)
                   const visible = effectiveVisible(entry)
+                  const eLinks = entry.links ?? req?.links ?? []
                   return (
                     <div key={ei} style={{ padding: '8px 0', borderBottom: '1px solid var(--ds-border)' }}>
                       {/* line 1: label + reorder/remove */}
@@ -196,6 +197,26 @@ export function OnboardingTemplateEditor() {
                           <input value={entry.assignee ?? ''} onChange={(e) => patchEntry(pi, ei, { assignee: e.target.value || undefined })} placeholder="e.g. Ivan Cartage HR" style={{ width: 130 }} className={selCls} />
                         </label>
                         <span style={{ fontSize: 11, color: 'var(--ds-t3)', fontFamily: 'var(--font-mono)' }}>{entry.key}</span>
+                      </div>
+
+                      {/* line 3: links the driver sees (form downloads / policies) */}
+                      <div style={{ marginTop: 8, paddingLeft: 22 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)' }}>Links the driver sees (form downloads / policies)</div>
+                        {eLinks.map((l, li) => (
+                          <div key={li} style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
+                            <input value={l.label}
+                              onChange={(e) => patchEntry(pi, ei, { links: eLinks.map((x, i) => (i === li ? { ...x, label: e.target.value } : x)) })}
+                              placeholder="Label" className={selCls} style={{ width: 190 }} />
+                            <input value={l.url}
+                              onChange={(e) => patchEntry(pi, ei, { links: eLinks.map((x, i) => (i === li ? { ...x, url: e.target.value } : x)) })}
+                              placeholder="https://…" className={selCls} style={{ flex: 1 }} />
+                            <Button size="sm" variant="ghost" onClick={() => patchEntry(pi, ei, { links: eLinks.filter((_, i) => i !== li) })} title="Remove link" style={{ color: 'var(--ds-red)' }}><Trash2 size={12} /></Button>
+                          </div>
+                        ))}
+                        <button type="button" onClick={() => patchEntry(pi, ei, { links: [...eLinks, { label: '', url: '' }] })}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 6, fontSize: 12, color: 'var(--ds-blue-dark)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                          <Plus size={12} /> add link
+                        </button>
                       </div>
                     </div>
                   )
