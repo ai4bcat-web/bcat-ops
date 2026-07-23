@@ -68,7 +68,7 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
         { key: 'psp_disclosure_authorization', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 3 }, // driver downloads/prints/uploads
         { key: 'pre_employment_drug_test', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },   // checkbox + date completed
         { key: 'occ_acc_or_workers_comp', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },
-        { key: 'amazon_relay_course', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 },
+        { key: 'amazon_relay_course', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' }, // HR enrolls once the driver's application is done
         { key: 'eldt_verification', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },       // 49 CFR 380 (CDL after 2/7/2022)
         // Ivan Cartage HR — FMCSA Driver Qualification File (49 CFR 391.51) & drug/alcohol program (Part 382)
         { key: 'mvr_initial', owner: 'OFFICE', requiresDocument: true, assignee: 'Ivan Cartage HR' },                 // 391.23 — MVR from each licensing state
@@ -83,10 +83,11 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       phase: 2,
-      title: 'IRS Forms',
+      title: 'Payroll & IRS Forms',
       entries: [
         { key: 'i9_w4', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'COMPANY' },
         { key: 'w9', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'OWNER_OPERATOR' },
+        { key: 'direct_deposit_authorization', owner: 'DRIVER', requiresDocument: true }, // download / fill / upload
         { key: 'occ_acc_or_workers_comp', owner: 'OFFICE', requiresDocument: true },
       ],
     },
