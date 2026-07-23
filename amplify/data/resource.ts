@@ -737,6 +737,19 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // Editable onboarding template (phased flows). One row per templateId (e.g.
+  // 'amazon-driver-v1') holding the full phases[] as JSON. When present, kickoff reads
+  // this instead of the code default, so staff can edit what onboarding looks like.
+  OnboardingTemplateConfig: a
+    .model({
+      templateId: a.string().required(),   // e.g. 'amazon-driver-v1' — PK
+      label:      a.string(),
+      phases:     a.json(),                 // OnboardingPhase[] (see src/lib/onboardingTemplates.ts)
+      updatedBy:  a.string(),
+    })
+    .identifier(['templateId'])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.

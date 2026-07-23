@@ -1,5 +1,6 @@
 import { ReviewQueueSection } from '@/features/compliance-review/ReviewQueuePage'
 import { OnboardingPipelineSection } from './OnboardingPipelinePage'
+import { OnboardingTemplateEditor } from './OnboardingTemplateEditor'
 
 /**
  * Merged onboarding hub: the approvals worklist ("Needs review") on top of the driver
@@ -17,6 +18,7 @@ export function OnboardingPage() {
           </p>
         </div>
 
+        <OnboardingTemplateEditor />
         <ReviewQueueSection />
         <OnboardingPipelineSection />
       </div>

@@ -12,8 +12,8 @@ import { useStartOnboarding } from '@/hooks/useStartOnboarding'
 import { useOnboardingInvites } from '@/hooks/useOnboardingInvites'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
-import { buildPortalUrl, generateTemplateChecklist, writeComplianceAudit } from '@/lib/complianceClient'
-import { ONBOARDING_TEMPLATES, getOnboardingTemplate } from '@/lib/onboardingTemplates'
+import { buildPortalUrl, generateTemplateChecklist, resolveOnboardingTemplate, writeComplianceAudit } from '@/lib/complianceClient'
+import { ONBOARDING_TEMPLATES } from '@/lib/onboardingTemplates'
 import type { Driver, DriverType } from '@/types'
 
 // null = the standard flat Ivan/Local checklist; otherwise a phased template id.
@@ -46,7 +46,7 @@ export function OnboardingKickoffDialog({ driver, open, onOpenChange }: Props) {
     }
     setBusy(true)
     try {
-      const template = templateId === STANDARD ? null : getOnboardingTemplate(templateId)
+      const template = templateId === STANDARD ? null : (await resolveOnboardingTemplate(templateId) ?? null)
       if (template) {
         const { created } = await generateTemplateChecklist({ driverId: driver.id, driverType: classification, template })
         await writeComplianceAudit({

@@ -20,8 +20,14 @@ export interface TemplateEntry {
   /** Catalog requirement key — resolved via getRequirement(). */
   key: string
   owner: TaskOwner
+  /** Overrides the catalog label (the driver-facing step name) when set. */
+  label?: string
   /** Overrides the catalog's requiresDocument when set (per-task file vs. checkbox). */
   requiresDocument?: boolean
+  /** Overrides the catalog's `required` when set. */
+  required?: boolean
+  /** Overrides driver-portal visibility (default follows owner === 'DRIVER'). */
+  driverVisible?: boolean
   /** Include this entry only for the given driver type (omit = all types). */
   appliesToDriverType?: DriverType
   /** Due date = phase-start date + this many days (omit = no due date). */

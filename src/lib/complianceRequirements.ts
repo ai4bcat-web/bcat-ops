@@ -733,10 +733,17 @@ export function getTruckRequirements(ownershipType: TruckOwnershipType): Complia
   return TRUCK_REQUIREMENTS.filter((r) => r.appliesTo.includes(ownershipType))
 }
 
+// Every known requirement across all catalogs — used by the template editor's step picker.
+export const ALL_REQUIREMENTS: readonly ComplianceRequirement[] = [
+  ...DRIVER_REQUIREMENTS,
+  ...TRUCK_REQUIREMENTS,
+  ...AMAZON_REQUIREMENTS,
+]
+
 // AMAZON_REQUIREMENTS are registered here (so getRequirement() resolves them) but are
 // deliberately excluded from getDriverRequirements/getTruckRequirements above.
 const BY_KEY: ReadonlyMap<string, ComplianceRequirement> = new Map(
-  [...DRIVER_REQUIREMENTS, ...TRUCK_REQUIREMENTS, ...AMAZON_REQUIREMENTS].map((r) => [r.key, r]),
+  ALL_REQUIREMENTS.map((r) => [r.key, r]),
 )
 
 export function getRequirement(key: string): ComplianceRequirement | undefined {
