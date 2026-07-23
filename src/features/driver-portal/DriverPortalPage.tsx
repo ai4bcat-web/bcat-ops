@@ -299,7 +299,7 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--ds-bg)' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
       <header style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
         <div className="mx-auto flex max-w-xl items-center gap-2.5 px-4 py-3.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
@@ -309,7 +309,11 @@ function Shell({ children }: { children: React.ReactNode }) {
           <div className="ml-auto text-xs" style={{ color: 'var(--ds-t3)' }}>Driver onboarding</div>
         </div>
       </header>
-      {children}
+      {/* Center the content on the page — vertically + horizontally — and scroll when it's tall.
+          `margin: auto` in a flex column centers vertically without clipping the top on overflow. */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ margin: 'auto', width: '100%' }}>{children}</div>
+      </main>
     </div>
   )
 }
