@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-23.1'
+export const CATALOG_VERSION = '2026-07-23.2'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -229,12 +229,8 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Read Ivan Cartage’s company policies and Drug & Alcohol policy using the links below, then acknowledge and sign by typing your full name.',
-    links: [
-      // TODO: paste the policy URLs (rows with a blank url are hidden in the portal).
-      { label: 'Company policies', url: '' },
-      { label: 'Drug & Alcohol policy', url: '' },
-    ],
+      'Read Ivan Cartage’s company policy (which includes the Drug & Alcohol policy) using the link below, then acknowledge and sign by typing your full name.',
+    links: [{ label: 'Company policy', url: 'https://drive.google.com/file/d/1Zee89vAC-L-7wQg6MrS2Dy0-lgJeGQxA/view?usp=sharing' }],
   },
   {
     key: 'voided_check_or_direct_deposit',
@@ -365,7 +361,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverActionable: true,
     helpText:
       'Download the occupational-accident / workers-compensation form below, print and complete it, then upload the signed copy and enter its expiration date.',
-    links: [{ label: 'Download the occupational-accident form', url: '' }], // TODO: paste the form URL
+    links: [{ label: 'Download the occupational-accident form', url: 'https://drive.google.com/file/d/1p-IullRZkDsfxqEADb_mKt3OI_Y31Xog/view?usp=sharing' }],
   },
   {
     key: 'truck_title_registration',
@@ -705,7 +701,7 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverActionable: true,
     helpText:
       'Download the FMCSA PSP (Pre-employment Screening Program) Disclosure & Authorization form below, print it, complete and sign it, then upload the signed copy.',
-    links: [{ label: 'Download the PSP Disclosure & Authorization form', url: '' }], // TODO: paste the form URL
+    links: [{ label: 'Download the PSP Disclosure & Authorization form', url: 'https://drive.google.com/file/d/11iMnWixv5UNQ2heW8NO0vydAPcFsY3P0/view?usp=sharing' }],
   },
   {
     key: 'nm_permits',
