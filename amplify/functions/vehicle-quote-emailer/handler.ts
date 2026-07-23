@@ -4,7 +4,8 @@
  * Emails a customer their Best Care Auto Transport vehicle-transport quote as a
  * branded HTML email. The frontend builds the HTML (so the on-screen preview and the
  * sent message are byte-identical) and passes it here; this Lambda sends it via SES
- * from ruben@bcatcorp.com and always BCCs cars@bcatcorp.com.
+ * from ruben@bcatcorp.com and always CCs cars@bcatcorp.com (visible to the customer,
+ * so replies naturally include the team).
  *
  * bcatcorp.com is verified in SES at the domain level, so ruben@bcatcorp.com sends
  * with no per-address verification.
@@ -15,7 +16,8 @@ import { LOGO_CID, LOGO_PNG_BASE64 } from './logo'
 const ses = new SESv2Client({})
 
 const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ruben@bcatcorp.com'
-const BCC_ADDRESS = process.env.BCC_ADDRESS ?? 'cars@bcatcorp.com'
+// CC (was BCC) — falls back to the old BCC_ADDRESS var so existing wiring keeps working.
+const CC_ADDRESS = process.env.CC_ADDRESS ?? process.env.BCC_ADDRESS ?? 'cars@bcatcorp.com'
 
 interface Args {
   to: string
@@ -40,11 +42,14 @@ function encodeSubject(s: string): string {
  * Build a multipart/related raw message: the HTML (base64/UTF-8) plus the Best
  * Care logo as an inline image referenced by `cid:${LOGO_CID}` in the HTML.
  */
-function buildRawWithLogo(from: string, to: string, subject: string, replyTo: string | undefined, html: string): Uint8Array {
+function buildRawWithLogo(from: string, to: string, cc: string | undefined, subject: string, replyTo: string | undefined, html: string): Uint8Array {
   const boundary = `=_bcatquote_${Buffer.from(to).toString('hex').slice(0, 16)}`
   const raw =
     `From: ${from}\r\n` +
     `To: ${to}\r\n` +
+    // Visible Cc header — the raw MIME carries the display headers, so this is what
+    // makes cars@ show up as a copied recipient rather than a hidden BCC.
+    (cc ? `Cc: ${cc}\r\n` : '') +
     (replyTo ? `Reply-To: ${replyTo}\r\n` : '') +
     `Subject: ${encodeSubject(subject)}\r\n` +
     `MIME-Version: 1.0\r\n` +
@@ -83,14 +88,15 @@ export const handler = async (event: { arguments: Args }) => {
   try {
     await ses.send(new SendEmailCommand({
       FromEmailAddress: FROM_ADDRESS,
-      // BCC via the envelope (Destination) so it stays hidden from the recipient.
+      // CC via the envelope so cars@ is delivered to; for the Simple path SES also
+      // renders the visible Cc header, and the Raw path carries its own (above).
       Destination: {
         ToAddresses: [to],
-        BccAddresses: BCC_ADDRESS ? [BCC_ADDRESS] : undefined,
+        CcAddresses: CC_ADDRESS ? [CC_ADDRESS] : undefined,
       },
       ReplyToAddresses: replyTo ? [replyTo] : undefined,
       Content: usesLogo
-        ? { Raw: { Data: buildRawWithLogo(FROM_ADDRESS, to, subject, replyTo, a.html) } }
+        ? { Raw: { Data: buildRawWithLogo(FROM_ADDRESS, to, CC_ADDRESS, subject, replyTo, a.html) } }
         : {
             Simple: {
               Subject: { Data: subject, Charset: 'UTF-8' },
@@ -103,6 +109,6 @@ export const handler = async (event: { arguments: Args }) => {
     return { sent: false, error: err instanceof Error ? err.message : 'send-failed' }
   }
 
-  console.log('[vehicle-quote-emailer] sent to', to, 'bcc', BCC_ADDRESS, 'logo', usesLogo)
-  return { sent: true, to, bcc: BCC_ADDRESS }
+  console.log('[vehicle-quote-emailer] sent to', to, 'cc', CC_ADDRESS, 'logo', usesLogo)
+  return { sent: true, to, cc: CC_ADDRESS }
 }

@@ -10,7 +10,7 @@ import bestCareLogo from '@/assets/best-care-logo.png'
 // preview uses the bundled asset URL; the sent email references this CID.
 const LOGO_CID = 'cid:bestcarelogo'
 
-const BCC = 'cars@bcatcorp.com'
+const CC = 'cars@bcatcorp.com'
 const FROM = 'ruben@bcatcorp.com'
 
 const TRANSPORT_TYPES = ['Open Transport', 'Enclosed Transport']
@@ -78,7 +78,7 @@ export function VehicleConfirmationPage() {
     }
     setSending(true)
     try {
-      // Reuses the vehicle-quote emailer — same sender (ruben@) and auto-BCC (cars@).
+      // Reuses the vehicle-quote emailer — same sender (ruben@) and auto-CC (cars@).
       const res = await sendVehicleQuoteEmail({
         to: effectiveTo.trim(),
         subject: effectiveSubject,
@@ -86,7 +86,7 @@ export function VehicleConfirmationPage() {
         replyTo: FROM,
       })
       if (!res.sent) throw new Error(res.error || 'The email service rejected the message')
-      toast.success(`Confirmation sent to ${res.to} (BCC ${res.bcc ?? BCC})`)
+      toast.success(`Confirmation sent to ${res.to} (CC ${res.cc ?? CC})`)
     } catch (e) {
       toast.error(`Couldn't send: ${e instanceof Error ? e.message : 'unknown error'}`)
     } finally {
@@ -106,7 +106,7 @@ export function VehicleConfirmationPage() {
             <div>
               <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Booking Confirmation</h1>
               <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
-                Best Care Auto Transport — sends from {FROM}, BCC {BCC}
+                Best Care Auto Transport — sends from {FROM}, CC {CC}
               </p>
             </div>
           </div>
@@ -152,7 +152,7 @@ export function VehicleConfirmationPage() {
               </Field>
             </div>
             <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 10, marginBottom: 0 }}>
-              Every confirmation is automatically BCC&rsquo;d to <strong>{BCC}</strong> and sent from <strong>{FROM}</strong>.
+              Every confirmation is automatically CC&rsquo;d to <strong>{CC}</strong> and sent from <strong>{FROM}</strong>.
             </p>
           </section>
 
