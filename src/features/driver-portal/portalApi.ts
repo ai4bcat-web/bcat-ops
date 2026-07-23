@@ -13,6 +13,7 @@ export interface ChecklistItem {
   requiresDocument: boolean
   requiresExpiration: boolean
   driverActionable: boolean
+  links?: { label: string; url: string }[] | null
   rejectionReason: string | null
 }
 
@@ -97,6 +98,7 @@ function seedMock(): MockState {
       requiresDocument: r.requiresDocument,
       requiresExpiration: r.requiresExpiration,
       driverActionable: r.driverActionable,
+      links: r.links ? [...r.links] : null,
       rejectionReason: null,
     })),
   }

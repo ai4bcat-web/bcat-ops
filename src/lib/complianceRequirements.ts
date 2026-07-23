@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-23.7'
+export const CATALOG_VERSION = '2026-07-23.8'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -358,11 +358,11 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     appliesTo: ['OWNER_OPERATOR'],
     required: true,
     requiresDocument: true,
-    requiresExpiration: true,
+    requiresExpiration: false,
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Download the occupational-accident / workers-compensation form below, print and complete it, then upload the signed copy and enter its expiration date.',
+      'Download the occupational-accident / workers-compensation form below, print and complete it, then upload the signed copy.',
     links: [{ label: 'Download the occupational-accident form', url: 'https://drive.google.com/file/d/1p-IullRZkDsfxqEADb_mKt3OI_Y31Xog/view?usp=sharing' }],
   },
   {

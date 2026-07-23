@@ -326,11 +326,13 @@ export async function listAllOnboardingTasks(): Promise<OnboardingTask[]> {
 export async function createOnboardingTask(
   input: Omit<OnboardingTask, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<OnboardingTask> {
+  // links is an AWSJSON field — send it as a JSON string.
+  const gqlInput = input.links != null ? { ...input, links: JSON.stringify(input.links) } : input
   const data = await gql<{ createOnboardingTask: OnboardingTask }>(
     `mutation ($input: CreateOnboardingTaskInput!) {
       createOnboardingTask(input: $input) { ${TASK_FIELDS} }
     }`,
-    { input },
+    { input: gqlInput },
   )
   return data.createOnboardingTask
 }
@@ -478,6 +480,8 @@ function buildTemplateTaskInput(params: {
       dueDate: computeDueDate(phaseStart, entry.dueDaysFromPhaseStart),
       templateId,
       catalogVersion: CATALOG_VERSION,
+      // Edited template links win; otherwise fall back to the catalog's default links.
+      links: entry.links ? [...entry.links] : (req.links ? [...req.links] : null),
     },
   }
 }

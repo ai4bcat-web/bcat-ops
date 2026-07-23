@@ -36,6 +36,8 @@ export interface TemplateEntry {
   entity?: 'DRIVER' | 'TRUCK'
   /** Default assignee written onto the generated task (e.g. "Ivan Cartage HR"). */
   assignee?: string
+  /** Form/policy links shown to the driver. Overrides the catalog links when set. */
+  links?: readonly { label: string; url: string }[]
 }
 
 export interface OnboardingPhase {
@@ -83,11 +85,10 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       phase: 2,
-      title: 'Payroll & IRS Forms',
+      title: 'IRS Forms',
       entries: [
         { key: 'i9_w4', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'COMPANY' },
         { key: 'w9', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'OWNER_OPERATOR' },
-        { key: 'direct_deposit_authorization', owner: 'DRIVER', requiresDocument: true }, // download / fill / upload
         { key: 'occ_acc_or_workers_comp', owner: 'OFFICE', requiresDocument: true },
       ],
     },
@@ -113,13 +114,14 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       phase: 4,
-      title: 'Inspection, Relay, Policies & Lease',
+      title: 'Final steps — inspection, policies, direct deposit & lease',
       entries: [
         { key: 'annual_dot_inspection', owner: 'DRIVER', requiresDocument: true },
         { key: 'amazon_relay_truck', owner: 'OFFICE', requiresDocument: false, entity: 'TRUCK' },
         { key: 'amazon_relay_driver', owner: 'OFFICE', requiresDocument: false },
-        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false }, // read policies + acknowledge/sign
-        { key: 'lease_agreement', owner: 'DRIVER', requiresDocument: true },              // FINAL step — signed lease upload
+        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false },        // read policies + acknowledge/sign
+        { key: 'direct_deposit_authorization', owner: 'DRIVER', requiresDocument: true },         // last DRIVER step — download / fill / upload
+        { key: 'lease_agreement', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' }, // VERY last — HR step, no upload
       ],
     },
   ],
