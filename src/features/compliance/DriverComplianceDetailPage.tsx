@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/store/useAppStore'
 import { useOnboardingTasks } from '@/hooks/useOnboardingTasks'
 import { onboardingStatusLabel } from '@/lib/complianceStatus'
+import { isTaskSubmittedOrDone } from '@/lib/onboardingPhases'
 import { ComplianceBadge, ProgressBar, TaskStatusBadge, Card } from './components'
 import { InvitePanel } from './InvitePanel'
 import { ComplianceDocumentsCard } from './ComplianceDocumentsCard'
@@ -17,8 +18,13 @@ export function DriverComplianceDetailPage() {
   const { driverId = '' } = useParams()
   const navigate = useNavigate()
   const driver = useAppStore((s) => s.drivers.find((d) => d.id === driverId))
-  const { tasks, loading, doneCount, requiredCount } = useOnboardingTasks('DRIVER', driverId)
+  const { tasks, loading } = useOnboardingTasks('DRIVER', driverId)
   const [kickoffOpen, setKickoffOpen] = useState(false)
+
+  // Match the driver portal's %: their visible required tasks, counting submitted work.
+  const progressTasks = tasks.filter((t) => t.driverVisible && t.required && t.status !== 'NOT_APPLICABLE')
+  const doneCount = progressTasks.filter(isTaskSubmittedOrDone).length
+  const requiredCount = progressTasks.length
 
   if (!driver) {
     return (
@@ -67,7 +73,7 @@ export function DriverComplianceDetailPage() {
 
         {/* Onboarding progress */}
         {tasks.length > 0 && driver.onboardingStatus !== 'COMPLETE' && (
-          <Card title="Onboarding progress" sub={`${doneCount} of ${requiredCount} required items complete`}>
+          <Card title="Onboarding progress" sub={`${doneCount} of ${requiredCount} required items submitted or complete`}>
             <ProgressBar value={doneCount} max={requiredCount} />
           </Card>
         )}

@@ -22,6 +22,15 @@ export function isTaskDone(t: OnboardingTask): boolean {
   return DONE_STATUSES.includes(t.status)
 }
 
+/**
+ * Counts toward the PROGRESS bar: done OR submitted-and-awaiting-review. Matches the
+ * driver portal so staff see the same %. NOTE: not used for phase gating — a phase only
+ * completes when its required tasks are actually done/approved (see phaseComplete).
+ */
+export function isTaskSubmittedOrDone(t: OnboardingTask): boolean {
+  return isTaskDone(t) || t.status === 'PENDING_REVIEW'
+}
+
 /** A required task that isn't done yet — i.e. it blocks its phase. */
 export function isBlocking(t: OnboardingTask): boolean {
   return t.required && !isTaskDone(t)
@@ -141,7 +150,8 @@ export function buildPhaseViews(opts: {
       officeTasks: inPhase.filter((t) => ownerColumn(t) === 'OFFICE').sort((a, b) => a.sortOrder - b.sortOrder),
       tasks: inPhase.sort((a, b) => a.sortOrder - b.sortOrder),
       requiredCount: required.length,
-      doneCount: required.filter(isTaskDone).length,
+      // Progress bar counts submitted work too (matches the driver portal); gating uses `complete`.
+      doneCount: required.filter(isTaskSubmittedOrDone).length,
       complete,
       locked,
       stalled: phaseStalled(all, def.phase, thresholdDays),

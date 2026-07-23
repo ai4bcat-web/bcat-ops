@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/store/useAppStore'
 import { listAllOnboardingTasks, listAllOnboardingInvites, purgeCandidateOnboarding } from '@/lib/complianceClient'
 import { getOnboardingTemplate, ONBOARDING_TEMPLATES } from '@/lib/onboardingTemplates'
-import { currentPhaseNumber, isTaskDone, overdueTasks } from '@/lib/onboardingPhases'
+import { currentPhaseNumber, isTaskSubmittedOrDone, overdueTasks } from '@/lib/onboardingPhases'
 import { onboardingStatusLabel } from '@/lib/complianceStatus'
 import { ProgressBar, Card } from './components'
 import type { Driver, DriverOnboardingStatus, OnboardingInvite, OnboardingTask, OnboardingInviteStatus } from '@/types'
@@ -131,8 +131,9 @@ export function OnboardingPipelineSection() {
         const tTasks = driver.assignedTruckId ? (truckTasks.get(driver.assignedTruckId) ?? []) : []
         const combined = phased ? [...dTasks, ...tTasks] : dTasks
 
-        const required = combined.filter((t) => t.required && t.status !== 'NOT_APPLICABLE')
-        const doneCount = required.filter(isTaskDone).length
+        // Match the driver's own portal %: their visible required tasks, counting submitted work.
+        const required = dTasks.filter((t) => t.driverVisible && t.required && t.status !== 'NOT_APPLICABLE')
+        const doneCount = required.filter(isTaskSubmittedOrDone).length
         const lastActivity = combined.reduce<string | null>((max, t) => {
           const ts = t.updatedAt || t.createdAt
           return !max || ts > max ? ts : max
