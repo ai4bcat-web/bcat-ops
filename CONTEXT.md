@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-17
+> Last updated: 2026-07-23
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, weekly fleet profitability, finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Best Care Auto Transport vehicle-quote emailer, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
 
 ## Where it lives
 | | |
@@ -28,6 +28,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | Driver management + avatars |
+| `/fleet-dashboard` | Fleet Manager dashboard — repair spend, expiring truck docs, maintenance tasks, PM-due (25k-mi) and DOT-due widgets, driver time-off |
 | `/trucks` | Truck/equipment registry (Fleet) |
 | `/truck-docs` | Truck document tracking (insurance, IFTA, IRP, DOT inspection) — shares the compliance backend |
 | `/maintenance` | Maintenance tasks |
@@ -44,8 +45,10 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/tasks` | Task/todo board |
 | `/users` | User management (admin-only) |
 | `/vehicle-quote` | Best Care Auto Transport vehicle-quote emailer |
+| `/vehicle-confirmation` | Best Care Auto Transport booking-confirmation emailer (cost, ZIPs, pickup/delivery dates, transport type) |
 | `/compliance` | DOT compliance dashboard (drivers & trucks) |
-| `/compliance/review` | Compliance document review queue |
+| `/compliance/onboarding` | Driver onboarding hub (invite, kickoff, document review queue merged in) |
+| `/compliance/review` | → redirects to `/compliance/onboarding` (review queue merged into the hub) |
 | `/compliance/driver/:driverId` | Per-driver compliance detail |
 | `/compliance/truck/:truckId` | Truck onboarding wizard |
 | `/onboard/:token` | Public tokenized driver onboarding portal (outside the authenticated app shell) |
@@ -63,14 +66,16 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 
 **Expenses & fuel:** `FuelTransaction` · `ExpenseType` · `TruckExpenseAllocation` · `ExpenseRecord` · `RecurringExpense`
 
-**DOT compliance & onboarding:** `OnboardingInvite` · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings`
+**DOT compliance & onboarding:** `OnboardingInvite` · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` (supports phased templates via `phase`/`owner`/`templateId`) · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings` · `OnboardingTemplateConfig` (editable phased-onboarding template stored as JSON, e.g. `amazon-driver-v1`; kickoff reads it instead of the code default so staff can edit the steps drivers see)
+
+Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candidate set aside, reversible) and `Driver.onboardingTemplateId` selects the phased template. `Equipment.lastPmDate`/`lastPmMileage` feed the Fleet Manager dashboard's 25k-mi PM countdown.
 
 **Custom mutations/queries:**
 - `notifySlackStatusChange` (mutation) — posts to Slack when an IntakeItem status changes → `slackStatusNotifier`
 - `manageUsers` (query) — admin-gated Cognito user CRUD → `userManagement`
 - `sendOnboardingEmail` (mutation) — driver-facing onboarding email via SES (invite/rejected/complete), honors kill switch → `onboardingEmailer`
 - `sendDriverPayEmail` (mutation) — emails a driver their weekly pay statement PDF (built client-side, passed as base64) via SES → `driverPayEmailer`
-- `sendVehicleQuoteEmail` (mutation) — emails a customer their Best Care Auto Transport vehicle quote as branded HTML, sent from ruben@bcatcorp.com and always BCC'd to cars@bcatcorp.com → `vehicleQuoteEmailer`
+- `sendVehicleQuoteEmail` (mutation) — sends Best Care Auto Transport branded HTML email (backs both the `/vehicle-quote` quote and the `/vehicle-confirmation` booking confirmation), from ruben@bcatcorp.com and always BCC'd to cars@bcatcorp.com → `vehicleQuoteEmailer`
 - `getGoogleReviews` (query) — live Google rating + review count for the Best Care Auto Transport listing (CTA in the quote email) → `googleReviews`
 
 Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`. Default auth mode is Cognito `userPool`. The driver portal has no AppSync access — it goes through the `onboarding-portal-api` Lambda, which validates the invite token server-side.
