@@ -72,7 +72,7 @@ export function OfficeTasksSection() {
     <Card
       title="Office / HR tasks"
       sub={loading ? 'Loading…' : `${office.length} outstanding across all drivers`}
-      right={<Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>}
+      right={<Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>}
       noPad
     >
       <div style={{ overflowX: 'auto' }}>
@@ -113,9 +113,9 @@ export function OfficeTasksSection() {
                   <td style={{ padding: '9px 16px' }}>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
                       {!t.requiresDocument && (
-                        <Button size="sm" disabled={busyId === t.id} onClick={() => markDone(t)} style={{ background: 'var(--ds-green)', color: '#fff', border: 'none' }}><Check size={13} /> Mark done</Button>
+                        <Button size="sm" disabled={busyId === t.id} onClick={() => markDone(t)} style={{ paddingInline: 16, background: 'var(--ds-green)', color: '#fff', border: 'none' }}><Check size={13} /> Mark done</Button>
                       )}
-                      <Button size="sm" variant="outline" onClick={() => open(t)} title="Open"><ExternalLink size={14} /> Open</Button>
+                      <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={() => open(t)} title="Open"><ExternalLink size={14} /> Open</Button>
                     </div>
                   </td>
                 </tr>
