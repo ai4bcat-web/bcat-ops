@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-23.3'
+export const CATALOG_VERSION = '2026-07-23.4'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -602,15 +602,16 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
   },
   {
     key: 'amazon_relay_course',
-    label: 'Amazon Relay onboarding course completed',
+    label: 'Amazon Relay onboarding course (HR)',
     category: 'Amazon Relay',
     appliesTo: ALL_DRIVERS,
     required: true,
     requiresDocument: false,
     requiresExpiration: false,
-    driverVisible: true,
-    driverActionable: true,
-    helpText: 'Complete the Amazon Relay onboarding course in the Relay app, then check this off.',
+    driverVisible: false,
+    driverActionable: false,
+    helpText: 'Ivan Cartage HR enrolls the driver in / completes the Amazon Relay onboarding course.',
+    internalNotes: 'HR task — kicks off once the driver finishes their application section. Not a driver item.',
   },
   {
     key: 'amazon_relay_driver',
