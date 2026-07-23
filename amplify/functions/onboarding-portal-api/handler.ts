@@ -70,7 +70,9 @@ async function scan(table: string, filter: string, names: Record<string, string>
   do {
     const res = await ddb.send(new ScanCommand({
       TableName: table, FilterExpression: filter,
-      ExpressionAttributeNames: names, ExpressionAttributeValues: values,
+      // DynamoDB rejects an empty ExpressionAttributeNames — only include it when used.
+      ...(Object.keys(names).length ? { ExpressionAttributeNames: names } : {}),
+      ExpressionAttributeValues: values,
       ExclusiveStartKey: lastKey,
     }))
     if (res.Items) items.push(...(res.Items as Record<string, unknown>[]))
