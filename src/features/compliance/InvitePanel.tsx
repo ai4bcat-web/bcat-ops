@@ -87,21 +87,21 @@ export function InvitePanel({ driver }: { driver: Driver }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, padding: '6px 8px' }}>
             <input readOnly value={url ?? ''} onFocus={(e) => e.currentTarget.select()}
               style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', fontSize: 12.5, color: 'var(--ds-t2)' }} />
-            <Button size="sm" variant="outline" onClick={copyLink}>
+            <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={copyLink}>
               {copied ? <Check size={14} /> : <Copy size={14} />}{copied ? 'Copied' : 'Copy'}
             </Button>
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Button size="sm" variant="outline" disabled={busy}
+            <Button size="sm" variant="outline" style={{ paddingInline: 16 }} disabled={busy}
               onClick={() => withBusy(() => resendInvite(activeInvite), 'New invite issued (old one revoked)')}>
               <RefreshCw size={14} /> Resend
             </Button>
-            <Button size="sm" variant="outline" disabled={busy}
+            <Button size="sm" variant="outline" style={{ paddingInline: 16 }} disabled={busy}
               onClick={() => withBusy(() => extendInvite(activeInvite.id, 14), 'Expiration extended 14 days')}>
               <CalendarPlus size={14} /> Extend
             </Button>
-            <Button size="sm" variant="destructive" disabled={busy}
+            <Button size="sm" variant="destructive" style={{ paddingInline: 16 }} disabled={busy}
               onClick={() => withBusy(() => revokeInvite(activeInvite.id), 'Invite revoked')}>
               <Ban size={14} /> Revoke
             </Button>

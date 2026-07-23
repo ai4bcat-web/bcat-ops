@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { getComplianceDocUrl } from '@/lib/complianceClient'
+import { getColor } from '@/lib/driverColors'
+import type { ColorKey } from '@/types'
 import {
   documentStatusBadge,
   taskStatusBadge,
@@ -42,6 +44,17 @@ export function daysRemainingLabel(date?: string | null): string {
   if (d === 0) return 'today'
   if (d > 0) return `in ${d} day${d === 1 ? '' : 's'}`
   return `${Math.abs(d)} day${d === -1 ? '' : 's'} ago`
+}
+
+/** Round initials avatar tinted with the driver's calendar color. */
+export function InitialsAvatar({ name, colorKey, size = 30 }: { name: string; colorKey?: ColorKey | null; size?: number }) {
+  const initials =
+    (name || '').split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? '').join('') || '?'
+  return (
+    <div style={{ width: size, height: size, borderRadius: '50%', background: getColor(colorKey).avatarBg, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 600, flexShrink: 0 }}>
+      {initials}
+    </div>
+  )
 }
 
 export function ProgressBar({ value, max }: { value: number; max: number }) {

@@ -8,7 +8,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { listAllOnboardingTasks, setTaskStatus } from '@/lib/complianceClient'
 import { isTaskDone } from '@/lib/onboardingPhases'
-import { TaskStatusBadge, Card } from './components'
+import { TaskStatusBadge, Card, InitialsAvatar } from './components'
 import type { OnboardingTask } from '@/types'
 
 function todayIso() { return new Date().toISOString().slice(0, 10) }
@@ -72,7 +72,7 @@ export function OfficeTasksSection() {
     <Card
       title="Office / HR tasks"
       sub={loading ? 'Loading…' : `${office.length} outstanding across all drivers`}
-      right={<Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>}
+      right={<Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>}
       noPad
     >
       <div style={{ overflowX: 'auto' }}>
@@ -93,8 +93,13 @@ export function OfficeTasksSection() {
               const overdue = !!t.dueDate && t.dueDate < today
               return (
                 <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                  <td style={{ padding: '9px 16px', fontWeight: 500, color: 'var(--ds-t1)' }}>
-                    {e.isTruck && <Truck size={12} style={{ marginRight: 4, color: 'var(--ds-t3)', display: 'inline' }} />}{e.name}
+                  <td style={{ padding: '9px 16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {e.isTruck
+                        ? <div style={{ width: 30, height: 30, borderRadius: 9, background: 'var(--ds-blue-bg)', color: 'var(--ds-blue)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Truck size={15} /></div>
+                        : <InitialsAvatar name={e.name} colorKey={drivers.find((d) => d.id === e.driverId)?.colorKey} />}
+                      <span style={{ fontWeight: 500, color: 'var(--ds-t1)' }}>{e.name}</span>
+                    </div>
                   </td>
                   <td style={{ padding: '9px 16px', color: 'var(--ds-t2)' }}>{t.label}</td>
                   <td style={{ padding: '9px 16px', color: 'var(--ds-t3)' }}>{t.phase ? `Phase ${t.phase}` : '—'}</td>
@@ -105,11 +110,13 @@ export function OfficeTasksSection() {
                     {t.dueDate ? <>{overdue && <AlertTriangle size={11} style={{ display: 'inline', marginRight: 3 }} />}{t.dueDate}</> : '—'}
                   </td>
                   <td style={{ padding: '9px 16px' }}><TaskStatusBadge status={t.status} /></td>
-                  <td style={{ padding: '9px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {!t.requiresDocument && (
-                      <Button size="sm" variant="outline" disabled={busyId === t.id} onClick={() => markDone(t)}><Check size={13} /> Mark done</Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={() => open(t)} title="Open"><ExternalLink size={14} /></Button>
+                  <td style={{ padding: '9px 16px' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+                      {!t.requiresDocument && (
+                        <Button size="sm" disabled={busyId === t.id} onClick={() => markDone(t)} style={{ paddingInline: 16, background: 'var(--ds-green)', color: '#fff', border: 'none' }}><Check size={13} /> Mark done</Button>
+                      )}
+                      <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={() => open(t)} title="Open"><ExternalLink size={14} /> Open</Button>
+                    </div>
                   </td>
                 </tr>
               )

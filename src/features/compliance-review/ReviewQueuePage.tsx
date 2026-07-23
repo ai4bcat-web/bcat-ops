@@ -9,7 +9,8 @@ import {
 } from '@/components/ui/dialog'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody } from '@/components/ui/sheet'
 import { useReviewQueue, type ReviewQueueItem } from '@/hooks/useReviewQueue'
-import { Card, DocumentPreview } from '@/features/compliance/components'
+import { useAppStore } from '@/store/useAppStore'
+import { Card, DocumentPreview, InitialsAvatar } from '@/features/compliance/components'
 import { DriverApplicationView } from '@/features/compliance/DriverApplicationView'
 
 function fmtDate(iso: string): string {
@@ -23,6 +24,7 @@ function fmtDate(iso: string): string {
  */
 export function ReviewQueueSection() {
   const { items, pendingCount, loading, approveDocument, rejectDocument, approveApplication, rejectApplication } = useReviewQueue()
+  const drivers = useAppStore((s) => s.drivers)
   const [previewItem, setPreviewItem] = useState<ReviewQueueItem | null>(null)
   const [rejectItem, setRejectItem] = useState<ReviewQueueItem | null>(null)
   const [reason, setReason] = useState('')
@@ -69,7 +71,12 @@ export function ReviewQueueSection() {
                 )}
                 {items.map((item) => (
                   <tr key={`${item.kind}-${item.id}`} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                    <td style={{ padding: '10px 16px', fontWeight: 500, color: 'var(--ds-t1)' }}>{item.entityName}</td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {item.entityType === 'DRIVER' && <InitialsAvatar name={item.entityName} colorKey={drivers.find((d) => d.id === item.entityId)?.colorKey} />}
+                        <span style={{ fontWeight: 500, color: 'var(--ds-t1)' }}>{item.entityName}</span>
+                      </div>
+                    </td>
                     <td style={{ padding: '10px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         {item.kind === 'application' ? <FileText size={14} style={{ color: 'var(--ds-t3)' }} /> : null}
@@ -78,10 +85,12 @@ export function ReviewQueueSection() {
                       </div>
                     </td>
                     <td style={{ padding: '10px 16px', color: 'var(--ds-t3)' }}>{fmtDate(item.submittedAt)}</td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <Button size="sm" variant="ghost" onClick={() => setPreviewItem(item)}><Eye size={14} /> Preview</Button>
-                      <Button size="sm" variant="outline" disabled={busyId === item.id} onClick={() => approve(item)}><Check size={14} /> Approve</Button>
-                      <Button size="sm" variant="destructive" disabled={busyId === item.id} onClick={() => { setRejectItem(item); setReason('') }}><X size={14} /> Reject</Button>
+                    <td style={{ padding: '10px 16px' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+                        <Button size="sm" variant="ghost" style={{ paddingInline: 16 }} onClick={() => setPreviewItem(item)}><Eye size={14} /> Preview</Button>
+                        <Button size="sm" disabled={busyId === item.id} onClick={() => approve(item)} style={{ paddingInline: 16, background: 'var(--ds-green)', color: '#fff', border: 'none' }}><Check size={14} /> Approve</Button>
+                        <Button size="sm" variant="destructive" style={{ paddingInline: 16 }} disabled={busyId === item.id} onClick={() => { setRejectItem(item); setReason('') }}><X size={14} /> Reject</Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -12,7 +12,7 @@ import { listAllOnboardingTasks, listAllOnboardingInvites, purgeCandidateOnboard
 import { getOnboardingTemplate, ONBOARDING_TEMPLATES } from '@/lib/onboardingTemplates'
 import { currentPhaseNumber, isTaskSubmittedOrDone, overdueTasks } from '@/lib/onboardingPhases'
 import { onboardingStatusLabel } from '@/lib/complianceStatus'
-import { ProgressBar, Card } from './components'
+import { ProgressBar, Card, InitialsAvatar } from './components'
 import type { Driver, DriverOnboardingStatus, OnboardingInvite, OnboardingTask, OnboardingInviteStatus } from '@/types'
 
 // Drivers actively moving through onboarding (excludes not-started and fully-complete).
@@ -190,7 +190,7 @@ export function OnboardingPipelineSection() {
             {ONBOARDING_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
         </div>
-        <Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>
+        <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>
       </div>
 
       <Card title="In progress" sub={loading ? 'Loading…' : `${rows.length} driver${rows.length === 1 ? '' : 's'}`} noPad>
@@ -212,8 +212,13 @@ export function OnboardingPipelineSection() {
                 {rows.map((r) => (
                   <tr key={r.driver.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                     <td style={{ padding: '10px 16px' }}>
-                      <div style={{ fontWeight: 500, color: 'var(--ds-t1)' }}>{r.driver.name}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{onboardingStatusLabel(r.driver.onboardingStatus)}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <InitialsAvatar name={r.driver.name} colorKey={r.driver.colorKey} />
+                        <div>
+                          <div style={{ fontWeight: 500, color: 'var(--ds-t1)' }}>{r.driver.name}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{onboardingStatusLabel(r.driver.onboardingStatus)}</div>
+                        </div>
+                      </div>
                     </td>
                     <td style={{ padding: '10px 16px', color: 'var(--ds-t2)' }}>
                       {r.templateLabel ? <Badge variant={r.phased ? 'default' : 'secondary'}>{r.templateLabel}</Badge> : '—'}
@@ -230,22 +235,24 @@ export function OnboardingPipelineSection() {
                         : <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>No invite</span>}
                     </td>
                     <td style={{ padding: '10px 16px', color: 'var(--ds-t3)', fontSize: 12 }}>{fmtDateTime(r.lastActivity)}</td>
-                    <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <Button size="sm" variant="ghost" onClick={() => navigate(`/compliance/driver/${r.driver.id}`)} title="Open">
+                    <td style={{ padding: '10px 16px' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
+                      <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={() => navigate(`/compliance/driver/${r.driver.id}`)} title="Open">
                         <ExternalLink size={14} /> Open
                       </Button>
                       {r.archived ? (
-                        <Button size="sm" variant="ghost" onClick={() => unarchive(r)} title="Restore to onboarding">
+                        <Button size="sm" variant="ghost" style={{ paddingInline: 16 }} onClick={() => unarchive(r)} title="Restore to onboarding">
                           <ArchiveRestore size={14} /> Restore
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" onClick={() => archive(r)} title="Archive (set aside — not being considered)">
+                        <Button size="sm" variant="ghost" style={{ paddingInline: 16 }} onClick={() => archive(r)} title="Archive (set aside — not being considered)">
                           <Archive size={14} /> Archive
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(r)} title="Delete candidate" style={{ color: 'var(--ds-red)' }}>
+                      <Button size="sm" variant="ghost" style={{ paddingInline: 12, color: 'var(--ds-red)' }} onClick={() => setDeleteTarget(r)} title="Delete candidate">
                         <Trash2 size={14} />
                       </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
