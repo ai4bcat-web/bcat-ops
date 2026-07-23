@@ -126,8 +126,11 @@ export function DriverPortalPage() {
         state.checklist.reduce<Record<string, ChecklistItem[]>>((acc, c) => { (acc[c.category] ??= []).push(c); return acc }, {}),
       ).map(([cat, items], i) => ({ phase: i + 1, title: cat, items }))
 
+  const doneCount = state.checklist.filter((c) => c.status === 'COMPLETE' || c.status === 'WAIVED' || c.status === 'PENDING_REVIEW').length
+  const totalCount = state.checklist.filter((c) => c.status !== 'NOT_APPLICABLE').length
+
   return (
-    <Shell>
+    <Shell driver={state.firstName}>
       <div className={PORTAL_COL} style={PORTAL_MAXW}>
         {usingMock && (
           <div className="mb-3 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
@@ -137,14 +140,18 @@ export function DriverPortalPage() {
         <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>Welcome {state.firstName} — let's get you on the road.</h1>
         <p className="mt-1" style={{ color: 'var(--ds-t3)' }}>Complete the items below. Most drivers finish in about 20 minutes.</p>
 
-        {/* Progress */}
-        <div className="mt-4 mb-6">
-          <div className="mb-1.5 flex justify-between text-sm" style={{ color: 'var(--ds-t3)' }}>
-            <span>Your progress</span>
-            <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t2)', fontWeight: 600 }}>{state.progressPct}%</span>
+        {/* Progress card */}
+        <div className="mt-4 mb-6" style={{ ...cardStyle, padding: '16px 18px' }}>
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Your progress</span>
+            <span style={{ fontSize: 13, color: 'var(--ds-t3)' }}>
+              {totalCount > 0 && <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>{doneCount} of {totalCount}</span>}
+              {totalCount > 0 && ' · '}
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t2)', fontWeight: 600 }}>{state.progressPct}%</span>
+            </span>
           </div>
-          <div style={{ height: 8, overflow: 'hidden', borderRadius: 999, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
-            <div style={{ height: '100%', width: `${state.progressPct}%`, background: state.progressPct === 100 ? 'var(--ds-green)' : 'var(--ds-blue)', transition: 'width 200ms' }} />
+          <div style={{ height: 10, overflow: 'hidden', borderRadius: 999, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
+            <div style={{ height: '100%', width: `${state.progressPct}%`, borderRadius: 999, background: state.progressPct === 100 ? 'var(--ds-green)' : 'linear-gradient(90deg, var(--ds-blue-dark), var(--ds-blue))', transition: 'width 250ms' }} />
           </div>
         </div>
 
@@ -188,6 +195,18 @@ export function DriverPortalPage() {
             )
           })
         )}
+
+        {/* Footer help card */}
+        <div className="mt-8" style={{ ...cardStyle, padding: '16px 18px', background: 'var(--ds-bg)' }}>
+          <div className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>Need a hand?</div>
+          <div className="mt-1 text-sm" style={{ color: 'var(--ds-t3)' }}>
+            Our onboarding team is happy to help with any step.
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: 'var(--ds-blue)', fontWeight: 600, textDecoration: 'none' }}>{CONTACT_EMAIL}</a>
+            <a href={`tel:${CONTACT_PHONE.replace(/[^\d+]/g, '')}`} style={{ color: 'var(--ds-t2)', fontWeight: 600, textDecoration: 'none' }}>{CONTACT_PHONE}</a>
+          </div>
+        </div>
       </div>
     </Shell>
   )
@@ -331,16 +350,29 @@ function ChecklistRow({ item, token, appStatus, locked: phaseLocked = false, onO
   )
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function initialsOf(name?: string): string {
+  return (name || '').split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]?.toUpperCase() ?? '').join('') || ''
+}
+
+function Shell({ children, driver }: { children: React.ReactNode; driver?: string }) {
+  const initials = initialsOf(driver)
   return (
     <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
-        <div className="mx-auto flex w-full items-center gap-2.5 px-6 py-3.5" style={PORTAL_MAXW}>
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
+      {/* Black sticky top bar — carrier identity, always visible while the driver scrolls. */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 20, background: '#0e1116', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <div className="mx-auto flex w-full items-center gap-3 px-6" style={{ ...PORTAL_MAXW, height: 60 }}>
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
           </div>
-          <div className="text-sm font-bold" style={{ color: 'var(--ds-t1)' }}>IVAN <span style={{ color: 'var(--ds-blue)' }}>CARTAGE</span></div>
-          <div className="ml-auto text-xs" style={{ color: 'var(--ds-t3)' }}>Driver onboarding</div>
+          <div>
+            <div className="text-sm font-bold" style={{ color: '#fff', letterSpacing: '0.02em' }}>IVAN <span style={{ color: 'var(--ds-blue)' }}>CARTAGE</span></div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 1 }}>Driver onboarding</div>
+          </div>
+          {initials && (
+            <div className="ml-auto flex items-center justify-center" style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 13, fontWeight: 600 }} title={driver}>
+              {initials}
+            </div>
+          )}
         </div>
       </header>
       {/* Center the content on the page — vertically + horizontally — and scroll when it's tall.
