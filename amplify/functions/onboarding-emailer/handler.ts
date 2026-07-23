@@ -21,7 +21,7 @@ const INVITE_TABLE = process.env.INVITE_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME!
 
-type EmailType = 'invite' | 'rejected' | 'complete'
+type EmailType = 'invite' | 'rejected' | 'declined' | 'complete'
 
 interface Args {
   type: EmailType
@@ -83,6 +83,22 @@ Reason: ${ctx.reason ?? 'Please re-submit this item.'}
 Please open your onboarding portal and re-upload it:
 
 ${ctx.link}
+
+— Ivan Cartage`,
+      }
+    case 'declined':
+      // Application turned down — gracious, final, and deliberately does NOT expose the
+      // internal rejection reason or a portal link (the applicant isn't moving forward).
+      return {
+        subject: 'Thank you for applying to Ivan Cartage',
+        text:
+`Hi ${ctx.firstName},
+
+Thank you for your interest in driving with Ivan Cartage and for taking the time to complete an application.
+
+After careful review, we're unable to move forward with your onboarding at this time. This isn't a reflection of your experience — our current needs and requirements simply aren't the right match right now.
+
+We truly appreciate you considering us, and we wish you safe travels and the very best on the road.
 
 — Ivan Cartage`,
       }

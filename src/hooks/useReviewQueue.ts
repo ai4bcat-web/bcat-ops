@@ -204,7 +204,9 @@ export function useReviewQueue() {
         user: user?.email ?? 'unknown',
         changes: { applicationId: app.id, reason },
       })
-      void sendOnboardingEmail({ type: 'rejected', driverId: app.driverId, itemLabel: 'Employment application', reason })
+      // Application decline is terminal — send the gracious "not a fit" email, NOT the
+      // document-rejected "please fix and resubmit" one.
+      void sendOnboardingEmail({ type: 'declined', driverId: app.driverId, itemLabel: 'Employment application', reason })
       setApplications((prev) => prev.filter((a) => a.id !== app.id))
     },
     [user?.email],
