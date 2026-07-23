@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-23.4'
+export const CATALOG_VERSION = '2026-07-23.5'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -720,6 +720,20 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverActionable: false,
     helpText: 'The office obtains the New Mexico weight-distance / access permits for the truck and files them.',
     internalNotes: 'Office task — NM permit application; upload the permit document.',
+  },
+  {
+    key: 'direct_deposit_authorization',
+    label: 'Direct Deposit Authorization',
+    category: 'Payroll',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Download the Direct Deposit Authorization form below, complete it, and upload the signed form so payroll can pay you.',
+    links: [{ label: 'Download the Direct Deposit Authorization form', url: '' }], // TODO: paste the form URL
   },
   {
     // FMCSA Driver Qualification File capstone (49 CFR 391.51) — HR assembles/verifies the DQ file.

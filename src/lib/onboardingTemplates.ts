@@ -83,10 +83,11 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       phase: 2,
-      title: 'IRS Forms',
+      title: 'Payroll & IRS Forms',
       entries: [
         { key: 'i9_w4', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'COMPANY' },
         { key: 'w9', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'OWNER_OPERATOR' },
+        { key: 'direct_deposit_authorization', owner: 'DRIVER', requiresDocument: true }, // download / fill / upload
         { key: 'occ_acc_or_workers_comp', owner: 'OFFICE', requiresDocument: true },
       ],
     },
