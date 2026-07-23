@@ -96,7 +96,7 @@ export function BackfillOnboardingCard() {
         )}
 
         <div>
-          <Button onClick={() => setConfirmOpen(true)} disabled={running}>
+          <Button style={{ paddingInline: 18 }} onClick={() => setConfirmOpen(true)} disabled={running}>
             {running ? <Loader2 className="animate-spin" size={15} /> : <Layers size={15} />}
             {running ? 'Generating…' : 'Generate checklists'}
           </Button>
@@ -113,8 +113,8 @@ export function BackfillOnboardingCard() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
-            <Button onClick={run}>Run backfill</Button>
+            <Button variant="outline" style={{ paddingInline: 18 }} onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button style={{ paddingInline: 18 }} onClick={run}>Run backfill</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
