@@ -861,7 +861,7 @@ export async function writeComplianceAudit(entry: {
  * kill switch (default PAUSED) and no-ops while paused, so callers always succeed.
  */
 export async function sendOnboardingEmail(args: {
-  type: 'invite' | 'rejected' | 'complete'
+  type: 'invite' | 'rejected' | 'declined' | 'complete'
   driverId?: string
   inviteId?: string
   itemLabel?: string

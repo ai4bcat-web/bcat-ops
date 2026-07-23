@@ -32,8 +32,8 @@ interface Props {
 /**
  * Phased (Amazon) onboarding view for staff. Shows all 4 phases (office is NOT gated),
  * each split into Driver vs Office columns, with per-task status, assignee, due date, and
- * upload/attach. Truck-owned tasks (Phases 3-4) are generated on the driver's assigned
- * truck once Phase 2 completes, and shown inline here.
+ * upload/attach. Truck-owned tasks (Phase 2) are generated on the driver's assigned
+ * truck once Phase 1 completes, and shown inline here.
  */
 export function PhasedOnboardingSection({ driver }: Props) {
   const template = getOnboardingTemplate(driver.onboardingTemplateId ?? '') ?? null
@@ -52,8 +52,11 @@ export function PhasedOnboardingSection({ driver }: Props) {
     [driverHook.tasks, truckHook.tasks],
   )
   const current = currentPhaseNumber(combined)
-  const p2Complete = phaseComplete(driverHook.tasks, 2)
-  const needsTruck = p2Complete && !truckId
+  // Truck-owned tasks generate once the driver finishes Phase 1 (application/DQ), so the
+  // office can register/plate the assigned truck DURING Phase 2 — the DOT inspection and
+  // truck setup both live in Phase 2 now and must not wait on each other.
+  const phase1Complete = phaseComplete(driverHook.tasks, 1)
+  const needsTruck = phase1Complete && !truckId
 
   const views = useMemo(
     () => buildPhaseViews({ template, driverTasks: driverHook.tasks, truckTasks: truckHook.tasks, forDriverPortal: false }),
@@ -66,9 +69,9 @@ export function PhasedOnboardingSection({ driver }: Props) {
 
   const isOpen = (p: number) => manualOpen[p] ?? (p === current)
 
-  // ── Truck link: once Phase 2 completes, generate truck-owned tasks on the assigned truck.
+  // ── Truck link: once Phase 1 completes, generate truck-owned tasks on the assigned truck.
   useEffect(() => {
-    if (!template || !truckId || !p2Complete || genRef.current) return
+    if (!template || !truckId || !phase1Complete || genRef.current) return
     if (truckHook.loading) return
     // Only generate if the truck has no template tasks yet.
     if (truckHook.tasks.some((t) => t.templateId === template.id)) return
@@ -81,7 +84,7 @@ export function PhasedOnboardingSection({ driver }: Props) {
         }
       })
       .catch((e) => { console.error('[truck-link] failed', e); genRef.current = false })
-  }, [template, truckId, p2Complete, truckHook.loading, truckHook.tasks, truckHook, driver.driverType])
+  }, [template, truckId, phase1Complete, truckHook.loading, truckHook.tasks, truckHook, driver.driverType])
 
   function togglePhase(p: number) {
     setManualOpen((prev) => ({ ...prev, [p]: !(prev[p] ?? (p === current)) }))
@@ -115,8 +118,8 @@ export function PhasedOnboardingSection({ driver }: Props) {
           <div style={{ margin: '0 16px 10px', display: 'flex', gap: 10, alignItems: 'flex-start', background: 'rgba(220,38,38,0.06)', border: '1px solid rgba(220,38,38,0.25)', borderRadius: 8, padding: '10px 12px' }}>
             <Truck size={16} style={{ color: '#b91c1c', flexShrink: 0, marginTop: 1 }} />
             <div style={{ fontSize: 12.5, color: '#b91c1c' }}>
-              <strong>Truck tasks blocked.</strong> Phase 2 is complete, but no truck is assigned to this driver.
-              Assign a truck (Drivers → this driver → assign truck) to generate the Phase 3–4 truck checklist.
+              <strong>Truck tasks blocked.</strong> Phase 1 is complete, but no truck is assigned to this driver.
+              Assign a truck (Drivers → this driver → assign truck) to generate the Phase 2 truck checklist.
             </div>
           </div>
         )}

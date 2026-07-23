@@ -377,8 +377,8 @@ function Shell({ children, driver }: { children: React.ReactNode; driver?: strin
       </header>
       {/* Center the content on the page — vertically + horizontally — and scroll when it's tall.
           `margin: auto` in a flex column centers vertically without clipping the top on overflow. */}
-      <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ margin: 'auto', width: '100%' }}>{children}</div>
+      <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+        <div style={{ width: '100%', maxWidth: 720 }}>{children}</div>
       </main>
     </div>
   )
