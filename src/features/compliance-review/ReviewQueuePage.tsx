@@ -87,9 +87,9 @@ export function ReviewQueueSection() {
                     <td style={{ padding: '10px 16px', color: 'var(--ds-t3)' }}>{fmtDate(item.submittedAt)}</td>
                     <td style={{ padding: '10px 16px' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
-                        <Button size="sm" variant="ghost" onClick={() => setPreviewItem(item)}><Eye size={14} /> Preview</Button>
-                        <Button size="sm" disabled={busyId === item.id} onClick={() => approve(item)} style={{ background: 'var(--ds-green)', color: '#fff', border: 'none' }}><Check size={14} /> Approve</Button>
-                        <Button size="sm" variant="destructive" disabled={busyId === item.id} onClick={() => { setRejectItem(item); setReason('') }}><X size={14} /> Reject</Button>
+                        <Button size="sm" variant="ghost" style={{ paddingInline: 16 }} onClick={() => setPreviewItem(item)}><Eye size={14} /> Preview</Button>
+                        <Button size="sm" disabled={busyId === item.id} onClick={() => approve(item)} style={{ paddingInline: 16, background: 'var(--ds-green)', color: '#fff', border: 'none' }}><Check size={14} /> Approve</Button>
+                        <Button size="sm" variant="destructive" style={{ paddingInline: 16 }} disabled={busyId === item.id} onClick={() => { setRejectItem(item); setReason('') }}><X size={14} /> Reject</Button>
                       </div>
                     </td>
                   </tr>

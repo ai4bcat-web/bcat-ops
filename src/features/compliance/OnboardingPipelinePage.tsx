@@ -190,7 +190,7 @@ export function OnboardingPipelineSection() {
             {ONBOARDING_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
           </select>
         </div>
-        <Button size="sm" variant="outline" onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>
+        <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={load} disabled={loading}><RefreshCw size={14} /> Refresh</Button>
       </div>
 
       <Card title="In progress" sub={loading ? 'Loading…' : `${rows.length} driver${rows.length === 1 ? '' : 's'}`} noPad>
@@ -237,19 +237,19 @@ export function OnboardingPipelineSection() {
                     <td style={{ padding: '10px 16px', color: 'var(--ds-t3)', fontSize: 12 }}>{fmtDateTime(r.lastActivity)}</td>
                     <td style={{ padding: '10px 16px' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end', width: '100%' }}>
-                      <Button size="sm" variant="outline" onClick={() => navigate(`/compliance/driver/${r.driver.id}`)} title="Open">
+                      <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={() => navigate(`/compliance/driver/${r.driver.id}`)} title="Open">
                         <ExternalLink size={14} /> Open
                       </Button>
                       {r.archived ? (
-                        <Button size="sm" variant="ghost" onClick={() => unarchive(r)} title="Restore to onboarding">
+                        <Button size="sm" variant="ghost" style={{ paddingInline: 16 }} onClick={() => unarchive(r)} title="Restore to onboarding">
                           <ArchiveRestore size={14} /> Restore
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" onClick={() => archive(r)} title="Archive (set aside — not being considered)">
+                        <Button size="sm" variant="ghost" style={{ paddingInline: 16 }} onClick={() => archive(r)} title="Archive (set aside — not being considered)">
                           <Archive size={14} /> Archive
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(r)} title="Delete candidate" style={{ color: 'var(--ds-red)' }}>
+                      <Button size="sm" variant="ghost" style={{ paddingInline: 12, color: 'var(--ds-red)' }} onClick={() => setDeleteTarget(r)} title="Delete candidate">
                         <Trash2 size={14} />
                       </Button>
                       </div>

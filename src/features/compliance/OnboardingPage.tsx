@@ -62,7 +62,7 @@ export function OnboardingPage() {
             </div>
           </div>
           <button onClick={() => setEditorOpen(true)}
-            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 9, padding: '9px 18px', fontSize: 14, fontWeight: 600, background: '#fff', color: 'var(--ds-blue-dark)', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
+            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, borderRadius: 9, padding: '10px 22px', fontSize: 14, fontWeight: 600, background: '#fff', color: 'var(--ds-blue-dark)', border: 'none', cursor: 'pointer', flexShrink: 0 }}>
             <Pencil size={15} /> Edit
           </button>
         </div>
