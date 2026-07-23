@@ -20,15 +20,18 @@ const cardStyle: CSSProperties = {
   padding: 14,
 }
 const btnPrimary: CSSProperties = {
-  display: 'inline-flex', alignItems: 'center', gap: 6,
-  borderRadius: 8, padding: '8px 16px', fontSize: 14, fontWeight: 600,
+  display: 'inline-flex', alignItems: 'center', gap: 7,
+  borderRadius: 9, padding: '11px 22px', fontSize: 14, fontWeight: 600,
   background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
 }
 const btnSuccess: CSSProperties = { ...btnPrimary, background: 'var(--ds-green)' }
 const inputStyle: CSSProperties = {
-  borderRadius: 6, border: '1px solid var(--ds-border)', padding: '6px 10px',
+  borderRadius: 7, border: '1px solid var(--ds-border)', padding: '9px 12px',
   fontSize: 14, background: 'var(--ds-surface)', color: 'var(--ds-t1)', outline: 'none',
 }
+// Centered content column — matches the redesign spec (720px, generous padding).
+const PORTAL_COL = 'mx-auto w-full px-6 py-8'
+const PORTAL_MAXW: CSSProperties = { maxWidth: 720 }
 const chipBase: CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 4,
   borderRadius: 999, padding: '3px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
@@ -125,7 +128,7 @@ export function DriverPortalPage() {
 
   return (
     <Shell>
-      <div className="mx-auto max-w-xl px-4 py-6">
+      <div className={PORTAL_COL} style={PORTAL_MAXW}>
         {usingMock && (
           <div className="mb-3 rounded-lg px-3 py-2 text-xs" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
             Demo mode — running on local mock data (no backend configured).
@@ -332,7 +335,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
       <header style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
-        <div className="mx-auto flex max-w-xl items-center gap-2.5 px-4 py-3.5">
+        <div className="mx-auto flex w-full items-center gap-2.5 px-6 py-3.5" style={PORTAL_MAXW}>
           <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 4h7a4 4 0 0 1 0 8H5z M5 12h8a4 4 0 0 1 0 8H5z" fill="white" /></svg>
           </div>
