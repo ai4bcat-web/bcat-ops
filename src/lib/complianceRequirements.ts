@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-22.1'
+export const CATALOG_VERSION = '2026-07-22.2'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -706,6 +706,21 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
     helpText: 'The office obtains the New Mexico weight-distance / access permits for the truck and files them.',
     internalNotes: 'Office task — NM permit application; upload the permit document.',
   },
+  {
+    // FMCSA Driver Qualification File capstone (49 CFR 391.51) — HR assembles/verifies the DQ file.
+    key: 'dq_file_complete',
+    label: 'Driver Qualification File assembled & certified (49 CFR 391.51)',
+    category: 'Driver Qualification File',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: false,
+    driverActionable: false,
+    helpText:
+      'Ivan Cartage HR assembles and certifies the complete Driver Qualification File per 49 CFR 391.51 — application, MVRs, medical certificate + registry check, road-test/CDL equivalency, prior-employer safety investigation, and Clearinghouse query are all on file.',
+    internalNotes: 'HR sign-off — confirm every 391.51 DQ-file element is present before the driver is dispatched.',
+  },
 ] as const
 
 // ── Lookups ───────────────────────────────────────────────────────────────────
@@ -718,10 +733,17 @@ export function getTruckRequirements(ownershipType: TruckOwnershipType): Complia
   return TRUCK_REQUIREMENTS.filter((r) => r.appliesTo.includes(ownershipType))
 }
 
+// Every known requirement across all catalogs — used by the template editor's step picker.
+export const ALL_REQUIREMENTS: readonly ComplianceRequirement[] = [
+  ...DRIVER_REQUIREMENTS,
+  ...TRUCK_REQUIREMENTS,
+  ...AMAZON_REQUIREMENTS,
+]
+
 // AMAZON_REQUIREMENTS are registered here (so getRequirement() resolves them) but are
 // deliberately excluded from getDriverRequirements/getTruckRequirements above.
 const BY_KEY: ReadonlyMap<string, ComplianceRequirement> = new Map(
-  [...DRIVER_REQUIREMENTS, ...TRUCK_REQUIREMENTS, ...AMAZON_REQUIREMENTS].map((r) => [r.key, r]),
+  ALL_REQUIREMENTS.map((r) => [r.key, r]),
 )
 
 export function getRequirement(key: string): ComplianceRequirement | undefined {

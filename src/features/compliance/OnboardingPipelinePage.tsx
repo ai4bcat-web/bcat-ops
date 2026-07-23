@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ExternalLink, RefreshCw, Rocket } from 'lucide-react'
+import { ExternalLink, RefreshCw, Rocket, Archive, ArchiveRestore, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/store/useAppStore'
-import { listAllOnboardingTasks, listAllOnboardingInvites } from '@/lib/complianceClient'
+import { listAllOnboardingTasks, listAllOnboardingInvites, purgeCandidateOnboarding } from '@/lib/complianceClient'
 import { getOnboardingTemplate, ONBOARDING_TEMPLATES } from '@/lib/onboardingTemplates'
 import { currentPhaseNumber, isTaskDone, overdueTasks } from '@/lib/onboardingPhases'
 import { onboardingStatusLabel } from '@/lib/complianceStatus'
@@ -39,6 +43,7 @@ interface Row {
   overdueCount: number
   invite: OnboardingInvite | null
   lastActivity: string | null
+  archived: boolean
 }
 
 /**
@@ -48,11 +53,15 @@ interface Row {
 export function OnboardingPipelineSection() {
   const navigate = useNavigate()
   const drivers = useAppStore((s) => s.drivers)
+  const updateDriver = useAppStore((s) => s.updateDriver)
+  const deleteDriver = useAppStore((s) => s.deleteDriver)
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [invites, setInvites] = useState<OnboardingInvite[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<'ACTIVE' | DriverOnboardingStatus | 'ALL'>('ACTIVE')
   const [templateFilter, setTemplateFilter] = useState<string>('ALL')
+  const [deleteTarget, setDeleteTarget] = useState<Row | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
 
   async function load() {
     setLoading(true)
@@ -69,6 +78,30 @@ export function OnboardingPipelineSection() {
 
   // Same data-load-on-mount pattern as the other compliance hooks/pages in this app.
   useEffect(() => { load() }, [])
+
+  async function archive(r: Row) {
+    try { await updateDriver(r.driver.id, { onboardingStatus: 'ARCHIVED' }); toast.success(`Archived ${r.driver.name} — no longer in active onboarding`) }
+    catch (e) { console.error(e); toast.error('Could not archive') }
+  }
+
+  async function unarchive(r: Row) {
+    const restored: DriverOnboardingStatus = r.requiredCount > 0 ? 'IN_PROGRESS' : r.invite ? 'INVITED' : 'NOT_STARTED'
+    try { await updateDriver(r.driver.id, { onboardingStatus: restored }); toast.success(`Restored ${r.driver.name} to onboarding`) }
+    catch (e) { console.error(e); toast.error('Could not restore') }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setActionBusy(true)
+    try {
+      await purgeCandidateOnboarding(deleteTarget.driver.id)
+      await deleteDriver(deleteTarget.driver.id)
+      toast.success(`Deleted ${deleteTarget.driver.name}`)
+      setDeleteTarget(null)
+      await load()
+    } catch (e) { console.error(e); toast.error('Could not delete candidate') }
+    finally { setActionBusy(false) }
+  }
 
   const rows = useMemo<Row[]>(() => {
     // Index tasks & invites for O(1) lookups.
@@ -116,10 +149,14 @@ export function OnboardingPipelineSection() {
           overdueCount: overdueTasks(combined).length,
           invite: inv,
           lastActivity: lastActivity ?? inv?.sentAt ?? inv?.createdAt ?? null,
+          archived: (driver.onboardingStatus ?? 'NOT_STARTED') === 'ARCHIVED',
         }
       })
       .filter((r): r is Row => r !== null)
       .filter((r) => {
+        // Archived candidates are hidden from every view except the explicit "Archived" filter.
+        if (statusFilter === 'ARCHIVED') return r.archived
+        if (r.archived) return false
         if (statusFilter === 'ALL') return true
         const status = r.driver.onboardingStatus ?? 'NOT_STARTED'
         const liveInvite = !!r.invite && r.invite.status !== 'REVOKED' && r.invite.status !== 'EXPIRED'
@@ -142,6 +179,7 @@ export function OnboardingPipelineSection() {
             <option value="IN_PROGRESS">In progress</option>
             <option value="PENDING_REVIEW">Pending review</option>
             <option value="COMPLETE">Complete</option>
+            <option value="ARCHIVED">Archived</option>
             <option value="ALL">All</option>
           </select>
           <select value={templateFilter} onChange={(e) => setTemplateFilter(e.target.value)}
@@ -192,8 +230,20 @@ export function OnboardingPipelineSection() {
                     </td>
                     <td style={{ padding: '10px 16px', color: 'var(--ds-t3)', fontSize: 12 }}>{fmtDateTime(r.lastActivity)}</td>
                     <td style={{ padding: '10px 16px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <Button size="sm" variant="ghost" onClick={() => navigate(`/compliance/driver/${r.driver.id}`)}>
+                      <Button size="sm" variant="ghost" onClick={() => navigate(`/compliance/driver/${r.driver.id}`)} title="Open">
                         <ExternalLink size={14} /> Open
+                      </Button>
+                      {r.archived ? (
+                        <Button size="sm" variant="ghost" onClick={() => unarchive(r)} title="Restore to onboarding">
+                          <ArchiveRestore size={14} /> Restore
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" onClick={() => archive(r)} title="Archive (set aside — not being considered)">
+                          <Archive size={14} /> Archive
+                        </Button>
+                      )}
+                      <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(r)} title="Delete candidate" style={{ color: 'var(--ds-red)' }}>
+                        <Trash2 size={14} />
                       </Button>
                     </td>
                   </tr>
@@ -202,6 +252,26 @@ export function OnboardingPipelineSection() {
             </table>
           </div>
       </Card>
+
+      {/* Delete candidate confirmation */}
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete candidate — {deleteTarget?.driver.name}?</DialogTitle>
+            <DialogDescription>
+              This permanently removes the driver record along with their onboarding tasks, invites,
+              employment application, and uploaded documents. This can’t be undone. To keep the record
+              but stop considering them, use <strong>Archive</strong> instead.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={actionBusy}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={actionBusy}>
+              {actionBusy ? 'Deleting…' : 'Delete permanently'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)' }}>
         <Rocket size={13} /> Start a new driver from Drivers → open a driver → Start onboarding.

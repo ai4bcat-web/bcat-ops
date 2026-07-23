@@ -36,7 +36,7 @@ export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
 export type ComplianceStatus = 'COMPLIANT' | 'EXPIRING_SOON' | 'NON_COMPLIANT' | 'UNKNOWN'
 export type DriverOnboardingStatus =
-  | 'NOT_STARTED' | 'INVITED' | 'IN_PROGRESS' | 'PENDING_REVIEW' | 'COMPLETE'
+  | 'NOT_STARTED' | 'INVITED' | 'IN_PROGRESS' | 'PENDING_REVIEW' | 'COMPLETE' | 'ARCHIVED'
 export type TruckOnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETE'
 export type ComplianceEntityType = 'DRIVER' | 'TRUCK'
 

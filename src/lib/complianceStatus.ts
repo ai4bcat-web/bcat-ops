@@ -97,6 +97,7 @@ export function onboardingStatusLabel(status?: DriverOnboardingStatus | null): s
     case 'IN_PROGRESS': return 'In progress'
     case 'PENDING_REVIEW': return 'Pending review'
     case 'COMPLETE': return 'Complete'
+    case 'ARCHIVED': return 'Archived'
     default: return 'Not started'
   }
 }

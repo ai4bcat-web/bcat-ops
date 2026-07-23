@@ -13,7 +13,9 @@ import {
   type TruckOwnershipType,
 } from '@/lib/complianceRequirements'
 import {
+  getOnboardingTemplate,
   type OnboardingTemplate,
+  type OnboardingPhase,
   type TemplateEntry,
   type TaskOwner,
 } from '@/lib/onboardingTemplates'
@@ -451,7 +453,9 @@ function buildTemplateTaskInput(params: {
     console.error('[buildTemplateTaskInput] unknown requirement key', entry.key)
     return null
   }
-  const driverVisible = entityType === 'DRIVER' && entry.owner === 'DRIVER'
+  const isDriverOwned = entityType === 'DRIVER' && entry.owner === 'DRIVER'
+  // Visibility defaults to driver-owned, but the template editor can override it.
+  const driverVisible = entry.driverVisible ?? isDriverOwned
   return {
     phase,
     requirementKey: entry.key,
@@ -459,17 +463,18 @@ function buildTemplateTaskInput(params: {
       entityType,
       entityId,
       requirementKey: entry.key,
-      label: req.label,
+      label: entry.label?.trim() || req.label,
       category: req.category,
-      required: req.required,
+      required: entry.required ?? req.required,
       requiresDocument: entry.requiresDocument ?? req.requiresDocument,
       requiresExpiration: req.requiresExpiration,
       driverVisible,
-      driverActionable: driverVisible,
+      driverActionable: isDriverOwned && driverVisible,
       status: initialTemplateStatus(req, entry.owner),
       sortOrder,
       phase,
       owner: entry.owner,
+      assignee: entry.assignee ?? null,
       dueDate: computeDueDate(phaseStart, entry.dueDaysFromPhaseStart),
       templateId,
       catalogVersion: CATALOG_VERSION,
@@ -551,6 +556,97 @@ export async function generateTruckTasksFromTemplate(params: {
     created: created.length,
     tasks: [...existing, ...created].sort((a, b) => a.sortOrder - b.sortOrder),
   }
+}
+
+// ── Editable onboarding template config (OnboardingTemplateConfig) ────────────────
+// A saved template overrides the code default so staff can edit what onboarding looks
+// like. `phases` is stored as a JSON string (AWSJSON) — stringify on write, parse on read.
+
+const TEMPLATE_CONFIG_FIELDS = `templateId label phases updatedBy createdAt updatedAt`
+
+/** The saved (edited) template for an id, or null if none has been saved. */
+export async function getTemplateConfig(templateId: string): Promise<OnboardingTemplate | null> {
+  const data = await gql<{ getOnboardingTemplateConfig: { templateId: string; label?: string | null; phases?: unknown } | null }>(
+    `query ($templateId: String!) { getOnboardingTemplateConfig(templateId: $templateId) { ${TEMPLATE_CONFIG_FIELDS} } }`,
+    { templateId },
+  )
+  const rec = data.getOnboardingTemplateConfig
+  if (!rec) return null
+  let phases: OnboardingPhase[]
+  try {
+    phases = typeof rec.phases === 'string' ? JSON.parse(rec.phases) : ((rec.phases as OnboardingPhase[]) ?? [])
+  } catch {
+    phases = []
+  }
+  if (!phases.length) return null
+  return { id: rec.templateId, label: rec.label ?? templateId, phases }
+}
+
+/** Upsert the edited template (create or update the single row for this templateId). */
+export async function saveTemplateConfig(template: OnboardingTemplate, updatedBy?: string): Promise<void> {
+  const existing = await gql<{ getOnboardingTemplateConfig: { templateId: string } | null }>(
+    `query ($templateId: String!) { getOnboardingTemplateConfig(templateId: $templateId) { templateId } }`,
+    { templateId: template.id },
+  )
+  const input = {
+    templateId: template.id,
+    label: template.label,
+    phases: JSON.stringify(template.phases),
+    updatedBy: updatedBy ?? null,
+  }
+  if (existing.getOnboardingTemplateConfig) {
+    await gql(`mutation ($input: UpdateOnboardingTemplateConfigInput!) { updateOnboardingTemplateConfig(input: $input) { templateId } }`, { input })
+  } else {
+    await gql(`mutation ($input: CreateOnboardingTemplateConfigInput!) { createOnboardingTemplateConfig(input: $input) { templateId } }`, { input })
+  }
+}
+
+/** Reset to the code default by deleting the saved override. */
+export async function deleteTemplateConfig(templateId: string): Promise<void> {
+  await gql(`mutation ($input: DeleteOnboardingTemplateConfigInput!) { deleteOnboardingTemplateConfig(input: $input) { templateId } }`, { input: { templateId } })
+}
+
+/** The EFFECTIVE template used by kickoff: the saved (edited) version if present, else the code default. */
+export async function resolveOnboardingTemplate(templateId: string): Promise<OnboardingTemplate | undefined> {
+  try {
+    const cfg = await getTemplateConfig(templateId)
+    if (cfg) return cfg
+  } catch (e) {
+    console.error('[resolveOnboardingTemplate] falling back to default', e)
+  }
+  return getOnboardingTemplate(templateId)
+}
+
+export async function deleteOnboardingTask(id: string): Promise<void> {
+  await gql(`mutation ($input: DeleteOnboardingTaskInput!) { deleteOnboardingTask(input: $input) { id } }`, { input: { id } })
+}
+
+export async function deleteOnboardingInvite(id: string): Promise<void> {
+  await gql(`mutation ($input: DeleteOnboardingInviteInput!) { deleteOnboardingInvite(input: $input) { id } }`, { input: { id } })
+}
+
+export async function deleteDriverApplication(id: string): Promise<void> {
+  await gql(`mutation ($input: DeleteDriverApplicationInput!) { deleteDriverApplication(input: $input) { id } }`, { input: { id } })
+}
+
+/**
+ * Hard-delete every onboarding record tied to a driver: tasks, invites, the application,
+ * and uploaded compliance documents. Truck-entity tasks (on the assigned truck) are left
+ * intact — they belong to the truck, not the candidate.
+ */
+export async function purgeCandidateOnboarding(driverId: string): Promise<void> {
+  const [tasks, invites, docs, app] = await Promise.all([
+    listOnboardingTasks('DRIVER', driverId),
+    listOnboardingInvitesByDriver(driverId),
+    listComplianceDocuments('DRIVER', driverId),
+    getApplicationByDriver(driverId),
+  ])
+  await Promise.all([
+    ...tasks.map((t) => deleteOnboardingTask(t.id)),
+    ...invites.map((i) => deleteOnboardingInvite(i.id)),
+    ...docs.map((d) => deleteComplianceDocument(d.id)),
+    ...(app ? [deleteDriverApplication(app.id)] : []),
+  ])
 }
 
 /** Set a task's status and stamp completion when terminal. */

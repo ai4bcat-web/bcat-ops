@@ -69,7 +69,8 @@ const schema = a.schema({
       // driverType was previously a free-form string ('company'|'owner_op'); it is now an
       // enum. Existing un-reclassified records read as null → shown as "Unclassified" in UI.
       driverType:         a.enum(['COMPANY', 'OWNER_OPERATOR']),
-      onboardingStatus:   a.enum(['NOT_STARTED', 'INVITED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETE']),
+      // ARCHIVED = candidate set aside / not currently being considered (reversible).
+      onboardingStatus:   a.enum(['NOT_STARTED', 'INVITED', 'IN_PROGRESS', 'PENDING_REVIEW', 'COMPLETE', 'ARCHIVED']),
       complianceStatus:   a.enum(['COMPLIANT', 'EXPIRING_SOON', 'NON_COMPLIANT', 'UNKNOWN']), // cached, updated by scanner
       // Phased onboarding template in effect for this driver (e.g. Amazon Relay). Optional:
       // legacy/Ivan/Local drivers read null and keep the flat (non-phased) checklist behavior.
@@ -734,6 +735,19 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('settingsKey'),
     ])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Editable onboarding template (phased flows). One row per templateId (e.g.
+  // 'amazon-driver-v1') holding the full phases[] as JSON. When present, kickoff reads
+  // this instead of the code default, so staff can edit what onboarding looks like.
+  OnboardingTemplateConfig: a
+    .model({
+      templateId: a.string().required(),   // e.g. 'amazon-driver-v1' — PK
+      label:      a.string(),
+      phases:     a.json(),                 // OnboardingPhase[] (see src/lib/onboardingTemplates.ts)
+      updatedBy:  a.string(),
+    })
+    .identifier(['templateId'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Admin-only: manage Cognito users via Lambda.
