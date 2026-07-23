@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from 'react'
 import { useParams } from 'react-router-dom'
-import { Upload, FileText, CheckCircle2, Clock, AlertTriangle, PenLine } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, Clock, AlertTriangle, PenLine, ExternalLink, CalendarCheck } from 'lucide-react'
 import { portal, uploadFile, usingMock, PortalError, type OnboardingState, type ChecklistItem } from './portalApi'
 import { ApplicationForm } from './ApplicationForm'
 import { getRequirement } from '@/lib/complianceRequirements'
@@ -161,13 +161,17 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
   const fileRef = useRef<HTMLInputElement>(null)
   const [expiration, setExpiration] = useState('')
   const [signName, setSignName] = useState('')
+  const [completedDate, setCompletedDate] = useState('')
   const [busy, setBusy] = useState(false)
   const [showSign, setShowSign] = useState(false)
 
   const isDone = item.status === 'COMPLETE' || item.status === 'WAIVED' || item.status === 'PENDING_REVIEW' || item.status === 'NOT_APPLICABLE'
   const isApplication = item.requirementKey === 'employment_application'
   const canUpload = item.driverActionable && item.requiresDocument
-  const canSign = item.driverActionable && !item.requiresDocument && !isApplication
+  // Checkbox item that records a completion date (e.g. the drug test).
+  const needsDate = !!req?.requiresCompletionDate && item.driverActionable && !item.requiresDocument && !isApplication
+  const canSign = item.driverActionable && !item.requiresDocument && !isApplication && !needsDate
+  const links = (req?.links ?? []).filter((l) => l.url)
 
   async function handleFile(file: File) {
     setBusy(true)
@@ -184,6 +188,14 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
     finally { setBusy(false) }
   }
 
+  async function handleMarkComplete() {
+    if (!completedDate) return
+    setBusy(true)
+    try { await portal(token, 'eSign', { requirementKey: item.requirementKey, completedDate }); await onChanged() }
+    catch (e) { alert(e instanceof PortalError ? e.message : 'Failed') }
+    finally { setBusy(false) }
+  }
+
   return (
     <div style={cardStyle}>
       <div className="flex items-start justify-between gap-3">
@@ -193,6 +205,17 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
             {item.required && <span style={{ marginLeft: 6, fontSize: 12, color: 'var(--ds-red)' }}>required</span>}
           </div>
           {req?.helpText && <div className="mt-0.5 text-sm" style={{ color: 'var(--ds-t3)' }}>{req.helpText}</div>}
+          {links.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {links.map((l) => (
+                <a key={l.url} href={l.url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-sm font-medium"
+                  style={{ background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)', textDecoration: 'none' }}>
+                  <ExternalLink size={13} /> {l.label}
+                </a>
+              ))}
+            </div>
+          )}
           {item.rejectionReason && (
             <div className="mt-2 rounded-md px-2.5 py-1.5 text-sm" style={{ background: 'var(--ds-amber-bg)', color: 'var(--ds-amber)' }}>
               <span style={{ fontWeight: 600 }}>Needs attention:</span> {item.rejectionReason}
@@ -235,6 +258,18 @@ function ChecklistRow({ item, token, appStatus, onOpenApplication, onChanged }: 
               <button disabled={busy || !signName.trim()} onClick={handleSign} style={{ ...btnSuccess, opacity: busy || !signName.trim() ? 0.5 : 1 }}>Sign</button>
             </div>
           )}
+        </div>
+      )}
+
+      {!isApplication && needsDate && (!isDone || item.rejectionReason) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className="text-sm inline-flex items-center gap-1.5" style={{ color: 'var(--ds-t2)' }}>
+            Date drug test completed
+            <input type="date" value={completedDate} onChange={(e) => setCompletedDate(e.target.value)} style={inputStyle} />
+          </label>
+          <button disabled={busy || !completedDate} onClick={handleMarkComplete} style={{ ...btnSuccess, opacity: busy || !completedDate ? 0.5 : 1 }}>
+            <CalendarCheck size={15} /> Mark complete
+          </button>
         </div>
       )}
     </div>

@@ -292,7 +292,9 @@ export const handler = async (event: FnUrlEvent) => {
       case 'eSign': {
         const requirementKey = String(payload.requirementKey ?? '')
         const signatureName = String(payload.signatureName ?? '').trim()
-        if (!signatureName) throw new PortalError(400, 'Signature name required')
+        // Checkbox items (e.g. "date drug test completed") confirm with a date instead of a name.
+        const completedDate = (payload.completedDate as string) || null
+        if (!signatureName && !completedDate) throw new PortalError(400, 'Signature or completion date required')
         const tasks = await getDriverTasks(driverId)
         const task = tasks.find((t) => t.requirementKey === requirementKey)
         if (!task || !task.driverActionable) throw new PortalError(403, 'Not allowed for this item')
@@ -303,14 +305,17 @@ export const handler = async (event: FnUrlEvent) => {
           Item: {
             id: docId, __typename: 'ComplianceDocument', entityType: 'DRIVER', entityId: driverId,
             documentType: requirementKey, title: String(task.label),
+            ...(completedDate ? { issueDate: completedDate } : {}),
             status: 'PENDING_REVIEW', uploadedBy: 'DRIVER_PORTAL',
-            notes: `E-signed by ${signatureName} at ${now} from ${sourceIp}`,
+            notes: signatureName
+              ? `E-signed by ${signatureName} at ${now} from ${sourceIp}`
+              : `Marked complete${completedDate ? ` (completed ${completedDate})` : ''} at ${now} from ${sourceIp}`,
             createdAt: now, updatedAt: now,
           },
         }))
         await ddb.send(UpdateCommandFromObject(TASK_TABLE, { id: task.id }, { status: 'PENDING_REVIEW', complianceDocumentId: docId, updatedAt: now }))
         await touchInvite(invite, {})
-        await audit(driverId, 'document_uploaded', { eSign: requirementKey, source: 'DRIVER_PORTAL' })
+        await audit(driverId, 'document_uploaded', { eSign: requirementKey, completedDate, source: 'DRIVER_PORTAL' })
         return reply(200, { ok: true }, origin)
       }
 

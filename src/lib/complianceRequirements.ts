@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-22.2'
+export const CATALOG_VERSION = '2026-07-23.1'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -30,6 +30,13 @@ export interface ComplianceRequirement {
   helpText: string
   /** Staff-only context, never shown in the portal. */
   internalNotes?: string
+  /**
+   * Checkbox-style item that captures a completion date (e.g. "date drug test completed").
+   * The driver portal shows a date box + "Mark complete" instead of an upload or e-sign.
+   */
+  requiresCompletionDate?: boolean
+  /** Clickable links shown to the driver in the portal (form downloads, company policies). */
+  links?: readonly { label: string; url: string }[]
 }
 
 const ALL_DRIVERS: readonly DriverType[] = ['COMPANY', 'OWNER_OPERATOR']
@@ -147,16 +154,17 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
   },
   {
     key: 'pre_employment_drug_test',
-    label: 'Pre-employment drug test (negative on file)',
+    label: 'Schedule your pre-employment drug test',
     category: 'Background & Testing',
     appliesTo: ALL_DRIVERS,
     required: true,
     requiresDocument: false,
     requiresExpiration: false,
+    requiresCompletionDate: true,
     driverVisible: true,
-    driverActionable: false,
+    driverActionable: true,
     helpText:
-      'You must complete a pre-employment drug test with a negative result before driving (49 CFR 382.301). Ivan Cartage schedules this and records the result.',
+      'Schedule your pre-employment DOT drug test and have the lab send your results to hr@bcatcorp.com (49 CFR 382.301). Check this off and enter the date you completed the test.',
   },
   {
     key: 'clearinghouse_pre_employment',
@@ -212,7 +220,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
   },
   {
     key: 'drug_alcohol_policy_receipt',
-    label: 'Signed receipt of D&A + company policies',
+    label: 'Read & acknowledge company policies',
     category: 'Policies',
     appliesTo: ALL_DRIVERS,
     required: true,
@@ -221,7 +229,12 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Read and acknowledge Ivan Cartage’s Drug & Alcohol and company policies. You sign electronically by typing your name and checking the attestation box.',
+      'Read Ivan Cartage’s company policies and Drug & Alcohol policy using the links below, then acknowledge and sign by typing your full name.',
+    links: [
+      // TODO: paste the policy URLs (rows with a blank url are hidden in the portal).
+      { label: 'Company policies', url: '' },
+      { label: 'Drug & Alcohol policy', url: '' },
+    ],
   },
   {
     key: 'voided_check_or_direct_deposit',
@@ -342,7 +355,7 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
   },
   {
     key: 'occ_acc_or_workers_comp',
-    label: 'Occupational accident or workers comp cert',
+    label: 'Occupational accident / workers-comp form',
     category: 'Owner-Operator',
     appliesTo: ['OWNER_OPERATOR'],
     required: true,
@@ -351,7 +364,8 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: true,
     driverActionable: true,
     helpText:
-      'Upload your occupational-accident or workers-compensation certificate and enter its expiration date.',
+      'Download the occupational-accident / workers-compensation form below, print and complete it, then upload the signed copy and enter its expiration date.',
+    links: [{ label: 'Download the occupational-accident form', url: '' }], // TODO: paste the form URL
   },
   {
     key: 'truck_title_registration',
@@ -680,8 +694,8 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
     helpText: 'Upload a government identity document — Social Security card or passport (used to verify work eligibility).',
   },
   {
-    key: 'mvr_drug_consent_form',
-    label: 'MVR & drug-test consent form signed',
+    key: 'psp_disclosure_authorization',
+    label: 'PSP Disclosure & Authorization',
     category: 'Background & Testing',
     appliesTo: ALL_DRIVERS,
     required: true,
@@ -689,7 +703,9 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
     requiresExpiration: false,
     driverVisible: true,
     driverActionable: true,
-    helpText: 'Sign and upload the consent form authorizing us to pull your MVR and schedule your DOT drug test.',
+    helpText:
+      'Download the FMCSA PSP (Pre-employment Screening Program) Disclosure & Authorization form below, print it, complete and sign it, then upload the signed copy.',
+    links: [{ label: 'Download the PSP Disclosure & Authorization form', url: '' }], // TODO: paste the form URL
   },
   {
     key: 'nm_permits',
