@@ -184,7 +184,7 @@ export function DriverPortalPage() {
                 </div>
                 {locked && (
                   <div className="mb-2 text-sm" style={{ color: 'var(--ds-t3)' }}>
-                    Unlocks once Phase {g.phase - 1} is approved.
+                    Unlocks once you upload everything in Phase {g.phase - 1}.
                   </div>
                 )}
                 <div className="space-y-2.5">

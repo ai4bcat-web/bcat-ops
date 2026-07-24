@@ -203,14 +203,22 @@ export const handler = async (event: FnUrlEvent) => {
         const progressPct = required.length ? Math.round((done / required.length) * 100) : 0
 
         // ── Phase gating: the driver sees every phase, but only the CURRENT phase is
-        // actionable; earlier phases are done and later phases are locked. currentPhase
-        // is the lowest phase with a required task not yet finalized. A phase's own
-        // completion is judged over ALL driver-entity tasks (office + driver), so the
-        // next phase unlocks only once staff finalize the prior phase. PENDING_REVIEW is
-        // deliberately NOT "done" — a phase stays current until its work is approved.
-        const DONE = new Set(['COMPLETE', 'WAIVED', 'NOT_APPLICABLE'])
-        const phaseDone = (p: number) =>
-          gatingTasks.filter((t) => Number(t.phase) === p && t.required).every((t) => DONE.has(String(t.status)))
+        // actionable; earlier phases are cleared and later phases are locked. currentPhase
+        // is the lowest phase the driver hasn't yet cleared.
+        //
+        // The next phase unlocks as soon as the driver SUBMITS all of their required items
+        // in the prior phase — PENDING_REVIEW (uploaded, awaiting staff review) counts as
+        // cleared, so drivers keep moving instead of waiting on approval. Only the driver's
+        // OWN visible tasks gate them; back-office (office/truck-entity) tasks never do.
+        // If staff later REJECT a doc, that task leaves the cleared set and the driver drops
+        // back to that phase automatically. (This is intentionally more permissive than the
+        // staff pipeline, which still tracks true, approved completion.)
+        const CLEARED = new Set(['COMPLETE', 'WAIVED', 'NOT_APPLICABLE', 'PENDING_REVIEW'])
+        const phaseGating = tasks.filter((t) => t.driverVisible)
+        const phaseDone = (p: number) => {
+          const req = phaseGating.filter((t) => Number(t.phase) === p && t.required)
+          return req.every((t) => CLEARED.has(String(t.status)))
+        }
         const phaseSet = [...new Set(gatingTasks.map((t) => (t.phase != null ? Number(t.phase) : NaN)).filter((n) => !Number.isNaN(n)))].sort((a, b) => a - b)
         let currentPhase = phaseSet.length ? phaseSet[phaseSet.length - 1] : 1
         for (const p of phaseSet) { if (!phaseDone(p)) { currentPhase = p; break } }

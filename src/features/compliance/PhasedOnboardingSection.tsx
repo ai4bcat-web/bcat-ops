@@ -30,7 +30,7 @@ interface Props {
 }
 
 /**
- * Phased (Amazon) onboarding view for staff. Shows all 4 phases (office is NOT gated),
+ * Phased (Amazon) onboarding view for staff. Shows all phases (office is NOT gated),
  * each split into Driver vs Office columns, with per-task status, assignee, due date, and
  * upload/attach. Truck-owned tasks (Phase 2) are generated on the driver's assigned
  * truck once Phase 1 completes, and shown inline here.

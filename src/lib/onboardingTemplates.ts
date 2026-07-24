@@ -72,6 +72,7 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
         { key: 'occ_acc_or_workers_comp', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },
         { key: 'amazon_relay_course', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' }, // HR enrolls once the driver's application is done
         { key: 'eldt_verification', owner: 'DRIVER', requiresDocument: true, dueDaysFromPhaseStart: 7 },       // 49 CFR 380 (CDL after 2/7/2022)
+        { key: 'amazon_relay_training_complete', owner: 'DRIVER', requiresDocument: false, dueDaysFromPhaseStart: 7 }, // driver completes the required Relay course
         // Ivan Cartage HR — FMCSA Driver Qualification File (49 CFR 391.51) & drug/alcohol program (Part 382)
         { key: 'mvr_initial', owner: 'OFFICE', requiresDocument: true, assignee: 'Ivan Cartage HR' },                 // 391.23 — MVR from each licensing state
         { key: 'prev_employer_inquiry', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },      // 391.23(d)(e) — prior-employer safety investigation
@@ -84,18 +85,22 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
       ],
     },
     {
-      // Merged truck-setup + final-steps phase. Truck-owned (entity: 'TRUCK') tasks are
-      // generated on the assigned truck once Phase 1 completes (see PhasedOnboardingSection),
-      // so the office can register/plate the truck during this phase alongside the driver's
-      // DOT inspection — they no longer wait on each other.
+      // Legal forms & truck documents. Truck-owned (entity: 'TRUCK') tasks are generated on
+      // the assigned truck once Phase 1 completes (see PhasedOnboardingSection), so the
+      // office can register/plate the truck alongside the driver's document uploads.
       phase: 2,
-      title: 'Truck Setup, Permits, Insurance & Final Steps',
+      title: 'Legal Forms & Documents',
       entries: [
-        // Driver-provided truck docs
+        // Driver-provided legal/truck documents
         { key: 'oo_bobtail_insurance', owner: 'DRIVER', requiresDocument: true },
         { key: 'hvut_2290', owner: 'DRIVER', requiresDocument: true },
         { key: 'title_or_lease_proof', owner: 'DRIVER', requiresDocument: true },
+        { key: 'truck_photo_plate', owner: 'DRIVER', requiresDocument: true },
+        // Office / back-office (not driver-visible; do not gate the driver)
+        { key: 'occ_acc_or_workers_comp', owner: 'OFFICE', requiresDocument: true },
         { key: 'uia_port_authority_driver', owner: 'OFFICE', requiresDocument: false },
+        { key: 'amazon_relay_driver', owner: 'OFFICE', requiresDocument: false },
+        { key: 'begin_amazon_relay_training', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },
         // Truck-owned (generated on the assigned truck once Phase 1 completes)
         { key: 'truck_title_registration', owner: 'OFFICE', requiresDocument: true, entity: 'TRUCK' },
         { key: 'irp_cab_card', owner: 'OFFICE', requiresDocument: true, entity: 'TRUCK' },
@@ -105,30 +110,31 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
         { key: 'nm_permits', owner: 'OFFICE', requiresDocument: true, entity: 'TRUCK' },
         { key: 'uia_port_authority_truck', owner: 'OFFICE', requiresDocument: false, entity: 'TRUCK' },
         { key: 'cargo_insurance_add', owner: 'OFFICE', requiresDocument: true, entity: 'TRUCK' },
-        // Final steps (formerly Phase 4) — inspection, Relay registration, policies, direct deposit
-        { key: 'annual_dot_inspection', owner: 'DRIVER', requiresDocument: true },
         { key: 'amazon_relay_truck', owner: 'OFFICE', requiresDocument: false, entity: 'TRUCK' },
-        { key: 'amazon_relay_driver', owner: 'OFFICE', requiresDocument: false },
-        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false },        // read policies + acknowledge/sign
-        { key: 'direct_deposit_authorization', owner: 'DRIVER', requiresDocument: true },         // download / fill / upload
-        // END of Phase 2 — HR kicks off Amazon Relay training once everything above is done.
-        { key: 'begin_amazon_relay_training', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' },
       ],
     },
     {
       phase: 3,
-      title: 'IRS Forms',
+      title: 'Company Policies',
       entries: [
-        { key: 'i9_w4', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'COMPANY' },
-        { key: 'w9', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'OWNER_OPERATOR' },
-        { key: 'occ_acc_or_workers_comp', owner: 'OFFICE', requiresDocument: true },
+        { key: 'annual_dot_inspection', owner: 'DRIVER', requiresDocument: true },
+        { key: 'drug_alcohol_policy_receipt', owner: 'DRIVER', requiresDocument: false }, // read policies + acknowledge/sign
       ],
     },
     {
       phase: 4,
       title: 'Lease Agreement',
       entries: [
-        { key: 'lease_agreement', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' }, // VERY last — HR step, no upload
+        { key: 'lease_agreement', owner: 'OFFICE', requiresDocument: false, assignee: 'Ivan Cartage HR' }, // HR generates; driver signs
+      ],
+    },
+    {
+      phase: 5,
+      title: 'Payment Setup',
+      entries: [
+        { key: 'i9_w4', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'COMPANY' },
+        { key: 'w9', owner: 'DRIVER', requiresDocument: true, appliesToDriverType: 'OWNER_OPERATOR' },
+        { key: 'direct_deposit_authorization', owner: 'DRIVER', requiresDocument: true },
       ],
     },
   ],

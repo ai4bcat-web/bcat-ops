@@ -2,7 +2,7 @@
 // The onboarding flow reads this to generate OnboardingTask records per classification.
 // Bump CATALOG_VERSION whenever entries change so generated checklists are traceable.
 
-export const CATALOG_VERSION = '2026-07-23.8'
+export const CATALOG_VERSION = '2026-07-23.10'
 
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
@@ -396,6 +396,18 @@ export const TRUCK_REQUIREMENTS: readonly ComplianceRequirement[] = [
     helpText: 'Title, proof of ownership, or lease documents for the truck.',
   },
   {
+    key: 'truck_photo_plate',
+    label: 'Photo of truck with license plate',
+    category: 'Ownership',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Upload one clear photo of the truck where the whole truck AND its license plate are both visible and the plate is readable.',
+  },
+  {
     key: 'irp_cab_card',
     label: 'IRP registration / cab card',
     category: 'Registration',
@@ -612,6 +624,18 @@ export const AMAZON_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverActionable: false,
     helpText: 'Ivan Cartage HR enrolls the driver in / completes the Amazon Relay onboarding course.',
     internalNotes: 'HR task — kicks off once the driver finishes their application section. Not a driver item.',
+  },
+  {
+    key: 'amazon_relay_training_complete',
+    label: 'Complete Amazon Relay training',
+    category: 'Amazon Relay',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: false,
+    requiresExpiration: false,
+    driverVisible: true,
+    driverActionable: true,
+    helpText: 'Complete the required Amazon Relay training course, then check this off. Phase 2 unlocks once your Phase 1 items are done.',
   },
   {
     key: 'begin_amazon_relay_training',
