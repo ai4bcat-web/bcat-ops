@@ -384,6 +384,7 @@ complianceScanRule.addTarget(new EventsLambdaTarget(complianceScannerFn))
 // ── Shared compliance tables ───────────────────────────────────────────────
 
 const onboardingInviteTable    = backend.data.resources.tables['OnboardingInvite']
+const signatureRequestTable    = backend.data.resources.tables['DocumentSignatureRequest']
 const driverApplicationTable   = backend.data.resources.tables['DriverApplication']
 const auditLogTable            = backend.data.resources.tables['AuditLog']
 const complianceSettingsTable  = backend.data.resources.tables['ComplianceSettings']
@@ -407,12 +408,16 @@ backend.onboardingPortalApi.resources.lambda.addToRolePolicy(
       complianceDocTable.tableArn,
       driverApplicationTable.tableArn,
       auditLogTable.tableArn,
+      signatureRequestTable.tableArn,
     ],
   })
 )
 // Presigned PUT uploads land under compliance/* in the documents bucket.
 backend.storage.resources.bucket.grantPut(portalApiFn, 'compliance/*')
+// Signed-form PDFs are written directly (base64 body) by the sign action.
+backend.storage.resources.bucket.grantWrite(portalApiFn, 'compliance/*')
 
+portalApiFn.addEnvironment('SIGN_REQ_TABLE_NAME', signatureRequestTable.tableName)
 portalApiFn.addEnvironment('INVITE_TABLE_NAME', onboardingInviteTable.tableName)
 portalApiFn.addEnvironment('DRIVER_TABLE_NAME', driverTable.tableName)
 portalApiFn.addEnvironment('TASK_TABLE_NAME',   onboardingTaskTable.tableName)

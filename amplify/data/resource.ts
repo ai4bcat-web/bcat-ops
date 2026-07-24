@@ -572,6 +572,32 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // A "send for signature" request for a Driver Documents form (e.g. the WI Independent
+  // Contractor Status statement). The office creates one; the driver opens /sign/<token>,
+  // fills + e-signs, and the portal Lambda stores the signed PDF on their compliance
+  // record and flips this to SIGNED. Token is validated server-side (raw DynamoDB), so
+  // the model itself is only authenticated-facing for the office UI.
+  DocumentSignatureRequest: a
+    .model({
+      driverId:             a.string().required(),
+      driverName:           a.string(),
+      documentType:         a.string().required(),   // e.g. 'ic_status_wi'
+      documentTitle:        a.string(),
+      token:                a.string().required(),    // URL-safe crypto-random
+      status:               a.enum(['SENT', 'OPENED', 'SIGNED', 'VOIDED']),
+      sentTo:               a.string(),               // recipient email (record only)
+      valuesJson:           a.json(),                 // filled form values, captured on sign
+      complianceDocumentId: a.string(),               // linked signed ComplianceDocument
+      signedAt:             a.datetime(),
+      signerIp:             a.string(),
+      createdBy:            a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('driverId'),
+      index('token'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // The 49 CFR 391.21 employment application, filled by the driver in the portal.
   // NEVER collect or store a full SSN here — last 4 only.
   DriverApplication: a

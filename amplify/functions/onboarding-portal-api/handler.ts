@@ -24,6 +24,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
 
 const INVITE_TABLE = process.env.INVITE_TABLE_NAME!
+const SIGN_REQ_TABLE = process.env.SIGN_REQ_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const TASK_TABLE = process.env.TASK_TABLE_NAME!
 const DOC_TABLE = process.env.DOC_TABLE_NAME!
@@ -163,6 +164,18 @@ export const handler = async (event: FnUrlEvent) => {
     req = JSON.parse(raw)
   } catch {
     return reply(400, { error: 'Bad JSON' }, origin)
+  }
+
+  // Document-signing actions use their OWN token (DocumentSignatureRequest), not an
+  // onboarding invite — handle them before invite validation.
+  if (req.action === 'signGet' || req.action === 'signSubmit') {
+    try {
+      return await handleSigning(req.action, req.token ?? '', req.payload ?? {}, sourceIp, origin)
+    } catch (err) {
+      if (err instanceof PortalError) return reply(err.status, { error: err.message }, origin)
+      console.error('[portal-api] signing error', err)
+      return reply(500, { error: 'Internal error' }, origin)
+    }
   }
 
   try {
@@ -372,6 +385,68 @@ export const handler = async (event: FnUrlEvent) => {
 }
 
 // Small helper: build an UpdateCommand that SETs each key of `attrs`.
+/**
+ * Document-signing (Driver Documents). Own token type (DocumentSignatureRequest). The
+ * browser builds the signed PDF and sends the bytes (base64); we store them on S3 and
+ * create a VALID ComplianceDocument on the driver, then flip the request to SIGNED.
+ */
+async function handleSigning(
+  action: string,
+  token: string,
+  payload: Record<string, unknown>,
+  sourceIp: string,
+  origin?: string,
+) {
+  if (!token) throw new PortalError(400, 'Missing token')
+  const rows = await scan(SIGN_REQ_TABLE, '#t = :tok', { '#t': 'token' }, { ':tok': token })
+  const reqRow = rows[0] as Record<string, unknown> | undefined
+  if (!reqRow) throw new PortalError(404, 'This signing link is invalid or has expired.')
+  const status = String(reqRow.status ?? '')
+  if (status === 'VOIDED') throw new PortalError(410, 'This signing request has been cancelled.')
+  const now = new Date().toISOString()
+
+  if (action === 'signGet') {
+    if (status === 'SENT') {
+      await ddb.send(UpdateCommandFromObject(SIGN_REQ_TABLE, { id: reqRow.id }, { status: 'OPENED', updatedAt: now }))
+    }
+    return reply(200, {
+      status: status === 'SENT' ? 'OPENED' : status,
+      driverName: reqRow.driverName ?? '',
+      documentType: reqRow.documentType,
+      documentTitle: reqRow.documentTitle ?? '',
+      valuesJson: reqRow.valuesJson ?? null,
+    }, origin)
+  }
+
+  // signSubmit
+  if (status === 'SIGNED') throw new PortalError(409, 'This document has already been signed.')
+  const pdfBase64 = String(payload.pdfBase64 ?? '')
+  if (!pdfBase64) throw new PortalError(400, 'Missing signed document')
+  const bytes = Buffer.from(pdfBase64, 'base64')
+  if (bytes.length > MAX_UPLOAD_BYTES) throw new PortalError(413, 'Document too large')
+  const driverId = String(reqRow.driverId)
+  const documentType = String(reqRow.documentType)
+  const s3Key = `compliance/DRIVER/${driverId}/${documentType}/${Date.now()}-signed.pdf`
+  await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: s3Key, Body: bytes, ContentType: 'application/pdf' }))
+  const docId = randomUUID()
+  await ddb.send(new PutCommand({
+    TableName: DOC_TABLE,
+    Item: {
+      id: docId, __typename: 'ComplianceDocument', entityType: 'DRIVER', entityId: driverId,
+      documentType, title: String(reqRow.documentTitle ?? documentType), s3Key,
+      issueDate: now.slice(0, 10), status: 'VALID', uploadedBy: 'DRIVER_PORTAL',
+      notes: `E-signed via signing link at ${now} from ${sourceIp}`,
+      createdAt: now, updatedAt: now,
+    },
+  }))
+  await ddb.send(UpdateCommandFromObject(SIGN_REQ_TABLE, { id: reqRow.id }, {
+    status: 'SIGNED', valuesJson: payload.valuesJson ?? null, complianceDocumentId: docId,
+    signedAt: now, signerIp: sourceIp, updatedAt: now,
+  }))
+  await audit(driverId, 'document_signed', { documentType, source: 'DRIVER_PORTAL' })
+  return reply(200, { ok: true, status: 'SIGNED' }, origin)
+}
+
 function UpdateCommandFromObject(table: string, key: Record<string, unknown>, attrs: Record<string, unknown>) {
   const sets: string[] = []
   const names: Record<string, string> = {}

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, Fuel, History,
-  ShieldCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Rocket, type LucideIcon,
+  ShieldCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Rocket, FileSignature, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -52,7 +52,8 @@ export const NAV_GROUPS: NavSection[] = [
   {
     title: 'Drivers',
     items: [
-      { to: '/drivers',               label: 'Drivers',                 icon: Users,  pageKey: 'drivers' },
+      { to: '/drivers',               label: 'Drivers',                 icon: Users,          pageKey: 'drivers' },
+      { to: '/driver-docs',           label: 'Driver Documents',        icon: FileSignature,  pageKey: 'driverDocs' },
       { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements',   icon: Boxes,  pageKey: 'driverPayBoxTrucks' },
       { to: '/driver-pay',            label: 'Amazon Settlements',      icon: Wallet, pageKey: 'driverPay' },
       { to: '/disputes',              label: 'Amazon Disputes',         icon: Scale,  pageKey: 'disputes' },

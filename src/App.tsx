@@ -31,6 +31,8 @@ import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
 import { VehicleConfirmationPage } from '@/features/vehicle-confirmation/VehicleConfirmationPage'
 import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManagerDashboardPage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
+import { DriverDocumentsPage } from '@/features/driver-docs/DriverDocumentsPage'
+import { DocumentSigningPage } from '@/features/driver-docs/DocumentSigningPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 
 export default function App() {
@@ -41,6 +43,7 @@ export default function App() {
         <Routes>
           {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
+          <Route path="/sign/:token" element={<DocumentSigningPage />} />
           <Route path="/*" element={
             <AuthGuard>
               <Routes>
@@ -62,6 +65,7 @@ export default function App() {
               <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
               <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
+              <Route path="/driver-docs" element={<RequirePage page="driverDocs"><DriverDocumentsPage /></RequirePage>} />
               <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />

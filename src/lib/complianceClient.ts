@@ -298,6 +298,49 @@ export async function updateComplianceDocument(
   return data.updateComplianceDocument
 }
 
+// ── DocumentSignatureRequest (Driver Documents "send for signature") ──────────────
+
+export interface DocumentSignatureRequest {
+  id: string
+  driverId: string
+  driverName?: string | null
+  documentType: string
+  documentTitle?: string | null
+  token: string
+  status: 'SENT' | 'OPENED' | 'SIGNED' | 'VOIDED'
+  sentTo?: string | null
+  complianceDocumentId?: string | null
+  signedAt?: string | null
+  createdBy?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const SIGREQ_FIELDS = `id driverId driverName documentType documentTitle token status sentTo complianceDocumentId signedAt createdBy createdAt updatedAt`
+
+export async function createSignatureRequest(input: {
+  driverId: string; driverName?: string; documentType: string; documentTitle?: string
+  token: string; sentTo?: string; createdBy?: string
+}): Promise<DocumentSignatureRequest> {
+  const data = await gql<{ createDocumentSignatureRequest: DocumentSignatureRequest }>(
+    `mutation ($input: CreateDocumentSignatureRequestInput!) {
+      createDocumentSignatureRequest(input: $input) { ${SIGREQ_FIELDS} }
+    }`,
+    { input: { status: 'SENT', ...input } },
+  )
+  return data.createDocumentSignatureRequest
+}
+
+export async function listSignatureRequestsByDriver(driverId: string): Promise<DocumentSignatureRequest[]> {
+  const data = await gql<{ listDocumentSignatureRequestByDriverId: { items: DocumentSignatureRequest[] } }>(
+    `query ($driverId: String!) {
+      listDocumentSignatureRequestByDriverId(driverId: $driverId, limit: 200) { items { ${SIGREQ_FIELDS} } }
+    }`,
+    { driverId },
+  )
+  return data.listDocumentSignatureRequestByDriverId.items ?? []
+}
+
 // ── OnboardingTask ──────────────────────────────────────────────────────────────
 
 export async function listOnboardingTasks(
