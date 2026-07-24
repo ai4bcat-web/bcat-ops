@@ -10,6 +10,8 @@ import type { DriverApplicationDraft } from '@/lib/schemas'
 // Driver-facing contact info shown on the expired/error page.
 const CONTACT_PHONE = '(847) 450-0899'
 const CONTACT_EMAIL = 'onboarding@bcatcorp.com'
+// "Need a hand?" footer help card routes drivers to HR.
+const HELP_EMAIL = 'hr@bcatcorp.com'
 
 // ── Shared styles (design-system tokens, matching the admin app) ────────────────
 const cardStyle: CSSProperties = {
@@ -203,7 +205,7 @@ export function DriverPortalPage() {
             Our onboarding team is happy to help with any step.
           </div>
           <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-            <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: 'var(--ds-blue)', fontWeight: 600, textDecoration: 'none' }}>{CONTACT_EMAIL}</a>
+            <a href={`mailto:${HELP_EMAIL}`} style={{ color: 'var(--ds-blue)', fontWeight: 600, textDecoration: 'none' }}>{HELP_EMAIL}</a>
             <a href={`tel:${CONTACT_PHONE.replace(/[^\d+]/g, '')}`} style={{ color: 'var(--ds-t2)', fontWeight: 600, textDecoration: 'none' }}>{CONTACT_PHONE}</a>
           </div>
         </div>
