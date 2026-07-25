@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-24
+> Last updated: 2026-07-25
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
 
 ## Where it lives
 | | |
@@ -40,6 +40,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
 | `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay |
 | `/disputes` | Amazon driver disputes (underpaid/owed trips) — Google Form ingest + manual entry |
+| `/driver-docs` | Driver Documents — send forms (e.g. WI IC-Status statement) for tokenized e-signature |
 | `/audit-log` | Audit trail (legacy `/audit` redirects) |
 | `/intake` | Email/Slack intake queue |
 | `/tasks` | Task/todo board |
@@ -52,6 +53,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/compliance/driver/:driverId` | Per-driver compliance detail |
 | `/compliance/truck/:truckId` | Truck onboarding wizard |
 | `/onboard/:token` | Public tokenized driver onboarding portal (outside the authenticated app shell) |
+| `/sign/:token` | Public tokenized document-signing page — driver fills + e-signs a Driver Documents form (outside the authenticated app shell) |
 
 ## Data Models (GraphQL / DynamoDB)
 **Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability`
@@ -66,7 +68,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 
 **Expenses & fuel:** `FuelTransaction` · `ExpenseType` · `TruckExpenseAllocation` · `ExpenseRecord` · `RecurringExpense`
 
-**DOT compliance & onboarding:** `OnboardingInvite` · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` (supports phased templates via `phase`/`owner`/`templateId`) · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings` · `OnboardingTemplateConfig` (editable phased-onboarding template stored as JSON, e.g. `amazon-driver-v1`; kickoff reads it instead of the code default so staff can edit the steps drivers see)
+**DOT compliance & onboarding:** `OnboardingInvite` · `DocumentSignatureRequest` (a "send for signature" request for a Driver Documents form, e.g. WI IC-Status `ic_status_wi`; driver signs at `/sign/:token`, portal Lambda stores the signed PDF and flips status SENT → SIGNED) · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` (supports phased templates via `phase`/`owner`/`templateId`) · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings` · `OnboardingTemplateConfig` (editable phased-onboarding template stored as JSON, e.g. `amazon-driver-v1`; kickoff reads it instead of the code default so staff can edit the steps drivers see)
 
 Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candidate set aside, reversible) and `Driver.onboardingTemplateId` selects the phased template. `Equipment.lastPmDate`/`lastPmMileage` feed the Fleet Manager dashboard's 25k-mi PM countdown.
 
