@@ -37,15 +37,30 @@ export function ICStatusFields({ value, onChange }: { value: ICStatusValues; onC
         ))}
       </div>
 
+      {/* Sole-proprietor signature block */}
       <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-        <div><span style={label}>Print / Type Name</span><input style={inputStyle} value={value.printName} onChange={(e) => set('printName', e.target.value)} /></div>
-        <div><span style={label}>Date</span><input type="date" style={inputStyle} value={value.date} onChange={(e) => set('date', e.target.value)} /></div>
-        <div><span style={label}>Federal Employer Tax ID (EIN)</span><input style={inputStyle} value={value.ein} onChange={(e) => set('ein', e.target.value)} placeholder="XX-XXXXXXX" /></div>
+        <div style={{ gridColumn: '1 / -1' }}><span style={label}>Print or type name of business or personal name</span><input style={inputStyle} value={value.printName} onChange={(e) => set('printName', e.target.value)} /></div>
         <div><span style={label}>Signature (type full name)</span><input style={{ ...inputStyle, fontStyle: 'italic' }} value={value.signature} onChange={(e) => set('signature', e.target.value)} placeholder="e.g. John A. Smith" /></div>
+        <div><span style={label}>Date</span><input type="date" style={inputStyle} value={value.date} onChange={(e) => set('date', e.target.value)} /></div>
+        <div><span style={label}>FEIN or SSN</span><input style={inputStyle} value={value.ein} onChange={(e) => set('ein', e.target.value)} placeholder="FEIN (XX-XXXXXXX) or SSN" /></div>
       </div>
       <p style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-        <PenLine size={12} /> Typing your full name above is a legally binding electronic signature, timestamped on submit.
+        <PenLine size={12} /> Typing your full name is a legally binding electronic signature, timestamped on submit.
       </p>
+
+      {/* Motor carrier's acknowledgement & receipt of statement */}
+      <div style={{ marginTop: 22, paddingTop: 18, borderTop: '1px solid var(--ds-border)' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ds-t1)', letterSpacing: '0.02em' }}>Motor Carrier’s Acknowledgement and Receipt of Statement</div>
+        <p style={{ fontSize: 12, color: 'var(--ds-t2)', lineHeight: 1.5, margin: '8px 0 14px' }}>
+          The above-named owner-operator has entered into a written contract with us and the terms of the contract and our relationship are accurately stated.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div style={{ gridColumn: '1 / -1' }}><span style={label}>Motor Carrier</span><input style={inputStyle} value={value.carrierName} onChange={(e) => set('carrierName', e.target.value)} /></div>
+          <div><span style={label}>Print or Type Name</span><input style={inputStyle} value={value.carrierBy} onChange={(e) => set('carrierBy', e.target.value)} /></div>
+          <div><span style={label}>Date</span><input type="date" style={inputStyle} value={value.carrierDate} onChange={(e) => set('carrierDate', e.target.value)} /></div>
+          <div style={{ gridColumn: '1 / -1' }}><span style={label}>By — Signature / Title</span><input style={{ ...inputStyle, fontStyle: 'italic' }} value={value.carrierTitle} onChange={(e) => set('carrierTitle', e.target.value)} placeholder="Signature / Title" /></div>
+        </div>
+      </div>
     </div>
   )
 }

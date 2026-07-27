@@ -47,10 +47,10 @@ export function buildICStatusPdf(v: ICStatusValues, opts?: { capturedAt?: string
     doc.line(M, yy + 2, M + 280, yy + 2)
     doc.setFontSize(8).setTextColor(90).text(label, M, yy + 13); doc.setTextColor(0)
   }
-  line('Print or Type Name of Sole Proprietor', v.printName, y); doc.setFontSize(10).text(`Dated: ${fmtDate(v.date)}`, M + 320, y - 2); y += 34
+  line('Print or type name of business or personal name', v.printName, y); doc.setFontSize(10).text(`Dated: ${fmtDate(v.date)}`, M + 320, y - 2); y += 34
   doc.setFont('helvetica', 'italic').setFontSize(11).text(v.signature || '', M, y - 2); doc.setFont('helvetica', 'normal')
   doc.line(M, y + 2, M + 280, y + 2); doc.setFontSize(8).setTextColor(90).text('Signature of Sole Proprietor (typed e-signature)', M, y + 13); doc.setTextColor(0); y += 34
-  line('Federal Employer Tax Identification #', v.ein, y); y += 40
+  line('FEIN or SSN', v.ein, y); y += 40
 
   // Motor carrier acknowledgement
   doc.setFont('helvetica', 'bold').setFontSize(11).text('MOTOR CARRIER’S ACKNOWLEDGEMENT AND RECEIPT OF STATEMENT', M, y); y += 16
