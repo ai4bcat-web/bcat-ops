@@ -5,6 +5,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
 import type { TruckConfig } from '@/lib/apiClient'
 import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
+import { getUnitPremiumCents, setUnitPremiumCurrentPeriod } from '@/lib/insuranceClient'
 import { useExpenseData } from '@/hooks/useExpenseData'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -182,6 +183,17 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
 
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
   const isTruck = form.type === 'truck'
+
+  // Insurance premium is owned by the Insurance module (current period) — load this
+  // truck's/trailer's value so the field mirrors the Insurance page (two-way sync).
+  useEffect(() => {
+    if (!initial?.id) return
+    let active = true
+    getUnitPremiumCents(initial.id)
+      .then((cents) => { if (active && cents > 0) setForm((f) => ({ ...f, insuranceAnnual: String(cents / 100) })) })
+      .catch((e) => console.error('[insurance prefill]', e))
+    return () => { active = false }
+  }, [initial?.id])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -1058,6 +1070,12 @@ export function TrucksPage() {
         applyTruckCosts(id, unit, costs, existing)
           .then(() => expenseData.refresh())
           .catch((err) => console.error('[applyTruckCosts] failed', err))
+        // Insurance lives in the Insurance module (current period) — same record the
+        // Insurance page edits, so the two stay in sync and it feeds the P&L.
+        if (data.type === 'truck') {
+          setUnitPremiumCurrentPeriod('TRUCK', id, unit, Math.round((costs.insuranceAnnual ?? 0) * 100))
+            .catch((err) => console.error('[insurance save] failed', err))
+        }
       }
     } else {
       const truck = addEquipment(data)
@@ -1068,6 +1086,10 @@ export function TrucksPage() {
         provisionTruckCosts(truck.id, truck.unitNumber, costs)
           .then((n) => { if (n > 0) { toast('Operating costs added', { description: `${n} recurring cost${n === 1 ? '' : 's'} created for unit ${truck.unitNumber}` }); expenseData.refresh() } })
           .catch((err) => console.error('[provisionTruckCosts] failed', err))
+      }
+      if (costs && data.type === 'truck' && (costs.insuranceAnnual ?? 0) > 0) {
+        setUnitPremiumCurrentPeriod('TRUCK', truck.id, truck.unitNumber, Math.round((costs.insuranceAnnual ?? 0) * 100))
+          .catch((err) => console.error('[insurance save] failed', err))
       }
     }
     setShowForm(null)

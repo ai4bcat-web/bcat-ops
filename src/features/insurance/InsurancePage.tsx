@@ -6,6 +6,11 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { KpiCard } from '@/components/ui/kpi-card'
 import { useInsurance, type UnitRow } from '@/hooks/useInsurance'
+import { useInsuranceRecovery } from '@/hooks/useInsuranceRecovery'
+import { useExpenseData } from '@/hooks/useExpenseData'
+import { useTrucks } from '@/hooks/useTrucks'
+import { legacyTruckInsuranceCents } from '@/lib/truckCosts'
+import { importLegacyTruckPremiums } from '@/lib/insuranceClient'
 
 const usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 const usd2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -55,6 +60,9 @@ function Card({ title, sub, right, children }: { title: string; sub?: string; ri
 
 export function InsurancePage() {
   const ins = useInsurance()
+  const recovery = useInsuranceRecovery()
+  const expenseData = useExpenseData()
+  const { equipment } = useTrucks()
   const [mode, setMode] = useState<'edit' | 'compare'>('edit')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [cmpA, setCmpA] = useState<string | null>(null)
@@ -104,6 +112,22 @@ export function InsurancePage() {
     catch (e) { console.error(e); toast.error('Could not delete') }
   }
 
+  // Legacy per-truck insurance entered on truck profiles before this module existed.
+  const legacyPairs = useMemo(
+    () => legacyTruckInsuranceCents(
+      expenseData.recurring, expenseData.allocations, expenseData.expenseTypes,
+      equipment.filter((e) => e.type === 'truck').map((e) => ({ id: e.id, unitNumber: e.unitNumber })),
+    ),
+    [expenseData.recurring, expenseData.allocations, expenseData.expenseTypes, equipment],
+  )
+  async function importLegacy() {
+    try {
+      const n = await importLegacyTruckPremiums(legacyPairs)
+      await ins.refresh()
+      toast.success(n > 0 ? `Imported ${n} truck premium${n === 1 ? '' : 's'} from truck profiles` : 'Nothing new to import')
+    } catch (e) { console.error(e); toast.error('Import failed') }
+  }
+
   const wrap: CSSProperties = { maxWidth: 1200, margin: '0 auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }
 
   if (!ins.loading && ins.periods.length === 0) {
@@ -130,6 +154,8 @@ export function InsurancePage() {
       <div style={wrap}>
         <Header onNew={newPeriod} />
 
+        <RecoveryCard recovery={recovery} grossAnnual={(totals?.totalCents ?? 0) / 100} />
+
         {/* Controls: period picker + mode toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'inline-flex', borderRadius: 9, border: '1px solid var(--ds-border)', overflow: 'hidden' }}>
@@ -143,6 +169,7 @@ export function InsurancePage() {
               </select>
               {!period.isCurrent && <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={makeCurrent}><Star size={14} /> Set current</Button>}
               <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={clonePeriod}><CopyPlus size={14} /> New from this</Button>
+              {legacyPairs.length > 0 && <Button size="sm" variant="outline" style={{ paddingInline: 16 }} onClick={importLegacy} title="Import insurance values entered on truck profiles"><Truck size={14} /> Import from trucks</Button>}
               <Button size="sm" variant="ghost" style={{ paddingInline: 12, color: 'var(--ds-red)' }} onClick={removePeriod} title="Delete period"><Trash2 size={14} /></Button>
             </>
           )}
@@ -162,6 +189,40 @@ export function InsurancePage() {
         {mode === 'compare' && (
           <CompareView ins={ins} a={cmpA} b={cmpB} setA={setCmpA} setB={setCmpB} />
         )}
+      </div>
+    </div>
+  )
+}
+
+function RecoveryCard({ recovery, grossAnnual }: { recovery: ReturnType<typeof useInsuranceRecovery>; grossAnnual: number }) {
+  const { amazonAnnual, boxTruckAnnual, totalAnnual, rows, loading } = recovery
+  const net = Math.max(0, grossAnnual - totalAnnual)
+  const pct = grossAnnual > 0 ? (totalAnnual / grossAnnual) * 100 : 0
+  return (
+    <div style={{ ...cardStyle, padding: 0 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 0 }}>
+        <div style={{ padding: '16px 18px', borderRight: '1px solid var(--ds-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12, color: 'var(--ds-t3)' }}>
+            <HeartPulse size={14} style={{ color: 'var(--ds-green)' }} /> Recovered from driver settlements
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--ds-green)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{loading ? '…' : money(totalAnnual * 100)}<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ds-t3)' }}> / yr</span></div>
+          <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
+            {grossAnnual > 0 ? `${pct.toFixed(0)}% of premiums` : 'deducted from Amazon + box-truck pay'}
+          </div>
+        </div>
+        <div style={{ padding: '16px 18px', borderRight: '1px solid var(--ds-border)' }}>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>By pay group</div>
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span style={{ color: 'var(--ds-t2)' }}>Amazon drivers</span><span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{money(amazonAnnual * 100)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}><span style={{ color: 'var(--ds-t2)' }}>Box-truck drivers</span><span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{money(boxTruckAnnual * 100)}</span></div>
+            <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 2 }}>{rows.length} driver{rows.length === 1 ? '' : 's'} carry an insurance line</div>
+          </div>
+        </div>
+        <div style={{ padding: '16px 18px' }}>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Net company insurance</div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--ds-t1)', marginTop: 6, fontVariantNumeric: 'tabular-nums' }}>{money(net * 100)}<span style={{ fontSize: 12, fontWeight: 500, color: 'var(--ds-t3)' }}> / yr</span></div>
+          <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>premiums − recovered</div>
+        </div>
       </div>
     </div>
   )

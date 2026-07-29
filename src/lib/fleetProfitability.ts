@@ -181,6 +181,11 @@ export function calcFleetProfitability(
   mileageDayRows: TruckMileageDayInput[],
   driverPay: DriverPayInput[],
   driverAssignments: DriverAssignmentInput[],
+  /** When provided, REPLACES each truck's insurance category with this range-prorated $
+   *  (from the Insurance module — premium + trailer share + WC share). Keeps the P&L in
+   *  sync with the Insurance page and avoids double-counting the legacy per-truck
+   *  "Insurance" RecurringExpense (which is excluded from `other` below regardless). */
+  insuranceRangeByTruck?: Record<string, number>,
 ): FleetProfitabilityResult {
   const memberIds = new Set(members.map((m) => m.truckId))
 
@@ -283,7 +288,9 @@ export function calcFleetProfitability(
   const trucks: TruckProfitability[] = members.map((m) => {
     const exp = expensesByTruck[m.truckId]
     const fuel = exp?.fuel ?? 0
-    const insurance = exp?.insurance ?? 0
+    // Insurance override (Insurance module) wins when supplied; else the legacy per-truck
+    // RecurringExpense value from the engine.
+    const insurance = insuranceRangeByTruck ? (insuranceRangeByTruck[m.truckId] ?? 0) : (exp?.insurance ?? 0)
     const loan = exp?.financing ?? 0
     // Everything else non-fuel/insurance/loan (lease + maintenance + permits + tolls + other).
     const otherExpenses = exp ? exp.total - exp.fuel - exp.insurance - exp.financing : 0
@@ -324,8 +331,10 @@ export function calcFleetProfitability(
   const categories: ExpenseCategoryBreakdown = { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 }
   for (const m of members) {
     const e = expensesByTruck[m.truckId]
+    // Insurance line reflects the override (Insurance module) when supplied.
+    if (insuranceRangeByTruck) categories.insurance += insuranceRangeByTruck[m.truckId] ?? 0
     if (!e) continue
-    categories.insurance   += e.insurance
+    if (!insuranceRangeByTruck) categories.insurance += e.insurance
     categories.financing   += e.financing
     categories.lease       += e.lease
     categories.maintenance += e.maintenance

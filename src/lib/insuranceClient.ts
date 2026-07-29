@@ -129,6 +129,57 @@ export async function deleteInsuranceLineItem(id: string): Promise<void> {
   })
 }
 
+// ── Current-period helpers (used by the truck profile ↔ Insurance two-way sync) ──
+
+/** The current period (isCurrent flag, else the newest). Creates one if none exist. */
+export async function ensureCurrentPeriod(): Promise<InsurancePeriod> {
+  const periods = await listInsurancePeriods()
+  const cur = periods.find((p) => p.isCurrent) ?? periods[0]
+  if (cur) return cur
+  return createInsurancePeriod({ label: `${new Date().getFullYear()} Policy Year`, isCurrent: true })
+}
+
+/** A truck/trailer's annual premium (cents) in the current period, 0 if unset. */
+export async function getUnitPremiumCents(equipmentId: string): Promise<number> {
+  const periods = await listInsurancePeriods()
+  const cur = periods.find((p) => p.isCurrent) ?? periods[0]
+  if (!cur) return 0
+  const items = await listInsuranceLineItems()
+  const it = items.find((i) => i.periodId === cur.id && i.equipmentId === equipmentId && (i.kind === 'TRUCK' || i.kind === 'TRAILER'))
+  return it?.annualCents ?? 0
+}
+
+/** Upsert a truck/trailer's annual premium (cents) in the current period. */
+export async function setUnitPremiumCurrentPeriod(
+  kind: 'TRUCK' | 'TRAILER', equipmentId: string, unitNumber: string, annualCents: number,
+): Promise<void> {
+  const cur = await ensureCurrentPeriod()
+  const items = await listInsuranceLineItems()
+  const existing = items.find((i) => i.periodId === cur.id && i.kind === kind && i.equipmentId === equipmentId)
+  if (existing) await updateInsuranceLineItem(existing.id, { annualCents, unitNumber })
+  else await createInsuranceLineItem({ periodId: cur.id, kind, equipmentId, unitNumber, annualCents })
+}
+
+/**
+ * One-time import of legacy per-truck insurance (annual $ pairs derived from the old
+ * "Insurance" RecurringExpense) into the current period. Skips trucks that already have a
+ * TRUCK line item so it never clobbers a value entered on the Insurance page.
+ */
+export async function importLegacyTruckPremiums(
+  pairs: { equipmentId: string; unitNumber: string; annualCents: number }[],
+): Promise<number> {
+  const withValue = pairs.filter((p) => p.annualCents > 0)
+  if (withValue.length === 0) return 0
+  const cur = await ensureCurrentPeriod()
+  const items = await listInsuranceLineItems()
+  const have = new Set(items.filter((i) => i.periodId === cur.id && i.kind === 'TRUCK' && i.equipmentId).map((i) => i.equipmentId))
+  const toImport = withValue.filter((p) => !have.has(p.equipmentId))
+  await Promise.all(toImport.map((p) =>
+    createInsuranceLineItem({ periodId: cur.id, kind: 'TRUCK', equipmentId: p.equipmentId, unitNumber: p.unitNumber, annualCents: p.annualCents }),
+  ))
+  return toImport.length
+}
+
 /**
  * Copy every line item from one period into another (used by "Start a new period from
  * last year"). The caller supplies the fresh target period id; amounts carry over so the
