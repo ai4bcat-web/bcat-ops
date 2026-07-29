@@ -79,6 +79,36 @@ describe('computeInsuranceAllocation', () => {
   })
 })
 
+describe('box-truck drivers share the split (recouped via settlements)', () => {
+  const withBox: DriverLite[] = [
+    { id: 'd1', assignedTruckId: 't1', active: true },
+    { id: 'd2', assignedTruckId: 't2', active: true },
+    { id: 'b1', assignedTruckId: null, active: true, boxTruck: true },
+    { id: 'b2', assignedTruckId: null, active: true, boxTruck: true },
+  ]
+
+  it('counts box trucks in the trailer denominator (real trucks get a smaller share)', () => {
+    const items: InsItem[] = [{ kind: 'TRAILER', equipmentId: 'r1', annualCents: 1_000_00 }] // $1,000
+    const a = computeInsuranceAllocation(items, trucks, withBox)
+    expect(a.boxTruckCount).toBe(2)
+    // 2 active trucks + 2 box trucks = 4 units → $250 each on the real trucks.
+    expect(a.trailerSharePerTruck).toBe(250)
+    expect(a.byTruck.t1).toBe(250)
+    expect(a.byTruck.t2).toBe(250)
+    // Box trucks' $500 is NOT added to any P&L truck (recouped from settlements).
+    expect(a.byTruck.t1 + a.byTruck.t2).toBe(500)
+  })
+
+  it('counts box-truck drivers in the WC headcount but drops their share off the P&L trucks', () => {
+    const items: InsItem[] = [{ kind: 'WORKMANS_COMP', annualCents: 2_000_00 }] // $2,000 / 4 drivers = $500 each
+    const a = computeInsuranceAllocation(items, trucks, withBox)
+    // Ivan drivers' $500 lands on their trucks; the two box drivers' $1,000 is recouped.
+    expect(a.byTruck.t1).toBe(500)
+    expect(a.byTruck.t2).toBe(500)
+    expect(a.byTruck.t1 + a.byTruck.t2).toBe(1000)
+  })
+})
+
 describe('insuranceRangeByTruck / inclusiveDays', () => {
   it('counts inclusive days', () => {
     expect(inclusiveDays('2026-01-01', '2026-01-31')).toBe(31)
