@@ -7,10 +7,16 @@ import { useAppStore } from '@/store/useAppStore'
 // (periodEnd = +6 days) and useBoxTruckPay (@/lib/biweekly, 14-day period).
 const PERIODS_PER_YEAR: Record<'AMAZON' | 'BOX_TRUCK', number> = { AMAZON: 52, BOX_TRUCK: 26 }
 
+// Insurance appears under several labels in driver settlements today — Amazon splits it
+// into "cargo", "auto liability", and "insurance"; box truck uses "insurance". Match any of
+// these (a uniform "Insurance" label also matches, so standardizing later stays compatible).
+const INSURANCE_KEYWORDS = ['insurance', 'cargo', 'liability', 'workman', 'workers comp']
+
 /** A settlement fixed-expense line counts as insurance recovery if its label mentions it. */
 function isInsuranceLabel(label: string): boolean {
-  const l = label.toLowerCase()
-  return l.includes('insurance') || l.includes('workman') || l.includes('workers comp') || l.includes('wc ') || l === 'wc'
+  const l = label.toLowerCase().trim()
+  if (l === 'wc') return true
+  return INSURANCE_KEYWORDS.some((k) => l.includes(k))
 }
 
 export interface RecoveryRow {
