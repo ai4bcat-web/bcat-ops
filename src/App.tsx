@@ -12,6 +12,7 @@ import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
+import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { TimeOffPage } from '@/features/time-off/TimeOffPage'
@@ -60,6 +61,7 @@ export default function App() {
               <Route path="/invoices" element={<RequirePage page="invoices"><InvoicesPage /></RequirePage>} />
               <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
+              <Route path="/insurance" element={<RequirePage page="insurance"><InsurancePage /></RequirePage>} />
               <Route path="/schedule" element={<RequirePage page="schedule"><SchedulePage /></RequirePage>} />
               <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
               <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
