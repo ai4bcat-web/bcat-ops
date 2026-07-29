@@ -14,7 +14,10 @@
 export type InsuranceKind = 'TRUCK' | 'TRAILER' | 'WORKMANS_COMP'
 export interface InsItem { kind: InsuranceKind; equipmentId?: string | null; annualCents: number }
 export interface TruckLite { id: string; active: boolean }
-export interface DriverLite { id: string; assignedTruckId?: string | null; active: boolean }
+// `boxTruck` drivers run box trucks (BOX_TRUCK pay group) — not Fleet equipment. They
+// count toward the shared trailer/WC split (so Ivan/Amazon trucks bear a smaller share),
+// but their portion is recouped from their settlements, so it never lands on a P&L truck.
+export interface DriverLite { id: string; assignedTruckId?: string | null; active: boolean; boxTruck?: boolean }
 
 export interface InsuranceAllocation {
   /** Annual insurance $ attributed to each active truck (premium + trailer share + WC share). */
@@ -28,6 +31,7 @@ export interface InsuranceAllocation {
   fleetAnnual: number
   activeTruckCount: number
   activeDriverCount: number
+  boxTruckCount: number
 }
 
 const c2d = (cents: number) => (cents || 0) / 100
@@ -52,18 +56,26 @@ export function computeInsuranceAllocation(
     }
   }
 
-  // Trailers → even split across active trucks.
-  const trailerTotal = items.filter((i) => i.kind === 'TRAILER').reduce((s, i) => s + c2d(i.annualCents), 0)
-  const trailerSharePerTruck = n > 0 ? trailerTotal / n : 0
-
-  // Workmans comp → per active driver, onto that driver's active truck; leftovers spread evenly.
-  const wcTotal = items.filter((i) => i.kind === 'WORKMANS_COMP').reduce((s, i) => s + c2d(i.annualCents), 0)
   const activeDrivers = drivers.filter((d) => d.active)
+  const boxTruckCount = activeDrivers.filter((d) => d.boxTruck).length
+
+  // Trailers → even split across every truck that runs, including box trucks. Box trucks
+  // aren't Fleet equipment, so their share simply isn't added to any P&L truck (it's
+  // recouped from box-truck settlements); it still shrinks each real truck's share.
+  const trailerTotal = items.filter((i) => i.kind === 'TRAILER').reduce((s, i) => s + c2d(i.annualCents), 0)
+  const splitUnits = n + boxTruckCount
+  const trailerSharePerTruck = splitUnits > 0 ? trailerTotal / splitUnits : 0
+
+  // Workmans comp → per active driver (box-truck drivers included in the headcount, so each
+  // driver's share is smaller). A box-truck driver's WC is recouped from their settlement,
+  // so it's not placed on any P&L truck. Other drivers → their truck; leftovers spread evenly.
+  const wcTotal = items.filter((i) => i.kind === 'WORKMANS_COMP').reduce((s, i) => s + c2d(i.annualCents), 0)
   const dCount = activeDrivers.length
   const wcPerDriver = dCount > 0 ? wcTotal / dCount : 0
   const wcByTruck: Record<string, number> = {}
   let wcUnallocated = 0
   for (const d of activeDrivers) {
+    if (d.boxTruck) continue   // recouped from box-truck settlements — not a P&L truck cost
     if (d.assignedTruckId && activeTruckIds.has(d.assignedTruckId)) {
       wcByTruck[d.assignedTruckId] = (wcByTruck[d.assignedTruckId] ?? 0) + wcPerDriver
     } else {
@@ -80,7 +92,7 @@ export function computeInsuranceAllocation(
   return {
     byTruck, perTruckPremium, trailerSharePerTruck, wcByTruck,
     truckTotal, trailerTotal, wcTotal, fleetAnnual: truckTotal + trailerTotal + wcTotal,
-    activeTruckCount: n, activeDriverCount: dCount,
+    activeTruckCount: n, activeDriverCount: dCount, boxTruckCount,
   }
 }
 
