@@ -777,6 +777,33 @@ const schema = a.schema({
     .identifier(['templateId'])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Fleet insurance ─────────────────────────────────────────────────────────
+  // Insurance is entered per named PERIOD (a policy term, e.g. "2026 Policy Year") so the
+  // Insurance page can compare spend period-over-period. One InsurancePeriod holds many
+  // InsuranceLineItems: a per-truck or per-trailer annual amount, or a single workmans-comp
+  // total. All amounts are ANNUAL and stored in cents (app convention; monthly = /12).
+  InsurancePeriod: a
+    .model({
+      label:     a.string().required(),   // e.g. "2026 Policy Year"
+      startDate: a.string(),              // YYYY-MM-DD (optional)
+      endDate:   a.string(),              // YYYY-MM-DD (optional)
+      isCurrent: a.boolean(),             // the period used for the "current insurance cost" card
+      notes:     a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
+  InsuranceLineItem: a
+    .model({
+      periodId:    a.string().required(), // InsurancePeriod.id
+      kind:        a.string().required(), // 'TRUCK' | 'TRAILER' | 'WORKMANS_COMP'
+      equipmentId: a.string(),            // Equipment.id for TRUCK/TRAILER; empty for WORKMANS_COMP
+      unitNumber:  a.string(),            // denormalised for display
+      annualCents: a.integer().required(),// annual insurance amount, in cents
+      notes:       a.string(),
+    })
+    .secondaryIndexes((index) => [index('periodId')])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.
