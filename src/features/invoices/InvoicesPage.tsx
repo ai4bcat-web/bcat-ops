@@ -13,41 +13,60 @@ import {
 
 type InvoiceData = Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>
 
+interface EquipLine { equipmentId: string; amount: string }
+
 function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
   invoice: MaintenanceInvoice | null
   equipment: Equipment[]
-  onSave: (data: InvoiceData) => void
+  onSave: (rows: InvoiceData[]) => void
   onDelete?: () => void
   onClose: () => void
 }) {
   const isEdit = invoice !== null
   const [form, setForm] = useState({
-    equipmentId: invoice?.equipmentId ?? (equipment[0]?.id ?? ''),
     date: invoice?.date ?? '',
     vendor: invoice?.vendor ?? '',
     description: invoice?.description ?? '',
-    amount: invoice != null ? (invoice.amount / 100).toString() : '',
     invoiceNumber: invoice?.invoiceNumber ?? '',
     paymentMethod: invoice?.paymentMethod ?? '',
     paymentDate: invoice?.paymentDate ?? '',
     assignee: invoice?.assignee ?? '',
   })
+  // One line per piece of equipment on the invoice, each with its own amount. Editing an
+  // existing invoice stays single-unit (it maps to one record); creating supports several.
+  const [lines, setLines] = useState<EquipLine[]>(
+    invoice != null
+      ? [{ equipmentId: invoice.equipmentId, amount: (invoice.amount / 100).toString() }]
+      : [{ equipmentId: equipment[0]?.id ?? '', amount: '' }],
+  )
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
+  const setLine = (i: number, k: keyof EquipLine, v: string) =>
+    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, [k]: v } : l)))
+  const addLine = () => {
+    const used = new Set(lines.map((l) => l.equipmentId))
+    const next = equipment.find((e) => !used.has(e.id))?.id ?? ''
+    setLines((ls) => [...ls, { equipmentId: next, amount: '' }])
+  }
+  const removeLine = (i: number) => setLines((ls) => ls.filter((_, idx) => idx !== i))
+
+  const parsed = lines
+    .map((l) => ({ equipmentId: l.equipmentId, cents: Math.round(parseFloat(l.amount || '0') * 100) }))
+    .filter((l) => l.equipmentId && l.cents > 0)
+  const totalCents = parsed.reduce((s, l) => s + l.cents, 0)
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.equipmentId) return
-    onSave({
-      equipmentId: form.equipmentId,
+    if (parsed.length === 0) { toast.error('Add at least one piece of equipment with an amount'); return }
+    const shared = {
       date: form.date || undefined,
       vendor: form.vendor.trim() || undefined,
       description: form.description.trim() || undefined,
-      amount: Math.round(parseFloat(form.amount || '0') * 100),
       invoiceNumber: form.invoiceNumber.trim() || undefined,
       paymentMethod: form.paymentMethod || undefined,
       paymentDate: form.paymentDate || undefined,
       assignee: form.assignee || undefined,
-    })
+    }
+    onSave(parsed.map((l) => ({ ...shared, equipmentId: l.equipmentId, amount: l.cents })))
     onClose()
   }
 
@@ -62,21 +81,46 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
           ) : <span />}
           <div style={{ display: 'flex', gap: 10 }}>
             <button type="button" onClick={onClose} style={btnGhost}>Cancel</button>
-            <button type="submit" form="invoice-form" style={btnPrimary}>{isEdit ? 'Save Changes' : <><Plus size={14} /> Create Invoice</>}</button>
+            <button type="submit" form="invoice-form" style={btnPrimary}>{isEdit ? 'Save Changes' : <><Plus size={14} /> {parsed.length > 1 ? `Create ${parsed.length} Invoices` : 'Create Invoice'}</>}</button>
           </div>
         </>
       }
     >
       <form id="invoice-form" onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <FormSection title={isEdit ? 'Equipment' : 'Equipment & amounts'}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {lines.map((line, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: isEdit ? 'minmax(0,1.4fr) minmax(0,1fr)' : 'minmax(0,1.4fr) minmax(0,1fr) auto', gap: 10, alignItems: 'center' }}>
+                <select style={{ ...inputStyle, opacity: isEdit ? 0.6 : 1 }} value={line.equipmentId} onChange={(e) => setLine(i, 'equipmentId', e.target.value)} disabled={isEdit} required>
+                  <option value="" disabled>Select equipment…</option>
+                  {equipment.map((eq) => (
+                    <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
+                  ))}
+                </select>
+                <input type="number" step="0.01" min="0" style={inputStyle} value={line.amount} onChange={(e) => setLine(i, 'amount', e.target.value)} placeholder="Amount ($)" required />
+                {!isEdit && (
+                  <button type="button" onClick={() => removeLine(i)} disabled={lines.length === 1} title="Remove"
+                    style={{ ...iconBtnStyle, opacity: lines.length === 1 ? 0.35 : 1 }}>
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {!isEdit && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+              <button type="button" onClick={addLine} disabled={lines.length >= equipment.length}
+                style={{ ...btnGhost, opacity: lines.length >= equipment.length ? 0.4 : 1 }}>
+                <Plus size={14} /> Add equipment
+              </button>
+              {parsed.length > 1 && (
+                <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>Total <strong style={{ color: 'var(--ds-t1)' }}>{formatCents(totalCents)}</strong> across {parsed.length}</span>
+              )}
+            </div>
+          )}
+        </FormSection>
+
         <FormSection title="Invoice Details">
-          <Field label="Equipment" required>
-            <select style={{ ...inputStyle, opacity: isEdit ? 0.6 : 1 }} value={form.equipmentId} onChange={(e) => set('equipmentId', e.target.value)} disabled={isEdit} required>
-              <option value="" disabled>Select equipment…</option>
-              {equipment.map((eq) => (
-                <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
-              ))}
-            </select>
-          </Field>
           <Field label="Vendor">
             <input style={inputStyle} value={form.vendor} onChange={(e) => set('vendor', e.target.value)} placeholder="Shop / vendor name" />
           </Field>
@@ -90,21 +134,18 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
             <Field label="Date">
               <input type="date" style={inputStyle} value={form.date} onChange={(e) => set('date', e.target.value)} />
             </Field>
-            <Field label="Amount ($)" required>
-              <input type="number" step="0.01" min="0" style={inputStyle} value={form.amount} onChange={(e) => set('amount', e.target.value)} placeholder="0.00" required />
-            </Field>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
             <Field label="Invoice #">
               <input style={inputStyle} value={form.invoiceNumber} onChange={(e) => set('invoiceNumber', e.target.value)} />
             </Field>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
             <Field label="Payment Method">
               <input style={inputStyle} value={form.paymentMethod} onChange={(e) => set('paymentMethod', e.target.value)} placeholder="Card / check / cash" />
             </Field>
+            <Field label="Payment Date">
+              <input type="date" style={inputStyle} value={form.paymentDate} onChange={(e) => set('paymentDate', e.target.value)} />
+            </Field>
           </div>
-          <Field label="Payment Date">
-            <input type="date" style={inputStyle} value={form.paymentDate} onChange={(e) => set('paymentDate', e.target.value)} />
-          </Field>
         </FormSection>
       </form>
     </Modal>
@@ -518,7 +559,7 @@ export function InvoicesPage() {
         <InvoiceModal
           invoice={null}
           equipment={equipment}
-          onSave={(data) => { addMaintenanceInvoice({ ...data, source: 'MANUAL' }); toast.success('Invoice created') }}
+          onSave={(rows) => { rows.forEach((d) => addMaintenanceInvoice({ ...d, source: 'MANUAL' })); toast.success(rows.length > 1 ? `${rows.length} invoices created` : 'Invoice created') }}
           onClose={() => setNewOpen(false)}
         />
       )}
@@ -526,7 +567,7 @@ export function InvoicesPage() {
         <InvoiceModal
           invoice={editInvoice}
           equipment={equipment}
-          onSave={(data) => { updateMaintenanceInvoice(editInvoice.id, data); toast.success('Invoice updated') }}
+          onSave={(rows) => { updateMaintenanceInvoice(editInvoice.id, rows[0]); toast.success('Invoice updated') }}
           onDelete={() => { deleteMaintenanceInvoice(editInvoice.id); toast.success('Invoice deleted') }}
           onClose={() => setEditInvoice(null)}
         />
