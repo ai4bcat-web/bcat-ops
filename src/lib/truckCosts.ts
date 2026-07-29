@@ -91,6 +91,9 @@ export function readTruckCosts(
     if (!type) continue
     const cat = type.category
     if (cat !== 'FINANCING' && cat !== 'INSURANCE' && cat !== 'PERMITS' && cat !== 'OTHER') continue
+    // Insurance is now owned by the Insurance module (current period) — not a per-truck
+    // RecurringExpense — so it's read/written there, not here. Skip any legacy row.
+    if (cat === 'INSURANCE') continue
     const slot = slotOf(cat, type.name)
     if (existing.some((e) => e.slot === slot)) continue   // first per slot
     existing.push({ slot, category: cat, recurringId: r.id, typeName: type.name, monthlyAmount: r.monthlyAmount })
@@ -101,6 +104,33 @@ export function readTruckCosts(
     else { inputs.otherLabel = type.name; inputs.otherAnnual = round2(r.monthlyAmount * 12) }
   }
   return { inputs, existing }
+}
+
+/**
+ * Legacy per-truck insurance amounts (annual cents) from the old "Insurance"
+ * RecurringExpense rows — used once to seed the Insurance module's current period so
+ * values entered on truck profiles before the migration aren't lost.
+ */
+export function legacyTruckInsuranceCents(
+  recurring: RecurringExpenseData[],
+  allocations: TruckExpenseAllocationData[],
+  expenseTypes: ExpenseTypeData[],
+  trucks: { id: string; unitNumber: string }[],
+): { equipmentId: string; unitNumber: string; annualCents: number }[] {
+  const allocById = new Map(allocations.map((a) => [a.id, a]))
+  const typeById = new Map(expenseTypes.map((t) => [t.id, t]))
+  const out: { equipmentId: string; unitNumber: string; annualCents: number }[] = []
+  for (const t of trucks) {
+    for (const r of recurring) {
+      if (!r.active) continue
+      if (!isSingleTruckAlloc(allocById.get(r.allocationId), t.id)) continue
+      const type = typeById.get(r.expenseTypeId)
+      if (!type || type.category !== 'INSURANCE') continue
+      out.push({ equipmentId: t.id, unitNumber: t.unitNumber, annualCents: Math.round(r.monthlyAmount * 12 * 100) })
+      break
+    }
+  }
+  return out
 }
 
 /** Find-or-create the expense type, then create a single-truck allocation + recurring row. */
@@ -126,7 +156,7 @@ async function createCost(
 function targetsFor(costs: TruckCostInputs): { slot: CostSlot; category: CostCategory; name: string; monthly: number }[] {
   return [
     { slot: 'loan',      category: 'FINANCING', name: CANONICAL_NAME.FINANCING, monthly: costs.loanMonthly || 0 },
-    { slot: 'insurance', category: 'INSURANCE', name: CANONICAL_NAME.INSURANCE, monthly: (costs.insuranceAnnual || 0) / 12 },
+    // Insurance intentionally omitted — owned by the Insurance module (see setUnitPremiumCurrentPeriod).
     { slot: 'plates',    category: 'PERMITS',   name: CANONICAL_NAME.PERMITS,   monthly: (costs.platesAnnual || 0) / 12 },
     { slot: 'eld',       category: 'OTHER',     name: CANONICAL_NAME.ELD,       monthly: costs.eldMonthly || 0 },
     { slot: 'other',     category: 'OTHER',     name: costs.otherLabel?.trim() || 'Other', monthly: (costs.otherAnnual || 0) / 12 },

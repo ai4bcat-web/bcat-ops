@@ -8,6 +8,8 @@ import { useTruckMileage } from './useTruckMileage'
 import { useDriverPay } from './useDriverPay'
 import { driverForTruck } from '@/lib/assignments'
 import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
+import { useCurrentInsurance } from './useCurrentInsurance'
+import { insuranceRangeByTruck } from '@/lib/insuranceAllocation'
 import { calcFleetProfitability } from '@/lib/fleetProfitability'
 import type { DateRange, MemberTruck, FleetProfitabilityResult } from '@/lib/fleetProfitability'
 import type { ExpenseRecordInput, ExpenseTypeRecord } from '@/lib/expenseAllocation'
@@ -41,6 +43,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
   const exp = useExpenseData()
   const mileage = useTruckMileage('DAY')
   const pay = useDriverPay()
+  const insurance = useCurrentInsurance()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
 
   const loading = fuel.loading || exp.loading || mileage.loading || pay.loading
@@ -125,8 +128,11 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
         .filter((p) => !isCombinedPayDriverId(p.driverId) || p.driverId === combinedPayDriverId(group))
         .map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay, combined: p.driverId === combinedPayDriverId(group) })),
       drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker' })),
+      // Insurance override: current-period premiums (truck + trailer share + WC share)
+      // prorated to the range, replacing the legacy per-truck insurance in the P&L.
+      insuranceRangeByTruck(insurance.allocation.byTruck, cfrRange),
     )
-  }, [members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group])
+  }, [members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group, insurance.allocation])
 
   const data = useMemo<FleetProfitabilityResult | null>(() => computeForRange(range), [computeForRange, range])
 
