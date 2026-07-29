@@ -2,19 +2,28 @@ import { useEffect, useMemo, useState } from 'react'
 import { listDriverPaySettings, type DriverPaySetting } from '@/lib/apiClient'
 import { useAppStore } from '@/store/useAppStore'
 
-const WEEKS_PER_YEAR = 52
+// Settlements run on different cadences, so a fixed-expense line annualizes differently:
+// Amazon pays weekly (52/yr); box truck pays every 14 days (26/yr). See useAmazonPay
+// (periodEnd = +6 days) and useBoxTruckPay (@/lib/biweekly, 14-day period).
+const PERIODS_PER_YEAR: Record<'AMAZON' | 'BOX_TRUCK', number> = { AMAZON: 52, BOX_TRUCK: 26 }
+
+// Insurance appears under several labels in driver settlements today — Amazon splits it
+// into "cargo", "auto liability", and "insurance"; box truck uses "insurance". Match any of
+// these (a uniform "Insurance" label also matches, so standardizing later stays compatible).
+const INSURANCE_KEYWORDS = ['insurance', 'cargo', 'liability', 'workman', 'workers comp']
 
 /** A settlement fixed-expense line counts as insurance recovery if its label mentions it. */
 function isInsuranceLabel(label: string): boolean {
-  const l = label.toLowerCase()
-  return l.includes('insurance') || l.includes('workman') || l.includes('workers comp') || l.includes('wc ') || l === 'wc'
+  const l = label.toLowerCase().trim()
+  if (l === 'wc') return true
+  return INSURANCE_KEYWORDS.some((k) => l.includes(k))
 }
 
 export interface RecoveryRow {
   driverId: string
   driverName: string
   group: 'AMAZON' | 'BOX_TRUCK'
-  weekly: number
+  perSettlement: number   // the fixed-expense amount charged each settlement
   annual: number
 }
 
@@ -44,11 +53,11 @@ export function useInsuranceRecovery() {
       if (s.active === false) continue
       const group = s.payGroup
       if (group !== 'AMAZON' && group !== 'BOX_TRUCK') continue
-      const weekly = (s.fixedExpenses ?? [])
+      const perSettlement = (s.fixedExpenses ?? [])
         .filter((f) => isInsuranceLabel(f.label))
         .reduce((sum, f) => sum + (f.amount || 0), 0)
-      if (weekly <= 0) continue
-      rows.push({ driverId: s.driverId, driverName: nameById.get(s.driverId) ?? 'Driver', group, weekly, annual: weekly * WEEKS_PER_YEAR })
+      if (perSettlement <= 0) continue
+      rows.push({ driverId: s.driverId, driverName: nameById.get(s.driverId) ?? 'Driver', group, perSettlement, annual: perSettlement * PERIODS_PER_YEAR[group] })
     }
     const amazonAnnual = rows.filter((r) => r.group === 'AMAZON').reduce((s, r) => s + r.annual, 0)
     const boxTruckAnnual = rows.filter((r) => r.group === 'BOX_TRUCK').reduce((s, r) => s + r.annual, 0)
