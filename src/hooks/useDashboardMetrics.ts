@@ -20,6 +20,7 @@ export interface DashboardMetrics {
   needsInvoice: number     // shipments completed (non-TBD delivery) yesterday or earlier, still not ready to invoice
   needsAppt: number        // loads with at least one TBD appointment (all time)
   revenue: number          // sum of load.rate in cents
+  revenueDelta: number     // revenue − previous-period revenue (cents)
   revenueConnected: boolean // false when all rates are null
   loadsPerDriver: { driverId: string; name: string; count: number; colorKey: string }[]
   loadsByDay: { date: string; count: number }[]
@@ -180,6 +181,7 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       needsInvoice,
       needsAppt,
       revenue,
+      revenueDelta,
       revenueConnected,
       loadsPerDriver,
       loadsByDay,
@@ -187,8 +189,6 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       rangeStart: dateStr(start),
       rangeEnd:   dateStr(end),
       rangeDays:  days,
-      // expose delta for revenue too
-      ...{ revenueDelta },
-    } as DashboardMetrics & { revenueDelta: number }
+    }
   }, [loads, drivers, rangeKey])
 }
