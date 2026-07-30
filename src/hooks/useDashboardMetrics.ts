@@ -22,6 +22,10 @@ export interface DashboardMetrics {
   revenue: number          // sum of load.rate in cents
   revenueDelta: number     // revenue − previous-period revenue (cents)
   revenueConnected: boolean // false when all rates are null
+  brokerLoads: number         // count of broker-covered loads in range
+  brokerLoadsDelta: number    // vs previous period
+  brokerRevenue: number       // broker-covered revenue in range (cents)
+  brokerRevenueDelta: number  // vs previous period (cents)
   loadsPerDriver: { driverId: string; name: string; count: number; colorKey: string }[]
   loadsByDay: { date: string; count: number }[]
   driverPerformance: DriverPerf[]
@@ -134,6 +138,17 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
     const revenueConnectedPrev = previous.some((l) => l.rate != null && l.rate > 0)
     const revenueDelta     = revenueConnected || revenueConnectedPrev ? revenue - prevRevenue : 0
 
+    // Broker-covered loads = a load whose pickup or delivery driver is a broker.
+    const brokerIds = new Set(drivers.filter((d) => d.type === 'broker').map((d) => d.id))
+    const isBrokerCovered = (l: (typeof current)[number]) =>
+      (!!l.deliveryDriverId && brokerIds.has(l.deliveryDriverId)) || (!!l.pickupDriverId && brokerIds.has(l.pickupDriverId))
+    const brokerCur  = current.filter(isBrokerCovered)
+    const brokerPrev = previous.filter(isBrokerCovered)
+    const brokerLoads        = brokerCur.length
+    const brokerLoadsDelta   = brokerLoads - brokerPrev.length
+    const brokerRevenue      = brokerCur.reduce((s, l) => s + (l.rate ?? 0), 0)
+    const brokerRevenueDelta = brokerRevenue - brokerPrev.reduce((s, l) => s + (l.rate ?? 0), 0)
+
     // Loads per driver
     const countByDriver: Record<string, number> = {}
     current.forEach((l) => {
@@ -183,6 +198,10 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       revenue,
       revenueDelta,
       revenueConnected,
+      brokerLoads,
+      brokerLoadsDelta,
+      brokerRevenue,
+      brokerRevenueDelta,
       loadsPerDriver,
       loadsByDay,
       driverPerformance,

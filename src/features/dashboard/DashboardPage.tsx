@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import {
   Package, DollarSign, AlertCircle, CalendarClock,
-  RefreshCw, Plus, MoreHorizontal, ChevronRight,
+  RefreshCw, Plus, MoreHorizontal, ChevronRight, Handshake,
 } from 'lucide-react'
 import { KpiCard } from '@/components/ui/kpi-card'
 import { Avatar } from '@/components/ui/avatar'
@@ -112,6 +112,49 @@ function Donut({ data, size = 150, thickness = 18, centerLabel, centerValue }: {
   )
 }
 
+// KPI card that shows TWO month-over-month metrics (load count + revenue) — used for
+// broker-covered loads, where both the volume and the dollars matter.
+function DualDeltaBadge({ delta, dir }: { delta: string; dir: 'up' | 'down' | 'neutral' }) {
+  const color = dir === 'up' ? '#16a34a' : dir === 'down' ? '#dc2626' : 'var(--ds-t2)'
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11.5, color, fontWeight: 500, fontVariantNumeric: 'tabular-nums' }}>
+      {dir === 'up' ? '▲' : dir === 'down' ? '▼' : ''} {delta}
+    </span>
+  )
+}
+
+function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel, accent = '#6d28d9' }: {
+  count: number; countDelta: number; revenue: number; revenueDelta: number; sublabel: string; accent?: string
+}) {
+  const dir = (n: number): 'up' | 'down' | 'neutral' => (n > 0 ? 'up' : n < 0 ? 'down' : 'neutral')
+  const signed = (n: number, fmt: (v: number) => string) => `${n >= 0 ? '+' : '−'}${fmt(Math.abs(n))}`
+  return (
+    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%', background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
+      <div style={{ padding: '16px 18px', position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>Broker Covered</div>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+            <Handshake size={15} />
+          </div>
+        </div>
+        {/* Load count */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+          <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{count}</div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>loads</div>
+          <DualDeltaBadge delta={signed(countDelta, (v) => String(v))} dir={dir(countDelta)} />
+        </div>
+        {/* Revenue */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
+          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{cents(revenue)}</div>
+          <DualDeltaBadge delta={signed(revenueDelta, cents)} dir={dir(revenueDelta)} />
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{sublabel}</div>
+      </div>
+    </div>
+  )
+}
+
 function IconBtn({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
     <button title={label} style={{
@@ -211,7 +254,7 @@ export function DashboardPage() {
         </div>
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(0, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 16 }}>
           <KpiCard
             label="Total Loads"
             value={metrics.totalLoads}
@@ -248,6 +291,13 @@ export function DashboardPage() {
             accent="#1ea8f3"
             sparkColor="#1ea8f3"
             icon={<DollarSign size={15} />}
+          />
+          <BrokerCoveredCard
+            count={metrics.brokerLoads}
+            countDelta={metrics.brokerLoadsDelta}
+            revenue={metrics.brokerRevenue}
+            revenueDelta={metrics.brokerRevenueDelta}
+            sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
           />
         </div>
 
