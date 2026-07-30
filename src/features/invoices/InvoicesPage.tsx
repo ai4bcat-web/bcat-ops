@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown, ArrowUp, ArrowDown, Inbox, Archive, ArchiveRestore, Check } from 'lucide-react'
@@ -237,7 +238,11 @@ export function InvoicesPage() {
   const updateMaintenanceInvoice = useAppStore((s) => s.updateMaintenanceInvoice)
   const deleteMaintenanceInvoice = useAppStore((s) => s.deleteMaintenanceInvoice)
 
-  const [tab, setTab]                 = useState<Tab>('invoices')
+  const [searchParams]                = useSearchParams()
+  const paramTab                      = searchParams.get('tab') as Tab | null
+  const [tab, setTab]                 = useState<Tab>(
+    paramTab && ['invoices', 'queue', 'archived', 'history'].includes(paramTab) ? paramTab : 'invoices',
+  )
   // Multi-select equipment scope: null = all; otherwise the set of INCLUDED equipment ids.
   const [includedEquip, setIncludedEquip] = useState<Set<string> | null>(null)
   const matchesEquip = (id: string) => includedEquip === null || includedEquip.has(id)

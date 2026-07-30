@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Wrench, ChevronRight } from 'lucide-react'
+import { Wrench, ChevronRight, Inbox } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
-import { isPosted } from '@/lib/invoiceStatus'
+import { isPosted, isQueued } from '@/lib/invoiceStatus'
 
 function money(cents: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100)
@@ -35,6 +35,7 @@ export function RepairInvoicesWidget() {
   const equipment = useAppStore((s) => s.equipment)
   // Only posted invoices belong on the dashboard; pending (queued) and archived are excluded.
   const invoices = useMemo(() => allInvoices.filter(isPosted), [allInvoices])
+  const pendingCount = useMemo(() => allInvoices.filter(isQueued).length, [allInvoices])
 
   const unitOf = useMemo(() => {
     const m = new Map(equipment.map((e) => [e.id, e]))
@@ -71,6 +72,18 @@ export function RepairInvoicesWidget() {
           View all <ChevronRight size={12} />
         </button>
       </div>
+
+      {/* Awaiting-review heads-up — links straight to the Review Queue. */}
+      {pendingCount > 0 && (
+        <button
+          onClick={() => navigate('/invoices?tab=queue')}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderRadius: 8, background: 'var(--ds-amber-bg)', border: '1px solid var(--ds-amber)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}
+        >
+          <Inbox size={15} style={{ color: 'var(--ds-amber)', flexShrink: 0 }} />
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-amber)' }}>{pendingCount} invoice{pendingCount === 1 ? '' : 's'} awaiting review</span>
+          <ChevronRight size={13} style={{ color: 'var(--ds-amber)', marginLeft: 'auto' }} />
+        </button>
+      )}
 
       {/* This-month summary */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, padding: '10px 14px' }}>
