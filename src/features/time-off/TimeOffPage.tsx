@@ -13,7 +13,7 @@ type AvailType = DriverAvailability['type']
 
 const TYPE_META: Record<AvailType, { label: string; short: string; bg: string; fg: string; dot: string }> = {
   FULL_DAY_OFF: { label: 'Full Day Off', short: 'Off',   bg: '#fef2f2', fg: '#b91c1c', dot: '#dc2626' },
-  EARLY_START:  { label: 'Early Start',  short: 'Early', bg: '#fffbeb', fg: '#b45309', dot: '#f59e0b' },
+  EARLY_START:  { label: 'In Early By',  short: 'In by', bg: '#fffbeb', fg: '#b45309', dot: '#f59e0b' },
   LATE_START:   { label: 'Late Start',   short: 'Late',  bg: '#eff6ff', fg: '#1d4ed8', dot: '#3b82f6' },
 }
 

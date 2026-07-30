@@ -8,7 +8,7 @@ type AvailType = DriverAvailability['type']
 
 const TYPE_OPTIONS: { value: AvailType; label: string }[] = [
   { value: 'FULL_DAY_OFF', label: 'Full Day Off' },
-  { value: 'EARLY_START',  label: 'Early Start' },
+  { value: 'EARLY_START',  label: 'In Early By' },
   { value: 'LATE_START',   label: 'Late Start' },
 ]
 
@@ -119,8 +119,8 @@ export function TimeOffFormModal({ drivers, editing, onClose, onCreate, onUpdate
             </div>
             {needsTime && (
               <div>
-                <label style={labelStyle}>Time</label>
-                <input type="text" placeholder="08:00" value={time} onChange={(e) => setTime(e.target.value)} style={inputStyle} />
+                <label style={labelStyle}>{type === 'EARLY_START' ? 'In by' : 'Time'}</label>
+                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={inputStyle} />
               </div>
             )}
           </div>

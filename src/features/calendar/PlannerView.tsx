@@ -1156,7 +1156,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '3px 8px 4px', borderBottom: '1px solid var(--ds-border)' }}>
                 {dayStrips.map((strip, i) => {
                   const isOff  = strip.type === 'FULL_DAY_OFF'
-                  const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `Early ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
+                  const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
                   return (
                     <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 4, background: isOff ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.10)', fontSize: 10.5 }}>
                       <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? '#dc2626' : '#d97706', flexShrink: 0 }} />

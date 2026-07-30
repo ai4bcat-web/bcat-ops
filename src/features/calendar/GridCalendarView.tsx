@@ -566,7 +566,7 @@ function DayColumn({
         <div style={{ padding: '3px 6px 4px', borderBottom: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
           {availabilityStrips.map((strip, i) => {
             const isOff  = strip.type === 'FULL_DAY_OFF'
-            const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `Early ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
+            const label  = isOff ? 'OFF' : strip.type === 'EARLY_START' ? `In by ${strip.time ?? ''}`.trim() : `Late ${strip.time ?? ''}`.trim()
             return (
               <div key={`${strip.driverId}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 5px', borderRadius: 3, background: isOff ? 'rgba(220,38,38,0.08)' : 'rgba(217,119,6,0.10)' }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: isOff ? '#dc2626' : '#d97706', flexShrink: 0 }} />
