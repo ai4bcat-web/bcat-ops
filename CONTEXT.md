@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-29
+> Last updated: 2026-07-30
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
 
 ## Where it lives
 | | |
@@ -24,7 +24,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 ## Routes / Pages
 | Route | Feature |
 |---|---|
-| `/dashboard` | Operational metrics (KPIs, fuel widget, open tasks, live truck map, weekly fleet profitability, month-over-month comparison widget) |
+| `/dashboard` | Operational metrics (KPIs incl. revenue vs-previous-period delta and Broker Covered card, fuel widget, open tasks, live truck map, weekly fleet profitability, month-over-month comparison widget) |
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | Driver management + avatars |
@@ -35,6 +35,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/invoices` | Maintenance invoices |
 | `/fuel` | Fuel transaction tracking, EFS report upload (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
+| `/insurance` | Insurance premiums — per-truck/trailer + workers' comp annual amounts by policy period, period-over-period compare, driver insurance-deduction recovery KPI; feeds per-truck insurance cost in profitability |
 | `/schedule` | Driver schedule view |
 | `/time-off` | Driver time-off / availability management |
 | `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
@@ -67,6 +68,8 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 **Intake & audit:** `IntakeItem` · `AuditLog`
 
 **Expenses & fuel:** `FuelTransaction` · `ExpenseType` · `TruckExpenseAllocation` · `ExpenseRecord` · `RecurringExpense`
+
+**Insurance:** `InsurancePeriod` (policy year; `isCurrent` marks the one used for current insurance cost) · `InsuranceLineItem` (per-period annual premium in cents; kind TRUCK | TRAILER | WORKMANS_COMP, linked to Equipment for truck/trailer lines)
 
 **DOT compliance & onboarding:** `OnboardingInvite` · `DocumentSignatureRequest` (a "send for signature" request for a Driver Documents form, e.g. WI IC-Status `ic_status_wi`; driver signs at `/sign/:token`, portal Lambda stores the signed PDF and flips status SENT → SIGNED) · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` (supports phased templates via `phase`/`owner`/`templateId`) · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings` · `OnboardingTemplateConfig` (editable phased-onboarding template stored as JSON, e.g. `amazon-driver-v1`; kickoff reads it instead of the code default so staff can edit the steps drivers see)
 

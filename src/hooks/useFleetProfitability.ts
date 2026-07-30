@@ -10,6 +10,7 @@ import { driverForTruck } from '@/lib/assignments'
 import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import { useCurrentInsurance } from './useCurrentInsurance'
 import { insuranceRangeByTruck } from '@/lib/insuranceAllocation'
+import { isPosted } from '@/lib/invoiceStatus'
 import { calcFleetProfitability } from '@/lib/fleetProfitability'
 import type { DateRange, MemberTruck, FleetProfitabilityResult } from '@/lib/fleetProfitability'
 import type { ExpenseRecordInput, ExpenseTypeRecord } from '@/lib/expenseAllocation'
@@ -105,7 +106,8 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
     const expenseRecords: ExpenseRecordInput[] = [
       ...exp.records.map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, amount: r.amount, periodMonth: r.periodMonth, transactionDate: r.transactionDate, directTruckId: r.directTruckId })),
       ...maintenanceInvoices
-        .filter((inv) => inv.date)
+        // Only POSTED invoices hit the P&L — pending (queued) and archived are excluded.
+        .filter((inv) => inv.date && isPosted(inv))
         .map((inv) => ({ expenseTypeId: MAINT_INVOICE_TYPE_ID, allocationId: null, amount: inv.amount / 100, periodMonth: null, transactionDate: inv.date!, directTruckId: inv.equipmentId })),
     ]
     const expenseTypes: ExpenseTypeRecord[] = [

@@ -66,6 +66,10 @@ export interface MaintenanceInvoice {
   paymentDate?: string
   assignee?: string
   source?: string | null            // 'EMAIL' (repairs@ pipeline) | 'MANUAL'
+  status?: InvoiceStatus | null     // 'PENDING' | 'POSTED' | 'ARCHIVED'; null ≈ POSTED (legacy/manual)
+  reviewedBy?: string | null        // who posted/archived it
   createdAt: string
   updatedAt: string
 }
+
+export type InvoiceStatus = 'PENDING' | 'POSTED' | 'ARCHIVED'
