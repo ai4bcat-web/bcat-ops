@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown, ArrowUp, ArrowDown, Inbox, Archive, ArchiveRestore, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Equipment, MaintenanceInvoice } from '@/types/equipment'
+import { useAuth } from '@/hooks/useAuth'
+import { isPosted, isQueued, isArchived } from '@/lib/invoiceStatus'
 import {
   formatCents, thBase, tdBase, equipChipStyle, iconBtnStyle,
   Pill, inputStyle, btnGhost, btnPrimary, btnDanger, Field, FormSection, Modal,
@@ -91,7 +93,7 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {lines.map((line, i) => (
               <div key={i} style={{ display: 'grid', gridTemplateColumns: isEdit ? 'minmax(0,1.4fr) minmax(0,1fr)' : 'minmax(0,1.4fr) minmax(0,1fr) auto', gap: 10, alignItems: 'center' }}>
-                <select style={{ ...inputStyle, opacity: isEdit ? 0.6 : 1 }} value={line.equipmentId} onChange={(e) => setLine(i, 'equipmentId', e.target.value)} disabled={isEdit} required>
+                <select style={inputStyle} value={line.equipmentId} onChange={(e) => setLine(i, 'equipmentId', e.target.value)} required>
                   <option value="" disabled>Select equipment…</option>
                   {equipment.map((eq) => (
                     <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
@@ -220,12 +222,14 @@ function EquipMultiSelect({ equipment, included, onChange }: {
 
 // ── Page ────────────────────────────────────────────────────────────────────────
 
-type Tab = 'invoices' | 'history'
+type Tab = 'invoices' | 'queue' | 'archived' | 'history'
 type InvSortKey = 'date' | 'equipment' | 'source' | 'vendor' | 'invoiceNumber' | 'amount'
 
 export function InvoicesPage() {
   const isMobile = useIsMobile()
   const padX = isMobile ? 14 : 32
+  const { user } = useAuth()
+  const reviewer = user?.email ?? 'dispatch'
   const equipment                = useAppStore((s) => s.equipment)
   const maintenanceInvoices      = useAppStore((s) => s.maintenanceInvoices)
   const maintenanceTasks         = useAppStore((s) => s.maintenanceTasks)
@@ -269,7 +273,27 @@ export function InvoicesPage() {
     return e ? `#${e.unitNumber}` : id
   }
 
+  // Pending count drives the Review Queue tab badge.
+  const queueCount = maintenanceInvoices.filter(isQueued).length
+
+  // Action handlers — post (add to list), archive (dismiss), restore.
+  function postInvoice(inv: MaintenanceInvoice) {
+    updateMaintenanceInvoice(inv.id, { status: 'POSTED', reviewedBy: reviewer })
+    toast.success('Invoice posted')
+  }
+  function archiveInvoice(inv: MaintenanceInvoice) {
+    updateMaintenanceInvoice(inv.id, { status: 'ARCHIVED', reviewedBy: reviewer })
+    toast.success('Invoice archived')
+  }
+  function restoreInvoice(inv: MaintenanceInvoice) {
+    updateMaintenanceInvoice(inv.id, { status: 'POSTED', reviewedBy: reviewer })
+    toast.success('Invoice restored')
+  }
+
+  // The active invoice tab (posted / queue / archived) selects which status is shown.
+  const tabStatus = tab === 'queue' ? isQueued : tab === 'archived' ? isArchived : isPosted
   const filtered = maintenanceInvoices.filter((inv) => {
+    if (!tabStatus(inv)) return false
     if (!matchesEquip(inv.equipmentId)) return false
     if (search) {
       const q = search.toLowerCase()
@@ -324,8 +348,9 @@ export function InvoicesPage() {
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-01`
   }, [])
 
-  // KPIs are scoped to the equipment picked in the top toggle ("All Equipment" = everything).
-  const kpiInvoices  = includedEquip === null ? maintenanceInvoices : maintenanceInvoices.filter((i) => matchesEquip(i.equipmentId))
+  // KPIs are scoped to the equipment picked in the top toggle, POSTED invoices only
+  // (pending/archived don't count toward spend).
+  const kpiInvoices  = maintenanceInvoices.filter((i) => isPosted(i) && matchesEquip(i.equipmentId))
   const totalSpend   = kpiInvoices.reduce((s, i) => s + i.amount, 0)
   const monthSpend   = kpiInvoices.filter((i) => (i.date ?? '') >= monthStart).reduce((s, i) => s + i.amount, 0)
   const invoiceCount = kpiInvoices.length
@@ -347,7 +372,7 @@ export function InvoicesPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: `${isMobile ? 16 : 20}px ${padX}px 12px` }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Invoices</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Repair invoices &amp; service history · from repairs@bcatcorp.com</p>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Repairs from repairs@bcatcorp.com land in the Review Queue · post to add them to the list</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button style={{ display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8, fontSize: 13, fontWeight: 500, color: 'var(--ds-t2)', cursor: 'pointer', fontFamily: 'inherit' }}>
@@ -385,7 +410,12 @@ export function InvoicesPage() {
 
         {/* Tab bar */}
         <div style={{ display: 'flex', padding: `0 ${padX}px`, gap: 0, overflowX: 'auto' }}>
-          {[{ key: 'invoices' as const, label: 'Invoices', Icon: Receipt }, { key: 'history' as const, label: 'Maintenance History', Icon: History }].map(({ key, label, Icon }) => {
+          {[
+            { key: 'invoices' as const, label: 'Invoices', Icon: Receipt, badge: 0 },
+            { key: 'queue' as const, label: 'Review Queue', Icon: Inbox, badge: queueCount },
+            { key: 'archived' as const, label: 'Archived', Icon: Archive, badge: 0 },
+            { key: 'history' as const, label: 'Maintenance History', Icon: History, badge: 0 },
+          ].map(({ key, label, Icon, badge }) => {
             const active = tab === key
             return (
               <button
@@ -401,6 +431,9 @@ export function InvoicesPage() {
                 }}
               >
                 <Icon size={13} />{label}
+                {badge > 0 && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: 'var(--ds-blue)', color: '#fff', fontSize: 11, fontWeight: 700 }}>{badge}</span>
+                )}
               </button>
             )
           })}
@@ -426,13 +459,21 @@ export function InvoicesPage() {
           </div>
         </div>
 
-        {tab === 'invoices' && (
+        {(tab === 'invoices' || tab === 'queue' || tab === 'archived') && (
         <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 gap-2 text-muted-foreground">
-              <FileText className="size-8 opacity-20" />
-              <p className="text-sm">No invoices found.</p>
-              <p className="text-xs text-slate-400">Invoices arrive automatically from repairs@bcatcorp.com, or add one manually.</p>
+              {tab === 'queue' ? <Inbox className="size-8 opacity-20" /> : tab === 'archived' ? <Archive className="size-8 opacity-20" /> : <FileText className="size-8 opacity-20" />}
+              <p className="text-sm">
+                {tab === 'queue' ? 'Nothing to review.' : tab === 'archived' ? 'No archived invoices.' : 'No invoices found.'}
+              </p>
+              <p className="text-xs text-slate-400">
+                {tab === 'queue'
+                  ? 'New invoices from repairs@bcatcorp.com land here for review before posting.'
+                  : tab === 'archived'
+                    ? 'Archived invoices are hidden from the list and the P&L. Restore one to bring it back.'
+                    : 'Invoices arrive in the Review Queue from repairs@bcatcorp.com, or add one manually.'}
+              </p>
             </div>
           ) : (
             <div style={{ maxHeight: 'calc(100vh - 340px)', overflowY: 'auto', overflowX: 'auto' }}>
@@ -486,8 +527,21 @@ export function InvoicesPage() {
                       </td>
                       <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatCents(inv.amount)}</td>
                       <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <button aria-label="Edit invoice" onClick={() => setEditInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)' }}><Pencil size={13} /></button>
-                        <button aria-label="Delete invoice" onClick={() => { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') }} style={{ ...iconBtnStyle, color: 'var(--ds-red)' }}><Trash2 size={13} /></button>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end' }}>
+                          {tab === 'queue' && (
+                            <button aria-label="Post invoice" title="Add to the list" onClick={() => postInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-green)' }}><Check size={14} /></button>
+                          )}
+                          {tab === 'archived' && (
+                            <button aria-label="Restore invoice" title="Restore to the list" onClick={() => restoreInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-green)' }}><ArchiveRestore size={14} /></button>
+                          )}
+                          {tab !== 'archived' && (
+                            <button aria-label="Edit invoice" title="Edit" onClick={() => setEditInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)' }}><Pencil size={13} /></button>
+                          )}
+                          {tab !== 'archived' && (
+                            <button aria-label="Archive invoice" title="Archive" onClick={() => archiveInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)' }}><Archive size={13} /></button>
+                          )}
+                          <button aria-label="Delete invoice" title="Delete permanently" onClick={() => { if (window.confirm('Delete this invoice permanently?')) { deleteMaintenanceInvoice(inv.id); toast.success('Invoice deleted') } }} style={{ ...iconBtnStyle, color: 'var(--ds-red)' }}><Trash2 size={13} /></button>
+                        </div>
                       </td>
                     </tr>
                   ))}

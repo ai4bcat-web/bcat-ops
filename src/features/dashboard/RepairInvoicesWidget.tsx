@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Wrench, ChevronRight } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { isPosted } from '@/lib/invoiceStatus'
 
 function money(cents: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100)
@@ -30,8 +31,10 @@ function monthStart(): string {
  */
 export function RepairInvoicesWidget() {
   const navigate = useNavigate()
-  const invoices = useAppStore((s) => s.maintenanceInvoices)
+  const allInvoices = useAppStore((s) => s.maintenanceInvoices)
   const equipment = useAppStore((s) => s.equipment)
+  // Only posted invoices belong on the dashboard; pending (queued) and archived are excluded.
+  const invoices = useMemo(() => allInvoices.filter(isPosted), [allInvoices])
 
   const unitOf = useMemo(() => {
     const m = new Map(equipment.map((e) => [e.id, e]))

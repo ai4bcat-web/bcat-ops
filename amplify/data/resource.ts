@@ -285,6 +285,11 @@ const schema = a.schema({
       paymentDate:   a.string(),
       assignee:      a.string(),
       source:        a.string(),                       // 'EMAIL' (repairs@ pipeline) | 'MANUAL'
+      // Review queue: 'PENDING' (emailed, awaiting review) | 'POSTED' (on the list, counts
+      // in the P&L) | 'ARCHIVED' (dismissed). Null/absent is treated as POSTED so legacy and
+      // manually-added invoices are unaffected; only new emailed invoices enter the queue.
+      status:        a.string(),
+      reviewedBy:    a.string(),                       // who posted/archived it
     })
     .secondaryIndexes((index) => [index('equipmentId')])
     .authorization((allow) => [allow.authenticated()]),

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
+import { isPosted } from '@/lib/invoiceStatus'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
@@ -107,7 +108,7 @@ export function MonthlyFleetPL() {
   const trailerMaintenance = useMemo(() => {
     const trailerIds = new Set(equipment.filter((e) => e.type === 'trailer').map((e) => e.id))
     return maintenanceInvoices
-      .filter((inv) => inv.date && inv.date >= range.start && inv.date <= range.end && trailerIds.has(inv.equipmentId))
+      .filter((inv) => inv.date && inv.date >= range.start && inv.date <= range.end && trailerIds.has(inv.equipmentId) && isPosted(inv))
       .reduce((s, inv) => s + (inv.amount ?? 0), 0) / 100
   }, [equipment, maintenanceInvoices, range.start, range.end])
 
