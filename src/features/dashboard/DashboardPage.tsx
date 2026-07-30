@@ -240,9 +240,11 @@ export function DashboardPage() {
             icon={<CalendarClock size={15} />}
           />
           <KpiCard
-            label="Revenue This Month"
+            label="Revenue"
             value={metrics.revenueConnected ? cents(metrics.revenue) : '$0'}
-            sublabel={metrics.revenueConnected ? `from ${metrics.totalLoads} loads` : 'Connect rates to loads'}
+            sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
+            delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
+            deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
             accent="#1ea8f3"
             sparkColor="#1ea8f3"
             icon={<DollarSign size={15} />}
