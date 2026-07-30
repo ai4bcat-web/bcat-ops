@@ -7,7 +7,7 @@ type AvailType = 'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START'
 
 const TYPE_LABELS: Record<AvailType, string> = {
   FULL_DAY_OFF: 'Full Day Off',
-  EARLY_START:  'Early Start',
+  EARLY_START:  'In Early By',
   LATE_START:   'Late Start',
 }
 
@@ -101,7 +101,7 @@ export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCr
               <label style={labelStyle}>Type</label>
               <select value={type} onChange={(e) => setType(e.target.value as AvailType)} style={{ ...inputStyle, minWidth: 130 }}>
                 <option value="FULL_DAY_OFF">Full Day Off</option>
-                <option value="EARLY_START">Early Start</option>
+                <option value="EARLY_START">In Early By</option>
                 <option value="LATE_START">Late Start</option>
               </select>
             </div>
@@ -116,7 +116,7 @@ export function DriverAvailabilityModal({ drivers, availabilities, onClose, onCr
             {needsTime && (
               <div>
                 <label style={labelStyle}>Time</label>
-                <input type="text" placeholder="08:00" value={time} onChange={(e) => setTime(e.target.value)} style={{ ...inputStyle, width: 72 }} />
+                <input type="time" value={time} onChange={(e) => setTime(e.target.value)} style={{ ...inputStyle, width: 110 }} />
               </div>
             )}
           </div>
