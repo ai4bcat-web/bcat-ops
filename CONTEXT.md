@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-30
+> Last updated: 2026-07-31
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
@@ -24,7 +24,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 ## Routes / Pages
 | Route | Feature |
 |---|---|
-| `/dashboard` | Operational metrics (KPIs incl. revenue vs-previous-period delta and Broker Covered card, fuel widget, open tasks, live truck map, weekly fleet profitability, month-over-month comparison widget) |
+| `/dashboard` | Operational metrics (KPIs incl. revenue vs-previous-period delta and Broker Covered card, fuel widget, repair-invoices widget with an "N awaiting review" heads-up linking to `/invoices?tab=queue`, open tasks, live truck map, weekly fleet profitability, month-over-month comparison widget) |
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | Driver management + avatars |
@@ -32,7 +32,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/trucks` | Truck/equipment registry (Fleet) |
 | `/truck-docs` | Truck document tracking (insurance, IFTA, IRP, DOT inspection) — shares the compliance backend |
 | `/maintenance` | Maintenance tasks |
-| `/invoices` | Maintenance invoices |
+| `/invoices` | Maintenance invoices — list plus a Review Queue tab (`?tab=queue`) for emailed repairs, with edit/post/archive; one invoice can cover multiple units |
 | `/fuel` | Fuel transaction tracking, EFS report upload (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
 | `/insurance` | Insurance premiums — per-truck/trailer + workers' comp annual amounts by policy period, period-over-period compare, driver insurance-deduction recovery KPI; feeds per-truck insurance cost in profitability |
@@ -73,7 +73,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 
 **DOT compliance & onboarding:** `OnboardingInvite` · `DocumentSignatureRequest` (a "send for signature" request for a Driver Documents form, e.g. WI IC-Status `ic_status_wi`; driver signs at `/sign/:token`, portal Lambda stores the signed PDF and flips status SENT → SIGNED) · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` (supports phased templates via `phase`/`owner`/`templateId`) · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings` · `OnboardingTemplateConfig` (editable phased-onboarding template stored as JSON, e.g. `amazon-driver-v1`; kickoff reads it instead of the code default so staff can edit the steps drivers see)
 
-Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candidate set aside, reversible) and `Driver.onboardingTemplateId` selects the phased template. `Equipment.lastPmDate`/`lastPmMileage` feed the Fleet Manager dashboard's 25k-mi PM countdown.
+Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candidate set aside, reversible) and `Driver.onboardingTemplateId` selects the phased template. `Equipment.lastPmDate`/`lastPmMileage` feed the Fleet Manager dashboard's 25k-mi PM countdown. `MaintenanceInvoice.source` (`EMAIL` from the repairs@ pipeline | `MANUAL`), `status` (`PENDING` | `POSTED` | `ARCHIVED`) and `reviewedBy` drive the invoice review queue — effective state is computed in `src/lib/invoiceStatus.ts`, where a null status plus the `INVOICE_QUEUE_CUTOFF` timestamp keeps legacy and manual invoices POSTED (no back-fill needed) and only PENDING/ARCHIVED are excluded from the dashboard and P&L.
 
 **Custom mutations/queries:**
 - `notifySlackStatusChange` (mutation) — posts to Slack when an IntakeItem status changes → `slackStatusNotifier`
