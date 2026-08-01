@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Users, Truck, Wrench, Fuel, History,
-  ShieldCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Rocket, FileSignature, Umbrella, type LucideIcon,
+  ShieldCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Rocket, FileSignature, Umbrella, MessageSquare, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -88,6 +88,12 @@ export const NAV_GROUPS: NavSection[] = [
     title: 'System',
     items: [
       { to: '/audit-log', label: 'Audit Log', icon: History, pageKey: 'audit' },
+    ],
+  },
+  {
+    title: 'Marketing',
+    items: [
+      { to: '/reddit-queue', label: 'Reddit Queue', icon: MessageSquare, pageKey: 'redditQueue' },
     ],
   },
 ]

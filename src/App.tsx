@@ -34,6 +34,7 @@ import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManag
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDocumentsPage } from '@/features/driver-docs/DriverDocumentsPage'
 import { DocumentSigningPage } from '@/features/driver-docs/DocumentSigningPage'
+import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 
 export default function App() {
@@ -81,6 +82,8 @@ export default function App() {
               <Route path="/compliance/review" element={<Navigate to="/compliance/onboarding" replace />} />
               <Route path="/compliance/driver/:driverId" element={<RequirePage page="compliance"><DriverComplianceDetailPage /></RequirePage>} />
               <Route path="/compliance/truck/:truckId" element={<RequirePage page="compliance"><TruckOnboardingWizardPage /></RequirePage>} />
+              {/* Marketing */}
+              <Route path="/reddit-queue" element={<RequirePage page="redditQueue"><RedditQueuePage /></RequirePage>} />
               {/* legacy redirects */}
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
