@@ -511,6 +511,16 @@ backend.paychexPaySync.resources.lambda.addToRolePolicy(
 paychexFn.addEnvironment('PAY_TABLE_NAME', driverPayTable.tableName)
 // Paychex company id is an account number (not a secret) — set as a plain env var.
 paychexFn.addEnvironment('PAYCHEX_COMPANY_ID', process.env.PAYCHEX_COMPANY_ID ?? '')
+
+// EventBridge weekly cron — every Monday at 06:00 CT (11:00 UTC).
+// Syncs Paychex Flex driver pay data into DriverPayPeriod before the
+// weekly finance review.
+const paychexWeeklyRule = new Rule(paychexFn.stack, 'PaychexPaySyncWeeklyRule', {
+  schedule:    Schedule.cron({ minute: '0', hour: '11', weekDay: 'MON' }),
+  description: 'Weekly Paychex Flex pay-period sync (Monday 06:00 CT)',
+})
+paychexWeeklyRule.addTarget(new EventsLambdaTarget(paychexFn))
+
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────
