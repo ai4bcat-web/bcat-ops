@@ -10,7 +10,7 @@ import { formatTime, formatDayHeader, addDays, needLabel } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
-import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
+import { updateStop, getStops } from '@/lib/stops'
 import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
@@ -687,7 +687,6 @@ interface GridCalendarViewProps {
 
 export function GridCalendarView({ loads, drivers, startDate, viewMode, availabilities }: GridCalendarViewProps) {
   const { updateLoad } = useLoads()
-  const multiStopRender = useAppStore((s) => s.multiStopRender)
 
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const onSelect = useCallback((loadId: string, e: React.MouseEvent) => {
@@ -843,25 +842,16 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   const entriesByDay = useMemo(() => {
     const map = new Map<string, DayEntry[]>()
     const add = (key: string, e: DayEntry) => { if (!map.has(key)) map.set(key, []); map.get(key)!.push(e) }
-    if (multiStopRender) {
-      // Multi-stop: one card per STOP, placed on its own appt day.
-      for (const { load: l, stop, key } of flattenLoadsToStopEntries(loads.filter((l) => !l.unscheduled))) {
-        const day = chicagoDateStr(stop.appt)
-        if (!day) continue
-        add(day, { load: l, role: stop.type, key, stop })
-      }
-    } else {
-      for (const l of loads) {
-        if (l.unscheduled) continue   // orphans live in the Unscheduled lane, not on a day
-        const puDay = chicagoDateStr(l.pickupAppt)
-        if (!puDay) continue
-        const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
-        if (puDay !== deDay) {
-          add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })
-          add(deDay, { load: l, role: 'delivery', key: `${l.id}:delivery` })
-        } else {
-          add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
-        }
+    for (const l of loads) {
+      if (l.unscheduled) continue   // orphans live in the Unscheduled lane, not on a day
+      const puDay = chicagoDateStr(l.pickupAppt)
+      if (!puDay) continue
+      const deDay = chicagoDateStr(l.deliveryAppt) ?? puDay
+      if (puDay !== deDay) {
+        add(puDay, { load: l, role: 'pickup',   key: `${l.id}:pickup` })
+        add(deDay, { load: l, role: 'delivery', key: `${l.id}:delivery` })
+      } else {
+        add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
       }
     }
     // Sort by persisted drag position (hidden sortOrder) first, then appointment time —
@@ -875,7 +865,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     }
     entriesByDayRef.current = map
     return map
-  }, [loads, multiStopRender])
+  }, [loads])
 
   const orderedEntries = useCallback((dayStr: string): DayEntry[] => {
     const entries = entriesByDay.get(dayStr) ?? []
@@ -890,11 +880,8 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   // Unscheduled (orphan) lane entries — one card per stop in multi-stop mode, else per load.
   const unscheduledEntries = useMemo<DayEntry[]>(() => {
     const u = loads.filter((l) => l.unscheduled)
-    if (multiStopRender) {
-      return flattenLoadsToStopEntries(u).map(({ load: l, stop, key }) => ({ load: l, role: stop.type, key, stop }))
-    }
     return u.map((l) => ({ load: l, role: 'same-day' as Role, key: `${l.id}:same-day` }))
-  }, [loads, multiStopRender])
+  }, [loads])
 
   // Combined key→entry map so drag handlers can resolve the dragged card without parsing keys.
   useMemo(() => {

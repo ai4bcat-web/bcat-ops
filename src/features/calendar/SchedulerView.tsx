@@ -9,7 +9,7 @@ import { UserCheck, Trash2, Copy, X } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useAppStore } from '@/store/useAppStore'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
-import { flattenLoadsToStopEntries, updateStop } from '@/lib/stops'
+import { updateStop } from '@/lib/stops'
 import { EventCard } from './EventCard'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import { formatTime } from '@/lib/date'
@@ -59,7 +59,6 @@ export function SchedulerView({
 }: SchedulerViewProps) {
   const { updateLoad, addLoad, deleteLoad } = useLoads()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
-  const multiStopRender = useAppStore((s) => s.multiStopRender)
 
   const dragModifierRef = useRef<'none' | 'shift' | 'alt'>('none')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -110,23 +109,6 @@ export function SchedulerView({
   // ── Events (load blocks) ──────────────────────────────────────────────────
 
   const events = useMemo(() => {
-    if (multiStopRender) {
-      // One event per stop, on its own day under its own driver. Give each a 1h block
-      // so it's visible in both the day (hour slots) and week/month (day slots) views.
-      // Skip stops with no firm appt (e.g. TBD) — they can't be placed on the timeline.
-      return flattenLoadsToStopEntries(loads).flatMap(({ load, stop, key }) => {
-        const startMs = stop.appt ? new Date(stop.appt).getTime() : NaN
-        if (isNaN(startMs)) return []
-        return [{
-          id: key,
-          resourceId: stop.driverId ?? 'unassigned',
-          start: stop.appt,
-          end: new Date(startMs + 60 * 60 * 1000).toISOString(),
-          editable: true,
-          extendedProps: { load, stop },
-        }]
-      })
-    }
     return loads.map((load) => ({
       id: load.id,
       resourceId: load.pickupDriverId ?? 'unassigned',
@@ -135,7 +117,7 @@ export function SchedulerView({
       editable: true,
       extendedProps: { load, stop: undefined as Stop | undefined },
     }))
-  }, [loads, multiStopRender])
+  }, [loads])
 
   // ── Load order map (sequence # per driver per day) ───────────────────────
 
@@ -148,14 +130,8 @@ export function SchedulerView({
       if (!groups.has(gk)) groups.set(gk, [])
       groups.get(gk)!.push({ id, sortAppt })
     }
-    if (multiStopRender) {
-      for (const { stop, key } of flattenLoadsToStopEntries(loads)) {
-        push(`${stop.driverId ?? 'unassigned'}-${stop.appt.slice(0, 10)}`, key, stop.appt)
-      }
-    } else {
-      for (const l of loads) {
-        push(`${l.pickupDriverId ?? 'unassigned'}-${l.pickupAppt.slice(0, 10)}`, l.id, l.pickupAppt)
-      }
+    for (const l of loads) {
+      push(`${l.pickupDriverId ?? 'unassigned'}-${l.pickupAppt.slice(0, 10)}`, l.id, l.pickupAppt)
     }
     groups.forEach((group) => {
       group
@@ -163,7 +139,7 @@ export function SchedulerView({
         .forEach((g, i) => map.set(g.id, i + 1))
     })
     return map
-  }, [loads, multiStopRender])
+  }, [loads])
 
   // ── Event content renderer ────────────────────────────────────────────────
 
@@ -199,9 +175,7 @@ export function SchedulerView({
     }
     const resourceId = info.resource.id
     const targetDriverId = isUnassigned ? null : resourceId
-    const loadCount = multiStopRender
-      ? flattenLoadsToStopEntries(loads).filter(({ stop }) => stop.driverId === targetDriverId).length
-      : loads.filter((l) => l.pickupDriverId === targetDriverId).length
+    const loadCount = loads.filter((l) => l.pickupDriverId === targetDriverId).length
 
     if (isUnassigned) {
       return (
@@ -250,7 +224,7 @@ export function SchedulerView({
         </div>
       </button>
     )
-  }, [loads, multiStopRender])
+  }, [loads])
 
   // ── Drag / drop ───────────────────────────────────────────────────────────
 

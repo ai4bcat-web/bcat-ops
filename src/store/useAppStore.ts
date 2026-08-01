@@ -363,8 +363,6 @@ interface AppState {
   filterDriverId: string | null
   searchQuery: string
   filters: { readyToInvoice: boolean; notReadyToInvoice: boolean; split: boolean; unassigned: boolean; needsAppt: boolean }
-  multiStopRender: boolean   // DEPRECATED — always false; per-stop calendar toggle was removed. Kept so views compile.
-
   // ── Initialization ─────────────────────────────────────────────────────────
   initializeData: (userEmail: string) => Promise<void>
   setCurrentUser: (email: string) => void
@@ -465,7 +463,6 @@ export const useAppStore = create<AppState>()(
       filterDriverId: null,
       searchQuery: '',
       filters: { readyToInvoice: false, notReadyToInvoice: false, split: false, unassigned: false, needsAppt: false },
-      multiStopRender: false,
 
       // ── Init ───────────────────────────────────────────────────────────────
       setCurrentUser: (email) => set({ currentUserEmail: email }),
@@ -752,15 +749,12 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'bcat-ops-ui-v4',
-      // Bump when an existing persisted pref needs a one-time reset across all users.
-      // v2: the per-stop "Stops" toggle was removed entirely — the calendar always
-      //     renders one item per load — so force multiStopRender off for everyone
-      //     (including anyone who had it persisted on while it was default-on).
+      // Bump when an existing install needs any localStorage change.
       version: 2,
       migrate: (persisted, fromVersion) => {
         const state = (persisted ?? {}) as Record<string, unknown>
         if (fromVersion < 2) {
-          state.multiStopRender = false
+          // v2: removed multiStopRender flag — no migration needed
         }
         return state
       },
@@ -772,7 +766,6 @@ export const useAppStore = create<AppState>()(
         viewMode: s.viewMode,
         weekStart: s.weekStart,
         filters: s.filters,
-        multiStopRender: s.multiStopRender,
         equipment: s.equipment,
         maintenanceTasks: s.maintenanceTasks,
         maintenanceInvoices: s.maintenanceInvoices,

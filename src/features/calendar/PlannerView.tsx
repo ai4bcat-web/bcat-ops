@@ -18,7 +18,7 @@ import { addDays, formatDayHeader, formatApptTime, formatDateShort, formatDateTi
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
-import { flattenLoadsToStopEntries, updateStop, getStops } from '@/lib/stops'
+import { updateStop, getStops } from '@/lib/stops'
 import { computeMoveDates, computeStopMove, type MoveRole } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
@@ -830,7 +830,6 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
     return map
   }, [availabilities, drivers])
 
-  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const { updateLoad } = useLoads()
 
   // Multi-select state — shift/ctrl-click to toggle load selection
@@ -854,15 +853,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       map.get(dayStr)!.push(entry)
     }
 
-    if (multiStopRender) {
-      // Multi-stop mode: one row per STOP, placed on its own appt day.
-      for (const { load: l, stop, key } of flattenLoadsToStopEntries(loads.filter((l) => !l.unscheduled))) {
-        const day = chicagoDateStr(stop.appt)
-        if (!day) continue
-        add(day, { load: l, role: stop.type, key, stop })
-      }
-    } else {
-      for (const l of loads) {
+    for (const l of loads) {
         if (l.unscheduled) continue  // orphans live in the Unscheduled section, not on a day
         const puDay = chicagoDateStr(l.pickupAppt)
         if (!puDay) continue  // skip loads with invalid pickup date
@@ -876,7 +867,6 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
           add(puDay, { load: l, role: 'same-day', key: `${l.id}:same-day` })
         }
       }
-    }
 
     // Sort by persisted drag position (hidden sortOrder) first so a manual order survives
     // navigation and matches week/month, then by appointment time. (The number badge is a
@@ -891,16 +881,13 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
     }
 
     return map
-  }, [loads, multiStopRender])
+  }, [loads])
 
   // Orphan / unscheduled loads — shown in their own section so they're visible here too.
   const unscheduledEntries = useMemo<DayEntry[]>(() => {
     const u = loads.filter((l) => l.unscheduled)
-    if (multiStopRender) {
-      return flattenLoadsToStopEntries(u).map(({ load: l, stop, key }) => ({ load: l, role: stop.type, key, stop }))
-    }
     return u.map((l) => ({ load: l, role: 'same-day', key: `${l.id}:same-day` }))
-  }, [loads, multiStopRender])
+  }, [loads])
 
   // Map every draggable row key → its load id, so a drop onto the Unscheduled zone can
   // resolve which load to park (dragKey holds the row key during the drag).

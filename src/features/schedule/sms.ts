@@ -4,8 +4,7 @@ import type { Load, Driver, Stop } from '@/types'
 
 // ── Driver-schedule SMS builders ────────────────────────────────────────────────
 //
-// Legacy (whole-load) and multi-stop (per-stop) variants. The page picks one based on
-// the multiStopRender flag. Pure functions — no React, no store — so they're unit-tested.
+// Legacy (whole-load) variant. Pure functions — no React, no store — so they're unit-tested.
 
 /** One stop assigned to a specific driver on a specific day (multi-stop SMS mode). */
 export interface StopAssignment { load: Load; stop: Stop }

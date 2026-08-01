@@ -3,13 +3,11 @@ import { Copy, Check, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-re
 import { Avatar } from '@/components/ui/avatar'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
-import { useAppStore } from '@/store/useAppStore'
 import { chicagoDateStr, addDays, formatTime, needLabel } from '@/lib/date'
 import { getColor } from '@/lib/driverColors'
 import type { Load, Driver } from '@/types'
 import {
-  type StopAssignment,
-  loadsForDriverOnDay, stopsForDriverOnDay, buildSmsText, buildStopSmsText,
+  loadsForDriverOnDay, buildSmsText,
 } from './sms'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -78,19 +76,17 @@ function ApptLine({ kind, time, location }: { kind: 'PU' | 'DE'; time: string; l
 
 // ── Driver schedule card ──────────────────────────────────────────────────────
 
-function DriverCard({ driver, dateStr, loads, assignments }: {
-  driver: Driver; dateStr: string; loads?: Load[]; assignments?: StopAssignment[]
+function DriverCard({ driver, dateStr, loads }: {
+  driver: Driver; dateStr: string; loads: Load[]
 }) {
-  const multiStop = !!assignments
   const sms = useMemo(
-    () => (multiStop ? buildStopSmsText(driver, assignments!, dateStr) : buildSmsText(driver, loads!, dateStr)),
-    [multiStop, driver, assignments, loads, dateStr],
+    () => buildSmsText(driver, loads, dateStr),
+    [driver, loads, dateStr],
   )
   const color = getColor(driver.colorKey)
   const isBroker = driver.type === 'broker'
-  const count = multiStop ? assignments!.length : loads!.length
-  const unit  = multiStop ? 'stop' : 'load'
-  const hasHot = multiStop ? assignments!.some((a) => a.load.hot) : loads!.some((l) => l.hot)
+  const count = loads.length
+  const hasHot = loads.some((l) => l.hot)
 
   return (
     <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
@@ -106,7 +102,7 @@ function DriverCard({ driver, dateStr, loads, assignments }: {
             )}
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
-            {count} {unit}{count !== 1 ? 's' : ''} · {formatShortDate(dateStr)}
+            {count} load{count !== 1 ? 's' : ''} · {formatShortDate(dateStr)}
           </div>
         </div>
         <CopyButton text={sms} label="Copy SMS" />
@@ -114,18 +110,7 @@ function DriverCard({ driver, dateStr, loads, assignments }: {
 
       {/* Day-view-style rows */}
       <div>
-        {multiStop
-          ? assignments!.map(({ load, stop }, i) => {
-              const loc = [stop.name, stop.city].filter(Boolean).join(', ')
-              const isPickup = stop.type === 'pickup'
-              return (
-                <ScheduleRow key={`${load.id}:${stop.id}`} index={i + 1} hot={!!load.hot} accent={color.border}
-                  proId={load.aljexId} puNum={isPickup ? load.pickupNumber : undefined} tmsId={load.tmsId}>
-                  <ApptLine kind={isPickup ? 'PU' : 'DE'} time={apptText(stop.appt, stop.apptType, stop.apptEnd)} location={loc} />
-                </ScheduleRow>
-              )
-            })
-          : loads!.map((load, i) => {
+        {loads.map((load, i) => {
               const origin = [load.originName, load.originCity].filter(Boolean).join(', ')
               const dest   = [load.destinationName, load.destinationCity].filter(Boolean).join(', ')
               return (
@@ -181,8 +166,7 @@ function ScheduleRow({ index, hot, accent, proId, puNum, tmsId, children }: {
 
 interface DriverWork {
   driver: Driver
-  loads?: Load[]
-  assignments?: StopAssignment[]
+  loads: Load[]
   count: number
   sms: string
 }
@@ -190,7 +174,6 @@ interface DriverWork {
 export function SchedulePage() {
   const { loads } = useLoads()
   const { drivers } = useDrivers()
-  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const [dateStr, setDateStr] = useState(todayStr)
 
   const activeDrivers = drivers.filter((d) => d.active)
@@ -198,15 +181,11 @@ export function SchedulePage() {
   const driversWithWork = useMemo<DriverWork[]>(() =>
     activeDrivers
       .map((d): DriverWork => {
-        if (multiStopRender) {
-          const assignments = stopsForDriverOnDay(loads, d.id, dateStr)
-          return { driver: d, assignments, count: assignments.length, sms: buildStopSmsText(d, assignments, dateStr) }
-        }
         const dl = loadsForDriverOnDay(loads, d.id, dateStr)
         return { driver: d, loads: dl, count: dl.length, sms: buildSmsText(d, dl, dateStr) }
       })
       .filter((w) => w.count > 0),
-    [activeDrivers, loads, dateStr, multiStopRender]
+    [activeDrivers, loads, dateStr]
   )
 
   const driversWithoutWork = useMemo(() =>
@@ -258,7 +237,7 @@ export function SchedulePage() {
               {driversWithoutWork.length > 0 && ` · ${driversWithoutWork.map((d) => d.name.split(' ')[0]).join(', ')} off`}
             </p>
             {driversWithWork.map((w) => (
-              <DriverCard key={w.driver.id} driver={w.driver} dateStr={dateStr} loads={w.loads} assignments={w.assignments} />
+              <DriverCard key={w.driver.id} driver={w.driver} dateStr={dateStr} loads={w.loads} />
             ))}
           </div>
         )}

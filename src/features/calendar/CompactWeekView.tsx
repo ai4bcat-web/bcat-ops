@@ -4,7 +4,7 @@ import {
   getFullWeek, chicagoDateStr, formatApptTime, formatDateTime, formatDayHeader,
 } from '@/lib/date'
 import { getColor, UNASSIGNED_COLOR } from '@/lib/driverColors'
-import { getStops, updateStop } from '@/lib/stops'
+import { updateStop } from '@/lib/stops'
 import { Avatar } from '@/components/ui/avatar'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CheckCircle2, ArrowRight } from 'lucide-react'
@@ -321,32 +321,11 @@ function groupKey(item: WeekItem): string {
 }
 
 export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: CompactWeekViewProps) {
-  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const days = getFullWeek(weekStart) // [Mon … Sun]
   const dayStrs = useMemo(() => days.map((d) => chicagoDateStr(d.toISOString())), [days])
 
-  // One bar per load (legacy) or one bar per leg between consecutive stops (multi-stop).
+  // One bar per load
   const items = useMemo<WeekItem[]>(() => {
-    if (multiStopRender) {
-      const out: WeekItem[] = []
-      for (const load of loads) {
-        const stops = getStops(load)
-        for (let i = 0; i < stops.length - 1; i++) {
-          const from = stops[i], to = stops[i + 1]
-          if (!from.appt) continue
-          out.push({
-            key: `${load.id}:leg:${from.id}`,
-            load,
-            driverId: from.driverId,   // the driver departing this leg's origin
-            startAppt: from.appt,
-            endAppt: to.appt || from.appt,
-            fromStop: from,
-            toStop: to,
-          })
-        }
-      }
-      return out
-    }
     return loads.map((load) => ({
       key: load.id,
       load,
@@ -354,7 +333,7 @@ export function CompactWeekView({ loads, drivers, conflictIds, weekStart }: Comp
       startAppt: load.pickupAppt,
       endAppt: load.deliveryAppt || load.pickupAppt,
     }))
-  }, [loads, multiStopRender])
+  }, [loads])
 
   const itemByKey = useMemo(() => new Map(items.map((it) => [it.key, it])), [items])
 

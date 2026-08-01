@@ -20,15 +20,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { formatDateTime } from '@/lib/date'
-import { getStops } from '@/lib/stops'
 import { cn } from '@/lib/utils'
 import type { Load } from '@/types'
 import { toast } from 'sonner'
 
 // "Split" = handled by more than one driver. Legacy: pickup driver ≠ delivery driver.
 // Multi-stop: more than one distinct driver across all the load's stops.
-function isSplitLoad(l: Load, multiStop: boolean): boolean {
-  if (multiStop) return new Set(getStops(l).map((s) => s.driverId)).size > 1
+function isSplitLoad(l: Load): boolean {
   return l.pickupDriverId !== l.deliveryDriverId && l.deliveryDriverId !== null
 }
 
@@ -62,7 +60,6 @@ const KPI_COLORS: Record<TabId, string> = {
 export function GridPage() {
   const { loads, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
-  const multiStopRender = useAppStore((s) => s.multiStopRender)
   const isMobile = useIsMobile()
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
   const searchQuery = useAppStore((s) => s.searchQuery)
@@ -83,10 +80,10 @@ export function GridPage() {
       case 'ready':      return loads.filter((l) => l.readyToInvoice)
       case 'notReady':   return loads.filter((l) => !l.readyToInvoice)
       case 'unassigned': return loads.filter((l) => !l.pickupDriverId)
-      case 'split':      return loads.filter((l) => isSplitLoad(l, multiStopRender))
+      case 'split':      return loads.filter((l) => isSplitLoad(l))
       default:           return loads
     }
-  }, [loads, tab, multiStopRender])
+  }, [loads, tab])
 
   // Comprehensive search across ALL load fields (shared with calendar + top-bar search).
   const searched = useMemo(() => {
@@ -102,8 +99,8 @@ export function GridPage() {
     ready:      loads.filter((l) => l.readyToInvoice).length,
     notReady:   loads.filter((l) => !l.readyToInvoice).length,
     unassigned: loads.filter((l) => !l.pickupDriverId).length,
-    split:      loads.filter((l) => isSplitLoad(l, multiStopRender)).length,
-  }), [loads, multiStopRender])
+    split:      loads.filter((l) => isSplitLoad(l)).length,
+  }), [loads])
 
   const columns = useMemo<ColumnDef<Load>[]>(() => [
     {
