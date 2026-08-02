@@ -8,7 +8,7 @@ import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransa
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { DieselPriceWidget } from '@/features/dashboard/DieselPriceWidget'
 import { FuelUploadModal } from '@/features/expenses/FuelUploadModal'
-import { detectFuelAnomalies, type FuelAnomaly, type FleetAverage } from '@/lib/fuelAnomalies'
+import { detectFuelAnomalies } from '@/lib/fuelAnomalies'
 import type { Equipment } from '@/types/equipment'
 
 interface Agg { spend: number; gallons: number; count: number }
