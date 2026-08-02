@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
-import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle } from 'lucide-react'
+import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransactions'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { DieselPriceWidget } from '@/features/dashboard/DieselPriceWidget'
 import { FuelUploadModal } from '@/features/expenses/FuelUploadModal'
+import { detectFuelAnomalies, type FuelAnomaly, type FleetAverage } from '@/lib/fuelAnomalies'
 import type { Equipment } from '@/types/equipment'
 
 interface Agg { spend: number; gallons: number; count: number }
@@ -222,6 +223,12 @@ export function FuelPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, truckById, cardToTruck])
 
+  // ── Fuel anomalies (same logic as fuel-anomaly-check.sh / detectFuelAnomalies.mjs) ──
+  const anomalyResult = useMemo(() => {
+    if (!current.length) return null
+    return detectFuelAnomalies(current, 15)
+  }, [current])
+
   function assignCard(card: string, truckId: string) {
     const truck = truckById.get(truckId)
     if (!truck || !card || card === '(no card #)') return
@@ -320,6 +327,70 @@ export function FuelPage() {
             })}
           </div>
         </div>
+
+        {/* ── Fuel Anomalies ────────────────────────────────────────────────────── */}
+        {anomalyResult && (
+          <div style={{ background: 'var(--ds-surface)', border: `1px solid ${anomalyResult.anomalies.length ? '#fde68a' : 'var(--ds-border)'}`, borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+            <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {anomalyResult.anomalies.length ? (
+                <AlertTriangle size={15} style={{ color: '#b45309' }} />
+              ) : (
+                <ShieldCheck size={15} style={{ color: '#16a34a' }} />
+              )}
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel Price Anomalies</span>
+              <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+                · {anomalyResult.anomalies.length
+                  ? `${anomalyResult.anomalies.length} overpay transaction(s) >${anomalyResult.thresholdPct}% above fleet average`
+                  : `No overpay transactions >${anomalyResult.thresholdPct}% above fleet average`}
+              </span>
+            </div>
+
+            {/* Fleet Averages */}
+            <div style={{ padding: '12px 20px', borderBottom: anomalyResult.anomalies.length ? '1px solid var(--ds-border)' : 'none', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              {anomalyResult.fleetAverages.map((fa) => (
+                <div key={fa.fuelType} style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{fa.fuelType}</span>
+                  {' '}
+                  <span style={{ color: 'var(--ds-t3)' }}>avg</span>{' '}
+                  <b style={{ fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{money2(fa.avgPricePerGallon)}</b>
+                  <span style={{ color: 'var(--ds-t3)' }}>/gal</span>{' '}
+                  <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>({fa.count} txns, {gal(fa.totalGallons)})</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Anomaly rows */}
+            {anomalyResult.anomalies.length > 0 && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                      {['Date', 'Truck', 'Driver', 'Location', 'Type', '$/gal', 'Fleet Avg', 'Overpay %', 'Overpay $', 'Gallons'].map((h, i) => (
+                        <th key={h} style={{ padding: '8px 16px', textAlign: i >= 5 ? 'right' : 'left', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anomalyResult.anomalies.map((a) => (
+                      <tr key={a.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                        <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t1)' }}>{a.transactionDate}</td>
+                        <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{a.truckUnit}</td>
+                        <td style={{ padding: '9px 16px', color: a.driver ? 'var(--ds-t2)' : '#b45309', fontWeight: a.driver ? 400 : 600 }}>{a.driver || '—'}</td>
+                        <td style={{ padding: '9px 16px', color: 'var(--ds-t2)', fontSize: 12 }}>{a.location || '—'}</td>
+                        <td style={{ padding: '9px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)' }}>{a.fuelType}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#dc2626' }}>{money2(a.pricePerGallon)}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ds-t2)' }}>{money2(a.fleetAverage)}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#dc2626' }}>+{a.overpayPct}%</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: '#dc2626' }}>{money2(a.overpayAmount)}</td>
+                        <td style={{ padding: '9px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', color: 'var(--ds-t3)' }}>{gal(a.gallons)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Trucks missing a driver — their fuel lands in "Unassigned" */}
         {trucksNoDriver.length > 0 && (
