@@ -123,15 +123,4 @@ export function updateStop(load: Load, stopId: string, patch: Partial<Stop>): St
   return getStops(load).map((s) => (s.id === stopId ? { ...s, ...patch } : s))
 }
 
-export interface StopEntry {
-  load: Load
-  stop: Stop
-  key: string // `${load.id}:${stop.id}`
-}
 
-/** Flatten loads into one entry per stop (for per-stop calendar rendering in Phase 2). */
-export function flattenLoadsToStopEntries(loads: Load[]): StopEntry[] {
-  return loads.flatMap((load) =>
-    getStops(load).map((stop) => ({ load, stop, key: `${load.id}:${stop.id}` })),
-  )
-}

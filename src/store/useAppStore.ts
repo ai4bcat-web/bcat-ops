@@ -751,12 +751,8 @@ export const useAppStore = create<AppState>()(
       name: 'bcat-ops-ui-v4',
       // Bump when an existing install needs any localStorage change.
       version: 2,
-      migrate: (persisted, fromVersion) => {
-        const state = (persisted ?? {}) as Record<string, unknown>
-        if (fromVersion < 2) {
-          // v2: removed multiStopRender flag — no migration needed
-        }
-        return state
+      migrate: (persisted, _fromVersion) => {
+        return (persisted ?? {}) as Record<string, unknown>
       },
       // Persist UI prefs + a fleet fallback. Equipment/maintenance are backend-backed
       // now; the cached copy here only bridges the gap before initializeData's fetch
