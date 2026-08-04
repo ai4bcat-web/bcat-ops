@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-07-31
+> Last updated: 2026-08-04
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging.
 
 ## Where it lives
 | | |
@@ -33,7 +33,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/truck-docs` | Truck document tracking (insurance, IFTA, IRP, DOT inspection) — shares the compliance backend |
 | `/maintenance` | Maintenance tasks |
 | `/invoices` | Maintenance invoices — list plus a Review Queue tab (`?tab=queue`) for emailed repairs, with edit/post/archive; one invoice can cover multiple units |
-| `/fuel` | Fuel transaction tracking, EFS report upload (legacy `/expenses` redirects here) |
+| `/fuel` | Fuel transaction tracking, EFS report upload, fuel price anomaly widget flagging transactions >15% above the per-fuel-type fleet average (`src/lib/fuelAnomalies.ts`) (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
 | `/insurance` | Insurance premiums — per-truck/trailer + workers' comp annual amounts by policy period, period-over-period compare, driver insurance-deduction recovery KPI; feeds per-truck insurance cost in profitability |
 | `/schedule` | Driver schedule view |
@@ -48,6 +48,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/users` | User management (admin-only) |
 | `/vehicle-quote` | Best Care Auto Transport vehicle-quote emailer |
 | `/vehicle-confirmation` | Best Care Auto Transport booking-confirmation emailer (cost, ZIPs, pickup/delivery dates, transport type) |
+| `/reddit-queue` | Reddit reply queue — VA workflow for manually posting drafted replies (copy text, open thread, mark posted/skipped); reads drafts for JobsDone Labs / Best Care Auto from an external command-center API (`VITE_COMMAND_CENTER_URL`, same-origin in prod), not AppSync |
 | `/compliance` | DOT compliance dashboard (drivers & trucks) |
 | `/compliance/onboarding` | Driver onboarding hub (invite, kickoff, document review queue merged in) |
 | `/compliance/review` | → redirects to `/compliance/onboarding` (review queue merged into the hub) |
