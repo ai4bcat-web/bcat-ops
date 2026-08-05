@@ -68,6 +68,7 @@ export interface MaintenanceInvoice {
   source?: string | null            // 'EMAIL' (repairs@ pipeline) | 'MANUAL'
   status?: InvoiceStatus | null     // 'PENDING' | 'POSTED' | 'ARCHIVED'; null ≈ POSTED (legacy/manual)
   reviewedBy?: string | null        // who posted/archived it
+  externalId?: string | null        // stable identity of the source document (ingest dedup)
   createdAt: string
   updatedAt: string
 }

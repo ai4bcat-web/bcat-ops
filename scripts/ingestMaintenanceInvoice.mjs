@@ -10,8 +10,10 @@
  *   node scripts/ingestMaintenanceInvoice.mjs --json '[{...}]' [--dry-run]
  *   node scripts/ingestMaintenanceInvoice.mjs --email-body /tmp/invoice.txt [--dry-run]
  *
- * Dedup: skips if an existing invoice matches on
- *   (date, equipmentId, vendor, amount, invoiceNumber).
+ * Dedup: each invoice gets a stable `externalId` derived from what the source document
+ * says (date, vendor, amount, invoice #) — NOT equipmentId, which the office changes when
+ * it assigns the repair to a truck. See scripts/invoiceDedup.mjs. Reviewed and archived
+ * invoices therefore stay out of the queue instead of being re-inserted on the next run.
  * Exit codes: 0 ok, 1 fatal error, 2 zero inserted (possible dupes or parse issue).
  */
 
@@ -19,6 +21,7 @@ import { readFileSync, existsSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, resolve, basename } from 'path'
 import { Amplify } from 'aws-amplify'
+import { invoiceExternalId, legacyContentKey, buildSeenIndex, isAlreadyIngested } from './invoiceDedup.mjs'
 import { signIn, fetchAuthSession } from 'aws-amplify/auth'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -102,9 +105,9 @@ function resolveEquipmentId(raw) {
 
 // ─── GraphQL ──────────────────────────────────────────────────────────────────
 
-const LIST_QUERY = `query ListMaintenanceInvoices {
+const listQuery = (withExternalId) => `query ListMaintenanceInvoices {
   listMaintenanceInvoices(limit: 5000) {
-    items { id date equipmentId vendor amount invoiceNumber }
+    items { id date equipmentId vendor amount invoiceNumber status${withExternalId ? ' externalId' : ''} }
   }
 }`
 
@@ -281,17 +284,21 @@ async function main() {
     process.exit(1)
   }
 
-  // Dedup against existing invoices
-  const listed = await callAppSync(LIST_QUERY, {}, idToken)
+  // Dedup against everything already ingested, in ANY review state — an archived
+  // invoice must stay archived rather than reappear on the next run.
+  let hasExternalId = true
+  let listed = await callAppSync(listQuery(true), {}, idToken)
+  if (listed.errors && /externalId/i.test(JSON.stringify(listed.errors))) {
+    // Backend predates the externalId field — fall back to content matching only.
+    console.error('  note: externalId not deployed yet; matching on document content')
+    hasExternalId = false
+    listed = await callAppSync(listQuery(false), {}, idToken)
+  }
   if (listed.errors) {
     console.error('List failed:', listed.errors[0].message)
     process.exit(1)
   }
-  const existing = new Set(
-    (listed.data.listMaintenanceInvoices.items ?? []).map(
-      (i) => `${i.date ?? ''}|${i.equipmentId ?? ''}|${i.vendor ?? ''}|${i.amount ?? 0}|${i.invoiceNumber ?? ''}`,
-    ),
-  )
+  const seen = buildSeenIndex(listed.data.listMaintenanceInvoices.items ?? [])
 
   let inserted = 0, duplicates = 0, failed = 0
 
@@ -319,10 +326,11 @@ async function main() {
       continue
     }
 
-    // Dedup check
-    const dedupKey = `${input.date ?? ''}|${input.equipmentId ?? ''}|${input.vendor ?? ''}|${input.amount ?? 0}|${input.invoiceNumber ?? ''}`
-    if (existing.has(dedupKey)) {
-      console.error(`  DUPLICATE: ${dedupKey}`)
+    // Dedup check — identity comes from the document, not the editable record
+    const externalId = invoiceExternalId(raw)
+    if (hasExternalId) input.externalId = externalId
+    if (isAlreadyIngested(raw, seen)) {
+      console.error(`  DUPLICATE (already ingested): ${input.vendor ?? '?'} ${input.invoiceNumber ?? ''} ${input.amount ?? 0}`)
       duplicates++
       continue
     }
@@ -332,7 +340,9 @@ async function main() {
       console.error(`  FAIL: ${result.errors[0].message} — ${JSON.stringify(input)}`)
       failed++
     } else {
-      existing.add(dedupKey)
+      // Remember it so a repeated invoice within THIS batch is caught too.
+      seen.byExternalId.add(externalId)
+      seen.byContent.add(legacyContentKey(raw))
       inserted++
       const created = result.data.createMaintenanceInvoice
       console.error(`  OK: ${created.id} vendor=${input.vendor} amount=${input.amount} equipment=${input.equipmentId || 'unassigned'}`)

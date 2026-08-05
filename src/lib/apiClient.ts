@@ -1317,7 +1317,7 @@ export async function deleteMaintenanceTask(id: string): Promise<void> {
 // ── Maintenance invoices ──────────────────────────────────────────────────────────
 
 const MAINT_INVOICE_FIELDS = `
-  id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate assignee source status reviewedBy createdAt updatedAt
+  id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate assignee source status reviewedBy externalId createdAt updatedAt
 `
 
 export async function listMaintenanceInvoices(): Promise<MaintenanceInvoice[]> {
