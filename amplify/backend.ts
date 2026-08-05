@@ -511,14 +511,6 @@ backend.paychexPaySync.resources.lambda.addToRolePolicy(
 paychexFn.addEnvironment('PAY_TABLE_NAME', driverPayTable.tableName)
 // Paychex company id is an account number (not a secret) — set as a plain env var.
 paychexFn.addEnvironment('PAYCHEX_COMPANY_ID', process.env.PAYCHEX_COMPANY_ID ?? '')
-
-// EventBridge cron — every Monday at 06:00 CT (11:00 UTC during CDT, 12:00 UTC during CST)
-const paychexRule = new Rule(paychexFn.stack, 'PaychexPaySyncWeeklyRule', {
-  schedule:    Schedule.cron({ minute: '0', hour: '11', weekDay: 'MON', month: '*' }),
-  description: 'Sync Paychex pay data every Monday at 6am CT',
-})
-paychexRule.addTarget(new EventsLambdaTarget(paychexFn))
-
 emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────
