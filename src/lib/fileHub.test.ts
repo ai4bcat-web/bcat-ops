@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
-  daysUntil, slotState, readyScore, type SlotState,
+  daysUntil, slotState, readyScore, driverExpiry, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
@@ -92,6 +92,47 @@ describe('slot state', () => {
     expect(slotState({ expirationDate: '2026-09-04' }, TODAY)).toBe('EXPIRING_SOON') // day 30
     expect(slotState({ expirationDate: '2026-09-05' }, TODAY)).toBe('VALID')         // day 31
     expect(slotState({ expirationDate: '2026-08-04' }, TODAY)).toBe('EXPIRED')
+  })
+})
+
+describe('driver expiry columns (CDL / medical card)', () => {
+  it('uses the driver record date — what the Drivers page edits and alerts read', () => {
+    const info = driverExpiry('2027-03-14', { expirationDate: '2027-03-14' }, TODAY)
+    expect(info.date).toBe('2027-03-14')
+    expect(info.state).toBe('VALID')
+    expect(info.conflict).toBe(false)
+  })
+
+  it('falls back to the uploaded document when the record has no date', () => {
+    const info = driverExpiry(null, { expirationDate: '2026-08-20' }, TODAY)
+    expect(info.date).toBe('2026-08-20')
+    expect(info.state).toBe('EXPIRING_SOON')
+    expect(info.conflict).toBe(false)
+  })
+
+  it('flags a conflict when record and document disagree, preferring the record', () => {
+    const info = driverExpiry('2027-03-14', { expirationDate: '2026-01-01' }, TODAY)
+    expect(info.date).toBe('2027-03-14')
+    expect(info.conflict).toBe(true)
+    expect(info.recordDate).toBe('2027-03-14')
+    expect(info.documentDate).toBe('2026-01-01')
+  })
+
+  it('reports MISSING when neither side has a date', () => {
+    const info = driverExpiry(null, undefined, TODAY)
+    expect(info.date).toBeNull()
+    expect(info.state).toBe('MISSING')
+    expect(info.conflict).toBe(false)
+  })
+
+  it('colour-codes an expired licence', () => {
+    expect(driverExpiry('2026-08-04', undefined, TODAY).state).toBe('EXPIRED')
+  })
+
+  it('tolerates full ISO datetimes on either side', () => {
+    const info = driverExpiry('2027-03-14T00:00:00Z', { expirationDate: '2027-03-14' }, TODAY)
+    expect(info.conflict).toBe(false)
+    expect(info.date).toBe('2027-03-14')
   })
 })
 

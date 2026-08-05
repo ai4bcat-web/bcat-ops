@@ -112,6 +112,46 @@ export function truckSlotState(truck: Equipment, slotKey: string, doc?: Complian
   return evaluateTruckDoc(truck, spec, doc).state as SlotState
 }
 
+/** Which document backs each dated field on the driver record. */
+export const DRIVER_EXPIRY_FIELDS = [
+  { key: 'cdl_copy',     label: 'CDL expires',      recordField: 'cdlExpiration' as const },
+  { key: 'medical_card', label: 'Med card expires', recordField: 'medCardExpiration' as const },
+]
+
+export interface ExpiryInfo {
+  date:   string | null
+  state:  SlotState
+  /** True when the driver record and the uploaded document carry DIFFERENT dates. */
+  conflict: boolean
+  recordDate:   string | null
+  documentDate: string | null
+}
+
+/**
+ * The expiry to show for a driver's CDL / medical card.
+ *
+ * Two places hold this date: the Driver record (edited on the Drivers page, and what
+ * the compliance chips read) and the uploaded document. The record wins because it is
+ * what the rest of the app treats as authoritative — but when the two disagree that is
+ * a data problem worth showing rather than hiding, so it is reported as a conflict.
+ */
+export function driverExpiry(
+  recordDate: string | null | undefined,
+  doc: { expirationDate?: string | null } | undefined,
+  today = new Date(),
+): ExpiryInfo {
+  const rec = recordDate?.slice(0, 10) || null
+  const docDate = doc?.expirationDate?.slice(0, 10) || null
+  const date = rec ?? docDate
+  return {
+    date,
+    state: date ? slotState({ expirationDate: date }, today) : 'MISSING',
+    conflict: !!rec && !!docDate && rec !== docDate,
+    recordDate: rec,
+    documentDate: docDate,
+  }
+}
+
 export interface ReadyScore {
   /** Required slots that have a document on file (any state). */
   onFile:   number

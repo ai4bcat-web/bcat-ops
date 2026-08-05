@@ -6,7 +6,10 @@ import { useFileHub } from '@/hooks/useFileHub'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone, formatVin } from '@/lib/utils'
-import { slotsFor, readyScore, slotState, truckSlotState, type ReadyScore } from '@/lib/fileHub'
+import {
+  slotsFor, readyScore, slotState, truckSlotState, driverExpiry,
+  type ReadyScore, type SlotState, type ExpiryInfo,
+} from '@/lib/fileHub'
 import { EntityFilePanel } from './EntityFilePanel'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
@@ -40,6 +43,37 @@ function ReadyDots({ score }: { score: ReadyScore }) {
         {score.onFile}/{score.required}
       </span>
     </span>
+  )
+}
+
+const EXPIRY_STYLE: Record<SlotState, { bg: string; fg: string }> = {
+  VALID:         { bg: '#f0fdf4', fg: '#15803d' },
+  EXPIRING_SOON: { bg: '#fffbeb', fg: '#b45309' },
+  EXPIRED:       { bg: '#fef2f2', fg: '#b91c1c' },
+  MISSING:       { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
+  WAIVED:        { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
+}
+
+const shortDate = (d: string) =>
+  new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit', timeZone: 'UTC' })
+
+/** A driver's CDL / med-card expiry, colour-coded, flagging a record-vs-document mismatch. */
+function ExpiryCell({ info }: { info: ExpiryInfo }) {
+  const style = EXPIRY_STYLE[info.state]
+  if (!info.date) {
+    return <td style={{ ...TD, color: 'var(--ds-t3)' }}>—</td>
+  }
+  return (
+    <td style={{ ...TD, whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 11.5, fontWeight: 600, color: style.fg, background: style.bg, padding: '2px 7px', borderRadius: 999, fontVariantNumeric: 'tabular-nums' }}>
+        {shortDate(info.date)}
+      </span>
+      {info.conflict && (
+        <span
+          title={`The driver record says ${info.recordDate} but the uploaded document says ${info.documentDate}. Showing the driver record — fix whichever is wrong.`}
+          style={{ marginLeft: 5, fontSize: 11, color: '#b45309', cursor: 'help' }}>⚠</span>
+      )}
+    </td>
   )
 }
 
@@ -182,6 +216,7 @@ export function FilesPage() {
                 {tab === 'DRIVER' ? (
                   <>
                     <th style={TH}>Driver</th><th style={TH}>Phone</th><th style={TH}>CDL</th>
+                    <th style={TH}>CDL expires</th><th style={TH}>Med card expires</th>
                     <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
                 ) : (
@@ -195,7 +230,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -223,6 +258,8 @@ export function FilesPage() {
                     </td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{d.phone ? formatPhone(d.phone) : '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{d.cdl || '—'}</td>
+                    <ExpiryCell info={driverExpiry(d.cdlExpiration, hub.docFor('DRIVER', d.id, 'cdl_copy'))} />
+                    <ExpiryCell info={driverExpiry(d.medCardExpiration, hub.docFor('DRIVER', d.id, 'medical_card'))} />
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</td>
                     <td style={{ ...TD, color: trailer ? 'var(--ds-t2)' : 'var(--ds-t3)' }}>{trailer?.unitNumber ?? 'TBD'}</td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('DRIVER', d.id)} /></td>
