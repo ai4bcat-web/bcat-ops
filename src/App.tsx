@@ -33,6 +33,7 @@ import { VehicleConfirmationPage } from '@/features/vehicle-confirmation/Vehicle
 import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManagerDashboardPage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDocumentsPage } from '@/features/driver-docs/DriverDocumentsPage'
+import { FilesPage } from '@/features/files/FilesPage'
 import { DocumentSigningPage } from '@/features/driver-docs/DocumentSigningPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
@@ -69,6 +70,7 @@ export default function App() {
               <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/driver-docs" element={<RequirePage page="driverDocs"><DriverDocumentsPage /></RequirePage>} />
+              <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
               <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />

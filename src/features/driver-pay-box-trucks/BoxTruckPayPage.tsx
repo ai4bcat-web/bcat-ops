@@ -1,16 +1,18 @@
 import { useState, useRef, useMemo } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, Pencil, FileText, Mail, Boxes, CalendarDays, GripVertical, DownloadCloud } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, Pencil, FileText, Mail, Boxes, CalendarDays, GripVertical, DownloadCloud, PlusCircle, SkipForward } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
-import { useBoxTruckPay, type BoxTruckPayRow, type BoxTruckTrip } from '@/hooks/useBoxTruckPay'
+import { useAuth } from '@/hooks/useAuth'
+import { useBoxTruckPay, type BoxTruckPayRow, type BoxTruckTrip, type DriverPayCredit } from '@/hooks/useBoxTruckPay'
 import { tripPayAmount } from '@/lib/driverPay'
+import { creditLineLabel } from '@/lib/payCredits'
 import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildBoxTruckPayStatementPdf, boxTruckPdfFilename, pdfToBase64 } from '@/lib/payPdfBoxTruck'
-import { sendDriverPayEmail } from '@/lib/apiClient'
+import { sendDriverPayEmail, payCreditsDeployed } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
 import { currentPeriodStart, shiftPeriod, periodEnd, periodLabelLong } from '@/lib/biweekly'
 import type { Driver } from '@/types'
-import { TripModal, ImportModal, SettingsModal } from './BoxTruckPayForms'
+import { TripModal, ImportModal, SettingsModal, CreditModal } from './BoxTruckPayForms'
 import { DeductionModal, EmailModal } from '../driver-pay/DriverPayForms'
 
 const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
@@ -35,6 +37,11 @@ function statementCsv(row: BoxTruckPayRow, periodStart: string): string {
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
+  if (row.credits.length) {
+    L.push(''); L.push([q('Credits'), q('Reason code'), q('Date'), q('Ref'), q('Amount')].join(','))
+    for (const c of row.credits) L.push([q(creditLineLabel(c)), q(c.reasonCode), q(c.date), q(c.loadRef), q(c.amount)].join(','))
+    L.push([q('Total credits'), '', '', '', q(row.statement.totalCredits)].join(','))
+  }
   L.push(''); L.push([q('CHECK AMOUNT'), q(row.statement.checkAmount)].join(','))
   return L.join('\n')
 }
@@ -48,11 +55,13 @@ function download(name: string, text: string) {
 export function BoxTruckPayPage() {
   const [periodStart, setPeriodStart] = useState(currentPeriodStart)
   const pay = useBoxTruckPay(periodStart)
+  const { user } = useAuth()
 
   const [tripModal, setTripModal] = useState<{ driverId: string } | null>(null)
   const [editTrip, setEditTrip]   = useState<BoxTruckTrip | null>(null)
   const [importDriver, setImport] = useState<string | null>(null)
   const [dedDriver, setDedDriver] = useState<string | null>(null)
+  const [creditFor, setCreditFor] = useState<{ row: BoxTruckPayRow; credit?: DriverPayCredit } | null>(null)
   const [settingsFor, setSettings] = useState<Driver | null>(null)
   const [emailFor, setEmailFor]   = useState<BoxTruckPayRow | null>(null)
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
@@ -77,6 +86,24 @@ export function BoxTruckPayPage() {
       toast.success(n ? `Pulled ${n} load${n !== 1 ? 's' : ''} from the calendar` : 'No new loads to pull for this period')
     } catch (e) {
       toast.error(`Couldn't pull from the calendar: ${e instanceof Error ? e.message : 'unknown error'}`)
+    }
+  }
+
+  const handleRemoveCredit = async (c: DriverPayCredit) => {
+    if (!window.confirm(`Remove the ${money(c.amount)} ${creditLineLabel(c)} credit from this check?`)) return
+    try { await pay.removeCredit(c.id); toast.success('Credit removed') }
+    catch (e) { toast.error(`Couldn't remove the credit: ${e instanceof Error ? e.message : 'unknown error'}`) }
+  }
+
+  const handlePushTrip = async (t: BoxTruckTrip) => {
+    const target = shiftPeriod(t.periodStart, 1)
+    const what = t.aljexPro || t.proNumber || 'this shipment'
+    if (!window.confirm(`Move ${what} to the next pay period (${periodLabelLong(target)})?\n\nIt comes off this check and lands at the bottom of the next one.`)) return
+    try {
+      await pay.pushTripToNextPeriod(t.id)
+      toast.success(`Moved ${what} to ${periodLabelLong(target)}`)
+    } catch (e) {
+      toast.error(`Couldn't move the shipment: ${e instanceof Error ? e.message : 'unknown error'}`)
     }
   }
 
@@ -160,9 +187,13 @@ export function BoxTruckPayPage() {
             onAddTrip={() => setTripModal({ driverId: selectedRow.driver.id })}
             onImport={() => setImport(selectedRow.driver.id)}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
+            onAddCredit={() => setCreditFor({ row: selectedRow })}
+            onEditCredit={(c) => setCreditFor({ row: selectedRow, credit: c })}
+            onRemoveCredit={handleRemoveCredit}
             onSettings={() => setSettings(selectedRow.driver)}
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
+            onPushTrip={handlePushTrip}
             onRemoveDeduction={pay.removeDeduction}
             onUpdateTrip={(id, patch) => { void pay.updateTrip(id, patch) }}
             onExport={() => download(`pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
@@ -191,6 +222,22 @@ export function BoxTruckPayPage() {
       {editTrip && <TripModal driverId={editTrip.driverId} periodStart={editTrip.periodStart} initial={editTrip} onSave={async (input) => { await pay.updateTrip(editTrip.id, input); setEditTrip(null) }} onClose={() => setEditTrip(null)} />}
       {importDriver && <ImportModal driverId={importDriver} periodStart={periodStart} onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setImport(null) }} onClose={() => setImport(null)} />}
       {dedDriver && <DeductionModal driverId={dedDriver} periodStart={periodStart} onSave={async (input) => { await pay.addDeduction(input); setDedDriver(null) }} onClose={() => setDedDriver(null)} />}
+      {creditFor && (
+        <CreditModal
+          driverId={creditFor.row.driver.id}
+          driverName={creditFor.row.driver.name}
+          periodStart={periodStart}
+          periodLabel={periodLabelLong(periodStart)}
+          initial={creditFor.credit}
+          createdBy={user?.email ?? null}
+          onSave={async (input) => {
+            if (creditFor.credit) { await pay.updateCredit(creditFor.credit.id, input); toast.success('Credit updated') }
+            else { await pay.addCredit(input); toast.success(`Added ${money(input.amount)} credit to ${creditFor.row.driver.name}'s check`) }
+            setCreditFor(null)
+          }}
+          onClose={() => setCreditFor(null)}
+        />
+      )}
       {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.setting} onSave={async (patch) => { await pay.saveSetting(settingsFor.id, patch); setSettings(null) }} onClose={() => setSettings(null)} />}
       {emailFor && (() => {
         const r = emailFor
@@ -207,11 +254,13 @@ export function BoxTruckPayPage() {
 }
 
 // ── One driver's biweekly statement ─────────────────────────────────────────
-function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAddCredit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onPushTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: BoxTruckPayRow
   onPull: () => void; onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
+  onAddCredit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onEditTrip: (t: BoxTruckTrip) => void
-  onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
+  onRemoveTrip: (id: string) => void; onPushTrip: (t: BoxTruckTrip) => void
+  onRemoveDeduction: (id: string) => void; onExport: () => void
   onPdf: () => void; onEmail: () => void
   onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
@@ -270,6 +319,10 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onSet
         {iconBtn(onAddTrip, Plus, 'Add shipment')}
         {iconBtn(onImport, Upload, 'Import')}
         {iconBtn(onAddDeduction, Plus, 'Add expense')}
+        <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+          <PlusCircle size={13} /> Add credit
+        </button>
         {iconBtn(onExport, Download, 'CSV')}
         {iconBtn(onPdf, FileText, 'PDF')}
         {iconBtn(onEmail, Mail, 'Email')}
@@ -287,7 +340,7 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onSet
             <th style={{ ...TH, textAlign: 'left' }}>Status</th>
             <th style={TH}>Gross Profit</th>
             <th style={TH}>Amount</th>
-            <th style={{ ...TH, width: 64 }}></th>
+            <th style={{ ...TH, width: 84 }}></th>
           </tr></thead>
           <tbody>
             {trips.length === 0 && <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No shipments yet. Click <b>Pull from calendar</b> to load what {driver.name} delivered this period, or add one manually.</td></tr>}
@@ -309,6 +362,7 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onSet
                   <td style={{ ...TD, padding: '7px 4px', whiteSpace: 'nowrap' }}>
                     <span draggable onDragStart={() => onTripDragStart(t.id)} onDragEnd={onTripDragEnd} title="Drag to reorder" aria-label="Drag to reorder" style={{ display: 'inline-flex', cursor: 'grab', color: 'var(--ds-t3)', padding: '0 2px', verticalAlign: 'middle' }}><GripVertical size={13} /></span>
                     <button onClick={() => onEditTrip(t)} title="Edit shipment" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Pencil size={13} /></button>
+                    <button onClick={() => onPushTrip(t)} title="Push to next pay period" aria-label="Push to next pay period" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><SkipForward size={13} /></button>
                     <button onClick={() => onRemoveTrip(t.id)} title="Remove shipment" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: '0 3px' }}><Trash2 size={13} /></button>
                   </td>
                 </tr>
@@ -349,6 +403,60 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onSet
           </div>
         )}
       </div>
+
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Credits</div>
+          <button onClick={onAddCredit} title="Add a credit" style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: '#15803d', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+            <PlusCircle size={12} /> Add
+          </button>
+        </div>
+        {!payCreditsDeployed() ? (
+          <div style={{ fontSize: 12.5, color: '#b45309' }}>Credits need the latest backend deploy (<code>npx ampx sandbox</code> / pipeline deploy) before they can be saved.</div>
+        ) : row.credits.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No credits. Add detention, layover, a bonus or a reimbursement to pay {driver.name} extra on this check.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {row.credits.map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {creditLineLabel(c)}
+                  {(c.date || c.loadRef) && (
+                    <span style={{ color: 'var(--ds-t3)', fontSize: 11.5 }}>
+                      {c.date ? ` · ${fmtShort(c.date)}` : ''}{c.loadRef ? ` · ${c.loadRef}` : ''}
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: '#15803d', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>+{money(c.amount)}</span>
+                <button onClick={() => onEditCredit(c)} title="Edit credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Pencil size={12} /></button>
+                <button onClick={() => onRemoveCredit(c)} title="Remove credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
+              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total credits</span>
+              <span style={{ color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>+{money(statement.totalCredits)}</span>
+              <span style={{ width: 40 }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {statement.totalCredits > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, padding: '10px 16px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontSize: 12.5 }}>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>Pay after {pct(setting.payPercent)} model</span>
+            <span style={{ color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{money(statement.payBeforeCredits)}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>Credits (paid at 100%)</span>
+            <span style={{ color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>+{money(statement.totalCredits)}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 3, paddingTop: 5 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Check amount</span>
+            <span style={{ color: statement.checkAmount >= 0 ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{money(statement.checkAmount)}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -48,13 +48,26 @@ const DRIVER_BASE_FIELDS = `
   createdAt updatedAt
 `
 let driversHaveCompliance = true
-const driverFields = () =>
-  driversHaveCompliance ? `${DRIVER_BASE_FIELDS} onboardingStatus complianceStatus` : DRIVER_BASE_FIELDS
+// assignedTrailerId ships with the Files hub — same self-healing treatment.
+let driversHaveTrailer = true
+const driverFields = () => [
+  DRIVER_BASE_FIELDS,
+  driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
+  driversHaveTrailer ? 'assignedTrailerId' : '',
+].filter(Boolean).join(' ')
 
 function isComplianceFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   return Array.isArray(errs) && errs.some((e) => /'(onboardingStatus|complianceStatus)'/.test(e?.message ?? ''))
 }
+
+function isTrailerFieldUndefined(err: unknown): boolean {
+  const errs = (err as { errors?: { message?: string }[] })?.errors
+  return Array.isArray(errs) && errs.some((e) => /'assignedTrailerId'/.test(e?.message ?? ''))
+}
+
+/** False once a call proved the backend predates assignedTrailerId (pre-deploy). */
+export const driverTrailerFieldDeployed = () => driversHaveTrailer
 
 const AUDIT_FIELDS = `
   id entityType entityId action user changes createdAt
@@ -212,10 +225,18 @@ export async function listDrivers(): Promise<Driver[]> {
     const items = result.data.listDrivers.items ?? []
     return Promise.all(items.map(resolveDriverPhotoUrl))
   } catch (err: unknown) {
-    // Backend doesn't have the compliance fields yet (pre-deploy) — drop them and retry.
-    if (driversHaveCompliance && isComplianceFieldUndefined(err)) {
-      console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
-      driversHaveCompliance = false
+    // Backend doesn't have the newer fields yet (pre-deploy) — drop them and retry.
+    const missingCompliance = driversHaveCompliance && isComplianceFieldUndefined(err)
+    const missingTrailer = driversHaveTrailer && isTrailerFieldUndefined(err)
+    if (missingCompliance || missingTrailer) {
+      if (missingCompliance) {
+        console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
+        driversHaveCompliance = false
+      }
+      if (missingTrailer) {
+        console.warn("[apiClient] backend has no assignedTrailerId yet — querying drivers without it until deploy")
+        driversHaveTrailer = false
+      }
       const result = await run()
       return Promise.all((result.data.listDrivers.items ?? []).map(resolveDriverPhotoUrl))
     }
@@ -260,7 +281,10 @@ export async function updateDriver(
   id: string,
   patch: Partial<Omit<Driver, 'id' | 'createdAt'>>
 ): Promise<Driver> {
-  const { photoUrl: _skip, ...rest } = patch as typeof patch & { photoUrl?: string }
+  const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
+  // Writing assignedTrailerId to a backend that doesn't have it yet would hard-fail.
+  const { assignedTrailerId: _t, ...withoutTrailer } = all
+  const rest = driversHaveTrailer ? all : withoutTrailer
   try {
     const result = await client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
@@ -1728,6 +1752,76 @@ export async function createDriverPayDeduction(input: Omit<DriverPayDeduction, '
 export async function deleteDriverPayDeduction(id: string): Promise<void> {
   await client.graphql({
     query: `mutation DeleteDriverPayDeduction($input: DeleteDriverPayDeductionInput!) { deleteDriverPayDeduction(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Driver pay credits (extra pay added to a check, e.g. detention / bonus) ─────
+// Reason codes live in src/lib/payCredits.ts — stored as a plain string here.
+
+export interface DriverPayCredit {
+  id:          string
+  driverId:    string
+  periodStart: string
+  reasonCode:  string
+  label?:      string | null
+  amount:      number          // dollars ADDED to the check (positive)
+  date?:       string | null
+  loadRef?:    string | null
+  createdBy?:  string | null
+  notes?:      string | null
+  createdAt:   string
+  updatedAt:   string
+}
+
+export type DriverPayCreditInput = Omit<DriverPayCredit, 'id' | 'createdAt' | 'updatedAt'>
+
+const PAY_CREDIT_FIELDS = `id driverId periodStart reasonCode label amount date loadRef createdBy notes createdAt updatedAt`
+
+// The model ships with this feature; until the backend migration lands the API has no
+// such type. Degrade to "no credits" rather than breaking the whole pay page.
+let payCreditsAvailable = true
+const isMissingCreditModel = (err: unknown) => /DriverPayCredit/i.test(JSON.stringify(err ?? ''))
+
+/** True once a call has proven the backend doesn't have the credit model deployed. */
+export const payCreditsDeployed = () => payCreditsAvailable
+
+export async function listDriverPayCredits(): Promise<DriverPayCredit[]> {
+  if (!payCreditsAvailable) return []
+  try {
+    const result = await client.graphql({
+      query: `query ListDriverPayCredits { listDriverPayCredits(limit: 10000) { items { ${PAY_CREDIT_FIELDS} } } }`,
+    }) as { data: { listDriverPayCredits: { items: DriverPayCredit[] } } }
+    return result.data.listDriverPayCredits.items ?? []
+  } catch (err) {
+    if (isMissingCreditModel(err)) {
+      console.warn('[apiClient] DriverPayCredit not deployed yet — treating credits as empty')
+      payCreditsAvailable = false
+      return []
+    }
+    throw err
+  }
+}
+
+export async function createDriverPayCredit(input: DriverPayCreditInput): Promise<DriverPayCredit> {
+  const result = await client.graphql({
+    query: `mutation CreateDriverPayCredit($input: CreateDriverPayCreditInput!) { createDriverPayCredit(input: $input) { ${PAY_CREDIT_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createDriverPayCredit: DriverPayCredit } }
+  return result.data.createDriverPayCredit
+}
+
+export async function updateDriverPayCredit(id: string, patch: Partial<DriverPayCreditInput>): Promise<DriverPayCredit> {
+  const result = await client.graphql({
+    query: `mutation UpdateDriverPayCredit($input: UpdateDriverPayCreditInput!) { updateDriverPayCredit(input: $input) { ${PAY_CREDIT_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateDriverPayCredit: DriverPayCredit } }
+  return result.data.updateDriverPayCredit
+}
+
+export async function deleteDriverPayCredit(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteDriverPayCredit($input: DeleteDriverPayCreditInput!) { deleteDriverPayCredit(input: $input) { id } }`,
     variables: { input: { id } },
   })
 }

@@ -1,0 +1,219 @@
+import { useMemo, useState } from 'react'
+import { FolderOpen, Search, Users, Truck as TruckIcon } from 'lucide-react'
+import { useAppStore } from '@/store/useAppStore'
+import { useFileHub } from '@/hooks/useFileHub'
+import { Avatar } from '@/components/ui/avatar'
+import { getColor } from '@/lib/driverColors'
+import { formatPhone } from '@/lib/utils'
+import { slotsFor, readyScore, type ReadyScore } from '@/lib/fileHub'
+import { EntityFilePanel, type FileEntity } from './EntityFilePanel'
+import type { Driver } from '@/types'
+import type { Equipment } from '@/types/equipment'
+
+type Tab = 'DRIVER' | 'TRUCK'
+
+const getInitials = (name: string) =>
+  name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
+
+const TH: React.CSSProperties = {
+  fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase',
+  letterSpacing: '0.04em', padding: '8px 10px', textAlign: 'left', whiteSpace: 'nowrap',
+}
+const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 10px', textAlign: 'left' }
+
+/** ●●●○○ — filled per required slot on file, amber when something needs attention. */
+function ReadyDots({ score }: { score: ReadyScore }) {
+  const color = score.missing > 0 ? 'var(--ds-t3)' : score.attention > 0 ? '#b45309' : '#15803d'
+  return (
+    <span title={`${score.onFile} of ${score.required} on file${score.attention ? ` · ${score.attention} need attention` : ''}`}
+      style={{ display: 'inline-flex', gap: 3, alignItems: 'center' }}>
+      {Array.from({ length: score.required }, (_, i) => (
+        <span key={i} style={{
+          width: 7, height: 7, borderRadius: '50%',
+          background: i < score.onFile ? color : 'transparent',
+          border: i < score.onFile ? 'none' : '1px solid var(--ds-border)',
+        }} />
+      ))}
+      <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginLeft: 4, fontVariantNumeric: 'tabular-nums' }}>
+        {score.onFile}/{score.required}
+      </span>
+    </span>
+  )
+}
+
+export function FilesPage() {
+  const drivers = useAppStore((s) => s.drivers)
+  const equipment = useAppStore((s) => s.equipment)
+  const hub = useFileHub()
+
+  const [tab, setTab] = useState<Tab>('DRIVER')
+  const [query, setQuery] = useState('')
+  const [openId, setOpenId] = useState<string | null>(null)
+
+  const trucks = useMemo(
+    () => equipment.filter((e) => e.type === 'truck' && e.active !== false)
+      .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
+    [equipment],
+  )
+  const trailers = useMemo(() => equipment.filter((e) => e.type === 'trailer'), [equipment])
+
+  const activeDrivers = useMemo(
+    () => drivers.filter((d) => d.active !== false && d.type !== 'broker')
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [drivers],
+  )
+
+  const scoreFor = (entityType: Tab, id: string): ReadyScore => {
+    const slots = slotsFor(entityType)
+    const map = new Map(
+      slots.map((s) => [s.key, hub.docFor(entityType, id, s.key)] as const)
+        .filter((e): e is [string, NonNullable<typeof e[1]>] => !!e[1]),
+    )
+    return readyScore(slots, map)
+  }
+
+  const q = query.trim().toLowerCase()
+  const shownDrivers = useMemo(() => {
+    if (!q) return activeDrivers
+    return activeDrivers.filter((d) => {
+      const truck = trucks.find((t) => t.id === d.assignedTruckId)
+      return [d.name, d.phone, d.cdl, truck?.unitNumber].some((v) => (v ?? '').toLowerCase().includes(q))
+    })
+  }, [activeDrivers, trucks, q])
+
+  const shownTrucks = useMemo(() => {
+    if (!q) return trucks
+    return trucks.filter((t) =>
+      [t.unitNumber, t.vin, t.plate, t.make, t.model, t.nickname].some((v) => (v ?? '').toLowerCase().includes(q)))
+  }, [trucks, q])
+
+  const openEntity: FileEntity | null = useMemo(() => {
+    if (!openId) return null
+    if (tab === 'DRIVER') {
+      const d = drivers.find((x) => x.id === openId)
+      return d ? { kind: 'DRIVER', driver: d } : null
+    }
+    const t = equipment.find((x) => x.id === openId)
+    return t ? { kind: 'TRUCK', truck: t } : null
+  }, [openId, tab, drivers, equipment])
+
+  const tabBtn = (t: Tab, label: string, Icon: typeof Users, count: number) => (
+    <button onClick={() => { setTab(t); setOpenId(null) }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 14px', borderRadius: 8,
+        border: `1px solid ${tab === t ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+        background: tab === t ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
+        color: tab === t ? 'var(--ds-blue)' : 'var(--ds-t2)',
+        fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+      }}>
+      <Icon size={14} /> {label}
+      <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{count}</span>
+    </button>
+  )
+
+  return (
+    <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
+        <div style={{ padding: '20px 32px 12px' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <FolderOpen size={20} /> Files
+          </h1>
+          <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+            Every document and detail on file for each driver and truck — view, download or upload what's missing.
+            Shares one store with Compliance, Onboarding and Asset Documents, so nothing is uploaded twice.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+            {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
+            {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
+            <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)' }} />
+              <input value={query} onChange={(e) => setQuery(e.target.value)}
+                placeholder={tab === 'DRIVER' ? 'Search name, phone, CDL, truck #' : 'Search unit #, VIN, plate, make'}
+                style={{
+                  height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)',
+                  padding: '0 10px 0 30px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)',
+                  boxSizing: 'border-box', fontFamily: 'inherit',
+                }} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto' }}>
+        {hub.error && (
+          <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', marginBottom: 14 }}>
+            Couldn't load documents: {hub.error}
+          </div>
+        )}
+
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                {tab === 'DRIVER' ? (
+                  <>
+                    <th style={TH}>Driver</th><th style={TH}>Phone</th><th style={TH}>CDL</th>
+                    <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
+                  </>
+                ) : (
+                  <>
+                    <th style={TH}>Unit</th><th style={TH}>VIN</th><th style={TH}>Plate</th>
+                    <th style={TH}>Make / model</th><th style={TH}>Driver</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {tab === 'DRIVER' && shownDrivers.length === 0 && (
+                <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>No drivers match "{query}".</td></tr>
+              )}
+              {tab === 'TRUCK' && shownTrucks.length === 0 && (
+                <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>No trucks match "{query}".</td></tr>
+              )}
+
+              {tab === 'DRIVER' && shownDrivers.map((d: Driver) => {
+                const truck = trucks.find((t) => t.id === d.assignedTruckId)
+                const trailer = trailers.find((t) => t.id === d.assignedTrailerId)
+                return (
+                  <tr key={d.id} onClick={() => setOpenId(d.id)}
+                    style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: openId === d.id ? 'var(--ds-bg)' : undefined }}>
+                    <td style={TD}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Avatar src={d.photoUrl} initials={getInitials(d.name)} size="xs" style={{ background: getColor(d.colorKey).avatarBg, color: '#fff' }} />
+                        <b style={{ fontWeight: 600 }}>{d.name}</b>
+                      </span>
+                    </td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{d.phone ? formatPhone(d.phone) : '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{d.cdl || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</td>
+                    <td style={{ ...TD, color: trailer ? 'var(--ds-t2)' : 'var(--ds-t3)' }}>{trailer?.unitNumber ?? 'TBD'}</td>
+                    <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('DRIVER', d.id)} /></td>
+                  </tr>
+                )
+              })}
+
+              {tab === 'TRUCK' && shownTrucks.map((t: Equipment) => {
+                const driver = drivers.find((d) => d.id === t.assignedDriverId)
+                return (
+                  <tr key={t.id} onClick={() => setOpenId(t.id)}
+                    style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: openId === t.id ? 'var(--ds-bg)' : undefined }}>
+                    <td style={{ ...TD, fontWeight: 600 }}>{t.unitNumber}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{t.vin || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{t.plate || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{[t.make, t.model].filter(Boolean).join(' ') || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{driver?.name ?? '—'}</td>
+                    <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('TRUCK', t.id)} /></td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {hub.loading && <div style={{ color: 'var(--ds-t3)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
+      </div>
+
+      {openEntity && <EntityFilePanel entity={openEntity} hub={hub} onClose={() => setOpenId(null)} />}
+    </div>
+  )
+}

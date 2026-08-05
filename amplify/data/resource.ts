@@ -58,6 +58,9 @@ const schema = a.schema({
       notes:              a.string(),
       photoKey:           a.string(),
       assignedTruckId:    a.string(),
+      // Equipment.id of the trailer this driver pulls. Null = not yet assigned ("TBD"),
+      // which is the normal state until trailers are handed out.
+      assignedTrailerId:  a.string(),
       // Compliance & profile fields
       email:              a.string(),   // invite target; required for new drivers (enforced in Zod)
       cdl:                a.string(),   // CDL number e.g. "CDL-A IL-8823901"
@@ -142,8 +145,10 @@ const schema = a.schema({
   // ── Amazon driver pay ──────────────────────────────────────────────────────
   // Weekly (7-day) trip-based pay for Amazon drivers. AmazonTrip = one freight load
   // line; DriverPaySetting = per-driver pay model (% + expense timing + fuel card +
-  // fixed weekly deductions); DriverPayDeduction = per-week one-off charges. Fuel is
-  // pulled live from FuelTransaction by the driver's fuel card. See src/lib/driverPay.ts.
+  // fixed weekly deductions); DriverPayDeduction = per-week one-off charges;
+  // DriverPayCredit = per-period extra pay (detention, bonus…) added to the check at
+  // 100%. Fuel is pulled live from FuelTransaction by the driver's fuel card.
+  // See src/lib/driverPay.ts.
   AmazonTrip: a
     .model({
       driverId:      a.string().required(),
@@ -254,6 +259,26 @@ const schema = a.schema({
       label:       a.string().required(),
       amount:      a.float().required(),    // dollars deducted (positive)
       date:        a.string(),              // YYYY-MM-DD when incurred (display only)
+    })
+    .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // Extra pay added to a settlement check that didn't come from a shipment's gross
+  // profit — detention, layover, bonuses, reimbursements, prior-period corrections.
+  // The full amount lands on the check; the driver's pay % is NOT applied to it.
+  // reasonCode is a plain string (see src/lib/payCredits.ts) so the code list can grow
+  // without a backend redeploy.
+  DriverPayCredit: a
+    .model({
+      driverId:    a.string().required(),
+      periodStart: a.string().required(),  // YYYY-MM-DD — start of the pay period it lands on
+      reasonCode:  a.string().required(),  // 'DETENTION' | 'LAYOVER' | 'BONUS' | …
+      label:       a.string(),             // free-text note shown next to the reason
+      amount:      a.float().required(),   // dollars ADDED to the check (positive)
+      date:        a.string(),             // YYYY-MM-DD when earned (display only)
+      loadRef:     a.string(),             // optional Aljex PRO / PU # the credit relates to
+      createdBy:   a.string(),             // user email who added it (audit trail)
+      notes:       a.string(),
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
     .authorization((allow) => [allow.authenticated()]),

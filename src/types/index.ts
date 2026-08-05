@@ -14,6 +14,7 @@ export interface Driver {
   photoKey?: string  // S3 key for driver photo
   photoUrl?: string  // client-side: resolved presigned URL
   assignedTruckId?: string | null
+  assignedTrailerId?: string | null   // Equipment.id of the trailer; null = TBD
   // Compliance & profile fields
   email?: string
   cdl?: string           // CDL number e.g. "CDL-A IL-8823901"

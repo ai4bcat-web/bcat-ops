@@ -15,6 +15,10 @@
  *
  * gross = sum of every trip's freight amount (cancelled trips included — they appear
  * with a pay amount on the sheets). All amounts in DOLLARS.
+ *
+ * Credits (detention, layover, bonus, reimbursements, prior-period adjustments…) are
+ * added to the check IN FULL after the pay model runs — the driver's % is never applied
+ * to them, so a $150 credit always raises the check by exactly $150.
  */
 
 export interface PayTripInput {
@@ -35,6 +39,13 @@ export interface PayDeductionInput {
   amount: number
 }
 
+/** A credit line — `amount` is the positive dollar figure ADDED to the check, in full. */
+export interface PayCreditInput {
+  label:       string
+  amount:      number
+  reasonCode?: string | null
+}
+
 export interface DriverPayStatement {
   gross:                 number   // Σ freight
   payPercent:            number
@@ -42,9 +53,12 @@ export interface DriverPayStatement {
   /** Σ of per-trip driver "Amount" (mode-false: pct×gross; mode-true: gross). */
   driverAmount:          number
   totalDeductions:       number
-  /** mode-true: gross − deductions (the pre-% subtotal); mode-false: same as checkAmount. */
+  /** mode-true: gross − deductions (the pre-% subtotal); mode-false: pay after deductions. */
   subtotal:              number
-  checkAmount:           number   // what the driver is paid this period
+  totalCredits:          number   // Σ credits — added to the check at 100%
+  /** Pay after the % model + deductions, BEFORE credits are added. */
+  payBeforeCredits:      number
+  checkAmount:           number   // what the driver is paid this period (incl. credits)
 }
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -59,23 +73,25 @@ export function calcDriverPay(
   trips: PayTripInput[],
   setting: DriverPaySettingInput,
   deductions: PayDeductionInput[],
+  credits: PayCreditInput[] = [],
 ): DriverPayStatement {
   const gross = round2(trips.reduce((s, t) => s + (t.freightAmount || 0), 0))
   const totalDeductions = round2(deductions.reduce((s, d) => s + (d.amount || 0), 0))
+  const totalCredits = round2(credits.reduce((s, c) => s + (c.amount || 0), 0))
   const pct = setting.payPercent
 
   let driverAmount: number
   let subtotal: number
-  let checkAmount: number
+  let payBeforeCredits: number
 
   if (setting.expensesBeforePercent) {
-    driverAmount = gross
-    subtotal     = round2(gross - totalDeductions)
-    checkAmount  = round2(pct * subtotal)
+    driverAmount     = gross
+    subtotal         = round2(gross - totalDeductions)
+    payBeforeCredits = round2(pct * subtotal)
   } else {
-    driverAmount = round2(pct * gross)
-    subtotal     = round2(driverAmount - totalDeductions)
-    checkAmount  = subtotal
+    driverAmount     = round2(pct * gross)
+    subtotal         = round2(driverAmount - totalDeductions)
+    payBeforeCredits = subtotal
   }
 
   return {
@@ -85,6 +101,8 @@ export function calcDriverPay(
     driverAmount,
     totalDeductions,
     subtotal,
-    checkAmount,
+    totalCredits,
+    payBeforeCredits,
+    checkAmount: round2(payBeforeCredits + totalCredits),
   }
 }
