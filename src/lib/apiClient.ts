@@ -61,9 +61,25 @@ function isComplianceFieldUndefined(err: unknown): boolean {
   return Array.isArray(errs) && errs.some((e) => /'(onboardingStatus|complianceStatus)'/.test(e?.message ?? ''))
 }
 
-function isTrailerFieldUndefined(err: unknown): boolean {
-  const errs = (err as { errors?: { message?: string }[] })?.errors
-  return Array.isArray(errs) && errs.some((e) => /'assignedTrailerId'/.test(e?.message ?? ''))
+/**
+ * Whether an error is AppSync rejecting `assignedTrailerId` as an unknown field.
+ *
+ * Deliberately inspects the WHOLE serialized error rather than errors[].message: a
+ * rejected query surfaces through the Amplify client in more than one shape (an
+ * `errors` array, a bare Error with the text in `message`, a wrapped network error),
+ * and missing it here blanks the entire driver roster — initializeData gives up on
+ * the first listDrivers throw. Same approach as isMissingBtExt below.
+ */
+export function isTrailerFieldUndefined(err: unknown): boolean {
+  return /assignedTrailerId/i.test(safeStringify(err))
+}
+
+/** JSON.stringify that also captures Error.message (not an own enumerable property). */
+function safeStringify(err: unknown): string {
+  if (err == null) return ''
+  const parts = [String((err as { message?: unknown })?.message ?? '')]
+  try { parts.push(JSON.stringify(err)) } catch { /* circular — the message is enough */ }
+  return parts.join(' ')
 }
 
 /** False once a call proved the backend predates assignedTrailerId (pre-deploy). */
@@ -220,36 +236,39 @@ export async function listDrivers(): Promise<Driver[]> {
   const run = async () => client.graphql({
     query: `query ListDrivers { listDrivers(limit: 1000) { items { ${driverFields()} } } }`,
   }) as Promise<{ data: { listDrivers: { items: Driver[] } } }>
-  try {
-    const result = await run()
-    const items = result.data.listDrivers.items ?? []
-    return Promise.all(items.map(resolveDriverPhotoUrl))
-  } catch (err: unknown) {
-    // Backend doesn't have the newer fields yet (pre-deploy) — drop them and retry.
-    const missingCompliance = driversHaveCompliance && isComplianceFieldUndefined(err)
-    const missingTrailer = driversHaveTrailer && isTrailerFieldUndefined(err)
-    if (missingCompliance || missingTrailer) {
-      if (missingCompliance) {
-        console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
-        driversHaveCompliance = false
-      }
-      if (missingTrailer) {
-        console.warn("[apiClient] backend has no assignedTrailerId yet — querying drivers without it until deploy")
-        driversHaveTrailer = false
-      }
+  // Retry while newer fields are rejected: AppSync may report only one unknown field
+  // per attempt, and one unhandled throw here blanks the whole roster (initializeData
+  // gives up on the first failure) — which is exactly how the Files page ended up
+  // showing trucks but no drivers.
+  let err: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
       const result = await run()
-      return Promise.all((result.data.listDrivers.items ?? []).map(resolveDriverPhotoUrl))
+      const items = result.data.listDrivers.items ?? []
+      return Promise.all(items.map(resolveDriverPhotoUrl))
+    } catch (e: unknown) {
+      err = e
+      let dropped = false
+      if (driversHaveCompliance && isComplianceFieldUndefined(e)) {
+        console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
+        driversHaveCompliance = false; dropped = true
+      }
+      if (driversHaveTrailer && isTrailerFieldUndefined(e)) {
+        console.warn("[apiClient] backend has no assignedTrailerId yet — querying drivers without it until deploy")
+        driversHaveTrailer = false; dropped = true
+      }
+      if (!dropped) break
     }
-    // Stale records (e.g. legacy lowercase driverType before the enum migration) make
-    // AppSync return partial errors with valid data alongside. Surface what we can
-    // rather than blanking the roster — invalid enum fields come back null (Unclassified).
-    const partial = (err as { data?: { listDrivers?: { items?: Driver[] } } }).data
-    if (partial?.listDrivers?.items) {
-      console.warn('[listDrivers] partial errors (stale records?) — showing valid items', err)
-      return Promise.all(partial.listDrivers.items.filter(Boolean).map(resolveDriverPhotoUrl))
-    }
-    throw err
   }
+  // Stale records (e.g. legacy lowercase driverType before the enum migration) make
+  // AppSync return partial errors with valid data alongside. Surface what we can
+  // rather than blanking the roster — invalid enum fields come back null (Unclassified).
+  const partial = (err as { data?: { listDrivers?: { items?: Driver[] } } })?.data
+  if (partial?.listDrivers?.items) {
+    console.warn('[listDrivers] partial errors (stale records?) — showing valid items', err)
+    return Promise.all(partial.listDrivers.items.filter(Boolean).map(resolveDriverPhotoUrl))
+  }
+  throw err
 }
 
 // Stale/unset enum fields (e.g. legacy lowercase driverType, or an onboardingStatus that

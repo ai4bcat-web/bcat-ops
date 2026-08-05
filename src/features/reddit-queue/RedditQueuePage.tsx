@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, Copy, CheckCircle2, XCircle, MessageSquare } from "lucide-react";
 
-const CC_URL = import.meta.env.VITE_COMMAND_CENTER_URL ?? "http://localhost:4501";
+// API base — uses VITE_COMMAND_CENTER_URL if set, otherwise same-origin relative.
+// In production (ops.bcatcorp.com via Amplify), API must be on same origin.
+const CC_URL = import.meta.env.VITE_COMMAND_CENTER_URL || "";
 
 type RedditDraft = {
   id: string;

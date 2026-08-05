@@ -1,19 +1,27 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
-  daysUntil, slotState, readyScore,
+  daysUntil, slotState, readyScore, type SlotState,
 } from './fileHub'
-import { TRUCK_DOC_SPECS } from './truckDocs'
+import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
 
 const TODAY = new Date(2026, 7, 5) // 2026-08-05
 
 describe('file hub slots reuse existing document keys', () => {
-  it('truck paperwork slots match Asset Documents keys, so uploads are shared', () => {
-    const assetKeys = new Set(TRUCK_DOC_SPECS.map((s) => s.key))
-    for (const key of ['insurance_cert', 'irp_cab_card']) {
-      expect(assetKeys.has(key)).toBe(true)
-      expect(TRUCK_FILE_SLOTS.some((s) => s.key === key)).toBe(true)
+  it('the Files truck slots and Asset Documents specs are the SAME list', () => {
+    // Derived from one catalog — if these ever diverge, the two pages would show
+    // different documents for the same truck.
+    expect(TRUCK_FILE_SLOTS.map((s) => s.key)).toEqual(TRUCK_DOC_SPECS.map((s) => s.key))
+  })
+
+  it('covers both the original Asset Documents paperwork and the truck photos', () => {
+    const keys = TRUCK_FILE_SLOTS.map((s) => s.key)
+    for (const key of ['insurance_cert', 'ifta_decals', 'irp_cab_card', 'annual_dot_inspection']) {
+      expect(keys).toContain(key)
+    }
+    for (const key of ['photo_front', 'photo_driver_side', 'photo_passenger_side', 'photo_rear', 'photo_plate']) {
+      expect(keys).toContain(key)
     }
   })
 
@@ -44,6 +52,23 @@ describe('file hub slots reuse existing document keys', () => {
     }
     expect(TRUCK_FILE_SLOTS.find((s) => s.key === 'insurance_cert')?.expires).toBe(true)
   })
+
+  it('every photo slot is marked photo in the shared catalog, so neither page asks for an expiry', () => {
+    const photoKeys = ['photo_front', 'photo_driver_side', 'photo_passenger_side', 'photo_rear', 'photo_plate']
+    for (const key of photoKeys) {
+      expect(TRUCK_DOC_SPECS.find((s) => s.key === key)?.photo).toBe(true)
+      expect(TRUCK_FILE_SLOTS.find((s) => s.key === key)?.kind).toBe('photo')
+    }
+  })
+
+  it('a photo on file is VALID with no expiration date at all', () => {
+    const truck = { id: 't1', fleetGroup: 'LOCAL' } as Parameters<typeof evaluateTruckDoc>[0]
+    const spec = TRUCK_DOC_SPECS.find((s) => s.key === 'photo_front')!
+    const withPhoto = evaluateTruckDoc(truck, spec, { s3Key: 'k', expirationDate: null } as never)
+    expect(withPhoto.state).toBe('VALID')
+    expect(withPhoto.expiration).toBeNull()
+    expect(evaluateTruckDoc(truck, spec, undefined).state).toBe('MISSING')
+  })
 })
 
 describe('slot state', () => {
@@ -71,31 +96,39 @@ describe('slot state', () => {
 })
 
 describe('ready score', () => {
+  const N = TRUCK_FILE_SLOTS.length
+
   it('is all-missing for an entity with nothing on file', () => {
-    const s = readyScore(TRUCK_FILE_SLOTS, new Map(), TODAY)
-    expect(s.required).toBe(7)
+    const s = readyScore(TRUCK_FILE_SLOTS, () => 'MISSING')
+    expect(s.required).toBe(N)
     expect(s.onFile).toBe(0)
-    expect(s.missing).toBe(7)
+    expect(s.missing).toBe(N)
     expect(s.attention).toBe(0)
   })
 
   it('counts documents on file and flags the ones needing attention', () => {
-    const docs = new Map<string, { expirationDate?: string | null }>([
-      ['insurance_cert', { expirationDate: '2026-08-10' }],  // expiring soon
-      ['irp_cab_card',   { expirationDate: '2026-01-01' }],  // expired
-      ['photo_front',    { expirationDate: null }],          // fine
-    ])
-    const s = readyScore(TRUCK_FILE_SLOTS, docs, TODAY)
+    const states: Record<string, SlotState> = {
+      insurance_cert: 'EXPIRING_SOON',
+      irp_cab_card:   'EXPIRED',
+      photo_front:    'VALID',
+    }
+    const s = readyScore(TRUCK_FILE_SLOTS, (k) => states[k] ?? 'MISSING')
     expect(s.onFile).toBe(3)
-    expect(s.missing).toBe(4)
+    expect(s.missing).toBe(N - 3)
     expect(s.attention).toBe(2)
   })
 
   it('a fully documented truck has no gaps', () => {
-    const docs = new Map(TRUCK_FILE_SLOTS.map((s) => [s.key, { expirationDate: null }]))
-    const s = readyScore(TRUCK_FILE_SLOTS, docs, TODAY)
+    const s = readyScore(TRUCK_FILE_SLOTS, () => 'VALID')
     expect(s.onFile).toBe(s.required)
     expect(s.missing).toBe(0)
     expect(s.attention).toBe(0)
+  })
+
+  it('a waived document drops out of the count instead of reading as a gap', () => {
+    const s = readyScore(TRUCK_FILE_SLOTS, (k) => (k === 'ifta_decals' ? 'WAIVED' : 'VALID'))
+    expect(s.required).toBe(N - 1)
+    expect(s.onFile).toBe(N - 1)
+    expect(s.missing).toBe(0)
   })
 })

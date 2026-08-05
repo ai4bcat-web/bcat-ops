@@ -35,6 +35,13 @@ export interface FileHubState {
     expirationDate?: string | null
     uploadedByUser?: string | null
   }) => Promise<ComplianceDocument>
+  /** Change a document's expiration date (Asset Documents allowed this inline). */
+  setExpiration: (doc: ComplianceDocument, date: string | null) => Promise<ComplianceDocument>
+  /** Mark a slot not-required (or required again) — the WAIVED status. */
+  setWaived: (
+    entityType: ComplianceEntityType, entityId: string, documentType: string,
+    title: string, doc: ComplianceDocument | undefined, waived: boolean,
+  ) => Promise<ComplianceDocument>
   /** Presigned URL for viewing/downloading a stored file. */
   urlFor:  (s3Key: string) => Promise<string>
   refresh: () => void
@@ -137,8 +144,43 @@ export function useFileHub(): FileHubState {
     return saved
   }, [docFor])
 
+  const applyDoc = useCallback((saved: ComplianceDocument) => {
+    setDocs((prev) => [...prev.filter((d) => d.id !== saved.id), saved])
+    return saved
+  }, [])
+
+  const setExpiration = useCallback(async (doc: ComplianceDocument, date: string | null) => {
+    const saved = await updateComplianceDocument(doc.id, {
+      expirationDate: date,
+      // Keep the stored status honest with the new date.
+      status: date ? (slotState({ expirationDate: date }) as ComplianceDocument['status']) : 'VALID',
+    })
+    return applyDoc(saved)
+  }, [applyDoc])
+
+  const setWaived = useCallback(async (
+    entityType: ComplianceEntityType, entityId: string, documentType: string,
+    title: string, doc: ComplianceDocument | undefined, waived: boolean,
+  ) => {
+    if (doc) {
+      const saved = await updateComplianceDocument(doc.id, {
+        status: waived ? 'WAIVED' : (doc.s3Key ? 'VALID' : 'MISSING'),
+        waivedReason: waived ? 'Marked not required' : null,
+      })
+      return applyDoc(saved)
+    }
+    // Nothing uploaded yet — a waiver is recorded as a document row with no file.
+    const saved = await createComplianceDocument({
+      entityType, entityId, documentType, title,
+      s3Key: null, status: 'WAIVED', uploadedBy: 'INTERNAL',
+      waivedReason: 'Marked not required',
+    })
+    return applyDoc(saved)
+  }, [applyDoc])
+
   return {
     loading, error, docFor, docsForEntity, stateFor, upload,
+    setExpiration, setWaived,
     urlFor: getComplianceDocUrl,
     refresh: load,
   }

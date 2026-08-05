@@ -5,40 +5,31 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
-import { formatPhone } from '@/lib/utils'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
-import { slotsFor, slotState, isUnslottedDoc, type FileSlot, type SlotState } from '@/lib/fileHub'
-import { buildFilePacket, packetFilename, type PacketItem } from '@/lib/filePacketPdf'
+import { slotsFor, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, type FileSlot, type SlotState } from '@/lib/fileHub'
+import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
+import {
+  downloadEntityPacket, packetToast, entityFields, fmtDate, driverForTruck,
+  DRIVER_DOCS_ON_TRUCK, type FileEntity,
+} from './entityPacket'
 import type { FileHubState } from '@/hooks/useFileHub'
-import type { Driver, ComplianceDocument } from '@/types'
-import type { Equipment } from '@/types/equipment'
+import type { ComplianceDocument } from '@/types'
 
-export type FileEntity =
-  | { kind: 'DRIVER'; driver: Driver }
-  | { kind: 'TRUCK';  truck: Equipment }
+export type { FileEntity }
 
 const STATE_STYLE: Record<SlotState, { fg: string; bg: string; label: string }> = {
   VALID:         { fg: '#15803d', bg: '#f0fdf4', label: 'On file' },
   EXPIRING_SOON: { fg: '#b45309', bg: '#fffbeb', label: 'Expiring soon' },
   EXPIRED:       { fg: '#b91c1c', bg: '#fef2f2', label: 'Expired' },
   MISSING:       { fg: 'var(--ds-t3)', bg: 'var(--ds-bg)', label: 'Missing' },
+  WAIVED:        { fg: 'var(--ds-t3)', bg: 'var(--ds-bg)', label: 'Not required' },
 }
 
 const getInitials = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 
-const fmtDate = (d?: string | null) =>
-  d ? new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : ''
-
 const todayIso = () => new Date().toISOString().slice(0, 10)
-
-function download(name: string, bytes: Uint8Array) {
-  const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
 
 export function EntityFilePanel({ entity, hub, onClose }: {
   entity: FileEntity
@@ -49,6 +40,7 @@ export function EntityFilePanel({ entity, hub, onClose }: {
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
   const updateDriver = useAppStore((s) => s.updateDriver)
+  const updateEquipment = useAppStore((s) => s.updateEquipment)
 
   const entityType = entity.kind
   const entityId = entity.kind === 'DRIVER' ? entity.driver.id : entity.truck.id
@@ -67,34 +59,23 @@ export function EntityFilePanel({ entity, hub, onClose }: {
   )
 
   // Details shown at the top of the panel — and reused verbatim on the packet cover.
-  const fields = useMemo(() => {
-    if (entity.kind === 'DRIVER') {
-      const d = entity.driver
-      const truck = equipment.find((e) => e.id === d.assignedTruckId)
-      const trailer = equipment.find((e) => e.id === d.assignedTrailerId)
-      return [
-        { label: 'Phone', value: d.phone ? formatPhone(d.phone) : '' },
-        { label: 'CDL', value: d.cdl ?? '' },
-        { label: 'CDL expires', value: fmtDate(d.cdlExpiration) },
-        { label: 'Truck', value: truck?.unitNumber ?? '' },
-        { label: 'Trailer', value: trailer?.unitNumber ?? 'TBD' },
-      ]
-    }
-    const t = entity.truck
-    const driver = drivers.find((d) => d.id === t.assignedDriverId)
-    return [
-      { label: 'VIN', value: t.vin ?? '' },
-      { label: 'Plate', value: t.plate ?? '' },
-      { label: 'Make / model', value: [t.make, t.model].filter(Boolean).join(' ') },
-      { label: 'Year', value: t.year ? String(t.year) : '' },
-      { label: 'Driver', value: driver?.name ?? '' },
-    ]
-  }, [entity, equipment, drivers])
+  const fields = useMemo(() => entityFields(entity, drivers, equipment), [entity, drivers, equipment])
 
   const otherDocs = useMemo(
     () => hub.docsForEntity(entityType, entityId).filter((d) => isUnslottedDoc(d.documentType) && d.s3Key),
     [hub, entityType, entityId],
   )
+
+  // On a truck, show the assigned driver's CDL and medical card in context.
+  const assignedDriver = entity.kind === 'TRUCK' ? driverForTruck(entity.truck, drivers) : undefined
+  const driverDocsOnTruck = useMemo(() => {
+    if (!assignedDriver) return []
+    return DRIVER_DOCS_ON_TRUCK.map((key) => ({
+      key,
+      label: DRIVER_FILE_SLOTS.find((s) => s.key === key)?.label ?? key,
+      doc: hub.docFor('DRIVER', assignedDriver.id, key),
+    }))
+  }, [assignedDriver, hub])
 
   // ── Actions ───────────────────────────────────────────────────────────────────
 
@@ -145,49 +126,48 @@ export function EntityFilePanel({ entity, hub, onClose }: {
   }
 
   const buildPacket = async () => {
-    const items: PacketItem[] = []
-    for (const slot of slots) {
-      const doc = hub.docFor(entityType, entityId, slot.key)
-      if (doc?.s3Key) {
-        items.push({
-          label: slot.label,
-          s3Key: doc.s3Key,
-          note: doc.expirationDate ? `Expires ${fmtDate(doc.expirationDate)}` : undefined,
-        })
-      }
-    }
-    for (const doc of otherDocs) {
-      items.push({
-        label: doc.title || doc.documentType,
-        s3Key: doc.s3Key!,
-        note: doc.expirationDate ? `Expires ${fmtDate(doc.expirationDate)}` : undefined,
-      })
-    }
-
     setPacketBusy(true)
     try {
-      const { bytes, outcomes } = await buildFilePacket({
-        title,
-        subtitle: entity.kind === 'DRIVER' ? 'Driver file' : 'Truck file',
-        fields,
-        items,
-        getUrl: hub.urlFor,
-        generatedAt: fmtDate(todayIso()),
-      })
-      download(packetFilename(title, entity.kind === 'DRIVER' ? 'driver' : 'truck', todayIso()), bytes)
-
-      const problems = outcomes.filter((o) => o.outcome !== 'pdf' && o.outcome !== 'image')
-      if (problems.length) {
-        toast.warning(`Packet built — ${problems.length} file${problems.length !== 1 ? 's' : ''} couldn't be embedded (${problems.map((p) => p.label).join(', ')}). Download those individually.`)
-      } else if (items.length === 0) {
-        toast.info('Packet built — no documents on file yet, so it is just the cover sheet.')
-      } else {
-        toast.success(`Packet built — ${items.length} document${items.length !== 1 ? 's' : ''}`)
-      }
+      const outcome = await downloadEntityPacket({ entity, hub, drivers, equipment, todayIso: todayIso() })
+      const { level, message } = packetToast(outcome)
+      toast[level](message)
     } catch (err) {
       toast.error(`Couldn't build the packet: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally {
       setPacketBusy(false)
+    }
+  }
+
+  // ── Truck editing, carried over from the old Asset Documents table ─────────────
+  // DOT inspection date lives on the truck (and syncs with the Fleet page); expiration
+  // dates and waivers live on the document. Both were editable inline before this page
+  // adopted the Files layout, and Jason's workflow depends on them.
+  const setDotDate = (date: string) => {
+    if (entity.kind !== 'TRUCK') return
+    updateEquipment(entity.truck.id, { dotInspectionDate: date || undefined })
+    toast.success(date ? 'DOT inspection date updated' : 'DOT inspection date cleared')
+  }
+
+  const setAssignee = (value: string) => {
+    if (entity.kind !== 'TRUCK') return
+    updateEquipment(entity.truck.id, { fleetManagerAssignee: value || undefined })
+  }
+
+  const setExpiration = async (doc: ComplianceDocument, date: string) => {
+    try {
+      await hub.setExpiration(doc, date || null)
+      toast.success('Expiration updated')
+    } catch (err) {
+      toast.error(`Couldn't update the date: ${err instanceof Error ? err.message : 'unknown error'}`)
+    }
+  }
+
+  const toggleWaived = async (slot: FileSlot, doc: ComplianceDocument | undefined) => {
+    try {
+      await hub.setWaived(entityType, entityId, slot.key, slot.label, doc, doc?.status !== 'WAIVED')
+      toast.success(doc?.status === 'WAIVED' ? `${slot.label} is required again` : `${slot.label} marked not required`)
+    } catch (err) {
+      toast.error(`Couldn't update ${slot.label}: ${err instanceof Error ? err.message : 'unknown error'}`)
     }
   }
 
@@ -254,12 +234,38 @@ export function EntityFilePanel({ entity, hub, onClose }: {
             </div>
           )}
 
+          {entity.kind === 'TRUCK' && (
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 22 }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Last DOT inspection</div>
+                <input type="date" value={entity.truck.dotInspectionDate ?? ''} onChange={(e) => setDotDate(e.target.value)}
+                  title="Last DOT inspection — syncs with the Fleet page"
+                  style={{ height: 34, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontFamily: 'inherit' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 5 }}>Fleet manager</div>
+                <select value={entity.truck.fleetManagerAssignee ?? ''} onChange={(e) => setAssignee(e.target.value)}
+                  style={{ height: 34, minWidth: 140, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontFamily: 'inherit', textTransform: 'capitalize' }}>
+                  <option value="">Unassigned</option>
+                  <option value="jason">Jason</option>
+                  <option value="ryne">Ryne</option>
+                </select>
+              </div>
+            </div>
+          )}
+
           {/* Document slots */}
           <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Documents</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
             {slots.map((slot) => {
               const doc = hub.docFor(entityType, entityId, slot.key)
-              const state = slotState(doc)
+              // Trucks go through the Asset Documents evaluator so both pages agree.
+              const evalResult = entity.kind === 'TRUCK'
+                ? evaluateTruckDoc(entity.truck, TRUCK_DOC_SPECS.find((s) => s.key === slot.key)!, doc)
+                : null
+              const state: SlotState = evalResult ? (evalResult.state as SlotState) : slotState(doc)
+              // DOT's date lives on the truck, not the document.
+              const shownExpiry = evalResult?.expiration ?? doc?.expirationDate ?? null
               const style = STATE_STYLE[state]
               const busy = busySlot === slot.key
               const Icon = slot.kind === 'photo' ? ImageIcon : FileText
@@ -272,8 +278,21 @@ export function EntityFilePanel({ entity, hub, onClose }: {
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{slot.sub}</div>
                   <span style={{ alignSelf: 'flex-start', fontSize: 10.5, fontWeight: 600, color: style.fg, background: style.bg, padding: '2px 7px', borderRadius: 999 }}>
-                    {style.label}{doc?.expirationDate && state !== 'MISSING' ? ` · ${fmtDate(doc.expirationDate)}` : ''}
+                    {style.label}{shownExpiry && state !== 'MISSING' ? ` · ${fmtDate(shownExpiry)}` : ''}
                   </span>
+
+                  {/* Expiration is editable for dated paperwork (not photos, and not
+                      DOT — whose date comes from the truck field above). */}
+                  {doc?.s3Key && slot.expires && !TRUCK_DOC_SPECS.find((s) => s.key === slot.key)?.dot && (
+                    <input type="date" value={doc.expirationDate ?? ''} onChange={(e) => setExpiration(doc, e.target.value)}
+                      title="Expiration date"
+                      style={{ height: 28, width: '100%', borderRadius: 6, border: '1px solid var(--ds-border)', padding: '0 6px', fontSize: 11.5, background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                  )}
+
+                  <button onClick={() => toggleWaived(slot, doc)}
+                    style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, fontSize: 11, color: 'var(--ds-t3)', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
+                    {state === 'WAIVED' ? 'Mark required' : 'Not required'}
+                  </button>
 
                   <div style={{ display: 'flex', gap: 5, marginTop: 'auto', paddingTop: 4 }}>
                     {doc?.s3Key ? (
@@ -296,6 +315,39 @@ export function EntityFilePanel({ entity, hub, onClose }: {
               )
             })}
           </div>
+
+          {/* The assigned driver's own documents, shown on the truck for context.
+              These are the SAME records as the driver's file — read-only here so there
+              is exactly one place to upload them. */}
+          {assignedDriver && driverDocsOnTruck.length > 0 && (
+            <>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '22px 0 8px' }}>
+                Driver documents · {assignedDriver.name}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {driverDocsOnTruck.map(({ key, label, doc }) => (
+                  <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, padding: '6px 0', borderBottom: '1px solid var(--ds-border)' }}>
+                    <FileText size={13} style={{ color: 'var(--ds-t3)', flexShrink: 0 }} />
+                    <span style={{ flex: 1, color: doc ? 'var(--ds-t2)' : 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {label}
+                      {doc?.expirationDate
+                        ? <span style={{ color: 'var(--ds-t3)' }}> · expires {fmtDate(doc.expirationDate)}</span>
+                        : !doc && <span style={{ color: 'var(--ds-t3)' }}> · not on file</span>}
+                    </span>
+                    {doc?.s3Key && (
+                      <>
+                        <button onClick={() => openDoc(doc, 'view')} title="View" style={iconAction}><Eye size={13} /></button>
+                        <button onClick={() => openDoc(doc, 'download')} title="Download" style={iconAction}><Download size={13} /></button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 6 }}>
+                Upload these on {assignedDriver.name}'s driver file — they're the same records, so one upload covers both.
+              </div>
+            </>
+          )}
 
           {/* Anything else already on file for this entity, from other pages */}
           {otherDocs.length > 0 && (

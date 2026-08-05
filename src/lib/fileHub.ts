@@ -15,6 +15,10 @@
  * The truck photo keys are new to this hub.
  */
 
+import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
+import type { Equipment } from '@/types/equipment'
+import type { ComplianceDocument } from '@/types'
+
 export type FileSlotKind = 'document' | 'photo'
 
 export interface FileSlot {
@@ -38,18 +42,23 @@ export const DRIVER_FILE_SLOTS: readonly FileSlot[] = [
 ]
 
 // ── Truck ───────────────────────────────────────────────────────────────────────
-// VIN and plate number are fields on the Equipment record; the photos and paperwork
-// below are documents.
+// VIN and plate number are fields on the Equipment record; the paperwork and photos
+// are documents.
+//
+// DERIVED from TRUCK_DOC_SPECS rather than listed again here, so the Files hub and the
+// Asset Documents page always show the identical set of truck documents — adding one to
+// that catalog adds it to both pages at once, and they can never drift apart.
 
-export const TRUCK_FILE_SLOTS: readonly FileSlot[] = [
-  { key: 'insurance_cert',        label: 'Insurance cab card', sub: 'Cab card / certificate',   kind: 'document', required: true, expires: true },
-  { key: 'irp_cab_card',          label: 'Registration',       sub: 'IRP cab card',             kind: 'document', required: true, expires: true },
-  { key: 'photo_front',           label: 'Front',              sub: 'Photo',                    kind: 'photo',    required: true, expires: false },
-  { key: 'photo_driver_side',     label: 'Driver side',        sub: 'Photo',                    kind: 'photo',    required: true, expires: false },
-  { key: 'photo_passenger_side',  label: 'Passenger side',     sub: 'Photo',                    kind: 'photo',    required: true, expires: false },
-  { key: 'photo_rear',            label: 'Rear',               sub: 'Photo',                    kind: 'photo',    required: true, expires: false },
-  { key: 'photo_plate',           label: 'License plate',      sub: 'Close-up photo',           kind: 'photo',    required: true, expires: false },
-]
+export const TRUCK_FILE_SLOTS: readonly FileSlot[] = TRUCK_DOC_SPECS.map((spec) => ({
+  key:   spec.key,
+  label: spec.label,
+  sub:   spec.sub,
+  kind:  spec.photo ? 'photo' : 'document',
+  required: true,
+  // Photos never expire. DOT carries a date, but it comes from the truck record
+  // (Equipment.dotInspectionDate + fleet cadence), not from the document itself.
+  expires: !spec.photo,
+}))
 
 export const slotsFor = (entityType: 'DRIVER' | 'TRUCK'): readonly FileSlot[] =>
   entityType === 'DRIVER' ? DRIVER_FILE_SLOTS : TRUCK_FILE_SLOTS
@@ -61,7 +70,7 @@ export const isUnslottedDoc = (documentType: string) => !ALL_SLOT_KEYS.has(docum
 
 // ── Slot status ─────────────────────────────────────────────────────────────────
 
-export type SlotState = 'MISSING' | 'VALID' | 'EXPIRING_SOON' | 'EXPIRED'
+export type SlotState = 'MISSING' | 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'WAIVED'
 
 export const EXPIRING_SOON_DAYS = 30
 
@@ -73,14 +82,34 @@ export function daysUntil(dateStr: string, today = new Date()): number {
   return Math.round((target - now) / 86_400_000)
 }
 
-/** A slot's state from its document's expiration (non-expiring docs are simply VALID). */
-export function slotState(doc: { expirationDate?: string | null } | undefined, today = new Date()): SlotState {
+/**
+ * A slot's state from its document's expiration (non-expiring docs are simply VALID).
+ *
+ * For TRUCKS prefer `truckSlotState`, which additionally honours the DOT inspection's
+ * truck-sourced date and WAIVED markers exactly as the Asset Documents page does.
+ */
+export function slotState(
+  doc: { expirationDate?: string | null; status?: string; s3Key?: string | null } | undefined,
+  today = new Date(),
+): SlotState {
+  if (doc?.status === 'WAIVED') return 'WAIVED'
   if (!doc) return 'MISSING'
   if (!doc.expirationDate) return 'VALID'
   const days = daysUntil(doc.expirationDate, today)
   if (days < 0) return 'EXPIRED'
   if (days <= EXPIRING_SOON_DAYS) return 'EXPIRING_SOON'
   return 'VALID'
+}
+
+/**
+ * Truck slot state, delegating to the same evaluator the Asset Documents page uses so
+ * both pages report an identical status for the same truck + document. Handles the DOT
+ * inspection (date from Equipment.dotInspectionDate, cadence by fleet) and WAIVED.
+ */
+export function truckSlotState(truck: Equipment, slotKey: string, doc?: ComplianceDocument): SlotState {
+  const spec = TRUCK_DOC_SPECS.find((s) => s.key === slotKey)
+  if (!spec) return slotState(doc)
+  return evaluateTruckDoc(truck, spec, doc).state as SlotState
 }
 
 export interface ReadyScore {
@@ -93,21 +122,28 @@ export interface ReadyScore {
   attention: number
 }
 
-/** The dots in the list row: how complete this entity's file is. */
+/**
+ * The dots in the list row: how complete this entity's file is.
+ *
+ * Takes a state resolver rather than a document map so trucks can pass
+ * `truckSlotState` (DOT + waived aware) and drivers the plain `slotState`.
+ */
 export function readyScore(
   slots: readonly FileSlot[],
-  docBySlot: Map<string, { expirationDate?: string | null }>,
-  today = new Date(),
+  stateOf: (slotKey: string) => SlotState,
 ): ReadyScore {
   const required = slots.filter((s) => s.required)
   let onFile = 0, missing = 0, attention = 0
   for (const s of required) {
-    const state = slotState(docBySlot.get(s.key), today)
+    const state = stateOf(s.key)
+    // A waived document isn't outstanding and isn't a gap — it doesn't apply at all,
+    // so it drops out of the denominator rather than counting as satisfied.
+    if (state === 'WAIVED') continue
     if (state === 'MISSING') missing++
     else {
       onFile++
       if (state !== 'VALID') attention++
     }
   }
-  return { onFile, required: required.length, missing, attention }
+  return { onFile, required: onFile + missing, missing, attention }
 }

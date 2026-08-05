@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
-import { FolderOpen, Search, Users, Truck as TruckIcon } from 'lucide-react'
+import { toast } from 'sonner'
+import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useFileHub } from '@/hooks/useFileHub'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
-import { formatPhone } from '@/lib/utils'
-import { slotsFor, readyScore, type ReadyScore } from '@/lib/fileHub'
-import { EntityFilePanel, type FileEntity } from './EntityFilePanel'
+import { formatPhone, formatVin } from '@/lib/utils'
+import { slotsFor, readyScore, slotState, truckSlotState, type ReadyScore } from '@/lib/fileHub'
+import { EntityFilePanel } from './EntityFilePanel'
+import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 
@@ -44,11 +46,14 @@ function ReadyDots({ score }: { score: ReadyScore }) {
 export function FilesPage() {
   const drivers = useAppStore((s) => s.drivers)
   const equipment = useAppStore((s) => s.equipment)
+  const storeLoading = useAppStore((s) => s.isLoading)
+  const storeError = useAppStore((s) => s.error)
   const hub = useFileHub()
 
-  const [tab, setTab] = useState<Tab>('DRIVER')
+  const [tab, setTab] = useState<Tab>('TRUCK')
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [packetBusyId, setPacketBusyId] = useState<string | null>(null)
 
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active !== false)
@@ -63,13 +68,16 @@ export function FilesPage() {
     [drivers],
   )
 
+  // Trucks resolve status through truckSlotState so the dots agree exactly with the
+  // Asset Documents page (DOT date comes off the truck, waived docs drop out).
   const scoreFor = (entityType: Tab, id: string): ReadyScore => {
     const slots = slotsFor(entityType)
-    const map = new Map(
-      slots.map((s) => [s.key, hub.docFor(entityType, id, s.key)] as const)
-        .filter((e): e is [string, NonNullable<typeof e[1]>] => !!e[1]),
-    )
-    return readyScore(slots, map)
+    if (entityType === 'TRUCK') {
+      const t = equipment.find((e) => e.id === id)
+      if (!t) return { onFile: 0, required: 0, missing: 0, attention: 0 }
+      return readyScore(slots, (key) => truckSlotState(t, key, hub.docFor('TRUCK', id, key)))
+    }
+    return readyScore(slots, (key) => slotState(hub.docFor('DRIVER', id, key)))
   }
 
   const q = query.trim().toLowerCase()
@@ -86,6 +94,22 @@ export function FilesPage() {
     return trucks.filter((t) =>
       [t.unitNumber, t.vin, t.plate, t.make, t.model, t.nickname].some((v) => (v ?? '').toLowerCase().includes(q)))
   }, [trucks, q])
+
+  /** Build a packet straight from a list row, without opening the profile panel. */
+  const downloadPacket = async (entity: FileEntity, id: string) => {
+    setPacketBusyId(id)
+    try {
+      const outcome = await downloadEntityPacket({
+        entity, hub, drivers, equipment, todayIso: new Date().toISOString().slice(0, 10),
+      })
+      const { level, message } = packetToast(outcome)
+      toast[level](message)
+    } catch (err) {
+      toast.error(`Couldn't build the packet: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally {
+      setPacketBusyId(null)
+    }
+  }
 
   const openEntity: FileEntity | null = useMemo(() => {
     if (!openId) return null
@@ -123,8 +147,8 @@ export function FilesPage() {
             Shares one store with Compliance, Onboarding and Asset Documents, so nothing is uploaded twice.
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
-            {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
             {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
+            {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
             <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)' }} />
               <input value={query} onChange={(e) => setQuery(e.target.value)}
@@ -140,6 +164,11 @@ export function FilesPage() {
       </div>
 
       <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto' }}>
+        {storeError && (
+          <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', marginBottom: 14 }}>
+            Couldn't load drivers and loads: {storeError}
+          </div>
+        )}
         {hub.error && (
           <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', marginBottom: 14 }}>
             Couldn't load documents: {hub.error}
@@ -158,17 +187,26 @@ export function FilesPage() {
                 ) : (
                   <>
                     <th style={TH}>Unit</th><th style={TH}>VIN</th><th style={TH}>Plate</th>
-                    <th style={TH}>Make / model</th><th style={TH}>Driver</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
+                    <th style={TH}>Make / model</th><th style={TH}>Driver</th>
+                    <th style={{ ...TH, textAlign: 'right' }}>On file</th><th style={{ ...TH, width: 150 }}></th>
                   </>
                 )}
               </tr>
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>No drivers match "{query}".</td></tr>
+                <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                  {activeDrivers.length === 0
+                    ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
+                    : `No drivers match "${query}".`}
+                </td></tr>
               )}
               {tab === 'TRUCK' && shownTrucks.length === 0 && (
-                <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>No trucks match "{query}".</td></tr>
+                <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                  {trucks.length === 0
+                    ? (storeLoading ? 'Loading trucks…' : 'No active trucks.')
+                    : `No trucks match "${query}".`}
+                </td></tr>
               )}
 
               {tab === 'DRIVER' && shownDrivers.map((d: Driver) => {
@@ -193,16 +231,30 @@ export function FilesPage() {
               })}
 
               {tab === 'TRUCK' && shownTrucks.map((t: Equipment) => {
-                const driver = drivers.find((d) => d.id === t.assignedDriverId)
+                const driver = driverForTruck(t, drivers)
                 return (
                   <tr key={t.id} onClick={() => setOpenId(t.id)}
                     style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: openId === t.id ? 'var(--ds-bg)' : undefined }}>
                     <td style={{ ...TD, fontWeight: 600 }}>{t.unitNumber}</td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{t.vin || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{formatVin(t.vin) || '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{t.plate || '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{[t.make, t.model].filter(Boolean).join(' ') || '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{driver?.name ?? '—'}</td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('TRUCK', t.id)} /></td>
+                    <td style={{ ...TD, textAlign: 'right', padding: '6px 10px' }}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); downloadPacket({ kind: 'TRUCK', truck: t }, t.id) }}
+                        disabled={packetBusyId === t.id}
+                        title="Download every document for this truck as one PDF"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 10px',
+                          borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
+                          color: 'var(--ds-blue)', fontSize: 12, fontWeight: 600,
+                          cursor: packetBusyId === t.id ? 'wait' : 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+                        }}>
+                        <FileStack size={13} /> {packetBusyId === t.id ? 'Building…' : 'Download full PDF'}
+                      </button>
+                    </td>
                   </tr>
                 )
               })}

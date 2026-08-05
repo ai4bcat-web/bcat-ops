@@ -13,6 +13,16 @@ export function formatPhone(e164: string): string {
   return `(${local.slice(0, 3)}) ${local.slice(3, 6)}-${local.slice(6)}`
 }
 
+/**
+ * VINs are uppercase by standard (ISO 3779 — and the alphabet excludes I, O and Q to
+ * avoid confusion with 1 and 0). Operators type them in mixed case, so normalise on the
+ * way in AND on the way out: use this at every display site so a record saved before
+ * normalisation still reads correctly.
+ */
+export function formatVin(vin?: string | null): string {
+  return (vin ?? '').trim().toUpperCase()
+}
+
 /** Normalize any phone input to E.164 (+1XXXXXXXXXX) */
 export function toE164(raw: string): string {
   const digits = raw.replace(/\D/g, '')
