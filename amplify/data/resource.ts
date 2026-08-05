@@ -315,8 +315,13 @@ const schema = a.schema({
       // manually-added invoices are unaffected; only new emailed invoices enter the queue.
       status:        a.string(),
       reviewedBy:    a.string(),                       // who posted/archived it
+      // Stable identity of the SOURCE document (hash of date+vendor+amount+invoice #),
+      // set once at ingest. Deliberately excludes equipmentId, which staff change while
+      // reviewing — keying on it made reviewed/archived invoices reappear in the queue.
+      // See scripts/invoiceDedup.mjs.
+      externalId:    a.string(),
     })
-    .secondaryIndexes((index) => [index('equipmentId')])
+    .secondaryIndexes((index) => [index('equipmentId'), index('externalId')])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Intake queue ──────────────────────────────────────────────────────────
