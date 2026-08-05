@@ -6,6 +6,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { BoxTruckPayRow } from '@/hooks/useBoxTruckPay'
 import { tripPayAmount } from '@/lib/driverPay'
+import { creditLineLabel } from '@/lib/payCredits'
 import { periodLabelLong } from '@/lib/biweekly'
 
 const money = (n: number) =>
@@ -73,7 +74,38 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
     theme: 'plain',
   })
 
-  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 16
+  // Credits — extra pay added to the check at 100% (the % model never applies to them)
+  if (row.credits.length) {
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 13, 18)
+    doc.text('Credits', M, y); y += 6
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ...row.credits.map((c) => [
+          creditLineLabel(c),
+          [c.date ? fmtDate(c.date) : '', c.loadRef ?? ''].filter(Boolean).join('  ·  '),
+          `+${money(c.amount)}`,
+        ]),
+        ['Total credits', '', `+${money(statement.totalCredits)}`],
+      ],
+      styles: { fontSize: 9.5, cellPadding: 4 },
+      columnStyles: { 1: { textColor: [120, 120, 120] }, 2: { halign: 'right', textColor: [21, 128, 61] } },
+      margin: { left: M, right: M },
+      theme: 'plain',
+    })
+
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(120, 120, 120)
+    doc.text(
+      `Pay after ${pct(setting.payPercent)} model ${money(statement.payBeforeCredits)}  +  credits ${money(statement.totalCredits)}  =  check ${money(statement.checkAmount)}`,
+      M, y,
+    )
+    y += 16
+  } else {
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 16
+  }
+
   doc.setFillColor(243, 244, 246); doc.roundedRect(M, y, W - M * 2, 40, 6, 6, 'F')
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(11, 13, 18)
   doc.text('CHECK AMOUNT', M + 14, y + 25)

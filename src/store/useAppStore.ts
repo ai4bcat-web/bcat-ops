@@ -570,12 +570,28 @@ export const useAppStore = create<AppState>()(
       },
 
       assignTruckToDriver: async (equipmentId, driverId) => {
-        const { drivers, updateDriver } = get()
+        const { drivers, equipment, updateDriver, updateEquipment } = get()
         // Clear this truck from any other driver (one driver per truck).
         const holders = drivers.filter((d) => d.assignedTruckId === equipmentId && d.id !== driverId)
         await Promise.all(holders.map((d) => updateDriver(d.id, { assignedTruckId: null })))
         if (driverId) {
           await updateDriver(driverId, { assignedTruckId: equipmentId })
+        }
+
+        // The assignment is stored on BOTH sides (Driver.assignedTruckId and
+        // Equipment.assignedDriverId) and consumers read whichever they were written
+        // against — Fuel and the Files hub read the equipment side, the Drivers page
+        // writes the driver side. Historically only the driver side was updated here,
+        // so the two drifted apart and a truck could show no driver despite having one.
+        // Keep them in lockstep.
+        updateEquipment(equipmentId, { assignedDriverId: driverId })
+        if (driverId) {
+          // A driver pulls one truck: release whatever else pointed at this driver.
+          for (const e of equipment) {
+            if (e.id !== equipmentId && e.assignedDriverId === driverId) {
+              updateEquipment(e.id, { assignedDriverId: null })
+            }
+          }
         }
       },
 
@@ -751,12 +767,8 @@ export const useAppStore = create<AppState>()(
       name: 'bcat-ops-ui-v4',
       // Bump when an existing install needs any localStorage change.
       version: 2,
-      migrate: (persisted, fromVersion) => {
-        const state = (persisted ?? {}) as Record<string, unknown>
-        if (fromVersion < 2) {
-          // v2: removed multiStopRender flag — no migration needed
-        }
-        return state
+      migrate: (persisted, _fromVersion) => {
+        return (persisted ?? {}) as Record<string, unknown>
       },
       // Persist UI prefs + a fleet fallback. Equipment/maintenance are backend-backed
       // now; the cached copy here only bridges the gap before initializeData's fetch

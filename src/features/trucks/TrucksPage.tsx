@@ -21,7 +21,7 @@ import {
   CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck, Gauge, DollarSign,
 } from 'lucide-react'
 import { thBase, tdBase } from '@/features/maintenance/maintenanceUi'
-import { cn } from '@/lib/utils'
+import { cn, formatVin } from '@/lib/utils'
 import { driverForTruck } from '@/lib/assignments'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, FleetGroup, TaskPriority, TaskStatus } from '@/types/equipment'
 
@@ -205,7 +205,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
       model: form.model.trim(),
       year: form.year ? parseInt(form.year) : undefined,
       plate: form.plate.trim() || undefined,
-      vin: form.vin.trim() || undefined,
+      vin: formatVin(form.vin) || undefined,
       mileage: form.mileage ? parseInt(form.mileage) : undefined,
       ownership: form.ownership,
       insured: form.insured,
@@ -645,7 +645,7 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
           ['Tollway Account', equip.onTollwayAccount ? 'Yes' : 'No'],
           ['Ownership',       equip.ownership.charAt(0).toUpperCase() + equip.ownership.slice(1)],
           ['Mileage',         equip.mileage ? equip.mileage.toLocaleString() + ' mi' : '—'],
-          ['VIN',             equip.vin || '—'],
+          ['VIN',             formatVin(equip.vin) || '—'],
         ].map(([label, value]) => (
           <div key={label}>
             <span className="text-xs text-muted-foreground">{label}</span>

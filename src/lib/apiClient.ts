@@ -48,13 +48,42 @@ const DRIVER_BASE_FIELDS = `
   createdAt updatedAt
 `
 let driversHaveCompliance = true
-const driverFields = () =>
-  driversHaveCompliance ? `${DRIVER_BASE_FIELDS} onboardingStatus complianceStatus` : DRIVER_BASE_FIELDS
+// assignedTrailerId ships with the Files hub — same self-healing treatment.
+let driversHaveTrailer = true
+const driverFields = () => [
+  DRIVER_BASE_FIELDS,
+  driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
+  driversHaveTrailer ? 'assignedTrailerId' : '',
+].filter(Boolean).join(' ')
 
 function isComplianceFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   return Array.isArray(errs) && errs.some((e) => /'(onboardingStatus|complianceStatus)'/.test(e?.message ?? ''))
 }
+
+/**
+ * Whether an error is AppSync rejecting `assignedTrailerId` as an unknown field.
+ *
+ * Deliberately inspects the WHOLE serialized error rather than errors[].message: a
+ * rejected query surfaces through the Amplify client in more than one shape (an
+ * `errors` array, a bare Error with the text in `message`, a wrapped network error),
+ * and missing it here blanks the entire driver roster — initializeData gives up on
+ * the first listDrivers throw. Same approach as isMissingBtExt below.
+ */
+export function isTrailerFieldUndefined(err: unknown): boolean {
+  return /assignedTrailerId/i.test(safeStringify(err))
+}
+
+/** JSON.stringify that also captures Error.message (not an own enumerable property). */
+function safeStringify(err: unknown): string {
+  if (err == null) return ''
+  const parts = [String((err as { message?: unknown })?.message ?? '')]
+  try { parts.push(JSON.stringify(err)) } catch { /* circular — the message is enough */ }
+  return parts.join(' ')
+}
+
+/** False once a call proved the backend predates assignedTrailerId (pre-deploy). */
+export const driverTrailerFieldDeployed = () => driversHaveTrailer
 
 const AUDIT_FIELDS = `
   id entityType entityId action user changes createdAt
@@ -207,28 +236,39 @@ export async function listDrivers(): Promise<Driver[]> {
   const run = async () => client.graphql({
     query: `query ListDrivers { listDrivers(limit: 1000) { items { ${driverFields()} } } }`,
   }) as Promise<{ data: { listDrivers: { items: Driver[] } } }>
-  try {
-    const result = await run()
-    const items = result.data.listDrivers.items ?? []
-    return Promise.all(items.map(resolveDriverPhotoUrl))
-  } catch (err: unknown) {
-    // Backend doesn't have the compliance fields yet (pre-deploy) — drop them and retry.
-    if (driversHaveCompliance && isComplianceFieldUndefined(err)) {
-      console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
-      driversHaveCompliance = false
+  // Retry while newer fields are rejected: AppSync may report only one unknown field
+  // per attempt, and one unhandled throw here blanks the whole roster (initializeData
+  // gives up on the first failure) — which is exactly how the Files page ended up
+  // showing trucks but no drivers.
+  let err: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
       const result = await run()
-      return Promise.all((result.data.listDrivers.items ?? []).map(resolveDriverPhotoUrl))
+      const items = result.data.listDrivers.items ?? []
+      return Promise.all(items.map(resolveDriverPhotoUrl))
+    } catch (e: unknown) {
+      err = e
+      let dropped = false
+      if (driversHaveCompliance && isComplianceFieldUndefined(e)) {
+        console.warn("[apiClient] backend has no onboardingStatus/complianceStatus yet — querying drivers without them until deploy")
+        driversHaveCompliance = false; dropped = true
+      }
+      if (driversHaveTrailer && isTrailerFieldUndefined(e)) {
+        console.warn("[apiClient] backend has no assignedTrailerId yet — querying drivers without it until deploy")
+        driversHaveTrailer = false; dropped = true
+      }
+      if (!dropped) break
     }
-    // Stale records (e.g. legacy lowercase driverType before the enum migration) make
-    // AppSync return partial errors with valid data alongside. Surface what we can
-    // rather than blanking the roster — invalid enum fields come back null (Unclassified).
-    const partial = (err as { data?: { listDrivers?: { items?: Driver[] } } }).data
-    if (partial?.listDrivers?.items) {
-      console.warn('[listDrivers] partial errors (stale records?) — showing valid items', err)
-      return Promise.all(partial.listDrivers.items.filter(Boolean).map(resolveDriverPhotoUrl))
-    }
-    throw err
   }
+  // Stale records (e.g. legacy lowercase driverType before the enum migration) make
+  // AppSync return partial errors with valid data alongside. Surface what we can
+  // rather than blanking the roster — invalid enum fields come back null (Unclassified).
+  const partial = (err as { data?: { listDrivers?: { items?: Driver[] } } })?.data
+  if (partial?.listDrivers?.items) {
+    console.warn('[listDrivers] partial errors (stale records?) — showing valid items', err)
+    return Promise.all(partial.listDrivers.items.filter(Boolean).map(resolveDriverPhotoUrl))
+  }
+  throw err
 }
 
 // Stale/unset enum fields (e.g. legacy lowercase driverType, or an onboardingStatus that
@@ -260,7 +300,10 @@ export async function updateDriver(
   id: string,
   patch: Partial<Omit<Driver, 'id' | 'createdAt'>>
 ): Promise<Driver> {
-  const { photoUrl: _skip, ...rest } = patch as typeof patch & { photoUrl?: string }
+  const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
+  // Writing assignedTrailerId to a backend that doesn't have it yet would hard-fail.
+  const { assignedTrailerId: _t, ...withoutTrailer } = all
+  const rest = driversHaveTrailer ? all : withoutTrailer
   try {
     const result = await client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
@@ -1728,6 +1771,76 @@ export async function createDriverPayDeduction(input: Omit<DriverPayDeduction, '
 export async function deleteDriverPayDeduction(id: string): Promise<void> {
   await client.graphql({
     query: `mutation DeleteDriverPayDeduction($input: DeleteDriverPayDeductionInput!) { deleteDriverPayDeduction(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Driver pay credits (extra pay added to a check, e.g. detention / bonus) ─────
+// Reason codes live in src/lib/payCredits.ts — stored as a plain string here.
+
+export interface DriverPayCredit {
+  id:          string
+  driverId:    string
+  periodStart: string
+  reasonCode:  string
+  label?:      string | null
+  amount:      number          // dollars ADDED to the check (positive)
+  date?:       string | null
+  loadRef?:    string | null
+  createdBy?:  string | null
+  notes?:      string | null
+  createdAt:   string
+  updatedAt:   string
+}
+
+export type DriverPayCreditInput = Omit<DriverPayCredit, 'id' | 'createdAt' | 'updatedAt'>
+
+const PAY_CREDIT_FIELDS = `id driverId periodStart reasonCode label amount date loadRef createdBy notes createdAt updatedAt`
+
+// The model ships with this feature; until the backend migration lands the API has no
+// such type. Degrade to "no credits" rather than breaking the whole pay page.
+let payCreditsAvailable = true
+const isMissingCreditModel = (err: unknown) => /DriverPayCredit/i.test(JSON.stringify(err ?? ''))
+
+/** True once a call has proven the backend doesn't have the credit model deployed. */
+export const payCreditsDeployed = () => payCreditsAvailable
+
+export async function listDriverPayCredits(): Promise<DriverPayCredit[]> {
+  if (!payCreditsAvailable) return []
+  try {
+    const result = await client.graphql({
+      query: `query ListDriverPayCredits { listDriverPayCredits(limit: 10000) { items { ${PAY_CREDIT_FIELDS} } } }`,
+    }) as { data: { listDriverPayCredits: { items: DriverPayCredit[] } } }
+    return result.data.listDriverPayCredits.items ?? []
+  } catch (err) {
+    if (isMissingCreditModel(err)) {
+      console.warn('[apiClient] DriverPayCredit not deployed yet — treating credits as empty')
+      payCreditsAvailable = false
+      return []
+    }
+    throw err
+  }
+}
+
+export async function createDriverPayCredit(input: DriverPayCreditInput): Promise<DriverPayCredit> {
+  const result = await client.graphql({
+    query: `mutation CreateDriverPayCredit($input: CreateDriverPayCreditInput!) { createDriverPayCredit(input: $input) { ${PAY_CREDIT_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createDriverPayCredit: DriverPayCredit } }
+  return result.data.createDriverPayCredit
+}
+
+export async function updateDriverPayCredit(id: string, patch: Partial<DriverPayCreditInput>): Promise<DriverPayCredit> {
+  const result = await client.graphql({
+    query: `mutation UpdateDriverPayCredit($input: UpdateDriverPayCreditInput!) { updateDriverPayCredit(input: $input) { ${PAY_CREDIT_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateDriverPayCredit: DriverPayCredit } }
+  return result.data.updateDriverPayCredit
+}
+
+export async function deleteDriverPayCredit(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteDriverPayCredit($input: DeleteDriverPayCreditInput!) { deleteDriverPayCredit(input: $input) { id } }`,
     variables: { input: { id } },
   })
 }

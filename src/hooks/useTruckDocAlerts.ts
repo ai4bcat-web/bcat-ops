@@ -32,7 +32,10 @@ export function useTruckDocAlerts() {
     let expired = 0, missing = 0, expiring = 0
     for (const t of equipment) {
       if (t.type !== 'truck' || t.active === false) continue
+      // Photos are part of the truck's file but are NOT a DOT compliance item —
+      // a missing photo must not inflate the sidebar's out-of-date badge.
       for (const spec of TRUCK_DOC_SPECS) {
+        if (spec.photo) continue
         const { state } = evaluateTruckDoc(t, spec, latest.get(`${t.id}::${spec.key}`))
         if (state === 'EXPIRED') expired++
         else if (state === 'MISSING') missing++

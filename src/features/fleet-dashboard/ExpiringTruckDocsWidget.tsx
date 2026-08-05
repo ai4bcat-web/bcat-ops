@@ -56,6 +56,7 @@ export function ExpiringTruckDocsWidget() {
     for (const t of equipment) {
       if (t.type !== 'truck' || t.active === false) continue
       for (const spec of TRUCK_DOC_SPECS) {
+        if (spec.photo) continue   // photos have no expiration to report
         const { state, expiration } = evaluateTruckDoc(t, spec, latest.get(`${t.id}::${spec.key}`))
         if (state === 'EXPIRED' || state === 'EXPIRING_SOON') {
           out.push({ truckId: t.id, unit: `#${t.unitNumber}`, docLabel: spec.label, state, expiration })

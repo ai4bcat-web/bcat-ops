@@ -15,13 +15,29 @@ export interface TruckDocSpec {
   months?: number
   /** DOT inspection — date sourced from Equipment.dotInspectionDate, cadence by fleet. */
   dot?: boolean
+  /** A photo of the truck rather than paperwork — never expires, no date to confirm. */
+  photo?: boolean
 }
 
+/**
+ * Every document a truck carries — the SINGLE source of truth, shared by the Asset
+ * Documents page, the Files hub (via src/lib/fileHub.ts) and the sidebar alert badge.
+ * Add a document here once and it appears in all of them, backed by the same
+ * ComplianceDocument record, so an upload on either page shows up on the other.
+ *
+ * Never rename a `key`: it is the stored documentType and renaming orphans every file
+ * already uploaded under it.
+ */
 export const TRUCK_DOC_SPECS: TruckDocSpec[] = [
   { key: 'insurance_cert',        label: 'Insurance',      sub: 'Cab card / certificate',  rule: 'PLUS_N_MONTHS', months: 12 },
   { key: 'ifta_decals',           label: 'IFTA',           sub: 'License / decals',        rule: 'DEC_31' },
   { key: 'irp_cab_card',          label: 'IRP',            sub: 'Registration / cab card', rule: 'PLUS_N_MONTHS', months: 12 },
   { key: 'annual_dot_inspection', label: 'DOT Inspection', sub: 'Amazon every 2 mo · Ivan yearly', rule: 'PLUS_N_MONTHS', months: 12, dot: true },
+  { key: 'photo_front',           label: 'Front',          sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
+  { key: 'photo_driver_side',     label: 'Driver side',    sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
+  { key: 'photo_passenger_side',  label: 'Passenger side', sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
+  { key: 'photo_rear',            label: 'Rear',           sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
+  { key: 'photo_plate',           label: 'License plate',  sub: 'Close-up photo',          rule: 'PLUS_N_MONTHS', photo: true },
 ]
 
 // ── Date helpers ────────────────────────────────────────────────────────────────
@@ -69,6 +85,11 @@ export interface DocEval {
  */
 export function evaluateTruckDoc(truck: Equipment, spec: TruckDocSpec, doc?: ComplianceDocument): DocEval {
   if (doc?.status === 'WAIVED') return { state: 'WAIVED', expiration: null, doc }
+
+  // Photos don't expire — having one on file is the whole requirement.
+  if (spec.photo) {
+    return doc?.s3Key ? { state: 'VALID', expiration: null, doc } : { state: 'MISSING', expiration: null, doc }
+  }
 
   if (spec.dot) {
     const last = truck.dotInspectionDate || null
