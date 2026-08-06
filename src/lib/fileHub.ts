@@ -15,7 +15,7 @@
  * The truck photo keys are new to this hub.
  */
 
-import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
+import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc } from './truckDocs'
 import type { Equipment } from '@/types/equipment'
 import type { ComplianceDocument } from '@/types'
 
@@ -49,16 +49,26 @@ export const DRIVER_FILE_SLOTS: readonly FileSlot[] = [
 // Asset Documents page always show the identical set of truck documents — adding one to
 // that catalog adds it to both pages at once, and they can never drift apart.
 
-export const TRUCK_FILE_SLOTS: readonly FileSlot[] = TRUCK_DOC_SPECS.map((spec) => ({
+const toSlot = (spec: (typeof TRUCK_DOC_SPECS)[number]): FileSlot => ({
   key:   spec.key,
   label: spec.label,
   sub:   spec.sub,
   kind:  spec.photo ? 'photo' : 'document',
   required: true,
-  // Photos never expire. DOT carries a date, but it comes from the truck record
-  // (Equipment.dotInspectionDate + fleet cadence), not from the document itself.
   expires: !spec.photo,
-}))
+})
+
+// Every truck-side document. Photos never expire; DOT carries a date, but it comes from
+// the truck record (Equipment.dotInspectionDate + fleet cadence), not the document.
+// Use slotsForAsset() when you know whether you're looking at a truck or a trailer.
+export const TRUCK_FILE_SLOTS: readonly FileSlot[] = TRUCK_DOC_SPECS.map((spec) => toSlot(spec))
+
+/**
+ * Slots for one asset type. Trucks and trailers share most documents but each has a
+ * photo of its own — the VIN plate inside the cab, and the trailer shown with its plate.
+ */
+export const slotsForAsset = (type: 'truck' | 'trailer'): readonly FileSlot[] =>
+  specsForAssetType(type).map(toSlot)
 
 export const slotsFor = (entityType: 'DRIVER' | 'TRUCK'): readonly FileSlot[] =>
   entityType === 'DRIVER' ? DRIVER_FILE_SLOTS : TRUCK_FILE_SLOTS

@@ -15,8 +15,13 @@ export interface TruckDocSpec {
   months?: number
   /** DOT inspection — date sourced from Equipment.dotInspectionDate, cadence by fleet. */
   dot?: boolean
-  /** A photo of the truck rather than paperwork — never expires, no date to confirm. */
+  /** A photo of the asset rather than paperwork — never expires, no date to confirm. */
   photo?: boolean
+  /**
+   * Which asset type this document belongs to. Omitted = both, which is how every
+   * original spec behaves, so adding this field changed nothing that already existed.
+   */
+  appliesTo?: 'truck' | 'trailer'
 }
 
 /**
@@ -38,7 +43,16 @@ export const TRUCK_DOC_SPECS: TruckDocSpec[] = [
   { key: 'photo_passenger_side',  label: 'Passenger side', sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
   { key: 'photo_rear',            label: 'Rear',           sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
   { key: 'photo_plate',           label: 'License plate',  sub: 'Close-up photo',          rule: 'PLUS_N_MONTHS', photo: true },
+  // The VIN stamped inside the cab (door jamb / dash plate) — proves the VIN on the
+  // paperwork matches the physical truck.
+  { key: 'photo_vin_inside',      label: 'VIN plate',      sub: 'Photo of the VIN inside the truck', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'truck' },
+  // Trailers are identified by their own plate, so one shot showing both.
+  { key: 'photo_trailer_plate',   label: 'Trailer + plate', sub: 'Photo of the trailer showing its plate', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'trailer' },
 ]
+
+/** The documents that apply to one asset type (trucks or trailers). */
+export const specsForAssetType = (type: 'truck' | 'trailer'): TruckDocSpec[] =>
+  TRUCK_DOC_SPECS.filter((s) => !s.appliesTo || s.appliesTo === type)
 
 // ── Date helpers ────────────────────────────────────────────────────────────────
 
