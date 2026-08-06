@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-08-05
+> Last updated: 2026-08-06
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Files hub (everything on file per driver/truck, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging.
 
 ## Where it lives
 | | |
@@ -17,7 +17,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 > Note: This is a different project from the WordPress site `bestcareautotransport.com` and from the Python `MultiAgent_Operations` folder. bcat-ops is the React/AWS dispatch app.
 
 ## Tech Stack
-**Frontend:** React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui (Radix primitives) · Zustand · React Router v7 · FullCalendar v6 (resource-timeline) · TanStack Table · react-hook-form + Zod · Recharts · `@vis.gl/react-google-maps` (dashboard truck map) · d3-geo / topojson-client / us-atlas (US map geometry) · jsPDF + jspdf-autotable (driver pay statement PDFs) · sonner · date-fns
+**Frontend:** React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui (Radix primitives) · Zustand · React Router v7 · FullCalendar v6 (resource-timeline) · TanStack Table · react-hook-form + Zod · Recharts · `@vis.gl/react-google-maps` (dashboard truck map) · d3-geo / topojson-client / us-atlas (US map geometry) · jsPDF + jspdf-autotable (driver pay statement PDFs) · pdf-lib (Files hub packet PDFs — merges stored documents into one file) · sonner · date-fns
 
 **Backend (AWS Amplify Gen 2):** AppSync GraphQL API · Cognito auth (userPool) · DynamoDB (via `a.model`) · S3 (confirmation/compliance docs) · Lambda functions · SES (onboarding/escalation email)
 
@@ -27,10 +27,10 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/dashboard` | Operational metrics (KPIs incl. revenue vs-previous-period delta and Broker Covered card, fuel widget, repair-invoices widget with an "N awaiting review" heads-up linking to `/invoices?tab=queue`, open tasks, live truck map, weekly fleet profitability, month-over-month comparison widget) |
 | `/calendar` | FullCalendar resource-timeline scheduler |
 | `/loads` | Load grid (legacy `/grid` redirects here) |
-| `/drivers` | Driver management + avatars |
+| `/drivers` | Driver management + avatars, with CDL / medical-card expiration chips on each row |
 | `/fleet-dashboard` | Fleet Manager dashboard — repair spend, expiring truck docs, maintenance tasks, PM-due (25k-mi) and DOT-due widgets, driver time-off |
 | `/trucks` | Truck/equipment registry (Fleet) |
-| `/truck-docs` | Truck document tracking (insurance, IFTA, IRP, DOT inspection) — shares the compliance backend |
+| `/truck-docs` | Asset Documents — truck/trailer document tracking (insurance, IFTA, IRP, DOT inspection, inside-VIN / trailer-plate photos); shares the compliance backend and the Files hub's panel + catalog (`src/lib/truckDocs.ts`) |
 | `/maintenance` | Maintenance tasks |
 | `/invoices` | Maintenance invoices — list plus a Review Queue tab (`?tab=queue`) for emailed repairs, with edit/post/archive; one invoice can cover multiple units |
 | `/fuel` | Fuel transaction tracking, EFS report upload, fuel price anomaly widget flagging transactions >15% above the per-fuel-type fleet average (`src/lib/fuelAnomalies.ts`) (legacy `/expenses` redirects here) |
@@ -39,9 +39,10 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/schedule` | Driver schedule view |
 | `/time-off` | Driver time-off / availability management |
 | `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
-| `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay |
+| `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay — settlement credits (detention/layover/bonus, paid at 100%), one-off deductions, and pushing a shipment forward to the next pay period |
 | `/disputes` | Amazon driver disputes (underpaid/owed trips) — Google Form ingest + manual entry |
 | `/driver-docs` | Driver Documents — send forms (e.g. WI IC-Status statement) for tokenized e-signature |
+| `/files` | Files hub — per-driver and per-truck view of every document/photo on file, with a ready score (`N/M` slots), expiry state, upload/waive, and a merged "packet" PDF download; reads and writes the same `ComplianceDocument` store as Compliance, Onboarding and Asset Documents (`src/lib/fileHub.ts`) |
 | `/audit-log` | Audit trail (legacy `/audit` redirects) |
 | `/intake` | Email/Slack intake queue |
 | `/tasks` | Task/todo board |
@@ -60,7 +61,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 ## Data Models (GraphQL / DynamoDB)
 **Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability`
 
-**Driver pay:** `DriverPayPeriod` (biweekly gross pay, Paychex seam) · `AmazonTrip` (weekly trip-based Amazon pay lines) · `AmazonPayMaster` (archive of uploaded master CSVs, raw file in S3) · `BoxTruckTrip` (biweekly box-truck shipment lines) · `DriverPaySetting` (per-driver pay model: %, expense timing, fuel card, fixed deductions) · `DriverPayDeduction` (per-week one-off charges)
+**Driver pay:** `DriverPayPeriod` (biweekly gross pay, Paychex seam) · `AmazonTrip` (weekly trip-based Amazon pay lines) · `AmazonPayMaster` (archive of uploaded master CSVs, raw file in S3) · `BoxTruckTrip` (biweekly box-truck shipment lines) · `DriverPaySetting` (per-driver pay model: %, expense timing, fuel card, fixed deductions) · `DriverPayDeduction` (per-week one-off charges) · `DriverPayCredit` (extra pay added to a settlement that didn't come from shipment gross profit — detention, layover, bonus, reimbursement; the pay % is NOT applied, `reasonCode` is a plain string so the list can grow without a redeploy — see `src/lib/payCredits.ts`)
 
 **Disputes:** `AmazonDispute` (driver claims that Amazon underpaid/owes on a trip; Google Form → intake Lambda, source `GOOGLE_FORM`, plus `MANUAL`; workflow PENDING → POSTED → PAID | REJECTED)
 
@@ -74,7 +75,9 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 
 **DOT compliance & onboarding:** `OnboardingInvite` · `DocumentSignatureRequest` (a "send for signature" request for a Driver Documents form, e.g. WI IC-Status `ic_status_wi`; driver signs at `/sign/:token`, portal Lambda stores the signed PDF and flips status SENT → SIGNED) · `DriverApplication` · `ComplianceDocument` · `OnboardingTask` (supports phased templates via `phase`/`owner`/`templateId`) · `ComplianceAlert` · `EscalationRule` · `EscalationEmailLog` · `ComplianceSettings` · `OnboardingTemplateConfig` (editable phased-onboarding template stored as JSON, e.g. `amazon-driver-v1`; kickoff reads it instead of the code default so staff can edit the steps drivers see)
 
-Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candidate set aside, reversible) and `Driver.onboardingTemplateId` selects the phased template. `Equipment.lastPmDate`/`lastPmMileage` feed the Fleet Manager dashboard's 25k-mi PM countdown. `MaintenanceInvoice.source` (`EMAIL` from the repairs@ pipeline | `MANUAL`), `status` (`PENDING` | `POSTED` | `ARCHIVED`) and `reviewedBy` drive the invoice review queue — effective state is computed in `src/lib/invoiceStatus.ts`, where a null status plus the `INVOICE_QUEUE_CUTOFF` timestamp keeps legacy and manual invoices POSTED (no back-fill needed) and only PENDING/ARCHIVED are excluded from the dashboard and P&L.
+One document dataset: `ComplianceDocument` is the ONE store for every uploaded document/photo (drivers and trucks). Compliance, Onboarding, Driver Documents, Asset Documents and the Files hub all read it through the shared cache in `src/lib/complianceDocStore.ts`, which owns the single "which document is current" rule so those pages can't disagree about a doc's status. Document-type keys are shared across `src/lib/complianceRequirements.ts` (driver) and `src/lib/truckDocs.ts` (asset) — renaming one orphans every document already uploaded under it.
+
+Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candidate set aside, reversible) and `Driver.onboardingTemplateId` selects the phased template. `Equipment.lastPmDate`/`lastPmMileage` feed the Fleet Manager dashboard's 25k-mi PM countdown. `MaintenanceInvoice.source` (`EMAIL` from the repairs@ pipeline | `MANUAL`), `status` (`PENDING` | `POSTED` | `ARCHIVED`) and `reviewedBy` drive the invoice review queue — effective state is computed in `src/lib/invoiceStatus.ts`, where a null status plus the `INVOICE_QUEUE_CUTOFF` timestamp keeps legacy and manual invoices POSTED (no back-fill needed) and only PENDING/ARCHIVED are excluded from the dashboard and P&L. `MaintenanceInvoice.externalId` is a hash of the SOURCE document (date + vendor + amount + invoice #) set once at ingest and deliberately excluding `equipmentId` — keying on the unit made reviewed/archived invoices reappear in the queue after staff re-assigned them (see `scripts/invoiceDedup.mjs`).
 
 **Custom mutations/queries:**
 - `notifySlackStatusChange` (mutation) — posts to Slack when an IntakeItem status changes → `slackStatusNotifier`
@@ -115,7 +118,7 @@ Internal staff manage driver/truck compliance from `/compliance`. Drivers are in
 ## Code Conventions
 - All UI in `src/features/<name>/` (self-contained) or `src/components/`
 - Hooks in `src/hooks/*` → call `src/lib/apiClient.ts` → AppSync
-- Shared logic in `src/lib/*`; Zod schemas in `src/lib/schemas.ts`; multi-stop loads in `src/lib/stops.ts`
+- Shared logic in `src/lib/*`; Zod schemas in `src/lib/schemas.ts`; multi-stop loads in `src/lib/stops.ts`; document slots/readiness in `src/lib/fileHub.ts` and packet PDFs in `src/lib/filePacketPdf.ts`
 - `@/` import alias; no `any` in new files; Conventional Commits
 - Never manually edit `amplify_outputs.json` (injected by deploy)
 - Reference docs: `Docs/WELCOME.md`, `ARCHITECTURE.md`, `WORKFLOWS.md`, `STYLE.md`, `POST-DEPLOY-RUNBOOK.md`, and `SES-ONBOARDING-DNS.md`
