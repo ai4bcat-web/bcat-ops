@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FileSignature, PenLine, Mail, Eye, CheckCircle2, X, Send } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { listAllComplianceDocuments, getComplianceDocUrl, createSignatureRequest } from '@/lib/complianceClient'
+import { getComplianceDocUrl, createSignatureRequest } from '@/lib/complianceClient'
+import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { DRIVER_DOC_SPECS, IC_STATUS_SPEC, IC_STATUS_TITLE, MOTOR_CARRIER_NAME } from '@/lib/driverDocs'
 import { signingUrl } from './signing'
 import { useAuth } from '@/hooks/useAuth'
@@ -23,30 +24,13 @@ const miniBtn: React.CSSProperties = {
 export function DriverDocumentsPage() {
   const drivers = useAppStore((s) => s.drivers)
   const isMobile = useIsMobile()
-  const [docs, setDocs] = useState<ComplianceDocument[]>([])
-  const [loading, setLoading] = useState(true)
   const [filling, setFilling] = useState<{ id: string; name: string; email?: string } | null>(null)
   const [emailing, setEmailing] = useState<{ id: string; name: string; email?: string } | null>(null)
 
-  const load = () => {
-    setLoading(true)
-    listAllComplianceDocuments()
-      .then((all) => setDocs(all.filter((d) => d.entityType === 'DRIVER')))
-      .catch((e) => { console.error('[driver-docs] load', e); toast.error('Could not load documents') })
-      .finally(() => setLoading(false))
-  }
-  useEffect(load, [])
-
-  // Latest doc per driver+type.
-  const latest = useMemo(() => {
-    const m = new Map<string, ComplianceDocument>()
-    for (const d of docs) {
-      const k = `${d.entityId}::${d.documentType}`
-      const cur = m.get(k)
-      if (!cur || d.createdAt > cur.createdAt) m.set(k, d)
-    }
-    return m
-  }, [docs])
+  // Shared dataset + shared "current document" rule — was a fourth independent scan.
+  const { docFor, loading, refresh } = useAllComplianceDocuments()
+  const load = refresh
+  const latest = { get: (k: string) => { const [id, type] = k.split('::'); return docFor('DRIVER', id, type) } }
 
   // The IC Status form applies to owner-operators; show them first, then everyone else.
   const rows = useMemo(
