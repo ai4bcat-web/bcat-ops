@@ -1,21 +1,12 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import {
-  listAllComplianceDocuments, createComplianceDocument, updateComplianceDocument,
+  createComplianceDocument, updateComplianceDocument,
   uploadComplianceDocument, getComplianceDocUrl, isAcceptedDoc,
 } from '@/lib/complianceClient'
+import { applyDoc } from '@/lib/complianceDocStore'
+import { useAllComplianceDocuments } from './useAllComplianceDocuments'
 import { slotState, type SlotState } from '@/lib/fileHub'
 import type { ComplianceDocument, ComplianceEntityType } from '@/types'
-
-/** The newest document per (entityId, documentType) — older uploads stay in S3 for audit. */
-function indexLatest(docs: ComplianceDocument[]): Map<string, ComplianceDocument> {
-  const map = new Map<string, ComplianceDocument>()
-  for (const d of docs) {
-    const key = `${d.entityType}::${d.entityId}::${d.documentType}`
-    const prev = map.get(key)
-    if (!prev || (d.updatedAt ?? d.createdAt) > (prev.updatedAt ?? prev.createdAt)) map.set(key, d)
-  }
-  return map
-}
 
 export interface FileHubState {
   loading: boolean
@@ -53,45 +44,9 @@ export interface FileHubState {
  * up in the Files hub without being uploaded twice — and vice versa.
  */
 export function useFileHub(): FileHubState {
-  const [docs, setDocs] = useState<ComplianceDocument[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
-    try {
-      setDocs(await listAllComplianceDocuments())
-    } catch (err) {
-      console.error('[useFileHub] load', err)
-      setError(err instanceof Error ? err.message : String(err))
-    } finally { setLoading(false) }
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const latest = useMemo(() => indexLatest(docs), [docs])
-
-  const byEntity = useMemo(() => {
-    const map = new Map<string, ComplianceDocument[]>()
-    for (const d of latest.values()) {
-      const k = `${d.entityType}::${d.entityId}`
-      const list = map.get(k)
-      if (list) list.push(d)
-      else map.set(k, [d])
-    }
-    return map
-  }, [latest])
-
-  const docFor = useCallback(
-    (entityType: ComplianceEntityType, entityId: string, documentType: string) =>
-      latest.get(`${entityType}::${entityId}::${documentType}`),
-    [latest],
-  )
-
-  const docsForEntity = useCallback(
-    (entityType: ComplianceEntityType, entityId: string) => byEntity.get(`${entityType}::${entityId}`) ?? [],
-    [byEntity],
-  )
+  // One shared dataset + one "which document is current" rule, via useAllComplianceDocuments.
+  const shared = useAllComplianceDocuments()
+  const { docFor, docsForEntity } = shared
 
   const stateFor = useCallback(
     (entityType: ComplianceEntityType, entityId: string, documentType: string) =>
@@ -113,39 +68,23 @@ export function useFileHub(): FileHubState {
     }
     const s3Key = await uploadComplianceDocument(params.entityType, params.entityId, params.documentType, params.file)
 
-    // Replacing an existing slot updates that record so history stays on one row;
-    // otherwise create it. Either way it lands in the store every other page reads.
-    const existing = docFor(params.entityType, params.entityId, params.documentType)
-    const saved = existing
-      ? await updateComplianceDocument(existing.id, {
-          s3Key,
-          title: params.title,
-          expirationDate: params.expirationDate ?? null,
-          status: 'VALID',
-          uploadedBy: 'INTERNAL',
-          verifiedBy: params.uploadedByUser ?? undefined,
-        })
-      : await createComplianceDocument({
-          entityType: params.entityType,
-          entityId:   params.entityId,
-          documentType: params.documentType,
-          title:      params.title,
-          s3Key,
-          expirationDate: params.expirationDate ?? null,
-          status:     'VALID',
-          uploadedBy: 'INTERNAL',
-          verifiedBy: params.uploadedByUser ?? undefined,
-        })
-
-    setDocs((prev) => {
-      const without = prev.filter((d) => d.id !== saved.id)
-      return [...without, saved]
+    // ALWAYS create a new row. Uploading a replacement is a new document, and the old
+    // row is deliberately kept as audit history — the same thing Asset Documents does
+    // (see uploadComplianceDocument). This hook used to update in place, which both
+    // destroyed that history and made it disagree with every other consumer about
+    // which document is current.
+    const saved = await createComplianceDocument({
+      entityType: params.entityType,
+      entityId:   params.entityId,
+      documentType: params.documentType,
+      title:      params.title,
+      s3Key,
+      expirationDate: params.expirationDate ?? null,
+      status:     'VALID',
+      uploadedBy: 'INTERNAL',
+      verifiedBy: params.uploadedByUser ?? undefined,
     })
-    return saved
-  }, [docFor])
-
-  const applyDoc = useCallback((saved: ComplianceDocument) => {
-    setDocs((prev) => [...prev.filter((d) => d.id !== saved.id), saved])
+    applyDoc(saved)
     return saved
   }, [])
 
@@ -155,8 +94,9 @@ export function useFileHub(): FileHubState {
       // Keep the stored status honest with the new date.
       status: date ? (slotState({ expirationDate: date }) as ComplianceDocument['status']) : 'VALID',
     })
-    return applyDoc(saved)
-  }, [applyDoc])
+    applyDoc(saved)
+    return saved
+  }, [])
 
   const setWaived = useCallback(async (
     entityType: ComplianceEntityType, entityId: string, documentType: string,
@@ -167,7 +107,8 @@ export function useFileHub(): FileHubState {
         status: waived ? 'WAIVED' : (doc.s3Key ? 'VALID' : 'MISSING'),
         waivedReason: waived ? 'Marked not required' : null,
       })
-      return applyDoc(saved)
+      applyDoc(saved)
+      return saved
     }
     // Nothing uploaded yet — a waiver is recorded as a document row with no file.
     const saved = await createComplianceDocument({
@@ -175,13 +116,16 @@ export function useFileHub(): FileHubState {
       s3Key: null, status: 'WAIVED', uploadedBy: 'INTERNAL',
       waivedReason: 'Marked not required',
     })
-    return applyDoc(saved)
-  }, [applyDoc])
+    applyDoc(saved)
+    return saved
+  }, [])
 
   return {
-    loading, error, docFor, docsForEntity, stateFor, upload,
+    loading: shared.loading,
+    error: shared.error,
+    docFor, docsForEntity, stateFor, upload,
     setExpiration, setWaived,
     urlFor: getComplianceDocUrl,
-    refresh: load,
+    refresh: shared.refresh,
   }
 }

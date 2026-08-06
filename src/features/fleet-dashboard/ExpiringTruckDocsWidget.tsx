@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { FileText, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
-import { listAllComplianceDocuments } from '@/lib/complianceClient'
+import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from '@/lib/truckDocs'
-import type { ComplianceDocument } from '@/types'
 
 const STATE_META: Record<'EXPIRED' | 'EXPIRING_SOON', { label: string; bg: string; fg: string; rank: number }> = {
   EXPIRED:       { label: 'Expired',       bg: '#fef2f2', fg: '#b91c1c', rank: 0 },
@@ -33,31 +32,16 @@ interface Row {
  */
 export function ExpiringTruckDocsWidget() {
   const equipment = useAppStore((s) => s.equipment)
-  const [docs, setDocs] = useState<ComplianceDocument[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let alive = true
-    listAllComplianceDocuments()
-      .then((all) => { if (alive) setDocs(all.filter((d) => d.entityType === 'TRUCK')) })
-      .catch(() => {})
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [])
+  // Shared dataset + shared "current document" rule (was its own scan and its own index).
+  const { docFor, docs, loading } = useAllComplianceDocuments()
 
   const rows = useMemo<Row[]>(() => {
-    const latest = new Map<string, ComplianceDocument>()
-    for (const d of docs) {
-      const k = `${d.entityId}::${d.documentType}`
-      const cur = latest.get(k)
-      if (!cur || d.createdAt > cur.createdAt) latest.set(k, d)
-    }
     const out: Row[] = []
     for (const t of equipment) {
       if (t.type !== 'truck' || t.active === false) continue
       for (const spec of TRUCK_DOC_SPECS) {
         if (spec.photo) continue   // photos have no expiration to report
-        const { state, expiration } = evaluateTruckDoc(t, spec, latest.get(`${t.id}::${spec.key}`))
+        const { state, expiration } = evaluateTruckDoc(t, spec, docFor('TRUCK', t.id, spec.key))
         if (state === 'EXPIRED' || state === 'EXPIRING_SOON') {
           out.push({ truckId: t.id, unit: `#${t.unitNumber}`, docLabel: spec.label, state, expiration })
         }
@@ -67,7 +51,7 @@ export function ExpiringTruckDocsWidget() {
       STATE_META[a.state].rank - STATE_META[b.state].rank ||
       (a.expiration ?? '').localeCompare(b.expiration ?? ''),
     )
-  }, [docs, equipment])
+  }, [docFor, docs, equipment])
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
