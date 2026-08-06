@@ -7,7 +7,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
-import { slotsFor, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, type FileSlot, type SlotState } from '@/lib/fileHub'
+import { slotsFor, slotsForAsset, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, type FileSlot, type SlotState } from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
 import {
   downloadEntityPacket, packetToast, entityFields, fmtDate, driverForTruck,
@@ -46,7 +46,7 @@ export function EntityFilePanel({ entity, hub, onClose }: {
   const entityId = entity.kind === 'DRIVER' ? entity.driver.id : entity.truck.id
   const title = entity.kind === 'DRIVER' ? entity.driver.name : `Truck ${entity.truck.unitNumber}`
 
-  const slots = slotsFor(entityType)
+  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type) : slotsFor(entityType)
   const [busySlot, setBusySlot] = useState<string | null>(null)
   const [packetBusy, setPacketBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)

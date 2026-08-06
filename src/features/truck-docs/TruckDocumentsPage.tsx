@@ -15,8 +15,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { useFileHub } from '@/hooks/useFileHub'
 import { formatVin } from '@/lib/utils'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
-import { TRUCK_DOC_SPECS, evaluateTruckDoc, type DocState } from '@/lib/truckDocs'
-import { slotsFor, readyScore, truckSlotState, type ReadyScore } from '@/lib/fileHub'
+import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc, type DocState } from '@/lib/truckDocs'
+import { slotsForAsset, readyScore, truckSlotState, type ReadyScore } from '@/lib/fileHub'
 import { EntityFilePanel } from '@/features/files/EntityFilePanel'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from '@/features/files/entityPacket'
 import type { Equipment } from '@/types/equipment'
@@ -24,7 +24,7 @@ import type { Equipment } from '@/types/equipment'
 type Tab = 'truck' | 'trailer'
 
 /** Only documents with a real expiration get their own column. Photos never do. */
-const DATED_SPECS = TRUCK_DOC_SPECS.filter((s) => !s.photo)
+const datedSpecsFor = (type: 'truck' | 'trailer') => specsForAssetType(type).filter((s) => !s.photo)
 
 const STATUS_STYLE: Record<DocState, { bg: string; fg: string; label: string }> = {
   VALID:         { bg: '#f0fdf4', fg: '#15803d', label: 'Valid' },
@@ -93,6 +93,9 @@ export function TruckDocumentsPage() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [packetBusyId, setPacketBusyId] = useState<string | null>(null)
 
+  // Columns follow the tab: trailers have no IFTA/IRP-style truck-only rows.
+  const datedSpecs = useMemo(() => datedSpecsFor(tab), [tab])
+
   const assets = useMemo(
     () => equipment.filter((e) => e.type === tab && e.active !== false)
       .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
@@ -107,7 +110,7 @@ export function TruckDocumentsPage() {
   }, [assets, q])
 
   const scoreFor = (asset: Equipment): ReadyScore =>
-    readyScore(slotsFor('TRUCK'), (key) => truckSlotState(asset, key, hub.docFor('TRUCK', asset.id, key)))
+    readyScore(slotsForAsset(asset.type), (key) => truckSlotState(asset, key, hub.docFor('TRUCK', asset.id, key)))
 
   const downloadPacket = async (asset: Equipment) => {
     setPacketBusyId(asset.id)
@@ -193,7 +196,7 @@ export function TruckDocumentsPage() {
                 <th style={TH}>VIN</th>
                 {tab === 'truck' && <th style={TH}>Driver</th>}
                 {/* One column per document that carries an expiration date */}
-                {DATED_SPECS.map((s) => <th key={s.key} style={TH}>{s.label}</th>)}
+                {datedSpecs.map((s) => <th key={s.key} style={TH}>{s.label}</th>)}
                 <th style={{ ...TH, textAlign: 'right' }}>On file</th>
                 <th style={{ ...TH, width: 150 }}></th>
               </tr>
@@ -201,7 +204,7 @@ export function TruckDocumentsPage() {
             <tbody>
               {shown.length === 0 && (
                 <tr>
-                  <td colSpan={DATED_SPECS.length + (tab === 'truck' ? 5 : 4)} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                  <td colSpan={datedSpecs.length + (tab === 'truck' ? 5 : 4)} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                     {assets.length === 0
                       ? (storeLoading ? 'Loading…' : `No active ${tab === 'truck' ? 'trucks' : 'trailers'}.`)
                       : `Nothing matches "${query}".`}
@@ -222,7 +225,7 @@ export function TruckDocumentsPage() {
                     </td>
                     <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{formatVin(a.vin) || '—'}</td>
                     {tab === 'truck' && <td style={{ ...TD, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{driver?.name ?? '—'}</td>}
-                    {DATED_SPECS.map((s) => <DocCell key={s.key} asset={a} specKey={s.key} hub={hub} />)}
+                    {datedSpecs.map((s) => <DocCell key={s.key} asset={a} specKey={s.key} hub={hub} />)}
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor(a)} /></td>
                     <td style={{ ...TD, textAlign: 'right', padding: '6px 10px' }}>
                       <button

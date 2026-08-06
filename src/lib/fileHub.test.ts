@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
-  daysUntil, slotState, readyScore, driverExpiry, type SlotState,
+  daysUntil, slotState, readyScore, driverExpiry, slotsForAsset, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
@@ -68,6 +68,56 @@ describe('file hub slots reuse existing document keys', () => {
     expect(withPhoto.state).toBe('VALID')
     expect(withPhoto.expiration).toBeNull()
     expect(evaluateTruckDoc(truck, spec, undefined).state).toBe('MISSING')
+  })
+})
+
+describe('truck vs trailer slots', () => {
+  const truckKeys = slotsForAsset('truck').map((s) => s.key)
+  const trailerKeys = slotsForAsset('trailer').map((s) => s.key)
+
+  it('module initialises without a temporal-dead-zone crash', () => {
+    // TRUCK_FILE_SLOTS is built at module load from a helper defined in the same file;
+    // if that helper is declared after its use, importing this module throws.
+    expect(TRUCK_FILE_SLOTS.length).toBeGreaterThan(0)
+    expect(TRUCK_FILE_SLOTS.every((s) => !!s.key && !!s.label)).toBe(true)
+  })
+
+  it('gives trucks the inside-VIN photo and not the trailer plate photo', () => {
+    expect(truckKeys).toContain('photo_vin_inside')
+    expect(truckKeys).not.toContain('photo_trailer_plate')
+  })
+
+  it('gives trailers the trailer+plate photo and not the inside-VIN photo', () => {
+    expect(trailerKeys).toContain('photo_trailer_plate')
+    expect(trailerKeys).not.toContain('photo_vin_inside')
+  })
+
+  it('keeps every pre-existing document on BOTH asset types', () => {
+    // Adding appliesTo must not quietly drop paperwork trailers used to show.
+    for (const key of ['insurance_cert', 'ifta_decals', 'irp_cab_card', 'annual_dot_inspection',
+                       'photo_front', 'photo_driver_side', 'photo_passenger_side', 'photo_rear', 'photo_plate']) {
+      expect(truckKeys).toContain(key)
+      expect(trailerKeys).toContain(key)
+    }
+  })
+
+  it('both new photos are photo slots, so neither asks for an expiration', () => {
+    for (const key of ['photo_vin_inside', 'photo_trailer_plate']) {
+      const spec = TRUCK_DOC_SPECS.find((s) => s.key === key)
+      expect(spec?.photo).toBe(true)
+      expect(TRUCK_FILE_SLOTS.find((s) => s.key === key)?.expires).toBe(false)
+    }
+  })
+
+  it('the full catalog still contains every asset-specific slot', () => {
+    const all = TRUCK_FILE_SLOTS.map((s) => s.key)
+    expect(all).toContain('photo_vin_inside')
+    expect(all).toContain('photo_trailer_plate')
+  })
+
+  it('neither new key collides with an existing document type', () => {
+    const keys = TRUCK_DOC_SPECS.map((s) => s.key)
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
 
