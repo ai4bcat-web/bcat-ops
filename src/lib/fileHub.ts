@@ -17,7 +17,7 @@
 
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc } from './truckDocs'
 import type { Equipment } from '@/types/equipment'
-import type { ComplianceDocument } from '@/types'
+import type { ComplianceDocument, Driver } from '@/types'
 
 export type FileSlotKind = 'document' | 'photo'
 
@@ -127,6 +127,27 @@ export const DRIVER_EXPIRY_FIELDS = [
   { key: 'cdl_copy',     label: 'CDL expires',      recordField: 'cdlExpiration' as const },
   { key: 'medical_card', label: 'Med card expires', recordField: 'medCardExpiration' as const },
 ]
+
+/**
+ * The driver-record patch to write when a dated driver document is uploaded.
+ *
+ * Keeps the two copies of this date in step: the document carries the expiration as
+ * captured at upload, and the Driver record — which the Drivers page edits and the
+ * compliance chips/alerts read — is updated to match. Without this the two drift and
+ * the Files list shows a mismatch warning.
+ *
+ * Returns null when the document type isn't dated on the driver record, or when no
+ * expiration was given (never blank out a good date with an empty one).
+ */
+export function driverExpiryPatch(
+  documentType: string,
+  expiration: string | null | undefined,
+): Partial<Pick<Driver, 'cdlExpiration' | 'medCardExpiration'>> | null {
+  const field = DRIVER_EXPIRY_FIELDS.find((f) => f.key === documentType)
+  const date = expiration?.slice(0, 10)
+  if (!field || !date) return null
+  return { [field.recordField]: date }
+}
 
 export interface ExpiryInfo {
   date:   string | null

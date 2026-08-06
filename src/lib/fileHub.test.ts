@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
-  daysUntil, slotState, readyScore, driverExpiry, slotsForAsset, type SlotState,
+  daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
@@ -221,5 +221,38 @@ describe('ready score', () => {
     expect(s.required).toBe(N - 1)
     expect(s.onFile).toBe(N - 1)
     expect(s.missing).toBe(0)
+  })
+})
+
+describe('driverExpiryPatch — keeping the two copies of the date in step', () => {
+  it('maps a CDL upload to the driver record field', () => {
+    expect(driverExpiryPatch('cdl_copy', '2027-03-14')).toEqual({ cdlExpiration: '2027-03-14' })
+  })
+
+  it('maps a medical card upload to its own field', () => {
+    expect(driverExpiryPatch('medical_card', '2026-11-01')).toEqual({ medCardExpiration: '2026-11-01' })
+  })
+
+  it('trims a full ISO datetime to the calendar day', () => {
+    expect(driverExpiryPatch('cdl_copy', '2027-03-14T00:00:00Z')).toEqual({ cdlExpiration: '2027-03-14' })
+  })
+
+  it('never blanks out a good record date when no expiration was given', () => {
+    expect(driverExpiryPatch('cdl_copy', null)).toBeNull()
+    expect(driverExpiryPatch('cdl_copy', '')).toBeNull()
+    expect(driverExpiryPatch('cdl_copy', undefined)).toBeNull()
+  })
+
+  it('ignores document types the driver record has no date for', () => {
+    expect(driverExpiryPatch('mvr_initial', '2027-01-01')).toBeNull()
+    expect(driverExpiryPatch('insurance_cert', '2027-01-01')).toBeNull()
+  })
+
+  it('after syncing, the record and document no longer report a conflict', () => {
+    const uploaded = '2027-03-14'
+    const patch = driverExpiryPatch('cdl_copy', uploaded)!
+    const info = driverExpiry(patch.cdlExpiration, { expirationDate: uploaded }, TODAY)
+    expect(info.conflict).toBe(false)
+    expect(info.date).toBe(uploaded)
   })
 })
