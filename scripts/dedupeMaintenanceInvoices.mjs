@@ -20,11 +20,16 @@
  *
  * Usage:
  *   node scripts/dedupeMaintenanceInvoices.mjs                 # DRY RUN (default)
- *   BCAT_EMAIL=... BCAT_PASSWORD=... node scripts/dedupeMaintenanceInvoices.mjs --apply
+ *   node scripts/dedupeMaintenanceInvoices.mjs --apply         # actually archive
+ *
+ * Credentials come from BCAT_EMAIL / BCAT_PASSWORD if set; otherwise the script asks
+ * for them. Prompting is the recommended path — passing a password on the command line
+ * puts it in your shell history, and any quote or $ in it breaks the shell quoting.
  */
 import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import { createInterface } from 'node:readline'
 import { Amplify } from 'aws-amplify'
 import { signIn, fetchAuthSession } from 'aws-amplify/auth'
 import { legacyContentKey } from './invoiceDedup.mjs'
@@ -100,27 +105,39 @@ function chooseKeeper(group) {
   })[0]
 }
 
+/** Ask a question on the terminal; `hidden` suppresses echo for passwords. */
+function ask(question, { hidden = false } = {}) {
+  return new Promise((resolvePrompt, reject) => {
+    if (!process.stdin.isTTY) {
+      reject(new Error(
+        'No terminal available to prompt for credentials.\n' +
+        'Run this in a normal terminal, or set BCAT_EMAIL and BCAT_PASSWORD first.',
+      ))
+      return
+    }
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true })
+    if (hidden) {
+      // Swallow the echoed characters so the password never appears on screen.
+      rl._writeToOutput = (str) => { if (str.includes(question)) rl.output.write(question) }
+    }
+    rl.question(question, (answer) => { rl.close(); if (hidden) process.stdout.write('\n'); resolvePrompt(answer.trim()) })
+  })
+}
+
 async function main() {
-  let idToken = null
-  if (APPLY) {
-    const email = process.env.BCAT_EMAIL, password = process.env.BCAT_PASSWORD
-    if (!email || !password) {
-      console.error('BCAT_EMAIL and BCAT_PASSWORD are required with --apply.')
-      process.exit(1)
-    }
+  const email = process.env.BCAT_EMAIL || await ask('ops.bcatcorp.com email: ')
+  const password = process.env.BCAT_PASSWORD || await ask('password (hidden): ', { hidden: true })
+  if (!email || !password) { console.error('Email and password are required.'); process.exit(1) }
+
+  try {
     await signIn({ username: email, password })
-    idToken = (await fetchAuthSession()).tokens?.idToken?.toString() ?? null
-    if (!idToken) { console.error('No ID token after sign-in'); process.exit(1) }
-  } else {
-    // Dry run still needs to read; reuse creds if present, otherwise explain.
-    const email = process.env.BCAT_EMAIL, password = process.env.BCAT_PASSWORD
-    if (!email || !password) {
-      console.error('BCAT_EMAIL and BCAT_PASSWORD are required to read the invoice list.')
-      process.exit(1)
-    }
-    await signIn({ username: email, password })
-    idToken = (await fetchAuthSession()).tokens?.idToken?.toString() ?? null
+  } catch (err) {
+    console.error(`\nSign-in failed: ${err?.message ?? err}`)
+    process.exit(1)
   }
+  const idToken = (await fetchAuthSession()).tokens?.idToken?.toString() ?? null
+  if (!idToken) { console.error('No ID token after sign-in'); process.exit(1) }
+  console.log(`\nSigned in as ${email}${APPLY ? '' : '  ·  DRY RUN'}`)
 
   const listed = await gql(LIST, {}, idToken)
   if (listed.errors) { console.error('List failed:', listed.errors[0].message); process.exit(1) }
