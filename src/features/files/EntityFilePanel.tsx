@@ -7,7 +7,10 @@ import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
-import { slotsFor, slotsForAsset, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, type FileSlot, type SlotState } from '@/lib/fileHub'
+import {
+  slotsFor, slotsForAsset, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, driverExpiryPatch,
+  type FileSlot, type SlotState,
+} from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
 import {
   downloadEntityPacket, packetToast, entityFields, fmtDate, driverForTruck,
@@ -48,6 +51,9 @@ export function EntityFilePanel({ entity, hub, onClose }: {
 
   const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type) : slotsFor(entityType)
   const [busySlot, setBusySlot] = useState<string | null>(null)
+  // A dated document needs its expiration captured at upload, so it can be stored on
+  // the document AND written back to the driver record (they used to drift apart).
+  const [pending, setPending] = useState<{ slot: FileSlot; file: File; expiration: string } | null>(null)
   const [packetBusy, setPacketBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const targetSlot = useRef<FileSlot | null>(null)
@@ -84,12 +90,29 @@ export function EntityFilePanel({ entity, hub, onClose }: {
     fileRef.current?.click()
   }
 
-  const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  /** DOT's date lives on the truck, so it is never asked for here. */
+  const needsExpiration = (slot: FileSlot) =>
+    slot.expires && !TRUCK_DOC_SPECS.find((sp) => sp.key === slot.key)?.dot
+
+  const onFileChosen = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     const slot = targetSlot.current
     e.target.value = ''
+    targetSlot.current = null
     if (!file || !slot) return
 
+    if (needsExpiration(slot)) {
+      // Prefill from the driver record so the common case is one click.
+      const record = entity.kind === 'DRIVER'
+        ? (slot.key === 'cdl_copy' ? entity.driver.cdlExpiration : slot.key === 'medical_card' ? entity.driver.medCardExpiration : null)
+        : null
+      setPending({ slot, file, expiration: (record ?? '').slice(0, 10) })
+      return
+    }
+    void doUpload(slot, file, null)
+  }
+
+  const doUpload = async (slot: FileSlot, file: File, expiration: string | null) => {
     setBusySlot(slot.key)
     try {
       await hub.upload({
@@ -97,14 +120,29 @@ export function EntityFilePanel({ entity, hub, onClose }: {
         documentType: slot.key,
         title: slot.label,
         file,
+        expirationDate: expiration,
         uploadedByUser: user?.email ?? null,
       })
-      toast.success(`${slot.label} uploaded`)
+
+      // Keep the driver record's copy of this date in step with the document.
+      const driverId = entity.kind === 'DRIVER' ? entity.driver.id : null
+      const patch = driverId ? driverExpiryPatch(slot.key, expiration) : null
+      if (patch && driverId) {
+        try {
+          await updateDriver(driverId, patch)
+        } catch (err) {
+          // The document IS saved — say so rather than implying the upload failed.
+          toast.warning(`${slot.label} uploaded, but the driver record's date could not be updated: ${err instanceof Error ? err.message : 'unknown error'}`)
+          setPending(null)
+          return
+        }
+      }
+      toast.success(`${slot.label} uploaded${patch ? ' · driver record updated' : ''}`)
+      setPending(null)
     } catch (err) {
       toast.error(`Couldn't upload ${slot.label}: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally {
       setBusySlot(null)
-      targetSlot.current = null
     }
   }
 
@@ -378,6 +416,42 @@ export function EntityFilePanel({ entity, hub, onClose }: {
         </div>
 
         <input ref={fileRef} type="file" accept={ACCEPTED_DOC_EXT} onChange={onFileChosen} style={{ display: 'none' }} />
+
+        {/* Confirm the expiration before saving a dated document. The date is stored on
+            the document and, for a driver's CDL / medical card, written to the driver
+            record too so the two can't drift. */}
+        {pending && (
+          <div onClick={() => setPending(null)}
+            style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)' }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', width: 420, maxWidth: '92vw', overflow: 'hidden' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)' }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{pending.slot.label}</div>
+                <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pending.file.name}</div>
+              </div>
+              <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Expiration date</label>
+                <input type="date" value={pending.expiration}
+                  onChange={(e) => setPending((p) => (p ? { ...p, expiration: e.target.value } : p))}
+                  style={{ height: 36, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontSize: 13, fontFamily: 'inherit' }} />
+                {entity.kind === 'DRIVER' && driverExpiryPatch(pending.slot.key, pending.expiration) && (
+                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+                    This also updates {entity.driver.name}'s {pending.slot.key === 'cdl_copy' ? 'CDL' : 'medical card'} expiration on their driver record.
+                  </div>
+                )}
+                <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>Leave blank if this document doesn't expire.</div>
+              </div>
+              <div style={{ padding: '12px 20px', borderTop: '1px solid var(--ds-border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button onClick={() => setPending(null)} disabled={!!busySlot}
+                  style={{ height: 34, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+                <button onClick={() => doUpload(pending.slot, pending.file, pending.expiration || null)} disabled={!!busySlot}
+                  style={{ height: 34, padding: '0 18px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: busySlot ? 'wait' : 'pointer', opacity: busySlot ? 0.6 : 1, fontFamily: 'inherit' }}>
+                  {busySlot ? 'Uploading…' : 'Save & upload'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
