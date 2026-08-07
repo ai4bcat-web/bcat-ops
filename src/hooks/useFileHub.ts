@@ -3,9 +3,9 @@ import {
   createComplianceDocument, updateComplianceDocument,
   uploadComplianceDocument, getComplianceDocUrl, isAcceptedDoc,
 } from '@/lib/complianceClient'
-import { applyDoc } from '@/lib/complianceDocStore'
+import { applyDoc, removeDoc } from '@/lib/complianceDocStore'
 import { findLinkedTask } from '@/lib/documentReview'
-import { setTaskStatus } from '@/lib/complianceClient'
+import { setTaskStatus, deleteComplianceDocument } from '@/lib/complianceClient'
 import { useAllComplianceDocuments } from './useAllComplianceDocuments'
 import { slotState, type SlotState } from '@/lib/fileHub'
 import type { ComplianceDocument, ComplianceEntityType } from '@/types'
@@ -35,6 +35,8 @@ export interface FileHubState {
     entityType: ComplianceEntityType, entityId: string, documentType: string,
     title: string, doc: ComplianceDocument | undefined, waived: boolean,
   ) => Promise<ComplianceDocument>
+  /** Delete a document and reopen the checklist item it was satisfying. */
+  remove:  (doc: ComplianceDocument) => Promise<void>
   /** Presigned URL for viewing/downloading a stored file. */
   urlFor:  (s3Key: string) => Promise<string>
   refresh: () => void
@@ -141,11 +143,28 @@ export function useFileHub(): FileHubState {
     return saved
   }, [])
 
+  const remove = useCallback(async (doc: ComplianceDocument) => {
+    await deleteComplianceDocument(doc.id)
+    removeDoc(doc.id)
+
+    // Reopen whatever this document was satisfying. Leaving the box ticked after the
+    // file is gone would tell everyone a document exists that doesn't — the same
+    // file/checklist disagreement that ticking-on-upload fixed, in reverse.
+    try {
+      const task = await findLinkedTask(doc)
+      if (task && task.status === 'COMPLETE') {
+        await setTaskStatus(task.id, 'PENDING')
+      }
+    } catch (err) {
+      console.error('[useFileHub] could not reopen the checklist item', err)
+    }
+  }, [])
+
   return {
     loading: shared.loading,
     error: shared.error,
     docFor, docsForEntity, stateFor, upload,
-    setExpiration, setWaived,
+    setExpiration, setWaived, remove,
     urlFor: getComplianceDocUrl,
     refresh: shared.refresh,
   }

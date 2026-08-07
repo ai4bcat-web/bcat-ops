@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { X, Upload, Eye, Download, FileText, Image as ImageIcon, RefreshCw, FileStack, Pencil } from 'lucide-react'
+import { X, Upload, Eye, Download, FileText, Image as ImageIcon, RefreshCw, FileStack, Pencil, Trash2 } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { Avatar } from '@/components/ui/avatar'
@@ -121,11 +121,13 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
     if (!file || !slot) return
 
     if (needsExpiration(slot)) {
-      // Prefill from the driver record so the common case is one click.
+      // Replacing offers the CURRENT document's date so it's visible and easy to change;
+      // a first upload falls back to the driver record.
+      const existing = hub.docFor(entityType, entityId, slot.key)?.expirationDate
       const record = entity.kind === 'DRIVER'
         ? (slot.key === 'cdl_copy' ? entity.driver.cdlExpiration : slot.key === 'medical_card' ? entity.driver.medCardExpiration : null)
         : null
-      setPending({ slot, file, expiration: (record ?? '').slice(0, 10) })
+      setPending({ slot, file, expiration: (existing ?? record ?? '').slice(0, 10) })
       return
     }
     void doUpload(slot, file, null)
@@ -246,6 +248,17 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
       toast.success(decision === 'approve' ? 'Document approved' : 'Sent back to the driver')
     } catch (err) {
       toast.error(`Couldn't ${decision} it: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally { setBusySlot(null) }
+  }
+
+  const removeDocument = async (doc: ComplianceDocument, label: string) => {
+    if (!window.confirm(`Delete the ${label} on file?\n\nThe file is removed and its checklist item reopens. This can't be undone.`)) return
+    setBusySlot(doc.documentType)
+    try {
+      await hub.remove(doc)
+      toast.success(`${label} deleted`)
+    } catch (err) {
+      toast.error(`Couldn't delete it: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally { setBusySlot(null) }
   }
 
@@ -417,8 +430,11 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                           style={iconAction}><Eye size={13} /></button>
                         <button onClick={() => openDoc(doc, 'download')} title="Download" aria-label={`Download ${slot.label}`}
                           style={iconAction}><Download size={13} /></button>
-                        <button onClick={() => pickFile(slot)} disabled={busy} title="Replace" aria-label={`Replace ${slot.label}`}
+                        <button onClick={() => pickFile(slot)} disabled={busy} title="Replace with a new file and date" aria-label={`Replace ${slot.label}`}
                           style={iconAction}><RefreshCw size={13} /></button>
+                        <button onClick={() => void removeDocument(doc, slot.label)} disabled={busy}
+                          title="Delete" aria-label={`Delete ${slot.label}`}
+                          style={{ ...iconAction, color: '#b91c1c' }}><Trash2 size={13} /></button>
                       </>
                     ) : (
                       <button onClick={() => pickFile(slot)} disabled={busy}
@@ -481,6 +497,8 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                     </span>
                     <button onClick={() => openDoc(doc, 'view')} title="Preview" style={iconAction}><Eye size={13} /></button>
                     <button onClick={() => openDoc(doc, 'download')} title="Download" style={iconAction}><Download size={13} /></button>
+                    <button onClick={() => void removeDocument(doc, doc.title || doc.documentType)}
+                      title="Delete" style={{ ...iconAction, color: '#b91c1c' }}><Trash2 size={13} /></button>
                   </div>
                 ))}
               </div>
