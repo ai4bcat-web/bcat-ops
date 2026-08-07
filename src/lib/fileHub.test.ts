@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
-  daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, type SlotState,
+  daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, slotsForDriver, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
@@ -43,7 +43,9 @@ describe('file hub slots reuse existing document keys', () => {
   it('flags document types with no slot so they still surface as "other"', () => {
     expect(isUnslottedDoc('cdl_copy')).toBe(false)
     expect(isUnslottedDoc('photo_plate')).toBe(false)
-    expect(isUnslottedDoc('lease_agreement')).toBe(true)
+    // lease_agreement is now an Amazon driver slot, so use one that genuinely has none.
+    expect(isUnslottedDoc('i9_w4')).toBe(true)
+    expect(isUnslottedDoc('mvr_initial')).toBe(true)
   })
 
   it('photos never expire; paperwork does', () => {
@@ -254,5 +256,67 @@ describe('driverExpiryPatch — keeping the two copies of the date in step', () 
     const info = driverExpiry(patch.cdlExpiration, { expirationDate: uploaded }, TODAY)
     expect(info.conflict).toBe(false)
     expect(info.date).toBe(uploaded)
+  })
+})
+
+describe('driver documents by fleet', () => {
+  const keys = (g: Parameters<typeof slotsForDriver>[0]) => slotsForDriver(g).map((s) => s.key)
+
+  it('every driver carries CDL and medical card whatever the fleet', () => {
+    for (const g of [undefined, null, 'LOCAL', 'AMAZON', 'BOX_TRUCK'] as const) {
+      expect(keys(g)).toContain('cdl_copy')
+      expect(keys(g)).toContain('medical_card')
+    }
+  })
+
+  it('Ivan (Local) drivers carry a job application and employment agreement', () => {
+    expect(keys('LOCAL')).toContain('employment_application')
+    expect(keys('LOCAL')).toContain('employment_agreement')
+    expect(keys('LOCAL')).not.toContain('lease_agreement')
+  })
+
+  it('Box Truck drivers carry the same paperwork as Ivan', () => {
+    expect(keys('BOX_TRUCK')).toEqual(keys('LOCAL'))
+  })
+
+  it('Amazon drivers carry a lease agreement instead', () => {
+    expect(keys('AMAZON')).toContain('lease_agreement')
+    expect(keys('AMAZON')).not.toContain('employment_agreement')
+    expect(keys('AMAZON')).not.toContain('employment_application')
+  })
+
+  it('an unclassified driver is only asked for the base documents', () => {
+    expect(keys(null)).toEqual(['cdl_copy', 'medical_card'])
+  })
+
+  it('every fleet-specific key is still recognised as slotted', () => {
+    for (const key of ['employment_application', 'employment_agreement', 'lease_agreement']) {
+      expect(isUnslottedDoc(key)).toBe(false)
+    }
+  })
+})
+
+describe('I-PASS photo is Local and Box Truck only', () => {
+  const truckKeys = (g: 'LOCAL' | 'AMAZON' | 'BOX_TRUCK' | null) => slotsForAsset('truck', g).map((s) => s.key)
+
+  it('appears for Local and Box Truck trucks', () => {
+    expect(truckKeys('LOCAL')).toContain('photo_ipass')
+    expect(truckKeys('BOX_TRUCK')).toContain('photo_ipass')
+  })
+
+  it('does not appear for Amazon trucks', () => {
+    expect(truckKeys('AMAZON')).not.toContain('photo_ipass')
+  })
+
+  it('still appears on a truck with no fleet set, so it is never silently hidden', () => {
+    expect(truckKeys(null)).toContain('photo_ipass')
+  })
+
+  it('never appears on a trailer', () => {
+    expect(slotsForAsset('trailer', 'LOCAL').map((s) => s.key)).not.toContain('photo_ipass')
+  })
+
+  it('is a photo, so it asks for no expiration', () => {
+    expect(slotsForAsset('truck', 'LOCAL').find((s) => s.key === 'photo_ipass')?.expires).toBe(false)
   })
 })

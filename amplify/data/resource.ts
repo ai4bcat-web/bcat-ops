@@ -61,6 +61,9 @@ const schema = a.schema({
       // Equipment.id of the trailer this driver pulls. Null = not yet assigned ("TBD"),
       // which is the normal state until trailers are handed out.
       assignedTrailerId:  a.string(),
+      // Which fleet this driver runs in. Mirrors DriverPaySetting.payGroup so the two
+      // agree, and decides which documents their file requires (see src/lib/fileHub.ts).
+      fleetGroup:         a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
       // Compliance & profile fields
       email:              a.string(),   // invite target; required for new drivers (enforced in Zod)
       cdl:                a.string(),   // CDL number e.g. "CDL-A IL-8823901"
@@ -114,7 +117,7 @@ const schema = a.schema({
       // Fleet grouping for profitability — LOCAL (Ivan) vs AMAZON. Optional: legacy
       // records read null and are treated as "ungrouped" by the profitability view.
       // This is the SOURCE OF TRUTH for fleet membership (no hardcoded unit lists).
-      fleetGroup:              a.enum(['LOCAL', 'AMAZON']),
+      fleetGroup:              a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
       // Preventive-maintenance (PM) tracking — Ivan/LOCAL fleet runs a PM every 25k mi.
       // lastPmMileage is the odometer reading at the last PM service; the Fleet Manager
       // Dashboard counts down to the next PM (lastPmMileage + 25000) using live mileage.

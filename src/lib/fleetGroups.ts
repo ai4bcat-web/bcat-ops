@@ -1,10 +1,11 @@
 import type { FleetGroup } from '@/types/equipment'
 
-export const FLEET_GROUPS: FleetGroup[] = ['LOCAL', 'AMAZON']
+export const FLEET_GROUPS: FleetGroup[] = ['LOCAL', 'AMAZON', 'BOX_TRUCK']
 
 export const FLEET_GROUP_LABELS: Record<FleetGroup, string> = {
-  LOCAL:  'Local (Ivan)',
-  AMAZON: 'Amazon',
+  LOCAL:     'Local (Ivan)',
+  AMAZON:    'Amazon',
+  BOX_TRUCK: 'Box Truck',
 }
 
 /**
@@ -25,8 +26,9 @@ export const FLEET_GROUP_LABELS: Record<FleetGroup, string> = {
  * the Amazon fleet via its Equipment record, so it's no longer bridged as a Local orphan).
  */
 export const ORPHAN_UNITS_BY_GROUP: Record<FleetGroup, string[]> = {
-  LOCAL:  ['89510'],
-  AMAZON: [],
+  LOCAL:     ['89510'],
+  AMAZON:    [],
+  BOX_TRUCK: [],
 }
 
 /**

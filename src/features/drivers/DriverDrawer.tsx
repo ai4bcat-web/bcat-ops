@@ -20,6 +20,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP } from '@/lib/driverColors'
+import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { ColorKey } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,7 +68,7 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, assignedTruckId: null, assignedTrailerId: null },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, assignedTruckId: null, assignedTrailerId: null, fleetGroup: null },
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
@@ -91,8 +92,9 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
             driverType: (driver.driverType || undefined) as 'COMPANY' | 'OWNER_OPERATOR' | undefined,
             assignedTruckId: driver.assignedTruckId ?? null,
             assignedTrailerId: driver.assignedTrailerId ?? null,
+            fleetGroup: driver.fleetGroup ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, assignedTruckId: null, assignedTrailerId: null })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', driverType: undefined, assignedTruckId: null, assignedTrailerId: null, fleetGroup: null })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -238,6 +240,19 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                     </Field>
                   </div>
                 </div>
+
+                <Field label="Fleet" hint="decides which documents this driver's file requires">
+                  <Controller
+                    name="fleetGroup"
+                    control={control}
+                    render={({ field }) => (
+                      <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || null)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
+                        <option value="">— Unclassified —</option>
+                        {FLEET_GROUPS.map((g) => <option key={g} value={g}>{FLEET_GROUP_LABELS[g]}</option>)}
+                      </select>
+                    )}
+                  />
+                </Field>
 
                 {/* Type toggle */}
                 <Field label="Type">

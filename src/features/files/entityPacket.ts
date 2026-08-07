@@ -4,7 +4,7 @@
  * two produce byte-identical PDFs — including the assigned driver's phone and CDL on a
  * truck packet.
  */
-import { slotsFor, slotsForAsset, isUnslottedDoc } from '@/lib/fileHub'
+import { slotsForAsset, slotsForDriver, isUnslottedDoc } from '@/lib/fileHub'
 import { buildFilePacket, packetFilename, type PacketField, type PacketItem, type PacketResult } from '@/lib/filePacketPdf'
 import { formatPhone, formatVin } from '@/lib/utils'
 import type { FileHubState } from '@/hooks/useFileHub'
@@ -80,7 +80,7 @@ export function packetItems(entity: FileEntity, hub: FileHubState, drivers: Driv
   const id = entityId(entity)
   const items: PacketItem[] = []
 
-  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type) : slotsFor(type)
+  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup) : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)
   for (const slot of slots) {
     const doc = hub.docFor(type, id, slot.key)
     if (doc?.s3Key) {

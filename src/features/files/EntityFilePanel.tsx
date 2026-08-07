@@ -8,7 +8,7 @@ import { getColor } from '@/lib/driverColors'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
 import {
-  slotsFor, slotsForAsset, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, driverExpiryPatch,
+  slotsForAsset, slotsForDriver, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, driverExpiryPatch,
   type FileSlot, type SlotState,
 } from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
@@ -51,7 +51,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver }: {
   const entityId = entity.kind === 'DRIVER' ? entity.driver.id : entity.truck.id
   const title = entity.kind === 'DRIVER' ? entity.driver.name : `Truck ${entity.truck.unitNumber}`
 
-  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type) : slotsFor(entityType)
+  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup) : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)
   const [busySlot, setBusySlot] = useState<string | null>(null)
   // A dated document needs its expiration captured at upload, so it can be stored on
   // the document AND written back to the driver record (they used to drift apart).

@@ -27,6 +27,7 @@ export const driverSchema = z.object({
   driverType: z.enum(['COMPANY', 'OWNER_OPERATOR']).optional(),
   assignedTruckId: z.string().nullable().optional(),
   assignedTrailerId: z.string().nullable().optional(),
+  fleetGroup: z.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']).nullable().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])

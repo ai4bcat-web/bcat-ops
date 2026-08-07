@@ -16,7 +16,7 @@
  */
 
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc } from './truckDocs'
-import type { Equipment } from '@/types/equipment'
+import type { Equipment, FleetGroup } from '@/types/equipment'
 import type { ComplianceDocument, Driver } from '@/types'
 
 export type FileSlotKind = 'document' | 'photo'
@@ -36,9 +36,45 @@ export interface FileSlot {
 // Phone, truck # and trailer # are fields on the Driver record, not documents; they're
 // rendered from the record itself in the profile panel.
 
-export const DRIVER_FILE_SLOTS: readonly FileSlot[] = [
+/** Required of every driver, whichever fleet they run in. */
+const DRIVER_BASE_SLOTS: readonly FileSlot[] = [
   { key: 'cdl_copy',     label: 'CDL',              sub: 'Front and back',            kind: 'document', required: true,  expires: true },
   { key: 'medical_card', label: 'Medical card',     sub: "Examiner's certificate",    kind: 'document', required: true,  expires: true },
+]
+
+/**
+ * Fleet-specific paperwork. Local (Ivan) and Box Truck drivers are employees, so they
+ * carry a job application and an employment agreement; Amazon drivers run under a lease
+ * agreement instead.
+ */
+const DRIVER_SLOTS_BY_FLEET: Record<FleetGroup, readonly FileSlot[]> = {
+  LOCAL: [
+    { key: 'employment_application', label: 'Job application',      sub: '3-yr history, 10-yr CDL', kind: 'document', required: true, expires: false },
+    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false },
+  ],
+  BOX_TRUCK: [
+    { key: 'employment_application', label: 'Job application',      sub: '3-yr history, 10-yr CDL', kind: 'document', required: true, expires: false },
+    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false },
+  ],
+  AMAZON: [
+    { key: 'lease_agreement',        label: 'Lease agreement',      sub: '49 CFR Part 376',         kind: 'document', required: true, expires: false },
+  ],
+}
+
+/** Every driver slot across all fleets — used for "is this key slotted?" checks. */
+export const DRIVER_FILE_SLOTS: readonly FileSlot[] = [
+  ...DRIVER_BASE_SLOTS,
+  ...Object.values(DRIVER_SLOTS_BY_FLEET).flat()
+    .filter((slot, i, all) => all.findIndex((x) => x.key === slot.key) === i),
+]
+
+/**
+ * The slots ONE driver's file requires. An unclassified driver (no fleet yet) gets the
+ * base set only, rather than being shown paperwork that may not apply to them.
+ */
+export const slotsForDriver = (fleetGroup?: FleetGroup | null): readonly FileSlot[] => [
+  ...DRIVER_BASE_SLOTS,
+  ...(fleetGroup ? DRIVER_SLOTS_BY_FLEET[fleetGroup] : []),
 ]
 
 // ── Truck ───────────────────────────────────────────────────────────────────────
@@ -67,8 +103,8 @@ export const TRUCK_FILE_SLOTS: readonly FileSlot[] = TRUCK_DOC_SPECS.map((spec) 
  * Slots for one asset type. Trucks and trailers share most documents but each has a
  * photo of its own — the VIN plate inside the cab, and the trailer shown with its plate.
  */
-export const slotsForAsset = (type: 'truck' | 'trailer'): readonly FileSlot[] =>
-  specsForAssetType(type).map(toSlot)
+export const slotsForAsset = (type: 'truck' | 'trailer', fleetGroup?: FleetGroup | null): readonly FileSlot[] =>
+  specsForAssetType(type, fleetGroup).map(toSlot)
 
 export const slotsFor = (entityType: 'DRIVER' | 'TRUCK'): readonly FileSlot[] =>
   entityType === 'DRIVER' ? DRIVER_FILE_SLOTS : TRUCK_FILE_SLOTS
