@@ -24,7 +24,6 @@ export const driverSchema = z.object({
   medCardExpiration: z.string().optional(),
   drugTestDate: z.string().optional(),
   hireDate: z.string().optional(),
-  driverType: z.enum(['COMPANY', 'OWNER_OPERATOR']).optional(),
   assignedTruckId: z.string().nullable().optional(),
   assignedTrailerId: z.string().nullable().optional(),
   fleetGroup: z.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']).nullable().optional(),
