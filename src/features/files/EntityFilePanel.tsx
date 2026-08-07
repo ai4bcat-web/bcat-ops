@@ -17,6 +17,8 @@ import {
   DRIVER_DOCS_ON_TRUCK, type FileEntity,
 } from './entityPacket'
 import { DriverOnboardingSection } from './DriverOnboardingSection'
+import { TruckOnboardingSection } from './TruckOnboardingSection'
+import { DriverApplicationView } from '@/features/compliance/DriverApplicationView'
 import { PacketPickerModal } from './PacketPickerModal'
 import { DocumentPreviewModal } from './DocumentPreviewModal'
 import { packetItems } from './entityPacket'
@@ -343,7 +345,18 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
             </div>
           )}
 
-          {entity.kind === 'DRIVER' && <DriverOnboardingSection driver={entity.driver} />}
+          {entity.kind === 'DRIVER'
+            ? <DriverOnboardingSection driver={entity.driver} />
+            : <TruckOnboardingSection asset={entity.truck} />}
+
+          {/* The submitted DOT application, reviewable next to the documents it produced
+              — it used to live only on the Compliance pages. */}
+          {entity.kind === 'DRIVER' && (
+            <div style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Application</div>
+              <DriverApplicationView driverId={entity.driver.id} />
+            </div>
+          )}
 
           {/* Document slots */}
           <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Documents</div>
