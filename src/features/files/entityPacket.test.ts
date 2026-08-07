@@ -54,7 +54,8 @@ describe('truck packet fields', () => {
     const fields = entityFields({ kind: 'TRUCK', truck: truck() }, [], [])
     expect(label(fields, 'VIN')).toBe('1FUJGLD55LLAA3391')
     expect(label(fields, 'Plate')).toBe('P123456')
-    expect(label(fields, 'Make / model')).toBe('Freightliner Cascadia')
+    // Year reads with the make and model rather than as its own row.
+    expect(label(fields, 'Year / make / model')).toBe('2020 Freightliner Cascadia')
   })
 
   it('omits the driver rows entirely when the truck has no driver', () => {

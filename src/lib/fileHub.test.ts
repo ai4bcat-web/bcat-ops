@@ -489,3 +489,28 @@ describe('classification has ONE source', () => {
     }
   })
 })
+
+describe('trailer documents', () => {
+  const trailerKeys = slotsForAsset('trailer', null).map((s) => s.key)
+  const truckKeys = slotsForAsset('truck', null).map((s) => s.key)
+
+  it('a trailer carries a licence plate photo and a dock plate photo', () => {
+    expect(trailerKeys).toContain('photo_plate')
+    expect(trailerKeys).toContain('photo_dock_plate')
+  })
+
+  it('the dock plate is trailer-only — trucks do not back into docks with one', () => {
+    expect(truckKeys).not.toContain('photo_dock_plate')
+  })
+
+  it('trailers still skip truck-only paperwork', () => {
+    expect(trailerKeys).not.toContain('photo_vin_inside')
+    expect(trailerKeys).not.toContain('photo_ipass')
+  })
+
+  it('every trailer photo is a photo slot, so none asks for an expiry', () => {
+    for (const key of ['photo_plate', 'photo_dock_plate', 'photo_trailer_plate']) {
+      expect(slotsForAsset('trailer', null).find((s) => s.key === key)?.expires).toBe(false)
+    }
+  })
+})

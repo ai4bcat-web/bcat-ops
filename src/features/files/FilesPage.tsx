@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus, EyeOff } from 'lucide-react'
+import { FolderOpen, Search, Users, Truck as TruckIcon, Container, FileStack, UserPlus, EyeOff } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
@@ -25,7 +25,12 @@ import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } fr
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 
-type Tab = 'DRIVER' | 'TRUCK'
+/**
+ * TRAILER is a third tab rather than a filter on TRUCK: trailers carry a different set
+ * of documents (no IFTA or I-PASS; a dock plate instead), so mixing them into one list
+ * would show columns that don't apply to half the rows.
+ */
+type Tab = 'DRIVER' | 'TRUCK' | 'TRAILER'
 
 const getInitials = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
@@ -175,6 +180,13 @@ export function FilesPage() {
     [equipment],
   )
   const trailers = useMemo(() => equipment.filter((e) => e.type === 'trailer'), [equipment])
+  // Every active trailer in the fleet, so what the Fleet Manager dashboard shows is
+  // reachable here too.
+  const activeTrailers = useMemo(
+    () => equipment.filter((e) => e.type === 'trailer' && e.active !== false)
+      .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
+    [equipment],
+  )
 
   // EVERY driver (brokers aside — they're a calendar construct, not people). Inactive
   // drivers must be in the base list or the Inactive tab has nothing to show and "All"
@@ -214,11 +226,13 @@ export function FilesPage() {
     })
   }, [byStatus, trucks, q])
 
+  const assetsForTab = tab === 'TRAILER' ? activeTrailers : trucks
+
   const shownTrucks = useMemo(() => {
-    if (!q) return trucks
-    return trucks.filter((t) =>
-      [t.unitNumber, t.vin, t.plate, t.make, t.model, t.nickname].some((v) => (v ?? '').toLowerCase().includes(q)))
-  }, [trucks, q])
+    if (!q) return assetsForTab
+    return assetsForTab.filter((t) =>
+      [t.unitNumber, t.vin, t.plate, String(t.year ?? ''), t.make, t.model, t.nickname].some((v) => (v ?? '').toLowerCase().includes(q)))
+  }, [assetsForTab, q])
 
   /** Build a packet straight from a list row, without opening the profile panel. */
   const downloadPacket = async (entity: FileEntity, id: string) => {
@@ -280,6 +294,7 @@ export function FilesPage() {
           </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
             {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
+            {tabBtn('TRAILER', 'Trailers', Container, activeTrailers.length)}
             {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
             {isAdmin && (
               <button onClick={() => setPrivateDocsOpen(true)} title="Choose which documents are hidden from everyone else"
@@ -350,10 +365,10 @@ export function FilesPage() {
                     : `No drivers match "${query}".`}
                 </td></tr>
               )}
-              {tab === 'TRUCK' && shownTrucks.length === 0 && (
+              {tab !== 'DRIVER' && shownTrucks.length === 0 && (
                 <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {trucks.length === 0
-                    ? (storeLoading ? 'Loading trucks…' : 'No active trucks.')
+                    ? (storeLoading ? 'Loading…' : `No active ${tab === 'TRAILER' ? 'trailers' : 'trucks'}.`)
                     : `No trucks match "${query}".`}
                 </td></tr>
               )}
@@ -401,7 +416,7 @@ export function FilesPage() {
                 )
               })}
 
-              {tab === 'TRUCK' && shownTrucks.map((t: Equipment) => {
+              {tab !== 'DRIVER' && shownTrucks.map((t: Equipment) => {
                 const driver = driverForTruck(t, drivers)
                 return (
                   <tr key={t.id} onClick={() => setOpenId(t.id)}
@@ -409,7 +424,7 @@ export function FilesPage() {
                     <td style={{ ...TD, fontWeight: 600 }}>{t.unitNumber}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5 }}>{formatVin(t.vin) || '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{t.plate || '—'}</td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{[t.make, t.model].filter(Boolean).join(' ') || '—'}</td>
+                    <td style={{ ...TD, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{[t.year, t.make, t.model].filter(Boolean).join(' ') || '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{driver?.name ?? '—'}</td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('TRUCK', t.id)} /></td>
                     <td style={{ ...TD, textAlign: 'right', padding: '6px 10px' }}>

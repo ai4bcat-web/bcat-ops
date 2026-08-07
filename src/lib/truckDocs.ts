@@ -52,7 +52,8 @@ export const TRUCK_DOC_SPECS: TruckDocSpec[] = [
   // paperwork matches the physical truck.
   { key: 'photo_vin_inside',      label: 'VIN plate',      sub: 'Photo of the VIN inside the truck', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'truck' },
   // Trailers are identified by their own plate, so one shot showing both.
-  { key: 'photo_trailer_plate',   label: 'Trailer + plate', sub: 'Photo of the trailer showing its plate', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'trailer' },
+  { key: 'photo_trailer_plate',   label: 'Trailer + plate', sub: 'Full view showing the plate', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'trailer' },
+  { key: 'photo_dock_plate',      label: 'Dock plate',      sub: 'Photo of the dock plate',   rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'trailer' },
   // The I-PASS transponder that travels with the truck — Local and Box Truck only;
   // Amazon units don't carry one.
   { key: 'photo_ipass',           label: 'I-PASS',          sub: 'Photo of the transponder', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'truck', fleets: ['LOCAL', 'BOX_TRUCK'] },

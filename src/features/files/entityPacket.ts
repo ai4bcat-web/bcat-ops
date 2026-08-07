@@ -55,8 +55,8 @@ export function entityFields(entity: FileEntity, drivers: Driver[], equipment: E
   return [
     { label: 'VIN', value: formatVin(t.vin) },
     { label: 'Plate', value: t.plate ?? '' },
-    { label: 'Make / model', value: [t.make, t.model].filter(Boolean).join(' ') },
-    { label: 'Year', value: t.year ? String(t.year) : '' },
+    // Year reads with the make and model rather than as its own orphan row.
+    { label: 'Year / make / model', value: [t.year, t.make, t.model].filter(Boolean).join(' ') },
     { label: 'Driver', value: driver?.name ?? '' },
     // Whoever receives this packet (insurer, auditor, broker) needs to reach the driver
     // and see their license — only included when the truck actually has one assigned.
