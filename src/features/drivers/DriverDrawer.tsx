@@ -178,6 +178,10 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     onClose()
   }
 
+  // SidePanel has no `open` prop of its own — the Sheet it replaced honoured one, so
+  // without this the editor rendered permanently over the Files page.
+  if (!open) return null
+
   return (
     <SidePanel
       title={isEdit ? driver.name : 'Add driver'}

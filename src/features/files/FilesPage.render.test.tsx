@@ -101,6 +101,17 @@ describe('Files hub renders', () => {
     expect(screen.getByText('Drivers')).toBeTruthy()
   })
 
+  it('opens on the LIST — no editor covering the page', async () => {
+    // The driver editor is always mounted and gated on its `open` prop. When that gate
+    // was lost, the "Add driver" panel rendered permanently over the Files page and
+    // every other assertion here still passed, because the list was underneath it.
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    expect(screen.queryByText('Add driver')).toBeNull()
+    expect(screen.queryByText('New driver')).toBeNull()
+    expect(screen.queryByText('Driver Details')).toBeNull()
+  })
+
   it('lists the truck with its VIN uppercased', async () => {
     const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
