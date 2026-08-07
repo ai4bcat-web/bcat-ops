@@ -76,7 +76,7 @@ export function useDriverOnboarding(driver: Driver | null) {
       await createOnboardingInvite({
         driverId: driver.id,
         email: driver.email,
-        driverType: driver.driverType ?? null,
+        driverType: classificationForFleet(driver.fleetGroup),
         token,
         status: 'SENT',
         expiresAt: inviteExpiry(),

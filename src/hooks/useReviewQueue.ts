@@ -12,6 +12,7 @@ import {
 } from '@/lib/complianceClient'
 import { useAuth } from '@/hooks/useAuth'
 import { approveDocument as approveDoc, rejectDocument as rejectDoc } from '@/lib/documentReview'
+import { driverPatchFromApplication } from '@/lib/applicationToDriver'
 import { useAppStore } from '@/store/useAppStore'
 import type { ComplianceDocument, DriverApplicationRecord } from '@/types'
 
@@ -144,6 +145,22 @@ export function useReviewQueue() {
       const tasks = await listOnboardingTasks('DRIVER', app.driverId)
       const appTask = tasks.find((t) => t.requirementKey === 'employment_application')
       if (appTask) await setTaskStatus(appTask.id, 'COMPLETE', { completedBy: user?.email })
+
+      // Fill the driver record from what they told us. A driver invited to apply starts
+      // as a stub named from their email; without this the roster keeps showing that
+      // stub and an empty phone while the real details sit inside the application.
+      const driver = useAppStore.getState().drivers.find((d) => d.id === app.driverId)
+      if (driver) {
+        const patch = driverPatchFromApplication(app, driver)
+        if (Object.keys(patch).length > 0) {
+          try {
+            await updateDriverInStore(app.driverId, patch)
+          } catch (err) {
+            // The application IS approved; a failed backfill shouldn't undo that.
+            console.error('[review] could not fill the driver record from the application', err)
+          }
+        }
+      }
       await writeComplianceAudit({
         entityType: 'DRIVER',
         entityId: app.driverId,

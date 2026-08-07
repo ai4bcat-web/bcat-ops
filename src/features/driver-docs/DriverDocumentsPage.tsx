@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FileSignature, PenLine, Mail, Eye, CheckCircle2, X, Send } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { classificationForFleet } from '@/lib/fileHub'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { getComplianceDocUrl, createSignatureRequest } from '@/lib/complianceClient'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
@@ -36,7 +37,7 @@ export function DriverDocumentsPage() {
   const rows = useMemo(
     () => drivers
       .filter((d) => d.active !== false)
-      .sort((a, b) => (rank(a.driverType) - rank(b.driverType)) || a.name.localeCompare(b.name)),
+      .sort((a, b) => (rank(classificationForFleet(a.fleetGroup)) - rank(classificationForFleet(b.fleetGroup))) || a.name.localeCompare(b.name)),
     [drivers],
   )
   const signedCount = useMemo(
@@ -89,7 +90,7 @@ export function DriverDocumentsPage() {
                   return (
                     <tr key={d.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                       <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>{d.name}</td>
-                      <td style={{ padding: '10px 16px', fontSize: 12.5, color: 'var(--ds-t3)' }}>{typeLabel(d.driverType)}</td>
+                      <td style={{ padding: '10px 16px', fontSize: 12.5, color: 'var(--ds-t3)' }}>{typeLabel(classificationForFleet(d.fleetGroup))}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                           {signed ? (
