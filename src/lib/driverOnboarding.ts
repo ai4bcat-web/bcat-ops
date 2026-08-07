@@ -209,3 +209,22 @@ export function statusAfterToggle(
  */
 export const templateIdForFleet = (fleetGroup?: FleetGroup | null): string | null =>
   fleetGroup === 'AMAZON' ? 'amazon-driver-v1' : null
+
+
+// ── One email per driver ────────────────────────────────────────────────────────
+
+/**
+ * A driver's email, wherever it was entered.
+ *
+ * It lives in two places: on the Driver record, and on their DriverPaySetting (where
+ * settlements are emailed). Settlements were set up long before the driver file existed,
+ * so most real addresses are on the pay setting — and the file was asking for it again.
+ *
+ * The driver record wins when both are set, since that's the one the file and the portal
+ * invite maintain; the pay setting fills the gap for everyone onboarded through
+ * settlements.
+ */
+export const resolveDriverEmail = (
+  driver: { email?: string | null },
+  paySettingEmail?: string | null,
+): string => (driver.email?.trim() || paySettingEmail?.trim() || '')

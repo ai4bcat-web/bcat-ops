@@ -57,7 +57,7 @@ export interface AmazonPayState {
 
 /** Composes the Amazon weekly pay statements for one 7-day period. */
 export function useAmazonPay(periodStart: string): AmazonPayState {
-  const { drivers } = useDrivers()
+  const { drivers, updateDriver: updateDriverRecord } = useDrivers()
   const { transactions: fuelTxs } = useFuelTransactions()
 
   const [trips, setTrips]           = useState<AmazonTrip[]>([])
@@ -168,7 +168,19 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
       const created = await createDriverPaySetting({ driverId, ...patch })
       setSettings((p) => [...p, created])
     }
-  }, [settings])
+
+    // The driver record and the pay setting each hold an email. If the settlement email
+    // is set and the driver record has none, mirror it onto the driver so nobody is
+    // asked for the same address twice.
+    const driver = drivers.find((d) => d.id === driverId)
+    if (patch.email?.trim() && driver && !driver.email?.trim()) {
+      try {
+        await updateDriverRecord(driverId, { email: patch.email.trim() })
+      } catch (err) {
+        console.error('[pay] could not mirror the email onto the driver', err)
+      }
+    }
+  }, [settings, drivers, updateDriverRecord])
   const addDeduction = useCallback(async (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => {
     const created = await createDriverPayDeduction(input)
     setDeductions((p) => [...p, created])

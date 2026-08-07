@@ -75,6 +75,11 @@ vi.mock('@/lib/complianceClient', () => ({
 
 vi.mock('@/lib/apiClient', () => ({
   driverTrailerFieldDeployed: () => true,
+  listDriverPaySettings: vi.fn().mockResolvedValue([
+    // Armando's address only exists on his settlement setting — the file should use it.
+    { id: 'ps1', driverId: 'd2', payPercent: 0.5, expensesBeforePercent: true,
+      email: 'armando@bcatcorp.com', createdAt: '', updatedAt: '' },
+  ]),
   uploadDriverPhoto: vi.fn(),
   deleteDriverPhoto: vi.fn(),
 }))
@@ -181,6 +186,16 @@ describe('Files hub renders', () => {
     fireEvent.click(screen.getByText('Inactive'))
     // Armando has no hireDate in the fixtures.
     expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+
+  it('uses the settlement email when the driver record has none', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    // Armando has no email on his driver record, but does on his pay setting. Asking
+    // for it again would be entering the same address twice.
+    expect(await screen.findByText('armando@bcatcorp.com')).toBeTruthy()
   })
 
   it('shows the admin-only Private docs control', async () => {

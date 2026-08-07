@@ -13,7 +13,8 @@ import {
 } from '@/lib/fileHub'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { listAllOnboardingTasks } from '@/lib/complianceClient'
-import { onboardingProgress, driverStatus, DRIVER_STATUS_LABELS, type DriverStatus } from '@/lib/driverOnboarding'
+import { listDriverPaySettings } from '@/lib/apiClient'
+import { onboardingProgress, driverStatus, DRIVER_STATUS_LABELS, resolveDriverEmail, type DriverStatus } from '@/lib/driverOnboarding'
 import type { OnboardingTask } from '@/types'
 import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
@@ -136,6 +137,24 @@ export function FilesPage() {
     return () => { alive = false }
   }, [])
 
+  // Settlement emails, so the file doesn't ask for an address that already exists on a
+  // driver's pay setting.
+  const [payEmails, setPayEmails] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    let alive = true
+    listDriverPaySettings()
+      .then((all) => {
+        if (!alive) return
+        const map = new Map<string, string>()
+        for (const st of all) if (st.email?.trim()) map.set(st.driverId, st.email.trim())
+        setPayEmails(map)
+      })
+      .catch((err) => console.error('[FilesPage] pay settings', err))
+    return () => { alive = false }
+  }, [])
+
+  const emailOf = (d: Driver) => resolveDriverEmail(d, payEmails.get(d.id))
+
   const tasksByDriver = useMemo(() => {
     const map = new Map<string, OnboardingTask[]>()
     for (const t of tasks) {
@@ -191,7 +210,7 @@ export function FilesPage() {
     return activeDrivers.filter((d) => {
       const truck = trucks.find((t) => t.id === d.assignedTruckId)
       const fleet = d.fleetGroup ? FLEET_GROUP_LABELS[d.fleetGroup] : ''
-      return [d.name, d.phone, d.email, d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
+      return [d.name, d.phone, emailOf(d), d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
   }, [byStatus, trucks, q])
 
@@ -357,10 +376,10 @@ export function FilesPage() {
                         : <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>Unclassified</span>}
                     </td>
                     <td style={{ ...TD, maxWidth: 210 }}
-                      title={d.email || 'No email — an application can’t be sent without one'}>
+                      title={emailOf(d) || 'No email — an application can’t be sent without one'}>
                       <div style={{ color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.phone ? formatPhone(d.phone) : '—'}</div>
-                      <div style={{ fontSize: 11.5, color: d.email ? 'var(--ds-t3)' : '#b45309', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {d.email || 'no email'}
+                      <div style={{ fontSize: 11.5, color: emailOf(d) ? 'var(--ds-t3)' : '#b45309', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {emailOf(d) || 'no email'}
                       </div>
                     </td>
                     <td style={{ ...TD, maxWidth: 190 }}>
