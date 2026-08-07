@@ -2,14 +2,16 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone, formatVin } from '@/lib/utils'
 import {
-  slotsFor, readyScore, slotState, truckSlotState, driverExpiry,
+  slotsForDriver, slotsForAsset, readyScore, slotState, truckSlotState, driverExpiry, visibleSlots,
   type ReadyScore, type SlotState, type ExpiryInfo,
 } from '@/lib/fileHub'
+import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
@@ -84,6 +86,8 @@ export function FilesPage() {
   const storeLoading = useAppStore((s) => s.isLoading)
   const storeError = useAppStore((s) => s.error)
   const hub = useFileHub()
+  // Private documents (pay terms) are admin-only — hidden entirely, not shown as missing.
+  const { isAdmin } = useAuth()
 
   const [tab, setTab] = useState<Tab>('TRUCK')
   const [query, setQuery] = useState('')
@@ -109,13 +113,13 @@ export function FilesPage() {
   // Trucks resolve status through truckSlotState so the dots agree exactly with the
   // Asset Documents page (DOT date comes off the truck, waived docs drop out).
   const scoreFor = (entityType: Tab, id: string): ReadyScore => {
-    const slots = slotsFor(entityType)
     if (entityType === 'TRUCK') {
       const t = equipment.find((e) => e.id === id)
       if (!t) return { onFile: 0, required: 0, missing: 0, attention: 0 }
-      return readyScore(slots, (key) => truckSlotState(t, key, hub.docFor('TRUCK', id, key)))
+      return readyScore(visibleSlots(slotsForAsset(t.type, t.fleetGroup), isAdmin), (key) => truckSlotState(t, key, hub.docFor('TRUCK', id, key)))
     }
-    return readyScore(slots, (key) => slotState(hub.docFor('DRIVER', id, key)))
+    const d = drivers.find((x) => x.id === id)
+    return readyScore(visibleSlots(slotsForDriver(d?.fleetGroup), isAdmin), (key) => slotState(hub.docFor('DRIVER', id, key)))
   }
 
   const q = query.trim().toLowerCase()
@@ -123,7 +127,8 @@ export function FilesPage() {
     if (!q) return activeDrivers
     return activeDrivers.filter((d) => {
       const truck = trucks.find((t) => t.id === d.assignedTruckId)
-      return [d.name, d.phone, d.cdl, truck?.unitNumber].some((v) => (v ?? '').toLowerCase().includes(q))
+      const fleet = d.fleetGroup ? FLEET_GROUP_LABELS[d.fleetGroup] : ''
+      return [d.name, d.phone, d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
   }, [activeDrivers, trucks, q])
 
@@ -138,7 +143,7 @@ export function FilesPage() {
     setPacketBusyId(id)
     try {
       const outcome = await downloadEntityPacket({
-        entity, hub, drivers, equipment, todayIso: new Date().toISOString().slice(0, 10),
+        entity, hub, drivers, equipment, todayIso: new Date().toISOString().slice(0, 10), canSeePrivate: isAdmin,
       })
       const { level, message } = packetToast(outcome)
       toast[level](message)
@@ -226,7 +231,7 @@ export function FilesPage() {
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 {tab === 'DRIVER' ? (
                   <>
-                    <th style={TH}>Driver</th><th style={TH}>Phone</th><th style={TH}>CDL</th>
+                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>CDL</th>
                     <th style={TH}>CDL expires</th><th style={TH}>Med card expires</th>
                     <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
@@ -241,7 +246,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={9} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -266,6 +271,11 @@ export function FilesPage() {
                         <Avatar src={d.photoUrl} initials={getInitials(d.name)} size="xs" style={{ background: getColor(d.colorKey).avatarBg, color: '#fff' }} />
                         <b style={{ fontWeight: 600 }}>{d.name}</b>
                       </span>
+                    </td>
+                    <td style={{ ...TD }}>
+                      {d.fleetGroup
+                        ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{FLEET_GROUP_LABELS[d.fleetGroup]}</span>
+                        : <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>Unclassified</span>}
                     </td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{d.phone ? formatPhone(d.phone) : '—'}</td>
                     <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{d.cdl || '—'}</td>
@@ -319,6 +329,7 @@ export function FilesPage() {
           hub={hub}
           onClose={() => setOpenId(null)}
           onEditDriver={(d) => setDriverEdit({ open: true, driver: d })}
+          canSeePrivate={isAdmin}
         />
       )}
       <DriverDrawer open={driverEdit.open} driver={driverEdit.driver} onClose={() => setDriverEdit({ open: false, driver: null })} />

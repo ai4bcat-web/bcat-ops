@@ -15,6 +15,11 @@ export interface Driver {
   photoUrl?: string  // client-side: resolved presigned URL
   assignedTruckId?: string | null
   assignedTrailerId?: string | null   // Equipment.id of the trailer; null = TBD
+  /**
+   * Which fleet this driver runs in — mirrors DriverPaySetting.payGroup so the two
+   * agree, and decides which documents their file requires.
+   */
+  fleetGroup?: import('./equipment').FleetGroup | null
   // Compliance & profile fields
   email?: string
   cdl?: string           // CDL number e.g. "CDL-A IL-8823901"

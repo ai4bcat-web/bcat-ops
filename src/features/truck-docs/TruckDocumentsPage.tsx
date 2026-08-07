@@ -12,11 +12,12 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FileText, Search, Truck as TruckIcon, Container, FileStack } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { formatVin } from '@/lib/utils'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc, type DocState } from '@/lib/truckDocs'
-import { slotsForAsset, readyScore, truckSlotState, type ReadyScore } from '@/lib/fileHub'
+import { slotsForAsset, readyScore, truckSlotState, visibleSlots, type ReadyScore } from '@/lib/fileHub'
 import { EntityFilePanel } from '@/features/files/EntityFilePanel'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from '@/features/files/entityPacket'
 import type { Equipment } from '@/types/equipment'
@@ -87,6 +88,7 @@ export function TruckDocumentsPage() {
   const drivers = useAppStore((s) => s.drivers)
   const storeLoading = useAppStore((s) => s.isLoading)
   const hub = useFileHub()
+  const { isAdmin } = useAuth()
 
   const [tab, setTab] = useState<Tab>('truck')
   const [query, setQuery] = useState('')
@@ -110,14 +112,14 @@ export function TruckDocumentsPage() {
   }, [assets, q])
 
   const scoreFor = (asset: Equipment): ReadyScore =>
-    readyScore(slotsForAsset(asset.type), (key) => truckSlotState(asset, key, hub.docFor('TRUCK', asset.id, key)))
+    readyScore(visibleSlots(slotsForAsset(asset.type, asset.fleetGroup), isAdmin), (key) => truckSlotState(asset, key, hub.docFor('TRUCK', asset.id, key)))
 
   const downloadPacket = async (asset: Equipment) => {
     setPacketBusyId(asset.id)
     try {
       const outcome = await downloadEntityPacket({
         entity: { kind: 'TRUCK', truck: asset }, hub, drivers, equipment,
-        todayIso: new Date().toISOString().slice(0, 10),
+        todayIso: new Date().toISOString().slice(0, 10), canSeePrivate: isAdmin,
       })
       const { level, message } = packetToast(outcome)
       toast[level](message)
@@ -251,7 +253,7 @@ export function TruckDocumentsPage() {
         {hub.loading && <div style={{ color: 'var(--ds-t3)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
       </div>
 
-      {openEntity && <EntityFilePanel entity={openEntity} hub={hub} onClose={() => setOpenId(null)} />}
+      {openEntity && <EntityFilePanel entity={openEntity} hub={hub} onClose={() => setOpenId(null)} canSeePrivate={isAdmin} />}
     </div>
   )
 }

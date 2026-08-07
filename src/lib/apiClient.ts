@@ -48,12 +48,13 @@ const DRIVER_BASE_FIELDS = `
   createdAt updatedAt
 `
 let driversHaveCompliance = true
-// assignedTrailerId ships with the Files hub — same self-healing treatment.
+// assignedTrailerId + fleetGroup ship with the Files hub — same self-healing treatment.
+// They deploy together, so one flag covers both.
 let driversHaveTrailer = true
 const driverFields = () => [
   DRIVER_BASE_FIELDS,
   driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
-  driversHaveTrailer ? 'assignedTrailerId' : '',
+  driversHaveTrailer ? 'assignedTrailerId fleetGroup' : '',
 ].filter(Boolean).join(' ')
 
 function isComplianceFieldUndefined(err: unknown): boolean {
@@ -71,7 +72,7 @@ function isComplianceFieldUndefined(err: unknown): boolean {
  * the first listDrivers throw. Same approach as isMissingBtExt below.
  */
 export function isTrailerFieldUndefined(err: unknown): boolean {
-  return /assignedTrailerId/i.test(safeStringify(err))
+  return /assignedTrailerId|fleetGroup/i.test(safeStringify(err))
 }
 
 /** JSON.stringify that also captures Error.message (not an own enumerable property). */
@@ -301,9 +302,9 @@ export async function updateDriver(
   patch: Partial<Omit<Driver, 'id' | 'createdAt'>>
 ): Promise<Driver> {
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
-  // Writing assignedTrailerId to a backend that doesn't have it yet would hard-fail.
-  const { assignedTrailerId: _t, ...withoutTrailer } = all
-  const rest = driversHaveTrailer ? all : withoutTrailer
+  // Writing these to a backend that doesn't have them yet would hard-fail.
+  const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
+  const rest = driversHaveTrailer ? all : withoutNewFields
   try {
     const result = await client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,

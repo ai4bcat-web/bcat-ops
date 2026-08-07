@@ -1,4 +1,4 @@
-import type { Equipment } from '@/types/equipment'
+import type { Equipment, FleetGroup } from '@/types/equipment'
 import type { ComplianceDocument } from '@/types'
 import type { DefaultExpirationRule } from './complianceRequirements'
 
@@ -22,6 +22,11 @@ export interface TruckDocSpec {
    * original spec behaves, so adding this field changed nothing that already existed.
    */
   appliesTo?: 'truck' | 'trailer'
+  /**
+   * Restrict this document to certain fleets. Omitted = every fleet. The I-PASS
+   * transponder is only carried by Local and Box Truck units.
+   */
+  fleets?: FleetGroup[]
 }
 
 /**
@@ -48,11 +53,19 @@ export const TRUCK_DOC_SPECS: TruckDocSpec[] = [
   { key: 'photo_vin_inside',      label: 'VIN plate',      sub: 'Photo of the VIN inside the truck', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'truck' },
   // Trailers are identified by their own plate, so one shot showing both.
   { key: 'photo_trailer_plate',   label: 'Trailer + plate', sub: 'Photo of the trailer showing its plate', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'trailer' },
+  // The I-PASS transponder that travels with the truck — Local and Box Truck only;
+  // Amazon units don't carry one.
+  { key: 'photo_ipass',           label: 'I-PASS',          sub: 'Photo of the transponder', rule: 'PLUS_N_MONTHS', photo: true, appliesTo: 'truck', fleets: ['LOCAL', 'BOX_TRUCK'] },
 ]
 
 /** The documents that apply to one asset type (trucks or trailers). */
-export const specsForAssetType = (type: 'truck' | 'trailer'): TruckDocSpec[] =>
-  TRUCK_DOC_SPECS.filter((s) => !s.appliesTo || s.appliesTo === type)
+export const specsForAssetType = (type: 'truck' | 'trailer', fleetGroup?: FleetGroup | null): TruckDocSpec[] =>
+  TRUCK_DOC_SPECS.filter((s) =>
+    (!s.appliesTo || s.appliesTo === type) &&
+    // A fleet-restricted document only appears for those fleets. An unassigned truck
+    // shows it too, so a missing fleetGroup never silently hides a required photo.
+    (!s.fleets || !fleetGroup || s.fleets.includes(fleetGroup)),
+  )
 
 // ── Date helpers ────────────────────────────────────────────────────────────────
 

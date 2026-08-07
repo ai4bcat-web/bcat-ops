@@ -33,7 +33,7 @@ const inputStyle: React.CSSProperties = {
 }
 const labelStyle: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }
 
-const FLEET_COLOR: Record<'all' | FleetGroup, string> = { all: '#1ea8f3', LOCAL: '#1ea8f3', AMAZON: '#f59e0b' }
+const FLEET_COLOR: Record<'all' | FleetGroup, string> = { all: '#1ea8f3', LOCAL: '#1ea8f3', AMAZON: '#f59e0b', BOX_TRUCK: '#8b5cf6' }
 
 // Cap the timeline so an all-time range stays readable.
 const MAX_BARS = 24

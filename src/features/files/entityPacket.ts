@@ -4,7 +4,7 @@
  * two produce byte-identical PDFs — including the assigned driver's phone and CDL on a
  * truck packet.
  */
-import { slotsFor, slotsForAsset, isUnslottedDoc } from '@/lib/fileHub'
+import { slotsForAsset, slotsForDriver, isUnslottedDoc, visibleSlots, isPrivateDoc } from '@/lib/fileHub'
 import { buildFilePacket, packetFilename, type PacketField, type PacketItem, type PacketResult } from '@/lib/filePacketPdf'
 import { formatPhone, formatVin } from '@/lib/utils'
 import type { FileHubState } from '@/hooks/useFileHub'
@@ -75,12 +75,23 @@ export function entityFields(entity: FileEntity, drivers: Driver[], equipment: E
 export const DRIVER_DOCS_ON_TRUCK = ['cdl_copy', 'medical_card'] as const
 
 /** Every document to include, slots first (in slot order), then anything else on file. */
-export function packetItems(entity: FileEntity, hub: FileHubState, drivers: Driver[] = []): PacketItem[] {
+export function packetItems(
+  entity: FileEntity,
+  hub: FileHubState,
+  drivers: Driver[] = [],
+  /** A packet built by a non-admin must not contain private documents. */
+  canSeePrivate = false,
+): PacketItem[] {
   const type = entity.kind
   const id = entityId(entity)
   const items: PacketItem[] = []
 
-  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type) : slotsFor(type)
+  const slots = visibleSlots(
+    entity.kind === 'TRUCK'
+      ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup)
+      : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null),
+    canSeePrivate,
+  )
   for (const slot of slots) {
     const doc = hub.docFor(type, id, slot.key)
     if (doc?.s3Key) {
@@ -93,7 +104,7 @@ export function packetItems(entity: FileEntity, hub: FileHubState, drivers: Driv
   }
 
   for (const doc of hub.docsForEntity(type, id)) {
-    if (isUnslottedDoc(doc.documentType) && doc.s3Key) {
+    if (isUnslottedDoc(doc.documentType) && doc.s3Key && (canSeePrivate || !isPrivateDoc(doc.documentType))) {
       items.push({
         label: doc.title || doc.documentType,
         s3Key: doc.s3Key,
@@ -139,9 +150,10 @@ export async function downloadEntityPacket(params: {
   drivers: Driver[]
   equipment: Equipment[]
   todayIso: string
+  canSeePrivate?: boolean
 }): Promise<PacketOutcome> {
-  const { entity, hub, drivers, equipment, todayIso } = params
-  const items = packetItems(entity, hub, drivers)
+  const { entity, hub, drivers, equipment, todayIso, canSeePrivate = false } = params
+  const items = packetItems(entity, hub, drivers, canSeePrivate)
   const title = entityTitle(entity)
 
   const result = await buildFilePacket({
