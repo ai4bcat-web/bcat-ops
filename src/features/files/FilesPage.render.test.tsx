@@ -129,7 +129,8 @@ describe('Files hub renders', () => {
     const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
-    expect(screen.getAllByText('Email').length).toBeGreaterThanOrEqual(1)
+    // Phone and email share a Contact column now — ten columns were being clipped.
+    expect(screen.getByText('Contact')).toBeTruthy()
     expect(screen.getByText('zak@bcatcorp.com')).toBeTruthy()
   })
 
