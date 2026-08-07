@@ -30,6 +30,7 @@ if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => 
 
 const driver: Driver = {
   id: 'd1', name: 'Zak Pace', phone: '+18472936704', active: true, type: 'driver',
+  email: 'zak@bcatcorp.com',
   cdl: 'CDL-A IL-8823901', cdlExpiration: '2027-03-14', medCardExpiration: '2026-11-01',
   fleetGroup: 'BOX_TRUCK', assignedTruckId: 't1', createdAt: '', updatedAt: '',
 }
@@ -104,6 +105,24 @@ describe('Files hub renders', () => {
     renderIn(<FilesPage />)
     // Stored lowercase in the fixture — proves formatVin is applied at the display site.
     expect(screen.getByText('1FUJGLD55LLAA3391')).toBeTruthy()
+  })
+
+  it('shows each driver\'s email in the list', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    expect(screen.getByText('Email')).toBeTruthy()
+    expect(screen.getByText('zak@bcatcorp.com')).toBeTruthy()
+  })
+
+  it('finds a driver by their email', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    fireEvent.change(screen.getByPlaceholderText(/Search name/), { target: { value: 'zak@bcat' } })
+    expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
   it('shows the admin-only Private docs control', async () => {

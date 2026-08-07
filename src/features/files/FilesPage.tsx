@@ -137,7 +137,7 @@ export function FilesPage() {
     return activeDrivers.filter((d) => {
       const truck = trucks.find((t) => t.id === d.assignedTruckId)
       const fleet = d.fleetGroup ? FLEET_GROUP_LABELS[d.fleetGroup] : ''
-      return [d.name, d.phone, d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
+      return [d.name, d.phone, d.email, d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
   }, [activeDrivers, trucks, q])
 
@@ -246,7 +246,7 @@ export function FilesPage() {
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 {tab === 'DRIVER' ? (
                   <>
-                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>CDL</th>
+                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>Email</th><th style={TH}>CDL</th>
                     <th style={TH}>CDL expires</th><th style={TH}>Med card expires</th>
                     <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
@@ -261,7 +261,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={9} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -293,6 +293,10 @@ export function FilesPage() {
                         : <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>Unclassified</span>}
                     </td>
                     <td style={{ ...TD, color: 'var(--ds-t2)' }}>{d.phone ? formatPhone(d.phone) : '—'}</td>
+                    <td style={{ ...TD, color: d.email ? 'var(--ds-t2)' : 'var(--ds-t3)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={d.email || 'No email — an application can’t be sent without one'}>
+                      {d.email || '—'}
+                    </td>
                     <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{d.cdl || '—'}</td>
                     <ExpiryCell info={driverExpiry(d.cdlExpiration, hub.docFor('DRIVER', d.id, 'cdl_copy'))} />
                     <ExpiryCell info={driverExpiry(d.medCardExpiration, hub.docFor('DRIVER', d.id, 'medical_card'))} />
