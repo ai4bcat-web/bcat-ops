@@ -66,7 +66,8 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     key: 'employment_agreement',
     label: 'Employment agreement',
     category: 'Application',
-    appliesTo: ALL_DRIVERS,
+    // Employees only. Owner-operators run under a lease agreement instead.
+    appliesTo: ['COMPANY'],
     required: true,
     requiresDocument: true,
     requiresExpiration: false,

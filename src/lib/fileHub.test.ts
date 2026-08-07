@@ -290,14 +290,31 @@ describe('driver documents by fleet', () => {
     expect(keys('AMAZON')).toContain('employment_application')
   })
 
-  it('an unclassified driver keeps the DQ file but no fleet-specific paperwork', () => {
+  it('treats an unclassified driver as a company driver — the safer default', () => {
+    // Showing owner-operator paperwork to an employee is worse than the reverse.
     const k = keys(null)
     expect(k).toContain('cdl_copy')
-    expect(k).toContain('medical_card')
     expect(k).toContain('employment_application')
-    // Neither fleet's agreement, since we don't know which applies.
-    expect(k).not.toContain('employment_agreement')
+    expect(k).toContain('employment_agreement')
     expect(k).not.toContain('lease_agreement')
+  })
+
+  it('owner-operator paperwork appears ONLY for Amazon', () => {
+    const ooOnly = ['lease_agreement', 'w9', 'equipment_receipt', 'escrow_terms',
+                    'oo_bobtail_insurance', 'oo_physical_damage', 'occ_acc_or_workers_comp',
+                    'truck_title_registration']
+    for (const key of ooOnly) {
+      expect(keys('AMAZON')).toContain(key)
+      // Ivan and box-truck drivers are employees — none of this applies to them.
+      expect(keys('LOCAL')).not.toContain(key)
+      expect(keys('BOX_TRUCK')).not.toContain(key)
+    }
+  })
+
+  it('company drivers carry the employment agreement, owner-operators do not', () => {
+    expect(keys('LOCAL')).toContain('employment_agreement')
+    expect(keys('BOX_TRUCK')).toContain('employment_agreement')
+    expect(keys('AMAZON')).not.toContain('employment_agreement')
   })
 
   it('carries the document-bearing DQ file, not just a CDL and med card', () => {

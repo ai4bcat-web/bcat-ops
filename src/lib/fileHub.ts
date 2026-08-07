@@ -124,33 +124,35 @@ const catalogSlot = (req: (typeof DRIVER_REQUIREMENTS)[number]): FileSlot => ({
   expires: req.requiresExpiration,
 })
 
-const DRIVER_BASE_SLOTS: readonly FileSlot[] = DRIVER_REQUIREMENTS
+/**
+ * Which DOT classification a fleet implies.
+ *
+ * Local (Ivan) and Box Truck drivers are company employees; Amazon drivers run as
+ * owner-operators. Deriving it from the fleet keeps one source of truth — the
+ * alternative is a separate driverType that can silently disagree and put lease and
+ * escrow paperwork on a company driver's file.
+ */
+export const classificationForFleet = (fleetGroup?: FleetGroup | null): 'COMPANY' | 'OWNER_OPERATOR' =>
+  fleetGroup === 'AMAZON' ? 'OWNER_OPERATOR' : 'COMPANY'
+
+/** Every driver slot across all fleets — used for "is this key slotted?" checks. */
+export const DRIVER_FILE_SLOTS: readonly FileSlot[] = DRIVER_REQUIREMENTS
   .filter((r) => r.requiresDocument)
   .map(catalogSlot)
 
 /**
- * Fleet-specific paperwork on top of the DQ file. Local (Ivan) and Box Truck drivers are
- * employees, so they carry an employment agreement; Amazon drivers run under a lease.
- */
-const DRIVER_SLOTS_BY_FLEET: Record<FleetGroup, readonly string[]> = {
-  LOCAL:     ['employment_agreement'],
-  BOX_TRUCK: ['employment_agreement'],
-  AMAZON:    ['lease_agreement'],
-}
-
-const FLEET_ONLY_KEYS = new Set(Object.values(DRIVER_SLOTS_BY_FLEET).flat())
-
-/** Every driver slot across all fleets — used for "is this key slotted?" checks. */
-export const DRIVER_FILE_SLOTS: readonly FileSlot[] = DRIVER_BASE_SLOTS
-
-/**
- * The slots ONE driver's file requires: the DQ file minus other fleets' paperwork.
- * An unclassified driver keeps the DQ set but is shown no fleet-specific documents,
- * rather than being asked for paperwork that may not apply.
+ * The slots ONE driver's file requires — the catalog's own `appliesTo` decides it, so
+ * owner-operator paperwork (lease, W-9, escrow, bobtail, occ/acc, title) appears only
+ * for Amazon, and company drivers get the employment agreement instead.
+ *
+ * An unclassified driver is treated as a company driver: the safe default, since
+ * showing owner-operator paperwork to an employee is worse than the reverse.
  */
 export const slotsForDriver = (fleetGroup?: FleetGroup | null): readonly FileSlot[] => {
-  const mine = new Set(fleetGroup ? DRIVER_SLOTS_BY_FLEET[fleetGroup] : [])
-  return DRIVER_BASE_SLOTS.filter((s) => !FLEET_ONLY_KEYS.has(s.key) || mine.has(s.key))
+  const classification = classificationForFleet(fleetGroup)
+  return DRIVER_REQUIREMENTS
+    .filter((r) => r.requiresDocument && (r.appliesTo as readonly string[]).includes(classification))
+    .map(catalogSlot)
 }
 
 // ── Truck ───────────────────────────────────────────────────────────────────────
