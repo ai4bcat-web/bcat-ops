@@ -21,7 +21,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP } from '@/lib/driverColors'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
-import { classificationForFleet } from '@/lib/fileHub'
+import { classificationForFleet, driverExpiry } from '@/lib/fileHub'
+import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import type { ColorKey } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -63,7 +64,11 @@ function ReadOnly({ label, value, from }: { label: string; value: string; from: 
   )
 }
 
-export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
+export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawerProps) {
+  // The prop is a snapshot from when Edit was clicked; anything uploaded or changed
+  // since would be invisible. Prefer the live record.
+  const liveDrivers = useAppStore((s) => s.drivers)
+  const driver = driverProp ? (liveDrivers.find((d) => d.id === driverProp.id) ?? driverProp) : driverProp
   const { addDriver, updateDriver, deleteDriver } = useDrivers()
   const isEdit = driver !== null
 
@@ -84,6 +89,21 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
   const trucks = useAppStore((s) => s.equipment).filter((e) => e.type === 'truck' && e.active)
   const trailers = useAppStore((s) => s.equipment).filter((e) => e.type === 'trailer' && e.active)
+
+  // Read the DOCUMENTS, not just the driver record. The record only carries an expiry if
+  // someone typed one during upload, so a CDL that is plainly on file could leave this
+  // section empty — which is exactly what it looked like.
+  const { docFor } = useAllComplianceDocuments()
+  const docState = (documentType: string, recordDate?: string | null) => {
+    const doc = driver ? docFor('DRIVER', driver.id, documentType) : undefined
+    const info = driverExpiry(recordDate, doc)
+    if (!doc?.s3Key && !info.date) return { value: 'Not on file', from: 'upload it in the driver file' }
+    if (!info.date) return { value: 'On file', from: 'no expiry recorded — add one on the tile' }
+    return {
+      value: info.date,
+      from: doc?.s3Key ? 'from the uploaded document' : 'on the driver record',
+    }
+  }
 
   const watchType = watch('type')
   const watchName = watch('name')
@@ -370,12 +390,8 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                   <ReadOnly label="Classification"
                     value={watchFleet ? (classificationForFleet(watchFleet) === 'OWNER_OPERATOR' ? 'Owner operator' : 'Company driver') : '—'}
                     from={watchFleet ? 'from the fleet above' : 'set a fleet above'} />
-                  <ReadOnly label="CDL Expiration"
-                    value={driver?.cdlExpiration || '—'}
-                    from={driver?.cdlExpiration ? 'from the uploaded CDL' : 'set when the CDL is uploaded'} />
-                  <ReadOnly label="Med Card Expiration"
-                    value={driver?.medCardExpiration || '—'}
-                    from={driver?.medCardExpiration ? 'from the uploaded medical card' : 'set when the medical card is uploaded'} />
+                  <ReadOnly label="CDL" {...docState('cdl_copy', driver?.cdlExpiration)} />
+                  <ReadOnly label="Medical card" {...docState('medical_card', driver?.medCardExpiration)} />
                   <ReadOnly label="Last Drug Test"
                     value={driver?.drugTestDate || '—'}
                     from="from the onboarding checklist" />

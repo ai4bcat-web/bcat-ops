@@ -22,10 +22,6 @@ import { InvoicesPage } from '@/features/invoices/InvoicesPage'
 import { UsersPage } from '@/features/users/UsersPage'
 import { IntakePage } from '@/features/intake/IntakePage'
 import { TasksPage } from '@/features/tasks/TasksPage'
-import { CompliancePage } from '@/features/compliance/CompliancePage'
-import { OnboardingPage } from '@/features/compliance/OnboardingPage'
-import { DriverComplianceDetailPage } from '@/features/compliance/DriverComplianceDetailPage'
-import { TruckOnboardingWizardPage } from '@/features/compliance/TruckOnboardingWizardPage'
 import { DriverPortalPage } from '@/features/driver-portal/DriverPortalPage'
 import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
 import { VehicleConfirmationPage } from '@/features/vehicle-confirmation/VehicleConfirmationPage'
@@ -33,6 +29,7 @@ import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManag
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDocumentsPage } from '@/features/driver-docs/DriverDocumentsPage'
 import { FilesPage } from '@/features/files/FilesPage'
+import { SettingsPage } from '@/features/settings/SettingsPage'
 import { DocumentSigningPage } from '@/features/driver-docs/DocumentSigningPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
@@ -71,19 +68,21 @@ export default function App() {
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/driver-docs" element={<RequirePage page="driverDocs"><DriverDocumentsPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
+              <Route path="/settings" element={<RequirePage page="settings"><SettingsPage /></RequirePage>} />
               <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
               <Route path="/users" element={<RequireOwner><UsersPage /></RequireOwner>} />
               <Route path="/vehicle-quote" element={<RequirePage page="vehicleQuote"><VehicleQuotePage /></RequirePage>} />
               <Route path="/vehicle-confirmation" element={<RequirePage page="vehicleConfirmation"><VehicleConfirmationPage /></RequirePage>} />
-              {/* Compliance & onboarding */}
-              <Route path="/compliance" element={<RequirePage page="compliance"><CompliancePage /></RequirePage>} />
-              <Route path="/compliance/onboarding" element={<RequirePage page="complianceOnboarding"><OnboardingPage /></RequirePage>} />
-              {/* Review Queue merged into the Onboarding hub */}
-              <Route path="/compliance/review" element={<Navigate to="/compliance/onboarding" replace />} />
-              <Route path="/compliance/driver/:driverId" element={<RequirePage page="compliance"><DriverComplianceDetailPage /></RequirePage>} />
-              <Route path="/compliance/truck/:truckId" element={<RequirePage page="compliance"><TruckOnboardingWizardPage /></RequirePage>} />
+              {/* Retired — compliance lives in the driver and truck files now, and the
+                  global settings moved to /settings. Redirected so bookmarks and old
+                  links land somewhere useful rather than 404ing. */}
+              <Route path="/compliance" element={<Navigate to="/files" replace />} />
+              <Route path="/compliance/onboarding" element={<Navigate to="/files" replace />} />
+              <Route path="/compliance/review" element={<Navigate to="/files" replace />} />
+              <Route path="/compliance/driver/:driverId" element={<Navigate to="/files" replace />} />
+              <Route path="/compliance/truck/:truckId" element={<Navigate to="/files" replace />} />
               {/* Marketing */}
               <Route path="/reddit-queue" element={<RequirePage page="redditQueue"><RedditQueuePage /></RequirePage>} />
               {/* legacy redirects */}

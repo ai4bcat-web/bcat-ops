@@ -48,3 +48,18 @@ describe('assignedTrailerId pre-deploy detection', () => {
     expect(isTrailerFieldUndefined(circular)).toBe(true)
   })
 })
+
+describe('a saved value must come back in the response', () => {
+  it('the optimistic selection always asks for the newer fields', () => {
+    // The write succeeding is only half of it: if the response selection omits
+    // fleetGroup, the returned driver overwrites local state without it and a value
+    // that WAS saved instantly reads as unsaved. That is what "it's not saving" was.
+    const { readFileSync } = require('node:fs') as typeof import('node:fs')
+    const src = readFileSync('src/lib/apiClient.ts', 'utf8')
+    const updateDriver = src.slice(src.indexOf('export async function updateDriver'))
+    const run = updateDriver.slice(0, updateDriver.indexOf('export async function', 10))
+    expect(run).toContain('assignedTrailerId fleetGroup')
+    // And the fallback path must NOT ask for them, or it would fail the same way.
+    expect(run).toContain('withNewFields')
+  })
+})

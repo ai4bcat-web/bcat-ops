@@ -86,7 +86,7 @@ export const AMAZON_DRIVER_TEMPLATE: OnboardingTemplate = {
     },
     {
       // Legal forms & truck documents. Truck-owned (entity: 'TRUCK') tasks are generated on
-      // the assigned truck once Phase 1 completes (see PhasedOnboardingSection), so the
+      // the assigned truck once Phase 1 completes (shown by phase in the driver file), so the
       // office can register/plate the truck alongside the driver's document uploads.
       phase: 2,
       title: 'Legal Forms & Documents',

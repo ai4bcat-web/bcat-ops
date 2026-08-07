@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
   Truck, Wrench, Fuel, History,
-  ShieldCheck, LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Rocket, FileSignature, Umbrella, MessageSquare, FolderOpen, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, FileSignature, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -78,15 +78,9 @@ export const NAV_GROUPS: NavSection[] = [
     ],
   },
   {
-    title: 'Compliance',
-    items: [
-      { to: '/compliance',            label: 'Compliance', icon: ShieldCheck, pageKey: 'compliance' },
-      { to: '/compliance/onboarding', label: 'Onboarding', icon: Rocket,      pageKey: 'complianceOnboarding', badgeKey: 'review' },
-    ],
-  },
-  {
     title: 'System',
     items: [
+      { to: '/settings',  label: 'Settings',  icon: SlidersHorizontal, pageKey: 'settings' },
       { to: '/audit-log', label: 'Audit Log', icon: History, pageKey: 'audit' },
     ],
   },

@@ -49,6 +49,7 @@ vi.mock('@/lib/complianceClient', () => ({
   listAllComplianceDocuments: vi.fn().mockResolvedValue([]),
   listOnboardingTasks: vi.fn().mockResolvedValue([]),
   listAllOnboardingTasks: vi.fn().mockResolvedValue([]),
+  getApplicationByDriver: vi.fn().mockResolvedValue(null),
   ensureComplianceSettings: vi.fn().mockResolvedValue({
     id: 's1', settingsKey: 'GLOBAL', portalEmailsPaused: true, escalationEmailsPaused: true,
     privateDocumentTypes: null, createdAt: '', updatedAt: '',
@@ -251,6 +252,28 @@ describe('editing a driver opens ONE drawer', () => {
     expect(screen.queryByText('Driver file')).toBeNull()
     // The editor now uses the same SidePanel shell: driver name as title, role beneath.
     expect(screen.getByText('Edit driver')).toBeTruthy()
+  })
+
+  it('shows an uploaded CDL in the compliance section, even with no expiry typed', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { getSnapshot, applyDoc, __resetForTests } = await import('@/lib/complianceDocStore')
+    __resetForTests({ loaded: true })
+    applyDoc({
+      id: 'cdl1', entityType: 'DRIVER', entityId: 'd1', documentType: 'cdl_copy',
+      title: 'CDL copy', s3Key: 'k/cdl.pdf', status: 'VALID', uploadedBy: 'INTERNAL',
+      expirationDate: null, createdAt: '2026-08-01', updatedAt: '2026-08-01',
+    })
+    expect(getSnapshot().docs).toHaveLength(1)
+
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    fireEvent.click(screen.getByText('Zak Pace'))
+    fireEvent.click(screen.getByText('Edit'))
+
+    // The record carries no expiry — reading only the record showed nothing at all.
+    expect(screen.getByText('On file')).toBeTruthy()
+    __resetForTests()
   })
 
   it('uses the same panel shell as the driver file', async () => {

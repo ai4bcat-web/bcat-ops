@@ -304,10 +304,19 @@ export async function updateDriver(
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
   const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
 
-  const run = async (input: Record<string, unknown>) => client.graphql({
-    query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
-    variables: { input: { id, ...input } },
-  }) as Promise<{ data: { updateDriver: Driver } }>
+  // The SELECTION matters as much as the input. Building it from `driversHaveTrailer`
+  // meant a stale flag returned a driver with fleetGroup/assignedTrailerId missing —
+  // the write succeeded and the response then overwrote local state without them, so a
+  // saved value instantly read as unsaved. Ask for them on the optimistic attempt.
+  const run = async (input: Record<string, unknown>, withNewFields: boolean) => {
+    const fields = withNewFields
+      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup`
+      : driverFields()
+    return client.graphql({
+      query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${fields} } }`,
+      variables: { input: { id, ...input } },
+    }) as Promise<{ data: { updateDriver: Driver } }>
+  }
 
   // ALWAYS attempt the full patch first, then fall back if the backend rejects a newer
   // field. Deciding up-front from `driversHaveTrailer` was a silent data loss: that flag
@@ -315,7 +324,7 @@ export async function updateDriver(
   // kept dropping fleetGroup/assignedTrailerId from every save while still reporting
   // success — the user set a value, saw it accepted, and it was never written.
   try {
-    const result = await run(all)
+    const result = await run(all, true)
     driversHaveTrailer = true   // proven supported — re-enable it for reads too
     return resolveDriverPhotoUrl(result.data.updateDriver)
   } catch (err: unknown) {
@@ -325,7 +334,7 @@ export async function updateDriver(
     if (isTrailerFieldUndefined(err)) {
       console.warn('[apiClient] backend has no assignedTrailerId/fleetGroup yet — saving without them')
       driversHaveTrailer = false
-      const result = await run(withoutNewFields)
+      const result = await run(withoutNewFields, false)
       return resolveDriverPhotoUrl(result.data.updateDriver)
     }
     throw err
