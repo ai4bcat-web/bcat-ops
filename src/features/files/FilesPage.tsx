@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus } from 'lucide-react'
+import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus, EyeOff } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
@@ -14,6 +14,8 @@ import {
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
+import { PrivateDocsModal } from './PrivateDocsModal'
+import { useComplianceSettings } from '@/hooks/useComplianceSettings'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
@@ -88,6 +90,9 @@ export function FilesPage() {
   const hub = useFileHub()
   // Private documents (pay terms) are admin-only — hidden entirely, not shown as missing.
   const { isAdmin } = useAuth()
+  // Loading settings applies the configured private-document list app-wide.
+  useComplianceSettings()
+  const [privateDocsOpen, setPrivateDocsOpen] = useState(false)
 
   const [tab, setTab] = useState<Tab>('TRUCK')
   const [query, setQuery] = useState('')
@@ -192,6 +197,12 @@ export function FilesPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
             {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
             {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
+            {isAdmin && (
+              <button onClick={() => setPrivateDocsOpen(true)} title="Choose which documents are hidden from everyone else"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <EyeOff size={14} /> Private docs
+              </button>
+            )}
             {tab === 'DRIVER' && (
               <button onClick={() => setDriverEdit({ open: true, driver: null })}
                 title="Add a new driver"
@@ -332,6 +343,7 @@ export function FilesPage() {
           canSeePrivate={isAdmin}
         />
       )}
+      {privateDocsOpen && <PrivateDocsModal onClose={() => setPrivateDocsOpen(false)} />}
       <DriverDrawer open={driverEdit.open} driver={driverEdit.driver} onClose={() => setDriverEdit({ open: false, driver: null })} />
     </div>
   )

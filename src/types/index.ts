@@ -196,6 +196,8 @@ export interface ComplianceSettings {
   portalEmailsPaused: boolean
   escalationEmailsPaused: boolean
   managerEmails?: string[] | null
+  /** documentTypes hidden from non-admins. Null falls back to DEFAULT_PRIVATE_DOC_TYPES. */
+  privateDocumentTypes?: string[] | null
   createdAt: string
   updatedAt: string
 }

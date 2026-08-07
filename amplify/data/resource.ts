@@ -796,6 +796,10 @@ const schema = a.schema({
       portalEmailsPaused:   a.boolean().required(),   // default true (PAUSED)
       escalationEmailsPaused: a.boolean().required(), // default true (PAUSED)
       managerEmails:        a.string().array(),       // escalation manager recipients
+      // documentTypes hidden from everyone except admins — pay-term paperwork the fleet
+      // manager must not see. Editable here so it changes without a deploy.
+      // NOTE: presentation-level only; the documents remain readable via the API.
+      privateDocumentTypes: a.string().array(),
     })
     .secondaryIndexes((index) => [
       index('settingsKey'),

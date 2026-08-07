@@ -44,12 +44,22 @@ export interface FileSlot {
  * readable through the API by any authenticated user, so this hides them from the app,
  * it does not secure them at the backend.
  */
-export const PRIVATE_DOC_TYPES: ReadonlySet<string> = new Set([
-  'employment_agreement',
-  'lease_agreement',
-])
+export const DEFAULT_PRIVATE_DOC_TYPES: readonly string[] = ['employment_agreement', 'lease_agreement']
 
-export const isPrivateDoc = (documentType: string): boolean => PRIVATE_DOC_TYPES.has(documentType)
+/**
+ * The live set, overridden from ComplianceSettings.privateDocumentTypes so it is
+ * editable without a deploy. Falls back to the defaults until settings load, so a slow
+ * or failed settings fetch errs toward HIDING rather than exposing.
+ */
+let privateDocTypes: ReadonlySet<string> = new Set(DEFAULT_PRIVATE_DOC_TYPES)
+
+export const setPrivateDocTypes = (types: readonly string[] | null | undefined): void => {
+  privateDocTypes = new Set(types ?? DEFAULT_PRIVATE_DOC_TYPES)
+}
+
+export const getPrivateDocTypes = (): ReadonlySet<string> => privateDocTypes
+
+export const isPrivateDoc = (documentType: string): boolean => privateDocTypes.has(documentType)
 
 /** Drop private slots for anyone who may not see them. */
 export const visibleSlots = (slots: readonly FileSlot[], canSeePrivate: boolean): readonly FileSlot[] =>
