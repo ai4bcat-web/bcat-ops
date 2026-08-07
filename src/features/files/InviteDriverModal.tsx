@@ -7,7 +7,9 @@ import {
   createOnboardingInvite, generateInviteToken, inviteExpiry, buildPortalUrl, writeComplianceAudit,
 } from '@/lib/complianceClient'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
-import { applicationFormFor } from '@/lib/driverOnboarding'
+import { applicationFormFor, templateIdForFleet } from '@/lib/driverOnboarding'
+import { classificationForFleet } from '@/lib/fileHub'
+import { generateChecklist, generateTemplateChecklist, resolveOnboardingTemplate } from '@/lib/complianceClient'
 import type { FleetGroup } from '@/types/equipment'
 
 /**
@@ -25,15 +27,20 @@ import type { FleetGroup } from '@/types/equipment'
 export function InviteDriverModal({ onClose }: { onClose: () => void }) {
   const { user } = useAuth()
   const addDriver = useAppStore((s) => s.addDriver)
+  const updateDriverRecord = useAppStore((s) => s.updateDriver)
 
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [fleetGroup, setFleetGroup] = useState<FleetGroup | ''>('')
   const [busy, setBusy] = useState(false)
+  // Carried over from the onboarding wizard: create the file and checklist without
+  // emailing anyone, for a driver who won't use a portal or whose paperwork you hold.
+  const [internalOnly, setInternalOnly] = useState(false)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
   const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())
+  // Internal-only still wants an email on the record for later, but won't send.
   const ready = emailOk && !!fleetGroup
 
   const invite = async () => {
@@ -50,27 +57,50 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
         active: true,
         type: 'driver',
         fleetGroup: fleetGroup as FleetGroup,
-        onboardingStatus: 'INVITED',
+        onboardingStatus: internalOnly ? 'IN_PROGRESS' : 'INVITED',
       })
 
-      const token = generateInviteToken()
-      await createOnboardingInvite({
-        driverId: driver.id,
-        email: email.trim(),
-        driverType: null,
-        token,
-        status: 'SENT',
-        expiresAt: inviteExpiry(),
-        sentAt: new Date().toISOString(),
-      })
+      // Generate the checklist as part of inviting. The old flow could create an invite
+      // without one, leaving a driver in the portal with nothing to do.
+      const classification = classificationForFleet(fleetGroup as FleetGroup)
+      const templateId = templateIdForFleet(fleetGroup as FleetGroup)
+      if (templateId) {
+        const template = await resolveOnboardingTemplate(templateId)
+        if (template) {
+          await generateTemplateChecklist({ driverId: driver.id, driverType: classification, template })
+          await updateDriverRecord(driver.id, { onboardingTemplateId: templateId })
+        }
+      } else {
+        await generateChecklist({ entityType: 'DRIVER', entityId: driver.id, classification })
+      }
+
+      let url: string | null = null
+      if (!internalOnly) {
+        const token = generateInviteToken()
+        await createOnboardingInvite({
+          driverId: driver.id,
+          email: email.trim(),
+          driverType: classification,
+          token,
+          status: 'SENT',
+          expiresAt: inviteExpiry(),
+          sentAt: new Date().toISOString(),
+        })
+        url = buildPortalUrl(token)
+      }
+
       await writeComplianceAudit({
         entityType: 'DRIVER', entityId: driver.id, action: 'onboarding_started',
         user: user?.email ?? 'unknown',
-        changes: { invitedEmail: email.trim(), fleetGroup, form: applicationFormFor(fleetGroup as FleetGroup)?.key },
+        changes: {
+          invitedEmail: email.trim(), fleetGroup, internalOnly,
+          template: templateId ?? 'standard',
+          form: applicationFormFor(fleetGroup as FleetGroup)?.key,
+        },
       })
 
-      setPortalUrl(buildPortalUrl(token))
-      toast.success(`Invitation created for ${email.trim()}`)
+      if (url) { setPortalUrl(url); toast.success(`Invitation created for ${email.trim()}`) }
+      else { toast.success(`${placeholderName} added — checklist ready, no email sent`); onClose() }
     } catch (err) {
       toast.error(`Couldn't invite: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally { setBusy(false) }
@@ -142,7 +172,20 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
                   {FLEET_GROUPS.map((g) => <option key={g} value={g}>{FLEET_GROUP_LABELS[g]}</option>)}
                 </select>
                 <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4 }}>
-                  Decides which application they get and what their file will require.
+                  Decides their application, their documents, and their onboarding flow
+                  {fleetGroup && (templateIdForFleet(fleetGroup as FleetGroup)
+                    ? ' — Amazon Relay, in phases.'
+                    : ' — the standard checklist.')}
+                </div>
+              </div>
+              <div>
+                <label style={{ ...label, marginBottom: 0 }}>
+                  <input type="checkbox" checked={internalOnly} onChange={(e) => setInternalOnly(e.target.checked)}
+                    style={{ marginRight: 7, verticalAlign: '-2px' }} />
+                  Don't email them — we'll handle it
+                </label>
+                <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4 }}>
+                  Creates the file and checklist without sending a portal link.
                 </div>
               </div>
               <div>
@@ -157,7 +200,7 @@ export function InviteDriverModal({ onClose }: { onClose: () => void }) {
               <button onClick={invite} disabled={!ready || busy}
                 title={!emailOk ? 'Enter a valid email' : !fleetGroup ? 'Choose a fleet' : 'Create the invitation'}
                 style={{ height: 32, padding: '0 16px', borderRadius: 8, border: 'none', background: ready ? 'var(--ds-blue)' : 'var(--ds-border)', color: ready ? '#fff' : 'var(--ds-t3)', fontSize: 12.5, fontWeight: 600, cursor: ready && !busy ? 'pointer' : 'not-allowed', fontFamily: 'inherit' }}>
-                {busy ? 'Inviting…' : 'Invite driver to apply'}
+                {busy ? 'Working…' : internalOnly ? 'Add driver' : 'Invite driver to apply'}
               </button>
             </div>
           </>

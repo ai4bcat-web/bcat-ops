@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   onboardingProgress, tasksByCategory, applicationFormFor, canSendApplication, APPLICATION_FORMS,
-  driverStatus, showsOnboardingPercent,
+  driverStatus, showsOnboardingPercent, templateIdForFleet,
 } from './driverOnboarding'
 import type { OnboardingTask, OnboardingTaskStatus } from '@/types'
 
@@ -144,5 +144,35 @@ describe('driver status', () => {
     expect(showsOnboardingPercent('ONBOARDING')).toBe(true)
     expect(showsOnboardingPercent('ACTIVE')).toBe(false)
     expect(showsOnboardingPercent('INACTIVE')).toBe(false)
+  })
+})
+
+describe('checklist grouping', () => {
+  it('groups a templated driver by phase, in order', () => {
+    const groups = tasksByCategory([
+      task('PENDING', { phase: 2, category: 'Payroll', label: 'b', sortOrder: 0 }),
+      task('PENDING', { phase: 1, category: 'Application', label: 'a', sortOrder: 1 }),
+      task('PENDING', { phase: 1, category: 'License', label: 'a0', sortOrder: 0 }),
+    ])
+    expect(groups.map((g) => g.category)).toEqual(['Phase 1', 'Phase 2'])
+    // Phases gate each other, so order within a phase still matters.
+    expect(groups[0].tasks.map((t) => t.label)).toEqual(['a0', 'a'])
+  })
+
+  it('falls back to categories when the driver has no template', () => {
+    const groups = tasksByCategory([
+      task('PENDING', { category: 'Payroll', sortOrder: 1 }),
+      task('PENDING', { category: 'Application', sortOrder: 0 }),
+    ])
+    expect(groups.map((g) => g.category)).toEqual(['Application', 'Payroll'])
+  })
+})
+
+describe('onboarding flow by fleet', () => {
+  it('gives Amazon the phased Relay template and everyone else the flat list', () => {
+    expect(templateIdForFleet('AMAZON')).toBe('amazon-driver-v1')
+    expect(templateIdForFleet('LOCAL')).toBeNull()
+    expect(templateIdForFleet('BOX_TRUCK')).toBeNull()
+    expect(templateIdForFleet(null)).toBeNull()
   })
 })
