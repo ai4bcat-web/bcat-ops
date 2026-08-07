@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ensureComplianceSettings, updateComplianceSettings } from '@/lib/complianceClient'
+import { setPrivateDocTypes } from '@/lib/fileHub'
 import type { ComplianceSettings } from '@/types'
 
 /** GLOBAL compliance settings: email kill switches (both default PAUSED) + manager recipients. */
@@ -9,7 +10,11 @@ export function useComplianceSettings() {
 
   const load = useCallback(async () => {
     try {
-      setSettings(await ensureComplianceSettings())
+      const loaded = await ensureComplianceSettings()
+      setSettings(loaded)
+      // Apply the configured private-document list app-wide. Until this resolves the
+      // defaults stand, so a slow or failed load errs toward hiding, not exposing.
+      setPrivateDocTypes(loaded.privateDocumentTypes)
     } catch (err) {
       console.error('[useComplianceSettings] load error', err)
     } finally {
@@ -20,10 +25,11 @@ export function useComplianceSettings() {
   useEffect(() => { load() }, [load])
 
   const patch = useCallback(
-    async (changes: Partial<Pick<ComplianceSettings, 'portalEmailsPaused' | 'escalationEmailsPaused' | 'managerEmails'>>) => {
+    async (changes: Partial<Pick<ComplianceSettings, 'portalEmailsPaused' | 'escalationEmailsPaused' | 'managerEmails' | 'privateDocumentTypes'>>) => {
       if (!settings) return
       const updated = await updateComplianceSettings(settings.id, changes)
       setSettings(updated)
+      if (changes.privateDocumentTypes !== undefined) setPrivateDocTypes(updated.privateDocumentTypes)
       return updated
     },
     [settings],

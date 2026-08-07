@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
   daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, slotsForDriver,
-  isPrivateDoc, visibleSlots, visibleDocs, type SlotState,
+  isPrivateDoc, visibleSlots, visibleDocs, setPrivateDocTypes, getPrivateDocTypes,
+  DEFAULT_PRIVATE_DOC_TYPES, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
@@ -364,5 +365,39 @@ describe('private documents are admin-only', () => {
     ]
     expect(visibleDocs(docs, false).map((d) => d.documentType)).toEqual(['cdl_copy'])
     expect(visibleDocs(docs, true)).toHaveLength(3)
+  })
+})
+
+describe('configurable private document types', () => {
+  afterEach(() => setPrivateDocTypes(null))   // back to defaults between cases
+
+  it('defaults to the pay-term documents when settings have not loaded', () => {
+    setPrivateDocTypes(null)
+    expect(isPrivateDoc('employment_agreement')).toBe(true)
+    expect(isPrivateDoc('lease_agreement')).toBe(true)
+  })
+
+  it('a failed or missing settings load errs toward HIDING, not exposing', () => {
+    setPrivateDocTypes(undefined)
+    expect([...getPrivateDocTypes()].sort()).toEqual([...DEFAULT_PRIVATE_DOC_TYPES].sort())
+  })
+
+  it('honours a configured list, including types that were not private before', () => {
+    setPrivateDocTypes(['medical_card'])
+    expect(isPrivateDoc('medical_card')).toBe(true)
+    expect(isPrivateDoc('employment_agreement')).toBe(false)   // no longer listed
+  })
+
+  it('an explicitly empty list makes nothing private', () => {
+    setPrivateDocTypes([])
+    expect(isPrivateDoc('employment_agreement')).toBe(false)
+    expect(getPrivateDocTypes().size).toBe(0)
+  })
+
+  it('the configured list drives what a non-admin actually sees', () => {
+    setPrivateDocTypes(['cdl_copy'])
+    const keys = visibleSlots(slotsForDriver('LOCAL'), false).map((s) => s.key)
+    expect(keys).not.toContain('cdl_copy')
+    expect(keys).toContain('employment_agreement')   // not configured private any more
   })
 })
