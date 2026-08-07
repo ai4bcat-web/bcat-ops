@@ -361,9 +361,19 @@ export function InvoicesPage() {
   const invoiceCount = kpiInvoices.length
   const avgInvoice   = invoiceCount > 0 ? Math.round(totalSpend / invoiceCount) : 0
 
+  // Unpaid = posted invoices with no payment date recorded. Amber when there are any,
+  // because it's money owed rather than a neutral statistic.
+  const unpaid       = kpiInvoices.filter((i) => !i.paymentDate)
+  const unpaidTotal  = unpaid.reduce((s, i) => s + i.amount, 0)
+
   const KPIS = [
     { label: 'Total Spend',  value: formatCents(totalSpend), color: '#a78bfa' },
     { label: 'This Month',   value: formatCents(monthSpend), color: '#1ea8f3' },
+    {
+      label: unpaid.length === 1 ? 'Unpaid (1 invoice)' : `Unpaid (${unpaid.length} invoices)`,
+      value: formatCents(unpaidTotal),
+      color: unpaid.length > 0 ? '#f59e0b' : '#22c55e',
+    },
     { label: 'Invoices',     value: String(invoiceCount),    color: '#22c55e' },
     { label: 'Avg / Invoice', value: formatCents(avgInvoice), color: '#f59e0b' },
   ]

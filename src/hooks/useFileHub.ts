@@ -4,6 +4,8 @@ import {
   uploadComplianceDocument, getComplianceDocUrl, isAcceptedDoc,
 } from '@/lib/complianceClient'
 import { applyDoc } from '@/lib/complianceDocStore'
+import { findLinkedTask } from '@/lib/documentReview'
+import { setTaskStatus } from '@/lib/complianceClient'
 import { useAllComplianceDocuments } from './useAllComplianceDocuments'
 import { slotState, type SlotState } from '@/lib/fileHub'
 import type { ComplianceDocument, ComplianceEntityType } from '@/types'
@@ -85,6 +87,25 @@ export function useFileHub(): FileHubState {
       verifiedBy: params.uploadedByUser ?? undefined,
     })
     applyDoc(saved)
+
+    // Tick the checklist item this document satisfies. Uploading the CDL and then
+    // finding its box still unticked made the file and the checklist disagree, and left
+    // someone chasing a document that was already on file.
+    // Staff uploads count as verified — the driver portal's own uploads land
+    // PENDING_REVIEW instead and are settled when they're approved.
+    try {
+      const task = await findLinkedTask(saved)
+      if (task && task.status !== 'COMPLETE') {
+        await setTaskStatus(task.id, 'COMPLETE', {
+          completedBy: params.uploadedByUser ?? undefined,
+          complianceDocumentId: saved.id,
+        })
+      }
+    } catch (err) {
+      // The document IS saved; a checklist that didn't tick is worth a log, not a failure.
+      console.error('[useFileHub] could not settle the checklist item', err)
+    }
+
     return saved
   }, [])
 

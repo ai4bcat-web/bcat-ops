@@ -116,7 +116,7 @@ function TaskModal({ task, equipment, onSave, onDelete, onClose }: {
 
 
 type Tab = 'tasks' | 'completed'
-type SortKey = 'title' | 'equipment' | 'dueDate' | 'completedDate' | 'priority' | 'status'
+type SortKey = 'title' | 'equipment' | 'dueDate' | 'completedDate' | 'createdAt' | 'priority' | 'status'
 
 export function MaintenancePage() {
   const isMobile = useIsMobile()
@@ -177,6 +177,7 @@ export function MaintenancePage() {
         case 'equipment': cmp = equipUnit(a.equipmentId).localeCompare(equipUnit(b.equipmentId), undefined, { numeric: true }); break
         case 'dueDate':   cmp = (a.dueDate ?? '').localeCompare(b.dueDate ?? ''); break
         case 'completedDate': cmp = (a.completedDate ?? '').localeCompare(b.completedDate ?? ''); break
+        case 'createdAt': cmp = (a.createdAt ?? '').localeCompare(b.createdAt ?? ''); break
         case 'priority':  cmp = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]; break
         case 'status':    cmp = a.status.localeCompare(b.status); break
       }
@@ -338,6 +339,7 @@ export function MaintenancePage() {
                   <col style={{ width: 180 }} />
                   <col />
                   <col style={{ width: 112 }} />
+                  <col style={{ width: 104 }} />
                   <col style={{ width: 110 }} />
                   {isCompletedTab && <col style={{ width: 118 }} />}
                   <col style={{ width: 112 }} />
@@ -351,6 +353,7 @@ export function MaintenancePage() {
                     {sortTh('Task', 'title')}
                     <th style={{ ...thBase }}>Description</th>
                     {sortTh('Equipment', 'equipment')}
+                    {sortTh('Created', 'createdAt')}
                     {sortTh('Due', 'dueDate')}
                     {isCompletedTab && sortTh('Completed', 'completedDate')}
                     {sortTh('Priority', 'priority')}
@@ -383,6 +386,9 @@ export function MaintenancePage() {
                           {t.notes ? t.notes : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
                         </td>
                         <td style={tdBase}><span style={equipChipStyle}>{equipUnit(t.equipmentId)}</span></td>
+                        <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
+                          {t.createdAt ? t.createdAt.slice(0, 10) : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                        </td>
                         <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12.5, color: over ? 'var(--ds-red)' : 'var(--ds-t2)', fontWeight: over ? 600 : 400, whiteSpace: 'nowrap' }}>
                           {t.dueDate ? (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
