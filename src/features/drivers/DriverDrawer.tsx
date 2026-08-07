@@ -21,6 +21,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { uploadDriverPhoto, deleteDriverPhoto } from '@/lib/apiClient'
 import { COLOR_MAP } from '@/lib/driverColors'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { classificationForFleet } from '@/lib/fileHub'
 import type { ColorKey } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,6 +52,17 @@ interface DriverDrawerProps {
   onClose: () => void
 }
 
+/** A value the driver file owns — shown here with where it came from, never typed. */
+function ReadOnly({ label, value, from }: { label: string; value: string; from: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: value === '—' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>{value}</div>
+      <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', marginTop: 2 }}>{from}</div>
+    </div>
+  )
+}
+
 export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   const { addDriver, updateDriver, deleteDriver } = useDrivers()
   const isEdit = driver !== null
@@ -76,6 +88,7 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   const watchType = watch('type')
   const watchName = watch('name')
   const watchColorKey = watch('colorKey')
+  const watchFleet = watch('fleetGroup')
 
   // Reset form and photo state whenever the drawer opens or the driver changes
   useEffect(() => {
@@ -343,22 +356,29 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
               </FormSection>
 
               {/* ── Compliance & Documents (collapsed) ─────────────────────── */}
-              <FormSection icon={<ShieldCheck size={15} />} title="Compliance & Documents" subtitle="CDL, med card, drug test" collapsible defaultOpen={false}>
+              <FormSection icon={<ShieldCheck size={15} />} title="Compliance" subtitle="Most of this comes from the driver's file" collapsible defaultOpen={false}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                   <Field label="CDL Number"><Input {...register('cdl')} placeholder="CDL-A IL-8823901" className="h-9" /></Field>
-                  <Field label="CDL Class">
-                    <Controller name="driverType" control={control} render={({ field }) => (
-                      <select value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value || undefined)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20">
-                        <option value="">Select…</option>
-                        <option value="COMPANY">Company Driver</option>
-                        <option value="OWNER_OPERATOR">Owner Operator</option>
-                      </select>
-                    )} />
-                  </Field>
-                  <Field label="CDL Expiration"><Input {...register('cdlExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
-                  <Field label="Med Card Expiration"><Input {...register('medCardExpiration')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
-                  <Field label="Last Drug Test"><Input {...register('drugTestDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
                   <Field label="Hire Date"><Input {...register('hireDate')} placeholder="YYYY-MM-DD" className="h-9" type="date" /></Field>
+                </div>
+
+                {/* Derived, not entered. These used to be typed here AND set by uploading
+                    the document, so the two could disagree — and the classification field
+                    was mislabelled "CDL Class" while actually setting company vs
+                    owner-operator, which the fleet now decides. */}
+                <div style={{ marginTop: 14, borderTop: '1px solid var(--ds-border)', paddingTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
+                  <ReadOnly label="Classification"
+                    value={watchFleet ? (classificationForFleet(watchFleet) === 'OWNER_OPERATOR' ? 'Owner operator' : 'Company driver') : '—'}
+                    from={watchFleet ? 'from the fleet above' : 'set a fleet above'} />
+                  <ReadOnly label="CDL Expiration"
+                    value={driver?.cdlExpiration || '—'}
+                    from={driver?.cdlExpiration ? 'from the uploaded CDL' : 'set when the CDL is uploaded'} />
+                  <ReadOnly label="Med Card Expiration"
+                    value={driver?.medCardExpiration || '—'}
+                    from={driver?.medCardExpiration ? 'from the uploaded medical card' : 'set when the medical card is uploaded'} />
+                  <ReadOnly label="Last Drug Test"
+                    value={driver?.drugTestDate || '—'}
+                    from="from the onboarding checklist" />
                 </div>
               </FormSection>
 
