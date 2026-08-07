@@ -50,6 +50,7 @@ vi.mock('@/lib/complianceClient', () => ({
   listOnboardingTasks: vi.fn().mockResolvedValue([]),
   listAllOnboardingTasks: vi.fn().mockResolvedValue([]),
   getApplicationByDriver: vi.fn().mockResolvedValue(null),
+  deleteComplianceDocument: vi.fn().mockResolvedValue(undefined),
   ensureComplianceSettings: vi.fn().mockResolvedValue({
     id: 's1', settingsKey: 'GLOBAL', portalEmailsPaused: true, escalationEmailsPaused: true,
     privateDocumentTypes: null, createdAt: '', updatedAt: '',
@@ -273,6 +274,26 @@ describe('editing a driver opens ONE drawer', () => {
 
     // The record carries no expiry — reading only the record showed nothing at all.
     expect(screen.getByText('On file')).toBeTruthy()
+    __resetForTests()
+  })
+
+  it('offers delete and replace on a document that is on file', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { applyDoc, __resetForTests } = await import('@/lib/complianceDocStore')
+    __resetForTests({ loaded: true })
+    applyDoc({
+      id: 'cdl1', entityType: 'DRIVER', entityId: 'd1', documentType: 'cdl_copy',
+      title: 'CDL copy', s3Key: 'k/cdl.pdf', status: 'VALID', uploadedBy: 'INTERNAL',
+      expirationDate: '2027-03-14', createdAt: '2026-08-01', updatedAt: '2026-08-01',
+    })
+
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    fireEvent.click(screen.getByText('Zak Pace'))
+
+    expect(screen.getByLabelText(/Delete CDL copy/i)).toBeTruthy()
+    expect(screen.getByLabelText(/Replace CDL copy/i)).toBeTruthy()
     __resetForTests()
   })
 
