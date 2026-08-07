@@ -30,7 +30,34 @@ export interface FileSlot {
   required: boolean
   /** Photos and plate shots don't expire; cab cards and CDLs do. */
   expires: boolean
+  /** Commercially sensitive — hidden from everyone except admins. See PRIVATE_DOC_TYPES. */
+  private?: boolean
 }
+
+/**
+ * Documents only admins may see. These carry pay terms, so the fleet manager and other
+ * staff must not see them — not the file itself, not its status, and not a "missing"
+ * placeholder that would reveal it exists.
+ *
+ * Enforced in the UI (slots, ready score, packets, "other documents" lists and the
+ * fleet dashboard). NOTE: this is presentation-level only — the documents are still
+ * readable through the API by any authenticated user, so this hides them from the app,
+ * it does not secure them at the backend.
+ */
+export const PRIVATE_DOC_TYPES: ReadonlySet<string> = new Set([
+  'employment_agreement',
+  'lease_agreement',
+])
+
+export const isPrivateDoc = (documentType: string): boolean => PRIVATE_DOC_TYPES.has(documentType)
+
+/** Drop private slots for anyone who may not see them. */
+export const visibleSlots = (slots: readonly FileSlot[], canSeePrivate: boolean): readonly FileSlot[] =>
+  canSeePrivate ? slots : slots.filter((s) => !isPrivateDoc(s.key))
+
+/** Drop private documents from a list for anyone who may not see them. */
+export const visibleDocs = <T extends { documentType: string }>(docs: T[], canSeePrivate: boolean): T[] =>
+  canSeePrivate ? docs : docs.filter((d) => !isPrivateDoc(d.documentType))
 
 // ── Driver ──────────────────────────────────────────────────────────────────────
 // Phone, truck # and trailer # are fields on the Driver record, not documents; they're
@@ -50,14 +77,14 @@ const DRIVER_BASE_SLOTS: readonly FileSlot[] = [
 const DRIVER_SLOTS_BY_FLEET: Record<FleetGroup, readonly FileSlot[]> = {
   LOCAL: [
     { key: 'employment_application', label: 'Job application',      sub: '3-yr history, 10-yr CDL', kind: 'document', required: true, expires: false },
-    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false },
+    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false, private: true },
   ],
   BOX_TRUCK: [
     { key: 'employment_application', label: 'Job application',      sub: '3-yr history, 10-yr CDL', kind: 'document', required: true, expires: false },
-    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false },
+    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false, private: true },
   ],
   AMAZON: [
-    { key: 'lease_agreement',        label: 'Lease agreement',      sub: '49 CFR Part 376',         kind: 'document', required: true, expires: false },
+    { key: 'lease_agreement',        label: 'Lease agreement',      sub: '49 CFR Part 376',         kind: 'document', required: true, expires: false, private: true },
   ],
 }
 

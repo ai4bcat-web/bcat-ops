@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { useFileHub } from '@/hooks/useFileHub'
 import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone, formatVin } from '@/lib/utils'
 import {
-  slotsForDriver, slotsForAsset, readyScore, slotState, truckSlotState, driverExpiry,
+  slotsForDriver, slotsForAsset, readyScore, slotState, truckSlotState, driverExpiry, visibleSlots,
   type ReadyScore, type SlotState, type ExpiryInfo,
 } from '@/lib/fileHub'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
@@ -85,6 +86,8 @@ export function FilesPage() {
   const storeLoading = useAppStore((s) => s.isLoading)
   const storeError = useAppStore((s) => s.error)
   const hub = useFileHub()
+  // Private documents (pay terms) are admin-only — hidden entirely, not shown as missing.
+  const { isAdmin } = useAuth()
 
   const [tab, setTab] = useState<Tab>('TRUCK')
   const [query, setQuery] = useState('')
@@ -113,10 +116,10 @@ export function FilesPage() {
     if (entityType === 'TRUCK') {
       const t = equipment.find((e) => e.id === id)
       if (!t) return { onFile: 0, required: 0, missing: 0, attention: 0 }
-      return readyScore(slotsForAsset(t.type, t.fleetGroup), (key) => truckSlotState(t, key, hub.docFor('TRUCK', id, key)))
+      return readyScore(visibleSlots(slotsForAsset(t.type, t.fleetGroup), isAdmin), (key) => truckSlotState(t, key, hub.docFor('TRUCK', id, key)))
     }
     const d = drivers.find((x) => x.id === id)
-    return readyScore(slotsForDriver(d?.fleetGroup), (key) => slotState(hub.docFor('DRIVER', id, key)))
+    return readyScore(visibleSlots(slotsForDriver(d?.fleetGroup), isAdmin), (key) => slotState(hub.docFor('DRIVER', id, key)))
   }
 
   const q = query.trim().toLowerCase()
@@ -140,7 +143,7 @@ export function FilesPage() {
     setPacketBusyId(id)
     try {
       const outcome = await downloadEntityPacket({
-        entity, hub, drivers, equipment, todayIso: new Date().toISOString().slice(0, 10),
+        entity, hub, drivers, equipment, todayIso: new Date().toISOString().slice(0, 10), canSeePrivate: isAdmin,
       })
       const { level, message } = packetToast(outcome)
       toast[level](message)
@@ -326,6 +329,7 @@ export function FilesPage() {
           hub={hub}
           onClose={() => setOpenId(null)}
           onEditDriver={(d) => setDriverEdit({ open: true, driver: d })}
+          canSeePrivate={isAdmin}
         />
       )}
       <DriverDrawer open={driverEdit.open} driver={driverEdit.driver} onClose={() => setDriverEdit({ open: false, driver: null })} />

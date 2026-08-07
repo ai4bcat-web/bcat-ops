@@ -9,7 +9,7 @@ import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
 import {
   slotsForAsset, slotsForDriver, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, driverExpiryPatch,
-  type FileSlot, type SlotState,
+  visibleSlots, visibleDocs, type FileSlot, type SlotState,
 } from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
 import {
@@ -34,12 +34,14 @@ const getInitials = (name: string) =>
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
-export function EntityFilePanel({ entity, hub, onClose, onEditDriver }: {
+export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePrivate = false }: {
   entity: FileEntity
   hub: FileHubState
   onClose: () => void
   /** Opens the full driver editor (phone, CDL, truck, trailer, colour, photo…). */
   onEditDriver?: (driver: Driver) => void
+  /** False for non-admins: private documents are hidden completely, not shown missing. */
+  canSeePrivate?: boolean
 }) {
   const { user } = useAuth()
   const drivers = useAppStore((s) => s.drivers)
@@ -51,7 +53,12 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver }: {
   const entityId = entity.kind === 'DRIVER' ? entity.driver.id : entity.truck.id
   const title = entity.kind === 'DRIVER' ? entity.driver.name : `Truck ${entity.truck.unitNumber}`
 
-  const slots = entity.kind === 'TRUCK' ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup) : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)
+  const allSlots = entity.kind === 'TRUCK'
+    ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup)
+    : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)
+  // Private documents vanish for non-admins — no tile, no "missing" placeholder that
+  // would reveal the document exists at all.
+  const slots = visibleSlots(allSlots, canSeePrivate)
   const [busySlot, setBusySlot] = useState<string | null>(null)
   // A dated document needs its expiration captured at upload, so it can be stored on
   // the document AND written back to the driver record (they used to drift apart).
@@ -70,8 +77,8 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver }: {
   const fields = useMemo(() => entityFields(entity, drivers, equipment), [entity, drivers, equipment])
 
   const otherDocs = useMemo(
-    () => hub.docsForEntity(entityType, entityId).filter((d) => isUnslottedDoc(d.documentType) && d.s3Key),
-    [hub, entityType, entityId],
+    () => visibleDocs(hub.docsForEntity(entityType, entityId).filter((d) => isUnslottedDoc(d.documentType) && d.s3Key), canSeePrivate),
+    [hub, entityType, entityId, canSeePrivate],
   )
 
   // On a truck, show the assigned driver's CDL and medical card in context.
@@ -168,7 +175,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver }: {
   const buildPacket = async () => {
     setPacketBusy(true)
     try {
-      const outcome = await downloadEntityPacket({ entity, hub, drivers, equipment, todayIso: todayIso() })
+      const outcome = await downloadEntityPacket({ entity, hub, drivers, equipment, todayIso: todayIso(), canSeePrivate })
       const { level, message } = packetToast(outcome)
       toast[level](message)
     } catch (err) {

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
-  daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, slotsForDriver, type SlotState,
+  daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, slotsForDriver,
+  isPrivateDoc, visibleSlots, visibleDocs, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
 import { ALL_REQUIREMENTS } from './complianceRequirements'
@@ -318,5 +319,50 @@ describe('I-PASS photo is Local and Box Truck only', () => {
 
   it('is a photo, so it asks for no expiration', () => {
     expect(slotsForAsset('truck', 'LOCAL').find((s) => s.key === 'photo_ipass')?.expires).toBe(false)
+  })
+})
+
+describe('private documents are admin-only', () => {
+  it('marks the pay-term documents private and nothing else', () => {
+    expect(isPrivateDoc('employment_agreement')).toBe(true)
+    expect(isPrivateDoc('lease_agreement')).toBe(true)
+    for (const key of ['cdl_copy', 'medical_card', 'employment_application', 'insurance_cert', 'photo_ipass']) {
+      expect(isPrivateDoc(key)).toBe(false)
+    }
+  })
+
+  it('hides the employment agreement from a non-admin Ivan driver file', () => {
+    const keys = visibleSlots(slotsForDriver('LOCAL'), false).map((s) => s.key)
+    expect(keys).not.toContain('employment_agreement')
+    // The job application is NOT private and must still be visible.
+    expect(keys).toContain('employment_application')
+    expect(keys).toContain('cdl_copy')
+  })
+
+  it('hides the lease agreement from a non-admin Amazon driver file', () => {
+    expect(visibleSlots(slotsForDriver('AMAZON'), false).map((s) => s.key)).not.toContain('lease_agreement')
+  })
+
+  it('shows both to an admin', () => {
+    expect(visibleSlots(slotsForDriver('LOCAL'), true).map((s) => s.key)).toContain('employment_agreement')
+    expect(visibleSlots(slotsForDriver('AMAZON'), true).map((s) => s.key)).toContain('lease_agreement')
+  })
+
+  it('a hidden document does not count as MISSING, so it leaves no trace in the dots', () => {
+    // If it counted, a non-admin would see "3 of 4" and know something is there.
+    const nonAdmin = readyScore(visibleSlots(slotsForDriver('AMAZON'), false), () => 'VALID')
+    const admin = readyScore(visibleSlots(slotsForDriver('AMAZON'), true), () => 'VALID')
+    expect(nonAdmin.required).toBe(admin.required - 1)
+    expect(nonAdmin.missing).toBe(0)
+  })
+
+  it('filters private documents out of a document list', () => {
+    const docs = [
+      { documentType: 'cdl_copy' },
+      { documentType: 'lease_agreement' },
+      { documentType: 'employment_agreement' },
+    ]
+    expect(visibleDocs(docs, false).map((d) => d.documentType)).toEqual(['cdl_copy'])
+    expect(visibleDocs(docs, true)).toHaveLength(3)
   })
 })
