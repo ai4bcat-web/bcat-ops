@@ -26,6 +26,7 @@ export const driverSchema = z.object({
   hireDate: z.string().optional(),
   driverType: z.enum(['COMPANY', 'OWNER_OPERATOR']).optional(),
   assignedTruckId: z.string().nullable().optional(),
+  assignedTrailerId: z.string().nullable().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])

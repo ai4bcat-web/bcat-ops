@@ -7,7 +7,6 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { DashboardPage } from '@/features/dashboard/DashboardPage'
 import { CalendarPage } from '@/features/calendar/CalendarPage'
 import { GridPage } from '@/features/grid/GridPage'
-import { DriversPage } from '@/features/drivers/DriversPage'
 import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
@@ -55,7 +54,8 @@ export default function App() {
               <Route path="/dashboard" element={<RequirePage page="dashboard"><DashboardPage /></RequirePage>} />
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
               <Route path="/loads" element={<RequirePage page="loads"><GridPage /></RequirePage>} />
-              <Route path="/drivers" element={<RequirePage page="drivers"><DriversPage /></RequirePage>} />
+              {/* Retired: the driver roster and editor now live in the Files hub. */}
+              <Route path="/drivers" element={<Navigate to="/files" replace />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />
               <Route path="/trucks" element={<RequirePage page="trucks"><TrucksPage /></RequirePage>} />
               <Route path="/truck-docs" element={<RequirePage page="truckDocs"><TruckDocumentsPage /></RequirePage>} />

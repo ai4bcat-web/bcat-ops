@@ -425,7 +425,7 @@ export function DashboardPage() {
             title="Driver Performance"
             sub={`${RANGES.find((r) => r.value === rangeKey)?.label} · ${metrics.rangeStart} – ${metrics.rangeEnd}`}
             right={
-              <button onClick={() => navigate('/drivers')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+              <button onClick={() => navigate('/files')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
                 View all <ChevronRight size={12} />
               </button>
             }
