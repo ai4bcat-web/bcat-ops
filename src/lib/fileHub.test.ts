@@ -401,3 +401,21 @@ describe('configurable private document types', () => {
     expect(keys).toContain('employment_agreement')   // not configured private any more
   })
 })
+
+describe('documents awaiting review', () => {
+  it('reports PENDING_REVIEW rather than passing as valid', () => {
+    // An uploaded-but-unapproved document is not a gap, but it is not verified either —
+    // showing it as "On file" would imply someone had checked it.
+    expect(slotState({ status: 'PENDING_REVIEW', s3Key: 'k', expirationDate: null }, TODAY)).toBe('PENDING_REVIEW')
+  })
+
+  it('still counts toward the ready score as on-file needing attention', () => {
+    const score = readyScore(slotsForDriver('LOCAL'), (k) => (k === 'cdl_copy' ? 'PENDING_REVIEW' : 'VALID'))
+    expect(score.missing).toBe(0)
+    expect(score.attention).toBe(1)
+  })
+
+  it('a waived document still wins over pending review', () => {
+    expect(slotState({ status: 'WAIVED', s3Key: 'k' }, TODAY)).toBe('WAIVED')
+  })
+})

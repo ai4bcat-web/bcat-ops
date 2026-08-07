@@ -57,6 +57,7 @@ const EXPIRY_STYLE: Record<SlotState, { bg: string; fg: string }> = {
   EXPIRED:       { bg: '#fef2f2', fg: '#b91c1c' },
   MISSING:       { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
   WAIVED:        { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
+  PENDING_REVIEW:{ bg: '#fffbeb', fg: '#b45309' },
 }
 
 const shortDate = (d: string) =>
