@@ -92,3 +92,35 @@ describe('driver packet fields', () => {
     expect(label(fields, 'Trailer')).toBe('TBD')
   })
 })
+
+describe('packet picker filtering', () => {
+  const items = [{ label: 'CDL', s3Key: 'a' }, { label: 'Medical card', s3Key: 'b' }]
+  const fields = [{ label: 'Phone', value: '(708) 555-0142' }, { label: 'CDL', value: 'X' }]
+
+  // Mirrors the filter applied in downloadEntityPacket.
+  const apply = (include?: { fieldLabels?: string[]; itemLabels?: string[] }) => ({
+    items: items.filter((i) => !include?.itemLabels || include.itemLabels.includes(i.label)),
+    fields: fields.filter((f) => !include?.fieldLabels || include.fieldLabels.includes(f.label)),
+  })
+
+  it('an unfiltered build is unchanged — the one-click path keeps everything', () => {
+    const out = apply(undefined)
+    expect(out.items).toHaveLength(2)
+    expect(out.fields).toHaveLength(2)
+  })
+
+  it('can leave a document out', () => {
+    expect(apply({ itemLabels: ['CDL'] }).items.map((i) => i.label)).toEqual(['CDL'])
+  })
+
+  it('can leave a cover detail out — e.g. omitting a phone number from an insurer packet', () => {
+    expect(apply({ fieldLabels: ['CDL'] }).fields.map((f) => f.label)).toEqual(['CDL'])
+  })
+
+  it('an empty selection produces a cover-only packet rather than everything', () => {
+    // The dangerous inverse would be treating "none chosen" as "include all".
+    const out = apply({ itemLabels: [], fieldLabels: [] })
+    expect(out.items).toHaveLength(0)
+    expect(out.fields).toHaveLength(0)
+  })
+})

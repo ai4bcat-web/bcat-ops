@@ -17,6 +17,8 @@ import {
   DRIVER_DOCS_ON_TRUCK, type FileEntity,
 } from './entityPacket'
 import { DriverOnboardingSection } from './DriverOnboardingSection'
+import { PacketPickerModal } from './PacketPickerModal'
+import { packetItems } from './entityPacket'
 import { approveDocument, rejectDocument } from '@/lib/documentReview'
 import type { FileHubState } from '@/hooks/useFileHub'
 import type { ComplianceDocument, Driver } from '@/types'
@@ -67,6 +69,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   // the document AND written back to the driver record (they used to drift apart).
   const [pending, setPending] = useState<{ slot: FileSlot; file: File; expiration: string } | null>(null)
   const [packetBusy, setPacketBusy] = useState(false)
+  const [pickingPacket, setPickingPacket] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const targetSlot = useRef<FileSlot | null>(null)
 
@@ -175,10 +178,11 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
     }
   }
 
-  const buildPacket = async () => {
+  const buildPacket = async (include?: { fieldLabels: string[]; itemLabels: string[] }) => {
     setPacketBusy(true)
+    setPickingPacket(false)
     try {
-      const outcome = await downloadEntityPacket({ entity, hub, drivers, equipment, todayIso: todayIso(), canSeePrivate })
+      const outcome = await downloadEntityPacket({ entity, hub, drivers, equipment, todayIso: todayIso(), canSeePrivate, include })
       const { level, message } = packetToast(outcome)
       toast[level](message)
     } catch (err) {
@@ -277,7 +281,14 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
               <Pencil size={14} /> Edit
             </button>
           )}
-          <button onClick={buildPacket} disabled={packetBusy}
+          {/* Deliberately understated: the one-click path is unchanged and this only
+              appears as a small link for the times a packet needs trimming. */}
+          <button onClick={() => setPickingPacket(true)} disabled={packetBusy}
+            title="Choose what goes in the PDF"
+            style={{ background: 'none', border: 'none', color: 'var(--ds-t3)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline', padding: 0 }}>
+            Choose…
+          </button>
+          <button onClick={() => void buildPacket()} disabled={packetBusy}
             style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: packetBusy ? 'wait' : 'pointer', opacity: packetBusy ? 0.7 : 1, fontFamily: 'inherit' }}>
             <FileStack size={14} /> {packetBusy ? 'Building…' : 'Download packet'}
           </button>
@@ -465,6 +476,16 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
             everywhere. The packet is a single PDF: cover sheet, then every document above.
           </p>
         </div>
+
+        {pickingPacket && (
+          <PacketPickerModal
+            title={title}
+            fields={entityFields(entity, drivers, equipment)}
+            items={packetItems(entity, hub, drivers, canSeePrivate)}
+            onCancel={() => setPickingPacket(false)}
+            onBuild={(chosen) => void buildPacket(chosen)}
+          />
+        )}
 
         <input ref={fileRef} type="file" accept={ACCEPTED_DOC_EXT} onChange={onFileChosen} style={{ display: 'none' }} />
 

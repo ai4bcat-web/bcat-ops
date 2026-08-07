@@ -151,15 +151,23 @@ export async function downloadEntityPacket(params: {
   equipment: Equipment[]
   todayIso: string
   canSeePrivate?: boolean
+  /** Optional subset chosen in the packet picker; omitted means everything. */
+  include?: { fieldLabels?: string[]; itemLabels?: string[] }
 }): Promise<PacketOutcome> {
-  const { entity, hub, drivers, equipment, todayIso, canSeePrivate = false } = params
-  const items = packetItems(entity, hub, drivers, canSeePrivate)
+  const { entity, hub, drivers, equipment, todayIso, canSeePrivate = false, include } = params
+
+  // The picker can only ever SUBTRACT — an unfiltered build is byte-identical to before,
+  // so the one-click path is unchanged.
+  const keepItem = (label: string) => !include?.itemLabels || include.itemLabels.includes(label)
+  const keepField = (label: string) => !include?.fieldLabels || include.fieldLabels.includes(label)
+
+  const items = packetItems(entity, hub, drivers, canSeePrivate).filter((i) => keepItem(i.label))
   const title = entityTitle(entity)
 
   const result = await buildFilePacket({
     title,
     subtitle: entity.kind === 'DRIVER' ? 'Driver file' : 'Truck file',
-    fields: entityFields(entity, drivers, equipment),
+    fields: entityFields(entity, drivers, equipment).filter((f) => keepField(f.label)),
     items,
     getUrl: hub.urlFor,
     generatedAt: fmtDate(todayIso),
