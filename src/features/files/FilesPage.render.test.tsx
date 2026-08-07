@@ -77,9 +77,14 @@ vi.mock('@/lib/apiClient', () => ({
   deleteDriverPhoto: vi.fn(),
 }))
 
+const inactiveDriver: Driver = {
+  id: 'd2', name: 'Armando Aranda', phone: '+12628186030', active: false, type: 'driver',
+  createdAt: '', updatedAt: '',
+}
+
 vi.mock('@/store/useAppStore', () => {
   const state = {
-    drivers: [driver], equipment: [truck], isLoading: false, error: null,
+    drivers: [driver, inactiveDriver], equipment: [truck], isLoading: false, error: null,
     updateDriver: vi.fn(), updateEquipment: vi.fn(), addDriver: vi.fn(), deleteDriver: vi.fn(),
     assignTruckToDriver: vi.fn(),
   }
@@ -137,15 +142,23 @@ describe('Files hub renders', () => {
     expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
-  it('shows a status for each driver, without a percentage when active', async () => {
+  it('filters drivers by status from the tabs below the list', async () => {
     const { fireEvent } = await import('@testing-library/react')
     const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
-    expect(screen.getByText('Status')).toBeTruthy()
-    // No checklist → Active, and an active driver carries no percentage.
-    expect(screen.getByText('Active')).toBeTruthy()
-    expect(screen.queryByText(/%$/)).toBeNull()
+
+    // Status is a filter, not a column.
+    expect(screen.queryByRole('columnheader', { name: 'Status' })).toBeNull()
+    expect(screen.getByText('All')).toBeTruthy()
+    expect(screen.getByText('Onboarding')).toBeTruthy()
+
+    // The fixture driver has no checklist, so they're Active — filtering to Onboarding
+    // should empty the list rather than showing them anyway.
+    fireEvent.click(screen.getByText('Onboarding'))
+    expect(screen.queryByText('Zak Pace')).toBeNull()
+    fireEvent.click(screen.getByText('Active'))
+    expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
   it('shows the admin-only Private docs control', async () => {
@@ -249,5 +262,22 @@ describe('editing a driver opens ONE drawer', () => {
     // that supply the padding.
     expect(screen.getByText('Edit driver')).toBeTruthy()
     expect(screen.getByText('Driver Details')).toBeTruthy()
+  })
+})
+
+describe('inactive drivers stay reachable', () => {
+  it('shows a deactivated driver under All and Inactive', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+
+    // Armando is active:false in the fixtures. The base list used to exclude
+    // active===false BEFORE the status tabs ran, so he vanished from the app entirely.
+    expect(screen.getByText('Armando Aranda')).toBeTruthy()
+    fireEvent.click(screen.getByText('Inactive'))
+    expect(screen.getByText('Armando Aranda')).toBeTruthy()
+    fireEvent.click(screen.getByText('Active'))
+    expect(screen.queryByText('Armando Aranda')).toBeNull()
   })
 })

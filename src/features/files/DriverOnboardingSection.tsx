@@ -28,6 +28,17 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
   // permanent to-do list implying they're incomplete.
   const showChecklist = showsOnboardingPercent(status)
 
+  /**
+   * Whether onboarding can be started at all.
+   *
+   * An established, already-active driver isn't offered it — they're working, not being
+   * hired. NOT_STARTED is the exception: new drivers are created with it, so a fresh
+   * hire can still be onboarded even though they read as Active until you begin.
+   * Without that distinction, "hide it for active drivers" would make it impossible to
+   * onboard anyone new.
+   */
+  const canStartOnboarding = driver.onboardingStatus === 'NOT_STARTED' || showChecklist
+
   const handleStart = async () => {
     try {
       await start()
@@ -115,6 +126,7 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
       )}
 
       {/* Actions */}
+      {canStartOnboarding && (
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         <button onClick={handleStart} disabled={busy}
           title="Create (or top up) this driver's checklist from the requirement catalog"
@@ -128,6 +140,15 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
           <Send size={13} /> Send application
         </button>
       </div>
+      )}
+
+      {!canStartOnboarding && (
+        <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginBottom: 10 }}>
+          {status === 'ACTIVE'
+            ? 'Already active — onboarding isn’t offered for a driver who is already working.'
+            : 'Set the driver active to begin onboarding.'}
+        </div>
+      )}
 
       {!canSend.ok && (
         <div style={{ fontSize: 11.5, color: '#b45309', marginBottom: 10 }}>{canSend.reason}</div>
