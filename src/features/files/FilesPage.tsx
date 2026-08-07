@@ -13,11 +13,12 @@ import {
 } from '@/lib/fileHub'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { listAllOnboardingTasks } from '@/lib/complianceClient'
-import { onboardingProgress, driverStatus, showsOnboardingPercent, DRIVER_STATUS_LABELS, type DriverStatus } from '@/lib/driverOnboarding'
+import { onboardingProgress, driverStatus, DRIVER_STATUS_LABELS, type DriverStatus } from '@/lib/driverOnboarding'
 import type { OnboardingTask } from '@/types'
 import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
 import { PrivateDocsModal } from './PrivateDocsModal'
+import { InviteDriverModal } from './InviteDriverModal'
 import { useComplianceSettings } from '@/hooks/useComplianceSettings'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
@@ -63,12 +64,6 @@ const EXPIRY_STYLE: Record<SlotState, { bg: string; fg: string }> = {
   PENDING_REVIEW:{ bg: '#fffbeb', fg: '#b45309' },
 }
 
-const STATUS_STYLE: Record<DriverStatus, { bg: string; fg: string }> = {
-  ACTIVE:     { bg: '#f0fdf4', fg: '#15803d' },
-  ONBOARDING: { bg: '#fffbeb', fg: '#b45309' },
-  INACTIVE:   { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
-}
-
 const shortDate = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit', timeZone: 'UTC' })
 
@@ -103,11 +98,15 @@ export function FilesPage() {
   // Loading settings applies the configured private-document list app-wide.
   useComplianceSettings()
   const [privateDocsOpen, setPrivateDocsOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
 
   const [tab, setTab] = useState<Tab>('TRUCK')
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [packetBusyId, setPacketBusyId] = useState<string | null>(null)
+  // Filter the driver list by working status. 'ALL' first so the default view is
+  // unchanged and nobody loses sight of a driver because a filter was remembered.
+  const [statusFilter, setStatusFilter] = useState<DriverStatus | 'ALL'>('ALL')
   // The full driver editor, moved here from the retired Drivers page — the only place
   // that can create a driver or edit phone/CDL/colour/photo/classification.
   const [driverEdit, setDriverEdit] = useState<{ open: boolean; driver: Driver | null }>({ open: false, driver: null })
@@ -147,8 +146,11 @@ export function FilesPage() {
   )
   const trailers = useMemo(() => equipment.filter((e) => e.type === 'trailer'), [equipment])
 
+  // EVERY driver (brokers aside — they're a calendar construct, not people). Inactive
+  // drivers must be in the base list or the Inactive tab has nothing to show and "All"
+  // quietly omits them, which is how a deactivated driver disappeared from the app.
   const activeDrivers = useMemo(
-    () => drivers.filter((d) => d.active !== false && d.type !== 'broker')
+    () => drivers.filter((d) => d.type !== 'broker')
       .sort((a, b) => a.name.localeCompare(b.name)),
     [drivers],
   )
@@ -166,14 +168,21 @@ export function FilesPage() {
   }
 
   const q = query.trim().toLowerCase()
+  const byStatus = useMemo(
+    () => statusFilter === 'ALL' ? activeDrivers : activeDrivers.filter((d) => statusOf(d).status === statusFilter),
+    // statusOf reads tasksByDriver, so the filter must recompute when tasks arrive.
+    [activeDrivers, statusFilter, tasksByDriver],
+  )
+
   const shownDrivers = useMemo(() => {
+    const activeDrivers = byStatus
     if (!q) return activeDrivers
     return activeDrivers.filter((d) => {
       const truck = trucks.find((t) => t.id === d.assignedTruckId)
       const fleet = d.fleetGroup ? FLEET_GROUP_LABELS[d.fleetGroup] : ''
       return [d.name, d.phone, d.email, d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
-  }, [activeDrivers, trucks, q])
+  }, [byStatus, trucks, q])
 
   const shownTrucks = useMemo(() => {
     if (!q) return trucks
@@ -196,6 +205,13 @@ export function FilesPage() {
       setPacketBusyId(null)
     }
   }
+
+  const statusCounts = useMemo(() => {
+    const counts = { ALL: activeDrivers.length, ACTIVE: 0, ONBOARDING: 0, INACTIVE: 0 }
+    for (const d of activeDrivers) counts[statusOf(d).status]++
+    return counts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDrivers, tasksByDriver])
 
   const openEntity: FileEntity | null = useMemo(() => {
     if (!openId) return null
@@ -242,10 +258,12 @@ export function FilesPage() {
               </button>
             )}
             {tab === 'DRIVER' && (
-              <button onClick={() => setDriverEdit({ open: true, driver: null })}
-                title="Add a new driver"
+              // Drivers are never created by hand — they're invited, and their own
+              // application fills in the record.
+              <button onClick={() => setInviteOpen(true)}
+                title="Send someone an application to fill in"
                 style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                <UserPlus size={14} /> Add driver
+                <UserPlus size={14} /> Invite driver
               </button>
             )}
             <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
@@ -280,7 +298,7 @@ export function FilesPage() {
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 {tab === 'DRIVER' ? (
                   <>
-                    <th style={TH}>Driver</th><th style={TH}>Status</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>Email</th><th style={TH}>CDL</th>
+                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>Email</th><th style={TH}>CDL</th>
                     <th style={TH}>CDL expires</th><th style={TH}>Med card expires</th>
                     <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
@@ -295,7 +313,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={11} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -321,20 +339,6 @@ export function FilesPage() {
                         <b style={{ fontWeight: 600 }}>{d.name}</b>
                       </span>
                     </td>
-                    <td style={{ ...TD, whiteSpace: 'nowrap' }}>{(() => {
-                      const { status, percent } = statusOf(d)
-                      const style = STATUS_STYLE[status]
-                      return (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: 10.5, fontWeight: 600, color: style.fg, background: style.bg, padding: '2px 8px', borderRadius: 999 }}>
-                            {DRIVER_STATUS_LABELS[status]}
-                          </span>
-                          {showsOnboardingPercent(status) && (
-                            <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>{percent}%</span>
-                          )}
-                        </span>
-                      )
-                    })()}</td>
                     <td style={{ ...TD }}>
                       {d.fleetGroup
                         ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{FLEET_GROUP_LABELS[d.fleetGroup]}</span>
@@ -387,6 +391,28 @@ export function FilesPage() {
           </table>
         </div>
 
+        {tab === 'DRIVER' && (
+          <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+            {(['ALL', 'ACTIVE', 'ONBOARDING', 'INACTIVE'] as const).map((key) => {
+              const on = statusFilter === key
+              const label = key === 'ALL' ? 'All' : DRIVER_STATUS_LABELS[key]
+              return (
+                <button key={key} onClick={() => setStatusFilter(key)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6, height: 28, padding: '0 12px', borderRadius: 8,
+                    border: `1px solid ${on ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                    background: on ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
+                    color: on ? 'var(--ds-blue)' : 'var(--ds-t2)',
+                    fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                  }}>
+                  {label}
+                  <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{statusCounts[key]}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {hub.loading && <div style={{ color: 'var(--ds-t3)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
       </div>
 
@@ -408,6 +434,7 @@ export function FilesPage() {
         />
       )}
       {privateDocsOpen && <PrivateDocsModal onClose={() => setPrivateDocsOpen(false)} />}
+      {inviteOpen && <InviteDriverModal onClose={() => setInviteOpen(false)} />}
       <DriverDrawer
         open={driverEdit.open}
         driver={driverEdit.driver}

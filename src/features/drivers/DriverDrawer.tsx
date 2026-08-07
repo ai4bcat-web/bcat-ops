@@ -132,7 +132,9 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
         await updateDriver(driver.id, normalized)
         driverId = driver.id
       } else {
-        const newDriver = await addDriver(normalized)
+        // NOT_STARTED marks a new hire as onboardable. Established drivers carry null
+        // and are deliberately never offered onboarding.
+        const newDriver = await addDriver({ ...normalized, onboardingStatus: 'NOT_STARTED' })
         driverId = newDriver.id
       }
 
