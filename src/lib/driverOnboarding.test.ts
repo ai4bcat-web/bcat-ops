@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   onboardingProgress, tasksByCategory, applicationFormFor, canSendApplication, APPLICATION_FORMS,
+  driverStatus, showsOnboardingPercent,
 } from './driverOnboarding'
 import type { OnboardingTask, OnboardingTaskStatus } from '@/types'
 
@@ -98,5 +99,39 @@ describe('canSendApplication', () => {
 
   it('allows it once both are set', () => {
     expect(canSendApplication({ email: 'a@b.com', fleetGroup: 'AMAZON' }).ok).toBe(true)
+  })
+})
+
+describe('driver status', () => {
+  const prog = (applicable: number, percent: number) => ({ applicable, percent })
+
+  it('is Inactive when the driver is deactivated, whatever onboarding says', () => {
+    expect(driverStatus({ active: false }, prog(10, 50))).toBe('INACTIVE')
+    expect(driverStatus({ active: false }, prog(0, 0))).toBe('INACTIVE')
+  })
+
+  it('treats an archived candidate as inactive', () => {
+    expect(driverStatus({ active: true, onboardingStatus: 'ARCHIVED' }, prog(5, 20))).toBe('INACTIVE')
+  })
+
+  it('is Onboarding while a checklist exists and is unfinished', () => {
+    expect(driverStatus({ active: true }, prog(10, 40))).toBe('ONBOARDING')
+    expect(driverStatus({ active: true }, prog(1, 0))).toBe('ONBOARDING')
+  })
+
+  it('is Active once the checklist is finished', () => {
+    expect(driverStatus({ active: true }, prog(10, 100))).toBe('ACTIVE')
+    expect(driverStatus({ active: true, onboardingStatus: 'COMPLETE' }, prog(10, 90))).toBe('ACTIVE')
+  })
+
+  it('is Active for an established driver who never had a checklist', () => {
+    // Not "0% onboarding" — they predate the process and aren't mid-hire.
+    expect(driverStatus({ active: true }, prog(0, 0))).toBe('ACTIVE')
+  })
+
+  it('shows the percentage only while onboarding', () => {
+    expect(showsOnboardingPercent('ONBOARDING')).toBe(true)
+    expect(showsOnboardingPercent('ACTIVE')).toBe(false)
+    expect(showsOnboardingPercent('INACTIVE')).toBe(false)
   })
 })

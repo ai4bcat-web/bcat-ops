@@ -302,18 +302,32 @@ export async function updateDriver(
   patch: Partial<Omit<Driver, 'id' | 'createdAt'>>
 ): Promise<Driver> {
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
-  // Writing these to a backend that doesn't have them yet would hard-fail.
   const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
-  const rest = driversHaveTrailer ? all : withoutNewFields
+
+  const run = async (input: Record<string, unknown>) => client.graphql({
+    query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
+    variables: { input: { id, ...input } },
+  }) as Promise<{ data: { updateDriver: Driver } }>
+
+  // ALWAYS attempt the full patch first, then fall back if the backend rejects a newer
+  // field. Deciding up-front from `driversHaveTrailer` was a silent data loss: that flag
+  // is set for the life of the page by the first read, so a tab opened before the deploy
+  // kept dropping fleetGroup/assignedTrailerId from every save while still reporting
+  // success — the user set a value, saw it accepted, and it was never written.
   try {
-    const result = await client.graphql({
-      query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${driverFields()} } }`,
-      variables: { input: { id, ...rest } },
-    }) as { data: { updateDriver: Driver } }
+    const result = await run(all)
+    driversHaveTrailer = true   // proven supported — re-enable it for reads too
     return resolveDriverPhotoUrl(result.data.updateDriver)
   } catch (err: unknown) {
     const partial = driverFromPartial(err, 'updateDriver')
     if (partial) return resolveDriverPhotoUrl(partial)
+
+    if (isTrailerFieldUndefined(err)) {
+      console.warn('[apiClient] backend has no assignedTrailerId/fleetGroup yet — saving without them')
+      driversHaveTrailer = false
+      const result = await run(withoutNewFields)
+      return resolveDriverPhotoUrl(result.data.updateDriver)
+    }
     throw err
   }
 }
