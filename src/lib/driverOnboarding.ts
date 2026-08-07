@@ -118,3 +118,39 @@ export function canSendApplication(driver: { email?: string | null; fleetGroup?:
   if (!driver.email?.trim()) return { ok: false, reason: 'Add an email address to send the application to.' }
   return { ok: true }
 }
+
+
+// ── Driver status ───────────────────────────────────────────────────────────────
+
+export type DriverStatus = 'ACTIVE' | 'ONBOARDING' | 'INACTIVE'
+
+export const DRIVER_STATUS_LABELS: Record<DriverStatus, string> = {
+  ACTIVE:     'Active',
+  ONBOARDING: 'Onboarding',
+  INACTIVE:   'Inactive',
+}
+
+/**
+ * A driver's working status.
+ *
+ * Derived rather than stored, so it can't contradict the two flags that already decide
+ * it — `active` on the record, and how far onboarding has got. Storing a third value
+ * would just be one more thing to reconcile.
+ *
+ * A driver is ONBOARDING while they have a checklist that isn't finished. Once it is
+ * complete (or they never had one) they're simply active. Inactive always wins: a
+ * deactivated driver isn't mid-onboarding, they're gone.
+ */
+export function driverStatus(
+  driver: { active?: boolean | null; onboardingStatus?: string | null },
+  progress: { applicable: number; percent: number },
+): DriverStatus {
+  if (driver.active === false) return 'INACTIVE'
+  if (driver.onboardingStatus === 'ARCHIVED') return 'INACTIVE'
+  const started = progress.applicable > 0
+  const finished = progress.percent === 100 || driver.onboardingStatus === 'COMPLETE'
+  return started && !finished ? 'ONBOARDING' : 'ACTIVE'
+}
+
+/** The percentage is only meaningful — and only shown — while onboarding. */
+export const showsOnboardingPercent = (status: DriverStatus): boolean => status === 'ONBOARDING'
