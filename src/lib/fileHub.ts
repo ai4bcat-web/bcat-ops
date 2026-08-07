@@ -16,6 +16,7 @@
  */
 
 import { TRUCK_DOC_SPECS, specsForAssetType, evaluateTruckDoc } from './truckDocs'
+import { DRIVER_REQUIREMENTS } from './complianceRequirements'
 import type { Equipment, FleetGroup } from '@/types/equipment'
 import type { ComplianceDocument, Driver } from '@/types'
 
@@ -61,6 +62,38 @@ export const getPrivateDocTypes = (): ReadonlySet<string> => privateDocTypes
 
 export const isPrivateDoc = (documentType: string): boolean => privateDocTypes.has(documentType)
 
+// ── Who maintains a document ────────────────────────────────────────────────────
+
+export type Responsibility = 'OFFICE' | 'DRIVER'
+
+export const RESPONSIBILITY_LABELS: Record<Responsibility, string> = {
+  OFFICE: 'Management',
+  DRIVER: 'Employee / contractor',
+}
+
+/**
+ * Default owner of each requirement, taken from the catalog's `driverActionable` flag:
+ * if the driver can act on it, it's theirs; otherwise the office holds it. That matches
+ * how the portal already decides what to show them, so the two can't disagree.
+ */
+const defaultResponsibility = (documentType: string): Responsibility => {
+  const req = DRIVER_REQUIREMENTS.find((r) => r.key === documentType)
+  if (!req) return 'OFFICE'   // truck paperwork is the office's by default
+  return req.driverActionable ? 'DRIVER' : 'OFFICE'
+}
+
+/** Overrides from settings, so you can move a document without a deploy. */
+let responsibilityOverrides: Record<string, Responsibility> = {}
+
+export const setResponsibilityOverrides = (overrides: Record<string, Responsibility> | null | undefined): void => {
+  responsibilityOverrides = overrides ?? {}
+}
+
+export const getResponsibilityOverrides = (): Record<string, Responsibility> => responsibilityOverrides
+
+export const responsibilityFor = (documentType: string): Responsibility =>
+  responsibilityOverrides[documentType] ?? defaultResponsibility(documentType)
+
 /** Drop private slots for anyone who may not see them. */
 export const visibleSlots = (slots: readonly FileSlot[], canSeePrivate: boolean): readonly FileSlot[] =>
   canSeePrivate ? slots : slots.filter((s) => !isPrivateDoc(s.key))
@@ -73,46 +106,52 @@ export const visibleDocs = <T extends { documentType: string }>(docs: T[], canSe
 // Phone, truck # and trailer # are fields on the Driver record, not documents; they're
 // rendered from the record itself in the profile panel.
 
-/** Required of every driver, whichever fleet they run in. */
-const DRIVER_BASE_SLOTS: readonly FileSlot[] = [
-  { key: 'cdl_copy',     label: 'CDL',              sub: 'Front and back',            kind: 'document', required: true,  expires: true },
-  { key: 'medical_card', label: 'Medical card',     sub: "Examiner's certificate",    kind: 'document', required: true,  expires: true },
-]
+/**
+ * The driver's file carries the DOT Driver Qualification file (49 CFR 391.51) — derived
+ * from the requirement catalog rather than listed again here, so adding a regulation
+ * once makes it appear in the file, the portal and the checklist together.
+ *
+ * Only document-bearing requirements become slots; the action-only items (Clearinghouse
+ * queries, policy acknowledgements) live in the onboarding checklist, which is where a
+ * thing with no file belongs.
+ */
+const catalogSlot = (req: (typeof DRIVER_REQUIREMENTS)[number]): FileSlot => ({
+  key:   req.key,
+  label: req.label,
+  sub:   req.category,
+  kind:  'document',
+  required: req.required,
+  expires: req.requiresExpiration,
+})
+
+const DRIVER_BASE_SLOTS: readonly FileSlot[] = DRIVER_REQUIREMENTS
+  .filter((r) => r.requiresDocument)
+  .map(catalogSlot)
 
 /**
- * Fleet-specific paperwork. Local (Ivan) and Box Truck drivers are employees, so they
- * carry a job application and an employment agreement; Amazon drivers run under a lease
- * agreement instead.
+ * Fleet-specific paperwork on top of the DQ file. Local (Ivan) and Box Truck drivers are
+ * employees, so they carry an employment agreement; Amazon drivers run under a lease.
  */
-const DRIVER_SLOTS_BY_FLEET: Record<FleetGroup, readonly FileSlot[]> = {
-  LOCAL: [
-    { key: 'employment_application', label: 'Job application',      sub: '3-yr history, 10-yr CDL', kind: 'document', required: true, expires: false },
-    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false, private: true },
-  ],
-  BOX_TRUCK: [
-    { key: 'employment_application', label: 'Job application',      sub: '3-yr history, 10-yr CDL', kind: 'document', required: true, expires: false },
-    { key: 'employment_agreement',   label: 'Employment agreement', sub: 'Signed agreement',        kind: 'document', required: true, expires: false, private: true },
-  ],
-  AMAZON: [
-    { key: 'lease_agreement',        label: 'Lease agreement',      sub: '49 CFR Part 376',         kind: 'document', required: true, expires: false, private: true },
-  ],
+const DRIVER_SLOTS_BY_FLEET: Record<FleetGroup, readonly string[]> = {
+  LOCAL:     ['employment_agreement'],
+  BOX_TRUCK: ['employment_agreement'],
+  AMAZON:    ['lease_agreement'],
 }
 
+const FLEET_ONLY_KEYS = new Set(Object.values(DRIVER_SLOTS_BY_FLEET).flat())
+
 /** Every driver slot across all fleets — used for "is this key slotted?" checks. */
-export const DRIVER_FILE_SLOTS: readonly FileSlot[] = [
-  ...DRIVER_BASE_SLOTS,
-  ...Object.values(DRIVER_SLOTS_BY_FLEET).flat()
-    .filter((slot, i, all) => all.findIndex((x) => x.key === slot.key) === i),
-]
+export const DRIVER_FILE_SLOTS: readonly FileSlot[] = DRIVER_BASE_SLOTS
 
 /**
- * The slots ONE driver's file requires. An unclassified driver (no fleet yet) gets the
- * base set only, rather than being shown paperwork that may not apply to them.
+ * The slots ONE driver's file requires: the DQ file minus other fleets' paperwork.
+ * An unclassified driver keeps the DQ set but is shown no fleet-specific documents,
+ * rather than being asked for paperwork that may not apply.
  */
-export const slotsForDriver = (fleetGroup?: FleetGroup | null): readonly FileSlot[] => [
-  ...DRIVER_BASE_SLOTS,
-  ...(fleetGroup ? DRIVER_SLOTS_BY_FLEET[fleetGroup] : []),
-]
+export const slotsForDriver = (fleetGroup?: FleetGroup | null): readonly FileSlot[] => {
+  const mine = new Set(fleetGroup ? DRIVER_SLOTS_BY_FLEET[fleetGroup] : [])
+  return DRIVER_BASE_SLOTS.filter((s) => !FLEET_ONLY_KEYS.has(s.key) || mine.has(s.key))
+}
 
 // ── Truck ───────────────────────────────────────────────────────────────────────
 // VIN and plate number are fields on the Equipment record; the paperwork and photos

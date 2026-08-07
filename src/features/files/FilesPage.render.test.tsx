@@ -186,9 +186,10 @@ describe('driver file panel renders', () => {
     expect(screen.getByText('Active')).toBeTruthy()
     expect(screen.queryByText('0%')).toBeNull()
     expect(screen.getByText('Documents')).toBeTruthy()
-    // "CDL" appears twice — as a detail field and as a document tile. Both are correct.
-    expect(screen.getAllByText('CDL').length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText('Medical card')).toBeTruthy()
+    // Detail field is "CDL"; the tile now carries the catalog's fuller label.
+    expect(screen.getByText('CDL')).toBeTruthy()
+    expect(screen.getAllByText(/CDL copy/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Medical/).length).toBeGreaterThan(0)
   })
 
   it('shows box-truck paperwork, not the Amazon lease', async () => {
@@ -199,9 +200,10 @@ describe('driver file panel renders', () => {
       return <EntityFilePanel entity={{ kind: 'DRIVER', driver }} hub={hub} onClose={() => {}} canSeePrivate />
     }
     renderIn(<Harness />)
-    expect(screen.getByText('Job application')).toBeTruthy()
+    // Catalog labels now, so match on the meaningful part rather than my earlier wording.
+    expect(screen.getAllByText(/Employment application/).length).toBeGreaterThan(0)
     expect(screen.getByText('Employment agreement')).toBeTruthy()
-    expect(screen.queryByText('Lease agreement')).toBeNull()
+    expect(screen.queryByText(/lease agreement/i)).toBeNull()
   })
 
   it('hides the employment agreement from a non-admin', async () => {
@@ -212,7 +214,7 @@ describe('driver file panel renders', () => {
       return <EntityFilePanel entity={{ kind: 'DRIVER', driver }} hub={hub} onClose={() => {}} canSeePrivate={false} />
     }
     renderIn(<Harness />)
-    expect(screen.getByText('Job application')).toBeTruthy()
+    expect(screen.getAllByText(/Employment application/).length).toBeGreaterThan(0)
     expect(screen.queryByText('Employment agreement')).toBeNull()
   })
 

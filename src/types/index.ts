@@ -198,6 +198,8 @@ export interface ComplianceSettings {
   managerEmails?: string[] | null
   /** documentTypes hidden from non-admins. Null falls back to DEFAULT_PRIVATE_DOC_TYPES. */
   privateDocumentTypes?: string[] | null
+  /** documentType → 'OFFICE' | 'DRIVER'; overrides the catalog default. */
+  documentResponsibility?: Record<string, 'OFFICE' | 'DRIVER'> | null
   createdAt: string
   updatedAt: string
 }

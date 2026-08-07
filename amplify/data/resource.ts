@@ -800,6 +800,9 @@ const schema = a.schema({
       // manager must not see. Editable here so it changes without a deploy.
       // NOTE: presentation-level only; the documents remain readable via the API.
       privateDocumentTypes: a.string().array(),
+      // documentType → 'OFFICE' | 'DRIVER'. Who maintains each document; overrides the
+      // catalog default so it can change without a deploy.
+      documentResponsibility: a.json(),
     })
     .secondaryIndexes((index) => [
       index('settingsKey'),

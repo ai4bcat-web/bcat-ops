@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { X, EyeOff } from 'lucide-react'
-import { DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, DEFAULT_PRIVATE_DOC_TYPES, getPrivateDocTypes } from '@/lib/fileHub'
+import {
+  DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, DEFAULT_PRIVATE_DOC_TYPES, getPrivateDocTypes,
+  responsibilityFor, RESPONSIBILITY_LABELS, type Responsibility,
+} from '@/lib/fileHub'
 import { useComplianceSettings } from '@/hooks/useComplianceSettings'
 
 /**
@@ -17,6 +20,7 @@ import { useComplianceSettings } from '@/hooks/useComplianceSettings'
 export function PrivateDocsModal({ onClose }: { onClose: () => void }) {
   const { settings, patch } = useComplianceSettings()
   const [selected, setSelected] = useState<Set<string> | null>(null)
+  const [owners, setOwners] = useState<Record<string, Responsibility> | null>(null)
   const [saving, setSaving] = useState(false)
 
   // Every slot a document could occupy, de-duplicated across drivers and assets.
@@ -28,6 +32,9 @@ export function PrivateDocsModal({ onClose }: { onClose: () => void }) {
   }, [])
 
   const current = selected ?? new Set(settings?.privateDocumentTypes ?? getPrivateDocTypes())
+  const ownerOf = (key: string): Responsibility => owners?.[key] ?? responsibilityFor(key)
+  const setOwner = (key: string, value: Responsibility) =>
+    setOwners({ ...(owners ?? {}), [key]: value })
 
   const toggle = (key: string) => {
     const next = new Set(current)
@@ -38,7 +45,10 @@ export function PrivateDocsModal({ onClose }: { onClose: () => void }) {
   const save = async () => {
     setSaving(true)
     try {
-      await patch({ privateDocumentTypes: [...current] })
+      await patch({
+        privateDocumentTypes: [...current],
+        ...(owners ? { documentResponsibility: owners } : {}),
+      })
       toast.success('Private documents updated')
       onClose()
     } catch (err) {
@@ -53,12 +63,12 @@ export function PrivateDocsModal({ onClose }: { onClose: () => void }) {
     <div onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.45)', padding: 16 }}>
       <div onClick={(e) => e.stopPropagation()}
-        style={{ background: 'var(--ds-surface)', borderRadius: 14, width: 520, maxWidth: '94vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        style={{ background: 'var(--ds-surface)', borderRadius: 14, width: 560, maxWidth: '94vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 20px', borderBottom: '1px solid var(--ds-border)' }}>
           <EyeOff size={17} style={{ color: 'var(--ds-t3)' }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Private documents</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Hidden from everyone except admins</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>Document settings</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>Tick to hide from non-admins · set who maintains it</div>
           </div>
           <button onClick={onClose} aria-label="Close" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
         </div>
@@ -68,12 +78,20 @@ export function PrivateDocsModal({ onClose }: { onClose: () => void }) {
             <div key={g} style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{g}</div>
               {allSlots.filter((s) => s.group === g).map((s) => (
-                <label key={s.key}
-                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 0', fontSize: 13, color: 'var(--ds-t1)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={current.has(s.key)} onChange={() => toggle(s.key)} />
-                  {s.label}
-                  <span style={{ fontSize: 11, color: 'var(--ds-t3)', fontFamily: 'var(--font-mono, monospace)' }}>{s.key}</span>
-                </label>
+                <div key={s.key}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 0', fontSize: 12.5, color: 'var(--ds-t1)' }}>
+                  <input type="checkbox" id={`priv-${s.key}`} checked={current.has(s.key)} onChange={() => toggle(s.key)}
+                    title="Hide from everyone except admins" />
+                  <label htmlFor={`priv-${s.key}`} style={{ flex: 1, cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {s.label}
+                  </label>
+                  <select value={ownerOf(s.key)} onChange={(e) => setOwner(s.key, e.target.value as Responsibility)}
+                    title="Who is responsible for keeping this current"
+                    style={{ height: 26, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 11.5, fontFamily: 'inherit' }}>
+                    <option value="OFFICE">{RESPONSIBILITY_LABELS.OFFICE}</option>
+                    <option value="DRIVER">{RESPONSIBILITY_LABELS.DRIVER}</option>
+                  </select>
+                </div>
               ))}
             </div>
           ))}

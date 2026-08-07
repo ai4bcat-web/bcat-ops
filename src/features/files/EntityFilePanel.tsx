@@ -9,7 +9,7 @@ import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
 import {
   slotsForAsset, slotsForDriver, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, driverExpiryPatch,
-  visibleSlots, visibleDocs, type FileSlot, type SlotState,
+  visibleSlots, visibleDocs, responsibilityFor, RESPONSIBILITY_LABELS, type FileSlot, type SlotState,
 } from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
 import {
@@ -368,6 +368,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{slot.label}</span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{slot.sub}</div>
+                  <div style={{ fontSize: 10, color: 'var(--ds-t3)' }}>
+                    {RESPONSIBILITY_LABELS[responsibilityFor(slot.key)]}
+                  </div>
                   <span style={{ alignSelf: 'flex-start', fontSize: 10.5, fontWeight: 600, color: style.fg, background: style.bg, padding: '2px 7px', borderRadius: 999 }}>
                     {style.label}{shownExpiry && state !== 'MISSING' ? ` · ${fmtDate(shownExpiry)}` : ''}
                   </span>

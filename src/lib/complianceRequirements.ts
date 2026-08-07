@@ -52,7 +52,9 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     category: 'Application',
     appliesTo: ALL_DRIVERS,
     required: true,
-    requiresDocument: false,
+    // 391.21 requires the completed application be RETAINED in the DQ file, so it is a
+    // document even though it's filled in-portal rather than uploaded.
+    requiresDocument: true,
     requiresExpiration: false,
     driverVisible: true,
     driverActionable: true,
@@ -125,6 +127,36 @@ export const DRIVER_REQUIREMENTS: readonly ComplianceRequirement[] = [
     driverVisible: false,
     driverActionable: false,
     helpText: 'Ivan Cartage pulls your Motor Vehicle Record from each licensing state (49 CFR 391.23).',
+  },
+  {
+    key: 'annual_violation_certification',
+    label: 'Annual certification of violations',
+    category: 'Background & Testing',
+    appliesTo: ALL_DRIVERS,
+    required: true,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationMonths: 12,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'List every traffic violation you were convicted of in the past 12 months, or certify that you had none. Required annually by 49 CFR 391.27.',
+    internalNotes: 'DQ file item — 391.27. Must be on file within 12 months of the previous one.',
+  },
+  {
+    key: 'spe_certificate',
+    label: 'Skill Performance Evaluation / medical variance',
+    category: 'License & Medical',
+    appliesTo: ALL_DRIVERS,
+    required: false,
+    requiresDocument: true,
+    requiresExpiration: true,
+    defaultExpirationMonths: 24,
+    driverVisible: true,
+    driverActionable: true,
+    helpText:
+      'Only if you hold an SPE certificate or a federal medical variance/exemption (49 CFR 391.49). Skip if it does not apply to you.',
+    internalNotes: 'Conditional DQ item — only for drivers with a limb impairment SPE or a medical exemption.',
   },
   {
     key: 'mvr_annual_review',

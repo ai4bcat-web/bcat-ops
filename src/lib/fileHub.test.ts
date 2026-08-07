@@ -45,9 +45,10 @@ describe('file hub slots reuse existing document keys', () => {
   it('flags document types with no slot so they still surface as "other"', () => {
     expect(isUnslottedDoc('cdl_copy')).toBe(false)
     expect(isUnslottedDoc('photo_plate')).toBe(false)
-    // lease_agreement is now an Amazon driver slot, so use one that genuinely has none.
-    expect(isUnslottedDoc('i9_w4')).toBe(true)
-    expect(isUnslottedDoc('mvr_initial')).toBe(true)
+    // Action-only requirements (no file attached) are not slots — they live in the
+    // onboarding checklist instead.
+    expect(isUnslottedDoc('clearinghouse_annual')).toBe(true)
+    expect(isUnslottedDoc('random_testing_enrollment')).toBe(true)
   })
 
   it('photos never expire; paperwork does', () => {
@@ -271,7 +272,7 @@ describe('driver documents by fleet', () => {
     }
   })
 
-  it('Ivan (Local) drivers carry a job application and employment agreement', () => {
+  it('Ivan (Local) drivers carry an employment agreement, not a lease', () => {
     expect(keys('LOCAL')).toContain('employment_application')
     expect(keys('LOCAL')).toContain('employment_agreement')
     expect(keys('LOCAL')).not.toContain('lease_agreement')
@@ -281,14 +282,39 @@ describe('driver documents by fleet', () => {
     expect(keys('BOX_TRUCK')).toEqual(keys('LOCAL'))
   })
 
-  it('Amazon drivers carry a lease agreement instead', () => {
+  it('Amazon drivers carry a lease agreement instead of an employment agreement', () => {
     expect(keys('AMAZON')).toContain('lease_agreement')
     expect(keys('AMAZON')).not.toContain('employment_agreement')
-    expect(keys('AMAZON')).not.toContain('employment_application')
+    // The employment APPLICATION is required of every driver by 391.21, whatever fleet
+    // they run in — only the agreement differs.
+    expect(keys('AMAZON')).toContain('employment_application')
   })
 
-  it('an unclassified driver is only asked for the base documents', () => {
-    expect(keys(null)).toEqual(['cdl_copy', 'medical_card'])
+  it('an unclassified driver keeps the DQ file but no fleet-specific paperwork', () => {
+    const k = keys(null)
+    expect(k).toContain('cdl_copy')
+    expect(k).toContain('medical_card')
+    expect(k).toContain('employment_application')
+    // Neither fleet's agreement, since we don't know which applies.
+    expect(k).not.toContain('employment_agreement')
+    expect(k).not.toContain('lease_agreement')
+  })
+
+  it('carries the document-bearing DQ file, not just a CDL and med card', () => {
+    const k = keys('LOCAL')
+    for (const key of ['employment_application', 'mvr_initial', 'mvr_annual_review',
+                       'road_test_cert', 'annual_violation_certification']) {
+      expect(k).toContain(key)
+    }
+    expect(k.length).toBeGreaterThan(8)
+  })
+
+  it('leaves action-only DQ items out of the file — they belong on the checklist', () => {
+    // The National Registry check and the previous-employer inquiry are things somebody
+    // DOES; there's no file to hold, so a permanently-missing tile would be wrong.
+    const k = keys('LOCAL')
+    expect(k).not.toContain('med_examiner_registry_check')
+    expect(k).not.toContain('prev_employer_inquiry')
   })
 
   it('every fleet-specific key is still recognised as slotted', () => {
