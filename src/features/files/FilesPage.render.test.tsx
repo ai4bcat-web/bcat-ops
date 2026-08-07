@@ -283,3 +283,33 @@ describe('inactive drivers stay reachable', () => {
     expect(screen.queryByText('Armando Aranda')).toBeNull()
   })
 })
+
+describe('document preview', () => {
+  it('previews in place instead of opening a browser tab', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { DocumentPreviewModal } = await import('./DocumentPreviewModal')
+    const doc = {
+      id: 'doc1', entityType: 'DRIVER' as const, entityId: 'd1', documentType: 'cdl_copy',
+      title: 'CDL copy', s3Key: 'compliance/DRIVER/d1/cdl_copy/1-cdl.pdf',
+      status: 'VALID' as const, uploadedBy: 'INTERNAL' as const,
+      expirationDate: '2027-03-14', createdAt: '', updatedAt: '',
+    }
+    renderIn(<DocumentPreviewModal doc={doc} getUrl={async () => 'blob:preview'} onClose={() => {}} />)
+
+    expect(screen.getByText('CDL copy')).toBeTruthy()
+    // Download stays available alongside the preview.
+    expect(screen.getByText('Download')).toBeTruthy()
+    expect(fireEvent).toBeTruthy()
+  })
+
+  it('says so plainly for a HEIC photo rather than showing an empty frame', async () => {
+    const { DocumentPreviewModal } = await import('./DocumentPreviewModal')
+    const doc = {
+      id: 'doc2', entityType: 'TRUCK' as const, entityId: 't1', documentType: 'photo_front',
+      title: 'Front', s3Key: 'compliance/TRUCK/t1/photo_front/1-IMG.heic',
+      status: 'VALID' as const, uploadedBy: 'INTERNAL' as const, createdAt: '', updatedAt: '',
+    }
+    renderIn(<DocumentPreviewModal doc={doc} getUrl={async () => 'blob:x'} onClose={() => {}} />)
+    expect(await screen.findByText(/browsers can't display/i)).toBeTruthy()
+  })
+})
