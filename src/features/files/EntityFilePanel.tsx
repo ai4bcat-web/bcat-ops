@@ -18,6 +18,7 @@ import {
 } from './entityPacket'
 import { DriverOnboardingSection } from './DriverOnboardingSection'
 import { PacketPickerModal } from './PacketPickerModal'
+import { DocumentPreviewModal } from './DocumentPreviewModal'
 import { packetItems } from './entityPacket'
 import { approveDocument, rejectDocument } from '@/lib/documentReview'
 import type { FileHubState } from '@/hooks/useFileHub'
@@ -70,6 +71,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const [pending, setPending] = useState<{ slot: FileSlot; file: File; expiration: string } | null>(null)
   const [packetBusy, setPacketBusy] = useState(false)
   const [pickingPacket, setPickingPacket] = useState(false)
+  const [preview, setPreview] = useState<ComplianceDocument | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const targetSlot = useRef<FileSlot | null>(null)
 
@@ -163,16 +165,14 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
 
   const openDoc = async (doc: ComplianceDocument, mode: 'view' | 'download') => {
     if (!doc.s3Key) return
+    // Preview in place — opening a tab lost your position in the file.
+    if (mode === 'view') { setPreview(doc); return }
     try {
       const url = await hub.urlFor(doc.s3Key)
-      if (mode === 'view') {
-        window.open(url, '_blank', 'noopener')
-      } else {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = doc.s3Key.split('/').pop() ?? doc.title
-        a.click()
-      }
+      const a = document.createElement('a')
+      a.href = url
+      a.download = doc.s3Key.split('/').pop() ?? doc.title
+      a.click()
     } catch (err) {
       toast.error(`Couldn't open ${doc.title}: ${err instanceof Error ? err.message : 'unknown error'}`)
     }
@@ -400,7 +400,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                   <div style={{ display: 'flex', gap: 5, marginTop: 'auto', paddingTop: 4 }}>
                     {doc?.s3Key ? (
                       <>
-                        <button onClick={() => openDoc(doc, 'view')} title="View" aria-label={`View ${slot.label}`}
+                        <button onClick={() => openDoc(doc, 'view')} title="Preview" aria-label={`Preview ${slot.label}`}
                           style={iconAction}><Eye size={13} /></button>
                         <button onClick={() => openDoc(doc, 'download')} title="Download" aria-label={`Download ${slot.label}`}
                           style={iconAction}><Download size={13} /></button>
@@ -439,7 +439,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                     </span>
                     {doc?.s3Key && (
                       <>
-                        <button onClick={() => openDoc(doc, 'view')} title="View" style={iconAction}><Eye size={13} /></button>
+                        <button onClick={() => openDoc(doc, 'view')} title="Preview" style={iconAction}><Eye size={13} /></button>
                         <button onClick={() => openDoc(doc, 'download')} title="Download" style={iconAction}><Download size={13} /></button>
                       </>
                     )}
@@ -466,7 +466,7 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                       {doc.title || doc.documentType}
                       {doc.expirationDate && <span style={{ color: 'var(--ds-t3)' }}> · expires {fmtDate(doc.expirationDate)}</span>}
                     </span>
-                    <button onClick={() => openDoc(doc, 'view')} title="View" style={iconAction}><Eye size={13} /></button>
+                    <button onClick={() => openDoc(doc, 'view')} title="Preview" style={iconAction}><Eye size={13} /></button>
                     <button onClick={() => openDoc(doc, 'download')} title="Download" style={iconAction}><Download size={13} /></button>
                   </div>
                 ))}
@@ -479,6 +479,10 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
             everywhere. The packet is a single PDF: cover sheet, then every document above.
           </p>
         </div>
+
+        {preview && (
+          <DocumentPreviewModal doc={preview} getUrl={hub.urlFor} onClose={() => setPreview(null)} />
+        )}
 
         {pickingPacket && (
           <PacketPickerModal
