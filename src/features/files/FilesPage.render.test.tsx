@@ -126,8 +126,10 @@ describe('driver file panel renders', () => {
 
     expect(screen.getByText('Zak Pace')).toBeTruthy()
     expect(screen.getByText('Onboarding')).toBeTruthy()
-    // 0% for a driver with no checklist — the deliberate choice, asserted on screen.
-    expect(screen.getByText('0%')).toBeTruthy()
+    // This driver has no checklist, so they are ACTIVE — and an active driver shows no
+    // percentage and no to-do list, only the status.
+    expect(screen.getByText('Active')).toBeTruthy()
+    expect(screen.queryByText('0%')).toBeNull()
     expect(screen.getByText('Documents')).toBeTruthy()
     // "CDL" appears twice — as a detail field and as a document tile. Both are correct.
     expect(screen.getAllByText('CDL').length).toBeGreaterThanOrEqual(2)

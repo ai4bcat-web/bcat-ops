@@ -200,8 +200,8 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
               {/* ── Driver Details ─────────────────────────────────────────── */}
               <FormSection icon={<User size={15} />} title="Driver Details" subtitle="Identity, type & calendar color">
                 {/* Photo column beside stacked Name + Phone */}
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div
                       className="relative group cursor-pointer"
                       onClick={() => photoInputRef.current?.click()}
@@ -226,7 +226,8 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                     )}
                   </div>
 
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+                  {/* Same 2-up grid as the Fleet and maintenance drawers. */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 14 }}>
                     <Field label="Full Name *">
                       <Input {...register('name')} placeholder="Full name" className={cn('h-9', errors.name && 'border-destructive')} />
                       {errors.name && <p className="text-xs text-destructive mt-1">{errors.name.message}</p>}
