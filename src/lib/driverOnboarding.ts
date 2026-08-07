@@ -59,14 +59,26 @@ export function onboardingProgress(tasks: OnboardingTask[]): OnboardingProgress 
   }
 }
 
-/** Group a driver's checklist by category, preserving each category's sort order. */
+/**
+ * Group a driver's checklist for display.
+ *
+ * A templated driver (Amazon) is grouped by PHASE in order, because the phases gate each
+ * other — seeing that someone is stuck in Phase 2 is more useful than "40% done".
+ * Everyone else groups by category, which is how a flat checklist reads best.
+ */
 export function tasksByCategory(tasks: OnboardingTask[]): { category: string; tasks: OnboardingTask[] }[] {
-  const byCategory = new Map<string, OnboardingTask[]>()
-  for (const t of [...tasks].sort((a, b) => a.sortOrder - b.sortOrder)) {
-    const list = byCategory.get(t.category)
-    if (list) list.push(t); else byCategory.set(t.category, [t])
+  const phased = tasks.some((t) => t.phase != null)
+  const sorted = [...tasks].sort((a, b) =>
+    phased ? (a.phase ?? 99) - (b.phase ?? 99) || a.sortOrder - b.sortOrder : a.sortOrder - b.sortOrder,
+  )
+
+  const groups = new Map<string, OnboardingTask[]>()
+  for (const t of sorted) {
+    const key = phased ? `Phase ${t.phase ?? '—'}` : t.category
+    const list = groups.get(key)
+    if (list) list.push(t); else groups.set(key, [t])
   }
-  return [...byCategory.entries()].map(([category, list]) => ({ category, tasks: list }))
+  return [...groups.entries()].map(([category, list]) => ({ category, tasks: list }))
 }
 
 // ── Application forms ───────────────────────────────────────────────────────────
@@ -183,3 +195,17 @@ export function statusAfterToggle(
 ): DriverStatus {
   return driverStatus({ ...driver, active: !(driver.active !== false) }, progress)
 }
+
+
+// ── Which onboarding flow a fleet gets ──────────────────────────────────────────
+
+/**
+ * The onboarding template for a fleet, or null for the flat checklist.
+ *
+ * Derived rather than chosen: Amazon runs the phased Relay flow, Local and Box Truck run
+ * the flat list. The kickoff wizard used to ask, which meant it could be set to something
+ * that contradicted the fleet — the same duplicate-entry problem as the classification
+ * field.
+ */
+export const templateIdForFleet = (fleetGroup?: FleetGroup | null): string | null =>
+  fleetGroup === 'AMAZON' ? 'amazon-driver-v1' : null
