@@ -5,6 +5,7 @@ import {
 } from '@/lib/complianceClient'
 import { onboardingProgress, tasksByCategory, applicationFormFor } from '@/lib/driverOnboarding'
 import { useAuth } from '@/hooks/useAuth'
+import { useAppStore } from '@/store/useAppStore'
 import type { Driver, OnboardingTask } from '@/types'
 
 /**
@@ -15,6 +16,7 @@ import type { Driver, OnboardingTask } from '@/types'
  */
 export function useDriverOnboarding(driver: Driver | null) {
   const { user } = useAuth()
+  const updateDriverRecord = useAppStore((st) => st.updateDriver)
   const [tasks, setTasks] = useState<OnboardingTask[]>([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -54,9 +56,12 @@ export function useDriverOnboarding(driver: Driver | null) {
         // core checklist rather than nothing at all.
         classification: driver.driverType ?? 'COMPANY',
       })
+      // Record that onboarding was STARTED. Status is derived from this, so without it
+      // the driver would keep reading Active with a checklist nobody is tracking.
+      await updateDriverRecord(driver.id, { onboardingStatus: 'IN_PROGRESS' })
       await load()
     } finally { setBusy(false) }
-  }, [driver, load])
+  }, [driver, load, updateDriverRecord])
 
   /**
    * Invite the driver to apply. The invite carries the fleet so the portal can render
@@ -81,9 +86,10 @@ export function useDriverOnboarding(driver: Driver | null) {
         user: user?.email ?? 'unknown',
         changes: { fleetGroup: driver.fleetGroup, form: applicationFormFor(driver.fleetGroup)?.key },
       })
+      await updateDriverRecord(driver.id, { onboardingStatus: 'INVITED' })
       return buildPortalUrl(token)
     } finally { setBusy(false) }
-  }, [driver, user])
+  }, [driver, user, updateDriverRecord])
 
   /** Tick or untick an action item (the non-upload parts of the checklist). */
   const toggleTask = useCallback(async (task: OnboardingTask) => {

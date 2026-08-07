@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus, EyeOff } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
@@ -12,6 +12,9 @@ import {
   type ReadyScore, type SlotState, type ExpiryInfo,
 } from '@/lib/fileHub'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { listAllOnboardingTasks } from '@/lib/complianceClient'
+import { onboardingProgress, driverStatus, showsOnboardingPercent, DRIVER_STATUS_LABELS, type DriverStatus } from '@/lib/driverOnboarding'
+import type { OnboardingTask } from '@/types'
 import { EntityFilePanel } from './EntityFilePanel'
 import { DriverDrawer } from '@/features/drivers/DriverDrawer'
 import { PrivateDocsModal } from './PrivateDocsModal'
@@ -60,6 +63,12 @@ const EXPIRY_STYLE: Record<SlotState, { bg: string; fg: string }> = {
   PENDING_REVIEW:{ bg: '#fffbeb', fg: '#b45309' },
 }
 
+const STATUS_STYLE: Record<DriverStatus, { bg: string; fg: string }> = {
+  ACTIVE:     { bg: '#f0fdf4', fg: '#15803d' },
+  ONBOARDING: { bg: '#fffbeb', fg: '#b45309' },
+  INACTIVE:   { bg: 'var(--ds-bg)', fg: 'var(--ds-t3)' },
+}
+
 const shortDate = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit', timeZone: 'UTC' })
 
@@ -105,6 +114,31 @@ export function FilesPage() {
   // The file we came from, so closing the editor returns there instead of dumping the
   // user back on the list having lost their place.
   const [returnToDriverId, setReturnToDriverId] = useState<string | null>(null)
+
+  // Onboarding tasks for every driver, so the Status column can tell "still onboarding"
+  // from "active". One query for the list rather than one per row.
+  const [tasks, setTasks] = useState<OnboardingTask[]>([])
+  useEffect(() => {
+    let alive = true
+    listAllOnboardingTasks()
+      .then((all) => { if (alive) setTasks(all.filter((t) => t.entityType === 'DRIVER')) })
+      .catch((err) => console.error('[FilesPage] onboarding tasks', err))
+    return () => { alive = false }
+  }, [])
+
+  const tasksByDriver = useMemo(() => {
+    const map = new Map<string, OnboardingTask[]>()
+    for (const t of tasks) {
+      const list = map.get(t.entityId)
+      if (list) list.push(t); else map.set(t.entityId, [t])
+    }
+    return map
+  }, [tasks])
+
+  const statusOf = (d: Driver): { status: DriverStatus; percent: number } => {
+    const progress = onboardingProgress(tasksByDriver.get(d.id) ?? [])
+    return { status: driverStatus(d, progress), percent: progress.percent }
+  }
 
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active !== false)
@@ -246,7 +280,7 @@ export function FilesPage() {
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 {tab === 'DRIVER' ? (
                   <>
-                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>Email</th><th style={TH}>CDL</th>
+                    <th style={TH}>Driver</th><th style={TH}>Status</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>Email</th><th style={TH}>CDL</th>
                     <th style={TH}>CDL expires</th><th style={TH}>Med card expires</th>
                     <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
@@ -261,7 +295,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={11} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -287,6 +321,20 @@ export function FilesPage() {
                         <b style={{ fontWeight: 600 }}>{d.name}</b>
                       </span>
                     </td>
+                    <td style={{ ...TD, whiteSpace: 'nowrap' }}>{(() => {
+                      const { status, percent } = statusOf(d)
+                      const style = STATUS_STYLE[status]
+                      return (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 10.5, fontWeight: 600, color: style.fg, background: style.bg, padding: '2px 8px', borderRadius: 999 }}>
+                            {DRIVER_STATUS_LABELS[status]}
+                          </span>
+                          {showsOnboardingPercent(status) && (
+                            <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>{percent}%</span>
+                          )}
+                        </span>
+                      )
+                    })()}</td>
                     <td style={{ ...TD }}>
                       {d.fleetGroup
                         ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{FLEET_GROUP_LABELS[d.fleetGroup]}</span>
