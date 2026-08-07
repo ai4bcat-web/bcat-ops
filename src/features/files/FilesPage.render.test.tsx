@@ -48,6 +48,7 @@ vi.mock('@/hooks/useAuth', () => ({
 vi.mock('@/lib/complianceClient', () => ({
   listAllComplianceDocuments: vi.fn().mockResolvedValue([]),
   listOnboardingTasks: vi.fn().mockResolvedValue([]),
+  listAllOnboardingTasks: vi.fn().mockResolvedValue([]),
   ensureComplianceSettings: vi.fn().mockResolvedValue({
     id: 's1', settingsKey: 'GLOBAL', portalEmailsPaused: true, escalationEmailsPaused: true,
     privateDocumentTypes: null, createdAt: '', updatedAt: '',
@@ -112,7 +113,7 @@ describe('Files hub renders', () => {
     const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
-    expect(screen.getByText('Email')).toBeTruthy()
+    expect(screen.getAllByText('Email').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('zak@bcatcorp.com')).toBeTruthy()
   })
 
@@ -123,6 +124,17 @@ describe('Files hub renders', () => {
     fireEvent.click(screen.getByText('Drivers'))
     fireEvent.change(screen.getByPlaceholderText(/Search name/), { target: { value: 'zak@bcat' } })
     expect(screen.getByText('Zak Pace')).toBeTruthy()
+  })
+
+  it('shows a status for each driver, without a percentage when active', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    expect(screen.getByText('Status')).toBeTruthy()
+    // No checklist → Active, and an active driver carries no percentage.
+    expect(screen.getByText('Active')).toBeTruthy()
+    expect(screen.queryByText(/%$/)).toBeNull()
   })
 
   it('shows the admin-only Private docs control', async () => {
@@ -210,10 +222,11 @@ describe('editing a driver opens ONE drawer', () => {
     // backdrops stacked on top of each other is what looked broken.
     fireEvent.click(screen.getByText('Edit'))
     expect(screen.queryByText('Driver file')).toBeNull()
-    expect(screen.getByText('Edit Driver')).toBeTruthy()
+    // The editor now uses the same SidePanel shell: driver name as title, role beneath.
+    expect(screen.getByText('Edit driver')).toBeTruthy()
   })
 
-  it('uses the same Sheet chrome as the Fleet drawer', async () => {
+  it('uses the same panel shell as the driver file', async () => {
     const { fireEvent } = await import('@testing-library/react')
     const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
@@ -221,10 +234,9 @@ describe('editing a driver opens ONE drawer', () => {
     fireEvent.click(screen.getByText('Zak Pace'))
     fireEvent.click(screen.getByText('Edit'))
 
-    // Same title treatment and the standard right-hand sheet panel.
-    const title = screen.getByText('Edit Driver')
-    expect(title.className).toContain('font-semibold')
-    // The form sections that give the drawer its padding are present.
+    // Same shell as the file panel — subtitle under the name, and the form sections
+    // that supply the padding.
+    expect(screen.getByText('Edit driver')).toBeTruthy()
     expect(screen.getByText('Driver Details')).toBeTruthy()
   })
 })

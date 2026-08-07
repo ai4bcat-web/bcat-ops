@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { Rocket, Send, Copy, Check, CircleCheck, Circle, Clock } from 'lucide-react'
 import { useDriverOnboarding } from '@/hooks/useDriverOnboarding'
-import { applicationFormFor, canSendApplication, driverStatus, showsOnboardingPercent, DRIVER_STATUS_LABELS } from '@/lib/driverOnboarding'
+import { applicationFormFor, canSendApplication, driverStatus, showsOnboardingPercent, DRIVER_STATUS_LABELS, statusAfterToggle } from '@/lib/driverOnboarding'
+import { useAppStore } from '@/store/useAppStore'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { Driver, OnboardingTask } from '@/types'
 
@@ -17,6 +18,7 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
   const { grouped, progress, loading, busy, start, sendApplication, toggleTask } = useDriverOnboarding(driver)
   const [portalUrl, setPortalUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const updateDriver = useAppStore((st) => st.updateDriver)
 
   const form = applicationFormFor(driver.fleetGroup)
   const canSend = canSendApplication(driver)
@@ -67,6 +69,25 @@ export function DriverOnboardingSection({ driver }: { driver: Driver }) {
         {driver.fleetGroup && (
           <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{FLEET_GROUP_LABELS[driver.fleetGroup]}</span>
         )}
+        <div style={{ flex: 1 }} />
+        {/* You control active vs inactive. Onboarding is not selectable — a driver sits
+            there until every box is ticked and then becomes Active on their own. */}
+        <button
+          onClick={async () => {
+            const next = driver.active === false
+            try {
+              await updateDriver(driver.id, { active: next })
+              toast.success(next ? `${driver.name} set to active` : `${driver.name} set to inactive`)
+            } catch (err) {
+              toast.error(`Couldn't change status: ${err instanceof Error ? err.message : 'unknown error'}`)
+            }
+          }}
+          title={driver.active === false
+            ? `Reactivate — they will show as ${DRIVER_STATUS_LABELS[statusAfterToggle(driver, progress)]}`
+            : 'Set inactive'}
+          style={{ height: 24, padding: '0 10px', borderRadius: 999, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+          {driver.active === false ? 'Set active' : 'Set inactive'}
+        </button>
       </div>
 
       {/* Progress and checklist are shown ONLY while the driver is onboarding — an

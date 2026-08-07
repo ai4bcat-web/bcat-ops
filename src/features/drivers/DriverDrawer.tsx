@@ -27,9 +27,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
-} from '@/components/ui/sheet'
+import { SidePanel, panelBtn } from '@/features/files/SidePanel'
 import { driverSchema, type DriverFormValues } from '@/lib/schemas'
 import type { Driver } from '@/types'
 import { toast } from 'sonner'
@@ -101,9 +99,6 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
     }
   }, [open, driver?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen) onClose()
-  }
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -184,15 +179,32 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
   }
 
   return (
-    <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetContent>
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold">{isEdit ? 'Edit Driver' : 'Add Driver'}</SheetTitle>
-          <SheetCloseButton />
-        </SheetHeader>
+    <SidePanel
+      title={isEdit ? driver.name : 'Add driver'}
+      subtitle={isEdit ? 'Edit driver' : 'New driver'}
+      onClose={onClose}
+      footer={
+        <>
+          {isEdit && (
+            <button type="button" onClick={handleDelete} style={panelBtn.danger}>
+              <Trash2 size={14} /> Delete
+            </button>
+          )}
+          <div style={{ flex: 1 }} />
+          {Object.keys(errors).length > 0 && (
+            <span style={{ fontSize: 11.5, color: '#b91c1c', marginRight: 8 }}>Fix the errors above before saving.</span>
+          )}
+          <button type="button" onClick={onClose} style={panelBtn.secondary}>Cancel</button>
+          <button type="submit" form="driver-form" disabled={isSubmitting}
+            style={{ ...panelBtn.primary, opacity: isSubmitting ? 0.6 : 1, cursor: isSubmitting ? 'wait' : 'pointer' }}>
+            {isSubmitting ? 'Saving…' : isEdit ? 'Save changes' : 'Add driver'}
+          </button>
+        </>
+      }
+    >
 
-        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col h-full">
-          <SheetBody>
+        <form id="driver-form" onSubmit={handleSubmit(onSubmit)}>
+          <div>
             <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={handlePhotoSelect} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -360,33 +372,10 @@ export function DriverDrawer({ open, driver, onClose }: DriverDrawerProps) {
                 )}
               />
             </div>
-          </SheetBody>
+          </div>
 
-          <SheetFooter>
-            {Object.keys(errors).length > 0 && (
-              <p className="w-full text-xs text-destructive mb-1">
-                Please fix the errors above before saving.
-              </p>
-            )}
-            {isEdit && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mr-auto h-9 text-destructive border-destructive/30 hover:bg-destructive/5 gap-1.5"
-                onClick={handleDelete}
-              >
-                <Trash2 className="size-3.5" /> Delete
-              </Button>
-            )}
-            <Button type="button" variant="outline" size="sm" className="h-9" onClick={onClose}>Cancel</Button>
-            <Button type="submit" size="sm" className="h-9" disabled={isSubmitting}>
-              {isEdit ? 'Save Changes' : 'Add Driver'}
-            </Button>
-          </SheetFooter>
         </form>
-      </SheetContent>
-    </Sheet>
+    </SidePanel>
   )
 }
 

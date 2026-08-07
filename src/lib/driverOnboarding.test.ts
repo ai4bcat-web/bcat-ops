@@ -114,19 +114,30 @@ describe('driver status', () => {
     expect(driverStatus({ active: true, onboardingStatus: 'ARCHIVED' }, prog(5, 20))).toBe('INACTIVE')
   })
 
-  it('is Onboarding while a checklist exists and is unfinished', () => {
-    expect(driverStatus({ active: true }, prog(10, 40))).toBe('ONBOARDING')
-    expect(driverStatus({ active: true }, prog(1, 0))).toBe('ONBOARDING')
+  it('is Onboarding only once onboarding was explicitly started', () => {
+    expect(driverStatus({ active: true, onboardingStatus: 'IN_PROGRESS' }, prog(10, 40))).toBe('ONBOARDING')
+    expect(driverStatus({ active: true, onboardingStatus: 'INVITED' }, prog(1, 0))).toBe('ONBOARDING')
   })
 
-  it('is Active once the checklist is finished', () => {
-    expect(driverStatus({ active: true }, prog(10, 100))).toBe('ACTIVE')
+  it('leaves EXISTING drivers active even when they already have a checklist', () => {
+    // The old compliance flow generated tasks for established drivers. Inferring
+    // "onboarding" from the presence of a checklist labelled all of them mid-hire.
+    expect(driverStatus({ active: true }, prog(10, 40))).toBe('ACTIVE')
+    expect(driverStatus({ active: true, onboardingStatus: null }, prog(20, 5))).toBe('ACTIVE')
+  })
+
+  it('moves to Active once every box is ticked', () => {
+    expect(driverStatus({ active: true, onboardingStatus: 'IN_PROGRESS' }, prog(10, 100))).toBe('ACTIVE')
     expect(driverStatus({ active: true, onboardingStatus: 'COMPLETE' }, prog(10, 90))).toBe('ACTIVE')
   })
 
   it('is Active for an established driver who never had a checklist', () => {
-    // Not "0% onboarding" — they predate the process and aren't mid-hire.
     expect(driverStatus({ active: true }, prog(0, 0))).toBe('ACTIVE')
+  })
+
+  it('does not get stuck on Onboarding with an empty checklist', () => {
+    // Started but nothing generated yet — still onboarding, not silently "done".
+    expect(driverStatus({ active: true, onboardingStatus: 'IN_PROGRESS' }, prog(0, 0))).toBe('ONBOARDING')
   })
 
   it('shows the percentage only while onboarding', () => {
