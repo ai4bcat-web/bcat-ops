@@ -17,6 +17,15 @@ import { MemoryRouter } from 'react-router-dom'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
 
+// jsdom implements neither of these; Radix (used by the Sheet) needs both.
+class ResizeObserverStub {
+  observe() {} unobserve() {} disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+globalThis.DOMRect ??= class { constructor(public x = 0, public y = 0, public width = 0, public height = 0) {} } as never
+if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {}
+
 // ── Stub the network and auth edges; everything else is the real component tree ──
 
 const driver: Driver = {
@@ -162,5 +171,39 @@ describe('driver file panel renders', () => {
     expect(screen.getByText('VIN plate')).toBeTruthy()
     // I-PASS is Local/Box Truck only, and this truck is LOCAL.
     expect(screen.getByText('I-PASS')).toBeTruthy()
+  })
+})
+
+describe('editing a driver opens ONE drawer', () => {
+  it('closes the file panel when the editor opens, then returns to it', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+
+    // Open the driver's file.
+    fireEvent.click(screen.getByText('Drivers'))
+    fireEvent.click(screen.getByText('Zak Pace'))
+    expect(screen.getByText('Driver file')).toBeTruthy()
+
+    // Opening the editor must dismiss the file panel — two z-50 drawers with their own
+    // backdrops stacked on top of each other is what looked broken.
+    fireEvent.click(screen.getByText('Edit'))
+    expect(screen.queryByText('Driver file')).toBeNull()
+    expect(screen.getByText('Edit Driver')).toBeTruthy()
+  })
+
+  it('uses the same Sheet chrome as the Fleet drawer', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    fireEvent.click(screen.getByText('Zak Pace'))
+    fireEvent.click(screen.getByText('Edit'))
+
+    // Same title treatment and the standard right-hand sheet panel.
+    const title = screen.getByText('Edit Driver')
+    expect(title.className).toContain('font-semibold')
+    // The form sections that give the drawer its padding are present.
+    expect(screen.getByText('Driver Details')).toBeTruthy()
   })
 })

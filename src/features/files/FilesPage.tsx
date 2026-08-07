@@ -102,6 +102,9 @@ export function FilesPage() {
   // The full driver editor, moved here from the retired Drivers page — the only place
   // that can create a driver or edit phone/CDL/colour/photo/classification.
   const [driverEdit, setDriverEdit] = useState<{ open: boolean; driver: Driver | null }>({ open: false, driver: null })
+  // The file we came from, so closing the editor returns there instead of dumping the
+  // user back on the list having lost their place.
+  const [returnToDriverId, setReturnToDriverId] = useState<string | null>(null)
 
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active !== false)
@@ -340,12 +343,27 @@ export function FilesPage() {
           entity={openEntity}
           hub={hub}
           onClose={() => setOpenId(null)}
-          onEditDriver={(d) => setDriverEdit({ open: true, driver: d })}
+          onEditDriver={(d) => {
+            // Close the file panel first. Both it and the Sheet are z-50 with their own
+            // backdrops, so opening the editor on top of it stacked two drawers over
+            // each other — which is what read as broken padding. One drawer at a time,
+            // exactly like editing from the Fleet page.
+            setReturnToDriverId(openId)
+            setOpenId(null)
+            setDriverEdit({ open: true, driver: d })
+          }}
           canSeePrivate={isAdmin}
         />
       )}
       {privateDocsOpen && <PrivateDocsModal onClose={() => setPrivateDocsOpen(false)} />}
-      <DriverDrawer open={driverEdit.open} driver={driverEdit.driver} onClose={() => setDriverEdit({ open: false, driver: null })} />
+      <DriverDrawer
+        open={driverEdit.open}
+        driver={driverEdit.driver}
+        onClose={() => {
+          setDriverEdit({ open: false, driver: null })
+          if (returnToDriverId) { setOpenId(returnToDriverId); setReturnToDriverId(null) }
+        }}
+      />
     </div>
   )
 }
