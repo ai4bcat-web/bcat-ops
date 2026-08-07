@@ -32,7 +32,7 @@ const driver: Driver = {
   id: 'd1', name: 'Zak Pace', phone: '+18472936704', active: true, type: 'driver',
   email: 'zak@bcatcorp.com',
   cdl: 'CDL-A IL-8823901', cdlExpiration: '2027-03-14', medCardExpiration: '2026-11-01',
-  fleetGroup: 'BOX_TRUCK', assignedTruckId: 't1', createdAt: '', updatedAt: '',
+  fleetGroup: 'BOX_TRUCK', assignedTruckId: 't1', hireDate: '2025-06-02', createdAt: '', updatedAt: '',
 }
 
 const truck: Equipment = {
@@ -162,6 +162,25 @@ describe('Files hub renders', () => {
     expect(screen.queryByText('Zak Pace')).toBeNull()
     fireEvent.click(screen.getByText('Active'))
     expect(screen.getByText('Zak Pace')).toBeTruthy()
+  })
+
+  it('shows each driver\'s hire date', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    expect(screen.getByText('Hired')).toBeTruthy()
+    expect(screen.getByText('6/2/25')).toBeTruthy()
+  })
+
+  it('shows a dash when there is no hire date, rather than a blank cell', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { FilesPage } = await import('./FilesPage')
+    renderIn(<FilesPage />)
+    fireEvent.click(screen.getByText('Drivers'))
+    fireEvent.click(screen.getByText('Inactive'))
+    // Armando has no hireDate in the fixtures.
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
   it('shows the admin-only Private docs control', async () => {

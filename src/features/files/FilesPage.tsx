@@ -312,7 +312,7 @@ export function FilesPage() {
                   <>
                     <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Contact</th>
                     <th style={TH}>CDL</th><th style={TH}>Med card</th>
-                    <th style={TH}>Truck / Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
+                    <th style={TH}>Truck / Trailer</th><th style={TH}>Hired</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
                 ) : (
                   <>
@@ -325,7 +325,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -373,6 +373,9 @@ export function FilesPage() {
                     <td style={{ ...TD, whiteSpace: 'nowrap' }}>
                       <span style={{ color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</span>
                       <span style={{ color: 'var(--ds-t3)' }}> / {trailer?.unitNumber ?? 'TBD'}</span>
+                    </td>
+                    <td style={{ ...TD, whiteSpace: 'nowrap', color: d.hireDate ? 'var(--ds-t2)' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+                      {d.hireDate ? shortDate(d.hireDate.slice(0, 10)) : '—'}
                     </td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('DRIVER', d.id)} /></td>
                   </tr>
