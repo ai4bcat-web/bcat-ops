@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { X, Upload, Eye, Download, FileText, Image as ImageIcon, RefreshCw, FileStack } from 'lucide-react'
+import { X, Upload, Eye, Download, FileText, Image as ImageIcon, RefreshCw, FileStack, Pencil } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { Avatar } from '@/components/ui/avatar'
@@ -17,7 +17,7 @@ import {
   DRIVER_DOCS_ON_TRUCK, type FileEntity,
 } from './entityPacket'
 import type { FileHubState } from '@/hooks/useFileHub'
-import type { ComplianceDocument } from '@/types'
+import type { ComplianceDocument, Driver } from '@/types'
 
 export type { FileEntity }
 
@@ -34,10 +34,12 @@ const getInitials = (name: string) =>
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
-export function EntityFilePanel({ entity, hub, onClose }: {
+export function EntityFilePanel({ entity, hub, onClose, onEditDriver }: {
   entity: FileEntity
   hub: FileHubState
   onClose: () => void
+  /** Opens the full driver editor (phone, CDL, truck, trailer, colour, photo…). */
+  onEditDriver?: (driver: Driver) => void
 }) {
   const { user } = useAuth()
   const drivers = useAppStore((s) => s.drivers)
@@ -237,6 +239,12 @@ export function EntityFilePanel({ entity, hub, onClose }: {
             <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--ds-t1)' }}>{title}</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{entity.kind === 'DRIVER' ? 'Driver file' : 'Truck file'}</div>
           </div>
+          {entity.kind === 'DRIVER' && onEditDriver && (
+            <button onClick={() => onEditDriver(entity.driver)} title="Edit phone, CDL, truck, trailer and more"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+              <Pencil size={14} /> Edit
+            </button>
+          )}
           <button onClick={buildPacket} disabled={packetBusy}
             style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: packetBusy ? 'wait' : 'pointer', opacity: packetBusy ? 0.7 : 1, fontFamily: 'inherit' }}>
             <FileStack size={14} /> {packetBusy ? 'Building…' : 'Download packet'}

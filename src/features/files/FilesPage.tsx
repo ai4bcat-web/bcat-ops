@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack } from 'lucide-react'
+import { FolderOpen, Search, Users, Truck as TruckIcon, FileStack, UserPlus } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useFileHub } from '@/hooks/useFileHub'
 import { Avatar } from '@/components/ui/avatar'
@@ -11,6 +11,7 @@ import {
   type ReadyScore, type SlotState, type ExpiryInfo,
 } from '@/lib/fileHub'
 import { EntityFilePanel } from './EntityFilePanel'
+import { DriverDrawer } from '@/features/drivers/DriverDrawer'
 import { downloadEntityPacket, packetToast, driverForTruck, type FileEntity } from './entityPacket'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
@@ -88,6 +89,9 @@ export function FilesPage() {
   const [query, setQuery] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
   const [packetBusyId, setPacketBusyId] = useState<string | null>(null)
+  // The full driver editor, moved here from the retired Drivers page — the only place
+  // that can create a driver or edit phone/CDL/colour/photo/classification.
+  const [driverEdit, setDriverEdit] = useState<{ open: boolean; driver: Driver | null }>({ open: false, driver: null })
 
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active !== false)
@@ -183,6 +187,13 @@ export function FilesPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
             {tabBtn('TRUCK', 'Trucks', TruckIcon, trucks.length)}
             {tabBtn('DRIVER', 'Drivers', Users, activeDrivers.length)}
+            {tab === 'DRIVER' && (
+              <button onClick={() => setDriverEdit({ open: true, driver: null })}
+                title="Add a new driver"
+                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <UserPlus size={14} /> Add driver
+              </button>
+            )}
             <div style={{ position: 'relative', flex: 1, minWidth: 200, maxWidth: 320 }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)' }} />
               <input value={query} onChange={(e) => setQuery(e.target.value)}
@@ -302,7 +313,15 @@ export function FilesPage() {
         {hub.loading && <div style={{ color: 'var(--ds-t3)', fontSize: 12.5, padding: '10px 2px' }}>Loading documents…</div>}
       </div>
 
-      {openEntity && <EntityFilePanel entity={openEntity} hub={hub} onClose={() => setOpenId(null)} />}
+      {openEntity && (
+        <EntityFilePanel
+          entity={openEntity}
+          hub={hub}
+          onClose={() => setOpenId(null)}
+          onEditDriver={(d) => setDriverEdit({ open: true, driver: d })}
+        />
+      )}
+      <DriverDrawer open={driverEdit.open} driver={driverEdit.driver} onClose={() => setDriverEdit({ open: false, driver: null })} />
     </div>
   )
 }

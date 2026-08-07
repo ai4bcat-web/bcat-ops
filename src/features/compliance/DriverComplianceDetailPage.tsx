@@ -29,7 +29,7 @@ export function DriverComplianceDetailPage() {
   if (!driver) {
     return (
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px' }}>
-        <Button variant="ghost" onClick={() => navigate('/drivers')}><ArrowLeft size={15} /> Back</Button>
+        <Button variant="ghost" onClick={() => navigate('/files')}><ArrowLeft size={15} /> Back</Button>
         <p style={{ marginTop: 16, color: 'var(--ds-t3)' }}>Driver not found.</p>
       </div>
     )
@@ -51,7 +51,7 @@ export function DriverComplianceDetailPage() {
     <div className="h-full overflow-y-auto">
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
-          <Button variant="ghost" size="sm" onClick={() => navigate('/drivers')}><ArrowLeft size={15} /> Drivers</Button>
+          <Button variant="ghost" size="sm" onClick={() => navigate('/files')}><ArrowLeft size={15} /> Drivers</Button>
         </div>
 
         {/* Header */}

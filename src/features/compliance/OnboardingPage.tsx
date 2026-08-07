@@ -45,7 +45,7 @@ export function OnboardingPage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <Button variant="outline" onClick={() => window.open('/onboard/MOCK', '_blank', 'noopener')}><ExternalLink size={15} /> View driver portal</Button>
             <Button variant="outline" onClick={() => setEditorOpen(true)}><Pencil size={15} /> Edit template</Button>
-            <Button onClick={() => navigate('/drivers')}><UserPlus size={15} /> Start a driver</Button>
+            <Button onClick={() => navigate('/files')}><UserPlus size={15} /> Start a driver</Button>
           </div>
         </div>
 
