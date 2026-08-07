@@ -4,6 +4,7 @@ import {
   generateInviteToken, inviteExpiry, buildPortalUrl, writeComplianceAudit,
 } from '@/lib/complianceClient'
 import { onboardingProgress, tasksByCategory, applicationFormFor } from '@/lib/driverOnboarding'
+import { classificationForFleet } from '@/lib/fileHub'
 import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import type { Driver, OnboardingTask } from '@/types'
@@ -52,9 +53,9 @@ export function useDriverOnboarding(driver: Driver | null) {
       await generateChecklist({
         entityType: 'DRIVER',
         entityId: driver.id,
-        // Falls back to COMPANY so a driver with no DOT classification still gets the
-        // core checklist rather than nothing at all.
-        classification: driver.driverType ?? 'COMPANY',
+        // Derived from the fleet, the same rule the driver file uses — so the checklist
+        // and the file can't ask for different paperwork for the same driver.
+        classification: classificationForFleet(driver.fleetGroup),
       })
       // Record that onboarding was STARTED. Status is derived from this, so without it
       // the driver would keep reading Active with a checklist nobody is tracking.

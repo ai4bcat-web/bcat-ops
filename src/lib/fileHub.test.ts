@@ -2,11 +2,11 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
   daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, slotsForDriver,
-  isPrivateDoc, visibleSlots, visibleDocs, setPrivateDocTypes, getPrivateDocTypes,
+  isPrivateDoc, visibleSlots, visibleDocs, setPrivateDocTypes, getPrivateDocTypes, classificationForFleet,
   DEFAULT_PRIVATE_DOC_TYPES, type SlotState,
 } from './fileHub'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from './truckDocs'
-import { ALL_REQUIREMENTS } from './complianceRequirements'
+import { ALL_REQUIREMENTS, DRIVER_REQUIREMENTS } from './complianceRequirements'
 
 const TODAY = new Date(2026, 7, 5) // 2026-08-05
 
@@ -460,5 +460,32 @@ describe('documents awaiting review', () => {
 
   it('a waived document still wins over pending review', () => {
     expect(slotState({ status: 'WAIVED', s3Key: 'k' }, TODAY)).toBe('WAIVED')
+  })
+})
+
+describe('classification has ONE source', () => {
+  it('comes from the fleet, so it cannot contradict it', () => {
+    expect(classificationForFleet('LOCAL')).toBe('COMPANY')
+    expect(classificationForFleet('BOX_TRUCK')).toBe('COMPANY')
+    expect(classificationForFleet('AMAZON')).toBe('OWNER_OPERATOR')
+  })
+
+  it('defaults an unclassified driver to company', () => {
+    expect(classificationForFleet(null)).toBe('COMPANY')
+    expect(classificationForFleet(undefined)).toBe('COMPANY')
+  })
+
+  it('the file and the checklist ask for the same paperwork', () => {
+    // Both derive from classificationForFleet — if one used a stored driverType and the
+    // other the fleet, a driver could be asked for lease paperwork in one place and an
+    // employment agreement in the other.
+    for (const fleet of ['LOCAL', 'BOX_TRUCK', 'AMAZON'] as const) {
+      const fileKeys = slotsForDriver(fleet).map((s) => s.key)
+      const classification = classificationForFleet(fleet)
+      const expected = DRIVER_REQUIREMENTS
+        .filter((r) => r.requiresDocument && (r.appliesTo as readonly string[]).includes(classification))
+        .map((r) => r.key)
+      expect(fileKeys).toEqual(expected)
+    }
   })
 })
