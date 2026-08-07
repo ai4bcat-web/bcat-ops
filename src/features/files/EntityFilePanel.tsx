@@ -16,6 +16,7 @@ import {
   downloadEntityPacket, packetToast, entityFields, fmtDate, driverForTruck,
   DRIVER_DOCS_ON_TRUCK, type FileEntity,
 } from './entityPacket'
+import { DriverOnboardingSection } from './DriverOnboardingSection'
 import type { FileHubState } from '@/hooks/useFileHub'
 import type { ComplianceDocument, Driver } from '@/types'
 
@@ -306,6 +307,8 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
               </div>
             </div>
           )}
+
+          {entity.kind === 'DRIVER' && <DriverOnboardingSection driver={entity.driver} />}
 
           {/* Document slots */}
           <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Documents</div>
