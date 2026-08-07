@@ -482,6 +482,10 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
             title={title}
             fields={entityFields(entity, drivers, equipment)}
             items={packetItems(entity, hub, drivers, canSeePrivate)}
+            missing={(() => {
+              const included = new Set(packetItems(entity, hub, drivers, canSeePrivate).map((i) => i.label))
+              return slots.filter((sl) => !included.has(sl.label)).map((sl) => sl.label)
+            })()}
             onCancel={() => setPickingPacket(false)}
             onBuild={(chosen) => void buildPacket(chosen)}
           />

@@ -94,3 +94,27 @@ describe('packetFilename', () => {
     expect(packetFilename('Truck #214', 'truck', '2026-08-05')).toBe('truck-214-truck-file-2026-08-05.pdf')
   })
 })
+
+describe('branding', () => {
+  it('every outgoing PDF uses the one shared carrier name', async () => {
+    // PDF content streams are compressed, so this is asserted at the source: each
+    // document module must reference the shared constant rather than its own string.
+    // The drift this prevents is real — the pay statements said IVAN CARTAGE while the
+    // file packet said BCAT, so two documents about one driver disagreed on the carrier.
+    const { readFileSync } = await import('node:fs')
+    const { COMPANY_NAME } = await import('./branding')
+    expect(COMPANY_NAME).toBe('IVAN CARTAGE')
+
+    for (const file of ['src/lib/filePacketPdf.ts', 'src/lib/payPdf.ts', 'src/lib/payPdfBoxTruck.ts']) {
+      const src = readFileSync(file, 'utf8')
+      expect(src).toContain('COMPANY_NAME')
+      expect(src).not.toMatch(/drawText\('BCAT'|text\('BCAT'/)
+    }
+  })
+
+  it('titles the document with the entity and its file type', async () => {
+    const { PDFDocument } = await import('pdf-lib')
+    const { bytes } = await buildFilePacket({ ...baseInput, items: [], getUrl: async () => '' })
+    expect((await PDFDocument.load(bytes)).getTitle()).toBe('Zak Mendoza — Driver file')
+  })
+})

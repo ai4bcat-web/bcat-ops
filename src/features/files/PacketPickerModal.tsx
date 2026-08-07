@@ -13,11 +13,17 @@ import type { PacketField, PacketItem } from '@/lib/filePacketPdf'
  * the picker can only ever subtract.
  */
 export function PacketPickerModal({
-  title, fields, items, onCancel, onBuild,
+  title, fields, items, missing = [], onCancel, onBuild,
 }: {
   title: string
   fields: PacketField[]
   items: PacketItem[]
+  /**
+   * Slots with nothing uploaded. Listed but not selectable, so the picker shows the
+   * COMPLETE set of documents this asset should carry — otherwise a truck with three
+   * uploads offers three options and gives no hint the other six exist.
+   */
+  missing?: string[]
   onCancel: () => void
   onBuild: (chosen: { fieldLabels: string[]; itemLabels: string[] }) => void
 }) {
@@ -67,6 +73,23 @@ export function PacketPickerModal({
             ? <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Nothing on file yet — the packet will be just the cover sheet.</div>
             : items.map((i) => row(i.label, i.note, !omittedItems.has(i.label),
                 () => toggle(omittedItems, i.label, setOmittedItems)))}
+
+          {missing.length > 0 && (
+            <>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '14px 0 4px' }}>
+                Not on file
+              </div>
+              {missing.map((label) => (
+                <div key={label}
+                  title="Nothing uploaded for this yet, so it can't go in the packet"
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '5px 0', fontSize: 12.5, color: 'var(--ds-t3)' }}>
+                  <input type="checkbox" checked={false} disabled readOnly />
+                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                  <span style={{ fontSize: 11 }}>missing</span>
+                </div>
+              ))}
+            </>
+          )}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 18px', borderTop: '1px solid var(--ds-border)' }}>
