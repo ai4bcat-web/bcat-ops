@@ -153,7 +153,7 @@ export const isUnslottedDoc = (documentType: string) => !ALL_SLOT_KEYS.has(docum
 
 // ── Slot status ─────────────────────────────────────────────────────────────────
 
-export type SlotState = 'MISSING' | 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'WAIVED'
+export type SlotState = 'MISSING' | 'VALID' | 'EXPIRING_SOON' | 'EXPIRED' | 'WAIVED' | 'PENDING_REVIEW'
 
 export const EXPIRING_SOON_DAYS = 30
 
@@ -177,6 +177,8 @@ export function slotState(
 ): SlotState {
   if (doc?.status === 'WAIVED') return 'WAIVED'
   if (!doc) return 'MISSING'
+  // Uploaded but not yet accepted — not a gap, but not verified either.
+  if (doc.status === 'PENDING_REVIEW') return 'PENDING_REVIEW'
   if (!doc.expirationDate) return 'VALID'
   const days = daysUntil(doc.expirationDate, today)
   if (days < 0) return 'EXPIRED'

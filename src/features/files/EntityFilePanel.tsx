@@ -17,6 +17,7 @@ import {
   DRIVER_DOCS_ON_TRUCK, type FileEntity,
 } from './entityPacket'
 import { DriverOnboardingSection } from './DriverOnboardingSection'
+import { approveDocument, rejectDocument } from '@/lib/documentReview'
 import type { FileHubState } from '@/hooks/useFileHub'
 import type { ComplianceDocument, Driver } from '@/types'
 
@@ -28,6 +29,7 @@ const STATE_STYLE: Record<SlotState, { fg: string; bg: string; label: string }> 
   EXPIRED:       { fg: '#b91c1c', bg: '#fef2f2', label: 'Expired' },
   MISSING:       { fg: 'var(--ds-t3)', bg: 'var(--ds-bg)', label: 'Missing' },
   WAIVED:        { fg: 'var(--ds-t3)', bg: 'var(--ds-bg)', label: 'Not required' },
+  PENDING_REVIEW:{ fg: '#b45309', bg: '#fffbeb', label: 'To review' },
 }
 
 const getInitials = (name: string) =>
@@ -219,6 +221,28 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
     }
   }
 
+  /**
+   * Review a driver-uploaded document without leaving the file. Shares the rules with
+   * the Review Queue (documentReview.ts) so approving here also settles the checklist
+   * item, writes the audit entry, and — on rejection — emails the driver the reason.
+   */
+  const review = async (doc: ComplianceDocument, decision: 'approve' | 'reject') => {
+    let reason = ''
+    if (decision === 'reject') {
+      reason = window.prompt('Why is this being sent back? The driver is emailed this reason.')?.trim() ?? ''
+      if (!reason) return   // no silent rejection — they'd never know to fix it
+    }
+    setBusySlot(doc.documentType)
+    try {
+      if (decision === 'approve') await approveDocument(doc, user?.email)
+      else await rejectDocument(doc, reason, user?.email)
+      await hub.refresh()
+      toast.success(decision === 'approve' ? 'Document approved' : 'Sent back to the driver')
+    } catch (err) {
+      toast.error(`Couldn't ${decision} it: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally { setBusySlot(null) }
+  }
+
   const setTrailer = async (trailerId: string) => {
     if (entity.kind !== 'DRIVER') return
     try {
@@ -349,6 +373,15 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                     style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, fontSize: 11, color: 'var(--ds-t3)', cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' }}>
                     {state === 'WAIVED' ? 'Mark required' : 'Not required'}
                   </button>
+
+                  {doc?.status === 'PENDING_REVIEW' && (
+                    <div style={{ display: 'flex', gap: 5 }}>
+                      <button onClick={() => void review(doc, 'approve')} disabled={busy}
+                        style={{ flex: 1, height: 26, borderRadius: 6, border: 'none', background: '#15803d', color: '#fff', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Approve</button>
+                      <button onClick={() => void review(doc, 'reject')} disabled={busy}
+                        style={{ flex: 1, height: 26, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: '#b91c1c', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Send back</button>
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', gap: 5, marginTop: 'auto', paddingTop: 4 }}>
                     {doc?.s3Key ? (

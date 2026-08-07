@@ -4,7 +4,6 @@ import {
   listComplianceDocumentsByStatus,
   listApplicationsByStatus,
   listOnboardingTasks,
-  updateComplianceDocument,
   updateDriverApplication,
   setTaskStatus,
   updateOnboardingTask,
@@ -12,8 +11,9 @@ import {
   sendOnboardingEmail,
 } from '@/lib/complianceClient'
 import { useAuth } from '@/hooks/useAuth'
+import { approveDocument as approveDoc, rejectDocument as rejectDoc } from '@/lib/documentReview'
 import { useAppStore } from '@/store/useAppStore'
-import type { ComplianceDocument, DriverApplicationRecord, OnboardingTask } from '@/types'
+import type { ComplianceDocument, DriverApplicationRecord } from '@/types'
 
 const POLL_MS = 60_000
 
@@ -115,56 +115,22 @@ export function useReviewQueue() {
   )
 
   /** Find the OnboardingTask linked to a document (by id or requirementKey). */
-  const findLinkedTask = useCallback(
-    async (doc: ComplianceDocument): Promise<OnboardingTask | undefined> => {
-      const tasks = await listOnboardingTasks(doc.entityType, doc.entityId)
-      return (
-        tasks.find((t) => t.complianceDocumentId === doc.id) ??
-        tasks.find((t) => t.requirementKey === doc.documentType)
-      )
-    },
-    [],
-  )
-
+  // Shared with the driver file's review controls — see src/lib/documentReview.ts.
   const approveDocument = useCallback(
     async (doc: ComplianceDocument) => {
-      await updateComplianceDocument(doc.id, {
-        status: 'VALID',
-        verifiedBy: user?.email ?? 'unknown',
-        verifiedAt: new Date().toISOString(),
-        rejectionReason: null,
-      })
-      const task = await findLinkedTask(doc)
-      if (task) await setTaskStatus(task.id, 'COMPLETE', { completedBy: user?.email, complianceDocumentId: doc.id })
-      await writeComplianceAudit({
-        entityType: doc.entityType,
-        entityId: doc.entityId,
-        action: 'document_approved',
-        user: user?.email ?? 'unknown',
-        changes: { documentId: doc.id, documentType: doc.documentType },
-      })
+      await approveDoc(doc, user?.email)
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
       if (doc.entityType === 'DRIVER') await maybeCompleteOnboarding(doc.entityId)
     },
-    [findLinkedTask, maybeCompleteOnboarding, user?.email],
+    [maybeCompleteOnboarding, user?.email],
   )
 
   const rejectDocument = useCallback(
     async (doc: ComplianceDocument, reason: string) => {
-      await updateComplianceDocument(doc.id, { status: 'REJECTED', rejectionReason: reason })
-      const task = await findLinkedTask(doc)
-      if (task) await updateOnboardingTask(task.id, { status: 'AWAITING_DRIVER' })
-      await writeComplianceAudit({
-        entityType: doc.entityType,
-        entityId: doc.entityId,
-        action: 'document_rejected',
-        user: user?.email ?? 'unknown',
-        changes: { documentId: doc.id, reason },
-      })
-      if (doc.entityType === 'DRIVER') void sendOnboardingEmail({ type: 'rejected', driverId: doc.entityId, itemLabel: doc.title, reason })
+      await rejectDoc(doc, reason, user?.email)
       setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
     },
-    [findLinkedTask, user?.email],
+    [user?.email],
   )
 
   const approveApplication = useCallback(
