@@ -8,6 +8,7 @@ import type { BoxTruckPayRow } from '@/hooks/useBoxTruckPay'
 import { tripPayAmount } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { periodLabelLong } from '@/lib/biweekly'
+import { COMPANY_NAME } from '@/lib/branding'
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -30,7 +31,7 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   doc.rect(0, 0, W, 64, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFont('helvetica', 'bold'); doc.setFontSize(18)
-  doc.text('IVAN CARTAGE', M, 34)
+  doc.text(COMPANY_NAME, M, 34)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
   doc.text('Box-Truck Pay Statement', M, 50)
 

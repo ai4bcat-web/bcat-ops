@@ -9,6 +9,7 @@
  * packet never silently omits something.
  */
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib'
+import { COMPANY_NAME } from './branding'
 
 const PAGE = { w: 612, h: 792 }   // US Letter, points
 const M = 48
@@ -74,7 +75,7 @@ export async function buildFilePacket(input: PacketInput): Promise<PacketResult>
   // ── Cover sheet ───────────────────────────────────────────────────────────────
   const cover = doc.addPage([PAGE.w, PAGE.h])
   cover.drawRectangle({ x: 0, y: PAGE.h - 92, width: PAGE.w, height: 92, color: rgb(0, 0, 0) })
-  cover.drawText('BCAT', { x: M, y: PAGE.h - 46, size: 20, font: bold, color: rgb(1, 1, 1) })
+  cover.drawText(COMPANY_NAME, { x: M, y: PAGE.h - 46, size: 20, font: bold, color: rgb(1, 1, 1) })
   cover.drawText(input.subtitle, { x: M, y: PAGE.h - 68, size: 11, font, color: rgb(0.85, 0.85, 0.85) })
 
   let y = PAGE.h - 132

@@ -15,7 +15,8 @@ import ivanLogo from '@/assets/ivan-cartage-logo.png'
 
 // Branding for the statement. PAY_LOGO is the image logo; if it fails to load we
 // fall back to the COMPANY_NAME text wordmark below.
-const COMPANY_NAME = 'IVAN CARTAGE'
+import { COMPANY_NAME } from './branding'
+export { COMPANY_NAME }
 const PAY_LOGO: string | null = ivanLogo
 
 const money = (n: number) =>
