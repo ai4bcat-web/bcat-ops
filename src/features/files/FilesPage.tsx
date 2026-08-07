@@ -67,6 +67,17 @@ const EXPIRY_STYLE: Record<SlotState, { bg: string; fg: string }> = {
 const shortDate = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit', timeZone: 'UTC' })
 
+/** The same expiry chip, sized to sit under a value rather than in its own column. */
+function ExpiryInline({ info }: { info: ExpiryInfo }) {
+  if (!info.date) return <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>no expiry</div>
+  const style = EXPIRY_STYLE[info.state]
+  return (
+    <div style={{ fontSize: 11, color: style.fg, fontVariantNumeric: 'tabular-nums' }}>
+      {shortDate(info.date)}{info.conflict && ' ⚠'}
+    </div>
+  )
+}
+
 /** A driver's CDL / med-card expiry, colour-coded, flagging a record-vs-document mismatch. */
 function ExpiryCell({ info }: { info: ExpiryInfo }) {
   const style = EXPIRY_STYLE[info.state]
@@ -280,7 +291,7 @@ export function FilesPage() {
         </div>
       </div>
 
-      <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ padding: '20px 32px 40px', maxWidth: 1400, margin: '0 auto' }}>
         {storeError && (
           <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2', marginBottom: 14 }}>
             Couldn't load drivers and loads: {storeError}
@@ -292,15 +303,16 @@ export function FilesPage() {
           </div>
         )}
 
-        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
+        {/* overflow-x so a narrow window scrolls the table instead of clipping columns. */}
+        <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflowX: 'auto', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 {tab === 'DRIVER' ? (
                   <>
-                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Phone</th><th style={TH}>Email</th><th style={TH}>CDL</th>
-                    <th style={TH}>CDL expires</th><th style={TH}>Med card expires</th>
-                    <th style={TH}>Truck</th><th style={TH}>Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
+                    <th style={TH}>Driver</th><th style={TH}>Type</th><th style={TH}>Contact</th>
+                    <th style={TH}>CDL</th><th style={TH}>Med card</th>
+                    <th style={TH}>Truck / Trailer</th><th style={{ ...TH, textAlign: 'right' }}>On file</th>
                   </>
                 ) : (
                   <>
@@ -313,7 +325,7 @@ export function FilesPage() {
             </thead>
             <tbody>
               {tab === 'DRIVER' && shownDrivers.length === 0 && (
-                <tr><td colSpan={10} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
+                <tr><td colSpan={7} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 24 }}>
                   {activeDrivers.length === 0
                     ? (storeLoading ? 'Loading drivers…' : 'No drivers loaded. If the roster is empty everywhere, the drivers query failed — check the console.')
                     : `No drivers match "${query}".`}
@@ -344,16 +356,24 @@ export function FilesPage() {
                         ? <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t2)', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', padding: '2px 7px', borderRadius: 999, whiteSpace: 'nowrap' }}>{FLEET_GROUP_LABELS[d.fleetGroup]}</span>
                         : <span style={{ color: 'var(--ds-t3)', fontSize: 12 }}>Unclassified</span>}
                     </td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{d.phone ? formatPhone(d.phone) : '—'}</td>
-                    <td style={{ ...TD, color: d.email ? 'var(--ds-t2)' : 'var(--ds-t3)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    <td style={{ ...TD, maxWidth: 210 }}
                       title={d.email || 'No email — an application can’t be sent without one'}>
-                      {d.email || '—'}
+                      <div style={{ color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.phone ? formatPhone(d.phone) : '—'}</div>
+                      <div style={{ fontSize: 11.5, color: d.email ? 'var(--ds-t3)' : '#b45309', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {d.email || 'no email'}
+                      </div>
                     </td>
-                    <td style={{ ...TD, color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{d.cdl || '—'}</td>
-                    <ExpiryCell info={driverExpiry(d.cdlExpiration, hub.docFor('DRIVER', d.id, 'cdl_copy'))} />
+                    <td style={{ ...TD, maxWidth: 190 }}>
+                      <div style={{ color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {d.cdl || '—'}
+                      </div>
+                      <ExpiryInline info={driverExpiry(d.cdlExpiration, hub.docFor('DRIVER', d.id, 'cdl_copy'))} />
+                    </td>
                     <ExpiryCell info={driverExpiry(d.medCardExpiration, hub.docFor('DRIVER', d.id, 'medical_card'))} />
-                    <td style={{ ...TD, color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</td>
-                    <td style={{ ...TD, color: trailer ? 'var(--ds-t2)' : 'var(--ds-t3)' }}>{trailer?.unitNumber ?? 'TBD'}</td>
+                    <td style={{ ...TD, whiteSpace: 'nowrap' }}>
+                      <span style={{ color: 'var(--ds-t2)' }}>{truck?.unitNumber ?? '—'}</span>
+                      <span style={{ color: 'var(--ds-t3)' }}> / {trailer?.unitNumber ?? 'TBD'}</span>
+                    </td>
                     <td style={{ ...TD, textAlign: 'right' }}><ReadyDots score={scoreFor('DRIVER', d.id)} /></td>
                   </tr>
                 )
