@@ -2,13 +2,16 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
-import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle, ShieldCheck } from 'lucide-react'
+import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle, ShieldCheck, CalendarDays } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransactions'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { DieselPriceWidget } from '@/features/dashboard/DieselPriceWidget'
 import { FuelUploadModal } from '@/features/expenses/FuelUploadModal'
 import { detectFuelAnomalies } from '@/lib/fuelAnomalies'
+import { useTruckMileage } from '@/hooks/useTruckMileage'
+import { milesByTruck, mpg, formatMpg, formatMiles, mpgTone, recentWeeks, weeklyTotals } from '@/lib/fuelEfficiency'
+import type { WeekTotals } from '@/lib/fuelEfficiency'
 import type { Equipment } from '@/types/equipment'
 
 interface Agg { spend: number; gallons: number; count: number }
@@ -74,8 +77,14 @@ export function FuelPage() {
   const initialRange = (RANGES.find((r) => r.key === params.get('range'))?.key ?? 'this-month') as RangeKey
   const [rangeKey, setRangeKey] = useState<RangeKey>(initialRange)
   const [uploadOpen, setUploadOpen] = useState(false)
+  // The weekly card keeps its own truck filter — it answers "how did #214 do week to
+  // week", which is a different question from the period totals above it.
+  const [weekTruckId, setWeekTruckId] = useState<string>('all')
 
   const { transactions, loading, addTransactions, refresh } = useFuelTransactions()
+  // Mileage loads independently of fuel — the table renders as soon as fuel is in and
+  // fills the miles/MPG columns when the ELD rows land, rather than blocking on both.
+  const { rows: mileageRows } = useTruckMileage('DAY')
   const equipment = useAppStore((s) => s.equipment)
   const drivers = useAppStore((s) => s.drivers)
   const updateEquipment = useAppStore((s) => s.updateEquipment)
@@ -165,6 +174,14 @@ export function FuelPage() {
   const prevSpend = previous.reduce((s, t) => s + t.amount, 0)
   const spendDelta = prev && prevSpend > 0 ? Math.round(((spend - prevSpend) / prevSpend) * 100) : null
 
+  // Miles come from the Motive DAY feed, the same source the profitability engine uses.
+  const truckMiles = useMemo(() => milesByTruck(mileageRows, range), [mileageRows, range])
+  const fleetMiles = useMemo(
+    () => trucks.reduce((sum, tr) => (excludedTruckIds.has(tr.id) ? sum : sum + (truckMiles.get(tr.id) ?? 0)), 0),
+    [trucks, truckMiles, excludedTruckIds],
+  )
+  const fleetMpg = mpg(fleetMiles, gallons)
+
   const addTo = (map: Map<string, Agg>, key: string, t: FuelTransaction) => {
     const c = map.get(key)
     if (c) { c.spend += t.amount; c.gallons += t.quantity; c.count += 1 }
@@ -178,13 +195,33 @@ export function FuelPage() {
     const rows: TruckFuelRow[] = trucks.filter((tr) => !excludedTruckIds.has(tr.id)).map((tr) => {
       const a = agg.get(tr.id) ?? { spend: 0, gallons: 0, count: 0 }
       const dn = driverNameForTruck(tr.id)
-      return { label: `#${tr.unitNumber}`, driver: dn, noDriver: !dn, spend: a.spend, gallons: a.gallons }
+      const mi = truckMiles.get(tr.id) ?? 0
+      return { label: `#${tr.unitNumber}`, driver: dn, noDriver: !dn, spend: a.spend, gallons: a.gallons, miles: mi, mpg: mpg(mi, a.gallons) }
     })
     const um = agg.get('__unmapped__')
-    if (um && um.spend > 0) rows.push({ label: 'Unmapped', driver: 'card not matched to a truck', noDriver: true, spend: um.spend, gallons: um.gallons })
+    if (um && um.spend > 0) rows.push({ label: 'Unmapped', driver: 'card not matched to a truck', noDriver: true, spend: um.spend, gallons: um.gallons, miles: 0, mpg: null })
     return rows.sort((a, b) => b.spend - a.spend)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, trucks, truckById, driverById, cardToTruck, excludedTruckIds])
+  }, [current, trucks, truckById, driverById, cardToTruck, excludedTruckIds, truckMiles])
+
+  // Weekly view: its own 12-week window, independent of the period selector above.
+  const weeks = useMemo(() => recentWeeks(12, new Date()), [])
+  const weeklyEntries = useMemo(
+    () => fuelTxs.map((t) => {
+      const tr = truckForTx(t)
+      return { day: t.transactionDate, amount: t.amount, gallons: t.quantity, truckId: tr?.id }
+    }).filter((e) => !(e.truckId && excludedTruckIds.has(e.truckId))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fuelTxs, truckById, cardToTruck, excludedTruckIds],
+  )
+  const weeklyMileage = useMemo(
+    () => mileageRows.filter((m) => !excludedTruckIds.has(m.truckId)),
+    [mileageRows, excludedTruckIds],
+  )
+  const weekRows = useMemo(
+    () => weeklyTotals(weeklyEntries, weeklyMileage, weeks, weekTruckId === 'all' ? null : weekTruckId),
+    [weeklyEntries, weeklyMileage, weeks, weekTruckId],
+  )
 
   const trucksFueled = byTruck.filter((r) => r.spend > 0).length
   const trucksNoDriver = trucks.filter((t) => t.active !== false && !driverByTruckId.has(t.id))
@@ -288,6 +325,8 @@ export function FuelPage() {
             sub={prev ? 'vs previous period' : 'all recorded fuel'} />
           <StatCard label="Gallons" value={loading ? '—' : gal(gallons)} accent="#1ea8f3" sub={`${current.length} transactions`} />
           <StatCard label="Avg $/gal" value={loading ? '—' : money2(avgPerGal)} accent="#16a34a" sub="blended, this period" />
+          <StatCard label="Miles" value={loading ? '—' : formatMiles(fleetMiles)} accent="#0891b2" sub="from ELD, this period" />
+          <StatCard label="Avg MPG" value={loading ? '—' : formatMpg(fleetMpg)} accent="#7c3aed" sub={fleetMiles > 0 ? 'fleet miles ÷ gallons' : 'no mileage synced'} />
           <StatCard label="Trucks Fueled" value={loading ? '—' : `${trucksFueled} / ${trucks.length}`} accent="#6366f1" sub="fueled this period" />
         </div>
 
@@ -406,6 +445,15 @@ export function FuelPage() {
         {/* Fuel by truck — with miles & MPG */}
         <FuelByTruckTable rows={byTruck} loading={loading} />
 
+        {/* Week by week (Sun–Sat), per truck or fleet-wide */}
+        <WeeklyFuelTable
+          rows={weekRows}
+          trucks={trucks.filter((t) => !excludedTruckIds.has(t.id))}
+          truckId={weekTruckId}
+          onTruckChange={setWeekTruckId}
+          loading={loading}
+        />
+
         {/* Unmapped fuel cards — not attached to any truck (all time) */}
         {(unmappedCards.length > 0 || ignoredCards.length > 0) && (
           <div style={{ background: 'var(--ds-surface)', border: '1px solid #fde68a', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -514,6 +562,75 @@ function StatCard({ label, value, sub, accent, right }: { label: string; value: 
 interface TruckFuelRow {
   label: string; driver?: string; noDriver: boolean
   spend: number; gallons: number
+  miles: number; mpg: number | null
+}
+
+/**
+ * Fuel and miles week by week, for one truck or the whole fleet.
+ *
+ * Weeks run Sunday→Saturday (5/31–6/6 and so on), matching the settlement week the
+ * office already works in — so a week here lines up with a week on a pay statement.
+ */
+function WeeklyFuelTable({ rows, trucks, truckId, onTruckChange, loading }: {
+  rows: WeekTotals[]
+  trucks: Equipment[]
+  truckId: string
+  onTruckChange: (id: string) => void
+  loading: boolean
+}) {
+  const th: React.CSSProperties = { padding: '8px 16px', fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }
+  const td: React.CSSProperties = { padding: '9px 16px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }
+  const sorted = [...trucks].sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
+
+  return (
+    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <CalendarDays size={15} style={{ color: 'var(--ds-t3)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel &amp; miles by week</span>
+        <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>· last 12 weeks · Sun–Sat</span>
+        <div style={{ flex: 1 }} />
+        <select value={truckId} onChange={(e) => onTruckChange(e.target.value)}
+          style={{ height: 30, padding: '0 8px', borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t1)', fontSize: 12.5, fontFamily: 'inherit' }}>
+          <option value="all">All trucks</option>
+          {sorted.map((t) => <option key={t.id} value={t.id}>#{t.unitNumber}</option>)}
+        </select>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+              <th style={{ ...th, textAlign: 'left' }}>Week</th>
+              <th style={{ ...th, textAlign: 'right' }}>Fuel $</th>
+              <th style={{ ...th, textAlign: 'right' }}>Gallons</th>
+              <th style={{ ...th, textAlign: 'right' }}>Miles</th>
+              <th style={{ ...th, textAlign: 'right' }}>MPG</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={5} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
+            ) : rows.map((r) => {
+              const quiet = r.spend === 0 && r.miles === 0
+              return (
+                <tr key={r.week.start} style={{ borderBottom: '1px solid var(--ds-border)', opacity: quiet ? 0.55 : 1 }}>
+                  <td style={{ padding: '9px 16px', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{r.week.label}</td>
+                  <td style={{ ...td, fontWeight: 600, color: 'var(--ds-t1)' }}>{r.spend > 0 ? money(r.spend) : '—'}</td>
+                  <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.gallons > 0 ? gal(r.gallons) : '—'}</td>
+                  <td style={{ ...td, color: 'var(--ds-t2)' }}>{formatMiles(r.miles)}</td>
+                  <td style={{ ...td, fontWeight: 600, color: MPG_COLOR[mpgTone(r.mpg)] }}>{formatMpg(r.mpg)}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/** Muted when unknown, so a missing MPG never looks like a bad MPG. */
+const MPG_COLOR: Record<ReturnType<typeof mpgTone>, string> = {
+  good: '#15803d', ok: 'var(--ds-t1)', poor: '#dc2626', none: 'var(--ds-t3)',
 }
 
 function FuelByTruckTable({ rows, loading }: { rows: TruckFuelRow[]; loading: boolean }) {
@@ -526,26 +643,33 @@ function FuelByTruckTable({ rows, loading }: { rows: TruckFuelRow[]; loading: bo
         <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Fuel by Truck</span>
       </div>
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 520 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 680 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
               <th style={{ ...th, textAlign: 'left' }}>Truck</th>
               <th style={{ ...th, textAlign: 'left' }}>Driver</th>
               <th style={{ ...th, textAlign: 'right' }}>Fuel $</th>
               <th style={{ ...th, textAlign: 'right' }}>Gallons</th>
+              <th style={{ ...th, textAlign: 'right' }}>Miles</th>
+              <th style={{ ...th, textAlign: 'right' }}>MPG</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
+              <tr><td colSpan={6} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={4} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>No trucks</td></tr>
+              <tr><td colSpan={6} style={{ padding: 28, textAlign: 'center', color: 'var(--ds-t3)' }}>No trucks</td></tr>
             ) : rows.map((r) => (
               <tr key={r.label} style={{ borderBottom: '1px solid var(--ds-border)' }}>
                 <td style={{ padding: '9px 16px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>{r.label}</td>
                 <td style={{ padding: '9px 16px', color: r.noDriver ? '#b45309' : 'var(--ds-t2)', fontWeight: r.noDriver ? 600 : 400 }}>{r.driver ?? '—'}</td>
                 <td style={{ ...td, fontWeight: 600, color: 'var(--ds-t1)' }}>{money(r.spend)}</td>
                 <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.gallons > 0 ? gal(r.gallons) : '—'}</td>
+                <td style={{ ...td, color: 'var(--ds-t2)' }}>{formatMiles(r.miles)}</td>
+                <td style={{ ...td, fontWeight: 600, color: MPG_COLOR[mpgTone(r.mpg)] }}
+                  title={r.mpg == null ? 'Needs both miles and gallons this period' : undefined}>
+                  {formatMpg(r.mpg)}
+                </td>
               </tr>
             ))}
           </tbody>

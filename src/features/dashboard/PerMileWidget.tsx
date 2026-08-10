@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react'
 import { Gauge, Table2, LineChart as LineChartIcon, ChevronLeft, ChevronRight } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
+import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import type { FleetGroup } from '@/types/equipment'
 import { monthRange, monthLabel } from '@/features/fleet-profitability/monthRange'
 import { weekRange, weekLabel } from '@/features/fleet-profitability/weekRange'
 
@@ -30,18 +32,20 @@ const TH: React.CSSProperties = { fontSize: 10.5, fontWeight: 600, color: 'var(-
 const TD: React.CSSProperties = { fontSize: 13, color: 'var(--ds-t1)', padding: '9px 12px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
 /**
- * Per-truck efficiency for the Ivan (LOCAL) fleet — revenue per mile and fuel cost
+ * Per-truck efficiency for a chosen fleet — revenue per mile and fuel cost
  * per mile. Table view lists every active truck (incl. drivers without fuel cards)
  * plus a fleet-average row; graph view plots the fleet rev/mi & fuel/mi month over
  * month as lines so the trend is easy to compare.
  */
 export function PerMileWidget() {
+  // Defaults to Ivan, which is what this widget showed before the fleet picker existed.
+  const [fleet_, setFleet] = useState<FleetGroup>('LOCAL')
   const [view, setView] = useState<'table' | 'graph'>('table')
   const [period, setPeriod] = useState<'week' | 'month'>('month')
   const [offset, setOffset] = useState(0)   // 0 = current period, 1 = previous, …
   const range = period === 'week' ? weekRange(offset) : monthRange(offset)
   const rangeLabel = period === 'week' ? weekLabel(range) : monthLabel(range)
-  const { data, loading, computeForRange } = useFleetProfitability(range, 'LOCAL')
+  const { data, loading, computeForRange } = useFleetProfitability(range, fleet_)
 
   // Switching the period unit makes the offset ambiguous — jump back to current.
   const changePeriod = (p: 'week' | 'month') => { setPeriod(p); setOffset(0) }
@@ -79,13 +83,18 @@ export function PerMileWidget() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue &amp; fuel per mile</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              Ivan fleet · {view === 'table'
+              {FLEET_GROUP_LABELS[fleet_]} · {view === 'table'
                 ? `Per truck · ${rangeLabel}`
                 : `${period === 'week' ? 'Weekly' : 'Monthly'} trend · last ${TREND_WINDOW[period]} ${period}s${offset > 0 ? ` through ${rangeLabel}` : ''}`}
             </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <select value={fleet_} onChange={(e) => setFleet(e.target.value as FleetGroup)}
+            title="Which fleet to measure"
+            style={{ height: 28, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', padding: '0 6px' }}>
+            {FLEET_GROUPS.map((g) => <option key={g} value={g}>{FLEET_GROUP_LABELS[g]}</option>)}
+          </select>
           {/* History navigation — step through previous periods */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {offset > 0 && (
