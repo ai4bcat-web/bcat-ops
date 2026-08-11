@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-08-10
+> Last updated: 2026-08-11
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking (with miles & MPG), insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, a Files hub (drivers, trucks and trailers — the roster, DOT compliance and onboarding, everything on file per record, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), company-wide Settings, and audit logging.
@@ -115,7 +115,7 @@ Internal staff manage driver/truck compliance from `/files` (the dedicated `/com
 ## Code Conventions
 - All UI in `src/features/<name>/` (self-contained) or `src/components/`
 - Hooks in `src/hooks/*` → call `src/lib/apiClient.ts` → AppSync
-- Shared logic in `src/lib/*`; Zod schemas in `src/lib/schemas.ts`; multi-stop loads in `src/lib/stops.ts`; document slots/readiness in `src/lib/fileHub.ts` and packet PDFs in `src/lib/filePacketPdf.ts`; driver working status + onboarding progress in `src/lib/driverOnboarding.ts`; miles/MPG in `src/lib/fuelEfficiency.ts`; the carrier name/header used by every outgoing PDF lives in `src/lib/branding.ts`
+- Shared logic in `src/lib/*`; Zod schemas in `src/lib/schemas.ts`; multi-stop loads in `src/lib/stops.ts`; document slots/readiness in `src/lib/fileHub.ts` and packet PDFs in `src/lib/filePacketPdf.ts`; driver working status + onboarding progress in `src/lib/driverOnboarding.ts`; miles/MPG in `src/lib/fuelEfficiency.ts`; browser file saves in `src/lib/download.ts` (fetch → blob, because `<a download>` is ignored on cross-origin presigned-S3 URLs and would navigate away — used by the Files hub); the carrier name/header used by every outgoing PDF lives in `src/lib/branding.ts`
 - The sidebar nav, the grantable page permissions on `/users`, and the `page-<key>` Cognito groups all derive from one list — `NAV_GROUPS` in `src/lib/navItems.ts`. Add a page there once; a user with no page-groups has full access, granting any page restricts them to those pages (admins always have full access)
 - Tests are Vitest + Testing Library (`npm test`), colocated as `*.test.ts(x)` next to the code they cover
 - `@/` import alias; no `any` in new files; Conventional Commits
