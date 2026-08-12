@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { X, Plus, Trash2, Upload } from 'lucide-react'
+import { X, Plus, Trash2, Upload, Image as ImageIcon } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
 import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv'
+import { parseTripScreenshot } from '@/lib/apiClient'
+import { imageToUploadableBase64, imageFromClipboard, screenshotTripToRaw } from '@/lib/screenshotImport'
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
@@ -132,34 +134,80 @@ function FilePick({ onText }: { onText: (t: string, fileName?: string) => void }
 
 const importTextarea: React.CSSProperties = { width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: 10, fontSize: 12, fontFamily: 'monospace', background: 'var(--ds-surface)', color: 'var(--ds-t1)', resize: 'vertical', boxSizing: 'border-box' }
 
-// ── Per-driver import (paste or file) ───────────────────────────────────────
+/** Pick a screenshot of the Relay trips list; it's read server-side into trip rows. */
+function ScreenshotPick({ busy, onFile }: { busy: boolean; onFile: (f: File) => void }) {
+  return (
+    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: busy ? 'wait' : 'pointer', fontSize: 12.5, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>
+      <ImageIcon size={14} /> {busy ? 'Reading…' : 'Screenshot…'}
+      <input type="file" accept="image/*" style={{ display: 'none' }} disabled={busy}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.currentTarget.value = '' }} />
+    </label>
+  )
+}
+
+// ── Per-driver import (paste text, upload a CSV, or paste/upload a screenshot) ──
 export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onClose }: { driverId: string; periodStart: string; onImport: (rows: TripInput[]) => Promise<void>; onSetPeriod?: (week: string) => void; onClose: () => void }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
+  // Trips read out of pasted/uploaded screenshots (Relay trips list). These carry
+  // the block's true pay, so they don't need the base-rate block warning, and they
+  // file into the week being viewed — Relay's week filter already scoped them.
+  const [shotRows, setShotRows] = useState<RawTripRow[]>([])
+  const [shotBusy, setShotBusy] = useState(false)
+  const [shotError, setShotError] = useState<string | null>(null)
+
   const raw = parseRows(text)
-  const parsed = raw.map((r) => rowToTrip(r, driverId, r.date ? weekStartOfISO(r.date) : periodStart))
+  const parsed = [
+    ...raw.map((r) => rowToTrip(r, driverId, r.date ? weekStartOfISO(r.date) : periodStart)),
+    ...shotRows.map((r) => rowToTrip(r, driverId, periodStart)),
+  ]
   const detectedWeeks = Array.from(new Set(raw.map((r) => (r.date ? weekStartOfISO(r.date) : null)).filter((w): w is string => !!w)))
   const dominantWeek = modeOf(raw.map((r) => (r.date ? weekStartOfISO(r.date) : null)).filter((w): w is string => !!w))
 
+  const readScreenshot = async (file: Blob) => {
+    setShotBusy(true); setShotError(null)
+    try {
+      const { base64, mediaType } = await imageToUploadableBase64(file)
+      const res = await parseTripScreenshot({ imageBase64: base64, mediaType, todayISO: new Date().toISOString().slice(0, 10) })
+      if (!res.trips) throw new Error(res.error || 'Could not read the screenshot')
+      if (!res.trips.length) throw new Error('No trip rows found in that image — crop to the trips table and try again')
+      setShotRows((p) => [...p, ...res.trips!.map(screenshotTripToRaw)])
+    } catch (e) {
+      setShotError(e instanceof Error ? e.message : String(e))
+    } finally { setShotBusy(false) }
+  }
+
   return (
-    <Modal title="Import trips" sub="Upload a CSV or paste rows from your pay spreadsheet" onClose={onClose} width={640}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
-          Columns (header auto-detected, else this order):<br />
-          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>Load ID · Origin · Destination · Miles · Equipment · Freight · Rate/mi · Dispatcher · Status</span>
+    <Modal title="Import trips" sub="Upload a CSV, paste rows, or paste a screenshot of the Relay trips list" onClose={onClose} width={640}>
+      <div onPaste={(e) => { const f = imageFromClipboard(e); if (f) { e.preventDefault(); void readScreenshot(f) } }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', lineHeight: 1.5 }}>
+            Columns (header auto-detected, else this order):<br />
+            <span style={{ fontFamily: 'monospace', fontSize: 11 }}>Load ID · Origin · Destination · Miles · Equipment · Freight · Rate/mi · Dispatcher · Status</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+            <ScreenshotPick busy={shotBusy} onFile={(f) => void readScreenshot(f)} />
+            <FilePick onText={setText} />
+          </div>
         </div>
-        <FilePick onText={setText} />
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10}
+          placeholder={'Paste spreadsheet rows here — or paste a screenshot (⌘V) of the Relay trips list.\n\n112CRP7T7\tUPRR->ELP1\t\t40.73\t53\' Container\t$300.00\t\tLee Lara\tCompleted'}
+          style={importTextarea} />
+        <div style={{ fontSize: 12.5, color: parsed.length ? '#15803d' : 'var(--ds-t3)', marginTop: 8 }}>
+          {shotBusy ? 'Reading screenshot…' : parsed.length ? `${parsed.length} trip${parsed.length !== 1 ? 's' : ''} ready to import` : 'Upload, paste rows, or paste a screenshot to preview'}
+          {!shotBusy && shotRows.length > 0 && (
+            <span style={{ color: 'var(--ds-t3)' }}>
+              {' '}· {shotRows.length} from screenshot{shotRows.length !== 1 ? 's' : ''} (filed to {weekLabel(periodStart)})
+              {' '}<button type="button" onClick={() => setShotRows([])} style={{ border: 'none', background: 'none', color: 'var(--ds-blue)', cursor: 'pointer', fontSize: 12, padding: 0 }}>clear</button>
+            </span>
+          )}
+          {detectedWeeks.length === 1 && <span style={{ color: 'var(--ds-t3)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
+          {detectedWeeks.length > 1 && <span style={{ color: '#b45309' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
+        </div>
+        {shotError && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{shotError}</div>}
+        <BlockWarning rows={raw} />
+        <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
       </div>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={10}
-        placeholder={'112CRP7T7\tUPRR->ELP1\t\t40.73\t53\' Container\t$300.00\t\tLee Lara\tCompleted'}
-        style={importTextarea} />
-      <div style={{ fontSize: 12.5, color: parsed.length ? '#15803d' : 'var(--ds-t3)', marginTop: 8 }}>
-        {parsed.length ? `${parsed.length} trip${parsed.length !== 1 ? 's' : ''} ready to import` : 'Upload or paste rows to preview'}
-        {detectedWeeks.length === 1 && <span style={{ color: 'var(--ds-t3)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
-        {detectedWeeks.length > 1 && <span style={{ color: '#b45309' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
-      </div>
-      <BlockWarning rows={raw} />
-      <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
     </Modal>
   )
 }
