@@ -25,6 +25,7 @@ import { googleReviews } from './functions/google-reviews/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
+import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
 
 const backend = defineBackend({
   auth,
@@ -48,6 +49,7 @@ const backend = defineBackend({
   paychexPaySync,
   brokerLoadAlert,
   amazonDisputeIntake,
+  tripScreenshotParser,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────

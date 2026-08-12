@@ -664,6 +664,41 @@ export async function sendDriverPayEmail(args: {
   return (data ?? { sent: false, error: 'no-response' }) as { sent: boolean; to?: string; error?: string }
 }
 
+// ── Trip screenshot parsing (Driver Pay import) ────────────────────────────────
+
+export interface ScreenshotTrip {
+  loadId: string | null
+  origin: string | null
+  destination: string | null
+  miles: number | null
+  equipment: string | null
+  freightAmount: number
+  ratePerMile: number | null
+  status: string | null
+  date: string | null
+}
+
+/**
+ * Read an Amazon Relay trips-list screenshot into structured trip rows (Claude
+ * vision, server-side). The caller downscales the image first — AppSync caps the
+ * request at ~1MB — and previews the rows before importing.
+ */
+export async function parseTripScreenshot(args: {
+  imageBase64: string
+  mediaType?: string
+  todayISO?: string
+}): Promise<{ trips: ScreenshotTrip[] | null; error?: string | null }> {
+  const res = await client.graphql({
+    query: `mutation ParseTripScreenshot($imageBase64: String!, $mediaType: String, $todayISO: String) {
+      parseTripScreenshot(imageBase64: $imageBase64, mediaType: $mediaType, todayISO: $todayISO)
+    }`,
+    variables: args,
+  })
+  let data: unknown = (res as { data?: { parseTripScreenshot?: unknown } }).data?.parseTripScreenshot
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave as-is */ } }
+  return (data ?? { trips: null, error: 'no-response' }) as { trips: ScreenshotTrip[] | null; error?: string | null }
+}
+
 // ── Vehicle quote email (Best Care Auto Transport) ─────────────────────────────
 
 /**

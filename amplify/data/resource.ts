@@ -3,6 +3,7 @@ import { userManagement } from '../functions/userManagement/resource'
 import { slackStatusNotifier } from '../functions/slack-status-notifier/resource'
 import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
 import { driverPayEmailer } from '../functions/driver-pay-emailer/resource'
+import { tripScreenshotParser } from '../functions/trip-screenshot-parser/resource'
 import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource'
 import { googleReviews } from '../functions/google-reviews/resource'
 
@@ -916,6 +917,20 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(driverPayEmailer)),
+
+  // Read an Amazon Relay trips-list screenshot into structured trip rows for the
+  // Driver Pay import (upload or paste an image instead of a CSV). The frontend
+  // downscales the image and previews the rows before anything is saved.
+  parseTripScreenshot: a
+    .mutation()
+    .arguments({
+      imageBase64: a.string().required(),
+      mediaType:   a.string(),
+      todayISO:    a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tripScreenshotParser)),
 
   // Email a customer their Best Care Auto Transport vehicle quote as branded HTML.
   // The frontend builds the HTML (identical to the on-screen preview); the Lambda
