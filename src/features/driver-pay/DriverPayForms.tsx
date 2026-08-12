@@ -206,7 +206,12 @@ export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onCl
         </div>
         {shotError && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{shotError}</div>}
         <BlockWarning rows={raw} />
-        <Footer onClose={onClose} onSave={async () => { setSaving(true); try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) } }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
+        <Footer onClose={onClose} onSave={async () => {
+          // Nothing parsed yet → keep the modal open instead of silently importing nothing.
+          if (!parsed.length) { setShotError('Nothing to import yet — paste rows, or add a screenshot with the Screenshot… button.'); return }
+          setSaving(true)
+          try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) }
+        }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
       </div>
     </Modal>
   )
