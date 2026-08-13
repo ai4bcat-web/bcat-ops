@@ -1,10 +1,10 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-08-12
+> Last updated: 2026-08-13
 
 ## What it is
-Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking (with miles & MPG), insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, a Files hub (drivers, trucks and trailers — the roster, DOT compliance and onboarding, everything on file per record, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), company-wide Settings, and audit logging.
+Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking (with miles & MPG), insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, a manual weekly cash-flow forecast (BCAT + IVAN), driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, a Files hub (drivers, trucks and trailers — the roster, DOT compliance and onboarding, everything on file per record, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), company-wide Settings, and audit logging.
 
 ## Where it lives
 | | |
@@ -19,7 +19,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 ## Tech Stack
 **Frontend:** React 19 · TypeScript (strict) · Vite · Tailwind v4 · shadcn/ui (Radix primitives) · Zustand · React Router v7 · FullCalendar v6 (resource-timeline) · TanStack Table · react-hook-form + Zod · Recharts · `@vis.gl/react-google-maps` (dashboard truck map) · d3-geo / topojson-client / us-atlas (US map geometry) · jsPDF + jspdf-autotable (driver pay statement PDFs) · pdf-lib (Files hub packet PDFs — merges stored documents into one file) · sonner · date-fns
 
-**Backend (AWS Amplify Gen 2):** AppSync GraphQL API · Cognito auth (userPool) · DynamoDB (via `a.model`) · S3 (confirmation/compliance docs) · Lambda functions · SES (onboarding/escalation email)
+**Backend (AWS Amplify Gen 2):** AppSync GraphQL API · Cognito auth (userPool) · DynamoDB (via `a.model`) · S3 (confirmation/compliance docs) · Lambda functions · SES (onboarding/escalation email) · Anthropic Claude API (`@anthropic-ai/sdk`, Relay trip-screenshot parsing; `ANTHROPIC_API_KEY` Amplify secret)
 
 ## Routes / Pages
 | Route | Feature |
@@ -36,10 +36,11 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/invoices` | Maintenance invoices — list plus a Review Queue tab (`?tab=queue`) for emailed repairs, with edit/post/archive; one invoice can cover multiple units; KPI row includes an Unpaid card (count + total owed on posted invoices with no payment date, amber when non-zero) |
 | `/fuel` | Fuel transaction tracking, EFS report upload, fuel price anomaly widget flagging transactions >15% above the per-fuel-type fleet average (`src/lib/fuelAnomalies.ts`), plus Miles / Avg-MPG KPIs and a per-truck and recent-weeks miles·gallons·MPG breakdown pairing FuelTransaction gallons with Motive `TruckMileage` day rows (`src/lib/fuelEfficiency.ts`) (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
+| `/cash-flow` | Manual weekly cash-flow forecast for BCAT + IVAN — cash on hand, AR (0–30 / 120+ day with a collection rate), payables (optionally spread over months), recurring revenue/expenses → monthly projection, projected low / ending cash, runway, and a weekly history log. Standalone by design: every number is typed in on the page; nothing reads Load/Invoice/Expense data (`src/lib/cashFlow.ts` is pure math in cents) |
 | `/insurance` | Insurance premiums — per-truck/trailer + workers' comp annual amounts by policy period, period-over-period compare, driver insurance-deduction recovery KPI; feeds per-truck insurance cost in profitability |
 | `/schedule` | Driver schedule view (route only — not listed in the sidebar nav) |
 | `/time-off` | Driver time-off / availability management |
-| `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email |
+| `/driver-pay` | Amazon driver weekly (7-day) trip-based pay + statement PDFs/email; trips import from the master CSV or from a pasted/uploaded Amazon Relay screenshot (Claude-parsed via `parseTripScreenshot`, image prepared client-side in `src/lib/screenshotImport.ts`, rows previewed before saving) |
 | `/driver-pay-box-trucks` | Box-truck (Ivan Cartage) biweekly shipment-based pay — settlement credits (detention/layover/bonus, paid at 100%), one-off deductions, and pushing a shipment forward to the next pay period |
 | `/disputes` | Amazon driver disputes (underpaid/owed trips) — Google Form ingest + manual entry |
 | `/driver-docs` | Driver Documents — send forms (e.g. WI IC-Status statement) for tokenized e-signature |
@@ -62,6 +63,8 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 
 **Disputes:** `AmazonDispute` (driver claims that Amazon underpaid/owes on a trip; Google Form → intake Lambda, source `GOOGLE_FORM`, plus `MANUAL`; workflow PENDING → POSTED → PAID | REJECTED)
 
+**Cash flow (standalone):** `CashFlowInputs` (the manually-entered forecast input set — cash, AR buckets + 120-day collection rate, AP buckets, recurring revenue/expenses, payables spread, min-cash threshold; one `isCurrent` row is live, older rows kept for traceability) · `CashFlowWeekLog` (one appended row per week — headline figures plus the projection they produced, behind the trend chart; `runwayMonths` null = not burning, deliberately distinct from 0). Both deliberately isolated — no relations, nothing else reads/writes them; money in integer cents
+
 **Telematics (Motive + Blue Ink Tech):** `TruckConfig` · `TruckMileage` · `TruckLocation` · `TruckLocationHistory` (BIT trucks write into the same mileage/location tables as Motive)
 
 **Intake & audit:** `IntakeItem` · `AuditLog`
@@ -81,6 +84,7 @@ Notable model fields: `Driver.onboardingStatus` now includes `ARCHIVED` (candida
 - `manageUsers` (query) — admin-gated Cognito user CRUD → `userManagement`
 - `sendOnboardingEmail` (mutation) — driver-facing onboarding email via SES (invite/rejected/complete), honors kill switch → `onboardingEmailer`
 - `sendDriverPayEmail` (mutation) — emails a driver their weekly pay statement PDF (built client-side, passed as base64) via SES → `driverPayEmailer`
+- `parseTripScreenshot` (mutation) — reads an Amazon Relay trips-list screenshot (base64 image) into structured trip rows for the Driver Pay import; the frontend downscales the image and previews the rows before anything is saved → `tripScreenshotParser`
 - `sendVehicleQuoteEmail` (mutation) — sends Best Care Auto Transport branded HTML email (backs both the `/vehicle-quote` quote and the `/vehicle-confirmation` booking confirmation), from ruben@bcatcorp.com and always CC'd to cars@bcatcorp.com (visible to the customer; falls back to the legacy `BCC_ADDRESS` env var) → `vehicleQuoteEmailer`
 - `getGoogleReviews` (query) — live Google rating + review count for the Best Care Auto Transport listing (CTA in the quote email) → `googleReviews`
 
@@ -98,6 +102,7 @@ Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`.
 - **generate-recurring-expenses** — materializes RecurringExpense templates into monthly ExpenseRecords
 - **paychex-pay-sync** — pulls the latest closed Paychex pay period and writes ONE combined fleet driver-cost record into DriverPayPeriod (idempotent per period); feeds fleet driver cost in Finances
 - **driver-pay-emailer** — custom AppSync mutation (`sendDriverPayEmail`); wraps the client-built pay-statement PDF in a MIME message and sends via SES
+- **trip-screenshot-parser** — custom AppSync mutation (`parseTripScreenshot`); sends a screenshot of the Amazon Relay trips list (History/Payments view) to Claude and returns structured trip rows for the Driver Pay import; needs the `ANTHROPIC_API_KEY` Amplify secret (clear error until set)
 - **vehicle-quote-emailer** — custom AppSync mutation (`sendVehicleQuoteEmail`); sends the client-built Best Care Auto Transport quote HTML from ruben@bcatcorp.com, always CC'ing cars@bcatcorp.com
 - **google-reviews** — custom AppSync query (`getGoogleReviews`); returns the live Google rating + review count for the Best Care listing, shown as a CTA in the quote email
 - **amazon-dispute-intake** — Function URL called by the Google Form Apps Script bridge; writes each dispute-form submission into an `AmazonDispute` record (deduped by `externalId`, source `GOOGLE_FORM`)
