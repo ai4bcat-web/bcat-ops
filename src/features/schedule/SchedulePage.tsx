@@ -3,7 +3,7 @@ import { Copy, Check, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-re
 import { Avatar } from '@/components/ui/avatar'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
-import { chicagoDateStr, addDays, formatTime, needLabel } from '@/lib/date'
+import { chicagoDateStr, addDays, apptTimeLabel } from '@/lib/date'
 import { getColor } from '@/lib/driverColors'
 import type { Load, Driver } from '@/types'
 import {
@@ -25,13 +25,8 @@ function getInitials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 }
 
-/** Appointment display matching the calendar day view (NEED / NEED HH:MM / FCFS / range / time). */
-function apptText(appt: string, type?: string | null, apptEnd?: string | null): string {
-  if (type === 'tbd')  return needLabel(appt)
-  if (type === 'fcfs') return 'FCFS'
-  if (type === 'range' && apptEnd) return `${formatTime(appt)}–${formatTime(apptEnd)}`
-  return appt ? formatTime(appt) : '—'
-}
+/** Appointment display — shared with the calendar so the two never disagree. */
+const apptText = apptTimeLabel
 
 // ── Copy button ───────────────────────────────────────────────────────────────
 

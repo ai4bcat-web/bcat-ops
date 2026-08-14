@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { X, Download, ExternalLink } from 'lucide-react'
+import { toast } from 'sonner'
 import { isPdfKey, isImageKey, isUnembeddableKey } from '@/lib/filePacketPdf'
+import { downloadFromUrl } from '@/lib/download'
 import type { ComplianceDocument } from '@/types'
 
 /**
@@ -34,12 +36,20 @@ export function DocumentPreviewModal({
   const filename = key.split('/').pop() ?? doc.title
   const canRender = isPdfKey(key) || isImageKey(key)
 
-  const download = () => {
-    if (!url) return
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
+  const [saving, setSaving] = useState(false)
+
+  // Same cross-origin trap as the Files tab: pointing <a download> at the presigned S3 URL
+  // navigates instead of saving. Fetch the bytes and save a blob. See src/lib/download.ts.
+  const download = async () => {
+    if (!url || saving) return
+    setSaving(true)
+    try {
+      await downloadFromUrl(url, filename)
+    } catch (err) {
+      toast.error(`Couldn't download ${filename}: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const btn: React.CSSProperties = {
@@ -63,8 +73,9 @@ export function DocumentPreviewModal({
               {filename}{doc.expirationDate ? ` · expires ${doc.expirationDate.slice(0, 10)}` : ''}
             </div>
           </div>
-          <button onClick={download} disabled={!url} style={{ ...btn, opacity: url ? 1 : 0.5 }}>
-            <Download size={14} /> Download
+          <button onClick={() => void download()} disabled={!url || saving}
+            style={{ ...btn, opacity: url ? 1 : 0.5, cursor: saving ? 'wait' : 'pointer' }}>
+            <Download size={14} /> {saving ? 'Downloading…' : 'Download'}
           </button>
           {url && (
             <a href={url} target="_blank" rel="noopener noreferrer" style={{ ...btn, textDecoration: 'none' }}>

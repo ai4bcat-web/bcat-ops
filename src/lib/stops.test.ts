@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import type { Load, Stop } from '@/types'
-import { getStops, deriveLegacyFields, withDerivedLegacy, makeStop, updateStop, reorderStops } from './stops'
+import type { ApptType, Load, Stop, StopType } from '@/types'
+import { getStops, deriveLegacyFields, withDerivedLegacy, makeStop, updateStop, reorderStops, stopsNewlyNeeding } from './stops'
 
 function legacyLoad(over: Partial<Load> = {}): Load {
   return {
@@ -115,5 +115,58 @@ describe('updateStop / reorderStops / makeStop', () => {
     expect(s.id).toBeTruthy()
     expect(s.apptType).toBe('exact')
     expect(s.driverId).toBeNull()
+  })
+})
+
+describe('stopsNewlyNeeding', () => {
+  const stop = (id: string, apptType: ApptType, type: StopType = 'pickup'): Stop => ({
+    id, type, appt: '2026-08-20T14:00:00.000Z', apptType, driverId: null, sequence: 0,
+  })
+
+  it('fires when a stop moves into NEED', () => {
+    const found = stopsNewlyNeeding([stop('s1', 'tbd')], [stop('s1', 'exact')])
+    expect(found.map((s) => s.id)).toEqual(['s1'])
+  })
+
+  it('stays quiet when the stop was already NEED — the re-save case', () => {
+    // This is what keeps #appts-ivan a signal: editing an unrelated field on a load
+    // that is already flagged must not re-post.
+    expect(stopsNewlyNeeding([stop('s1', 'tbd')], [stop('s1', 'tbd')])).toEqual([])
+  })
+
+  it('stays quiet when a stop moves OUT of NEED', () => {
+    expect(stopsNewlyNeeding([stop('s1', 'exact')], [stop('s1', 'tbd')])).toEqual([])
+  })
+
+  it('treats every NEED stop on a brand-new load as newly needing', () => {
+    const found = stopsNewlyNeeding([stop('s1', 'tbd'), stop('s2', 'tbd', 'delivery')], [])
+    expect(found).toHaveLength(2)
+  })
+
+  it('reports pickup and delivery separately', () => {
+    const found = stopsNewlyNeeding(
+      [stop('s1', 'tbd'), stop('s2', 'tbd', 'delivery')],
+      [stop('s1', 'exact'), stop('s2', 'exact', 'delivery')],
+    )
+    expect(found.map((s) => s.type)).toEqual(['pickup', 'delivery'])
+  })
+
+  it('only reports the stop that changed', () => {
+    const found = stopsNewlyNeeding(
+      [stop('s1', 'tbd'), stop('s2', 'tbd', 'delivery')],
+      [stop('s1', 'exact'), stop('s2', 'tbd', 'delivery')],
+    )
+    expect(found.map((s) => s.id)).toEqual(['s1'])
+  })
+
+  it('does not fire for FCFS or a plain Pending appointment', () => {
+    // Pending is a quiet state by design — only an explicit NEED asks someone to act.
+    expect(stopsNewlyNeeding([stop('s1', 'fcfs')], [stop('s1', 'exact')])).toEqual([])
+    expect(stopsNewlyNeeding([stop('s1', 'exact')], [stop('s1', 'exact')])).toEqual([])
+  })
+
+  it('treats a legacy stop with no apptType as not-NEED', () => {
+    const legacy = { ...stop('s1', 'exact'), apptType: undefined } as unknown as Stop
+    expect(stopsNewlyNeeding([stop('s1', 'tbd')], [legacy]).map((s) => s.id)).toEqual(['s1'])
   })
 })

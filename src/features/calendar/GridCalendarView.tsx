@@ -6,7 +6,7 @@
 
 import { useState, useRef, useMemo, useCallback, useEffect } from 'react'
 import { Plus, CheckCircle, Circle, GripVertical, PaintBucket } from 'lucide-react'
-import { formatTime, formatDayHeader, addDays, needLabel } from '@/lib/date'
+import { formatDayHeader, addDays, apptTimeLabel } from '@/lib/date'
 import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -68,10 +68,7 @@ interface AvailabilityStrip {
 
 function apptDisplay(iso: string | undefined | null, type: string | undefined | null, yard: boolean): string {
   if (yard) return 'Yard'
-  if (type === 'tbd')  return needLabel(iso)   // "NEED" or "NEED HH:MM" when a desired time is set
-  if (type === 'fcfs') return 'FCFS'
-  if (!iso) return '—'
-  return formatTime(iso)
+  return apptTimeLabel(iso, type)
 }
 
 function apptDate(iso: string | undefined | null): string {
