@@ -947,6 +947,59 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(vehicleQuoteEmailer)),
 
+  // ── Cash Flow (STANDALONE) ──────────────────────────────────────────────────
+  // A manual weekly cash-flow forecast for BCAT + IVAN. These two tables are
+  // deliberately isolated: no relations, no shared IDs, and nothing else in the app
+  // reads or writes them. Every value is typed in on the Cash Flow page. Do NOT wire
+  // these to Load/Invoice/ExpenseRecord — the page's whole premise is that the
+  // operator enters the numbers by hand.
+  //
+  // Money is stored in integer cents, same as the insurance module.
+
+  // The current input set. One active row (isCurrent) is read on page load; older
+  // rows are kept so an input set can be traced back if a figure is questioned.
+  CashFlowInputs: a
+    .model({
+      weekOf:                  a.date().required(),
+      isCurrent:               a.boolean().required(),
+      cashBcatCents:           a.integer().required(),
+      cashIvanCents:           a.integer().required(),
+      ar30Cents:               a.integer().required(),
+      ar120Cents:              a.integer().required(),
+      ar120CollectionRate:     a.float().required(),   // 0–1
+      apBcatAgingCents:        a.integer().required(),
+      apBcatExpectedCents:     a.integer().required(),
+      apBcatAmexCents:         a.integer().required(),
+      apIvanCcCents:           a.integer().required(),
+      apIvanMiscCents:         a.integer().required(),
+      recurringRevenueCents:   a.integer().required(),
+      recurringExpensesCents:  a.integer().required(),
+      // Months the payables backlog is spread over (1 = pay it all in month 1).
+      payablesSpreadMonths:    a.integer(),
+      minCashThresholdCents:   a.integer(),
+      notes:                   a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
+  // One appended row per week — the history log behind the trend chart. Snapshots the
+  // headline figures plus the projection they produced, so a past week still shows the
+  // forecast it was based on even after the model's assumptions change.
+  CashFlowWeekLog: a
+    .model({
+      weekOf:               a.date().required(),
+      totalCashCents:       a.integer().required(),
+      ar30Cents:            a.integer().required(),
+      ar120Cents:           a.integer().required(),
+      totalPayablesCents:   a.integer().required(),
+      projectedLowCents:    a.integer().required(),
+      projectedEndingCents: a.integer().required(),
+      // Months of runway at the time of the snapshot. Null = wasn't burning that week,
+      // which is meaningfully different from zero and must not collapse into it.
+      runwayMonths:         a.integer(),
+      notes:                a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
   // Live Google rating + review count for the Best Care Auto Transport listing,
   // shown as a CTA in the quote email. Returns { configured, ok, rating, total, url }.
   getGoogleReviews: a
