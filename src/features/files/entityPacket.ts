@@ -7,6 +7,7 @@
 import { slotsForAsset, slotsForDriver, isUnslottedDoc, visibleSlots, isPrivateDoc } from '@/lib/fileHub'
 import { buildFilePacket, packetFilename, type PacketField, type PacketItem, type PacketResult } from '@/lib/filePacketPdf'
 import { formatPhone, formatVin } from '@/lib/utils'
+import { saveBlob } from '@/lib/download'
 import type { FileHubState } from '@/hooks/useFileHub'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
@@ -132,11 +133,8 @@ export function packetItems(
   return items
 }
 
-function saveBlob(name: string, bytes: Uint8Array) {
-  const blob = new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+function savePdf(name: string, bytes: Uint8Array) {
+  saveBlob(new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }), name)
 }
 
 export interface PacketOutcome extends PacketResult {
@@ -173,7 +171,7 @@ export async function downloadEntityPacket(params: {
     generatedAt: fmtDate(todayIso),
   })
 
-  saveBlob(packetFilename(title, entity.kind === 'DRIVER' ? 'driver' : 'truck', todayIso), result.bytes)
+  savePdf(packetFilename(title, entity.kind === 'DRIVER' ? 'driver' : 'truck', todayIso), result.bytes)
   return { ...result, itemCount: items.length }
 }
 

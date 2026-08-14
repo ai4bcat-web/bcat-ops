@@ -23,6 +23,7 @@ import { PacketPickerModal } from './PacketPickerModal'
 import { DocumentPreviewModal } from './DocumentPreviewModal'
 import { packetItems } from './entityPacket'
 import { approveDocument, rejectDocument } from '@/lib/documentReview'
+import { downloadFromUrl } from '@/lib/download'
 import type { FileHubState } from '@/hooks/useFileHub'
 import type { ComplianceDocument, Driver } from '@/types'
 
@@ -68,6 +69,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   // would reveal the document exists at all.
   const slots = visibleSlots(allSlots, canSeePrivate)
   const [busySlot, setBusySlot] = useState<string | null>(null)
+  // Which document is mid-download — the fetch takes a moment on large scans, and without
+  // this the button looks like it did nothing.
+  const [busyDoc, setBusyDoc] = useState<string | null>(null)
   // A dated document needs its expiration captured at upload, so it can be stored on
   // the document AND written back to the driver record (they used to drift apart).
   const [pending, setPending] = useState<{ slot: FileSlot; file: File; expiration: string } | null>(null)
@@ -171,14 +175,17 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
     if (!doc.s3Key) return
     // Preview in place — opening a tab lost your position in the file.
     if (mode === 'view') { setPreview(doc); return }
+    // Fetch-then-save rather than pointing an <a download> at the presigned URL: that
+    // attribute is ignored cross-origin, so the browser would navigate to S3 and the PDF
+    // viewer would replace this page. See src/lib/download.ts.
+    setBusyDoc(doc.id)
     try {
       const url = await hub.urlFor(doc.s3Key)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = doc.s3Key.split('/').pop() ?? doc.title
-      a.click()
+      await downloadFromUrl(url, doc.s3Key.split('/').pop() ?? doc.title)
     } catch (err) {
-      toast.error(`Couldn't open ${doc.title}: ${err instanceof Error ? err.message : 'unknown error'}`)
+      toast.error(`Couldn't download ${doc.title}: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally {
+      setBusyDoc(null)
     }
   }
 
@@ -428,8 +435,13 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
                       <>
                         <button onClick={() => openDoc(doc, 'view')} title="Preview" aria-label={`Preview ${slot.label}`}
                           style={iconAction}><Eye size={13} /></button>
-                        <button onClick={() => openDoc(doc, 'download')} title="Download" aria-label={`Download ${slot.label}`}
-                          style={iconAction}><Download size={13} /></button>
+                        <button onClick={() => void openDoc(doc, 'download')} disabled={busyDoc === doc.id}
+                          title="Download" aria-label={`Download ${slot.label}`}
+                          style={{ ...iconAction, cursor: busyDoc === doc.id ? 'wait' : 'pointer' }}>
+                          {busyDoc === doc.id
+                            ? <RefreshCw size={13} className="animate-spin" />
+                            : <Download size={13} />}
+                        </button>
                         <button onClick={() => pickFile(slot)} disabled={busy} title="Replace with a new file and date" aria-label={`Replace ${slot.label}`}
                           style={iconAction}><RefreshCw size={13} /></button>
                         <button onClick={() => void removeDocument(doc, slot.label)} disabled={busy}
