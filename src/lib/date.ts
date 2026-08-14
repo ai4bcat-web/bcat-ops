@@ -14,13 +14,59 @@ export function formatTime(iso: string): string {
 }
 
 /**
- * Label for a "NEED" (TBD / no firm appointment) appt. If a desired time was entered
- * (stored appt is not at UTC midnight), show "NEED HH:MM"; otherwise just "NEED".
- * A date-only entry is saved at UTC midnight, so "00:00" means no time was set.
+ * Label for a "NEED" (TBD / no firm appointment) appt. Shows "NEED HH:MM" when a desired
+ * time was entered, otherwise just "NEED". See apptHasTime for what counts as a time.
  */
 export function needLabel(iso: string | null | undefined): string {
-  if (iso && iso.slice(11, 16) !== '00:00') return `NEED ${formatTime(iso)}`
+  if (iso && apptHasTime(iso)) return `NEED ${formatTime(iso)}`
   return 'NEED'
+}
+
+/**
+ * True when an appointment carries an actual time of day.
+ *
+ * Midnight LOCAL (Chicago) means "no time chosen" — the convention NEED and FCFS already
+ * use, and now what makes an `exact` appointment read "Pending".
+ *
+ * This must compare in Chicago, not UTC. `fromDateInput` stores a date-only appointment
+ * as Chicago midnight, which is 05:00 or 06:00 Z depending on DST — so slicing the UTC
+ * string finds a "time" on every date-only appointment. That bug is why a NEED with no
+ * desired time used to render as "NEED 24:00".
+ *
+ * hourCycle h23 is pinned so midnight is "00:00" on every engine; Node's default h24
+ * formats it as "24:00".
+ */
+const chicagoHm = new Intl.DateTimeFormat('en-GB', {
+  timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+})
+
+export function apptHasTime(iso: string | null | undefined): boolean {
+  if (!iso) return false
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return false
+  return chicagoHm.format(d) !== '00:00'
+}
+
+/** Shown instead of inventing a time nobody picked. */
+export const PENDING_LABEL = 'Pending'
+
+/**
+ * The time portion of an appointment, as the calendar and schedule views show it:
+ * NEED / NEED HH:MM / FCFS / a range / a time / Pending.
+ *
+ * Single source of truth so "Pending" can't mean one thing on the calendar and another
+ * on the schedule.
+ */
+export function apptTimeLabel(
+  iso: string | null | undefined,
+  type?: string | null,
+  apptEnd?: string | null,
+): string {
+  if (!iso) return '—'
+  if (type === 'tbd') return needLabel(iso)
+  if (type === 'fcfs') return 'FCFS'
+  if (type === 'range' && apptEnd) return `${formatTime(iso)}–${formatTime(apptEnd)}`
+  return apptHasTime(iso) ? formatTime(iso) : PENDING_LABEL
 }
 
 export function formatDateShort(iso: string): string {

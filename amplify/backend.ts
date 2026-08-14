@@ -10,6 +10,7 @@ import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
+import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
@@ -34,6 +35,7 @@ const backend = defineBackend({
   userManagement,
   slackIntakeWebhook,
   gmailTaskIntake,
+  apptNeedNotifier,
   slackStatusNotifier,
   fuelImport,
   generateRecurringExpenses,
@@ -136,6 +138,14 @@ gmailTaskFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
 // Plain env var (not a secret) so a missing channel never blocks the deploy — set
 // INTAKE_IVAN_CHANNEL_ID in the Amplify Console env to enable the Slack post.
 gmailTaskFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? '')
+
+// ── apptNeedNotifier (pickup/delivery flagged NEED → Slack #appts-ivan) ──────
+// Defaults to the #appts-ivan channel; override with APPTS_IVAN_CHANNEL_ID in the
+// Amplify Console env if the channel ever moves.
+;(backend.apptNeedNotifier.resources.lambda as LambdaFunction).addEnvironment(
+  'APPTS_IVAN_CHANNEL_ID',
+  process.env.APPTS_IVAN_CHANNEL_ID ?? 'C0BPX858363',
+)
 
 const gmailTaskUrl = new FunctionUrl(gmailTaskFn.stack, 'GmailTaskIntakeUrl', {
   function: gmailTaskFn,
