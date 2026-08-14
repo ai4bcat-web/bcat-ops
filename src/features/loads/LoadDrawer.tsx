@@ -16,12 +16,12 @@ import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
-import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
+import { updateIntakeItem, notifySlackStatusChange, notifyApptNeeded } from '@/lib/apiClient'
 import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
-import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
+import { getStops, makeStop, deriveLegacyFields, stopsNewlyNeeding } from '@/lib/stops'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
-  formatDateInput, fromDateInput,
+  formatDateInput, fromDateInput, formatDateShort, apptHasTime, PENDING_LABEL,
 } from '@/lib/date'
 import { toast } from 'sonner'
 import type { ApptType, Load, Stop } from '@/types'
@@ -29,12 +29,13 @@ import type { ApptType, Load, Stop } from '@/types'
 // ── Stop ↔ form conversion ───────────────────────────────────────────────────
 // Form stores appt as a datetime-local / date string; the stored Stop uses ISO UTC.
 
-// A NEED (tbd) appt may carry an optional desired time; a stored UTC-midnight value
-// means no time was set. FCFS is always date-only.
-const tbdHasTime = (iso: string | null | undefined) => !!iso && iso.slice(11, 16) !== '00:00'
+// A stored UTC-midnight value means no time was set — true for NEED without a desired
+// time, for FCFS, and now for an `exact` appt nobody has scheduled yet ("Pending").
 
 function stopToForm(stop: Stop): StopFormValue {
-  const isDateOnly = stop.apptType === 'fcfs' || (stop.apptType === 'tbd' && !tbdHasTime(stop.appt))
+  const isDateOnly =
+    stop.apptType === 'fcfs' ||
+    ((stop.apptType === 'tbd' || stop.apptType === 'exact' || !stop.apptType) && !apptHasTime(stop.appt))
   return {
     id: stop.id,
     type: stop.type,
@@ -56,9 +57,11 @@ function loadToStopForms(load: Load): StopFormValue[] {
 function emptyStopForms(preDate?: string, driverId?: string | null): StopFormValue[] {
   const pu = makeStop({ type: 'pickup', driverId: driverId ?? null }, 0)
   const de = makeStop({ type: 'delivery', driverId: driverId ?? null }, 1)
+  // Date only — deliberately no default time. An 8:00/17:00 guess reads as a confirmed
+  // appointment nobody actually made; the stops show "Pending" until a real time is set.
   return [
-    { ...stopToForm(pu), appt: preDate ? `${preDate}T08:00` : '' },
-    { ...stopToForm(de), appt: preDate ? `${preDate}T17:00` : '' },
+    { ...stopToForm(pu), appt: preDate ?? '' },
+    { ...stopToForm(de), appt: preDate ?? '' },
   ]
 }
 
@@ -74,8 +77,10 @@ function deriveSplitFromStops(stops: StopFormValue[]): boolean {
 
 // Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
 function stopFormToStop(s: StopFormValue, sequence: number): Stop {
-  // FCFS is always date-only; NEED (tbd) is date-only unless the form value includes a time.
-  const dateOnly = s.apptType === 'fcfs' || (s.apptType === 'tbd' && s.appt.length <= 10)
+  // FCFS is always date-only. NEED and Exact are date-only until someone types a time —
+  // that's what makes an appointment read "Pending" instead of inventing midnight.
+  const dateOnly =
+    s.apptType === 'fcfs' || ((s.apptType === 'tbd' || s.apptType === 'exact') && s.appt.length <= 10)
   return {
     id: s.id,
     type: s.type,
@@ -233,11 +238,35 @@ function ApptFields({
 
       {type === 'exact' && (
         <div>
-          <DateTimeInput
-
-            value={startField.value}
-            onChange={startField.onChange}
-          />
+          {/* Date and time are separate so the time can be left blank — a load can be
+              scheduled for a day before anyone has confirmed the hour. */}
+          <div className="flex gap-2">
+            <Input
+              type="date"
+              className="h-9 text-sm"
+              style={{ flex: 1 }}
+              aria-label={`${label} date`}
+              value={startField.value.slice(0, 10)}
+              onChange={(e) => {
+                const t = startField.value.length > 10 ? startField.value.slice(11, 16) : ''
+                startField.onChange(e.target.value ? (t ? `${e.target.value}T${t}` : e.target.value) : '')
+              }}
+            />
+            <Input
+              type="time"
+              className="h-9 text-sm"
+              style={{ width: 120 }}
+              aria-label={`${label} time`}
+              value={startField.value.length > 10 ? startField.value.slice(11, 16) : ''}
+              onChange={(e) => {
+                const d = startField.value.slice(0, 10)
+                startField.onChange(d ? (e.target.value ? `${d}T${e.target.value}` : d) : '')
+              }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1.5">
+            Leave the time blank until it's confirmed — it shows as “Pending”.
+          </p>
           {startError && <p className="text-xs text-destructive mt-1">{startError}</p>}
         </div>
       )}
@@ -1005,6 +1034,9 @@ export function LoadDrawer() {
     // Build the canonical stops array; the store derives the legacy pickup/delivery
     // mirror fields (withDerivedLegacy) — the form never sets them directly.
     const stops = values.stops.map((s, i) => stopFormToStop(s, i))
+    // Anything that just became NEED gets one Slack post. Computed BEFORE the save so
+    // the comparison is against what was on screen, not what we just wrote.
+    const newlyNeeding = stopsNewlyNeeding(stops, load && !isCreate ? getStops(load) : [])
     const payload = {
       aljexId: values.aljexId,
       tmsId: values.tmsId,
@@ -1044,6 +1076,23 @@ export function LoadDrawer() {
         await updateLoad(load.id, payload)
         toast.success('Load updated')
       }
+
+      // Fire-and-forget, after the save succeeded — never post about a load that failed
+      // to save, and never let a Slack outage block the drawer from closing.
+      for (const stop of newlyNeeding) {
+        void notifyApptNeeded({
+          stopKind:     stop.type,
+          aljexId:      values.aljexId || null,
+          pickupNumber: values.pickupNumber || null,
+          customer:     values.customer || null,
+          location:     [stop.name, stop.city].filter(Boolean).join(', ') || null,
+          apptDate:     stop.appt ? formatDateShort(stop.appt) : null,
+          actorName:    userEmail,
+        })
+      }
+      if (newlyNeeding.length > 0) {
+        toast.message(`Posted to #appts-ivan — ${newlyNeeding.length} appt needed`)
+      }
       onClose()
     } catch (err) {
       console.error('Load save error:', err)
@@ -1064,6 +1113,8 @@ export function LoadDrawer() {
     if (type === 'tbd') return 'NEED'
     if (type === 'fcfs') return 'FCFS (first come first serve)'
     if (type === 'range' && apptEnd) return `${formatDateTime(appt)} – ${formatDateTime(apptEnd)}`
+    // No time chosen yet — show the date and say so rather than implying midnight.
+    if (!apptHasTime(appt)) return `${formatDateShort(appt)} · ${PENDING_LABEL}`
     return formatDateTime(appt)
   }
 

@@ -1903,3 +1903,32 @@ export async function deleteDriverPayCredit(id: string): Promise<void> {
     variables: { input: { id } },
   })
 }
+
+
+export async function notifyApptNeeded(args: {
+  stopKind: 'pickup' | 'delivery'
+  aljexId?: string | null
+  pickupNumber?: string | null
+  customer?: string | null
+  location?: string | null
+  apptDate?: string | null
+  actorName?: string | null
+}): Promise<void> {
+  try {
+    await client.graphql({
+      query: `mutation NotifyApptNeeded(
+        $stopKind: String!, $aljexId: String, $pickupNumber: String,
+        $customer: String, $location: String, $apptDate: String, $actorName: String
+      ) {
+        notifyApptNeeded(
+          stopKind: $stopKind, aljexId: $aljexId, pickupNumber: $pickupNumber,
+          customer: $customer, location: $location, apptDate: $apptDate, actorName: $actorName
+        )
+      }`,
+      variables: args,
+    })
+  } catch (err) {
+    // Fire-and-forget — a Slack outage must never block saving a load.
+    console.error('[notifyApptNeeded] failed', err)
+  }
+}
