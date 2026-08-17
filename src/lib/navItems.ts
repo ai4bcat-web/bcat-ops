@@ -1,6 +1,6 @@
 import {
-  LayoutDashboard, CalendarDays, Table2, Inbox, ClipboardList,
-  Truck, Wrench, Fuel, History,
+  LayoutDashboard, CalendarDays, Table2, Inbox,
+  Truck, Wrench, Fuel, History, CalendarClock,
   LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, FileSignature, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Waves, type LucideIcon,
 } from 'lucide-react'
 
@@ -40,7 +40,7 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff' },
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
-      { to: '/tasks',     label: 'Tasks',     icon: ClipboardList,   pageKey: 'tasks',  badgeKey: 'tasks' },
+      { to: '/appts',     label: 'Appts',     icon: CalendarClock,   pageKey: 'appts',  badgeKey: 'appts' },
     ],
   },
   {
