@@ -99,13 +99,26 @@ describe('box-truck drivers share the split (recouped via settlements)', () => {
     expect(a.byTruck.t1 + a.byTruck.t2).toBe(500)
   })
 
-  it('counts box-truck drivers in the WC headcount but drops their share off the P&L trucks', () => {
+  it('counts box-truck drivers in the WC headcount and attributes their WC like any driver', () => {
     const items: InsItem[] = [{ kind: 'WORKMANS_COMP', annualCents: 2_000_00 }] // $2,000 / 4 drivers = $500 each
     const a = computeInsuranceAllocation(items, trucks, withBox)
-    // Ivan drivers' $500 lands on their trucks; the two box drivers' $1,000 is recouped.
-    expect(a.byTruck.t1).toBe(500)
-    expect(a.byTruck.t2).toBe(500)
-    expect(a.byTruck.t1 + a.byTruck.t2).toBe(1000)
+    // Ivan drivers' $500 lands on their trucks; the two unassigned box drivers' $1,000
+    // spreads over the 2 active trucks ($500 each) — nothing is dropped.
+    expect(a.byTruck.t1).toBeCloseTo(1000)
+    expect(a.byTruck.t2).toBeCloseTo(1000)
+    expect(a.byTruck.t1 + a.byTruck.t2).toBeCloseTo(2000)
+  })
+
+  it('lands a box-truck driver WC share on their assigned truck', () => {
+    const withAssignedBox: DriverLite[] = [
+      { id: 'd1', assignedTruckId: 't1', active: true },
+      { id: 'b1', assignedTruckId: 't2', active: true, boxTruck: true },
+    ]
+    const items: InsItem[] = [{ kind: 'WORKMANS_COMP', annualCents: 2_000_00 }] // $1,000/driver
+    const a = computeInsuranceAllocation(items, trucks, withAssignedBox)
+    expect(a.wcByTruck.t1).toBeCloseTo(1000)
+    expect(a.wcByTruck.t2).toBeCloseTo(1000)
+    expect(a.byTruck.t2).toBeCloseTo(1000)
   })
 })
 

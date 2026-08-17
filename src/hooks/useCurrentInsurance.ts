@@ -35,8 +35,8 @@ export function useCurrentInsurance() {
   const allocation = useMemo(() => {
     const insItems: InsItem[] = items.map((i) => ({ kind: i.kind, equipmentId: i.equipmentId, annualCents: i.annualCents }))
     const trucks: TruckLite[] = equipment.filter((e) => e.type === 'truck').map((e) => ({ id: e.id, active: e.active !== false }))
-    // Drivers on the BOX_TRUCK pay group run box trucks — they share the trailer/WC split
-    // but their portion is recouped from settlements, not placed on a Fleet truck.
+    // Drivers on the BOX_TRUCK pay group run box trucks — they share the trailer split
+    // but their WC lands on their assigned truck (or spreads if unassigned) like any driver's.
     const boxTruckDriverIds = new Set(paySettings.filter((s) => s.payGroup === 'BOX_TRUCK' && s.active !== false).map((s) => s.driverId))
     // Brokers aren't employees — exclude them from the workmans-comp headcount.
     const drv: DriverLite[] = drivers.map((d) => ({
