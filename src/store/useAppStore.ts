@@ -6,7 +6,7 @@ import type { Expense } from '@/types/expense'
 import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
-import { withDerivedLegacy } from '@/lib/stops'
+import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
 import { errorMessage } from '@/lib/utils/errorMessage'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
@@ -621,11 +621,14 @@ export const useAppStore = create<AppState>()(
         const before = get().loads.find((l) => l.id === id)
         if (!before) return
         // Do NOT pass updatedAt — Amplify Gen 2 manages it server-side.
-        // withDerivedLegacy re-derives the legacy pickup/delivery mirrors when stops change.
-        const after = await api.updateLoad(id, withDerivedLegacy({
+        // The two directions of the dual-write, in order: a legacy-field write is first
+        // projected into `stops` (withStopsFromLegacy), then any `stops` write re-derives
+        // the legacy mirrors (withDerivedLegacy). Together they keep the canonical array
+        // and its mirrors from ever disagreeing, whichever side the caller wrote.
+        const after = await api.updateLoad(id, withDerivedLegacy(withStopsFromLegacy({
           ...patch,
           updatedBy: get().currentUserEmail,
-        }))
+        }, before)))
         set((s) => ({ loads: s.loads.map((l) => (l.id === id ? after : l)) }))
         writeAudit(get().currentUserEmail, 'Load', id, 'update', diffChanges(before, after))
       },

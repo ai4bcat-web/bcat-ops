@@ -141,3 +141,59 @@ export function stopsNewlyNeeding(next: Stop[], prev: Stop[] = []): Stop[] {
   const before = new Map(prev.map((s) => [s.id, s.apptType ?? 'exact']))
   return next.filter((s) => s.apptType === 'tbd' && before.get(s.id) !== 'tbd')
 }
+
+/** Legacy mirror field → the stop field it mirrors, per end of the load. */
+const PICKUP_MIRROR = {
+  pickupAppt: 'appt', pickupApptEnd: 'apptEnd', pickupApptType: 'apptType',
+  originName: 'name', originCity: 'city', pickupDriverId: 'driverId',
+} as const
+const DELIVERY_MIRROR = {
+  deliveryAppt: 'appt', deliveryApptEnd: 'apptEnd', deliveryApptType: 'apptType',
+  destinationName: 'name', destinationCity: 'city', deliveryDriverId: 'driverId',
+} as const
+
+/**
+ * The INVERSE of withDerivedLegacy: project a legacy-field write back into `stops`.
+ *
+ * Dual-write was only ever enforced in one direction — set `stops` and the legacy mirrors
+ * follow. But several call sites still patch `pickupAppt`/`deliveryAppt` directly (the
+ * scheduler's drag and resize, the appointment popover on a load with no matching stop),
+ * and nothing carried those back. The result was silent divergence: the Loads grid reads
+ * the legacy fields and showed the new time, while the calendar and Appts read getStops()
+ * and kept showing the old one. 26 production loads had drifted this way.
+ *
+ * Fixing it here rather than at each call site means the next `updateLoad({ pickupAppt })`
+ * someone writes is correct by construction.
+ *
+ * Only touches loads that actually have a stops array — for a legacy load getStops()
+ * synthesizes from these same fields, so there is nothing to keep in sync.
+ */
+export function withStopsFromLegacy<T extends Partial<Load>>(patch: T, load: Load | undefined): T {
+  if (!load || patch.stops) return patch                    // stops given → it's canonical
+  if (!Array.isArray(load.stops) || load.stops.length === 0) return patch
+
+  const touches = (m: Record<string, string>) => Object.keys(m).some((k) => k in patch)
+  if (!touches(PICKUP_MIRROR) && !touches(DELIVERY_MIRROR)) return patch
+
+  const ordered = getStops(load)
+  const first = ordered.find((s) => s.type === 'pickup') ?? ordered[0]
+  const last = [...ordered].reverse().find((s) => s.type === 'delivery') ?? ordered[ordered.length - 1]
+
+  // Copy only the keys the patch actually set, so writing just an appt time doesn't
+  // also blank the appointment type.
+  const apply = (stop: Stop, mirror: Record<string, string>): Stop => {
+    const next: Record<string, unknown> = { ...stop }
+    for (const [legacyKey, stopKey] of Object.entries(mirror)) {
+      if (legacyKey in patch) next[stopKey] = (patch as Record<string, unknown>)[legacyKey]
+    }
+    return next as unknown as Stop
+  }
+
+  const stops = ordered.map((s) => {
+    let out = s
+    if (s.id === first?.id) out = apply(out, PICKUP_MIRROR)
+    if (s.id === last?.id) out = apply(out, DELIVERY_MIRROR)
+    return out
+  })
+  return { ...patch, stops }
+}

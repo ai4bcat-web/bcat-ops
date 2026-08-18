@@ -3,7 +3,8 @@ import {
   apptQueue, apptNeedKind, apptQueueCount, splitApptQueue,
   isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs,
 } from './apptQueue'
-import { fromDateInput, fromDateTimeInput } from './date'
+import { fromDateInput, fromDateTimeInput, apptTimeLabel, PENDING_LABEL } from './date'
+import { stopsNewlyNeeding } from './stops'
 import type { ApptType, Load, Stop } from '@/types'
 
 const stop = (over: Partial<Stop> = {}): Stop => ({
@@ -207,27 +208,48 @@ describe('sortApptRows', () => {
 })
 
 describe('apptTypeAfterEdit', () => {
-  it('graduates a NEED stop to exact once a real time is entered', () => {
-    // The whole point: booking the time on the calendar takes it off the Appts queue.
-    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30')).toBe('exact')
+  const wasNeed = { type: 'tbd' as ApptType, value: '2026-08-20' }
+
+  it('CHOOSING need always sticks, even when the field already holds a time', () => {
+    // The editors seed their input from the existing appointment, so the time field is
+    // usually already populated. Graduating on that alone made it impossible to flag a
+    // booked stop as NEED — the selection silently reverted to exact and no Slack alert
+    // could ever fire.
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T14:30', { type: 'exact', value: '2026-08-20T14:30' })).toBe('tbd')
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T14:30', { type: 'fcfs', value: '2026-08-20T14:30' })).toBe('tbd')
+  })
+
+  it('graduates only when a time is NEWLY added to a stop already marked NEED', () => {
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30', wasNeed)).toBe('exact')
+  })
+
+  it('keeps NEED when re-saving a NEED stop that already had a time', () => {
+    // Nothing was booked here — the stop is just being saved again.
+    const prev = { type: 'tbd' as ApptType, value: '2026-08-20T09:30' }
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30', prev)).toBe('tbd')
   })
 
   it('leaves it as NEED when only a date was picked', () => {
-    expect(apptTypeAfterEdit('tbd', '2026-08-20')).toBe('tbd')
+    expect(apptTypeAfterEdit('tbd', '2026-08-20', wasNeed)).toBe('tbd')
   })
 
   it('does not treat midnight as a booked time — that is the empty time input', () => {
-    expect(apptTypeAfterEdit('tbd', '2026-08-20T00:00')).toBe('tbd')
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T00:00', wasNeed)).toBe('tbd')
   })
 
   it('never overrides a type the user chose deliberately', () => {
-    expect(apptTypeAfterEdit('fcfs', '2026-08-20T09:30')).toBe('fcfs')
-    expect(apptTypeAfterEdit('range', '2026-08-20T09:30')).toBe('range')
-    expect(apptTypeAfterEdit('exact', '2026-08-20T09:30')).toBe('exact')
+    expect(apptTypeAfterEdit('fcfs', '2026-08-20T09:30', wasNeed)).toBe('fcfs')
+    expect(apptTypeAfterEdit('range', '2026-08-20T09:30', wasNeed)).toBe('range')
+    expect(apptTypeAfterEdit('exact', '2026-08-20T09:30', wasNeed)).toBe('exact')
   })
 
   it('leaves a queued stop queued when the time is cleared', () => {
-    expect(apptTypeAfterEdit('tbd', '')).toBe('tbd')
+    expect(apptTypeAfterEdit('tbd', '', wasNeed)).toBe('tbd')
+  })
+
+  it('treats a brand-new stop with no previous state as an explicit choice', () => {
+    // On create there is nothing to compare against; whatever was picked is intent.
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30')).toBe('tbd')
   })
 })
 
@@ -285,5 +307,37 @@ describe('sortApptRows — appointment time columns', () => {
     ])
     expect(sortApptRows(rows, 'pickupTime', 'asc', name).map((r) => r.loadId)).toEqual(['l2', 'l1'])
     expect(sortApptRows(rows, 'deliveryTime', 'asc', name).map((r) => r.loadId)).toEqual(['l1', 'l2'])
+  })
+})
+
+describe('a new load with no appointment time reads as Pending', () => {
+  it('labels a date-only exact appointment Pending, and queues it', () => {
+    // This is what a freshly built load looks like: a date, no time chosen.
+    const fresh = stop({ apptType: 'exact', appt: fromDateInput('2099-01-01') })
+    expect(apptTimeLabel(fresh.appt, fresh.apptType)).toBe(PENDING_LABEL)
+    expect(apptNeedKind(fresh)).toBe('pending')
+  })
+
+  it('treats a legacy stop with no apptType the same way', () => {
+    const legacy = { ...stop({ appt: fromDateInput('2099-01-01') }), apptType: undefined }
+    expect(apptTimeLabel(legacy.appt, legacy.apptType)).toBe(PENDING_LABEL)
+  })
+
+  it('stops reading Pending once a real time is set', () => {
+    const booked = stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })
+    expect(apptTimeLabel(booked.appt, booked.apptType)).toBe('09:30')
+    expect(apptNeedKind(booked)).toBeNull()
+  })
+})
+
+describe('flagging NEED reaches the Slack notifier', () => {
+  it('reports the stop as newly needing once the type actually saves as tbd', () => {
+    // The regression made this unreachable: the type reverted to exact before the save,
+    // so no transition into NEED ever existed for stopsNewlyNeeding to detect.
+    const before = [stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })]
+    const chosen = apptTypeAfterEdit('tbd', '2099-01-01T09:30', { type: 'exact', value: '2099-01-01T09:30' })
+    const after = [{ ...before[0], apptType: chosen }]
+    expect(chosen).toBe('tbd')
+    expect(stopsNewlyNeeding(after, before).map((s) => s.id)).toEqual(['s1'])
   })
 })

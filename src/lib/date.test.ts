@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   apptHasTime, apptTimeLabel, needLabel, fromDateInput, fromDateTimeInput, PENDING_LABEL,
+  formatDateTimeInput, formatTime,
 } from './date'
 
 /**
@@ -74,5 +75,21 @@ describe('apptTimeLabel', () => {
   it('shows a dash when there is no appointment at all', () => {
     expect(apptTimeLabel('')).toBe('—')
     expect(apptTimeLabel(null)).toBe('—')
+  })
+})
+
+describe('midnight formats as 00:00, not 24:00, on every engine', () => {
+  it('formatDateTimeInput never emits a 24:00 hour', () => {
+    // Node's default h24 renders Chicago midnight as "24:00", which is not a valid
+    // datetime-local value and made a date-only appointment look like it had a time.
+    expect(formatDateTimeInput(fromDateInput('2099-01-01'))).toBe('2099-01-01T00:00')
+  })
+
+  it('formatTime agrees', () => {
+    expect(formatTime(fromDateInput('2099-01-01'))).toBe('00:00')
+  })
+
+  it('so a date-only appointment still reads as having no time', () => {
+    expect(apptHasTime(fromDateInput('2099-01-01'))).toBe(false)
   })
 })
