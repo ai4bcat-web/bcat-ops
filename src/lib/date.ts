@@ -9,7 +9,7 @@ export function formatTime(iso: string): string {
     timeZone: TZ,
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).format(d)
 }
 
@@ -96,7 +96,7 @@ export function formatDelivery(iso: string): string {
     weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).format(d)
 }
 
@@ -113,7 +113,7 @@ export function formatDateTime(iso: string | null | undefined): string {
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false,
+      hourCycle: 'h23',
     }).format(d)
   } catch {
     return '—'
@@ -130,7 +130,7 @@ export function formatDateTimeInput(iso: string): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).formatToParts(d)
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00'
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
@@ -153,7 +153,7 @@ export function fromDateTimeInput(localStr: string): string {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   })
     .formatToParts(approx)
     .reduce(

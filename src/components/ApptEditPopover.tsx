@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLoads } from '@/hooks/useLoads'
 import { updateStop } from '@/lib/stops'
 import { apptTypeAfterEdit } from '@/lib/apptQueue'
-import { formatDateTimeInput, fromDateTimeInput, fromDateInput } from '@/lib/date'
+import { formatDateTimeInput, fromDateTimeInput, fromDateInput, apptHasTime } from '@/lib/date'
 import type { Load, Stop, ApptType } from '@/types'
 
 /**
@@ -31,8 +31,13 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const srcType = stop ? stop.apptType : load[typeField]
   const initVal = srcAppt ? formatDateTimeInput(srcAppt) : ''
 
+  // 'pending' is not a stored type — it IS `exact` with no time yet, which is how the
+  // whole app already renders an unset appointment. Keeping it derived rather than adding
+  // a fourth enum value means there is still exactly one representation of the state; a
+  // second one would drift from the first, which is the bug class we just spent a day on.
+  const isPending = (srcType ?? 'exact') === 'exact' && !apptHasTime(srcAppt)
   const [dateVal, setDateVal] = useState(initVal)
-  const [typeVal, setTypeVal] = useState<ApptType>(srcType ?? 'exact')
+  const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isPending ? 'pending' : (srcType ?? 'exact'))
   const [saving,  setSaving]  = useState(false)
 
   const datePart = dateVal.slice(0, 10)
@@ -42,13 +47,17 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const commit = async () => {
     setSaving(true)
     try {
-      const effectiveType = apptTypeAfterEdit(typeVal, dateVal)
+      // Choosing Pending means "no time yet" — drop the time rather than keeping a stale one.
+      const pending = typeVal === 'pending'
+      const chosen: ApptType = pending ? 'exact' : typeVal
+      const value = pending ? dateVal.slice(0, 10) : dateVal
+      const effectiveType = apptTypeAfterEdit(chosen, value, { type: srcType, value: initVal })
 
       // fromDateTimeInput, not `new Date(...).toISOString()`: the input is Chicago wall
       // time, and the native parse treats it as the BROWSER's zone — which writes the
       // wrong instant for anyone not sitting in Chicago.
-      const iso = dateVal
-        ? (dateVal.length > 10 ? fromDateTimeInput(dateVal) : fromDateInput(dateVal.slice(0, 10)))
+      const iso = value
+        ? (value.length > 10 ? fromDateTimeInput(value) : fromDateInput(value.slice(0, 10)))
         : ''
 
       if (stop) {
@@ -99,9 +108,15 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
         className="w-full h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         aria-label="Appointment type"
         value={typeVal}
-        onChange={(e) => setTypeVal(e.target.value as ApptType)}
+        onChange={(e) => {
+          const v = e.target.value as ApptType | 'pending'
+          setTypeVal(v)
+          // Selecting Pending clears the time in the form too, so what you see is saved.
+          if (v === 'pending') setDateVal(datePart)
+        }}
       >
         <option value="exact">Exact Time</option>
+        <option value="pending">Pending (no time set)</option>
         <option value="fcfs">FCFS</option>
         <option value="tbd">NEED (TBD)</option>
       </select>

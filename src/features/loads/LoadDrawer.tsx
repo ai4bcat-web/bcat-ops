@@ -3,9 +3,7 @@ import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller, useFieldArray, type Control } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw, Plus, Truck, Package } from 'lucide-react'
-import {
-  Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton,
-} from '@/components/ui/sheet'
+import { SidePanel, panelBtn } from '@/features/files/SidePanel'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -77,7 +75,11 @@ function deriveSplitFromStops(stops: StopFormValue[]): boolean {
 }
 
 // Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
-function stopFormToStop(s: StopFormValue, sequence: number): Stop {
+function stopFormToStop(
+  s: StopFormValue,
+  sequence: number,
+  prev?: { type?: Stop['apptType']; value?: string },
+): Stop {
   // FCFS is always date-only. NEED and Exact are date-only until someone types a time —
   // that's what makes an appointment read "Pending" instead of inventing midnight.
   const dateOnly =
@@ -88,10 +90,10 @@ function stopFormToStop(s: StopFormValue, sequence: number): Stop {
     name: s.name?.trim() || undefined,
     city: s.city?.trim() || undefined,
     appt: dateOnly ? fromDateInput(s.appt.slice(0, 10)) : fromDateTimeInput(s.appt),
-    // Same rule as the calendar and the Appts queue: typing a real time on a stop still
-    // marked NEED is what books it. Without this the drawer was the odd one out — you
-    // could set a time here and the stop would keep asking to be booked everywhere else.
-    apptType: apptTypeAfterEdit(s.apptType, s.appt),
+    // Same rule as the calendar and the Appts queue: adding a time to a stop already
+    // marked NEED is what books it. `prev` is what makes choosing NEED on a stop that
+    // already has a time stick, rather than snapping back to Exact.
+    apptType: apptTypeAfterEdit(s.apptType, s.appt, prev),
     apptEnd: s.apptType === 'range' && s.apptEnd ? fromDateTimeInput(s.apptEnd) : undefined,
     driverId: s.driverId,
     sequence,
@@ -1037,7 +1039,13 @@ export function LoadDrawer() {
     const userEmail = user?.email ?? 'dispatch'
     // Build the canonical stops array; the store derives the legacy pickup/delivery
     // mirror fields (withDerivedLegacy) — the form never sets them directly.
-    const stops = values.stops.map((s, i) => stopFormToStop(s, i))
+    const prevStops = new Map(
+      (load && !isCreate ? getStops(load) : []).map((st) => [st.id, st]),
+    )
+    const stops = values.stops.map((s, i) => {
+      const was = prevStops.get(s.id)
+      return stopFormToStop(s, i, was && { type: was.apptType, value: formatDateTimeInput(was.appt) })
+    })
     // Anything that just became NEED gets one Slack post. Computed BEFORE the save so
     // the comparison is against what was on screen, not what we just wrote.
     const newlyNeeding = stopsNewlyNeeding(stops, load && !isCreate ? getStops(load) : [])
@@ -1143,34 +1151,48 @@ export function LoadDrawer() {
     )
   }
 
-  // ── View / edit mode → Sheet ───────────────────────────────────────────────
-  return (
-    <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
-      >
-        <SheetHeader>
-          <SheetTitle className="text-base font-semibold">
-            {isEdit ? `Edit — ${load?.aljexId}` : (load?.aljexId ?? 'Load Detail')}
-          </SheetTitle>
-          <div className="flex items-center gap-2">
-            {!isEdit && load && (
-              load.readyToInvoice ? (
-                <Badge variant="green" className="gap-1 text-xs">
-                  <CheckCircle2 className="size-3" /> Ready to Invoice
-                </Badge>
-              ) : (
-                <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
-                  <Circle className="size-3" /> Pending
-                </Badge>
-              )
-            )}
-          </div>
-          <SheetCloseButton />
-        </SheetHeader>
+  // SidePanel has no `open` prop — the Sheet honoured one, and without this guard the
+  // drawer renders as soon as it mounts and covers the loads list.
+  if (!isOpen) return null
 
-        <SheetBody>
+  // ── View / edit mode → shared SidePanel ────────────────────────────────────
+  // Was a Radix Sheet with its own chrome: bg-white and border-slate-200 hardcoded, a
+  // 540px width and px-8/py-5 header. Every other drawer in the app is the SidePanel
+  // shell on --ds-surface / --ds-border, so this one ignored the theme and read as a
+  // different component — which is what "doesn't match" was.
+  const panelFooter = (
+    <>
+      {load && (
+        <button type="button" onClick={handleDelete} style={panelBtn.danger} aria-label="Delete load">
+          <Trash2 size={14} /> Delete
+        </button>
+      )}
+      <div style={{ flex: 1 }} />
+      <button type="button" onClick={() => setSelectedLoad(selectedLoadId, 'edit')} style={panelBtn.primary}>
+        <Edit2 size={14} /> Edit Load
+      </button>
+    </>
+  )
+
+  return (
+    <SidePanel
+      title={isEdit ? `Edit — ${load?.aljexId ?? ''}` : (load?.aljexId ?? 'Load Detail')}
+      subtitle={isEdit ? 'Edit load' : (load?.customer || undefined)}
+      onClose={onClose}
+      actions={!isEdit && load ? (
+        load.readyToInvoice ? (
+          <Badge variant="green" className="gap-1 text-xs">
+            <CheckCircle2 className="size-3" /> Ready to Invoice
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
+            <Circle className="size-3" /> Pending
+          </Badge>
+        )
+      ) : undefined}
+      footer={panelFooter}
+    >
+      <>
           {load ? (
             <div className="space-y-0">
               <ReadonlyField label="Pro #"       value={load.aljexId} />
@@ -1253,24 +1275,7 @@ export function LoadDrawer() {
               </div>
             </div>
           ) : null}
-        </SheetBody>
-
-        <SheetFooter>
-          {load && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 text-destructive border-destructive/30 hover:bg-destructive/5"
-              onClick={handleDelete}
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          )}
-          <Button variant="outline" className="flex-1 h-9" onClick={() => setSelectedLoad(selectedLoadId, 'edit')}>
-            <Edit2 className="size-4 mr-2" /> Edit Load
-          </Button>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+      </>
+    </SidePanel>
   )
 }

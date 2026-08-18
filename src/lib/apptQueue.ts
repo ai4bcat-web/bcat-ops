@@ -202,16 +202,30 @@ export function sortApptRows(
 /* ── booking from the calendar ──────────────────────────────────────────────── */
 
 /**
- * The appointment type to save when someone sets a time on the calendar.
+ * The appointment type to save after an edit.
  *
- * Entering a real time IS booking the appointment, so a stop still marked NEED graduates
- * to Exact. Without this it would keep asking to be booked on the Appts page even though
- * the person looking at it just booked it.
+ * Adding a time to a stop that is already flagged NEED is how it gets booked, so that
+ * case graduates to Exact and drops off the Appts queue.
  *
- * `value` is a datetime-local string: "2026-08-20" (date only) or "2026-08-20T09:30".
- * Midnight is how the input represents "no time chosen", so it does not count as booked.
+ * Everything else keeps the type the user picked. That distinction matters: the editors
+ * seed their time input from the *existing* appointment, so the field is usually already
+ * populated. Graduating on "there is a time in the box" made it impossible to flag an
+ * already-booked stop as NEED — the selection silently reverted to Exact, and because no
+ * stop ever reached the NEED state, the #appts-ivan alert could never fire either.
+ *
+ * `value` is a datetime-local string: "2026-08-20" or "2026-08-20T09:30". Midnight is how
+ * the input represents "no time chosen", so it does not count as booked. `prev` is the
+ * stop's state before this edit; with none (a brand-new stop) the pick is taken as intent.
  */
-export function apptTypeAfterEdit(chosen: ApptType, value: string): ApptType {
-  const hasTime = value.length > 10 && value.slice(11, 16) !== '00:00'
-  return chosen === 'tbd' && hasTime ? 'exact' : chosen
+export function apptTypeAfterEdit(
+  chosen: ApptType,
+  value: string,
+  prev?: { type?: ApptType; value?: string },
+): ApptType {
+  const hasTime = (v: string) => v.length > 10 && v.slice(11, 16) !== '00:00'
+  if (chosen !== 'tbd') return chosen
+  // The user just switched TO NEED — that is a deliberate request to book it.
+  if (!prev || (prev.type ?? 'exact') !== 'tbd') return 'tbd'
+  // Already NEED, and a time has just appeared: someone booked it.
+  return hasTime(value) && !hasTime(prev.value ?? '') ? 'exact' : 'tbd'
 }
