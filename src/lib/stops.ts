@@ -126,22 +126,6 @@ export function updateStop(load: Load, stopId: string, patch: Partial<Stop>): St
 
 
 
-/**
- * Stops that have just moved INTO the NEED state — the transition, not the state.
- *
- * Matching is by stop id, so re-saving a load whose stop was already NEED returns
- * nothing. That's what keeps #appts-ivan a signal rather than a running commentary on
- * every edit: one message per time an appointment actually becomes a problem.
- *
- * On create there are no previous stops, so any stop authored as NEED counts — it does
- * genuinely need booking, and new loads default to Pending rather than NEED, so this
- * doesn't fire on ordinary load entry.
- */
-export function stopsNewlyNeeding(next: Stop[], prev: Stop[] = []): Stop[] {
-  const before = new Map(prev.map((s) => [s.id, s.apptType ?? 'exact']))
-  return next.filter((s) => s.apptType === 'tbd' && before.get(s.id) !== 'tbd')
-}
-
 /** Legacy mirror field → the stop field it mirrors, per end of the load. */
 const PICKUP_MIRROR = {
   pickupAppt: 'appt', pickupApptEnd: 'apptEnd', pickupApptType: 'apptType',

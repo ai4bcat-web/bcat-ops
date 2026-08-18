@@ -121,15 +121,6 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
 /** Queue size, for the sidebar badge. */
 export const apptQueueCount = (loads: Load[]): number => apptQueue(loads).length
 
-/** Split for display — the two groups are acted on differently. */
-export function splitApptQueue(rows: ApptQueueRow[]) {
-  return {
-    need: rows.filter((r) => r.kind === 'need'),
-    pending: rows.filter((r) => r.kind === 'pending'),
-  }
-}
-
-
 /* ── past appointments ──────────────────────────────────────────────────────── */
 
 /**
