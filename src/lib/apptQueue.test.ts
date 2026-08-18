@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   apptQueue, apptNeedKind, apptQueueCount, splitApptQueue,
-  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit,
+  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs,
 } from './apptQueue'
 import { fromDateInput, fromDateTimeInput } from './date'
 import type { ApptType, Load, Stop } from '@/types'
@@ -228,5 +228,62 @@ describe('apptTypeAfterEdit', () => {
 
   it('leaves a queued stop queued when the time is cleared', () => {
     expect(apptTypeAfterEdit('tbd', '')).toBe('tbd')
+  })
+})
+
+describe('loadApptRefs', () => {
+  it('reads the pickup and delivery off the stops', () => {
+    const { pickup, delivery } = loadApptRefs(load({ stops: [
+      stop({ id: 'p', type: 'pickup', appt: fromDateTimeInput('2026-08-20T09:00') }),
+      stop({ id: 'd', type: 'delivery', sequence: 1, appt: fromDateTimeInput('2026-08-21T14:00') }),
+    ] }))
+    expect(pickup).toMatchObject({ stopId: 'p', appt: fromDateTimeInput('2026-08-20T09:00') })
+    expect(delivery).toMatchObject({ stopId: 'd', appt: fromDateTimeInput('2026-08-21T14:00') })
+  })
+
+  it('takes the FIRST pickup and the LAST delivery on a multi-stop load', () => {
+    // Same rule as deriveLegacyFields, so the Appts page names the same two stops the
+    // calendar and the legacy mirror fields do.
+    const { pickup, delivery } = loadApptRefs(load({ stops: [
+      stop({ id: 'p1', type: 'pickup', sequence: 0 }),
+      stop({ id: 'p2', type: 'pickup', sequence: 1 }),
+      stop({ id: 'd1', type: 'delivery', sequence: 2 }),
+      stop({ id: 'd2', type: 'delivery', sequence: 3 }),
+    ] }))
+    expect(pickup.stopId).toBe('p1')
+    expect(delivery.stopId).toBe('d2')
+  })
+
+  it('falls back to the load fields on a legacy load, via synthesized stops', () => {
+    const refs = loadApptRefs(load({ stops: undefined }))
+    expect(refs.pickup.appt).toBe(fromDateTimeInput('2026-08-20T09:00'))
+    expect(refs.delivery.appt).toBe(fromDateTimeInput('2026-08-21T09:00'))
+  })
+
+  it('is carried on every queue row so the columns can render without a second lookup', () => {
+    const [row] = apptQueue([load({ stops: [
+      stop({ id: 'p', type: 'pickup', apptType: 'tbd', appt: fromDateInput('2026-08-20') }),
+      stop({ id: 'd', type: 'delivery', sequence: 1, appt: fromDateTimeInput('2026-08-21T14:00') }),
+    ] })])
+    expect(row.pickup.stopId).toBe('p')
+    expect(row.delivery.appt).toBe(fromDateTimeInput('2026-08-21T14:00'))
+  })
+})
+
+describe('sortApptRows — appointment time columns', () => {
+  const name = () => ''
+  it('sorts by pickup and delivery time chronologically', () => {
+    const rows = apptQueue([
+      load({ id: 'l1', stops: [
+        stop({ id: 'p', type: 'pickup', apptType: 'tbd', appt: fromDateTimeInput('2026-09-03T08:00') }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, appt: fromDateTimeInput('2026-09-05T08:00') }),
+      ] }),
+      load({ id: 'l2', stops: [
+        stop({ id: 'p', type: 'pickup', apptType: 'tbd', appt: fromDateTimeInput('2026-09-01T08:00') }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, appt: fromDateTimeInput('2026-09-09T08:00') }),
+      ] }),
+    ])
+    expect(sortApptRows(rows, 'pickupTime', 'asc', name).map((r) => r.loadId)).toEqual(['l2', 'l1'])
+    expect(sortApptRows(rows, 'deliveryTime', 'asc', name).map((r) => r.loadId)).toEqual(['l1', 'l2'])
   })
 })

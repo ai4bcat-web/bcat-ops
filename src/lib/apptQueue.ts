@@ -12,6 +12,18 @@ import type { ApptType, Load, Stop, StopType } from '@/types'
  */
 export type ApptNeedKind = 'need' | 'pending'
 
+/**
+ * A pointer to one editable appointment on a load — enough to both display it and write
+ * back to the right place. `stopId` is null for a legacy load with no stops array, where
+ * the write targets the load's mirror fields instead.
+ */
+export interface ApptRef {
+  stopId: string | null
+  appt: string
+  apptType?: ApptType
+  apptEnd?: string
+}
+
 export interface ApptQueueRow {
   loadId: string
   stopId: string
@@ -27,6 +39,29 @@ export interface ApptQueueRow {
   appt: string
   driverId: string | null
   sequence: number
+  /** The load's scheduled pickup and delivery — the same two the calendar shows. */
+  pickup: ApptRef
+  delivery: ApptRef
+}
+
+/**
+ * The load's pickup and delivery appointments.
+ *
+ * First pickup and last delivery, matching deriveLegacyFields — so the Appts page, the
+ * calendar, and the legacy mirror fields all name the same two stops on a multi-stop load
+ * rather than each picking a different one.
+ */
+export function loadApptRefs(load: Load): { pickup: ApptRef; delivery: ApptRef } {
+  const stops = getStops(load)
+  const first = stops.find((s) => s.type === 'pickup')
+  const last = [...stops].reverse().find((s) => s.type === 'delivery')
+  const ref = (s: Stop | undefined, appt: string, type?: ApptType, end?: string): ApptRef =>
+    s ? { stopId: s.id, appt: s.appt, apptType: s.apptType, apptEnd: s.apptEnd }
+      : { stopId: null, appt, apptType: type, apptEnd: end }
+  return {
+    pickup: ref(first, load.pickupAppt, load.pickupApptType, load.pickupApptEnd ?? undefined),
+    delivery: ref(last, load.deliveryAppt, load.deliveryApptType, load.deliveryApptEnd ?? undefined),
+  }
 }
 
 /** Which queue bucket a stop belongs to, or null when it needs nothing. */
@@ -52,6 +87,7 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
   const rows: ApptQueueRow[] = []
 
   for (const load of loads) {
+    const refs = loadApptRefs(load)
     for (const stop of getStops(load)) {
       const kind = apptNeedKind(stop)
       if (!kind) continue
@@ -67,6 +103,8 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
         appt: stop.appt,
         driverId: stop.driverId,
         sequence: stop.sequence,
+        pickup: refs.pickup,
+        delivery: refs.delivery,
       })
     }
   }
@@ -124,6 +162,7 @@ export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
 
 export type ApptSortKey =
   | 'stopType' | 'aljexId' | 'pickupNumber' | 'customer' | 'location' | 'appt' | 'driver'
+  | 'pickupTime' | 'deliveryTime'
 export type SortDir = 'asc' | 'desc'
 
 /**
@@ -143,6 +182,9 @@ export function sortApptRows(
   const value = (r: ApptQueueRow): string =>
     key === 'driver' ? driverName(r.driverId)
     : key === 'stopType' ? r.stopType
+    // ISO instants, so a string compare orders them chronologically.
+    : key === 'pickupTime' ? r.pickup.appt
+    : key === 'deliveryTime' ? r.delivery.appt
     : String(r[key] ?? '')
 
   const sign = dir === 'asc' ? 1 : -1

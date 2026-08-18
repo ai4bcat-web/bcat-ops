@@ -7,9 +7,11 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
   apptQueue, splitApptQueue, splitPastAppts, sortApptRows,
-  type ApptQueueRow, type ApptSortKey, type SortDir,
+  type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir,
 } from '@/lib/apptQueue'
-import { formatDateShort, chicagoDateStr } from '@/lib/date'
+import { ApptEditPopover } from '@/components/ApptEditPopover'
+import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL } from '@/lib/date'
+import type { Load } from '@/types'
 
 const RED = '#dc2626'
 const AMBER = '#b45309'
@@ -50,7 +52,61 @@ const COLUMNS: { key: ApptSortKey; label: string }[] = [
   { key: 'location',     label: 'Location' },
   { key: 'appt',         label: 'Date' },
   { key: 'driver',       label: 'Driver' },
+  { key: 'pickupTime',   label: 'PU time' },
+  { key: 'deliveryTime', label: 'Delivery time' },
 ]
+
+/**
+ * The load's scheduled pickup or delivery time — click to edit it right here.
+ *
+ * Shows exactly what the calendar shows (apptTimeLabel is the same labeller), and writes
+ * through the same ApptEditPopover, so a time set here and a time set on the calendar are
+ * the same operation.
+ */
+function ApptTimeCell({ load, refr, apptField, typeField }: {
+  load: Load | undefined
+  refr: ApptRef
+  apptField: 'pickupAppt' | 'deliveryAppt'
+  typeField: 'pickupApptType' | 'deliveryApptType'
+}) {
+  const [editing, setEditing] = useState(false)
+  const label = apptTimeLabel(refr.appt, refr.apptType, refr.apptEnd)
+  const unset = label === '—' || label === PENDING_LABEL
+
+  if (!load) return <td style={td}>{label}</td>
+
+  const stop = refr.stopId
+    ? (load.stops ?? []).find((s) => s.id === refr.stopId)
+    : undefined
+
+  return (
+    <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setEditing(true)}
+        title="Set this time — same as editing it on the calendar"
+        style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
+          color: unset ? 'var(--ds-t3)' : 'var(--ds-t1)', textAlign: 'left',
+          textDecoration: 'underline', textDecorationStyle: 'dotted',
+          textUnderlineOffset: 3, textDecorationColor: 'var(--ds-border)' }}
+      >
+        <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+          {refr.appt ? formatDateShort(refr.appt) : ''}
+        </div>
+        {label}
+      </button>
+      {editing && (
+        <ApptEditPopover
+          load={load}
+          stop={stop}
+          apptField={apptField}
+          typeField={typeField}
+          onClose={() => setEditing(false)}
+          className="absolute z-50 top-full right-0 mt-1 p-2.5 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
+        />
+      )}
+    </td>
+  )
+}
 
 /** Clickable header — first click sorts ascending, clicking the active column flips it. */
 function SortHeader({ label, active, dir, onClick }: {
@@ -73,11 +129,12 @@ function SortHeader({ label, active, dir, onClick }: {
   )
 }
 
-function Section({ title, hint, rows, drivers, onOpen, sort, onSort }: {
+function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort }: {
   title: string
   hint: string
   rows: ApptQueueRow[]
   drivers: { id: string; name: string }[]
+  loadsById: Map<string, Load>
   onOpen: (loadId: string) => void
   sort: { key: ApptSortKey; dir: SortDir } | null
   onSort: (key: ApptSortKey) => void
@@ -100,7 +157,7 @@ function Section({ title, hint, rows, drivers, onOpen, sort, onSort }: {
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 {COLUMNS.map((c) => (
@@ -139,6 +196,18 @@ function Section({ title, hint, rows, drivers, onOpen, sort, onSort }: {
                     <Urgency appt={r.appt} />
                   </td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{driverName(r.driverId)}</td>
+                  <ApptTimeCell
+                    load={loadsById.get(r.loadId)}
+                    refr={r.pickup}
+                    apptField="pickupAppt"
+                    typeField="pickupApptType"
+                  />
+                  <ApptTimeCell
+                    load={loadsById.get(r.loadId)}
+                    refr={r.delivery}
+                    apptField="deliveryAppt"
+                    typeField="deliveryApptType"
+                  />
                 </tr>
               ))}
             </tbody>
@@ -185,6 +254,8 @@ export function ApptsPage() {
   // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.
   const { current, past } = useMemo(() => splitPastAppts(matched), [matched])
   const rows = showPast ? matched : current
+
+  const loadsById = useMemo(() => new Map(loads.map((l) => [l.id, l])), [loads])
 
   const { need, pending } = useMemo(() => {
     const split = splitApptQueue(rows)
@@ -233,6 +304,7 @@ export function ApptsPage() {
           hint="Flagged NEED — someone has to call and set a time."
           rows={need}
           drivers={drivers}
+          loadsById={loadsById}
           onOpen={openById}
           sort={sort}
           onSort={onSort}
@@ -243,6 +315,7 @@ export function ApptsPage() {
           hint="Has a date but no time yet. Shows as Pending on the calendar."
           rows={pending}
           drivers={drivers}
+          loadsById={loadsById}
           onOpen={openById}
           sort={sort}
           onSort={onSort}
