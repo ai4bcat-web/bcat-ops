@@ -25,8 +25,12 @@ vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 const setSelectedLoad = vi.fn()
 vi.mock('@/store/useAppStore', () => ({
-  useAppStore: (sel: (s: unknown) => unknown) => sel({ setSelectedLoad }),
+  useAppStore: (sel: (s: unknown) => unknown) =>
+    sel({ setSelectedLoad, currentUserEmail: 'ryne@bcatcorp.com' }),
 }))
+
+const notifyApptNeeded = vi.fn().mockResolvedValue('1699999999.000100')
+vi.mock('@/lib/apiClient', () => ({ notifyApptNeeded: (a: unknown) => notifyApptNeeded(a) }))
 
 import { ApptsPage } from './ApptsPage'
 
@@ -58,16 +62,33 @@ beforeEach(() => {
 })
 
 describe('ApptsPage', () => {
-  it('mounts and shows both groups', async () => {
+  it('mounts and sections the queue by pickup day', async () => {
+    loads.mockReturnValue([pair({ id: 'l1' })])
     render(<ApptsPage />)
     expect(await screen.findByRole('heading', { name: 'Appts' })).toBeTruthy()
-    expect(screen.getByText('Needs booking')).toBeTruthy()
-    expect(screen.getByText('No time set')).toBeTruthy()
+    // 2099-01-01 is a Thursday; the section is titled by weekday because that is how a
+    // dispatcher scans the page.
+    expect(screen.getByText(/Thu, Jan 1, 2099/)).toBeTruthy()
+  })
+
+  it('groups two loads picking up the same day into ONE section', () => {
+    loads.mockReturnValue([pair({ id: 'l1' }), pair({ id: 'l2' })])
+    render(<ApptsPage />)
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+  })
+
+  it('gives each pickup day its own section', () => {
+    loads.mockReturnValue([
+      pair({ id: 'l1' }),
+      load({ id: 'l2', stops: [stop({ id: 'p', appt: fromDateInput('2099-02-02') })] }),
+    ])
+    render(<ApptsPage />)
+    expect(screen.getAllByRole('table')).toHaveLength(2)
   })
 
   it('says so plainly when nothing needs booking', () => {
     render(<ApptsPage />)
-    expect(screen.getAllByText(/every appointment in this group is booked/i).length).toBe(2)
+    expect(screen.getByText(/Every stop is booked/i)).toBeTruthy()
   })
 
   it('lists a NEED stop with the detail needed to make the call', () => {
@@ -85,16 +106,21 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Pickup')).toBeTruthy()
   })
 
-  it('separates an explicit NEED from a stop with no time set', () => {
+  it('marks NEED and Pending per row now that sections are days', () => {
+    // The distinction still has to be visible at a glance — it just is not the top level.
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'NEEDED', stops: [stop()] }),
       load({ id: 'l2', aljexId: 'NOTIME', stops: [stop({ apptType: 'exact' })] }),
     ])
     render(<ApptsPage />)
 
-    const tables = screen.getAllByRole('table')
-    expect(within(tables[0]).getByText('NEEDED')).toBeTruthy()
-    expect(within(tables[1]).getByText('NOTIME')).toBeTruthy()
+    const table = screen.getAllByRole('table')[0]
+    // Read the Status cell specifically — "NEED" also legitimately appears in the PU time
+    // column for a tbd stop, so a row-wide text query is ambiguous.
+    const statusOf = (pro: string) =>
+      within(table).getByText(pro).closest('tr')!.children[0].textContent
+    expect(statusOf('NEEDED')).toBe('NEED')
+    expect(statusOf('NOTIME')).toBe('Pending')
   })
 
   it('hides an appointment whose date has already gone by', () => {
@@ -120,9 +146,10 @@ describe('ApptsPage', () => {
     loads.mockReturnValue([row('l1', '300'), row('l2', '100'), row('l3', '200')])
     render(<ApptsPage />)
 
+    // children[0] is the Status chip, so Pro # is children[2].
     const proIds = () =>
       within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1)
-        .map((r) => r.children[1].textContent)
+        .map((r) => r.children[2].textContent)
 
     fireEvent.click(screen.getAllByLabelText('Sort by Pro #')[0])
     expect(proIds()).toEqual(['100', '200', '300'])
@@ -168,6 +195,40 @@ describe('ApptsPage', () => {
     expect(written.appt).toBe(fromDateTimeInput('2099-03-04T09:15'))
     // Booking the time is what takes it off the queue.
     expect(written.apptType).toBe('exact')
+  })
+
+  it('posts to #appts-ivan when a time cell flags NEED — the calendar path used to be silent', async () => {
+    loads.mockReturnValue([pair({ id: 'l9' })])
+    render(<ApptsPage />)
+
+    // The pickup on `pair` is already NEED; move the DELIVERY (exact, 14:30) to NEED.
+    fireEvent.click(screen.getAllByTitle(/Set this time/)[1])
+    fireEvent.change(screen.getByLabelText('Appointment type'), { target: { value: 'tbd' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(notifyApptNeeded).toHaveBeenCalled())
+    const arg = notifyApptNeeded.mock.calls[0][0]
+    expect(arg.stopKind).toBe('delivery')
+    expect(arg.kind).toBe('needed')
+    expect(arg.actorName).toBe('ryne@bcatcorp.com')
+  })
+
+  it('replies in the thread when a time changes on a stop already asked about', async () => {
+    loads.mockReturnValue([load({ id: 'l10', stops: [
+      stop({ id: 'p', type: 'pickup', apptType: 'tbd', apptThreadTs: 'TS-123',
+             appt: fromDateInput('2099-01-01') }),
+    ] })])
+    render(<ApptsPage />)
+
+    fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '09:15' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(notifyApptNeeded).toHaveBeenCalled())
+    const arg = notifyApptNeeded.mock.calls[0][0]
+    expect(arg.kind).toBe('updated')
+    expect(arg.threadTs).toBe('TS-123')
+    expect(arg.apptLabel).toContain('09:15')
   })
 
   it('does not open the drawer when a time cell is clicked', () => {

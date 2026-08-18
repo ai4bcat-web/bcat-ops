@@ -14,10 +14,12 @@ import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
-import { updateIntakeItem, notifySlackStatusChange, notifyApptNeeded } from '@/lib/apiClient'
+import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
 import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
-import { getStops, makeStop, deriveLegacyFields, stopsNewlyNeeding } from '@/lib/stops'
+import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
 import { apptTypeAfterEdit } from '@/lib/apptQueue'
+import { apptNotices } from '@/lib/apptNotify'
+import { sendApptNotices } from '@/lib/sendApptNotices'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
   formatDateInput, fromDateInput, formatDateShort, apptHasTime, PENDING_LABEL,
@@ -1039,16 +1041,15 @@ export function LoadDrawer() {
     const userEmail = user?.email ?? 'dispatch'
     // Build the canonical stops array; the store derives the legacy pickup/delivery
     // mirror fields (withDerivedLegacy) — the form never sets them directly.
-    const prevStops = new Map(
-      (load && !isCreate ? getStops(load) : []).map((st) => [st.id, st]),
-    )
+    const prevStops = load && !isCreate ? getStops(load) : []
+    const prevById = new Map(prevStops.map((st) => [st.id, st]))
     const stops = values.stops.map((s, i) => {
-      const was = prevStops.get(s.id)
+      const was = prevById.get(s.id)
       return stopFormToStop(s, i, was && { type: was.apptType, value: formatDateTimeInput(was.appt) })
     })
-    // Anything that just became NEED gets one Slack post. Computed BEFORE the save so
-    // the comparison is against what was on screen, not what we just wrote.
-    const newlyNeeding = stopsNewlyNeeding(stops, load && !isCreate ? getStops(load) : [])
+    // Slack notices are decided BEFORE the save, so the comparison is against what was on
+    // screen rather than what we just wrote.
+    const notices = apptNotices(stops, prevStops)
     const payload = {
       aljexId: values.aljexId,
       tmsId: values.tmsId,
@@ -1065,9 +1066,11 @@ export function LoadDrawer() {
       createdBy: userEmail,
       updatedBy: userEmail,
     }
+    let createdId: string | undefined
     try {
       if (isCreate) {
         const newLoad = await addLoad(payload)
+        createdId = newLoad.id
         if (pendingIntakeItemId) {
           setPendingIntakeItem(null)
           try {
@@ -1091,19 +1094,19 @@ export function LoadDrawer() {
 
       // Fire-and-forget, after the save succeeded — never post about a load that failed
       // to save, and never let a Slack outage block the drawer from closing.
-      for (const stop of newlyNeeding) {
-        void notifyApptNeeded({
-          stopKind:     stop.type,
-          aljexId:      values.aljexId || null,
-          pickupNumber: values.pickupNumber || null,
-          customer:     values.customer || null,
-          location:     [stop.name, stop.city].filter(Boolean).join(', ') || null,
-          apptDate:     stop.appt ? formatDateShort(stop.appt) : null,
-          actorName:    userEmail,
+      const savedId = isCreate ? createdId : load?.id
+      if (savedId && notices.length > 0) {
+        void sendApptNotices({
+          load: { ...(load as Load), id: savedId, ...payload } as Load,
+          next: stops,
+          prev: prevStops,
+          actorName: userEmail,
+          updateLoad,
         })
-      }
-      if (newlyNeeding.length > 0) {
-        toast.message(`Posted to #appts-ivan — ${newlyNeeding.length} appt needed`)
+        const needed = notices.filter((n) => n.kind === 'needed').length
+        toast.message(needed > 0
+          ? `Posted to #appts-ivan — ${needed} appt needed`
+          : 'Updated the #appts-ivan thread')
       }
       onClose()
     } catch (err) {

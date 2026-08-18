@@ -1,10 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  apptQueue, apptNeedKind, apptQueueCount, splitApptQueue,
+  apptQueue, apptNeedKind, apptQueueCount,
   isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs,
 } from './apptQueue'
 import { fromDateInput, fromDateTimeInput, apptTimeLabel, PENDING_LABEL } from './date'
-import { stopsNewlyNeeding } from './stops'
 import type { ApptType, Load, Stop } from '@/types'
 
 const stop = (over: Partial<Stop> = {}): Stop => ({
@@ -107,7 +106,7 @@ describe('apptQueue', () => {
   })
 })
 
-describe('apptQueueCount / splitApptQueue', () => {
+describe('apptQueueCount', () => {
   const loads = [
     load({ id: 'l1', stops: [stop({ apptType: 'tbd' })] }),
     load({ id: 'l2', stops: [stop({ appt: fromDateInput('2026-08-20') })] }),
@@ -116,14 +115,6 @@ describe('apptQueueCount / splitApptQueue', () => {
 
   it('counts everything awaiting an appointment', () => {
     expect(apptQueueCount(loads)).toBe(2)
-  })
-
-  it('splits the two groups for display', () => {
-    const { need, pending } = splitApptQueue(apptQueue(loads))
-    expect(need).toHaveLength(1)
-    expect(pending).toHaveLength(1)
-    expect(need[0].loadId).toBe('l1')
-    expect(pending[0].loadId).toBe('l2')
   })
 })
 
@@ -330,14 +321,3 @@ describe('a new load with no appointment time reads as Pending', () => {
   })
 })
 
-describe('flagging NEED reaches the Slack notifier', () => {
-  it('reports the stop as newly needing once the type actually saves as tbd', () => {
-    // The regression made this unreachable: the type reverted to exact before the save,
-    // so no transition into NEED ever existed for stopsNewlyNeeding to detect.
-    const before = [stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })]
-    const chosen = apptTypeAfterEdit('tbd', '2099-01-01T09:30', { type: 'exact', value: '2099-01-01T09:30' })
-    const after = [{ ...before[0], apptType: chosen }]
-    expect(chosen).toBe('tbd')
-    expect(stopsNewlyNeeding(after, before).map((s) => s.id)).toEqual(['s1'])
-  })
-})

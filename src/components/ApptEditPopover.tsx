@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useLoads } from '@/hooks/useLoads'
-import { updateStop } from '@/lib/stops'
+import { updateStop, getStops } from '@/lib/stops'
+import { sendApptNotices } from '@/lib/sendApptNotices'
+import { useAppStore } from '@/store/useAppStore'
 import { apptTypeAfterEdit } from '@/lib/apptQueue'
 import { formatDateTimeInput, fromDateTimeInput, fromDateInput, apptHasTime } from '@/lib/date'
 import type { Load, Stop, ApptType } from '@/types'
@@ -26,10 +28,19 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   className?: string
 }) {
   const { updateLoad } = useLoads()
+  // The same identity the store stamps on writes and the audit log — not useAuth, which
+  // would tie this leaf editor to the auth provider being mounted above it.
+  const actor = useAppStore((s) => s.currentUserEmail)
 
+  // Ranges can genuinely span days (there are multi-day windows in production), so the
+  // end is a full date+time like the start — a time-only field would quietly collapse a
+  // three-day window to one afternoon.
+  const endField = apptField === 'pickupAppt' ? 'pickupApptEnd' : 'deliveryApptEnd'
   const srcAppt = stop ? stop.appt : load[apptField]
   const srcType = stop ? stop.apptType : load[typeField]
+  const srcEnd = stop ? stop.apptEnd : load[endField]
   const initVal = srcAppt ? formatDateTimeInput(srcAppt) : ''
+  const initEnd = srcEnd ? formatDateTimeInput(srcEnd) : ''
 
   // 'pending' is not a stored type — it IS `exact` with no time yet, which is how the
   // whole app already renders an unset appointment. Keeping it derived rather than adding
@@ -38,11 +49,18 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const isPending = (srcType ?? 'exact') === 'exact' && !apptHasTime(srcAppt)
   const [dateVal, setDateVal] = useState(initVal)
   const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isPending ? 'pending' : (srcType ?? 'exact'))
+  const [endVal,  setEndVal]  = useState(initEnd)
   const [saving,  setSaving]  = useState(false)
 
   const datePart = dateVal.slice(0, 10)
   const timePart = dateVal.slice(11, 16)
+  const endDatePart = endVal.slice(0, 10)
+  const endTimePart = endVal.slice(11, 16)
   const combineDateTime = (d: string, t: string) => (d && t ? `${d}T${t}` : d || '')
+
+  const isRange = typeVal === 'range'
+  // A window that ends before it starts would render as "16:00–08:00" and mean nothing.
+  const badWindow = isRange && !!dateVal && !!endVal && endVal <= dateVal
 
   const commit = async () => {
     setSaving(true)
@@ -60,15 +78,31 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
         ? (value.length > 10 ? fromDateTimeInput(value) : fromDateInput(value.slice(0, 10)))
         : ''
 
+      // Decided before the write, against what was on screen.
+      const prev = getStops(load)
+      let next: Stop[]
+
+      // The window end belongs to a range and nothing else — carrying a stale one onto an
+      // exact appointment would leave apptTimeLabel rendering a window that no longer exists.
+      const endIso = effectiveType === 'range' && endVal ? fromDateTimeInput(endVal) : undefined
+
       if (stop) {
-        const stopPatch: Partial<Stop> = { apptType: effectiveType }
+        const stopPatch: Partial<Stop> = { apptType: effectiveType, apptEnd: endIso }
         if (iso) stopPatch.appt = iso
-        await updateLoad(load.id, { stops: updateStop(load, stop.id, stopPatch) })
+        next = updateStop(load, stop.id, stopPatch)
+        await updateLoad(load.id, { stops: next })
       } else {
-        const patch: Partial<Load> = { [typeField]: effectiveType }
+        const patch: Partial<Load> = { [typeField]: effectiveType, [endField]: endIso }
         if (iso) patch[apptField] = iso
         await updateLoad(load.id, patch)
+        // Legacy load: getStops synthesizes from the mirror fields, so read the result
+        // back through it rather than hand-building the stop.
+        next = getStops({ ...load, ...patch } as Load)
       }
+
+      // Flagging NEED from the calendar or the Appts queue used to be silent — only the
+      // Loads drawer notified. Same call, same rules, from every editor now.
+      void sendApptNotices({ load, next, prev, actorName: actor, updateLoad })
     } finally { setSaving(false) }
     onClose()
   }
@@ -117,12 +151,45 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       >
         <option value="exact">Exact Time</option>
         <option value="pending">Pending (no time set)</option>
+        <option value="range">Window (range)</option>
         <option value="fcfs">FCFS</option>
         <option value="tbd">NEED (TBD)</option>
       </select>
+
+      {isRange && (
+        <>
+          <div className="flex gap-1 items-center">
+            <span className="text-[10px] text-muted-foreground shrink-0" style={{ width: 24 }}>ends</span>
+            <input
+              type="date"
+              aria-label="Window end date"
+              className={inputCls}
+              style={{ flex: '1 1 0', minWidth: 0 }}
+              value={endDatePart}
+              onChange={(e) => setEndVal(combineDateTime(e.target.value, endTimePart || '00:00'))}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !badWindow) commit(); if (e.key === 'Escape') onClose() }}
+            />
+            <input
+              type="text"
+              placeholder="17:00"
+              aria-label="Window end time"
+              className={inputCls}
+              style={{ width: 56, flexShrink: 0 }}
+              value={endTimePart}
+              onChange={(e) => setEndVal(combineDateTime(endDatePart || datePart, e.target.value))}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !badWindow) commit(); if (e.key === 'Escape') onClose() }}
+            />
+          </div>
+          {badWindow && (
+            <div className="text-[10px]" style={{ color: 'var(--ds-red)' }} role="alert">
+              The window has to end after it starts.
+            </div>
+          )}
+        </>
+      )}
       <div className="flex gap-1.5">
         <button
-          disabled={saving}
+          disabled={saving || badWindow}
           className="flex-1 h-6 text-[11px] font-medium rounded bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 transition-colors"
           onClick={commit}
         >Save</button>

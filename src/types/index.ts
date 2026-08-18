@@ -235,6 +235,12 @@ export interface Stop {
   driverId: string | null    // ONE driver per stop — subsumes the old split-load concept
   colorKey?: ColorKey | null // per-stop highlight override; falls back to the load's colorKey
   sequence: number           // 0-based order along the route
+  // Slack message ts of the #appts-ivan post that asked for this appointment, so a later
+  // time change can reply IN that thread instead of starting a new one. Lives here rather
+  // than in a column because `stops` is an a.json() field — no schema change, and it
+  // travels with the stop it belongs to. Legacy loads (no stops array) have nowhere to
+  // keep it, so those post standalone messages.
+  apptThreadTs?: string
 }
 
 export interface Load {

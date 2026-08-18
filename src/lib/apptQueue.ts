@@ -121,15 +121,6 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
 /** Queue size, for the sidebar badge. */
 export const apptQueueCount = (loads: Load[]): number => apptQueue(loads).length
 
-/** Split for display — the two groups are acted on differently. */
-export function splitApptQueue(rows: ApptQueueRow[]) {
-  return {
-    need: rows.filter((r) => r.kind === 'need'),
-    pending: rows.filter((r) => r.kind === 'pending'),
-  }
-}
-
-
 /* ── past appointments ──────────────────────────────────────────────────────── */
 
 /**
@@ -228,4 +219,37 @@ export function apptTypeAfterEdit(
   if (!prev || (prev.type ?? 'exact') !== 'tbd') return 'tbd'
   // Already NEED, and a time has just appeared: someone booked it.
   return hasTime(value) && !hasTime(prev.value ?? '') ? 'exact' : 'tbd'
+}
+
+/* ── grouping by pickup date ─────────────────────────────────────────────────── */
+
+export interface ApptDateSection {
+  /** Chicago calendar date 'YYYY-MM-DD', or '' for rows with no pickup date. */
+  key: string
+  rows: ApptQueueRow[]
+}
+
+/**
+ * Group the queue by the LOAD's pickup date — including rows that are delivery stops,
+ * because a dispatcher works a day by the trucks rolling that morning, and a delivery is
+ * chased in the context of the pickup that feeds it.
+ *
+ * Chronological, with undated rows last: they carry no scheduling signal, so putting them
+ * first would push the actionable days below the fold.
+ */
+export function groupByPickupDate(rows: ApptQueueRow[]): ApptDateSection[] {
+  const buckets = new Map<string, ApptQueueRow[]>()
+  for (const r of rows) {
+    const key = r.pickup.appt ? chicagoDateStr(r.pickup.appt) : ''
+    const list = buckets.get(key)
+    if (list) list.push(r)
+    else buckets.set(key, [r])
+  }
+  return [...buckets.entries()]
+    .map(([key, rows]) => ({ key, rows }))
+    .sort((a, b) => {
+      if (!a.key) return 1
+      if (!b.key) return -1
+      return a.key.localeCompare(b.key)
+    })
 }
