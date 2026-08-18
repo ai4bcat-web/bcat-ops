@@ -1905,30 +1905,44 @@ export async function deleteDriverPayCredit(id: string): Promise<void> {
 }
 
 
+/**
+ * Tell #appts-ivan about an appointment.
+ *
+ * Returns the Slack message ts on a 'needed' post so the caller can persist it as the
+ * stop's apptThreadTs and later reply in that thread. Returns null on any failure:
+ * fire-and-forget, because a Slack outage must never block saving a load.
+ */
 export async function notifyApptNeeded(args: {
   stopKind: 'pickup' | 'delivery'
+  kind?: 'needed' | 'updated'
+  threadTs?: string | null
+  apptLabel?: string | null
   aljexId?: string | null
   pickupNumber?: string | null
   customer?: string | null
   location?: string | null
   apptDate?: string | null
   actorName?: string | null
-}): Promise<void> {
+}): Promise<string | null> {
   try {
-    await client.graphql({
+    const res = await client.graphql({
       query: `mutation NotifyApptNeeded(
-        $stopKind: String!, $aljexId: String, $pickupNumber: String,
+        $stopKind: String!, $kind: String, $threadTs: String, $apptLabel: String,
+        $aljexId: String, $pickupNumber: String,
         $customer: String, $location: String, $apptDate: String, $actorName: String
       ) {
         notifyApptNeeded(
-          stopKind: $stopKind, aljexId: $aljexId, pickupNumber: $pickupNumber,
+          stopKind: $stopKind, kind: $kind, threadTs: $threadTs, apptLabel: $apptLabel,
+          aljexId: $aljexId, pickupNumber: $pickupNumber,
           customer: $customer, location: $location, apptDate: $apptDate, actorName: $actorName
         )
       }`,
       variables: args,
-    })
+    }) as { data?: { notifyApptNeeded?: unknown } }
+    const payload = unwrapJson(res.data?.notifyApptNeeded) as { ok?: boolean; ts?: string } | null
+    return payload?.ok && payload.ts ? payload.ts : null
   } catch (err) {
-    // Fire-and-forget — a Slack outage must never block saving a load.
     console.error('[notifyApptNeeded] failed', err)
+    return null
   }
 }

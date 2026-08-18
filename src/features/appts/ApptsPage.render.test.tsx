@@ -25,8 +25,12 @@ vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
 const setSelectedLoad = vi.fn()
 vi.mock('@/store/useAppStore', () => ({
-  useAppStore: (sel: (s: unknown) => unknown) => sel({ setSelectedLoad }),
+  useAppStore: (sel: (s: unknown) => unknown) =>
+    sel({ setSelectedLoad, currentUserEmail: 'ryne@bcatcorp.com' }),
 }))
+
+const notifyApptNeeded = vi.fn().mockResolvedValue('1699999999.000100')
+vi.mock('@/lib/apiClient', () => ({ notifyApptNeeded: (a: unknown) => notifyApptNeeded(a) }))
 
 import { ApptsPage } from './ApptsPage'
 
@@ -191,6 +195,40 @@ describe('ApptsPage', () => {
     expect(written.appt).toBe(fromDateTimeInput('2099-03-04T09:15'))
     // Booking the time is what takes it off the queue.
     expect(written.apptType).toBe('exact')
+  })
+
+  it('posts to #appts-ivan when a time cell flags NEED — the calendar path used to be silent', async () => {
+    loads.mockReturnValue([pair({ id: 'l9' })])
+    render(<ApptsPage />)
+
+    // The pickup on `pair` is already NEED; move the DELIVERY (exact, 14:30) to NEED.
+    fireEvent.click(screen.getAllByTitle(/Set this time/)[1])
+    fireEvent.change(screen.getByLabelText('Appointment type'), { target: { value: 'tbd' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(notifyApptNeeded).toHaveBeenCalled())
+    const arg = notifyApptNeeded.mock.calls[0][0]
+    expect(arg.stopKind).toBe('delivery')
+    expect(arg.kind).toBe('needed')
+    expect(arg.actorName).toBe('ryne@bcatcorp.com')
+  })
+
+  it('replies in the thread when a time changes on a stop already asked about', async () => {
+    loads.mockReturnValue([load({ id: 'l10', stops: [
+      stop({ id: 'p', type: 'pickup', apptType: 'tbd', apptThreadTs: 'TS-123',
+             appt: fromDateInput('2099-01-01') }),
+    ] })])
+    render(<ApptsPage />)
+
+    fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '09:15' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(notifyApptNeeded).toHaveBeenCalled())
+    const arg = notifyApptNeeded.mock.calls[0][0]
+    expect(arg.kind).toBe('updated')
+    expect(arg.threadTs).toBe('TS-123')
+    expect(arg.apptLabel).toContain('09:15')
   })
 
   it('does not open the drawer when a time cell is clicked', () => {

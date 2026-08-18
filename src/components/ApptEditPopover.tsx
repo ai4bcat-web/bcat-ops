@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useLoads } from '@/hooks/useLoads'
-import { updateStop } from '@/lib/stops'
+import { updateStop, getStops } from '@/lib/stops'
+import { sendApptNotices } from '@/lib/sendApptNotices'
+import { useAppStore } from '@/store/useAppStore'
 import { apptTypeAfterEdit } from '@/lib/apptQueue'
 import { formatDateTimeInput, fromDateTimeInput, fromDateInput, apptHasTime } from '@/lib/date'
 import type { Load, Stop, ApptType } from '@/types'
@@ -26,6 +28,9 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   className?: string
 }) {
   const { updateLoad } = useLoads()
+  // The same identity the store stamps on writes and the audit log — not useAuth, which
+  // would tie this leaf editor to the auth provider being mounted above it.
+  const actor = useAppStore((s) => s.currentUserEmail)
 
   const srcAppt = stop ? stop.appt : load[apptField]
   const srcType = stop ? stop.apptType : load[typeField]
@@ -60,15 +65,27 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
         ? (value.length > 10 ? fromDateTimeInput(value) : fromDateInput(value.slice(0, 10)))
         : ''
 
+      // Decided before the write, against what was on screen.
+      const prev = getStops(load)
+      let next: Stop[]
+
       if (stop) {
         const stopPatch: Partial<Stop> = { apptType: effectiveType }
         if (iso) stopPatch.appt = iso
-        await updateLoad(load.id, { stops: updateStop(load, stop.id, stopPatch) })
+        next = updateStop(load, stop.id, stopPatch)
+        await updateLoad(load.id, { stops: next })
       } else {
         const patch: Partial<Load> = { [typeField]: effectiveType }
         if (iso) patch[apptField] = iso
         await updateLoad(load.id, patch)
+        // Legacy load: getStops synthesizes from the mirror fields, so read the result
+        // back through it rather than hand-building the stop.
+        next = getStops({ ...load, ...patch } as Load)
       }
+
+      // Flagging NEED from the calendar or the Appts queue used to be silent — only the
+      // Loads drawer notified. Same call, same rules, from every editor now.
+      void sendApptNotices({ load, next, prev, actorName: actor, updateLoad })
     } finally { setSaving(false) }
     onClose()
   }

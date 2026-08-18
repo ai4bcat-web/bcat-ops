@@ -1001,13 +1001,20 @@ const schema = a.schema({
     })
     .authorization((allow) => [allow.authenticated()]),
 
-  // Post to Slack #appts-ivan when a pickup or delivery is flagged NEED — somebody has
-  // to go book an appointment. Fired by the client on the TRANSITION into NEED only, so
-  // re-saving an already-flagged load stays quiet.
+  // Post to Slack #appts-ivan about an appointment. Fired by the client on a TRANSITION
+  // only — into NEED, or a time change on a stop already asked about — so re-saving a
+  // load stays quiet.
+  //
+  // `kind: 'updated'` with a `threadTs` replies inside the thread that asked, which is
+  // what keeps one appointment's history in one place instead of scattered posts.
+  // Returns { ok, ts }; the caller persists ts on the stop as apptThreadTs.
   notifyApptNeeded: a
     .mutation()
     .arguments({
       stopKind:     a.string().required(),   // 'pickup' | 'delivery'
+      kind:         a.string(),              // 'needed' (default) | 'updated'
+      threadTs:     a.string(),              // reply into this thread when updating
+      apptLabel:    a.string(),              // e.g. "Aug 20, 2026 · 09:30"
       aljexId:      a.string(),
       pickupNumber: a.string(),
       customer:     a.string(),

@@ -4,6 +4,16 @@ const INSTRUCTION =
   'contact to schedule an appt and update the thread and bcat-ops and e2open once complete.'
 
 interface MutationArgs {
+  /**
+   * 'needed'  — a stop was flagged NEED; post the standing instruction to the channel.
+   * 'updated' — the appointment moved; reply in the thread that asked for it.
+   * Absent means 'needed', so a client shipped before this change keeps working.
+   */
+  kind?: string | null
+  /** Slack ts of the post that asked for this appointment. Required to reply in-thread. */
+  threadTs?: string | null
+  /** The new appointment as a person reads it, e.g. "Aug 20, 2026 · 09:30". */
+  apptLabel?: string | null
   /** Which stop was flagged — 'pickup' | 'delivery'. */
   stopKind: string
   /** Load identifiers, for a message someone can act on without opening the app. */
@@ -45,6 +55,7 @@ export const handler = async (event: AppSyncEvent) => {
 
   const args = event.arguments
   const kind = args.stopKind === 'delivery' ? 'Delivery' : 'Pickup'
+  const isUpdate = args.kind === 'updated'
 
   if (!SLACK_BOT_TOKEN || !APPTS_IVAN_CHANNEL_ID) {
     console.warn('[appt-need-notifier] Slack not configured (token/channel) — skipping post')
@@ -52,16 +63,28 @@ export const handler = async (event: AppSyncEvent) => {
   }
 
   const who = args.actorName || event.identity?.claims?.email || null
-  const text = [
-    `*${kind} appt needed* — ${referenceLine(args)}`,
-    INSTRUCTION,
-    who ? `_Flagged by ${who}_` : null,
-  ].filter(Boolean).join('\n')
+  const text = isUpdate
+    ? [
+        `*${kind} appt updated* — ${args.apptLabel || 'time changed'}`,
+        `${referenceLine(args)}`,
+        who ? `_Updated by ${who}_` : null,
+      ].filter(Boolean).join('\n')
+    : [
+        `*${kind} appt needed* — ${referenceLine(args)}`,
+        INSTRUCTION,
+        who ? `_Flagged by ${who}_` : null,
+      ].filter(Boolean).join('\n')
 
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
-    body: JSON.stringify({ channel: APPTS_IVAN_CHANNEL_ID, text }),
+    body: JSON.stringify({
+      channel: APPTS_IVAN_CHANNEL_ID,
+      text,
+      // Reply inside the asking thread. Without a ts there is no thread to join, so the
+      // update posts at top level rather than being silently dropped.
+      ...(isUpdate && args.threadTs ? { thread_ts: args.threadTs } : {}),
+    }),
   })
   const json = await res.json() as { ok: boolean; error?: string; ts?: string }
   if (!json.ok) {

@@ -138,3 +138,60 @@ describe('appt-need-notifier', () => {
     }
   })
 })
+
+describe('appointment updates reply in the asking thread', () => {
+  const body = (n = 0) =>
+    JSON.parse(fetchMock.mock.calls[n][1]?.body ?? '{}') as
+      { channel: string; text: string; thread_ts?: string }
+
+  it('posts as a threaded reply when given a ts', async () => {
+    await handler(event({ kind: 'updated', threadTs: '1699999999.000100',
+                          apptLabel: 'Aug 20, 2026 · 09:30' }))
+    expect(body().thread_ts).toBe('1699999999.000100')
+  })
+
+  it('says what the appointment is now', async () => {
+    await handler(event({ kind: 'updated', threadTs: 'TS', apptLabel: 'Aug 20, 2026 · 09:30' }))
+    expect(body().text).toContain('Pickup appt updated')
+    expect(body().text).toContain('Aug 20, 2026 · 09:30')
+  })
+
+  it('still carries the load reference so the reply stands alone', async () => {
+    await handler(event({ kind: 'updated', threadTs: 'TS', apptLabel: 'x' }))
+    expect(body().text).toContain('Pro# 12345')
+  })
+
+  it('does NOT repeat the standing instruction on an update', async () => {
+    // The instruction belongs on the ask; repeating it on every answer is noise.
+    await handler(event({ kind: 'updated', threadTs: 'TS', apptLabel: 'x' }))
+    expect(body().text).not.toContain('reach out to the appropriate')
+  })
+
+  it('posts at top level rather than dropping the update when no ts is known', async () => {
+    // Legacy loads have nowhere to keep a thread ts; the message still has to arrive.
+    await handler(event({ kind: 'updated', apptLabel: 'Aug 20, 2026 · 09:30' }))
+    expect(body().thread_ts).toBeUndefined()
+    expect(body().text).toContain('Pickup appt updated')
+  })
+
+  it('names the delivery end when the delivery moved', async () => {
+    await handler(event({ kind: 'updated', stopKind: 'delivery', threadTs: 'TS', apptLabel: 'x' }))
+    expect(body().text).toContain('Delivery appt updated')
+  })
+
+  it('treats a missing kind as the original NEED post', async () => {
+    // A client shipped before this change sends no kind and must keep working.
+    await handler(event())
+    expect(body().text).toContain('appt needed')
+    expect(body().thread_ts).toBeUndefined()
+  })
+
+  it('returns the ts so the caller can remember the thread', async () => {
+    // The caller persists this on the stop; without it there is no thread to reply into
+    // when the appointment is later booked.
+    fetchMock.mockResolvedValue({ json: async () => ({ ok: true, ts: '1712345678.000900' }) })
+    const res = await handler(event()) as { ok: boolean; ts?: string }
+    expect(res.ok).toBe(true)
+    expect(res.ts).toBe('1712345678.000900')
+  })
+})
