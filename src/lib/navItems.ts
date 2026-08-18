@@ -37,10 +37,11 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard' },
       { to: '/files',     label: 'Files',     icon: FolderOpen,      pageKey: 'files' },
       { to: '/calendar',  label: 'Calendar',  icon: CalendarDays,    pageKey: 'calendar' },
+      // Directly under Calendar — the queue is the worklist for the calendar's blanks.
+      { to: '/appts',     label: 'Appts',     icon: CalendarClock,   pageKey: 'appts',  badgeKey: 'appts' },
       { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff' },
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
-      { to: '/appts',     label: 'Appts',     icon: CalendarClock,   pageKey: 'appts',  badgeKey: 'appts' },
     ],
   },
   {

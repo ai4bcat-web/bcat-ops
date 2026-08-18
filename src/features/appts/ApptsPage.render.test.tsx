@@ -6,7 +6,7 @@
  * urgent things where a dispatcher will see them.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, fireEvent } from '@testing-library/react'
 import { fromDateInput, fromDateTimeInput } from '@/lib/date'
 import type { Load } from '@/types'
 
@@ -37,7 +37,7 @@ const load = (over: Partial<Load>): Load => ({
 } as Load)
 
 const stop = (over = {}) => ({
-  id: 's1', type: 'pickup' as const, appt: fromDateInput('2026-08-20'),
+  id: 's1', type: 'pickup' as const, appt: fromDateInput('2099-01-01'),
   apptType: 'tbd' as const, driverId: null, sequence: 0, ...over,
 })
 
@@ -86,16 +86,44 @@ describe('ApptsPage', () => {
     expect(within(tables[1]).getByText('NOTIME')).toBeTruthy()
   })
 
-  it('calls out an appointment date that has already passed', () => {
-    loads.mockReturnValue([load({ stops: [stop({ appt: fromDateInput('2020-01-01') })] })])
+  it('hides an appointment whose date has already gone by', () => {
+    // Hundreds of historical loads would otherwise bury the stops still worth calling about.
+    loads.mockReturnValue([load({ aljexId: 'OLD', stops: [stop({ appt: fromDateInput('2020-01-01') })] })])
     render(<ApptsPage />)
+    expect(screen.queryByText('OLD')).toBeNull()
+  })
+
+  it('offers to show the past ones rather than dropping them silently', () => {
+    loads.mockReturnValue([load({ aljexId: 'OLD', stops: [stop({ appt: fromDateInput('2020-01-01') })] })])
+    render(<ApptsPage />)
+
+    const toggle = screen.getByText('Show 1 past appointment')
+    fireEvent.click(toggle)
+    expect(screen.getByText('OLD')).toBeTruthy()
     expect(screen.getByText(/d overdue/)).toBeTruthy()
+  })
+
+  it('sorts a column on click and reverses it on a second click', () => {
+    const row = (id: string, aljexId: string) =>
+      load({ id, aljexId, stops: [stop({ appt: fromDateInput('2099-01-01') })] })
+    loads.mockReturnValue([row('l1', '300'), row('l2', '100'), row('l3', '200')])
+    render(<ApptsPage />)
+
+    const proIds = () =>
+      within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1)
+        .map((r) => r.children[1].textContent)
+
+    fireEvent.click(screen.getAllByLabelText('Sort by Pro #')[0])
+    expect(proIds()).toEqual(['100', '200', '300'])
+
+    fireEvent.click(screen.getAllByLabelText('Sort by Pro #')[0])
+    expect(proIds()).toEqual(['300', '200', '100'])
   })
 
   it('leaves booked appointments out of the queue entirely', () => {
     loads.mockReturnValue([load({
       aljexId: 'BOOKED',
-      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:30') })],
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })])
     render(<ApptsPage />)
     expect(screen.queryByText('BOOKED')).toBeNull()

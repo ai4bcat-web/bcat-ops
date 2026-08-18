@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { apptQueue, apptNeedKind, apptQueueCount, splitApptQueue } from './apptQueue'
+import {
+  apptQueue, apptNeedKind, apptQueueCount, splitApptQueue,
+  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit,
+} from './apptQueue'
 import { fromDateInput, fromDateTimeInput } from './date'
 import type { ApptType, Load, Stop } from '@/types'
 
@@ -120,5 +123,110 @@ describe('apptQueueCount / splitApptQueue', () => {
     expect(pending).toHaveLength(1)
     expect(need[0].loadId).toBe('l1')
     expect(pending[0].loadId).toBe('l2')
+  })
+})
+
+describe('isPastAppt / splitPastAppts', () => {
+  const TODAY = fromDateInput('2026-08-17')
+
+  it('treats yesterday and earlier as past', () => {
+    expect(isPastAppt(fromDateInput('2026-08-16'), TODAY)).toBe(true)
+    expect(isPastAppt(fromDateInput('2025-01-01'), TODAY)).toBe(true)
+  })
+
+  it('does NOT treat today as past, even late in the day', () => {
+    // A 5pm appointment today still needs booking this morning.
+    expect(isPastAppt(fromDateInput('2026-08-17'), TODAY)).toBe(false)
+    expect(isPastAppt(fromDateTimeInput('2026-08-17T17:00'), TODAY)).toBe(false)
+  })
+
+  it('keeps future appointments', () => {
+    expect(isPastAppt(fromDateInput('2026-08-18'), TODAY)).toBe(false)
+  })
+
+  it('does not call a dateless stop past — it is unscheduled, not stale', () => {
+    expect(isPastAppt('', TODAY)).toBe(false)
+  })
+
+  it('splits the queue without losing rows', () => {
+    const rows = apptQueue([
+      load({ id: 'old', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-08-10') })] }),
+      load({ id: 'now', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-08-17') })] }),
+      load({ id: 'fut', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-01') })] }),
+    ])
+    const { current, past } = splitPastAppts(rows, TODAY)
+    expect(current.map((r) => r.loadId).sort()).toEqual(['fut', 'now'])
+    expect(past.map((r) => r.loadId)).toEqual(['old'])
+    expect(current.length + past.length).toBe(rows.length)
+  })
+})
+
+describe('sortApptRows', () => {
+  const name = (id: string | null) => (id === 'd1' ? 'Zak Pace' : id === 'd2' ? 'Ana Ruiz' : '')
+  const rows = apptQueue([
+    load({ id: 'l1', aljexId: '300', customer: 'Zeta',  stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-03'), driverId: 'd1' })] }),
+    load({ id: 'l2', aljexId: '100', customer: 'Alpha', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-01'), driverId: 'd2' })] }),
+    load({ id: 'l3', aljexId: '200', customer: '',      stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-02'), driverId: null })] }),
+  ])
+
+  it('sorts ascending and descending', () => {
+    expect(sortApptRows(rows, 'aljexId', 'asc', name).map((r) => r.aljexId)).toEqual(['100', '200', '300'])
+    expect(sortApptRows(rows, 'aljexId', 'desc', name).map((r) => r.aljexId)).toEqual(['300', '200', '100'])
+  })
+
+  it('sorts dates chronologically', () => {
+    expect(sortApptRows(rows, 'appt', 'asc', name).map((r) => r.loadId)).toEqual(['l2', 'l3', 'l1'])
+  })
+
+  it('sorts drivers by name, not by id', () => {
+    // d2 is "Ana", d1 is "Zak" — sorting by the raw id would invert this.
+    const sorted = sortApptRows(rows, 'driver', 'asc', name)
+    expect(sorted.map((r) => name(r.driverId))).toEqual(['Ana Ruiz', 'Zak Pace', ''])
+  })
+
+  it('sinks blanks to the bottom in BOTH directions', () => {
+    // A missing customer isn't "before A" or "after Z" — floating it to the top on a
+    // descending sort would push the real rows off-screen.
+    expect(sortApptRows(rows, 'customer', 'asc', name).map((r) => r.customer)).toEqual(['Alpha', 'Zeta', ''])
+    expect(sortApptRows(rows, 'customer', 'desc', name).map((r) => r.customer)).toEqual(['Zeta', 'Alpha', ''])
+  })
+
+  it('compares Pro numbers numerically, so 100 sorts before 20', () => {
+    const nums = apptQueue([
+      load({ id: 'a', aljexId: '100', stops: [stop({ apptType: 'tbd' })] }),
+      load({ id: 'b', aljexId: '20',  stops: [stop({ apptType: 'tbd' })] }),
+    ])
+    expect(sortApptRows(nums, 'aljexId', 'asc', name).map((r) => r.aljexId)).toEqual(['20', '100'])
+  })
+
+  it('does not mutate the input', () => {
+    const before = rows.map((r) => r.loadId)
+    sortApptRows(rows, 'aljexId', 'desc', name)
+    expect(rows.map((r) => r.loadId)).toEqual(before)
+  })
+})
+
+describe('apptTypeAfterEdit', () => {
+  it('graduates a NEED stop to exact once a real time is entered', () => {
+    // The whole point: booking the time on the calendar takes it off the Appts queue.
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30')).toBe('exact')
+  })
+
+  it('leaves it as NEED when only a date was picked', () => {
+    expect(apptTypeAfterEdit('tbd', '2026-08-20')).toBe('tbd')
+  })
+
+  it('does not treat midnight as a booked time — that is the empty time input', () => {
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T00:00')).toBe('tbd')
+  })
+
+  it('never overrides a type the user chose deliberately', () => {
+    expect(apptTypeAfterEdit('fcfs', '2026-08-20T09:30')).toBe('fcfs')
+    expect(apptTypeAfterEdit('range', '2026-08-20T09:30')).toBe('range')
+    expect(apptTypeAfterEdit('exact', '2026-08-20T09:30')).toBe('exact')
+  })
+
+  it('leaves a queued stop queued when the time is cleared', () => {
+    expect(apptTypeAfterEdit('tbd', '')).toBe('tbd')
   })
 })

@@ -14,11 +14,12 @@
 
 import { useState, useRef, useCallback, useMemo } from 'react'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
-import { addDays, formatDayHeader, formatApptTime, formatDateShort, formatDateTimeInput, needLabel, apptHasTime, PENDING_LABEL } from '@/lib/date'
+import { addDays, formatDayHeader, formatApptTime, formatDateShort, formatDateTimeInput, fromDateTimeInput, fromDateInput, needLabel, apptHasTime, PENDING_LABEL } from '@/lib/date'
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { updateStop, getStops } from '@/lib/stops'
+import { apptTypeAfterEdit } from '@/lib/apptQueue'
 import { computeMoveDates, computeStopMove, type MoveRole } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
@@ -303,13 +304,22 @@ function ApptEditPopover({ load, stop, apptField, typeField, onClose }: {
   const commit = async () => {
     setSaving(true)
     try {
+      const effectiveType = apptTypeAfterEdit(typeVal, dateVal)
+
+      // fromDateTimeInput, not `new Date(...).toISOString()`: the input is Chicago wall
+      // time, and the native parse treats it as the BROWSER's zone — which writes the
+      // wrong instant for anyone not sitting in Chicago.
+      const iso = dateVal
+        ? (dateVal.length > 10 ? fromDateTimeInput(dateVal) : fromDateInput(dateVal.slice(0, 10)))
+        : ''
+
       if (stop) {
-        const stopPatch: Partial<Stop> = { apptType: typeVal }
-        if (dateVal) stopPatch.appt = new Date(dateVal).toISOString()
+        const stopPatch: Partial<Stop> = { apptType: effectiveType }
+        if (iso) stopPatch.appt = iso
         await updateLoad(load.id, { stops: updateStop(load, stop.id, stopPatch) })
       } else {
-        const patch: Partial<Load> = { [typeField]: typeVal }
-        if (dateVal) patch[apptField] = new Date(dateVal).toISOString()
+        const patch: Partial<Load> = { [typeField]: effectiveType }
+        if (iso) patch[apptField] = iso
         await updateLoad(load.id, patch)
       }
     } finally { setSaving(false) }

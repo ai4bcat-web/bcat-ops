@@ -1,6 +1,6 @@
 import { getStops } from './stops'
-import { apptHasTime } from './date'
-import type { Load, Stop, StopType } from '@/types'
+import { apptHasTime, chicagoDateStr } from './date'
+import type { ApptType, Load, Stop, StopType } from '@/types'
 
 /**
  * Why a stop is in the queue.
@@ -89,4 +89,87 @@ export function splitApptQueue(rows: ApptQueueRow[]) {
     need: rows.filter((r) => r.kind === 'need'),
     pending: rows.filter((r) => r.kind === 'pending'),
   }
+}
+
+
+/* ── past appointments ──────────────────────────────────────────────────────── */
+
+/**
+ * A stop whose appointment date has already passed.
+ *
+ * These are almost always historical loads that were never going to be booked — with
+ * hundreds of loads on file they swamp the queue and bury the work that can still be
+ * done. They're filtered out of the default view rather than deleted, because "hidden
+ * forever with no way to look" is how real backlogs get lost.
+ *
+ * Compared as Chicago calendar dates, so a stop later today is never treated as past.
+ */
+export function isPastAppt(appt: string, todayIso: string = new Date().toISOString()): boolean {
+  if (!appt) return false            // no date carries no urgency, and no staleness either
+  const day = chicagoDateStr(appt)
+  const today = chicagoDateStr(todayIso)
+  if (!day || !today) return false
+  return day < today
+}
+
+/** Split the queue into what can still be actioned and what has already gone by. */
+export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
+  return {
+    current: rows.filter((r) => !isPastAppt(r.appt, todayIso)),
+    past: rows.filter((r) => isPastAppt(r.appt, todayIso)),
+  }
+}
+
+/* ── sorting ────────────────────────────────────────────────────────────────── */
+
+export type ApptSortKey =
+  | 'stopType' | 'aljexId' | 'pickupNumber' | 'customer' | 'location' | 'appt' | 'driver'
+export type SortDir = 'asc' | 'desc'
+
+/**
+ * Sort by one column. `driverName` resolves the id so the Driver column sorts by the name
+ * people actually read rather than by a uuid.
+ *
+ * Blanks always sink to the bottom regardless of direction — a row with no customer is
+ * not "before A" or "after Z", it's just missing, and floating those to the top on a
+ * descending sort would push the real data off-screen.
+ */
+export function sortApptRows(
+  rows: ApptQueueRow[],
+  key: ApptSortKey,
+  dir: SortDir,
+  driverName: (id: string | null) => string,
+): ApptQueueRow[] {
+  const value = (r: ApptQueueRow): string =>
+    key === 'driver' ? driverName(r.driverId)
+    : key === 'stopType' ? r.stopType
+    : String(r[key] ?? '')
+
+  const sign = dir === 'asc' ? 1 : -1
+  return [...rows].sort((a, b) => {
+    const av = value(a)
+    const bv = value(b)
+    if (!av && !bv) return 0
+    if (!av) return 1                 // blanks last, both directions
+    if (!bv) return -1
+    // Dates are ISO, so a plain string compare is chronological.
+    return sign * av.localeCompare(bv, undefined, { numeric: true })
+  })
+}
+
+/* ── booking from the calendar ──────────────────────────────────────────────── */
+
+/**
+ * The appointment type to save when someone sets a time on the calendar.
+ *
+ * Entering a real time IS booking the appointment, so a stop still marked NEED graduates
+ * to Exact. Without this it would keep asking to be booked on the Appts page even though
+ * the person looking at it just booked it.
+ *
+ * `value` is a datetime-local string: "2026-08-20" (date only) or "2026-08-20T09:30".
+ * Midnight is how the input represents "no time chosen", so it does not count as booked.
+ */
+export function apptTypeAfterEdit(chosen: ApptType, value: string): ApptType {
+  const hasTime = value.length > 10 && value.slice(11, 16) !== '00:00'
+  return chosen === 'tbd' && hasTime ? 'exact' : chosen
 }
