@@ -58,16 +58,33 @@ beforeEach(() => {
 })
 
 describe('ApptsPage', () => {
-  it('mounts and shows both groups', async () => {
+  it('mounts and sections the queue by pickup day', async () => {
+    loads.mockReturnValue([pair({ id: 'l1' })])
     render(<ApptsPage />)
     expect(await screen.findByRole('heading', { name: 'Appts' })).toBeTruthy()
-    expect(screen.getByText('Needs booking')).toBeTruthy()
-    expect(screen.getByText('No time set')).toBeTruthy()
+    // 2099-01-01 is a Thursday; the section is titled by weekday because that is how a
+    // dispatcher scans the page.
+    expect(screen.getByText(/Thu, Jan 1, 2099/)).toBeTruthy()
+  })
+
+  it('groups two loads picking up the same day into ONE section', () => {
+    loads.mockReturnValue([pair({ id: 'l1' }), pair({ id: 'l2' })])
+    render(<ApptsPage />)
+    expect(screen.getAllByRole('table')).toHaveLength(1)
+  })
+
+  it('gives each pickup day its own section', () => {
+    loads.mockReturnValue([
+      pair({ id: 'l1' }),
+      load({ id: 'l2', stops: [stop({ id: 'p', appt: fromDateInput('2099-02-02') })] }),
+    ])
+    render(<ApptsPage />)
+    expect(screen.getAllByRole('table')).toHaveLength(2)
   })
 
   it('says so plainly when nothing needs booking', () => {
     render(<ApptsPage />)
-    expect(screen.getAllByText(/every appointment in this group is booked/i).length).toBe(2)
+    expect(screen.getByText(/Every stop is booked/i)).toBeTruthy()
   })
 
   it('lists a NEED stop with the detail needed to make the call', () => {
@@ -85,16 +102,21 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Pickup')).toBeTruthy()
   })
 
-  it('separates an explicit NEED from a stop with no time set', () => {
+  it('marks NEED and Pending per row now that sections are days', () => {
+    // The distinction still has to be visible at a glance — it just is not the top level.
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'NEEDED', stops: [stop()] }),
       load({ id: 'l2', aljexId: 'NOTIME', stops: [stop({ apptType: 'exact' })] }),
     ])
     render(<ApptsPage />)
 
-    const tables = screen.getAllByRole('table')
-    expect(within(tables[0]).getByText('NEEDED')).toBeTruthy()
-    expect(within(tables[1]).getByText('NOTIME')).toBeTruthy()
+    const table = screen.getAllByRole('table')[0]
+    // Read the Status cell specifically — "NEED" also legitimately appears in the PU time
+    // column for a tbd stop, so a row-wide text query is ambiguous.
+    const statusOf = (pro: string) =>
+      within(table).getByText(pro).closest('tr')!.children[0].textContent
+    expect(statusOf('NEEDED')).toBe('NEED')
+    expect(statusOf('NOTIME')).toBe('Pending')
   })
 
   it('hides an appointment whose date has already gone by', () => {
@@ -120,9 +142,10 @@ describe('ApptsPage', () => {
     loads.mockReturnValue([row('l1', '300'), row('l2', '100'), row('l3', '200')])
     render(<ApptsPage />)
 
+    // children[0] is the Status chip, so Pro # is children[2].
     const proIds = () =>
       within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1)
-        .map((r) => r.children[1].textContent)
+        .map((r) => r.children[2].textContent)
 
     fireEvent.click(screen.getAllByLabelText('Sort by Pro #')[0])
     expect(proIds()).toEqual(['100', '200', '300'])
