@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { ApptType, Load, Stop, StopType } from '@/types'
-import { getStops, deriveLegacyFields, withDerivedLegacy, makeStop, updateStop, reorderStops, stopsNewlyNeeding } from './stops'
+import { getStops, deriveLegacyFields, withDerivedLegacy, withStopsFromLegacy, makeStop, updateStop, reorderStops, stopsNewlyNeeding } from './stops'
 
 function legacyLoad(over: Partial<Load> = {}): Load {
   return {
@@ -168,5 +168,67 @@ describe('stopsNewlyNeeding', () => {
   it('treats a legacy stop with no apptType as not-NEED', () => {
     const legacy = { ...stop('s1', 'exact'), apptType: undefined } as unknown as Stop
     expect(stopsNewlyNeeding([stop('s1', 'tbd')], [legacy]).map((s) => s.id)).toEqual(['s1'])
+  })
+})
+
+describe('withStopsFromLegacy — the inverse dual-write', () => {
+  const twoStop = (over: Partial<Load> = {}): Load => ({
+    id: 'l1', aljexId: '1', tmsId: '', pickupNumber: '',
+    pickupAppt: '2026-08-20T05:00:00.000Z', pickupApptType: 'exact',
+    deliveryAppt: '2026-08-21T05:00:00.000Z', deliveryApptType: 'exact',
+    pickupDriverId: null, deliveryDriverId: null,
+    readyToInvoice: false, createdBy: '', updatedBy: '', createdAt: '', updatedAt: '',
+    stops: [
+      { id: 'p', type: 'pickup', appt: '2026-08-20T05:00:00.000Z', apptType: 'exact', driverId: null, sequence: 0 },
+      { id: 'd', type: 'delivery', appt: '2026-08-21T05:00:00.000Z', apptType: 'exact', driverId: null, sequence: 1 },
+    ],
+    ...over,
+  } as Load)
+
+  it('carries a legacy pickup time into the pickup stop', () => {
+    // This is the reported bug: the Loads grid reads pickupAppt and showed the new time
+    // while the calendar and Appts read stops[] and kept showing the old one.
+    const out = withStopsFromLegacy({ pickupAppt: '2026-08-20T14:00:00.000Z' }, twoStop())
+    expect(out.stops!.find((s) => s.id === 'p')!.appt).toBe('2026-08-20T14:00:00.000Z')
+  })
+
+  it('carries a legacy delivery time into the LAST delivery stop', () => {
+    const load = twoStop({ stops: [
+      { id: 'p', type: 'pickup', appt: 'x', apptType: 'exact', driverId: null, sequence: 0 },
+      { id: 'd1', type: 'delivery', appt: 'x', apptType: 'exact', driverId: null, sequence: 1 },
+      { id: 'd2', type: 'delivery', appt: 'x', apptType: 'exact', driverId: null, sequence: 2 },
+    ] })
+    const out = withStopsFromLegacy({ deliveryAppt: 'NEW' }, load)
+    expect(out.stops!.find((s) => s.id === 'd2')!.appt).toBe('NEW')
+    expect(out.stops!.find((s) => s.id === 'd1')!.appt).toBe('x')  // middle stop untouched
+  })
+
+  it('only copies the keys the patch actually set', () => {
+    // Writing a time must not blank the appointment type.
+    const out = withStopsFromLegacy({ pickupAppt: 'NEW' }, twoStop())
+    expect(out.stops!.find((s) => s.id === 'p')!.apptType).toBe('exact')
+  })
+
+  it('leaves a patch that already carries stops alone — stops is canonical', () => {
+    const explicit = [{ id: 'p', type: 'pickup' as const, appt: 'FROM_STOPS', apptType: 'exact' as const, driverId: null, sequence: 0 }]
+    const out = withStopsFromLegacy({ stops: explicit, pickupAppt: 'FROM_LEGACY' }, twoStop())
+    expect(out.stops).toBe(explicit)
+  })
+
+  it('leaves a legacy load alone — getStops synthesizes from these same fields', () => {
+    const out = withStopsFromLegacy({ pickupAppt: 'NEW' }, twoStop({ stops: undefined }))
+    expect(out.stops).toBeUndefined()
+  })
+
+  it('ignores patches that touch no mirrored field', () => {
+    const patch = { readyToInvoice: true }
+    expect(withStopsFromLegacy(patch, twoStop())).toBe(patch)
+  })
+
+  it('round-trips with deriveLegacyFields so the two directions agree', () => {
+    const synced = withStopsFromLegacy({ pickupAppt: 'T1', deliveryAppt: 'T2' }, twoStop())
+    const back = deriveLegacyFields(synced.stops!)
+    expect(back.pickupAppt).toBe('T1')
+    expect(back.deliveryAppt).toBe('T2')
   })
 })

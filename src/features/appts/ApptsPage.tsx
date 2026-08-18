@@ -101,7 +101,7 @@ function ApptTimeCell({ load, refr, apptField, typeField }: {
           apptField={apptField}
           typeField={typeField}
           onClose={() => setEditing(false)}
-          className="absolute z-50 top-full right-0 mt-1 p-2.5 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
+          className="absolute z-50 top-full right-0 mt-1 p-2.5 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl flex flex-col gap-2"
         />
       )}
     </td>

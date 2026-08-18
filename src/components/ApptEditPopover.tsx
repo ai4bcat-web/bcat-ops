@@ -64,11 +64,11 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
     onClose()
   }
 
-  const inputCls = "h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+  const inputCls = "h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
 
   return (
     <div
-      className={className ?? "absolute z-50 top-full left-0 mt-1 p-2.5 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-col gap-2"}
+      className={className ?? "absolute z-50 top-full left-0 mt-1 p-2.5 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl flex flex-col gap-2"}
       style={{ width: 215 }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
@@ -96,7 +96,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
         />
       </div>
       <select
-        className="w-full h-7 px-2 text-[11px] rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        className="w-full h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         aria-label="Appointment type"
         value={typeVal}
         onChange={(e) => setTypeVal(e.target.value as ApptType)}
@@ -108,11 +108,11 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       <div className="flex gap-1.5">
         <button
           disabled={saving}
-          className="flex-1 h-6 text-[11px] font-medium rounded bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 transition-colors"
+          className="flex-1 h-6 text-[11px] font-medium rounded bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 transition-colors"
           onClick={commit}
         >Save</button>
         <button
-          className="flex-1 h-6 text-[11px] rounded border border-slate-200 hover:bg-slate-50 text-slate-600 transition-colors"
+          className="flex-1 h-6 text-[11px] rounded border border-border hover:bg-accent text-muted-foreground transition-colors"
           onClick={onClose}
         >Cancel</button>
       </div>

@@ -19,6 +19,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { updateIntakeItem, notifySlackStatusChange, notifyApptNeeded } from '@/lib/apiClient'
 import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
 import { getStops, makeStop, deriveLegacyFields, stopsNewlyNeeding } from '@/lib/stops'
+import { apptTypeAfterEdit } from '@/lib/apptQueue'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
   formatDateInput, fromDateInput, formatDateShort, apptHasTime, PENDING_LABEL,
@@ -87,7 +88,10 @@ function stopFormToStop(s: StopFormValue, sequence: number): Stop {
     name: s.name?.trim() || undefined,
     city: s.city?.trim() || undefined,
     appt: dateOnly ? fromDateInput(s.appt.slice(0, 10)) : fromDateTimeInput(s.appt),
-    apptType: s.apptType,
+    // Same rule as the calendar and the Appts queue: typing a real time on a stop still
+    // marked NEED is what books it. Without this the drawer was the odd one out — you
+    // could set a time here and the stop would keep asking to be booked everywhere else.
+    apptType: apptTypeAfterEdit(s.apptType, s.appt),
     apptEnd: s.apptType === 'range' && s.apptEnd ? fromDateTimeInput(s.apptEnd) : undefined,
     driverId: s.driverId,
     sequence,
