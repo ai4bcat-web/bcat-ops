@@ -92,9 +92,9 @@ describe('CashFlowPage', () => {
     })
 
     render(<CashFlowPage />)
-    await screen.findByRole('heading', { name: 'Cash Flow' })
-
-    expect(screen.getByText('Burn per steady month')).toBeTruthy()
+    // Wait for the LOADED record, not the static heading — the heading is there on the
+    // first paint, so gating on it races the fetch and only fails on a slow machine.
+    expect(await screen.findByText('Burn per steady month')).toBeTruthy()
     expect(screen.getByText('$105,000')).toBeTruthy()
     expect(screen.getByText(/cash drops below your floor in/)).toBeTruthy()
   })
@@ -130,9 +130,8 @@ describe('CashFlowPage', () => {
     })
 
     render(<CashFlowPage />)
-    await screen.findByRole('heading', { name: 'Cash Flow' })
-
-    expect(screen.getByText(/dips below your floor in Aug 2026/)).toBeTruthy()
+    // Same as above: gate on content only the fetched record produces.
+    expect(await screen.findByText(/dips below your floor in Aug 2026/)).toBeTruthy()
     expect(screen.getByText(/Spreading the payables over/)).toBeTruthy()
     expect(screen.getByText('3 months')).toBeTruthy()
   })

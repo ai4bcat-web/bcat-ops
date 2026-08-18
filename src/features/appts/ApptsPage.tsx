@@ -1,12 +1,17 @@
-import { useMemo, useState } from 'react'
-import { HelpCircle, Truck, Package, Search } from 'lucide-react'
+import { useCallback, useMemo, useState } from 'react'
+import { HelpCircle, Truck, Package, Search, ChevronUp, ChevronDown, History } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { apptQueue, splitApptQueue, type ApptQueueRow } from '@/lib/apptQueue'
-import { formatDateShort, chicagoDateStr } from '@/lib/date'
+import {
+  apptQueue, splitApptQueue, splitPastAppts, sortApptRows,
+  type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir,
+} from '@/lib/apptQueue'
+import { ApptEditPopover } from '@/components/ApptEditPopover'
+import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL } from '@/lib/date'
+import type { Load } from '@/types'
 
 const RED = '#dc2626'
 const AMBER = '#b45309'
@@ -39,12 +44,100 @@ function Urgency({ appt }: { appt: string }) {
   return <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>in {d}d</span>
 }
 
-function Section({ title, hint, rows, drivers, onOpen }: {
+const COLUMNS: { key: ApptSortKey; label: string }[] = [
+  { key: 'stopType',     label: 'Stop' },
+  { key: 'aljexId',      label: 'Pro #' },
+  { key: 'pickupNumber', label: 'PU #' },
+  { key: 'customer',     label: 'Customer' },
+  { key: 'location',     label: 'Location' },
+  { key: 'appt',         label: 'Date' },
+  { key: 'driver',       label: 'Driver' },
+  { key: 'pickupTime',   label: 'PU time' },
+  { key: 'deliveryTime', label: 'Delivery time' },
+]
+
+/**
+ * The load's scheduled pickup or delivery time — click to edit it right here.
+ *
+ * Shows exactly what the calendar shows (apptTimeLabel is the same labeller), and writes
+ * through the same ApptEditPopover, so a time set here and a time set on the calendar are
+ * the same operation.
+ */
+function ApptTimeCell({ load, refr, apptField, typeField }: {
+  load: Load | undefined
+  refr: ApptRef
+  apptField: 'pickupAppt' | 'deliveryAppt'
+  typeField: 'pickupApptType' | 'deliveryApptType'
+}) {
+  const [editing, setEditing] = useState(false)
+  const label = apptTimeLabel(refr.appt, refr.apptType, refr.apptEnd)
+  const unset = label === '—' || label === PENDING_LABEL
+
+  if (!load) return <td style={td}>{label}</td>
+
+  const stop = refr.stopId
+    ? (load.stops ?? []).find((s) => s.id === refr.stopId)
+    : undefined
+
+  return (
+    <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={() => setEditing(true)}
+        title="Set this time — same as editing it on the calendar"
+        style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
+          color: unset ? 'var(--ds-t3)' : 'var(--ds-t1)', textAlign: 'left',
+          textDecoration: 'underline', textDecorationStyle: 'dotted',
+          textUnderlineOffset: 3, textDecorationColor: 'var(--ds-border)' }}
+      >
+        <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+          {refr.appt ? formatDateShort(refr.appt) : ''}
+        </div>
+        {label}
+      </button>
+      {editing && (
+        <ApptEditPopover
+          load={load}
+          stop={stop}
+          apptField={apptField}
+          typeField={typeField}
+          onClose={() => setEditing(false)}
+          className="absolute z-50 top-full right-0 mt-1 p-2.5 rounded-lg border border-slate-200 bg-white shadow-xl flex flex-col gap-2"
+        />
+      )}
+    </td>
+  )
+}
+
+/** Clickable header — first click sorts ascending, clicking the active column flips it. */
+function SortHeader({ label, active, dir, onClick }: {
+  label: string; active: boolean; dir: SortDir; onClick: () => void
+}) {
+  return (
+    <th style={th}>
+      <button
+        onClick={onClick}
+        aria-label={`Sort by ${label}`}
+        aria-sort={active ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none',
+          border: 'none', padding: 0, cursor: 'pointer', font: 'inherit',
+          color: active ? 'var(--ds-t1)' : 'var(--ds-t3)', fontWeight: active ? 700 : 600 }}
+      >
+        {label}
+        {active && (dir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />)}
+      </button>
+    </th>
+  )
+}
+
+function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort }: {
   title: string
   hint: string
   rows: ApptQueueRow[]
   drivers: { id: string; name: string }[]
+  loadsById: Map<string, Load>
   onOpen: (loadId: string) => void
+  sort: { key: ApptSortKey; dir: SortDir } | null
+  onSort: (key: ApptSortKey) => void
 }) {
   const driverName = (id: string | null) => (id ? drivers.find((d) => d.id === id)?.name ?? '—' : '—')
 
@@ -64,16 +157,18 @@ function Section({ title, hint, rows, drivers, onOpen }: {
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', minWidth: 820, borderCollapse: 'collapse' }}>
+          <table style={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={th}>Stop</th>
-                <th style={th}>Pro #</th>
-                <th style={th}>PU #</th>
-                <th style={th}>Customer</th>
-                <th style={th}>Location</th>
-                <th style={th}>Date</th>
-                <th style={th}>Driver</th>
+                {COLUMNS.map((c) => (
+                  <SortHeader
+                    key={c.key}
+                    label={c.label}
+                    active={sort?.key === c.key}
+                    dir={sort?.key === c.key ? sort.dir : 'asc'}
+                    onClick={() => onSort(c.key)}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -101,6 +196,18 @@ function Section({ title, hint, rows, drivers, onOpen }: {
                     <Urgency appt={r.appt} />
                   </td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{driverName(r.driverId)}</td>
+                  <ApptTimeCell
+                    load={loadsById.get(r.loadId)}
+                    refr={r.pickup}
+                    apptField="pickupAppt"
+                    typeField="pickupApptType"
+                  />
+                  <ApptTimeCell
+                    load={loadsById.get(r.loadId)}
+                    refr={r.delivery}
+                    apptField="deliveryAppt"
+                    typeField="deliveryApptType"
+                  />
                 </tr>
               ))}
             </tbody>
@@ -123,10 +230,18 @@ export function ApptsPage() {
   const { loads } = useLoads()
   const { drivers } = useDrivers()
   const [query, setQuery] = useState('')
+  const [showPast, setShowPast] = useState(false)
+  // null = the default urgency order from apptQueue (NEED first, soonest first).
+  const [sort, setSort] = useState<{ key: ApptSortKey; dir: SortDir } | null>(null)
   // The drawer reads its target from the store, same as the calendar and loads grid.
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
-  const rows = useMemo(() => {
+  const driverName = useCallback(
+    (id: string | null) => (id ? drivers.find((d) => d.id === id)?.name ?? '—' : '—'),
+    [drivers],
+  )
+
+  const matched = useMemo(() => {
     const all = apptQueue(loads)
     const q = query.trim().toLowerCase()
     if (!q) return all
@@ -135,7 +250,25 @@ export function ApptsPage() {
     )
   }, [loads, query])
 
-  const { need, pending } = useMemo(() => splitApptQueue(rows), [rows])
+  // Appointment dates that have already gone by are almost always dead history — they
+  // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.
+  const { current, past } = useMemo(() => splitPastAppts(matched), [matched])
+  const rows = showPast ? matched : current
+
+  const loadsById = useMemo(() => new Map(loads.map((l) => [l.id, l])), [loads])
+
+  const { need, pending } = useMemo(() => {
+    const split = splitApptQueue(rows)
+    if (!sort) return split
+    return {
+      need: sortApptRows(split.need, sort.key, sort.dir, driverName),
+      pending: sortApptRows(split.pending, sort.key, sort.dir, driverName),
+    }
+  }, [rows, sort, driverName])
+
+  // Click a new column to sort it ascending; click the active one to flip direction.
+  const onSort = (key: ApptSortKey) =>
+    setSort((s) => (s?.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
   // 'edit' so the appointment fields are immediately editable — booking the time is
   // the entire reason someone opened this row.
   const openById = (loadId: string) => setSelectedLoad(loadId, 'edit')
@@ -171,7 +304,10 @@ export function ApptsPage() {
           hint="Flagged NEED — someone has to call and set a time."
           rows={need}
           drivers={drivers}
+          loadsById={loadsById}
           onOpen={openById}
+          sort={sort}
+          onSort={onSort}
         />
 
         <Section
@@ -179,8 +315,25 @@ export function ApptsPage() {
           hint="Has a date but no time yet. Shows as Pending on the calendar."
           rows={pending}
           drivers={drivers}
+          loadsById={loadsById}
           onOpen={openById}
+          sort={sort}
+          onSort={onSort}
         />
+
+        {past.length > 0 && (
+          <button
+            onClick={() => setShowPast((v) => !v)}
+            style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer',
+              font: 'inherit', fontSize: 12.5, color: 'var(--ds-t3)' }}
+          >
+            <History size={13} />
+            {showPast
+              ? `Hide ${past.length} past appointment${past.length === 1 ? '' : 's'}`
+              : `Show ${past.length} past appointment${past.length === 1 ? '' : 's'}`}
+          </button>
+        )}
 
         {rows.length === 0 && query.trim() !== '' && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', padding: '8px 0', fontSize: 12.5, color: 'var(--ds-t3)' }}>
