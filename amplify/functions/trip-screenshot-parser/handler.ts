@@ -62,13 +62,26 @@ export const handler = async (event: { arguments: Args }) => {
   if (!apiKey) return { trips: null, error: 'ANTHROPIC_API_KEY secret is not set in the Amplify console yet' }
   if (!imageBase64) return { trips: null, error: 'no-image' }
 
-  const client = new Anthropic({ apiKey })
+  // AppSync hangs up at 30s and the Lambda is capped there too, so give the model call a
+  // budget that leaves room to return an answer. Without this the request runs to the wall
+  // and the caller gets a timeout with no explanation instead of a usable message.
+  const BUDGET_MS = 24_000
+  const client = new Anthropic({ apiKey, timeout: BUDGET_MS, maxRetries: 0 })
 
   const today = (todayISO ?? new Date().toISOString().slice(0, 10)).slice(0, 10)
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-opus-5',
+    // Sonnet, not Opus: this is table OCR against a hard 30s ceiling, and Opus was
+    // reliably blowing through it (CloudWatch showed back-to-back `Status: timeout` at
+    // exactly 30000ms). Sonnet reads a trips table just as accurately and finishes inside
+    // the window.
+    //
+    // Streamed, not awaited whole: a non-streaming request with max_tokens this high sits
+    // silently until the entire response is generated, which is what turned a slow read
+    // into a dead 30s hang. Streaming keeps the connection working and lets the SDK
+    // surface a timeout as an error we can report.
+    const response = await client.messages.stream({
+      model: 'claude-sonnet-5',
       max_tokens: 8000,
       output_config: {
         // Structured extraction — keep latency inside AppSync's 30s resolver cap.
@@ -105,7 +118,7 @@ export const handler = async (event: { arguments: Args }) => {
           ],
         },
       ],
-    })
+    }).finalMessage()
 
     if (response.stop_reason === 'refusal') {
       return { trips: null, error: 'The model declined to read this image — try a tighter crop of just the trips table' }
@@ -117,6 +130,14 @@ export const handler = async (event: { arguments: Args }) => {
   } catch (err) {
     console.error('[trip-screenshot-parser]', err)
     const msg = err instanceof Error ? err.message : String(err)
+    // A timeout is the one failure a user can actually act on, so say what to do about it
+    // rather than surfacing the SDK's wording.
+    if (/timeout|aborted|ETIMEDOUT/i.test(msg)) {
+      return {
+        trips: null,
+        error: 'Reading the screenshot took too long. Crop to just the trips table (or split a very long list into two screenshots) and try again.',
+      }
+    }
     return { trips: null, error: msg }
   }
 }

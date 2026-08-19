@@ -3,7 +3,7 @@ import { X, Plus, Trash2, Upload, Image as ImageIcon } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
 import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv'
-import { parseTripScreenshot } from '@/lib/apiClient'
+import { parseTripScreenshot, graphqlErrorMessage } from '@/lib/apiClient'
 import { imageToUploadableBase64, imageFromClipboard, screenshotTripToRaw } from '@/lib/screenshotImport'
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 
@@ -173,7 +173,9 @@ export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onCl
       if (!res.trips.length) throw new Error('No trip rows found in that image — crop to the trips table and try again')
       setShotRows((p) => [...p, ...res.trips!.map(screenshotTripToRaw)])
     } catch (e) {
-      setShotError(e instanceof Error ? e.message : String(e))
+      // Not String(e): the GraphQL client throws a plain object, which stringifies to
+      // "[object Object]" and tells the user nothing.
+      setShotError(graphqlErrorMessage(e))
     } finally { setShotBusy(false) }
   }
 
