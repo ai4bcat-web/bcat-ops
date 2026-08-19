@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-08-18
+> Last updated: 2026-08-19
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, a manual weekly cash-flow forecast, an appointment-booking queue (stops flagged NEED or still pending a time), driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Files hub (the driver roster plus everything on file per driver/truck, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging. Access is per-page: every route is gated by `RequirePage` on Cognito `page-<key>` groups (allowlist — a non-admin with no page groups sees everything; granting any group restricts them to those pages).
@@ -36,7 +36,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/fuel` | Fuel transaction tracking, EFS report upload, fuel price anomaly widget flagging transactions >15% above the per-fuel-type fleet average (`src/lib/fuelAnomalies.ts`) (legacy `/expenses` redirects here) |
 | `/finances` | Profitability + fleet/Amazon P&L, combined monthly profit, fleet expenses |
 | `/cash-flow` | Manual weekly cash-flow forecast for BCAT + IVAN — cash/AR/AP inputs typed in by hand (deliberately NOT wired to Load/Invoice/ExpenseRecord), runway projection, weekly snapshot log + trend chart |
-| `/appts` | Appointments queue — pickup/delivery stops flagged NEED or still pending a time (FCFS/range stops excluded), sortable, hides past stops, edit the scheduled PU/delivery times in place or book from the calendar (`src/lib/apptQueue.ts`) |
+| `/appts` | Appointments queue — pickup/delivery stops flagged NEED or still pending a time (FCFS/range stops excluded), sectioned by pickup day (each day exportable as CSV), NEED-vs-Pending shown per row, hides past stops, edit the scheduled PU/delivery times in place or book from the calendar (`src/lib/apptQueue.ts`) |
 | `/insurance` | Insurance premiums — per-truck/trailer + workers' comp annual amounts by policy period, period-over-period compare, driver insurance-deduction recovery KPI; feeds per-truck insurance cost in profitability |
 | `/schedule` | Driver schedule view (route only — not listed in the sidebar nav) |
 | `/time-off` | Driver time-off / availability management |
@@ -88,7 +88,7 @@ Notable model fields: `Load` stops (and their legacy `pickupAppt*`/`deliveryAppt
 - `sendOnboardingEmail` (mutation) — driver-facing onboarding email via SES (invite/rejected/complete), honors kill switch → `onboardingEmailer`
 - `sendDriverPayEmail` (mutation) — emails a driver their weekly pay statement PDF (built client-side, passed as base64) via SES → `driverPayEmailer`
 - `parseTripScreenshot` (mutation) — reads an Amazon Relay trips-list screenshot (base64 image, downscaled client-side) into structured trip rows for the Driver Pay import, previewed before saving → `tripScreenshotParser`
-- `notifyApptNeeded` (mutation) — posts to Slack #appts-ivan when a pickup/delivery is flagged NEED; fired by the client only on the TRANSITION into NEED, so re-saving an already-flagged load stays quiet → `apptNeedNotifier`
+- `notifyApptNeeded` (mutation) — posts to Slack #appts-ivan when a pickup/delivery is flagged NEED; fired by the client only on a TRANSITION (into NEED, or a time change on a stop already asked about), so re-saving an already-flagged load stays quiet. A `kind: 'updated'` call passes `threadTs` to reply inside the thread that asked (the returned `ts` is persisted on the stop as `apptThreadTs`), keeping one appointment's history in one Slack thread → `apptNeedNotifier`
 - `sendVehicleQuoteEmail` (mutation) — sends Best Care Auto Transport branded HTML email (backs both the `/vehicle-quote` quote and the `/vehicle-confirmation` booking confirmation), from ruben@bcatcorp.com and always CC'd to cars@bcatcorp.com (visible to the customer; falls back to the legacy `BCC_ADDRESS` env var) → `vehicleQuoteEmailer`
 - `getGoogleReviews` (query) — live Google rating + review count for the Best Care Auto Transport listing (CTA in the quote email) → `googleReviews`
 

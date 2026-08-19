@@ -688,15 +688,45 @@ export async function parseTripScreenshot(args: {
   mediaType?: string
   todayISO?: string
 }): Promise<{ trips: ScreenshotTrip[] | null; error?: string | null }> {
-  const res = await client.graphql({
-    query: `mutation ParseTripScreenshot($imageBase64: String!, $mediaType: String, $todayISO: String) {
-      parseTripScreenshot(imageBase64: $imageBase64, mediaType: $mediaType, todayISO: $todayISO)
-    }`,
-    variables: args,
-  })
+  let res: unknown
+  try {
+    res = await client.graphql({
+      query: `mutation ParseTripScreenshot($imageBase64: String!, $mediaType: String, $todayISO: String) {
+        parseTripScreenshot(imageBase64: $imageBase64, mediaType: $mediaType, todayISO: $todayISO)
+      }`,
+      variables: args,
+    })
+  } catch (err) {
+    // Amplify rejects with a plain { data, errors } object, NOT an Error. Callers that
+    // did `String(e)` on it printed "[object Object]" and hid the real cause — which is
+    // usually the resolver timing out on a large screenshot.
+    return { trips: null, error: graphqlErrorMessage(err) }
+  }
   let data: unknown = (res as { data?: { parseTripScreenshot?: unknown } }).data?.parseTripScreenshot
   if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave as-is */ } }
   return (data ?? { trips: null, error: 'no-response' }) as { trips: ScreenshotTrip[] | null; error?: string | null }
+}
+
+/**
+ * A readable message out of whatever the GraphQL client threw.
+ *
+ * Amplify rejects with `{ data, errors: [{ message }] }` — a plain object, so `instanceof
+ * Error` is false and `String(err)` yields "[object Object]". Every rung of the error
+ * path has to unwrap it or the user is told nothing at all.
+ */
+export function graphqlErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message
+  const errors = (err as { errors?: { message?: string }[] } | null)?.errors
+  if (Array.isArray(errors) && errors.length > 0) {
+    const joined = errors.map((e) => e?.message).filter(Boolean).join('; ')
+    if (joined) {
+      return /timeout|timed out/i.test(joined)
+        ? 'The screenshot took too long to read. Crop to just the trips table (or split a long list into two screenshots) and try again.'
+        : joined
+    }
+  }
+  if (typeof err === 'string' && err) return err
+  return 'Something went wrong reading the screenshot.'
 }
 
 // ── Vehicle quote email (Best Care Auto Transport) ─────────────────────────────
