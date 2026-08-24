@@ -40,8 +40,8 @@ export interface TruckDocSpec {
  */
 export const TRUCK_DOC_SPECS: TruckDocSpec[] = [
   { key: 'insurance_cert',        label: 'Insurance',      sub: 'Cab card / certificate',  rule: 'PLUS_N_MONTHS', months: 12 },
-  { key: 'ifta_decals',           label: 'IFTA',           sub: 'License / decals',        rule: 'DEC_31' },
-  { key: 'irp_cab_card',          label: 'IRP',            sub: 'Registration / cab card', rule: 'PLUS_N_MONTHS', months: 12 },
+  { key: 'ifta_decals',           label: 'IFTA',           sub: 'License / decals',        rule: 'DEC_31',             appliesTo: 'truck' },
+  { key: 'irp_cab_card',          label: 'IRP',            sub: 'Registration / cab card', rule: 'PLUS_N_MONTHS', months: 12, appliesTo: 'truck' },
   { key: 'annual_dot_inspection', label: 'DOT Inspection', sub: 'Amazon every 2 mo · Ivan yearly', rule: 'PLUS_N_MONTHS', months: 12, dot: true },
   { key: 'photo_front',           label: 'Front',          sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
   { key: 'photo_driver_side',     label: 'Driver side',    sub: 'Photo',                   rule: 'PLUS_N_MONTHS', photo: true },
