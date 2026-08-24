@@ -7,11 +7,14 @@ import type { ApptQueueRow } from './apptQueue'
  * Columns mirror the on-screen table so an exported section is recognisable as the thing
  * that was on screen — the point of the export is to hand a day's outstanding
  * appointments to someone who is going to sit and make phone calls.
+ *
+ * One row per shipment — pickup and delivery status together.
  */
 
 export const APPT_CSV_HEADER = [
-  'Stop', 'Status', 'Pro #', 'PU #', 'Customer', 'Location',
-  'Appt date', 'Driver', 'PU time', 'Delivery time',
+  'PU Status', 'Del Status', 'Pro #', 'PU #', 'Customer',
+  'PU Location', 'Del Location', 'Appt date', 'Driver', 'Del Driver',
+  'PU time', 'Delivery time',
 ] as const
 
 /**
@@ -26,7 +29,7 @@ const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
 
 const STATUS_LABEL: Record<string, string> = { need: 'NEED', pending: 'Pending' }
 
-/** One CSV row per queue row, in the order given. */
+/** One CSV row per queue row (shipment), in the order given. */
 export function apptRowsToCsv(
   rows: ApptQueueRow[],
   driverName: (id: string | null) => string,
@@ -34,14 +37,16 @@ export function apptRowsToCsv(
   const lines = [APPT_CSV_HEADER.map(q).join(',')]
   for (const r of rows) {
     lines.push([
-      r.stopType === 'pickup' ? 'Pickup' : 'Delivery',
-      STATUS_LABEL[r.kind] ?? r.kind,
+      r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : '',
+      r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : '',
       r.aljexId,
       r.pickupNumber,
       r.customer,
       r.location,
+      r.deliveryLocation,
       r.appt ? formatDateShort(r.appt) : '',
       driverName(r.driverId),
+      r.deliveryDriverId ? driverName(r.deliveryDriverId) : '',
       apptTimeLabel(r.pickup.appt, r.pickup.apptType, r.pickup.apptEnd),
       apptTimeLabel(r.delivery.appt, r.delivery.apptType, r.delivery.apptEnd),
     ].map(q).join(','))

@@ -53,12 +53,35 @@ describe('apptQueue', () => {
     expect(apptQueue([load({ stops: [stop(), stop({ id: 's2', type: 'delivery' })] })])).toEqual([])
   })
 
-  it('picks up both stops of a load independently', () => {
+  it('produces ONE row per load when both stops need attention', () => {
     const rows = apptQueue([load({ stops: [
       stop({ id: 's1', apptType: 'tbd' }),
       stop({ id: 's2', type: 'delivery', apptType: 'tbd' }),
     ] })])
-    expect(rows.map((r) => r.stopType)).toEqual(['pickup', 'delivery'])
+    // One shipment, one row — not separate rows for pickup and delivery.
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pickupKind).toBe('need')
+    expect(rows[0].deliveryKind).toBe('need')
+  })
+
+  it('produces a row when only the pickup needs attention', () => {
+    const rows = apptQueue([load({ stops: [
+      stop({ id: 's1', apptType: 'tbd' }),
+      stop({ id: 's2', type: 'delivery' }),  // booked — no attention needed
+    ] })])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pickupKind).toBe('need')
+    expect(rows[0].deliveryKind).toBeNull()
+  })
+
+  it('produces a row when only the delivery needs attention', () => {
+    const rows = apptQueue([load({ stops: [
+      stop({ id: 's1' }),  // booked pickup
+      stop({ id: 's2', type: 'delivery', apptType: 'tbd' }),  // NEED delivery
+    ] })])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pickupKind).toBeNull()
+    expect(rows[0].deliveryKind).toBe('need')
   })
 
   it('carries the load reference a dispatcher needs to make the call', () => {
@@ -72,15 +95,16 @@ describe('apptQueue', () => {
     })
   })
 
-  it('puts explicit NEED above pending', () => {
+  it('puts loads with at least one NEED above pure-pending', () => {
     const rows = apptQueue([
-      load({ id: 'l1', stops: [stop({ appt: fromDateInput('2026-08-01') })] }),           // pending, earlier
-      load({ id: 'l2', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-01') })] }), // need, later
+      load({ id: 'l1', stops: [stop({ appt: fromDateInput('2026-08-01') })] }),                      // pending pickup, no delivery stop
+      load({ id: 'l2', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-01') })] }),     // need pickup
     ])
-    expect(rows.map((r) => r.kind)).toEqual(['need', 'pending'])
+    // l2 has a NEED, l1 has only pending
+    expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l1'])
   })
 
-  it('sorts soonest first within a group, so an overdue stop is at the top', () => {
+  it('sorts soonest first within a group, so an overdue load is at the top', () => {
     const rows = apptQueue([
       load({ id: 'l1', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-10') })] }),
       load({ id: 'l2', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-07-01') })] }),
@@ -89,7 +113,7 @@ describe('apptQueue', () => {
     expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l3', 'l1'])
   })
 
-  it('pushes a stop with no date at all to the end — no urgency signal', () => {
+  it('pushes a load with no pickup date at all to the end — no urgency signal', () => {
     const rows = apptQueue([
       load({ id: 'l1', stops: [stop({ apptType: 'tbd', appt: '' })] }),
       load({ id: 'l2', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-01') })] }),
@@ -97,12 +121,35 @@ describe('apptQueue', () => {
     expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l1'])
   })
 
+  it('skips a load entirely when both stops are booked', () => {
+    const rows = apptQueue([
+      load({ id: 'l1', stops: [
+        stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00') }),
+        stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
+      ] }),
+      load({ id: 'l2', stops: [stop({ apptType: 'tbd' })] }),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].loadId).toBe('l2')
+  })
+
   it('works on legacy loads with no stops array', () => {
     // getStops synthesises stops from the legacy pickup/delivery fields; a date-only
     // legacy appointment is exactly the "nobody set a time" case.
     const legacy = load({ id: 'l9', stops: undefined, pickupAppt: fromDateInput('2026-08-20') })
     const rows = apptQueue([legacy])
-    expect(rows.some((r) => r.loadId === 'l9' && r.stopType === 'pickup')).toBe(true)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].loadId).toBe('l9')
+    expect(rows[0].pickupKind).toBe('pending')
+  })
+
+  it('includes pickup and delivery locations on the row', () => {
+    const [row] = apptQueue([load({ stops: [
+      stop({ id: 'p', type: 'pickup', name: 'Warehouse A', city: 'Chicago, IL', apptType: 'tbd' }),
+      stop({ id: 'd', type: 'delivery', name: 'Dock 12', city: 'Detroit, MI', apptType: 'tbd' }),
+    ] })])
+    expect(row.location).toBe('Warehouse A, Chicago, IL')
+    expect(row.deliveryLocation).toBe('Dock 12, Detroit, MI')
   })
 })
 
@@ -113,8 +160,18 @@ describe('apptQueueCount', () => {
     load({ id: 'l3', stops: [stop()] }),   // booked — not in the queue
   ]
 
-  it('counts everything awaiting an appointment', () => {
+  it('counts loads (not stops) awaiting an appointment', () => {
     expect(apptQueueCount(loads)).toBe(2)
+  })
+
+  it('counts a load once even when both stops need attention', () => {
+    const both = [
+      load({ id: 'l1', stops: [
+        stop({ apptType: 'tbd' }),
+        stop({ type: 'delivery', apptType: 'tbd' }),
+      ] }),
+    ]
+    expect(apptQueueCount(both)).toBe(1)
   })
 })
 
@@ -320,4 +377,3 @@ describe('a new load with no appointment time reads as Pending', () => {
     expect(apptNeedKind(booked)).toBeNull()
   })
 })
-

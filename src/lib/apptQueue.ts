@@ -1,6 +1,6 @@
 import { getStops } from './stops'
 import { apptHasTime, chicagoDateStr } from './date'
-import type { ApptType, Load, Stop, StopType } from '@/types'
+import type { ApptType, Load, Stop } from '@/types'
 
 /**
  * Why a stop is in the queue.
@@ -26,19 +26,22 @@ export interface ApptRef {
 
 export interface ApptQueueRow {
   loadId: string
-  stopId: string
-  kind: ApptNeedKind
-  stopType: StopType
+  /** Null means the pickup stop doesn't need an appointment. */
+  pickupKind: ApptNeedKind | null
+  /** Null means the delivery stop doesn't need an appointment. */
+  deliveryKind: ApptNeedKind | null
   /** Pro # */
   aljexId: string
   pickupNumber: string
   customer: string
-  /** Facility and/or city, already joined for display. */
+  /** Pickup facility and/or city, joined for display. */
   location: string
-  /** ISO date of the (unscheduled) appointment. */
+  /** Delivery facility and/or city, joined for display. */
+  deliveryLocation: string
+  /** ISO date of the (unscheduled) pickup appointment — grouping key. */
   appt: string
   driverId: string | null
-  sequence: number
+  deliveryDriverId: string | null
   /** The load's scheduled pickup and delivery — the same two the calendar shows. */
   pickup: ApptRef
   delivery: ApptRef
@@ -74,43 +77,58 @@ export function apptNeedKind(stop: Stop): ApptNeedKind | null {
 }
 
 /**
- * Every stop across every load that still needs an appointment booked.
+ * Every load that has at least one stop still waiting on an appointment.
+ *
+ * One row per load — the pickup and delivery status live together on the same row
+ * rather than producing separate rows for each stop. A dispatcher works a shipment,
+ * not individual stops in isolation.
  *
  * Derived from load state rather than from an event firing, so it is self-healing: a load
  * that is flagged, missed, and re-flagged still shows exactly once, and nothing can fall
  * through a notification that didn't send.
  *
- * Ordered NEED first (a person asked for these), then soonest date first — a stop whose
- * date has already passed sorts to the very top, because that is the one now hurting.
+ * Ordered: loads with at least one NEED first, then the soonest pickup date first — a
+ * load whose date has already passed sorts to the very top, because that is the one
+ * now hurting.
  */
 export function apptQueue(loads: Load[]): ApptQueueRow[] {
   const rows: ApptQueueRow[] = []
 
   for (const load of loads) {
     const refs = loadApptRefs(load)
-    for (const stop of getStops(load)) {
-      const kind = apptNeedKind(stop)
-      if (!kind) continue
-      rows.push({
-        loadId: load.id,
-        stopId: stop.id,
-        kind,
-        stopType: stop.type,
-        aljexId: load.aljexId ?? '',
-        pickupNumber: load.pickupNumber ?? '',
-        customer: load.customer ?? '',
-        location: [stop.name, stop.city].filter(Boolean).join(', '),
-        appt: stop.appt,
-        driverId: stop.driverId,
-        sequence: stop.sequence,
-        pickup: refs.pickup,
-        delivery: refs.delivery,
-      })
-    }
+    const stops = getStops(load)
+
+    const pickupStop = stops.find((s) => s.type === 'pickup')
+    const deliveryStop = [...stops].reverse().find((s) => s.type === 'delivery')
+
+    const pickupKind = pickupStop ? apptNeedKind(pickupStop) : null
+    const deliveryKind = deliveryStop ? apptNeedKind(deliveryStop) : null
+
+    // Only include the load if at least one stop needs attention.
+    if (!pickupKind && !deliveryKind) continue
+
+    rows.push({
+      loadId: load.id,
+      pickupKind,
+      deliveryKind,
+      aljexId: load.aljexId ?? '',
+      pickupNumber: load.pickupNumber ?? '',
+      customer: load.customer ?? '',
+      location: pickupStop ? [pickupStop.name, pickupStop.city].filter(Boolean).join(', ') : '',
+      deliveryLocation: deliveryStop ? [deliveryStop.name, deliveryStop.city].filter(Boolean).join(', ') : '',
+      appt: pickupStop?.appt ?? '',
+      driverId: pickupStop?.driverId ?? null,
+      deliveryDriverId: deliveryStop?.driverId ?? null,
+      pickup: refs.pickup,
+      delivery: refs.delivery,
+    })
   }
 
   return rows.sort((a, b) => {
-    if (a.kind !== b.kind) return a.kind === 'need' ? -1 : 1
+    // Rows with at least one NEED sort first.
+    const aNeed = a.pickupKind === 'need' || a.deliveryKind === 'need'
+    const bNeed = b.pickupKind === 'need' || b.deliveryKind === 'need'
+    if (aNeed !== bNeed) return aNeed ? -1 : 1
     // Blank dates last — they carry no urgency signal at all.
     if (!a.appt) return 1
     if (!b.appt) return -1
@@ -124,7 +142,7 @@ export const apptQueueCount = (loads: Load[]): number => apptQueue(loads).length
 /* ── past appointments ──────────────────────────────────────────────────────── */
 
 /**
- * A stop whose appointment date has already passed.
+ * A load whose pickup appointment date has already passed.
  *
  * These are almost always historical loads that were never going to be booked — with
  * hundreds of loads on file they swamp the queue and bury the work that can still be
@@ -152,7 +170,7 @@ export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
 /* ── sorting ────────────────────────────────────────────────────────────────── */
 
 export type ApptSortKey =
-  | 'stopType' | 'aljexId' | 'pickupNumber' | 'customer' | 'location' | 'appt' | 'driver'
+  | 'aljexId' | 'pickupNumber' | 'customer' | 'location' | 'appt' | 'driver'
   | 'pickupTime' | 'deliveryTime'
 export type SortDir = 'asc' | 'desc'
 
@@ -172,10 +190,10 @@ export function sortApptRows(
 ): ApptQueueRow[] {
   const value = (r: ApptQueueRow): string =>
     key === 'driver' ? driverName(r.driverId)
-    : key === 'stopType' ? r.stopType
     // ISO instants, so a string compare orders them chronologically.
     : key === 'pickupTime' ? r.pickup.appt
     : key === 'deliveryTime' ? r.delivery.appt
+    : key === 'location' ? (r.location || r.deliveryLocation)
     : String(r[key] ?? '')
 
   const sign = dir === 'asc' ? 1 : -1
@@ -230,9 +248,9 @@ export interface ApptDateSection {
 }
 
 /**
- * Group the queue by the LOAD's pickup date — including rows that are delivery stops,
- * because a dispatcher works a day by the trucks rolling that morning, and a delivery is
- * chased in the context of the pickup that feeds it.
+ * Group the queue by the LOAD's pickup date. A dispatcher works a day by the trucks
+ * rolling that morning, and a delivery is chased in the context of the pickup that
+ * feeds it.
  *
  * Chronological, with undated rows last: they carry no scheduling signal, so putting them
  * first would push the actionable days below the fold.

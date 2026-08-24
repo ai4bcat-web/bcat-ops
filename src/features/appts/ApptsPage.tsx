@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { HelpCircle, Truck, Package, Search, ChevronUp, ChevronDown, History, Download } from 'lucide-react'
+import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -8,6 +8,7 @@ import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
   apptQueue, splitPastAppts, sortApptRows, groupByPickupDate,
   type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir, type ApptDateSection,
+  type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
@@ -52,8 +53,22 @@ function sectionTitle(dateKey: string): string {
   return `${weekday}, ${date}`
 }
 
+const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pending' }
+
+/** Small chip showing NEED, Pending, or nothing (booked). */
+function KindChip({ kind }: { kind: ApptNeedKind | null }) {
+  if (!kind) return <span style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>—</span>
+  const need = kind === 'need'
+  return (
+    <span style={{
+      fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
+      background: need ? 'var(--ds-red-soft)' : 'var(--ds-amber-soft)',
+      color: need ? RED : AMBER,
+    }}>{STATUS_LABEL[kind]}</span>
+  )
+}
+
 const COLUMNS: { key: ApptSortKey; label: string }[] = [
-  { key: 'stopType',     label: 'Stop' },
   { key: 'aljexId',      label: 'Pro #' },
   { key: 'pickupNumber', label: 'PU #' },
   { key: 'customer',     label: 'Customer' },
@@ -137,18 +152,6 @@ function SortHeader({ label, active, dir, onClick }: {
   )
 }
 
-/** NEED vs Pending, kept per-row now that the sections group by date instead. */
-function StatusChip({ kind }: { kind: ApptQueueRow['kind'] }) {
-  const need = kind === 'need'
-  return (
-    <span style={{
-      fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
-      background: need ? 'var(--ds-red-soft)' : 'var(--ds-amber-soft)',
-      color: need ? RED : AMBER,
-    }}>{need ? 'NEED' : 'Pending'}</span>
-  )
-}
-
 function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, onExport }: {
   title: string
   hint: string
@@ -161,7 +164,7 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
   onExport: () => void
 }) {
   const driverName = (id: string | null) => (id ? drivers.find((d) => d.id === id)?.name ?? '—' : '—')
-  const needCount = rows.filter((r) => r.kind === 'need').length
+  const needCount = rows.filter((r) => r.pickupKind === 'need' || r.deliveryKind === 'need').length
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -198,7 +201,8 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
           <table style={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={th}>Status</th>
+                <th style={th}>PU</th>
+                <th style={th}>Del</th>
                 {COLUMNS.map((c) => (
                   <SortHeader
                     key={c.key}
@@ -213,29 +217,37 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
             <tbody>
               {rows.map((r) => (
                 <tr
-                  key={`${r.loadId}:${r.stopId}`}
+                  key={r.loadId}
                   onClick={() => onOpen(r.loadId)}
                   style={{ cursor: 'pointer' }}
                   title="Open this load to set the appointment"
                 >
-                  <td style={td}><StatusChip kind={r.kind} /></td>
-                  <td style={td}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600 }}>
-                      {r.stopType === 'pickup'
-                        ? <Package size={13} style={{ color: 'var(--ds-blue)' }} />
-                        : <Truck size={13} style={{ color: 'var(--ds-blue)' }} />}
-                      {r.stopType === 'pickup' ? 'Pickup' : 'Delivery'}
-                    </span>
-                  </td>
+                  <td style={td}><KindChip kind={r.pickupKind} /></td>
+                  <td style={td}><KindChip kind={r.deliveryKind} /></td>
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.pickupNumber || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.customer || '—'}</td>
-                  <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.location || '—'}</td>
+                  <td style={{ ...td, color: 'var(--ds-t2)' }}>
+                    <div>{r.location || '—'}</div>
+                    {r.deliveryLocation && r.deliveryLocation !== r.location && (
+                      <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>
+                        <Truck size={10} style={{ verticalAlign: 'middle', marginRight: 2 }} />
+                        {r.deliveryLocation}
+                      </div>
+                    )}
+                  </td>
                   <td style={td}>
                     <div>{r.appt ? formatDateShort(r.appt) : '—'}</div>
                     <Urgency appt={r.appt} />
                   </td>
-                  <td style={{ ...td, color: 'var(--ds-t2)' }}>{driverName(r.driverId)}</td>
+                  <td style={{ ...td, color: 'var(--ds-t2)' }}>
+                    <div>{driverName(r.driverId)}</div>
+                    {r.deliveryDriverId && r.deliveryDriverId !== r.driverId && (
+                      <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>
+                        Del: {driverName(r.deliveryDriverId)}
+                      </div>
+                    )}
+                  </td>
                   <ApptTimeCell
                     load={loadsById.get(r.loadId)}
                     refr={r.pickup}
@@ -259,7 +271,7 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
 }
 
 /**
- * Appts — every stop still waiting on an appointment.
+ * Appts — every shipment still waiting on an appointment, one row per shipment.
  *
  * Derived from load state on every render rather than from a notification, so it can't
  * drift: flag a load, miss the Slack message, and it is still sitting here. Booking the
@@ -286,7 +298,7 @@ export function ApptsPage() {
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>
-      [r.aljexId, r.pickupNumber, r.customer, r.location].some((v) => v.toLowerCase().includes(q)),
+      [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation].some((v) => v.toLowerCase().includes(q)),
     )
   }, [loads, query])
 
@@ -297,7 +309,7 @@ export function ApptsPage() {
 
   const loadsById = useMemo(() => new Map(loads.map((l) => [l.id, l])), [loads])
 
-  // Sections are pickup days. NEED vs Pending is still on every row as a chip, so
+  // Sections are pickup days. NEED vs Pending is still on every row as chips, so
   // grouping by date doesn't cost the distinction — it just stops being the top level.
   const sections = useMemo(() => {
     const groups = groupByPickupDate(rows)
@@ -329,7 +341,7 @@ export function ApptsPage() {
               Appts
             </h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-              Every stop still waiting on an appointment. Book the time and it leaves the queue.
+              One row per shipment — pickup and delivery status together. Book both times and the shipment leaves the queue.
             </p>
           </div>
           <div style={{ position: 'relative', minWidth: 240 }}>
@@ -351,7 +363,7 @@ export function ApptsPage() {
             key={sec.key || 'undated'}
             title={sec.key ? sectionTitle(sec.key) : 'No pickup date'}
             hint={sec.key
-              ? 'Loads picking up this day that still need an appointment.'
+              ? 'Shipments picking up this day that still need an appointment.'
               : 'No pickup date on the load, so there is no day to work these under.'}
             rows={sec.rows}
             drivers={drivers}
@@ -367,7 +379,7 @@ export function ApptsPage() {
           <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
             borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '28px 18px',
             textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>
-            Nothing waiting on an appointment. Every stop is booked.
+            Nothing waiting on an appointment. Every shipment is booked.
           </div>
         )}
 
@@ -380,14 +392,14 @@ export function ApptsPage() {
           >
             <History size={13} />
             {showPast
-              ? `Hide ${past.length} past appointment${past.length === 1 ? '' : 's'}`
-              : `Show ${past.length} past appointment${past.length === 1 ? '' : 's'}`}
+              ? `Hide ${past.length} past shipment${past.length === 1 ? '' : 's'}`
+              : `Show ${past.length} past shipment${past.length === 1 ? '' : 's'}`}
           </button>
         )}
 
         {rows.length === 0 && query.trim() !== '' && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', padding: '8px 0', fontSize: 12.5, color: 'var(--ds-t3)' }}>
-            <HelpCircle size={14} /> Nothing matches “{query}”.
+            <HelpCircle size={14} /> Nothing matches "{query}".
           </div>
         )}
       </div>

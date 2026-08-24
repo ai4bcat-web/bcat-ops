@@ -19,7 +19,7 @@ const load = (over: Partial<Load> = {}): Load => ({
 const name = (id: string | null) => (id === 'd1' ? 'Zak Pace' : '—')
 
 describe('apptRowsToCsv', () => {
-  it('writes a header plus one line per row', () => {
+  it('writes a header plus one line per row (one row per shipment)', () => {
     const rows = apptQueue([load({ stops: [stop()] })])
     const lines = apptRowsToCsv(rows, name).split('\n')
     expect(lines).toHaveLength(2)
@@ -46,6 +46,7 @@ describe('apptRowsToCsv', () => {
     const rows = apptQueue([load({ customer: 'Smith, Jones & Co', stops: [stop({ city: 'Joliet, IL' })] })])
     const cells = apptRowsToCsv(rows, name).split('\n')[1].match(/"(?:[^"]|"")*"/g)!
     expect(cells).toHaveLength(APPT_CSV_HEADER.length)
+    // Customer is at index 4 (PU Status, Del Status, Pro #, PU #, Customer...)
     expect(cells[4]).toBe('"Smith, Jones & Co"')
   })
 
@@ -63,8 +64,7 @@ describe('apptRowsToCsv', () => {
   })
 
   it('reports the scheduled pickup and delivery times, using the on-screen labels', () => {
-    // The time columns read exactly as the calendar renders them: a real time, NEED for a
-    // stop flagged tbd, Pending for an exact appointment with no time chosen yet.
+    // Single row per shipment — pickup NEAR and delivery time both on one line.
     const rows = apptQueue([load({ stops: [
       stop({ id: 'p', type: 'pickup', apptType: 'tbd' }),
       stop({ id: 'd', type: 'delivery', apptType: 'exact', sequence: 1,
@@ -73,6 +73,10 @@ describe('apptRowsToCsv', () => {
     const line = apptRowsToCsv(rows, name).split('\n')[1]
     expect(line).toContain('"14:30"')   // delivery has a booked time
     expect(line).toContain('"NEED"')    // pickup is flagged NEED
+    // One row only — not separate rows per stop.
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pickupKind).toBe('need')
+    expect(rows[0].deliveryKind).toBeNull()  // delivery is booked, no attention needed
 
     const pending = apptQueue([load({ id: 'l2', stops: [
       stop({ id: 'p2', type: 'pickup', apptType: 'exact' }),   // date only, no time
@@ -104,8 +108,10 @@ describe('groupByPickupDate', () => {
     expect(groupByPickupDate(rows).map((s) => s.key)).toEqual(['2026-08-19', '2026-08-20', '2026-08-21'])
   })
 
-  it('puts a delivery stop under its LOAD pickup date, not its own date', () => {
+  it('puts every shipment under its LOAD pickup date, even when only the delivery needs attention', () => {
     // A delivery is chased in the context of the pickup that feeds it.
+    // The pickup is booked, so it doesn't appear as a stop needing attention — but the
+    // delivery does. The consolidated row still groups under the pickup date.
     const l = load({ id: 'x', stops: [
       { id: 'xp', type: 'pickup', appt: fromDateTimeInput('2026-08-19T08:00'), apptType: 'exact', driverId: null, sequence: 0 },
       { id: 'xd', type: 'delivery', appt: fromDateInput('2026-08-25'), apptType: 'tbd', driverId: null, sequence: 1 },
@@ -113,7 +119,9 @@ describe('groupByPickupDate', () => {
     const sections = groupByPickupDate(apptQueue([l]))
     expect(sections).toHaveLength(1)
     expect(sections[0].key).toBe('2026-08-19')
-    expect(sections[0].rows[0].stopType).toBe('delivery')
+    // One row, with delivery needing attention and pickup already booked.
+    expect(sections[0].rows[0].pickupKind).toBeNull()
+    expect(sections[0].rows[0].deliveryKind).toBe('need')
   })
 
   it('sinks rows with no pickup date to the end', () => {

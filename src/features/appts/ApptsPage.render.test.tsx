@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /**
- * Smoke tests that the Appts queue RENDERS and shows the right stops.
+ * Smoke tests that the Appts queue RENDERS and shows shipments correctly.
  *
  * apptQueue.test.ts proves the derivation. This proves the page mounts and puts the
- * urgent things where a dispatcher will see them.
+ * urgent things where a dispatcher will see them — one row per shipment, with pickup
+ * and delivery status on each row.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
@@ -88,10 +89,10 @@ describe('ApptsPage', () => {
 
   it('says so plainly when nothing needs booking', () => {
     render(<ApptsPage />)
-    expect(screen.getByText(/Every stop is booked/i)).toBeTruthy()
+    expect(screen.getByText(/Every shipment is booked/i)).toBeTruthy()
   })
 
-  it('lists a NEED stop with the detail needed to make the call', () => {
+  it('lists a shipment with the detail needed to make the call', () => {
     loads.mockReturnValue([load({
       customer: 'Acme Freight',
       stops: [stop({ name: 'Dock 4', city: 'Joliet, IL', driverId: 'd1' })],
@@ -103,11 +104,10 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Acme Freight')).toBeTruthy()
     expect(screen.getByText('Dock 4, Joliet, IL')).toBeTruthy()
     expect(screen.getByText('Zak Pace')).toBeTruthy()
-    expect(screen.getByText('Pickup')).toBeTruthy()
   })
 
-  it('marks NEED and Pending per row now that sections are days', () => {
-    // The distinction still has to be visible at a glance — it just is not the top level.
+  it('shows NEED and Pending chips per row — PU and Del status separately', () => {
+    // One row per shipment. PU chip in first column, Del chip in second.
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'NEEDED', stops: [stop()] }),
       load({ id: 'l2', aljexId: 'NOTIME', stops: [stop({ apptType: 'exact' })] }),
@@ -115,12 +115,20 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
 
     const table = screen.getAllByRole('table')[0]
-    // Read the Status cell specifically — "NEED" also legitimately appears in the PU time
-    // column for a tbd stop, so a row-wide text query is ambiguous.
-    const statusOf = (pro: string) =>
+    // PU status is children[0], Del status is children[1].
+    const puOf = (pro: string) =>
       within(table).getByText(pro).closest('tr')!.children[0].textContent
-    expect(statusOf('NEEDED')).toBe('NEED')
-    expect(statusOf('NOTIME')).toBe('Pending')
+    expect(puOf('NEEDED')).toBe('NEED')
+    expect(puOf('NOTIME')).toBe('Pending')
+  })
+
+  it('shows — when a stop is booked and needs no attention', () => {
+    // Delivery is booked (exact with time), so its status chip shows "—".
+    loads.mockReturnValue([pair()])
+    render(<ApptsPage />)
+    const table = screen.getAllByRole('table')[0]
+    const delCell = within(table).getByText('12345').closest('tr')!.children[1].textContent
+    expect(delCell).toBe('—')
   })
 
   it('hides an appointment whose date has already gone by', () => {
@@ -134,7 +142,7 @@ describe('ApptsPage', () => {
     loads.mockReturnValue([load({ aljexId: 'OLD', stops: [stop({ appt: fromDateInput('2020-01-01') })] })])
     render(<ApptsPage />)
 
-    const toggle = screen.getByText('Show 1 past appointment')
+    const toggle = screen.getByText('Show 1 past shipment')
     fireEvent.click(toggle)
     expect(screen.getByText('OLD')).toBeTruthy()
     expect(screen.getByText(/d overdue/)).toBeTruthy()
@@ -146,7 +154,7 @@ describe('ApptsPage', () => {
     loads.mockReturnValue([row('l1', '300'), row('l2', '100'), row('l3', '200')])
     render(<ApptsPage />)
 
-    // children[0] is the Status chip, so Pro # is children[2].
+    // PU, Del, Pro #, ... → Pro # is children[2].
     const proIds = () =>
       within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1)
         .map((r) => r.children[2].textContent)
@@ -172,6 +180,7 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
 
     const headers = screen.getAllByRole('table')[0].querySelectorAll('th')
+    // Columns: PU, Del, Pro #, PU #, Customer, Location, Date, Driver, PU time, Delivery time
     expect(headers[headers.length - 2].textContent).toContain('PU time')
     expect(headers[headers.length - 1].textContent).toContain('Delivery time')
 

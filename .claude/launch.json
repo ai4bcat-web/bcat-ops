@@ -9,9 +9,15 @@
       "autoPort": true
     },
     {
+      "name": "forge",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "/Users/adminoid/ethoslink-forge"],
+      "port": 5174
+    },
+    {
       "name": "tutorial-studio",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "studio", "--prefix", "/Users/adminoid/tutorial-factory"],
+      "runtimeArgs": ["run", "studio", "--prefix", "/Users/adminoid/rainmaker-studio"],
       "port": 4600
     }
   ]

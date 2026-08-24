@@ -313,6 +313,7 @@ const SEED_EXPENSES: Expense[] = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+let _invSeq = 0
 function nowIso(): string { return new Date().toISOString() }
 function initWeekStart(): string {
   return getMondayOf(new Date()).toISOString().slice(0, 10)
@@ -698,7 +699,7 @@ export const useAppStore = create<AppState>()(
 
       // ── Maintenance invoices ───────────────────────────────────────────────
       addMaintenanceInvoice: (i) => {
-        const inv: MaintenanceInvoice = { ...i, id: `inv-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
+        const inv: MaintenanceInvoice = { ...i, id: `inv-${Date.now()}-${++_invSeq}`, createdAt: nowIso(), updatedAt: nowIso() }
         set((s) => ({ maintenanceInvoices: [...s.maintenanceInvoices, inv] }))
         api.createMaintenanceInvoice(inv).catch((err) => console.error('[store] createMaintenanceInvoice failed', err))
       },
