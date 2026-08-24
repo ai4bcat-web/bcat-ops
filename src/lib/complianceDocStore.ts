@@ -23,6 +23,9 @@ export interface ComplianceDocState {
 
 let state: ComplianceDocState = { docs: [], loading: false, error: null, loaded: false }
 let inFlight: Promise<void> | null = null
+/** Docs mutated (applyDoc) while a fetch was in flight. Merged back so an upload during
+ *  the initial page load isn't clobbered when the pre-upload list response arrives. */
+const pendingApplyIds = new Set<string>()
 const listeners = new Set<() => void>()
 
 const setState = (patch: Partial<ComplianceDocState>) => {
@@ -48,7 +51,17 @@ export function ensureLoaded(force = false): Promise<void> {
 
   setState({ loading: true, error: null })
   inFlight = listAllComplianceDocuments()
-    .then((docs) => { setState({ docs, loading: false, loaded: true, error: null }) })
+    .then((docs) => {
+      // Preserve any doc applied via applyDoc() during the flight, so an upload that
+      // landed while the list was in-flight isn't clobbered by the (stale) response.
+      if (pendingApplyIds.size > 0) {
+        const pending = state.docs.filter((d) => pendingApplyIds.has(d.id))
+        const seen = new Set(docs.map((d) => d.id))
+        for (const d of pending) { if (!seen.has(d.id)) docs.push(d) }
+        pendingApplyIds.clear()
+      }
+      setState({ docs, loading: false, loaded: true, error: null })
+    })
     .catch((err) => {
       console.error('[complianceDocs] load failed', err)
       setState({ loading: false, error: err instanceof Error ? err.message : String(err) })
@@ -57,8 +70,13 @@ export function ensureLoaded(force = false): Promise<void> {
   return inFlight
 }
 
-/** Merge a created/updated document into the shared copy so every consumer sees it. */
+/**
+ * Merge a created/updated document into the shared copy so every consumer sees it.
+ * When a fetch is in flight the doc is also tracked so the stale response won't
+ * clobber it.
+ */
 export function applyDoc(saved: ComplianceDocument): void {
+  if (inFlight) pendingApplyIds.add(saved.id)
   setState({ docs: [...state.docs.filter((d) => d.id !== saved.id), saved] })
 }
 
@@ -71,6 +89,7 @@ export function removeDoc(id: string): void {
 export function __resetForTests(next: Partial<ComplianceDocState> = {}): void {
   state = { docs: [], loading: false, error: null, loaded: false, ...next }
   inFlight = null
+  pendingApplyIds.clear()
 }
 
 // ── The one index rule ──────────────────────────────────────────────────────────
