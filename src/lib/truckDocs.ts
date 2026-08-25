@@ -100,6 +100,29 @@ export function statusFromExpiration(exp?: string | null): DocState {
   return exp <= iso(soon) ? 'EXPIRING_SOON' : 'VALID'
 }
 
+/**
+ * The expiration date an asset should be judged on for a dated document (insurance,
+ * IFTA, IRP).
+ *
+ * These dates live in TWO places: the certificate uploaded on Asset Documents / Files
+ * (a ComplianceDocument carrying its own expirationDate) and a date typed into the
+ * Fleet equipment form (Equipment.insuranceExpirationDate & friends). The uploaded
+ * certificate is the real record, so it wins; the typed date is only the fallback for
+ * an asset with nothing on file. A WAIVED document means the requirement does not
+ * apply, so there is no date to judge at all.
+ *
+ * Without this the Fleet page read only the typed field and kept showing "Action
+ * needed" for insurance that had already been renewed and uploaded elsewhere.
+ */
+export function effectiveExpiration(
+  doc: ComplianceDocument | undefined,
+  equipmentDate?: string | null,
+): { date?: string; waived: boolean; source: 'document' | 'equipment' | 'none' } {
+  if (doc?.status === 'WAIVED') return { date: undefined, waived: true, source: 'none' }
+  if (doc?.expirationDate) return { date: doc.expirationDate, waived: false, source: 'document' }
+  return { date: equipmentDate || undefined, waived: false, source: equipmentDate ? 'equipment' : 'none' }
+}
+
 export interface DocEval {
   state: DocState
   expiration: string | null   // for DOT this is the computed next-due date

@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
+import { effectiveExpiration } from '@/lib/truckDocs'
 import { listTruckConfigs, upsertTruckConfig } from '@/lib/apiClient'
 import type { TruckConfig } from '@/lib/apiClient'
 import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
@@ -79,15 +81,35 @@ function chipExpiryState(dateStr?: string): ExpiryState {
   return 'ok'
 }
 
+/**
+ * The dated compliance items an asset carries, resolved across the two places they are
+ * kept: the certificate uploaded on Asset Documents / Files and the date typed into the
+ * equipment form below. Uploading a renewal on either page now clears the alert here —
+ * this page used to read the typed field alone, so a truck whose insurance had been
+ * renewed and uploaded still showed "Action needed".
+ */
+export interface ComplianceDates { ins?: string; ifta?: string; irp?: string }
+
+/** Resolver shared by the compliance cell, the detail panel, the sort and the KPI. */
+function useComplianceDates(): (e: Equipment) => ComplianceDates {
+  const { docFor } = useAllComplianceDocuments()
+  // Trailers are stored under the same 'TRUCK' entity type as trucks (see Asset Documents).
+  return useCallback((e: Equipment): ComplianceDates => ({
+    ins:  effectiveExpiration(docFor('TRUCK', e.id, 'insurance_cert'), e.insuranceExpirationDate).date,
+    ifta: effectiveExpiration(docFor('TRUCK', e.id, 'ifta_decals'),    e.iftaExpirationDate).date,
+    irp:  effectiveExpiration(docFor('TRUCK', e.id, 'irp_cab_card'),   e.irpExpirationDate).date,
+  }), [docFor])
+}
+
 const SEVERITY_ORDER: Record<ExpiryState, number> = { none: 0, ok: 1, expiring: 2, overdue: 3 }
 
 // Consolidated compliance cell — one worst-of status pill + per-field chips with date tooltips.
-function ComplianceCell({ equip, isTruck }: { equip: Equipment; isTruck: boolean }) {
+function ComplianceCell({ equip, isTruck, dates }: { equip: Equipment; isTruck: boolean; dates: ComplianceDates }) {
   const chips: { key: string; date?: string; state: ExpiryState }[] = [
     { key: 'DOT', date: equip.dotInspectionDate, state: dotInspectionState(equip.dotInspectionDate) },
-    ...(isTruck ? [{ key: 'IFTA', date: equip.iftaExpirationDate, state: chipExpiryState(equip.iftaExpirationDate) }] : []),
-    ...(isTruck ? [{ key: 'IRP', date: equip.irpExpirationDate, state: chipExpiryState(equip.irpExpirationDate) }] : []),
-    { key: 'INS', date: equip.insuranceExpirationDate, state: chipExpiryState(equip.insuranceExpirationDate) },
+    ...(isTruck ? [{ key: 'IFTA', date: dates.ifta, state: chipExpiryState(dates.ifta) }] : []),
+    ...(isTruck ? [{ key: 'IRP', date: dates.irp, state: chipExpiryState(dates.irp) }] : []),
+    { key: 'INS', date: dates.ins, state: chipExpiryState(dates.ins) },
   ]
   const worst = chips.reduce<ExpiryState>((w, c) => (SEVERITY_ORDER[c.state] > SEVERITY_ORDER[w] ? c.state : w), 'none')
 
@@ -384,6 +406,10 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                     </>
                   )}
                 </div>
+                <p style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 10 }}>
+                  Insurance, IFTA and IRP dates from a certificate uploaded on Asset Documents take
+                  precedence over what is typed here — these fields are the fallback when nothing is on file.
+                </p>
               </FormSection>
 
               {/* Status chips */}
@@ -599,12 +625,13 @@ function InvoiceForm({ equipmentId, initial, onSave, onClose }: InvoiceFormProps
 
 interface DetailPanelProps {
   equip: Equipment
+  dates: ComplianceDates
   tasks: MaintenanceTask[]
   invoices: MaintenanceInvoice[]
   driverName?: string
 }
 
-function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
+function DetailPanel({ equip, dates, tasks, invoices, driverName }: DetailPanelProps) {
   const addMaintenanceTask    = useAppStore((s) => s.addMaintenanceTask)
   const updateMaintenanceTask = useAppStore((s) => s.updateMaintenanceTask)
   const deleteMaintenanceTask = useAppStore((s) => s.deleteMaintenanceTask)
@@ -627,12 +654,12 @@ function DetailPanel({ equip, tasks, invoices, driverName }: DetailPanelProps) {
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Compliance</p>
         <div className="flex flex-wrap gap-2">
           <ExpiryBadge date={equip.dotInspectionDate}       label="DOT" stateFn={dotInspectionState} />
-          <ExpiryBadge date={equip.insuranceExpirationDate} label="Insurance" />
-          {isTruck && <ExpiryBadge date={equip.iftaExpirationDate} label="IFTA" />}
-          {isTruck && <ExpiryBadge date={equip.irpExpirationDate}  label="IRP" />}
+          <ExpiryBadge date={dates.ins} label="Insurance" />
+          {isTruck && <ExpiryBadge date={dates.ifta} label="IFTA" />}
+          {isTruck && <ExpiryBadge date={dates.irp}  label="IRP" />}
           <ExpiryBadge date={equip.bobtailInsuranceDate}    label="Bobtail" />
         </div>
-        {!equip.dotInspectionDate && !equip.insuranceExpirationDate && (
+        {!equip.dotInspectionDate && !dates.ins && (
           <p className="text-xs text-slate-400 mt-1">No compliance dates entered.</p>
         )}
       </div>
@@ -779,6 +806,7 @@ const OWNER_NEXT:  Record<TruckOwnership, TruckOwnership> = { COMPANY: 'OWNER_OP
 
 interface EquipRowProps {
   equip:             Equipment
+  dates:             ComplianceDates
   tasks:             MaintenanceTask[]
   invoices:          MaintenanceInvoice[]
   driverName?:       string
@@ -812,7 +840,7 @@ function OwnershipBadge({
   )
 }
 
-function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete }: EquipRowProps) {
+function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete }: EquipRowProps) {
   const navigate = useNavigate()
   const [expanded, setExpanded] = useState(false)
 
@@ -861,7 +889,7 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
 
         {/* Compliance — worst-of pill + DOT/IFTA/IRP/INS chips */}
         <td style={tdBase}>
-          <ComplianceCell equip={equip} isTruck={isTruck} />
+          <ComplianceCell equip={equip} isTruck={isTruck} dates={dates} />
         </td>
 
         {/* Assignment — driver + "fleet manager · tollway" subtitle */}
@@ -935,7 +963,7 @@ function EquipRow({ equip, tasks, invoices, driverName, colSpan, ownershipType, 
       {expanded && (
         <tr>
           <td colSpan={colSpan} style={{ padding: 0, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-            <DetailPanel equip={equip} tasks={tasks} invoices={invoices} driverName={driverName} />
+            <DetailPanel equip={equip} dates={dates} tasks={tasks} invoices={invoices} driverName={driverName} />
           </td>
         </tr>
       )}
@@ -995,15 +1023,17 @@ export function TrucksPage() {
   }
 
   // Per-truck values used for both display and column sorting.
+  const complianceDatesOf = useComplianceDates()
   const taskCountOf = (e: Equipment) => maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
   const repairOf    = (e: Equipment) => maintenanceInvoices.filter((inv) => inv.equipmentId === e.id).reduce((s, inv) => s + inv.amount, 0)
   const driverNameOf = (e: Equipment) => driverForTruck(e.id, drivers)?.name ?? ''
   const complianceRankOf = (e: Equipment) => {
     const isTruck = e.type === 'truck'
+    const d = complianceDatesOf(e)
     const states: ExpiryState[] = [
       dotInspectionState(e.dotInspectionDate),
-      chipExpiryState(e.insuranceExpirationDate),
-      ...(isTruck ? [chipExpiryState(e.iftaExpirationDate), chipExpiryState(e.irpExpirationDate)] : []),
+      chipExpiryState(d.ins),
+      ...(isTruck ? [chipExpiryState(d.ifta), chipExpiryState(d.irp)] : []),
     ]
     return states.reduce((w, s) => Math.max(w, SEVERITY_ORDER[s]), 0)
   }
@@ -1037,11 +1067,16 @@ export function TrucksPage() {
 
   const trucks        = equipment.filter((e) => e.type === 'truck')
   const trailers      = equipment.filter((e) => e.type === 'trailer')
-  const alertCount    = equipment.filter((e) =>
-    ['overdue', 'expiring'].includes(dotInspectionState(e.dotInspectionDate)) ||
-    [e.insuranceExpirationDate, e.iftaExpirationDate, e.irpExpirationDate, e.bobtailInsuranceDate]
-      .some((d) => expiryState(d) === 'overdue' || expiryState(d) === 'expiring')
-  ).length
+  const alertCount    = equipment.filter((e) => {
+    const d = complianceDatesOf(e)
+    // IFTA and IRP are a truck requirement — trailers are exempt, the same rule the
+    // Asset Documents catalog applies, so they must not raise an alert here either.
+    const dated = e.type === 'truck'
+      ? [d.ins, d.ifta, d.irp, e.bobtailInsuranceDate]
+      : [d.ins, e.bobtailInsuranceDate]
+    return ['overdue', 'expiring'].includes(dotInspectionState(e.dotInspectionDate)) ||
+      dated.some((x) => expiryState(x) === 'overdue' || expiryState(x) === 'expiring')
+  }).length
   const openTaskCount = maintenanceTasks.filter((t) => t.status === 'upcoming').length
 
   const FLEET_KPIS: { label: string; value: number; color: string; icon: React.ReactNode; to?: string }[] = [
@@ -1263,6 +1298,7 @@ export function TrucksPage() {
                       <EquipRow
                         key={e.id}
                         equip={e}
+                        dates={complianceDatesOf(e)}
                         tasks={tasks}
                         invoices={invs}
                         driverName={driver?.name}
