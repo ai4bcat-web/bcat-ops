@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-08-25
+> Last updated: 2026-08-26
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, a manual weekly cash-flow forecast, an appointment-booking queue (stops flagged NEED or still pending a time), driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Files hub (the driver roster plus everything on file per driver/truck, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging. Access is per-page: every route is gated by `RequirePage` on Cognito `page-<key>` groups (allowlist — a non-admin with no page groups sees everything; granting any group restricts them to those pages).
@@ -29,7 +29,7 @@ Internal operations dashboard for BCAT dispatch — calendar scheduling, load ma
 | `/loads` | Load grid (legacy `/grid` redirects here) |
 | `/drivers` | → redirects to `/files` — the Drivers page is retired; the roster and the driver editor now live in the Files hub |
 | `/fleet-dashboard` | Fleet Manager dashboard — repair spend, expiring truck docs, maintenance tasks, PM-due (25k-mi) and DOT-due widgets, driver time-off |
-| `/trucks` | Truck/equipment registry (Fleet) |
+| `/trucks` | Truck/equipment registry (Fleet) — the compliance pill/chips, detail panel, sort and Compliance Alerts KPI judge insurance/IFTA/IRP via `effectiveExpiration()` in `src/lib/truckDocs.ts`: the certificate uploaded on Asset Documents/Files wins, the date typed into the equipment form is only the fallback, a WAIVED document means the requirement doesn't apply, and IFTA/IRP are never counted against trailers |
 | `/truck-docs` | Asset Documents — truck/trailer document tracking (insurance, IFTA + IRP — trucks only, trailers are exempt — DOT inspection, inside-VIN / trailer-plate photos); shares the compliance backend and the Files hub's panel + catalog (`src/lib/truckDocs.ts`) |
 | `/maintenance` | Maintenance tasks |
 | `/invoices` | Maintenance invoices — list plus a Review Queue tab (`?tab=queue`) for emailed repairs, with edit/post/archive; one invoice can cover multiple units; KPI row includes an Unpaid card (count + total owed on posted invoices with no payment date, amber when non-zero) |
