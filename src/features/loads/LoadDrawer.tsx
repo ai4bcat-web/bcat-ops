@@ -92,9 +92,8 @@ function stopFormToStop(
     name: s.name?.trim() || undefined,
     city: s.city?.trim() || undefined,
     appt: dateOnly ? fromDateInput(s.appt.slice(0, 10)) : fromDateTimeInput(s.appt),
-    // Same rule as the calendar and the Appts queue: adding a time to a stop already
-    // marked NEED is what books it. `prev` is what makes choosing NEED on a stop that
-    // already has a time stick, rather than snapping back to Exact.
+    // Same rule as the calendar and the Appts queue: the status saved is the status
+    // picked — a NEED stop with a time stays NEED until someone chooses Exact.
     apptType: apptTypeAfterEdit(s.apptType, s.appt, prev),
     apptEnd: s.apptType === 'range' && s.apptEnd ? fromDateTimeInput(s.apptEnd) : undefined,
     driverId: s.driverId,
@@ -501,7 +500,7 @@ function StopCard({
             <Controller name={`stops.${index}.apptEnd`} control={control} render={({ field: ef }) => (
               <ApptFields
                 label="Appointment"
-                typeField={{ value: tf.value as ApptType, onChange: (v) => { const prev = tf.value; tf.onChange(v); ef.onChange(''); if (prev === 'tbd' && v !== 'tbd' && v !== 'fcfs') sf.onChange('') } }}
+                typeField={{ value: tf.value as ApptType, onChange: (v) => { tf.onChange(v); ef.onChange('') } }}
                 startField={{ value: sf.value ?? '', onChange: sf.onChange }}
                 endField={{ value: ef.value ?? '', onChange: ef.onChange }}
                 startError={stopErr?.appt?.message}

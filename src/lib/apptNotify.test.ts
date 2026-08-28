@@ -23,6 +23,29 @@ describe('apptNotices — flagging NEED', () => {
     expect(apptNotices(s, s)).toEqual([])
   })
 
+  it('fires from EVERY other status — exact-with-time, pending, FCFS, range', () => {
+    const t = fromDateTimeInput('2026-08-20T09:30')
+    const froms: Partial<Stop>[] = [
+      { apptType: 'exact', appt: t },                       // booked
+      { apptType: 'exact' },                                // pending (no time)
+      { apptType: undefined },                              // legacy default
+      { apptType: 'fcfs' },
+      { apptType: 'range', appt: t, apptEnd: fromDateTimeInput('2026-08-20T12:00') },
+    ]
+    for (const was of froms) {
+      const out = apptNotices([stop({ ...was, apptType: 'tbd' })], [stop(was)])
+      expect(out.map((n) => n.kind)).toEqual(['needed'])
+    }
+  })
+
+  it('still fires when a time is set alongside the NEED flag in the same save', () => {
+    // Status + time are saved exactly as picked — a NEED with a requested time is NEED.
+    const after = [stop({ apptType: 'tbd', appt: fromDateTimeInput('2026-08-20T09:30') })]
+    expect(apptNotices(after, [stop()])).toEqual([
+      { kind: 'needed', stopId: 's1', stopKind: 'pickup', apptLabel: 'Aug 20, 2026 · NEED 09:30' },
+    ])
+  })
+
   it('reports a brand-new stop authored as NEED', () => {
     expect(apptNotices([stop({ apptType: 'tbd' })], [])).toHaveLength(1)
   })
@@ -82,6 +105,44 @@ describe('apptNotices — updating the thread', () => {
     const notices = apptNotices(after, [was])
     expect(notices).toHaveLength(1)
     expect(notices[0].kind).toBe('needed')
+  })
+})
+
+describe('apptNotices — NEED stop whose time changes', () => {
+  const t1 = fromDateTimeInput('2026-08-20T09:30')
+  const t2 = fromDateTimeInput('2026-08-20T13:00')
+
+  it('replies in the thread when a NEED stop gets a different time', () => {
+    const before = [stop({ apptType: 'tbd', appt: t1, apptThreadTs: '1.1' })]
+    const after  = [stop({ apptType: 'tbd', appt: t2, apptThreadTs: '1.1' })]
+    expect(apptNotices(after, before)).toEqual([
+      { kind: 'updated', stopId: 's1', stopKind: 'pickup', threadTs: '1.1', apptLabel: 'Aug 20, 2026 · NEED 13:00' },
+    ])
+  })
+
+  it('posts fresh when a NEED stop changes time and there is no thread yet', () => {
+    const before = [stop({ apptType: 'tbd', appt: t1 })]
+    const after  = [stop({ apptType: 'tbd', appt: t2 })]
+    expect(apptNotices(after, before)).toEqual([
+      { kind: 'needed', stopId: 's1', stopKind: 'pickup', apptLabel: 'Aug 20, 2026 · NEED 13:00' },
+    ])
+  })
+
+  it('posts fresh when a NEED stop moves to another day', () => {
+    const before = [stop({ apptType: 'tbd' })]
+    const after  = [stop({ apptType: 'tbd', appt: fromDateInput('2026-08-21') })]
+    expect(apptNotices(after, before).map((n) => n.kind)).toEqual(['needed'])
+  })
+
+  it('still stays quiet when a NEED stop is re-saved unchanged', () => {
+    const s = [stop({ apptType: 'tbd', appt: t1 })]
+    expect(apptNotices(s, s)).toEqual([])
+  })
+
+  it('a non-NEED stop without a thread still says nothing when its time moves', () => {
+    const before = [stop({ appt: t1 })]
+    const after  = [stop({ appt: t2 })]
+    expect(apptNotices(after, before)).toEqual([])
   })
 })
 

@@ -433,6 +433,15 @@ function writeAudit(
 ) {
   // Fire-and-forget — audit log failures shouldn't block the user
   api.createAuditLog({ entityType, entityId, action, user, changes }).catch(() => {})
+  // Mirror it locally so pages that read history (Appts booking timeline) see this save
+  // now rather than after the next reload. The id is a placeholder until refetch.
+  useAppStore.setState((s) => ({
+    auditLog: [
+      { id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        entityType, entityId, action, user, changes, createdAt: new Date().toISOString() },
+      ...s.auditLog,
+    ],
+  }))
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────

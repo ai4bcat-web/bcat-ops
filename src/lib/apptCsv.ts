@@ -5,8 +5,8 @@ import type { ApptQueueRow } from './apptQueue'
  * CSV export for the Appts queue.
  *
  * Columns mirror the on-screen table so an exported section is recognisable as the thing
- * that was on screen — the point of the export is to hand a day's outstanding
- * appointments to someone who is going to sit and make phone calls.
+ * that was on screen — the point of the export is to hand a day's appointments to
+ * someone who is going to sit and make phone calls (Booked rows included, marked as such).
  *
  * One row per shipment — pickup and delivery status together.
  */
@@ -37,8 +37,8 @@ export function apptRowsToCsv(
   const lines = [APPT_CSV_HEADER.map(q).join(',')]
   for (const r of rows) {
     lines.push([
-      r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : '',
-      r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : '',
+      r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : 'Booked',
+      r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : 'Booked',
       r.aljexId,
       r.pickupNumber,
       r.customer,

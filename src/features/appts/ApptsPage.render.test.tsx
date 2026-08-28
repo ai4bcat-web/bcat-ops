@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within, fireEvent, waitFor } from '@testing-library/react'
 import { fromDateInput, fromDateTimeInput } from '@/lib/date'
-import type { Load } from '@/types'
+import type { AuditLogEntry, Load } from '@/types'
 
 class ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
@@ -21,6 +21,8 @@ vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({ drivers: [{ id: 'd1', name: 'Zak Pace' }] }),
 }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
+const auditLog = vi.fn<() => AuditLogEntry[]>(() => [])
+vi.mock('@/hooks/useAuditLog', () => ({ useAuditLog: () => ({ entries: auditLog() }) }))
 // The drawer pulls in the whole load-editing tree; the queue is what's under test.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 
@@ -60,6 +62,7 @@ const pair = (over: Partial<Load> = {}) => load({
 beforeEach(() => {
   vi.clearAllMocks()
   loads.mockReturnValue([])
+  auditLog.mockReturnValue([])
 })
 
 describe('ApptsPage', () => {
@@ -87,9 +90,9 @@ describe('ApptsPage', () => {
     expect(screen.getAllByRole('table')).toHaveLength(2)
   })
 
-  it('says so plainly when nothing needs booking', () => {
+  it('says so plainly when there is nothing to show', () => {
     render(<ApptsPage />)
-    expect(screen.getByText(/Every shipment is booked/i)).toBeTruthy()
+    expect(screen.getByText(/No shipments yet/i)).toBeTruthy()
   })
 
   it('lists a shipment with the detail needed to make the call', () => {
@@ -116,19 +119,22 @@ describe('ApptsPage', () => {
 
     const table = screen.getAllByRole('table')[0]
     // PU status is children[0], Del status is children[1].
+    // children[0] is the history toggle; PU status is children[1], Del status children[2].
     const puOf = (pro: string) =>
-      within(table).getByText(pro).closest('tr')!.children[0].textContent
+      within(table).getByText(pro).closest('tr')!.children[1].textContent
     expect(puOf('NEEDED')).toBe('NEED')
     expect(puOf('NOTIME')).toBe('Pending')
   })
 
-  it('shows — when a stop is booked and needs no attention', () => {
-    // Delivery is booked (exact with time), so its status chip shows "—".
+  it('shows a green Booked chip when a stop is booked, and marks the row', () => {
     loads.mockReturnValue([pair()])
     render(<ApptsPage />)
     const table = screen.getAllByRole('table')[0]
-    const delCell = within(table).getByText('12345').closest('tr')!.children[1].textContent
-    expect(delCell).toBe('—')
+    const row = within(table).getByText('12345').closest('tr')!
+    expect(row.children[2].textContent).toBe('Booked')
+    expect(row.children[2].querySelector('[data-state]')!.getAttribute('data-state')).toBe('booked')
+    // Pickup still NEED, so the shipment as a whole is outstanding (red edge).
+    expect(row.getAttribute('data-outstanding')).toBe('true')
   })
 
   it('hides an appointment whose date has already gone by', () => {
@@ -154,10 +160,10 @@ describe('ApptsPage', () => {
     loads.mockReturnValue([row('l1', '300'), row('l2', '100'), row('l3', '200')])
     render(<ApptsPage />)
 
-    // PU, Del, Pro #, ... → Pro # is children[2].
+    // history, PU, Del, Pro #, ... → Pro # is children[3].
     const proIds = () =>
       within(screen.getAllByRole('table')[0]).getAllByRole('row').slice(1)
-        .map((r) => r.children[2].textContent)
+        .map((r) => r.children[3].textContent)
 
     fireEvent.click(screen.getAllByLabelText('Sort by Pro #')[0])
     expect(proIds()).toEqual(['100', '200', '300'])
@@ -166,13 +172,51 @@ describe('ApptsPage', () => {
     expect(proIds()).toEqual(['300', '200', '100'])
   })
 
-  it('leaves booked appointments out of the queue entirely', () => {
+  it('keeps a fully booked shipment on the page as a green row', () => {
     loads.mockReturnValue([load({
       aljexId: 'BOOKED',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })])
     render(<ApptsPage />)
+    const row = screen.getByText('BOOKED').closest('tr')!
+    expect(row.getAttribute('data-outstanding')).toBe('false')
+    expect(row.children[1].textContent).toBe('Booked')
+  })
+
+  it('"Open only" hides the booked rows and shows the open count', () => {
+    loads.mockReturnValue([
+      load({ id: 'l1', aljexId: 'BOOKED', stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })] }),
+      pair({ id: 'l2', aljexId: 'OPEN' }),
+    ])
+    render(<ApptsPage />)
+    expect(screen.getByText('BOOKED')).toBeTruthy()
+    fireEvent.click(screen.getByText(/All shipments · 1 open/))
     expect(screen.queryByText('BOOKED')).toBeNull()
+    expect(screen.getByText('OPEN')).toBeTruthy()
+    expect(screen.getByText('Open only (1)')).toBeTruthy()
+  })
+
+  it('opens a booking history row from the audit log', () => {
+    const booked = load({
+      id: 'l9', aljexId: 'HIST',
+      stops: [stop({ id: 'p', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
+    })
+    loads.mockReturnValue([booked])
+    auditLog.mockReturnValue([{
+      id: 'a1', entityType: 'Load', entityId: 'l9', action: 'update', user: 'ryne@bcatcorp.com',
+      createdAt: '2026-08-28T15:00:00.000Z',
+      changes: { stops: {
+        from: [stop({ id: 'p', apptType: 'tbd', appt: fromDateInput('2099-01-01') })],
+        to: booked.stops,
+      } },
+    }])
+    render(<ApptsPage />)
+    fireEvent.click(screen.getByLabelText('Show appointment history for HIST'))
+    const hist = screen.getByTestId('appt-history')
+    expect(hist.textContent).toContain('Jan 1, 2099 · NEED')
+    expect(hist.textContent).toContain('Jan 1, 2099 · 09:30')
+    expect(hist.textContent).toContain('booked')
+    expect(hist.textContent).toContain('ryne@bcatcorp.com')
   })
 
   it('shows the scheduled pickup and delivery times as the last two columns', () => {
@@ -202,7 +246,25 @@ describe('ApptsPage', () => {
     expect(id).toBe('l5')
     const written = patch.stops.find((st: { id: string }) => st.id === 'p')
     expect(written.appt).toBe(fromDateTimeInput('2099-03-04T09:15'))
-    // Booking the time is what takes it off the queue.
+    // Status is saved as selected: the row was NEED and nobody changed that, so adding a
+    // requested time keeps it NEED (and on the queue). Booking is choosing Exact.
+    expect(written.apptType).toBe('tbd')
+  })
+
+  it('books the stop when Exact is chosen with the time', async () => {
+    loads.mockReturnValue([pair({ id: 'l6' })])
+    render(<ApptsPage />)
+
+    fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
+    fireEvent.change(screen.getByLabelText('Appointment date'), { target: { value: '2099-03-04' } })
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '09:15' } })
+    fireEvent.change(screen.getByLabelText('Appointment type'), { target: { value: 'exact' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const [, patch] = updateLoad.mock.calls[0]
+    const written = patch.stops.find((st: { id: string }) => st.id === 'p')
+    expect(written.appt).toBe(fromDateTimeInput('2099-03-04T09:15'))
     expect(written.apptType).toBe('exact')
   })
 

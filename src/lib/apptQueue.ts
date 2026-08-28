@@ -76,20 +76,24 @@ export function apptNeedKind(stop: Stop): ApptNeedKind | null {
   return apptHasTime(stop.appt) ? null : 'pending'
 }
 
+/** True when at least one of the shipment's two appointments is still unbooked. */
+export const rowOutstanding = (r: ApptQueueRow): boolean => !!(r.pickupKind || r.deliveryKind)
+
 /**
- * Every load that has at least one stop still waiting on an appointment.
+ * EVERY load, one row per shipment, with the pickup and delivery booking state on it.
  *
- * One row per load — the pickup and delivery status live together on the same row
- * rather than producing separate rows for each stop. A dispatcher works a shipment,
- * not individual stops in isolation.
+ * Booked shipments used to drop off the page the moment both times were set. Dispatch
+ * asked for the opposite: keep every shipment visible so the page reads as "here is the
+ * day, green is done, red is not" — and so a booking that later gets changed is still
+ * somewhere a person can see it, next to its history (see apptHistory.ts).
  *
  * Derived from load state rather than from an event firing, so it is self-healing: a load
  * that is flagged, missed, and re-flagged still shows exactly once, and nothing can fall
  * through a notification that didn't send.
  *
- * Ordered: loads with at least one NEED first, then the soonest pickup date first — a
- * load whose date has already passed sorts to the very top, because that is the one
- * now hurting.
+ * Ordered: loads with at least one NEED first, then pending, then fully booked; within
+ * each, the soonest pickup date first — a load whose date has already passed sorts to
+ * the very top, because that is the one now hurting.
  */
 export function apptQueue(loads: Load[]): ApptQueueRow[] {
   const rows: ApptQueueRow[] = []
@@ -103,9 +107,6 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
 
     const pickupKind = pickupStop ? apptNeedKind(pickupStop) : null
     const deliveryKind = deliveryStop ? apptNeedKind(deliveryStop) : null
-
-    // Only include the load if at least one stop needs attention.
-    if (!pickupKind && !deliveryKind) continue
 
     rows.push({
       loadId: load.id,
@@ -124,11 +125,12 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
     })
   }
 
+  const rank = (r: ApptQueueRow) =>
+    r.pickupKind === 'need' || r.deliveryKind === 'need' ? 0 : rowOutstanding(r) ? 1 : 2
+
   return rows.sort((a, b) => {
-    // Rows with at least one NEED sort first.
-    const aNeed = a.pickupKind === 'need' || a.deliveryKind === 'need'
-    const bNeed = b.pickupKind === 'need' || b.deliveryKind === 'need'
-    if (aNeed !== bNeed) return aNeed ? -1 : 1
+    const ra = rank(a), rb = rank(b)
+    if (ra !== rb) return ra - rb
     // Blank dates last — they carry no urgency signal at all.
     if (!a.appt) return 1
     if (!b.appt) return -1
@@ -136,8 +138,11 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
   })
 }
 
-/** Queue size, for the sidebar badge. */
-export const apptQueueCount = (loads: Load[]): number => apptQueue(loads).length
+/** Only the shipments still waiting on at least one appointment. */
+export const apptOutstanding = (loads: Load[]): ApptQueueRow[] => apptQueue(loads).filter(rowOutstanding)
+
+/** Outstanding shipment count, for the sidebar badge — booked shipments don't count. */
+export const apptQueueCount = (loads: Load[]): number => apptOutstanding(loads).length
 
 /* ── past appointments ──────────────────────────────────────────────────────── */
 
@@ -211,32 +216,23 @@ export function sortApptRows(
 /* ── booking from the calendar ──────────────────────────────────────────────── */
 
 /**
- * The appointment type to save after an edit.
+ * The appointment type to save after an edit: exactly what the user picked.
  *
- * Adding a time to a stop that is already flagged NEED is how it gets booked, so that
- * case graduates to Exact and drops off the Appts queue.
+ * This used to "graduate" a NEED stop to Exact the moment a time was typed into it. That
+ * meant the status on screen and the status saved could disagree — pick NEED, add the
+ * requested time, and the stop quietly came back as Exact, dropped off the Appts queue,
+ * and never pinged Slack. The rule now is the one dispatch expects: status and time are
+ * saved as selected, every time. Booking a NEED stop is done by choosing Exact yourself.
  *
- * Everything else keeps the type the user picked. That distinction matters: the editors
- * seed their time input from the *existing* appointment, so the field is usually already
- * populated. Graduating on "there is a time in the box" made it impossible to flag an
- * already-booked stop as NEED — the selection silently reverted to Exact, and because no
- * stop ever reached the NEED state, the #appts-ivan alert could never fire either.
- *
- * `value` is a datetime-local string: "2026-08-20" or "2026-08-20T09:30". Midnight is how
- * the input represents "no time chosen", so it does not count as booked. `prev` is the
- * stop's state before this edit; with none (a brand-new stop) the pick is taken as intent.
+ * Kept as a function (rather than inlined) so the three editors keep one seam if a rule
+ * ever needs to come back; `value`/`prev` are accepted and ignored for that reason.
  */
 export function apptTypeAfterEdit(
   chosen: ApptType,
-  value: string,
-  prev?: { type?: ApptType; value?: string },
+  _value?: string,
+  _prev?: { type?: ApptType; value?: string },
 ): ApptType {
-  const hasTime = (v: string) => v.length > 10 && v.slice(11, 16) !== '00:00'
-  if (chosen !== 'tbd') return chosen
-  // The user just switched TO NEED — that is a deliberate request to book it.
-  if (!prev || (prev.type ?? 'exact') !== 'tbd') return 'tbd'
-  // Already NEED, and a time has just appeared: someone booked it.
-  return hasTime(value) && !hasTime(prev.value ?? '') ? 'exact' : 'tbd'
+  return chosen
 }
 
 /* ── grouping by pickup date ─────────────────────────────────────────────────── */

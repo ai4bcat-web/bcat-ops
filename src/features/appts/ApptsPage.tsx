@@ -1,23 +1,26 @@
-import { useCallback, useMemo, useState } from 'react'
-import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download } from 'lucide-react'
+import { Fragment, useCallback, useMemo, useState } from 'react'
+import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useAuditLog } from '@/hooks/useAuditLog'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
-  apptQueue, splitPastAppts, sortApptRows, groupByPickupDate,
+  apptQueue, rowOutstanding, splitPastAppts, sortApptRows, groupByPickupDate,
   type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir, type ApptDateSection,
   type ApptNeedKind,
 } from '@/lib/apptQueue'
+import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
-import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput } from '@/lib/date'
-import type { Load } from '@/types'
+import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime } from '@/lib/date'
+import type { AuditLogEntry, Load } from '@/types'
 
 const RED = '#dc2626'
 const AMBER = '#b45309'
+const GREEN = '#15803d'
 
 const th: React.CSSProperties = {
   padding: '9px 12px', fontSize: 11.5, fontWeight: 600, color: 'var(--ds-t3)',
@@ -55,16 +58,62 @@ function sectionTitle(dateKey: string): string {
 
 const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pending' }
 
-/** Small chip showing NEED, Pending, or nothing (booked). */
+/**
+ * Booking-state chip: green Booked, red NEED / Pending.
+ *
+ * Red for BOTH unbooked kinds — the page's question is "is it booked or not", and the
+ * label still says which flavour of not. Amber Pending read as "sort of fine" and got
+ * skipped over.
+ */
 function KindChip({ kind }: { kind: ApptNeedKind | null }) {
-  if (!kind) return <span style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>—</span>
-  const need = kind === 'need'
+  const booked = !kind
   return (
-    <span style={{
-      fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
-      background: need ? 'var(--ds-red-soft)' : 'var(--ds-amber-soft)',
-      color: need ? RED : AMBER,
-    }}>{STATUS_LABEL[kind]}</span>
+    <span
+      data-state={booked ? 'booked' : kind}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
+        background: booked ? 'var(--ds-green-bg)' : 'var(--ds-red-soft)',
+        color: booked ? GREEN : RED,
+      }}
+    >
+      {booked ? <CheckCircle2 size={11} /> : <CircleAlert size={11} />}
+      {booked ? 'Booked' : STATUS_LABEL[kind]}
+    </span>
+  )
+}
+
+/**
+ * The booking timeline for one shipment — every time a pickup or delivery appointment
+ * was set, moved, or unbooked, who did it and when. Read straight out of the audit log.
+ */
+function HistoryRow({ events, colSpan }: { events: ApptHistoryEvent[]; colSpan: number }) {
+  return (
+    <tr data-testid="appt-history">
+      <td colSpan={colSpan} style={{ ...td, padding: '8px 12px 12px 40px', background: 'var(--ds-bg)' }}>
+        {events.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>No appointment changes on record for this shipment.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 2 }}>
+              <Clock size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Appointment history
+            </div>
+            {events.map((ev, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', minWidth: 170 }}>{formatDateTime(ev.at)}</span>
+                <span style={{ fontWeight: 600, color: 'var(--ds-t2)', minWidth: 52, textTransform: 'capitalize' }}>{ev.stopKind}</span>
+                <span style={{ color: 'var(--ds-t3)', textDecoration: 'line-through' }}>{ev.from}</span>
+                <span style={{ color: 'var(--ds-t3)' }}>→</span>
+                <span style={{ fontWeight: 600, color: ev.booked ? GREEN : ev.changed ? AMBER : 'var(--ds-t1)' }}>{ev.to}</span>
+                {ev.booked && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>booked</span>}
+                {ev.changed && <span style={{ fontSize: 10.5, fontWeight: 700, color: AMBER }}>changed after booking</span>}
+                <span style={{ color: 'var(--ds-t3)' }}>by {ev.user || '—'}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </td>
+    </tr>
   )
 }
 
@@ -152,12 +201,13 @@ function SortHeader({ label, active, dir, onClick }: {
   )
 }
 
-function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, onExport }: {
+function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort, onSort, onExport }: {
   title: string
   hint: string
   rows: ApptQueueRow[]
   drivers: { id: string; name: string }[]
   loadsById: Map<string, Load>
+  auditLog: AuditLogEntry[]
   onOpen: (loadId: string) => void
   sort: { key: ApptSortKey; dir: SortDir } | null
   onSort: (key: ApptSortKey) => void
@@ -165,6 +215,11 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
 }) {
   const driverName = (id: string | null) => (id ? drivers.find((d) => d.id === id)?.name ?? '—' : '—')
   const needCount = rows.filter((r) => r.pickupKind === 'need' || r.deliveryKind === 'need').length
+  const openCount = rows.filter(rowOutstanding).length
+  const bookedCount = rows.length - openCount
+  const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
+  const toggleHistory = (id: string) =>
+    setOpenHistory((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -176,6 +231,12 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
             {needCount > 0 && (
               <span style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5,
                 background: 'var(--ds-red-soft)', color: RED }}>{needCount} NEED</span>
+            )}
+            {openCount > 0 && (
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: RED }}>{openCount} open</span>
+            )}
+            {bookedCount > 0 && (
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>{bookedCount} booked</span>
             )}
           </div>
           <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{hint}</div>
@@ -194,13 +255,14 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
 
       {rows.length === 0 ? (
         <div style={{ padding: '24px 18px', textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>
-          Nothing here — every appointment in this group is booked.
+          No shipments in this group.
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse' }}>
             <thead>
               <tr>
+                <th style={{ ...th, width: 28 }} aria-label="History" />
                 <th style={th}>PU</th>
                 <th style={th}>Del</th>
                 {COLUMNS.map((c) => (
@@ -215,13 +277,30 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {rows.map((r) => {
+                const open = !!(r.pickupKind || r.deliveryKind)
+                const showHistory = openHistory.has(r.loadId)
+                const loadRec = loadsById.get(r.loadId)
+                return (
+                <Fragment key={r.loadId}>
                 <tr
-                  key={r.loadId}
+                  data-outstanding={open ? 'true' : 'false'}
                   onClick={() => onOpen(r.loadId)}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', boxShadow: `inset 3px 0 0 ${open ? RED : GREEN}` }}
                   title="Open this load to set the appointment"
                 >
+                  <td style={{ ...td, padding: '10px 4px 10px 10px' }} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleHistory(r.loadId)}
+                      aria-label={`${showHistory ? 'Hide' : 'Show'} appointment history for ${r.aljexId || 'this shipment'}`}
+                      aria-expanded={showHistory}
+                      title="Appointment history — every time this shipment's times were set or changed"
+                      style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer',
+                        color: showHistory ? 'var(--ds-t1)' : 'var(--ds-t3)', display: 'inline-flex' }}
+                    >
+                      <History size={13} />
+                    </button>
+                  </td>
                   <td style={td}><KindChip kind={r.pickupKind} /></td>
                   <td style={td}><KindChip kind={r.deliveryKind} /></td>
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
@@ -261,7 +340,12 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
                     typeField="deliveryApptType"
                   />
                 </tr>
-              ))}
+                {showHistory && (
+                  <HistoryRow events={loadRec ? apptHistory(loadRec, auditLog) : []} colSpan={3 + COLUMNS.length} />
+                )}
+                </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -271,11 +355,13 @@ function Section({ title, hint, rows, drivers, loadsById, onOpen, sort, onSort, 
 }
 
 /**
- * Appts — every shipment still waiting on an appointment, one row per shipment.
+ * Appts — EVERY shipment, one row each, green when both appointments are booked and red
+ * when one is not, with the booking history a click away.
  *
  * Derived from load state on every render rather than from a notification, so it can't
  * drift: flag a load, miss the Slack message, and it is still sitting here. Booking the
- * time is what removes it from the queue.
+ * time turns the row green rather than removing it — a booked appointment that later
+ * gets changed is still visible, next to its history.
  */
 export function ApptsPage() {
   const isMobile = useIsMobile()
@@ -283,6 +369,8 @@ export function ApptsPage() {
   const { drivers } = useDrivers()
   const [query, setQuery] = useState('')
   const [showPast, setShowPast] = useState(false)
+  const [onlyOpen, setOnlyOpen] = useState(false)
+  const { entries: auditLog } = useAuditLog()
   // null = the default urgency order from apptQueue (NEED first, soonest first).
   const [sort, setSort] = useState<{ key: ApptSortKey; dir: SortDir } | null>(null)
   // The drawer reads its target from the store, same as the calendar and loads grid.
@@ -294,13 +382,14 @@ export function ApptsPage() {
   )
 
   const matched = useMemo(() => {
-    const all = apptQueue(loads)
+    const all = onlyOpen ? apptQueue(loads).filter(rowOutstanding) : apptQueue(loads)
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>
       [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation].some((v) => v.toLowerCase().includes(q)),
     )
-  }, [loads, query])
+  }, [loads, query, onlyOpen])
+  const openTotal = useMemo(() => apptQueue(loads).filter(rowOutstanding).length, [loads])
 
   // Appointment dates that have already gone by are almost always dead history — they
   // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.
@@ -341,9 +430,20 @@ export function ApptsPage() {
               Appts
             </h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 3 }}>
-              One row per shipment — pickup and delivery status together. Book both times and the shipment leaves the queue.
+              One row per shipment — green when both appointments are booked, red when one is still open. Click the clock for its booking history.
             </p>
           </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            onClick={() => setOnlyOpen((v) => !v)}
+            aria-pressed={onlyOpen}
+            style={{ height: 34, padding: '0 12px', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer',
+              border: `1px solid ${onlyOpen ? RED : 'var(--ds-border)'}`,
+              background: onlyOpen ? 'var(--ds-red-soft)' : 'var(--ds-bg)',
+              color: onlyOpen ? RED : 'var(--ds-t2)', fontWeight: onlyOpen ? 700 : 500, whiteSpace: 'nowrap' }}
+          >
+            {onlyOpen ? `Open only (${openTotal})` : `All shipments · ${openTotal} open`}
+          </button>
           <div style={{ position: 'relative', minWidth: 240 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
             <input
@@ -356,6 +456,7 @@ export function ApptsPage() {
                 fontSize: 13, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
+          </div>
         </div>
 
         {sections.map((sec) => (
@@ -363,11 +464,12 @@ export function ApptsPage() {
             key={sec.key || 'undated'}
             title={sec.key ? sectionTitle(sec.key) : 'No pickup date'}
             hint={sec.key
-              ? 'Shipments picking up this day that still need an appointment.'
+              ? 'Shipments picking up this day — booked in green, still open in red.'
               : 'No pickup date on the load, so there is no day to work these under.'}
             rows={sec.rows}
             drivers={drivers}
             loadsById={loadsById}
+            auditLog={auditLog}
             onOpen={openById}
             sort={sort}
             onSort={onSort}
@@ -379,7 +481,7 @@ export function ApptsPage() {
           <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
             borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '28px 18px',
             textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>
-            Nothing waiting on an appointment. Every shipment is booked.
+            {onlyOpen ? 'Nothing open — every shipment is booked.' : 'No shipments yet.'}
           </div>
         )}
 

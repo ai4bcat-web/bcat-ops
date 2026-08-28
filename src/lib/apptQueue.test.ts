@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   apptQueue, apptNeedKind, apptQueueCount,
-  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs,
+  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs, rowOutstanding, apptOutstanding,
 } from './apptQueue'
 import { fromDateInput, fromDateTimeInput, apptTimeLabel, PENDING_LABEL } from './date'
 import type { ApptType, Load, Stop } from '@/types'
@@ -49,8 +49,16 @@ describe('apptNeedKind', () => {
 })
 
 describe('apptQueue', () => {
-  it('is empty when every appointment is booked', () => {
-    expect(apptQueue([load({ stops: [stop(), stop({ id: 's2', type: 'delivery' })] })])).toEqual([])
+  it('keeps a fully booked shipment on the page, marked booked on both ends', () => {
+    const rows = apptQueue([load({ stops: [stop(), stop({ id: 's2', type: 'delivery' })] })])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].pickupKind).toBeNull()
+    expect(rows[0].deliveryKind).toBeNull()
+    expect(rowOutstanding(rows[0])).toBe(false)
+  })
+
+  it('is empty only when there are no loads at all', () => {
+    expect(apptQueue([])).toEqual([])
   })
 
   it('produces ONE row per load when both stops need attention', () => {
@@ -121,16 +129,17 @@ describe('apptQueue', () => {
     expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l1'])
   })
 
-  it('skips a load entirely when both stops are booked', () => {
-    const rows = apptQueue([
+  it('sorts a fully booked load BELOW the ones still open, and apptOutstanding drops it', () => {
+    const loadsIn = [
       load({ id: 'l1', stops: [
         stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00') }),
         stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
       ] }),
       load({ id: 'l2', stops: [stop({ apptType: 'tbd' })] }),
-    ])
-    expect(rows).toHaveLength(1)
-    expect(rows[0].loadId).toBe('l2')
+    ]
+    const rows = apptQueue(loadsIn)
+    expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l1'])
+    expect(apptOutstanding(loadsIn).map((r) => r.loadId)).toEqual(['l2'])
   })
 
   it('works on legacy loads with no stops array', () => {
@@ -258,31 +267,17 @@ describe('sortApptRows', () => {
 describe('apptTypeAfterEdit', () => {
   const wasNeed = { type: 'tbd' as ApptType, value: '2026-08-20' }
 
-  it('CHOOSING need always sticks, even when the field already holds a time', () => {
-    // The editors seed their input from the existing appointment, so the time field is
-    // usually already populated. Graduating on that alone made it impossible to flag a
-    // booked stop as NEED — the selection silently reverted to exact and no Slack alert
-    // could ever fire.
+  it('saves the status the user picked — NEED sticks even when a time is present', () => {
     expect(apptTypeAfterEdit('tbd', '2026-08-20T14:30', { type: 'exact', value: '2026-08-20T14:30' })).toBe('tbd')
     expect(apptTypeAfterEdit('tbd', '2026-08-20T14:30', { type: 'fcfs', value: '2026-08-20T14:30' })).toBe('tbd')
   })
 
-  it('graduates only when a time is NEWLY added to a stop already marked NEED', () => {
-    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30', wasNeed)).toBe('exact')
-  })
-
-  it('keeps NEED when re-saving a NEED stop that already had a time', () => {
-    // Nothing was booked here — the stop is just being saved again.
-    const prev = { type: 'tbd' as ApptType, value: '2026-08-20T09:30' }
-    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30', prev)).toBe('tbd')
-  })
-
-  it('leaves it as NEED when only a date was picked', () => {
+  it('does NOT graduate a NEED stop to Exact just because a time was added', () => {
+    // Status and time always reflect what was selected; booking is an explicit choice.
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30', wasNeed)).toBe('tbd')
+    expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30', { type: 'tbd', value: '2026-08-20T09:30' })).toBe('tbd')
     expect(apptTypeAfterEdit('tbd', '2026-08-20', wasNeed)).toBe('tbd')
-  })
-
-  it('does not treat midnight as a booked time — that is the empty time input', () => {
-    expect(apptTypeAfterEdit('tbd', '2026-08-20T00:00', wasNeed)).toBe('tbd')
+    expect(apptTypeAfterEdit('tbd', '', wasNeed)).toBe('tbd')
   })
 
   it('never overrides a type the user chose deliberately', () => {
@@ -291,12 +286,7 @@ describe('apptTypeAfterEdit', () => {
     expect(apptTypeAfterEdit('exact', '2026-08-20T09:30', wasNeed)).toBe('exact')
   })
 
-  it('leaves a queued stop queued when the time is cleared', () => {
-    expect(apptTypeAfterEdit('tbd', '', wasNeed)).toBe('tbd')
-  })
-
   it('treats a brand-new stop with no previous state as an explicit choice', () => {
-    // On create there is nothing to compare against; whatever was picked is intent.
     expect(apptTypeAfterEdit('tbd', '2026-08-20T09:30')).toBe('tbd')
   })
 })

@@ -47,7 +47,10 @@ const describe = (s: Stop): string => {
  *
  * `updated` requires an existing thread. Without one there is no conversation to update,
  * and posting every appointment change to the channel would turn a signal into a feed —
- * which is the failure mode that makes people mute it.
+ * which is the failure mode that makes people mute it. The one exception is a stop that
+ * is STILL NEED when its requested time changes: that always notifies (in-thread when
+ * there is a thread, otherwise as a new post), because the person booking it needs the
+ * new time either way.
  */
 export function apptNotices(next: Stop[], prev: Stop[] = []): ApptNotice[] {
   const before = new Map(prev.map((s) => [s.id, s]))
@@ -63,17 +66,27 @@ export function apptNotices(next: Stop[], prev: Stop[] = []): ApptNotice[] {
       continue
     }
 
-    if (!was || !s.apptThreadTs) continue
+    if (!was) continue
 
     // The appointment itself moved: a different instant, a different window, or the type
     // changed (NEED → a real booking is exactly what the thread was waiting to hear).
     const moved =
       s.appt !== was.appt || (s.apptEnd ?? '') !== (was.apptEnd ?? '') || key(s) !== key(was)
-    if (moved) {
+    if (!moved) continue
+
+    if (s.apptThreadTs) {
       out.push({
         kind: 'updated', stopId: s.id, stopKind: s.type,
         threadTs: s.apptThreadTs, apptLabel: label,
       })
+      continue
+    }
+
+    // Still NEED and the requested date/time changed, but no thread to reply in (legacy
+    // load, or the original post never got its ts back): the booker still has to hear
+    // about it, so post fresh. Stops that are NOT need-flagged stay quiet without a thread.
+    if (key(s) === 'tbd') {
+      out.push({ kind: 'needed', stopId: s.id, stopKind: s.type, apptLabel: label })
     }
   }
 
