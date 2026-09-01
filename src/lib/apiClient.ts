@@ -1781,17 +1781,24 @@ export interface DriverPaySetting {
   email?:                string | null
   fuelCardNumber?:       string | null
   fixedExpenses?:        FixedExpense[] | null
+  /** Pinned past rate windows — see PayRateOverride in src/lib/driverPay.ts. */
+  rateHistory?:          import('./driverPay').PayRateOverride[] | null
   active?:               boolean | null
   notes?:                string | null
   createdAt:             string
   updatedAt:             string
 }
 
-const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fixedExpenses active notes createdAt updatedAt`
+const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fixedExpenses rateHistory active notes createdAt updatedAt`
 
-function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown }): DriverPaySetting {
+function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown }): DriverPaySetting {
   const v = unwrapJson(raw.fixedExpenses)
-  return { ...raw, fixedExpenses: Array.isArray(v) ? v as FixedExpense[] : [] }
+  const h = unwrapJson(raw.rateHistory)
+  return {
+    ...raw,
+    fixedExpenses: Array.isArray(v) ? v as FixedExpense[] : [],
+    rateHistory: Array.isArray(h) ? h as DriverPaySetting['rateHistory'] : [],
+  }
 }
 
 export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
@@ -1801,9 +1808,11 @@ export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
   return (result.data.listDriverPaySettings.items ?? []).map(normalizePaySetting)
 }
 
-function serializePaySetting<T extends { fixedExpenses?: unknown }>(input: T): T {
-  if (input.fixedExpenses == null) return input
-  return { ...input, fixedExpenses: JSON.stringify(input.fixedExpenses) }
+function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown }>(input: T): T {
+  let out: T = input
+  if (out.fixedExpenses != null) out = { ...out, fixedExpenses: JSON.stringify(out.fixedExpenses) }
+  if (out.rateHistory != null) out = { ...out, rateHistory: JSON.stringify(out.rateHistory) }
+  return out
 }
 
 export async function createDriverPaySetting(input: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt'>): Promise<DriverPaySetting> {

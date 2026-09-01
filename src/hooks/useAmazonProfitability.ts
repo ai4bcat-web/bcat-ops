@@ -5,7 +5,7 @@ import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
-import { calcDriverPay } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate } from '@/lib/driverPay'
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -103,7 +103,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
 
         const st = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.freightAmount, status: t.status })),
-          { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
+          effectivePayRate(setting, periodStart), // pinned window if one covers this week
           ded,
         )
         const profit = Math.round((st.gross - st.checkAmount - st.totalDeductions) * 100) / 100

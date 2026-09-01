@@ -33,6 +33,42 @@ export interface DriverPaySettingInput {
   expensesBeforePercent: boolean
 }
 
+/**
+ * A pinned historical rate window: for pay weeks starting in [from, until) the driver
+ * was paid on THIS model, whatever the current setting says.
+ *
+ * Why windows instead of "the setting at the time": pay is derived live from the current
+ * DriverPaySetting on every render, so changing a driver's % would silently rewrite every
+ * past week's statement. Pinning the past as explicit windows keeps history stable while
+ * the base setting stays the ONE current rate that the settings modal edits and future
+ * weeks follow. (First real case: Chad's weeks of 8/16 and 8/23/2026 paid Lee/Roy-style
+ * at 88% − expenses, before moving to 50% after expenses from 8/30 on.)
+ */
+export interface PayRateOverride {
+  /** First pay-week start (YYYY-MM-DD, inclusive) this window covers. */
+  from: string
+  /** Pay-week start (YYYY-MM-DD, exclusive) where this window ends. */
+  until: string
+  payPercent: number
+  expensesBeforePercent: boolean
+}
+
+/**
+ * The pay model in force for the week starting `periodStart`: the matching pinned
+ * window if one covers it, otherwise the setting's current base rate.
+ */
+export function effectivePayRate(
+  setting: DriverPaySettingInput & { rateHistory?: PayRateOverride[] | null },
+  periodStart: string,
+): DriverPaySettingInput {
+  const hit = (setting.rateHistory ?? []).find(
+    (w) => w.from <= periodStart && periodStart < w.until,
+  )
+  return hit
+    ? { payPercent: hit.payPercent, expensesBeforePercent: hit.expensesBeforePercent }
+    : { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent }
+}
+
 /** A deduction line — `amount` is the positive dollar figure subtracted from pay. */
 export interface PayDeductionInput {
   label:  string

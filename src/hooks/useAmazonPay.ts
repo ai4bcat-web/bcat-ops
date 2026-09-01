@@ -7,7 +7,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { compareByOrder } from '@/lib/calendarOrder'
 import type { Driver } from '@/types'
@@ -24,7 +24,15 @@ export function periodEnd(periodStart: string): string {
 
 export interface DriverPayRow {
   driver:     Driver
+  /**
+   * The pay setting AS IT APPLIES TO THIS WEEK — payPercent/expensesBeforePercent are
+   * the effective rate for the viewed period (a pinned rateHistory window when one
+   * covers it), so the table, PDF, CSV and email all show the rate the week was
+   * actually paid on. Edit rates through `baseSetting`.
+   */
   setting:    DriverPaySetting
+  /** The stored setting (current base rate) — what the settings modal edits. */
+  baseSetting: DriverPaySetting
   trips:      AmazonTrip[]
   fuel:       number
   fuelTxns:   FuelTransaction[]      // the individual fuel lines that make up `fuel`
@@ -91,9 +99,12 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
     return settings
       .filter((s) => (s.payGroup ?? 'AMAZON') === 'AMAZON' && s.active !== false)
-      .map((setting): DriverPayRow | null => {
-        const driver = driverById.get(setting.driverId)
+      .map((baseSetting): DriverPayRow | null => {
+        const driver = driverById.get(baseSetting.driverId)
         if (!driver) return null
+
+        // The rate in force for THIS pay week (pinned window or current base).
+        const setting: DriverPaySetting = { ...baseSetting, ...effectivePayRate(baseSetting, periodStart) }
 
         const driverTrips = trips
           .filter((t) => t.driverId === setting.driverId && t.periodStart === periodStart)
@@ -127,7 +138,7 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           ded,
         )
 
-        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, statement, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))

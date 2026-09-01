@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { calcDriverPay, tripPayAmount } from './driverPay'
-import type { PayTripInput, PayDeductionInput, PayCreditInput } from './driverPay'
+import { calcDriverPay, tripPayAmount, effectivePayRate } from './driverPay'
+import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride } from './driverPay'
 
 // Each "trip set" is reduced to its freight total; the calc only needs the sum.
 const tripsTotaling = (gross: number): PayTripInput[] => [{ freightAmount: gross }]
@@ -107,5 +107,40 @@ describe('credits — extra pay added to the check', () => {
     ])
     expect(r.totalCredits).toBeCloseTo(33.34, 2)
     expect(r.checkAmount).toBeCloseTo(533.35, 2)
+  })
+})
+
+describe('effectivePayRate — pinned rate windows', () => {
+  // Chad's real timeline: 42% after expenses historically, Lee/Roy-style 88% − expenses
+  // for the weeks of 8/16 and 8/23/2026, then 50% after expenses from 8/30 on.
+  const history: PayRateOverride[] = [
+    { from: '1970-01-01', until: '2026-08-16', payPercent: 0.42, expensesBeforePercent: true },
+    { from: '2026-08-16', until: '2026-08-30', payPercent: 0.88, expensesBeforePercent: false },
+  ]
+  const chad = { payPercent: 0.5, expensesBeforePercent: true, rateHistory: history }
+
+  it('weeks before the change keep the old pinned rate', () => {
+    expect(effectivePayRate(chad, '2026-08-09')).toEqual({ payPercent: 0.42, expensesBeforePercent: true })
+  })
+
+  it('the two 88% weeks pay like Lee and Roy', () => {
+    expect(effectivePayRate(chad, '2026-08-16')).toEqual({ payPercent: 0.88, expensesBeforePercent: false })
+    expect(effectivePayRate(chad, '2026-08-23')).toEqual({ payPercent: 0.88, expensesBeforePercent: false })
+  })
+
+  it('8/30 and every later week falls through to the base 50% after expenses', () => {
+    expect(effectivePayRate(chad, '2026-08-30')).toEqual({ payPercent: 0.5, expensesBeforePercent: true })
+    expect(effectivePayRate(chad, '2027-01-03')).toEqual({ payPercent: 0.5, expensesBeforePercent: true })
+  })
+
+  it('no history (every other driver) means the base rate, unchanged', () => {
+    expect(effectivePayRate({ payPercent: 0.88, expensesBeforePercent: false }, '2026-08-16'))
+      .toEqual({ payPercent: 0.88, expensesBeforePercent: false })
+    expect(effectivePayRate({ payPercent: 0.88, expensesBeforePercent: false, rateHistory: [] }, '2026-08-16'))
+      .toEqual({ payPercent: 0.88, expensesBeforePercent: false })
+  })
+
+  it('until is exclusive — the boundary week belongs to the NEXT window', () => {
+    expect(effectivePayRate(chad, '2026-08-15')).toEqual({ payPercent: 0.42, expensesBeforePercent: true })
   })
 })

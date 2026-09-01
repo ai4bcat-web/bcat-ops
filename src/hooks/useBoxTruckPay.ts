@@ -10,7 +10,7 @@ import {
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { useLoads } from './useLoads'
-import { calcDriverPay, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -139,7 +139,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
         // Credits are added to the check in full, after the % model.
         const statement = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.grossProfit, status: t.status })),
-          { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
+          effectivePayRate(setting, periodStart), // pinned window if one covers this period
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
         )

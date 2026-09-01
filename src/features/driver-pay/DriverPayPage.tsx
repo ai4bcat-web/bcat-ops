@@ -305,7 +305,7 @@ export function DriverPayPage() {
       )}
       {settingsFor && (
         <SettingsModal driver={settingsFor}
-          existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.setting}
+          existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.baseSetting}
           onSave={async (patch) => { await pay.saveSetting(settingsFor.id, patch); setSettings(null) }}
           onClose={() => setSettings(null)} />
       )}

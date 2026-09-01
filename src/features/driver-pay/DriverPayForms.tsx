@@ -505,6 +505,18 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
         <Field l="Driver email"><input style={input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="driver@example.com" /></Field>
       </div>
 
+      {(existing?.rateHistory?.length ?? 0) > 0 && (
+        <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t3)', marginBottom: 4 }}>Pinned past rate windows</div>
+          {existing!.rateHistory!.map((w, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--ds-t2)' }}>
+              weeks {w.from} → {w.until}: {Math.round(w.payPercent * 100)}% {w.expensesBeforePercent ? 'after expenses' : 'of gross − expenses'}
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', marginTop: 4 }}>Those weeks keep their rate — the fields above only change weeks outside the pinned windows.</div>
+        </div>
+      )}
+
       <div style={{ marginTop: 14 }}>
         <label style={label}>Calculation</label>
         <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>

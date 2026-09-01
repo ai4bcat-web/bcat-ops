@@ -251,6 +251,10 @@ const schema = a.schema({
       email:                 a.string(),             // where the weekly report is sent
       fuelCardNumber:        a.string(),             // EFS card prefix → pulls weekly fuel
       fixedExpenses:         a.json(),               // [{ label, amount }] applied every week
+      // Pinned past rate windows [{ from, until, payPercent, expensesBeforePercent }] —
+      // pay weeks starting in [from, until) use that model instead of the base fields,
+      // so changing a driver's current rate never rewrites already-paid history.
+      rateHistory:           a.json(),
       active:                a.boolean(),
       notes:                 a.string(),
     })
