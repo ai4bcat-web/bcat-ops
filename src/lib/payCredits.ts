@@ -30,7 +30,26 @@ export const CREDIT_REASONS: CreditReason[] = [
 
 export const DEFAULT_CREDIT_REASON = 'DETENTION'
 
-const BY_CODE = new Map(CREDIT_REASONS.map((r) => [r.code, r]))
+/**
+ * Debit reasons — money taken OFF the check at 100%, after the % model has run.
+ * Distinct from a deduction/expense: an after-expenses driver only bears their pay %
+ * of an expense, but bears a debit dollar-for-dollar.
+ */
+export const DEBIT_REASONS: CreditReason[] = [
+  { code: 'CASH_ADVANCE',   label: 'Cash advance',            hint: 'Money fronted to the driver, paid back off this check' },
+  { code: 'DAMAGE',         label: 'Damage / claim',          hint: 'Cargo or equipment damage charged to the driver' },
+  { code: 'ESCROW',         label: 'Escrow / reserve',        hint: 'Held back into the driver reserve account' },
+  { code: 'OVERPAYMENT',    label: 'Overpayment recovery',    hint: 'Clawing back an amount overpaid on an earlier check' },
+  { code: 'FINE',           label: 'Ticket / fine',           hint: 'Violation, citation or toll fine the company covered' },
+  { code: 'PRIOR_PERIOD',   label: 'Prior-period adjustment', hint: 'Correcting an earlier settlement' },
+  { code: 'OTHER',          label: 'Other',                   hint: 'Anything else — describe it in the note' },
+]
+
+export const DEFAULT_DEBIT_REASON = 'CASH_ADVANCE'
+
+// One lookup for BOTH lists so a stored code always resolves to a label, whichever
+// picker it came from (PRIOR_PERIOD/OTHER appear in both — same label, no conflict).
+const BY_CODE = new Map([...CREDIT_REASONS, ...DEBIT_REASONS].map((r) => [r.code, r]))
 
 export function creditReason(code?: string | null): CreditReason | undefined {
   return code ? BY_CODE.get(code) : undefined

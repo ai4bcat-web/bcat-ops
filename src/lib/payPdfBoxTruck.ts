@@ -75,6 +75,28 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
     theme: 'plain',
   })
 
+  // Debits — taken off the check at 100%, AFTER the net
+  if (row.debits.length) {
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 13, 18)
+    doc.text('Debits (after net)', M, y); y += 6
+    autoTable(doc, {
+      startY: y,
+      body: [
+        ...row.debits.map((c) => [
+          creditLineLabel(c),
+          [c.date ? fmtDate(c.date) : '', c.loadRef ?? ''].filter(Boolean).join('  ·  '),
+          `(${money(c.amount)})`,
+        ]),
+        ['Total debits', '', `(${money(statement.totalDebits)})`],
+      ],
+      styles: { fontSize: 9.5, cellPadding: 4 },
+      columnStyles: { 1: { textColor: [120, 120, 120] }, 2: { halign: 'right', textColor: [220, 38, 38] } },
+      margin: { left: M, right: M },
+      theme: 'plain',
+    })
+  }
+
   // Credits — extra pay added to the check at 100% (the % model never applies to them)
   if (row.credits.length) {
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18
@@ -99,7 +121,7 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(120, 120, 120)
     doc.text(
-      `Pay after ${pct(setting.payPercent)} model ${money(statement.payBeforeCredits)}  +  credits ${money(statement.totalCredits)}  =  check ${money(statement.checkAmount)}`,
+      `Pay after ${pct(setting.payPercent)} model ${money(statement.payBeforeCredits)}  +  credits ${money(statement.totalCredits)}${statement.totalDebits > 0 ? `  −  debits ${money(statement.totalDebits)}` : ''}  =  check ${money(statement.checkAmount)}`,
       M, y,
     )
     y += 16

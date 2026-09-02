@@ -82,6 +82,14 @@ export interface PayCreditInput {
   reasonCode?: string | null
 }
 
+/**
+ * A debit line — the positive dollar figure SUBTRACTED from the check, in full, AFTER
+ * the % model has run. The mirror of a credit: where an ordinary deduction on an
+ * after-expenses driver only costs them their pay % of it, a debit costs the driver
+ * the whole dollar (cash advance, damage, escrow, prior-period correction…).
+ */
+export type PayDebitInput = PayCreditInput
+
 export interface DriverPayStatement {
   gross:                 number   // Σ freight
   payPercent:            number
@@ -92,9 +100,10 @@ export interface DriverPayStatement {
   /** mode-true: gross − deductions (the pre-% subtotal); mode-false: pay after deductions. */
   subtotal:              number
   totalCredits:          number   // Σ credits — added to the check at 100%
-  /** Pay after the % model + deductions, BEFORE credits are added. */
+  totalDebits:           number   // Σ debits — subtracted from the check at 100%, after the net
+  /** Pay after the % model + deductions, BEFORE credits/debits are applied. */
   payBeforeCredits:      number
-  checkAmount:           number   // what the driver is paid this period (incl. credits)
+  checkAmount:           number   // what the driver is paid this period (incl. credits − debits)
 }
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -110,10 +119,12 @@ export function calcDriverPay(
   setting: DriverPaySettingInput,
   deductions: PayDeductionInput[],
   credits: PayCreditInput[] = [],
+  debits: PayDebitInput[] = [],
 ): DriverPayStatement {
   const gross = round2(trips.reduce((s, t) => s + (t.freightAmount || 0), 0))
   const totalDeductions = round2(deductions.reduce((s, d) => s + (d.amount || 0), 0))
   const totalCredits = round2(credits.reduce((s, c) => s + (c.amount || 0), 0))
+  const totalDebits = round2(debits.reduce((s, d) => s + (d.amount || 0), 0))
   const pct = setting.payPercent
 
   let driverAmount: number
@@ -138,7 +149,8 @@ export function calcDriverPay(
     totalDeductions,
     subtotal,
     totalCredits,
+    totalDebits,
     payBeforeCredits,
-    checkAmount: round2(payBeforeCredits + totalCredits),
+    checkAmount: round2(payBeforeCredits + totalCredits - totalDebits),
   }
 }

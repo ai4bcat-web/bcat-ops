@@ -62,6 +62,11 @@ function statementCsv(row: DriverPayRow, periodStart: string): string {
     for (const c of row.credits) L.push([q(creditLineLabel(c)), q(c.reasonCode), q(c.date), q(c.loadRef), q(c.amount)].join(','))
     L.push([q('Total credits'), '', '', '', q(row.statement.totalCredits)].join(','))
   }
+  if (row.debits.length) {
+    L.push(''); L.push([q('Debits (after net)'), q('Reason code'), q('Date'), q('Ref'), q('Amount')].join(','))
+    for (const c of row.debits) L.push([q(creditLineLabel(c)), q(c.reasonCode), q(c.date), q(c.loadRef), q(c.amount)].join(','))
+    L.push([q('Total debits'), '', '', '', q(row.statement.totalDebits)].join(','))
+  }
   L.push('')
   L.push([q('CHECK AMOUNT'), q(row.statement.checkAmount)].join(','))
   return L.join('\n')
@@ -86,16 +91,17 @@ export function DriverPayPage() {
   const [importDriver, setImport]   = useState<string | null>(null)
   const [masterOpen, setMasterOpen] = useState(false)
   const [dedDriver, setDedDriver]   = useState<string | null>(null)
-  const [creditFor, setCreditFor]   = useState<{ row: DriverPayRow; credit?: DriverPayCredit } | null>(null)
+  const [creditFor, setCreditFor]   = useState<{ row: DriverPayRow; credit?: DriverPayCredit; kind?: 'CREDIT' | 'DEBIT' } | null>(null)
   const [settingsFor, setSettings]  = useState<Driver | null>(null)
   const [emailFor, setEmailFor]     = useState<DriverPayRow | null>(null)
 
   const isThisWeek = periodStart === sundayOf()
 
   const handleRemoveCredit = async (c: DriverPayCredit) => {
-    if (!window.confirm(`Remove the ${money(c.amount)} ${creditLineLabel(c)} credit from this check?`)) return
-    try { await pay.removeCredit(c.id); toast.success('Credit removed') }
-    catch (e) { toast.error(`Couldn't remove the credit: ${e instanceof Error ? e.message : 'unknown error'}`) }
+    const noun = c.kind === 'DEBIT' ? 'debit' : 'credit'
+    if (!window.confirm(`Remove the ${money(c.amount)} ${creditLineLabel(c)} ${noun} from this check?`)) return
+    try { await pay.removeCredit(c.id); toast.success(noun === 'debit' ? 'Debit removed' : 'Credit removed') }
+    catch (e) { toast.error(`Couldn't remove the ${noun}: ${e instanceof Error ? e.message : 'unknown error'}`) }
   }
 
   // ── Drag-to-reorder the driver cards (persisted per browser) ────────────────
@@ -256,6 +262,7 @@ export function DriverPayPage() {
             onImport={() => setImport(selectedRow.driver.id)}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
             onAddCredit={() => setCreditFor({ row: selectedRow })}
+            onAddDebit={() => setCreditFor({ row: selectedRow, kind: 'DEBIT' })}
             onEditCredit={(c) => setCreditFor({ row: selectedRow, credit: c })}
             onRemoveCredit={handleRemoveCredit}
             onSettings={() => setSettings(selectedRow.driver)}
@@ -321,10 +328,12 @@ export function DriverPayPage() {
           periodStart={periodStart}
           periodLabel={weekLabelLong(periodStart)}
           initial={creditFor.credit}
+          kind={creditFor.credit?.kind === 'DEBIT' ? 'DEBIT' : (creditFor.kind ?? 'CREDIT')}
           createdBy={user?.email ?? null}
           onSave={async (input) => {
-            if (creditFor.credit) { await pay.updateCredit(creditFor.credit.id, input); toast.success('Credit updated') }
-            else { await pay.addCredit(input); toast.success(`Added ${money(input.amount)} credit to ${creditFor.row.driver.name}'s check`) }
+            const noun = input.kind === 'DEBIT' ? 'debit' : 'credit'
+            if (creditFor.credit) { await pay.updateCredit(creditFor.credit.id, input); toast.success(`${noun === 'debit' ? 'Debit' : 'Credit'} updated`) }
+            else { await pay.addCredit(input); toast.success(`Added ${money(input.amount)} ${noun} to ${creditFor.row.driver.name}'s check`) }
             setCreditFor(null)
           }}
           onClose={() => setCreditFor(null)}
@@ -370,10 +379,10 @@ export function DriverPayPage() {
 // Used only to FLAG a possibly-understated week for review — never to auto-change pay.
 const BLOCK_LEG_RATE_CEILING = 1.5
 
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
-  onAddCredit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
+  onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
   onPdf: () => void; onEmail: () => void
@@ -451,6 +460,10 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
         <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
           style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
           <PlusCircle size={13} /> Add credit
+        </button>
+        <button onClick={onAddDebit} title="Take money off this check after the net (cash advance, damage, escrow…)"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #fca5a5', background: 'var(--ds-surface)', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+          <PlusCircle size={13} /> Add debit
         </button>
         {iconBtn(onExport, Download, 'CSV')}
         {iconBtn(onPdf, FileText, 'PDF')}
@@ -614,11 +627,41 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
         )}
       </div>
 
+      {/* Debits — taken off the check at 100%, AFTER the net */}
+      {row.debits.length > 0 && (
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
+          <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Debits (after net)</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {row.debits.map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {creditLineLabel(c)}
+                  {(c.date || c.loadRef) && (
+                    <span style={{ color: 'var(--ds-t3)', fontSize: 11.5 }}>
+                      {c.date ? ` · ${fmtShortDate(c.date)}` : ''}{c.loadRef ? ` · ${c.loadRef}` : ''}
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>−{money(c.amount)}</span>
+                <button onClick={() => onEditCredit(c)} title="Edit debit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Pencil size={12} /></button>
+                <button onClick={() => onRemoveCredit(c)} title="Remove debit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
+              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total debits</span>
+              <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>−{money(statement.totalDebits)}</span>
+              <span style={{ width: 40 }} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Totals */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '12px 16px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
         <Total label="Total deductions" value={money(statement.totalDeductions)} negative />
         {setting.expensesBeforePercent && <Total label={`Subtotal × ${pct(setting.payPercent)}`} value={money(statement.subtotal)} />}
         {statement.totalCredits > 0 && <Total label="Credits" value={`+${money(statement.totalCredits)}`} color="#15803d" />}
+        {statement.totalDebits > 0 && <Total label="Debits (after net)" value={`−${money(statement.totalDebits)}`} color="#dc2626" />}
         <Total label="Check amount" value={money(statement.checkAmount)} strong color={statement.checkAmount >= 0 ? '#15803d' : '#dc2626'} />
       </div>
     </div>

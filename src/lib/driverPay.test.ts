@@ -144,3 +144,34 @@ describe('effectivePayRate — pinned rate windows', () => {
     expect(effectivePayRate(chad, '2026-08-15')).toEqual({ payPercent: 0.42, expensesBeforePercent: true })
   })
 })
+
+describe('debits — money off the check at 100%, AFTER the net', () => {
+  const debit = (amount: number, reasonCode = 'CASH_ADVANCE') => [{ label: 'advance', amount, reasonCode }]
+
+  it('after-expenses driver bears the FULL debit, not their pay % of it', () => {
+    const setting = { payPercent: 0.5, expensesBeforePercent: true }
+    // 50% × (4000 − 1000) = 1500; a $200 debit costs the whole $200, not $100
+    const r = calcDriverPay(tripsTotaling(4_000), setting, ded(1_000), [], debit(200))
+    expect(r.payBeforeCredits).toBeCloseTo(1_500, 2)
+    expect(r.totalDebits).toBeCloseTo(200, 2)
+    expect(r.checkAmount).toBeCloseTo(1_300, 2)
+  })
+
+  it('88%-of-gross model: subtracted in full after the net', () => {
+    const setting = { payPercent: 0.88, expensesBeforePercent: false }
+    const r = calcDriverPay(tripsTotaling(1_000), setting, ded(100), [], debit(75))
+    expect(r.checkAmount).toBeCloseTo(0.88 * 1_000 - 100 - 75, 2)
+  })
+
+  it('credits and debits compose: check = net + credits − debits', () => {
+    const setting = { payPercent: 0.5, expensesBeforePercent: true }
+    const r = calcDriverPay(tripsTotaling(2_000), setting, [], [{ label: 'bonus', amount: 100 }], debit(40))
+    expect(r.checkAmount).toBeCloseTo(1_000 + 100 - 40, 2)
+  })
+
+  it('no debits — statements are unchanged', () => {
+    const r = calcDriverPay(tripsTotaling(1_000), { payPercent: 0.88, expensesBeforePercent: false }, [])
+    expect(r.totalDebits).toBe(0)
+    expect(r.checkAmount).toBeCloseTo(880, 2)
+  })
+})

@@ -43,6 +43,8 @@ export interface DriverPayRow {
   oneOffs:    DriverPayDeduction[]
   /** Extra pay added to the check at 100% (detention, bonus…) — same model as box-truck. */
   credits:    DriverPayCredit[]
+  /** Money taken OFF the check at 100%, after the net (cash advance, damage…). */
+  debits:     DriverPayCredit[]
   statement:  DriverPayStatement
   /** Ids of this week's trips whose Load ID also appears in the previous week (likely a duplicate import). */
   duplicateTripIds: Set<string>
@@ -141,9 +143,12 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 
-        const driverCredits = credits
+        const mine = credits
           .filter((c) => c.driverId === setting.driverId && c.periodStart === periodStart)
           .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.createdAt.localeCompare(b.createdAt))
+        // null kind = CREDIT: every row written before debits existed is a credit.
+        const driverCredits = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT')
+        const driverDebits  = mine.filter((c) => c.kind === 'DEBIT')
 
         // Credits are added to the check in full, after the % model — same as box-truck.
         const statement = calcDriverPay(
@@ -151,9 +156,10 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
+          driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
         )
 
-        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, statement, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))

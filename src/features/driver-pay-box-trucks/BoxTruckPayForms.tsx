@@ -3,7 +3,7 @@ import { X, Plus, Trash2, Upload } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { BoxTruckTrip, DriverPaySetting, DriverPayCredit, DriverPayCreditInput, FixedExpense } from '@/hooks/useBoxTruckPay'
 import { parseBoxTruckRows, type RawBoxTruckRow } from '@/lib/boxTruckCsv'
-import { CREDIT_REASONS, DEFAULT_CREDIT_REASON } from '@/lib/payCredits'
+import { CREDIT_REASONS, DEFAULT_CREDIT_REASON, DEBIT_REASONS, DEFAULT_DEBIT_REASON } from '@/lib/payCredits'
 
 type TripInput = Omit<BoxTruckTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
@@ -100,19 +100,24 @@ export function TripModal({ driverId, periodStart, initial, onSave, onClose }: {
 }
 
 // ── Add / edit a credit (extra pay on the check) ─────────────────────────────
-export function CreditModal({ driverId, driverName, periodStart, periodLabel, initial, createdBy, onSave, onClose }: {
+export function CreditModal({ driverId, driverName, periodStart, periodLabel, initial, createdBy, kind = 'CREDIT', onSave, onClose }: {
   driverId: string
   driverName: string
   periodStart: string
   periodLabel: string
   initial?: DriverPayCredit
   createdBy?: string | null
+  /** 'DEBIT' takes the amount OFF the check at 100% after the net; default is a credit. */
+  kind?: 'CREDIT' | 'DEBIT'
   onSave: (c: DriverPayCreditInput) => Promise<void>
   onClose: () => void
 }) {
   const editing = !!initial
+  const debit = kind === 'DEBIT'
+  const REASONS = debit ? DEBIT_REASONS : CREDIT_REASONS
+  const noun = debit ? 'debit' : 'credit'
   const [f, setF] = useState({
-    reasonCode: initial?.reasonCode ?? DEFAULT_CREDIT_REASON,
+    reasonCode: initial?.reasonCode ?? (debit ? DEFAULT_DEBIT_REASON : DEFAULT_CREDIT_REASON),
     amount:     numStr(initial?.amount),
     label:      initial?.label ?? '',
     date:       initial?.date ?? '',
@@ -123,16 +128,16 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
   const [saving, setSaving] = useState(false)
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
 
-  const reason = CREDIT_REASONS.find((r) => r.code === f.reasonCode)
+  const reason = REASONS.find((r) => r.code === f.reasonCode)
   const amount = num(f.amount)
 
   const save = async () => {
     if (!f.reasonCode) { setErr('Pick a reason code'); return }
-    if (amount == null || amount <= 0) { setErr('Enter a positive credit amount'); return }
+    if (amount == null || amount <= 0) { setErr(`Enter a positive ${noun} amount`); return }
     setSaving(true)
     try {
       await onSave({
-        driverId, periodStart,
+        driverId, periodStart, kind,
         reasonCode: f.reasonCode,
         amount,
         label:   f.label.trim() || null,
@@ -145,11 +150,11 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
   }
 
   return (
-    <Modal title={editing ? 'Edit credit' : 'Add credit'} sub={`Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
+    <Modal title={editing ? `Edit ${noun}` : `Add ${noun}`} sub={debit ? `Taken off ${driverName}'s ${periodLabel} check, after the net` : `Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Reason code *" half>
           <select style={input} value={f.reasonCode} onChange={(e) => set('reasonCode', e.target.value)}>
-            {CREDIT_REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+            {REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
           </select>
         </Field>
         <Field l="Amount *" half><input style={input} value={f.amount} onChange={(e) => set('amount', e.target.value)} placeholder="$150.00" /></Field>
@@ -160,12 +165,14 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
       </div>
 
       <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', fontSize: 12.5, color: 'var(--ds-t2)' }}>
-        Credits are added to the check <b>in full</b> — the driver's pay percentage is not applied.
-        {amount != null && amount > 0 && <> This check goes up by <b style={{ color: '#15803d' }}>{moneyFmt(amount)}</b>.</>}
+        {debit
+          ? <>Debits come off the check <b>in full, after the net</b> — the driver's pay percentage is not applied.</>
+          : <>Credits are added to the check <b>in full</b> — the driver's pay percentage is not applied.</>}
+        {amount != null && amount > 0 && <> This check goes {debit ? 'down' : 'up'} by <b style={{ color: debit ? '#dc2626' : '#15803d' }}>{moneyFmt(amount)}</b>.</>}
       </div>
 
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
-      <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? 'Save credit' : 'Add credit'} />
+      <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? `Save ${noun}` : `Add ${noun}`} />
     </Modal>
   )
 }

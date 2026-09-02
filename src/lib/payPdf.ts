@@ -172,6 +172,25 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
     }
   }
 
+  // ── Debits — taken off the check at 100%, AFTER the net ─────────────────────
+  if (row.debits.length) {
+    y += 10
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(107, 114, 128)
+    doc.text('DEBITS (AFTER NET)', M, y)
+    y += 14
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    for (const c of row.debits) {
+      doc.setTextColor(55, 65, 81)
+      doc.text(creditLineLabel(c), M, y)
+      doc.setTextColor(220, 38, 38)
+      doc.text(`(${money(c.amount)})`, W - M, y, { align: 'right' })
+      y += 15
+    }
+  }
+
   // ── Totals ──────────────────────────────────────────────────────────────────
   y += 8
   doc.setDrawColor(229, 231, 235)
@@ -189,6 +208,7 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   totalRow('Total deductions', `(${money(statement.totalDeductions)})`, false, [220, 38, 38])
   if (setting.expensesBeforePercent) totalRow(`Subtotal × ${pct(setting.payPercent)}`, money(statement.subtotal))
   if (statement.totalCredits > 0) totalRow('Total credits', `+${money(statement.totalCredits)}`, false, [21, 128, 61])
+  if (statement.totalDebits > 0) totalRow('Debits (after net)', `(${money(statement.totalDebits)})`, false, [220, 38, 38])
   totalRow('CHECK AMOUNT', money(statement.checkAmount), true, statement.checkAmount >= 0 ? [21, 128, 61] : [220, 38, 38])
 
   // ── Footer ──────────────────────────────────────────────────────────────────

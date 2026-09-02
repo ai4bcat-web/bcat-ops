@@ -281,6 +281,9 @@ const schema = a.schema({
     .model({
       driverId:    a.string().required(),
       periodStart: a.string().required(),  // YYYY-MM-DD — start of the pay period it lands on
+      // 'CREDIT' (default when null — every pre-existing row) adds to the check at 100%;
+      // 'DEBIT' subtracts at 100% AFTER the % model (cash advance, damage, escrow…).
+      kind:        a.string(),
       reasonCode:  a.string().required(),  // 'DETENTION' | 'LAYOVER' | 'BONUS' | …
       label:       a.string(),             // free-text note shown next to the reason
       amount:      a.float().required(),   // dollars ADDED to the check (positive)

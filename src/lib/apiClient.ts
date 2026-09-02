@@ -1880,6 +1880,8 @@ export interface DriverPayCredit {
   id:          string
   driverId:    string
   periodStart: string
+  /** null/'CREDIT' = added to the check; 'DEBIT' = subtracted at 100% after the net. */
+  kind?:       'CREDIT' | 'DEBIT' | null
   reasonCode:  string
   label?:      string | null
   amount:      number          // dollars ADDED to the check (positive)
@@ -1893,7 +1895,7 @@ export interface DriverPayCredit {
 
 export type DriverPayCreditInput = Omit<DriverPayCredit, 'id' | 'createdAt' | 'updatedAt'>
 
-const PAY_CREDIT_FIELDS = `id driverId periodStart reasonCode label amount date loadRef createdBy notes createdAt updatedAt`
+const PAY_CREDIT_FIELDS = `id driverId periodStart kind reasonCode label amount date loadRef createdBy notes createdAt updatedAt`
 
 // The model ships with this feature; until the backend migration lands the API has no
 // such type. Degrade to "no credits" rather than breaking the whole pay page.

@@ -29,6 +29,7 @@ export interface BoxTruckPayRow {
   deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
   oneOffs:    DriverPayDeduction[]
   credits:    DriverPayCredit[]     // extra pay added to the check at 100% (detention, bonus…)
+  debits:     DriverPayCredit[]     // taken OFF the check at 100%, after the net (advance, damage…)
   statement:  DriverPayStatement
   /** Loads the driver delivered this period that aren't yet pulled in (count). */
   unpulledLoadCount: number
@@ -131,9 +132,12 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 
-        const driverCredits = credits
+        const mine = credits
           .filter((c) => c.driverId === setting.driverId && c.periodStart === periodStart)
           .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.createdAt.localeCompare(b.createdAt))
+        // null kind = CREDIT: every row written before debits existed is a credit.
+        const driverCredits = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT')
+        const driverDebits  = mine.filter((c) => c.kind === 'DEBIT')
 
         // Gross = Σ gross profit. Pay model is the driver's setting (Zak = 50% after expenses).
         // Credits are added to the check in full, after the % model.
@@ -142,9 +146,10 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
           effectivePayRate(setting, periodStart), // pinned window if one covers this period
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
+          driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
         )
 
-        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, statement, unpulledLoadCount }
+        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, statement, unpulledLoadCount }
       })
       .filter((r): r is BoxTruckPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
