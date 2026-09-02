@@ -5,7 +5,7 @@ import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
-import { calcDriverPay, effectivePayRate } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses } from '@/lib/driverPay'
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -96,7 +96,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
         const ded = [
-          ...(setting.fixedExpenses ?? []).map((f) => ({ label: f.label, amount: f.amount })),
+          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart).map((f) => ({ label: f.label, amount: f.amount })),
           ...(fuel > 0 ? [{ label: 'Fuel', amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]

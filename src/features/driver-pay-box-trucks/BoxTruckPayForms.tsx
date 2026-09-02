@@ -240,7 +240,7 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
   const save = async () => {
     const p = num(percent)
     if (p == null || p <= 0 || p > 100) { setErr('Enter a pay percent between 1 and 100'); return }
-    const cleanFixed = fixed.filter((x) => x.label.trim() && x.amount > 0).map((x) => ({ label: x.label.trim(), amount: x.amount }))
+    const cleanFixed = fixed.filter((x) => x.label.trim() && x.amount > 0).map((x) => ({ label: x.label.trim(), amount: x.amount, from: x.from || null, until: x.until || null }))
     setSaving(true)
     try {
       await onSave({
@@ -279,14 +279,22 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
           <label style={label}>Fixed expenses (per period)</label>
           <button type="button" onClick={() => setFixed((p) => [...p, { label: '', amount: 0 }])} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer' }}><Plus size={13} /> Add</button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginBottom: 8 }}>Deducted every period. Fuel is pulled from the card automatically — don't add it here.</div>
+        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginBottom: 8 }}>Deducted every period. Fuel pulls from the card automatically — don't add it here. Blank dates = always; set “until” (a period start) to END a charge going forward without touching past periods — deleting removes it from history too.</div>
         {fixed.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No fixed expenses.</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {fixed.map((x, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8 }}>
-              <input style={{ ...input, flex: 1 }} value={x.label} onChange={(e) => setFixedItem(i, { label: e.target.value })} placeholder="Insurance" />
-              <input style={{ ...input, width: 120 }} value={x.amount ? String(x.amount) : ''} onChange={(e) => setFixedItem(i, { amount: num(e.target.value) ?? 0 })} placeholder="$250" />
-              <button type="button" onClick={() => setFixed((p) => p.filter((_, j) => j !== i))} style={{ ...cancelBtn, width: 36, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={14} /></button>
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...input, flex: 1 }} value={x.label} onChange={(e) => setFixedItem(i, { label: e.target.value })} placeholder="Insurance" />
+                <input style={{ ...input, width: 120 }} value={x.amount ? String(x.amount) : ''} onChange={(e) => setFixedItem(i, { amount: num(e.target.value) ?? 0 })} placeholder="$250" />
+                <button type="button" title="Delete outright — past periods lose it too; to stop it going forward, set an 'until' date instead" onClick={() => setFixed((p) => p.filter((_, j) => j !== i))} style={{ ...cancelBtn, width: 36, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={14} /></button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', width: 34, textAlign: 'right' }}>from</span>
+                <input type="date" aria-label={`${x.label || 'charge'} applies from`} style={{ ...input, height: 28, fontSize: 11.5, flex: 1 }} value={x.from ?? ''} onChange={(e) => setFixedItem(i, { from: e.target.value || null })} />
+                <span style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>until</span>
+                <input type="date" aria-label={`${x.label || 'charge'} ends before`} style={{ ...input, height: 28, fontSize: 11.5, flex: 1 }} value={x.until ?? ''} onChange={(e) => setFixedItem(i, { until: e.target.value || null })} />
+              </div>
             </div>
           ))}
         </div>

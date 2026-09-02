@@ -269,6 +269,11 @@ export function DriverPayPage() {
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
             onRemoveDeduction={pay.removeDeduction}
+            onWaiveDeduction={async (label, amount) => {
+              if (!window.confirm(`Waive ${label} (${money(amount)}) for ${weekLabelLong(periodStart)} only?\n\nAdds an offsetting refund line to this week; every other week keeps the charge.`)) return
+              try { await pay.addDeduction({ driverId: selectedRow.driver.id, periodStart, label: `Waived — ${label}`, amount: -amount, date: null }); toast.success(`${label} waived for this week`) }
+              catch (e) { toast.error(`Couldn't waive: ${e instanceof Error ? e.message : 'unknown error'}`) }
+            }}
             onUpdateTrip={(id, patch) => { void pay.updateTrip(id, patch) }}
             onExport={() => download(`pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
             onPdf={() => handlePdf(selectedRow)}
@@ -379,12 +384,12 @@ export function DriverPayPage() {
 // Used only to FLAG a possibly-understated week for review — never to auto-change pay.
 const BLOCK_LEG_RATE_CEILING = 1.5
 
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onWaiveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onEditTrip: (t: AmazonTrip) => void
-  onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
+  onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onWaiveDeduction: (label: string, amount: number) => void; onExport: () => void
   onPdf: () => void; onEmail: () => void
   onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
@@ -552,13 +557,19 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {row.deductions.map((d, i) => {
               const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
+              const refund = d.amount < 0
+              const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
               return (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
                   <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
-                  <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(d.amount)})</span>
+                  <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+                    {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
+                  </span>
                   {oneOff
                     ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
-                    : <span style={{ width: 16 }} />}
+                    : isFixed
+                      ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS WEEK ONLY — adds an offsetting refund line; the charge stays on every other week`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
+                      : <span style={{ width: 16 }} />}
                 </div>
               )
             })}

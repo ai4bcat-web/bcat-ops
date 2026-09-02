@@ -456,13 +456,13 @@ export function DeductionModal({ driverId, periodStart, onSave, onClose }: { dri
   const [saving, setSaving] = useState(false)
   const save = async () => {
     const amount = num(f.amount)
-    if (!f.label.trim() || amount == null || amount <= 0) { setErr('Enter a label and a positive amount'); return }
+    if (!f.label.trim() || amount == null || amount === 0) { setErr('Enter a label and a non-zero amount (negative refunds a charge for this week)'); return }
     setSaving(true)
     try { await onSave({ driverId, periodStart, label: f.label.trim(), amount, date: f.date || null }) }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
   }
   return (
-    <Modal title="Add expense" sub="A one-off deduction for this week" onClose={onClose} width={440}>
+    <Modal title="Add expense" sub="A one-off deduction for this week — a NEGATIVE amount refunds/waives a charge for this week only" onClose={onClose} width={440}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Description"><input style={input} value={f.label} onChange={(e) => setF((p) => ({ ...p, label: e.target.value }))} placeholder="NM Permit one-time charge" /></Field>
         <Field l="Amount *" half><input style={input} value={f.amount} onChange={(e) => setF((p) => ({ ...p, amount: e.target.value }))} placeholder="$98.00" /></Field>
@@ -489,7 +489,7 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
   const save = async () => {
     const p = num(percent)
     if (p == null || p <= 0 || p > 100) { setErr('Enter a pay percent between 1 and 100'); return }
-    const cleanFixed = fixed.filter((x) => x.label.trim() && x.amount > 0).map((x) => ({ label: x.label.trim(), amount: x.amount }))
+    const cleanFixed = fixed.filter((x) => x.label.trim() && x.amount > 0).map((x) => ({ label: x.label.trim(), amount: x.amount, from: x.from || null, until: x.until || null }))
     setSaving(true)
     try {
       await onSave({
@@ -540,14 +540,22 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
           <label style={label}>Fixed weekly expenses</label>
           <button type="button" onClick={() => setFixed((p) => [...p, { label: '', amount: 0 }])} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer' }}><Plus size={13} /> Add</button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginBottom: 8 }}>Deducted every week (ELD, insurance, occupational, plates, tablet…). Fuel is pulled from the card automatically — don't add it here.</div>
+        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginBottom: 8 }}>Deducted every week (ELD, insurance, occupational, plates, tablet…). Fuel pulls from the card automatically — don't add it here. Blank dates = always; set “until” (a Sunday) to END a charge going forward without touching past weeks — deleting removes it from history too.</div>
         {fixed.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No fixed expenses.</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {fixed.map((x, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8 }}>
-              <input style={{ ...input, flex: 1 }} value={x.label} onChange={(e) => setFixedItem(i, { label: e.target.value })} placeholder="Insurance" />
-              <input style={{ ...input, width: 120 }} value={x.amount ? String(x.amount) : ''} onChange={(e) => setFixedItem(i, { amount: num(e.target.value) ?? 0 })} placeholder="$250" />
-              <button type="button" onClick={() => setFixed((p) => p.filter((_, j) => j !== i))} style={{ ...cancelBtn, width: 36, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={14} /></button>
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input style={{ ...input, flex: 1 }} value={x.label} onChange={(e) => setFixedItem(i, { label: e.target.value })} placeholder="Insurance" />
+                <input style={{ ...input, width: 120 }} value={x.amount ? String(x.amount) : ''} onChange={(e) => setFixedItem(i, { amount: num(e.target.value) ?? 0 })} placeholder="$250" />
+                <button type="button" title="Delete outright — past weeks lose it too; to stop it going forward, set an 'until' date instead" onClick={() => setFixed((p) => p.filter((_, j) => j !== i))} style={{ ...cancelBtn, width: 36, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={14} /></button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', width: 34, textAlign: 'right' }}>from</span>
+                <input type="date" aria-label={`${x.label || 'charge'} applies from`} style={{ ...input, height: 28, fontSize: 11.5, flex: 1 }} value={x.from ?? ''} onChange={(e) => setFixedItem(i, { from: e.target.value || null })} />
+                <span style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>until</span>
+                <input type="date" aria-label={`${x.label || 'charge'} ends before`} style={{ ...input, height: 28, fontSize: 11.5, flex: 1 }} value={x.until ?? ''} onChange={(e) => setFixedItem(i, { until: e.target.value || null })} />
+              </div>
             </div>
           ))}
         </div>

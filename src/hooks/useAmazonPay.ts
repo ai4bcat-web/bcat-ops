@@ -9,7 +9,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, effectivePayRate, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -138,7 +138,7 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
         const ded: PayDeductionInput[] = [
-          ...(setting.fixedExpenses ?? []).map((f) => ({ label: f.label, amount: f.amount })),
+          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart).map((f) => ({ label: f.label, amount: f.amount })),
           ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]

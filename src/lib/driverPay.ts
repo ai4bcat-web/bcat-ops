@@ -54,6 +54,32 @@ export interface PayRateOverride {
 }
 
 /**
+ * A fixed recurring charge, optionally bounded to a range of pay periods.
+ *
+ * `from`/`until` are period-start dates (YYYY-MM-DD): the charge applies to periods
+ * starting in [from, until); either side absent means unbounded. Same idea as
+ * PayRateOverride, for the same reason — deductions are derived live from the current
+ * setting, so deleting a charge outright silently rewrote every past week's statement.
+ * ENDING a charge (setting `until`) leaves history intact; deleting is for mistakes.
+ */
+export interface FixedExpenseInput {
+  label:  string
+  amount: number
+  from?:  string | null
+  until?: string | null
+}
+
+/** The fixed charges in force for the period starting `periodStart`. */
+export function effectiveFixedExpenses<T extends FixedExpenseInput>(
+  fixedExpenses: T[] | null | undefined,
+  periodStart: string,
+): T[] {
+  return (fixedExpenses ?? []).filter(
+    (f) => (!f.from || f.from <= periodStart) && (!f.until || periodStart < f.until),
+  )
+}
+
+/**
  * The pay model in force for the week starting `periodStart`: the matching pinned
  * window if one covers it, otherwise the setting's current base rate.
  */

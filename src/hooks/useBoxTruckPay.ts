@@ -10,7 +10,7 @@ import {
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { useLoads } from './useLoads'
-import { calcDriverPay, effectivePayRate, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -127,7 +127,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
         const ded: PayDeductionInput[] = [
-          ...(setting.fixedExpenses ?? []).map((f) => ({ label: f.label, amount: f.amount })),
+          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart).map((f) => ({ label: f.label, amount: f.amount })),
           ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]

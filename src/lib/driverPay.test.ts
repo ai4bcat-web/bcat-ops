@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcDriverPay, tripPayAmount, effectivePayRate } from './driverPay'
+import { calcDriverPay, tripPayAmount, effectivePayRate, effectiveFixedExpenses } from './driverPay'
 import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride } from './driverPay'
 
 // Each "trip set" is reduced to its freight total; the calc only needs the sum.
@@ -173,5 +173,42 @@ describe('debits — money off the check at 100%, AFTER the net', () => {
     const r = calcDriverPay(tripsTotaling(1_000), { payPercent: 0.88, expensesBeforePercent: false }, [])
     expect(r.totalDebits).toBe(0)
     expect(r.checkAmount).toBeCloseTo(880, 2)
+  })
+})
+
+describe('effectiveFixedExpenses — week-bounded fixed charges', () => {
+  // Chad's real case: PLATES was deleted from settings and every past week lost it.
+  // Bounded charges keep history: PLATES applies to weeks BEFORE 2026-08-30 only.
+  const charges = [
+    { label: 'ELD', amount: 20 },
+    { label: 'PLATES', amount: 75, until: '2026-08-30' },
+    { label: 'NEW ESCROW', amount: 50, from: '2026-09-06' },
+  ]
+
+  it('a past week keeps the since-ended charge', () => {
+    expect(effectiveFixedExpenses(charges, '2026-08-23').map((f) => f.label)).toEqual(['ELD', 'PLATES'])
+  })
+
+  it('the week it ends on no longer has it', () => {
+    expect(effectiveFixedExpenses(charges, '2026-08-30').map((f) => f.label)).toEqual(['ELD'])
+  })
+
+  it('a future-dated charge starts on its from week, not before', () => {
+    expect(effectiveFixedExpenses(charges, '2026-09-06').map((f) => f.label)).toEqual(['ELD', 'NEW ESCROW'])
+  })
+
+  it('unbounded charges (every existing row) apply everywhere', () => {
+    expect(effectiveFixedExpenses([{ label: 'ELD', amount: 20 }], '1999-01-03')).toHaveLength(1)
+    expect(effectiveFixedExpenses(null, '2026-08-23')).toEqual([])
+  })
+
+  it('a negative one-off offsets a fixed charge exactly, under BOTH pay models', () => {
+    // The per-week "waive" writes a −amount one-off; net deductions for the week drop by
+    // the full charge, which is correct whichever side of the % the expenses land on.
+    const dedWaived = [{ label: 'INSURANCE', amount: 300 }, { label: 'Waived — INSURANCE', amount: -300 }]
+    const after = calcDriverPay(tripsTotaling(2_000), { payPercent: 0.5, expensesBeforePercent: true }, dedWaived)
+    expect(after.checkAmount).toBeCloseTo(1_000, 2)
+    const gross = calcDriverPay(tripsTotaling(2_000), { payPercent: 0.88, expensesBeforePercent: false }, dedWaived)
+    expect(gross.checkAmount).toBeCloseTo(1_760, 2)
   })
 })

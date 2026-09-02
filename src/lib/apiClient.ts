@@ -1770,7 +1770,8 @@ export async function deleteBoxTruckTrip(id: string): Promise<void> {
   })
 }
 
-export interface FixedExpense { label: string; amount: number }
+/** `from`/`until` (period-start dates, [from, until)) bound the charge to a range of pay periods; absent = always. */
+export interface FixedExpense { label: string; amount: number; from?: string | null; until?: string | null }
 
 export interface DriverPaySetting {
   id:                    string
