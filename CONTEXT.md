@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-09-01
+> Last updated: 2026-09-02
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, a manual weekly cash-flow forecast, an appointment-booking board (every shipment with its pickup/delivery booked-or-open state and booking history), driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Files hub (the driver roster plus everything on file per driver/truck, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging. Access is per-page: every route is gated by `RequirePage` on Cognito `page-<key>` groups (allowlist — a non-admin with no page groups sees everything; granting any group restricts them to those pages).
@@ -62,7 +62,7 @@ Every authenticated route is wrapped in `RequirePage` (`src/components/RequirePa
 ## Data Models (GraphQL / DynamoDB)
 **Dispatch & fleet:** `Load` · `Driver` · `Equipment` (trucks/trailers; `fleetGroup` LOCAL/AMAZON/BOX_TRUCK is the source of truth for profitability membership) · `MaintenanceTask` · `MaintenanceInvoice` · `DriverAvailability`
 
-**Driver pay:** `DriverPayPeriod` (biweekly gross pay, Paychex seam) · `AmazonTrip` (weekly trip-based Amazon pay lines) · `AmazonPayMaster` (archive of uploaded master CSVs, raw file in S3) · `BoxTruckTrip` (biweekly box-truck shipment lines) · `DriverPaySetting` (per-driver pay model: %, expense timing, fuel card, fixed deductions) · `DriverPayDeduction` (per-week one-off charges) · `DriverPayCredit` (extra pay added to a settlement that didn't come from shipment gross profit — detention, layover, bonus, reimbursement; the pay % is NOT applied, `reasonCode` is a plain string so the list can grow without a redeploy — see `src/lib/payCredits.ts`)
+**Driver pay:** `DriverPayPeriod` (biweekly gross pay, Paychex seam) · `AmazonTrip` (weekly trip-based Amazon pay lines) · `AmazonPayMaster` (archive of uploaded master CSVs, raw file in S3) · `BoxTruckTrip` (biweekly box-truck shipment lines) · `DriverPaySetting` (per-driver pay model: %, expense timing, fuel card, fixed deductions; `rateHistory` pins past rate windows `[{from, until, payPercent, expensesBeforePercent}]` — pay weeks starting in `[from, until)` use that pinned model via `effectivePayRate()` in `src/lib/driverPay.ts`, so changing a driver's current rate never rewrites already-paid weeks) · `DriverPayDeduction` (per-week one-off charges) · `DriverPayCredit` (extra pay added to a settlement that didn't come from shipment gross profit — detention, layover, bonus, reimbursement; the pay % is NOT applied, `reasonCode` is a plain string so the list can grow without a redeploy — see `src/lib/payCredits.ts`)
 
 **Disputes:** `AmazonDispute` (driver claims that Amazon underpaid/owes on a trip; Google Form → intake Lambda, source `GOOGLE_FORM`, plus `MANUAL`; workflow PENDING → POSTED → PAID | REJECTED)
 
