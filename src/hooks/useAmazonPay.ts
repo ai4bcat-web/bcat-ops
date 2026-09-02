@@ -3,16 +3,19 @@ import {
   listAmazonTrips, createAmazonTrip, updateAmazonTrip, deleteAmazonTrip,
   listDriverPaySettings, createDriverPaySetting, updateDriverPaySetting,
   listDriverPayDeductions, createDriverPayDeduction, deleteDriverPayDeduction,
-  type AmazonTrip, type DriverPaySetting, type DriverPayDeduction, type FixedExpense, type FuelTransaction,
+  listDriverPayCredits, createDriverPayCredit, updateDriverPayCredit, deleteDriverPayCredit,
+  type AmazonTrip, type DriverPaySetting, type DriverPayDeduction, type DriverPayCredit,
+  type DriverPayCreditInput, type FixedExpense, type FuelTransaction,
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { calcDriverPay, effectivePayRate, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
+import { creditLineLabel } from '@/lib/payCredits'
 import { compareByOrder } from '@/lib/calendarOrder'
 import type { Driver } from '@/types'
 
-export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense, FuelTransaction }
+export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, DriverPayCredit, DriverPayCreditInput, FixedExpense, FuelTransaction }
 export { normalizeCard }
 
 /** Inclusive 7-day window from a period start (YYYY-MM-DD). */
@@ -38,6 +41,8 @@ export interface DriverPayRow {
   fuelTxns:   FuelTransaction[]      // the individual fuel lines that make up `fuel`
   deductions: PayDeductionInput[]   // fixed + fuel + one-offs, in display order
   oneOffs:    DriverPayDeduction[]
+  /** Extra pay added to the check at 100% (detention, bonus…) — same model as box-truck. */
+  credits:    DriverPayCredit[]
   statement:  DriverPayStatement
   /** Ids of this week's trips whose Load ID also appears in the previous week (likely a duplicate import). */
   duplicateTripIds: Set<string>
@@ -61,6 +66,9 @@ export interface AmazonPayState {
   saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => Promise<void>
   addDeduction:   (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   removeDeduction:(id: string) => Promise<void>
+  addCredit:      (input: DriverPayCreditInput) => Promise<void>
+  updateCredit:   (id: string, patch: Partial<DriverPayCreditInput>) => Promise<void>
+  removeCredit:   (id: string) => Promise<void>
 }
 
 /** Composes the Amazon weekly pay statements for one 7-day period. */
@@ -71,14 +79,15 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
   const [trips, setTrips]           = useState<AmazonTrip[]>([])
   const [settings, setSettings]     = useState<DriverPaySetting[]>([])
   const [deductions, setDeductions] = useState<DriverPayDeduction[]>([])
+  const [credits, setCredits]       = useState<DriverPayCredit[]>([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [t, s, d] = await Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions()])
-      setTrips(t); setSettings(s); setDeductions(d)
+      const [t, s, d, c] = await Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
+      setTrips(t); setSettings(s); setDeductions(d); setCredits(c)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally { setLoading(false) }
@@ -132,17 +141,23 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 
+        const driverCredits = credits
+          .filter((c) => c.driverId === setting.driverId && c.periodStart === periodStart)
+          .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.createdAt.localeCompare(b.createdAt))
+
+        // Credits are added to the check in full, after the % model — same as box-truck.
         const statement = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.freightAmount, status: t.status })),
           { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
           ded,
+          driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
         )
 
-        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, statement, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, trips, deductions, fuelTxs, periodStart, prevStart, end])
+  }, [settings, drivers, trips, deductions, credits, fuelTxs, periodStart, prevStart, end])
 
   const tripCount = useMemo(() => trips.filter((t) => t.periodStart === periodStart).length, [trips, periodStart])
 
@@ -200,6 +215,18 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
     await deleteDriverPayDeduction(id)
     setDeductions((p) => p.filter((d) => d.id !== id))
   }, [])
+  const addCredit = useCallback(async (input: DriverPayCreditInput) => {
+    const created = await createDriverPayCredit(input)
+    setCredits((p) => [...p, created])
+  }, [])
+  const updateCredit = useCallback(async (id: string, patch: Partial<DriverPayCreditInput>) => {
+    const updated = await updateDriverPayCredit(id, patch)
+    setCredits((p) => p.map((c) => c.id === id ? updated : c))
+  }, [])
+  const removeCredit = useCallback(async (id: string) => {
+    await deleteDriverPayCredit(id)
+    setCredits((p) => p.filter((c) => c.id !== id))
+  }, [])
 
-  return { loading, error, rows, tripCount, unconfigured, refresh: load, addTrip, updateTrip, removeTrip, clearWeek, saveSetting, addDeduction, removeDeduction }
+  return { loading, error, rows, tripCount, unconfigured, refresh: load, addTrip, updateTrip, removeTrip, clearWeek, saveSetting, addDeduction, removeDeduction, addCredit, updateCredit, removeCredit }
 }

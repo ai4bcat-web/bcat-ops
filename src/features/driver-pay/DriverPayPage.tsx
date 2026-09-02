@@ -1,19 +1,20 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, AlertTriangle, GripVertical } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, PlusCircle, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, AlertTriangle, GripVertical } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
-import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip } from '@/hooks/useAmazonPay'
+import { useAmazonPay, periodEnd, type DriverPayRow, type AmazonTrip, type DriverPayCredit } from '@/hooks/useAmazonPay'
 import { useAmazonPayMasters, type AmazonPayMaster } from '@/hooks/useAmazonPayMasters'
 import { useAuth } from '@/hooks/useAuth'
 import { useDrivers } from '@/hooks/useDrivers'
 import { tripPayAmount } from '@/lib/driverPay'
 import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildPayStatementPdf, payPdfFilename, pdfToBase64 } from '@/lib/payPdf'
-import { sendDriverPayEmail } from '@/lib/apiClient'
+import { sendDriverPayEmail, payCreditsDeployed } from '@/lib/apiClient'
+import { creditLineLabel } from '@/lib/payCredits'
 import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
-import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal } from './DriverPayForms'
+import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal, CreditModal } from './DriverPayForms'
 
 // Owner is CC'd on every pay statement that goes out to a driver.
 const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
@@ -56,6 +57,11 @@ function statementCsv(row: DriverPayRow, periodStart: string): string {
   L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
+  if (row.credits.length) {
+    L.push(''); L.push([q('Credits'), q('Reason code'), q('Date'), q('Ref'), q('Amount')].join(','))
+    for (const c of row.credits) L.push([q(creditLineLabel(c)), q(c.reasonCode), q(c.date), q(c.loadRef), q(c.amount)].join(','))
+    L.push([q('Total credits'), '', '', '', q(row.statement.totalCredits)].join(','))
+  }
   L.push('')
   L.push([q('CHECK AMOUNT'), q(row.statement.checkAmount)].join(','))
   return L.join('\n')
@@ -80,10 +86,17 @@ export function DriverPayPage() {
   const [importDriver, setImport]   = useState<string | null>(null)
   const [masterOpen, setMasterOpen] = useState(false)
   const [dedDriver, setDedDriver]   = useState<string | null>(null)
+  const [creditFor, setCreditFor]   = useState<{ row: DriverPayRow; credit?: DriverPayCredit } | null>(null)
   const [settingsFor, setSettings]  = useState<Driver | null>(null)
   const [emailFor, setEmailFor]     = useState<DriverPayRow | null>(null)
 
   const isThisWeek = periodStart === sundayOf()
+
+  const handleRemoveCredit = async (c: DriverPayCredit) => {
+    if (!window.confirm(`Remove the ${money(c.amount)} ${creditLineLabel(c)} credit from this check?`)) return
+    try { await pay.removeCredit(c.id); toast.success('Credit removed') }
+    catch (e) { toast.error(`Couldn't remove the credit: ${e instanceof Error ? e.message : 'unknown error'}`) }
+  }
 
   // ── Drag-to-reorder the driver cards (persisted per browser) ────────────────
   const [rowOrder, setRowOrder] = useState<string[]>(loadRowOrder)
@@ -242,6 +255,9 @@ export function DriverPayPage() {
             onAddTrip={() => setTripModal({ driverId: selectedRow.driver.id })}
             onImport={() => setImport(selectedRow.driver.id)}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
+            onAddCredit={() => setCreditFor({ row: selectedRow })}
+            onEditCredit={(c) => setCreditFor({ row: selectedRow, credit: c })}
+            onRemoveCredit={handleRemoveCredit}
             onSettings={() => setSettings(selectedRow.driver)}
             onEditTrip={setEditTrip}
             onRemoveTrip={pay.removeTrip}
@@ -298,6 +314,22 @@ export function DriverPayPage() {
           onSetPeriod={setPeriodStart}
           onClose={() => setImport(null)} />
       )}
+      {creditFor && (
+        <CreditModal
+          driverId={creditFor.row.driver.id}
+          driverName={creditFor.row.driver.name}
+          periodStart={periodStart}
+          periodLabel={weekLabelLong(periodStart)}
+          initial={creditFor.credit}
+          createdBy={user?.email ?? null}
+          onSave={async (input) => {
+            if (creditFor.credit) { await pay.updateCredit(creditFor.credit.id, input); toast.success('Credit updated') }
+            else { await pay.addCredit(input); toast.success(`Added ${money(input.amount)} credit to ${creditFor.row.driver.name}'s check`) }
+            setCreditFor(null)
+          }}
+          onClose={() => setCreditFor(null)}
+        />
+      )}
       {dedDriver && (
         <DeductionModal driverId={dedDriver} periodStart={periodStart}
           onSave={async (input) => { await pay.addDeduction(input); setDedDriver(null) }}
@@ -338,9 +370,10 @@ export function DriverPayPage() {
 // Used only to FLAG a possibly-understated week for review — never to auto-change pay.
 const BLOCK_LEG_RATE_CEILING = 1.5
 
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
+  onAddCredit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onEditTrip: (t: AmazonTrip) => void
   onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onExport: () => void
   onPdf: () => void; onEmail: () => void
@@ -415,6 +448,10 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         {iconBtn(onAddTrip, Plus, 'Add trip')}
         {iconBtn(onImport, Upload, 'Import')}
         {iconBtn(onAddDeduction, Plus, 'Add expense')}
+        <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
+          <PlusCircle size={13} /> Add credit
+        </button>
         {iconBtn(onExport, Download, 'CSV')}
         {iconBtn(onPdf, FileText, 'PDF')}
         {iconBtn(onEmail, Mail, 'Email')}
@@ -539,10 +576,49 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onSettings, o
         )}
       </div>
 
+      {/* Credits — extra pay added to the check at 100%, same model as box-truck */}
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Credits</div>
+          <button onClick={onAddCredit} title="Add a credit" style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'none', border: 'none', color: '#15803d', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
+            <PlusCircle size={12} /> Add
+          </button>
+        </div>
+        {!payCreditsDeployed() ? (
+          <div style={{ fontSize: 12.5, color: '#b45309' }}>Credits need the latest backend deploy before they can be saved.</div>
+        ) : row.credits.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No credits. Add detention, layover, a bonus or a reimbursement to pay {driver.name} extra on this check.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {row.credits.map((c) => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {creditLineLabel(c)}
+                  {(c.date || c.loadRef) && (
+                    <span style={{ color: 'var(--ds-t3)', fontSize: 11.5 }}>
+                      {c.date ? ` · ${fmtShortDate(c.date)}` : ''}{c.loadRef ? ` · ${c.loadRef}` : ''}
+                    </span>
+                  )}
+                </span>
+                <span style={{ color: '#15803d', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>+{money(c.amount)}</span>
+                <button onClick={() => onEditCredit(c)} title="Edit credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Pencil size={12} /></button>
+                <button onClick={() => onRemoveCredit(c)} title="Remove credit" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+              </div>
+            ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
+              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total credits</span>
+              <span style={{ color: '#15803d', fontVariantNumeric: 'tabular-nums' }}>+{money(statement.totalCredits)}</span>
+              <span style={{ width: 40 }} />
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Totals */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 24, padding: '12px 16px', borderTop: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
         <Total label="Total deductions" value={money(statement.totalDeductions)} negative />
         {setting.expensesBeforePercent && <Total label={`Subtotal × ${pct(setting.payPercent)}`} value={money(statement.subtotal)} />}
+        {statement.totalCredits > 0 && <Total label="Credits" value={`+${money(statement.totalCredits)}`} color="#15803d" />}
         <Total label="Check amount" value={money(statement.checkAmount)} strong color={statement.checkAmount >= 0 ? '#15803d' : '#dc2626'} />
       </div>
     </div>

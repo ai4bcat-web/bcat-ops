@@ -10,6 +10,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { DriverPayRow } from '@/hooks/useAmazonPay'
 import { tripPayAmount } from '@/lib/driverPay'
+import { creditLineLabel } from '@/lib/payCredits'
 import { weekLabelLong } from '@/features/driver-pay/week'
 import ivanLogo from '@/assets/ivan-cartage-logo.png'
 
@@ -152,6 +153,25 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
     }
   }
 
+  // ── Credits — extra pay added to the check at 100% (the % model never applies) ──
+  if (row.credits.length) {
+    y += 10
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(9)
+    doc.setTextColor(107, 114, 128)
+    doc.text('CREDITS', M, y)
+    y += 14
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(10)
+    for (const c of row.credits) {
+      doc.setTextColor(55, 65, 81)
+      doc.text(creditLineLabel(c), M, y)
+      doc.setTextColor(21, 128, 61)
+      doc.text(`+${money(c.amount)}`, W - M, y, { align: 'right' })
+      y += 15
+    }
+  }
+
   // ── Totals ──────────────────────────────────────────────────────────────────
   y += 8
   doc.setDrawColor(229, 231, 235)
@@ -168,6 +188,7 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   }
   totalRow('Total deductions', `(${money(statement.totalDeductions)})`, false, [220, 38, 38])
   if (setting.expensesBeforePercent) totalRow(`Subtotal × ${pct(setting.payPercent)}`, money(statement.subtotal))
+  if (statement.totalCredits > 0) totalRow('Total credits', `+${money(statement.totalCredits)}`, false, [21, 128, 61])
   totalRow('CHECK AMOUNT', money(statement.checkAmount), true, statement.checkAmount >= 0 ? [21, 128, 61] : [220, 38, 38])
 
   // ── Footer ──────────────────────────────────────────────────────────────────

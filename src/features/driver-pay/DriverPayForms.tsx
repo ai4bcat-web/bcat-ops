@@ -6,6 +6,8 @@ import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv
 import { parseTripScreenshot, graphqlErrorMessage } from '@/lib/apiClient'
 import { imageToUploadableBase64, imageFromClipboard, screenshotTripToRaw } from '@/lib/screenshotImport'
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
+import { CREDIT_REASONS, DEFAULT_CREDIT_REASON } from '@/lib/payCredits'
+import type { DriverPayCredit, DriverPayCreditInput } from '@/lib/apiClient'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
@@ -49,6 +51,7 @@ function Footer({ onClose, onSave, saving, label: lbl = 'Save' }: { onClose: () 
 
 // ── Add / edit a single trip ────────────────────────────────────────────────
 const numStr = (n: number | null | undefined) => (n == null ? '' : String(n))
+const moneyFmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 export function TripModal({ driverId, periodStart, initial, onSave, onClose }: { driverId: string; periodStart: string; initial?: AmazonTrip; onSave: (t: TripInput) => Promise<void>; onClose: () => void }) {
   const editing = !!initial
   const [f, setF] = useState({
@@ -552,6 +555,77 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
 
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 12 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label="Save settings" />
+    </Modal>
+  )
+}
+
+// ── Credit: extra pay added to a weekly check at 100% (same model as box-truck) ──
+export function CreditModal({ driverId, driverName, periodStart, periodLabel, initial, createdBy, onSave, onClose }: {
+  driverId: string
+  driverName: string
+  periodStart: string
+  periodLabel: string
+  initial?: DriverPayCredit
+  createdBy?: string | null
+  onSave: (c: DriverPayCreditInput) => Promise<void>
+  onClose: () => void
+}) {
+  const editing = !!initial
+  const [f, setF] = useState({
+    reasonCode: initial?.reasonCode ?? DEFAULT_CREDIT_REASON,
+    amount:     numStr(initial?.amount),
+    label:      initial?.label ?? '',
+    date:       initial?.date ?? '',
+    loadRef:    initial?.loadRef ?? '',
+    notes:      initial?.notes ?? '',
+  })
+  const [err, setErr] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
+
+  const reason = CREDIT_REASONS.find((r) => r.code === f.reasonCode)
+  const amount = num(f.amount)
+
+  const save = async () => {
+    if (!f.reasonCode) { setErr('Pick a reason code'); return }
+    if (amount == null || amount <= 0) { setErr('Enter a positive credit amount'); return }
+    setSaving(true)
+    try {
+      await onSave({
+        driverId, periodStart,
+        reasonCode: f.reasonCode,
+        amount,
+        label:   f.label.trim() || null,
+        date:    f.date || null,
+        loadRef: f.loadRef.trim() || null,
+        notes:   f.notes.trim() || null,
+        createdBy: initial?.createdBy ?? createdBy ?? null,
+      })
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
+  }
+
+  return (
+    <Modal title={editing ? 'Edit credit' : 'Add credit'} sub={`Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field l="Reason code *" half>
+          <select style={input} value={f.reasonCode} onChange={(e) => set('reasonCode', e.target.value)}>
+            {CREDIT_REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
+          </select>
+        </Field>
+        <Field l="Amount *" half><input style={input} value={f.amount} onChange={(e) => set('amount', e.target.value)} placeholder="$150.00" /></Field>
+        <Field l="Description"><input style={input} value={f.label} onChange={(e) => set('label', e.target.value)} placeholder={reason?.hint ?? 'What is this credit for?'} /></Field>
+        <Field l="Date earned" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
+        <Field l="Related Load / Trip ID" half><input style={input} value={f.loadRef} onChange={(e) => set('loadRef', e.target.value)} placeholder="111Y19HML" /></Field>
+        <Field l="Internal note"><input style={input} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Approved by…" /></Field>
+      </div>
+
+      <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', fontSize: 12.5, color: 'var(--ds-t2)' }}>
+        Credits are added to the check <b>in full</b> — the driver's pay percentage is not applied.
+        {amount != null && amount > 0 && <> This check goes up by <b style={{ color: '#15803d' }}>{moneyFmt(amount)}</b>.</>}
+      </div>
+
+      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
+      <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? 'Save credit' : 'Add credit'} />
     </Modal>
   )
 }
