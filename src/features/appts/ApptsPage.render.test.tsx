@@ -116,7 +116,7 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
-  it('shows the Batory ladder statuses per row — PU and Del separately', () => {
+  it('shows the Batory ladder statuses inside the time cells — PU and Del separately', () => {
     loads.mockReturnValue([
       load({ id: 'l1', aljexId: 'NEEDED', customer: 'Batory Foods', stops: [
         stop(), stop({ id: 'd', type: 'delivery', apptType: 'tbd', sequence: 1 }),
@@ -125,9 +125,9 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('NEEDED').closest('tr')!
-    // children[0] is the toggles cell; PU status children[1], Del children[2].
-    expect(row.children[1].textContent).toBe('NEED TO REQUEST')
-    expect(row.children[2].textContent).toBe('NEED TO BOOK')
+    // children[0] is the toggles cell; PU time cell children[1], Del children[2].
+    expect(row.children[1].textContent).toContain('NEED TO REQUEST')
+    expect(row.children[2].textContent).toContain('NEED TO BOOK')
   })
 
   it('a booked Batory stop without confirm screenshots grandfathers to REQUESTED', () => {
@@ -135,7 +135,7 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('12345').closest('tr')!
-    expect(row.children[2].textContent).toBe('REQUESTED')
+    expect(row.children[2].textContent).toContain('REQUESTED')
     expect(row.children[2].querySelector('[data-state]')!.getAttribute('data-state')).toBe('requested')
     expect(row.getAttribute('data-outstanding')).toBe('true')
   })
@@ -183,7 +183,7 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
     const row = screen.getByText('BOOKED').closest('tr')!
     expect(row.getAttribute('data-outstanding')).toBe('true')
-    expect(row.children[1].textContent).toBe('RATECON NEEDED')
+    expect(row.children[1].textContent).toContain('RATECON NEEDED')
   })
 
   it('a non-Batory booking confirms from the RATECON on the load', () => {
@@ -193,7 +193,8 @@ describe('ApptsPage', () => {
     } as Partial<Load>)])
     render(<ApptsPage />)
     const row = screen.getByText('ONESHOT').closest('tr')!
-    expect(row.children[1].textContent).toBe('CONFIRMED')
+    expect(row.children[1].textContent).toContain('CONFIRMED')
+    expect(row.children[1].textContent).toContain('09:30')
     expect(row.getAttribute('data-outstanding')).toBe('false')
   })
 
@@ -211,7 +212,7 @@ describe('ApptsPage', () => {
     })])
     render(<ApptsPage />)
     const row = screen.getByText('PROVEN').closest('tr')!
-    expect(row.children[1].textContent).toBe('CONFIRMED')
+    expect(row.children[1].textContent).toContain('CONFIRMED')
     expect(row.children[1].querySelector('[data-state]')!.getAttribute('data-state')).toBe('confirmed')
   })
 
@@ -222,7 +223,7 @@ describe('ApptsPage', () => {
                      apptProofs: { e2open: 'appt-proofs/a' } })],
     })])
     render(<ApptsPage />)
-    expect(screen.getByText('HALFPROOF').closest('tr')!.children[1].textContent).toBe('REQUESTED')
+    expect(screen.getByText('HALFPROOF').closest('tr')!.children[1].textContent).toContain('REQUESTED')
   })
 
   it('"Open only" hides the settled rows and shows the open count', () => {
@@ -262,17 +263,19 @@ describe('ApptsPage', () => {
     expect(hist.textContent).toContain('ryne@bcatcorp.com')
   })
 
-  it('shows the scheduled pickup and delivery times as the last two columns', () => {
-    loads.mockReturnValue([pair()])
+  it('shows the status-labelled pickup and delivery times as the FIRST two columns', () => {
+    loads.mockReturnValue([pair({ customer: 'Batory Foods' })])
     render(<ApptsPage />)
 
     const headers = screen.getAllByRole('table')[0].querySelectorAll('th')
-    // Columns: PU, Del, Pro #, PU #, Customer, Location, Date, Driver, PU time, Delivery time
-    expect(headers[headers.length - 2].textContent).toContain('PU time')
-    expect(headers[headers.length - 1].textContent).toContain('Delivery time')
+    // Columns: [toggles], PU time, Delivery time, Pro #, PU #, Customer, Location, Date, Driver
+    expect(headers[1].textContent).toContain('PU time')
+    expect(headers[2].textContent).toContain('Delivery time')
 
-    // The delivery has a real time (24h, as everywhere else in the app).
-    expect(screen.getByText('14:30')).toBeTruthy()
+    // The delivery has a real time (24h) with its ladder status in the same cell.
+    const row = screen.getByText('12345').closest('tr')!
+    expect(row.children[2].textContent).toContain('14:30')
+    expect(row.children[2].textContent).toContain('REQUESTED')
   })
 
   it('sets a time in place and writes it to the right stop', async () => {

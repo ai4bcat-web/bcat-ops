@@ -173,15 +173,17 @@ function HistoryRow({ events, colSpan }: { events: ApptHistoryEvent[]; colSpan: 
   )
 }
 
+// Times lead — the status-labelled PU and Delivery appointments are the first thing a
+// dispatcher scans for ("what time did we request / need to book / confirm").
 const COLUMNS: { key: ApptSortKey; label: string }[] = [
+  { key: 'pickupTime',   label: 'PU time' },
+  { key: 'deliveryTime', label: 'Delivery time' },
   { key: 'aljexId',      label: 'Pro #' },
   { key: 'pickupNumber', label: 'PU #' },
   { key: 'customer',     label: 'Customer' },
   { key: 'location',     label: 'Location' },
   { key: 'appt',         label: 'Date' },
   { key: 'driver',       label: 'Driver' },
-  { key: 'pickupTime',   label: 'PU time' },
-  { key: 'deliveryTime', label: 'Delivery time' },
 ]
 
 /**
@@ -191,11 +193,13 @@ const COLUMNS: { key: ApptSortKey; label: string }[] = [
  * through the same ApptEditPopover, so a time set here and a time set on the calendar are
  * the same operation.
  */
-function ApptTimeCell({ load, refr, apptField, typeField }: {
+function ApptTimeCell({ load, refr, apptField, typeField, kind, status }: {
   load: Load | undefined
   refr: ApptRef
   apptField: 'pickupAppt' | 'deliveryAppt'
   typeField: 'pickupApptType' | 'deliveryApptType'
+  kind: ApptNeedKind | null
+  status: EffectiveApptStatus | null
 }) {
   const [editing, setEditing] = useState(false)
   const label = apptTimeLabel(refr.appt, refr.apptType, refr.apptEnd)
@@ -215,6 +219,7 @@ function ApptTimeCell({ load, refr, apptField, typeField }: {
           ⚠ CHANGE NEEDED{stop?.apptChangeTo ? ` → ${formatDateShort(stop.apptChangeTo)} ${new Date(stop.apptChangeTo).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}` : ''}
         </div>
       )}
+      <div style={{ marginBottom: 3 }}><KindChip kind={kind} status={status} /></div>
       <button
         onClick={() => setEditing(true)}
         title="Set this time — same as editing it on the calendar"
@@ -329,8 +334,6 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
             <thead>
               <tr>
                 <th style={{ ...th, width: 28 }} aria-label="History" />
-                <th style={th}>PU</th>
-                <th style={th}>Del</th>
                 {COLUMNS.map((c) => (
                   <SortHeader
                     key={c.key}
@@ -383,8 +386,22 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     </button>
                     )}
                   </td>
-                  <td style={td}><KindChip kind={r.pickupKind} status={r.pickupStatus} /></td>
-                  <td style={td}><KindChip kind={r.deliveryKind} status={r.deliveryStatus} /></td>
+                  <ApptTimeCell
+                    load={loadRec}
+                    refr={r.pickup}
+                    apptField="pickupAppt"
+                    typeField="pickupApptType"
+                    kind={r.pickupKind}
+                    status={r.pickupStatus}
+                  />
+                  <ApptTimeCell
+                    load={loadRec}
+                    refr={r.delivery}
+                    apptField="deliveryAppt"
+                    typeField="deliveryApptType"
+                    kind={r.deliveryKind}
+                    status={r.deliveryStatus}
+                  />
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.pickupNumber || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.customer || '—'}</td>
@@ -409,28 +426,16 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                       </div>
                     )}
                   </td>
-                  <ApptTimeCell
-                    load={loadsById.get(r.loadId)}
-                    refr={r.pickup}
-                    apptField="pickupAppt"
-                    typeField="pickupApptType"
-                  />
-                  <ApptTimeCell
-                    load={loadsById.get(r.loadId)}
-                    refr={r.delivery}
-                    apptField="deliveryAppt"
-                    typeField="deliveryApptType"
-                  />
                 </tr>
                 {showProofs && batory && loadRec && (
                   <tr>
-                    <td colSpan={3 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--ds-bg)' }} onClick={(e) => e.stopPropagation()}>
+                    <td colSpan={1 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--ds-bg)' }} onClick={(e) => e.stopPropagation()}>
                       <ApptProofPanel load={loadRec} updateLoad={updateLoad} />
                     </td>
                   </tr>
                 )}
                 {showHistory && (
-                  <HistoryRow events={loadRec ? apptHistory(loadRec, auditLog) : []} colSpan={3 + COLUMNS.length} />
+                  <HistoryRow events={loadRec ? apptHistory(loadRec, auditLog) : []} colSpan={1 + COLUMNS.length} />
                 )}
                 </Fragment>
                 )
