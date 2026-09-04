@@ -111,11 +111,28 @@ function HistoryRow({ events, colSpan }: { events: ApptHistoryEvent[]; colSpan: 
               <div key={i} style={{ display: 'flex', gap: 10, fontSize: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
                 <span style={{ color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', minWidth: 170 }}>{formatDateTime(ev.at)}</span>
                 <span style={{ fontWeight: 600, color: 'var(--ds-t2)', minWidth: 52, textTransform: 'capitalize' }}>{ev.stopKind}</span>
-                <span style={{ color: 'var(--ds-t3)', textDecoration: 'line-through' }}>{ev.from}</span>
-                <span style={{ color: 'var(--ds-t3)' }}>→</span>
-                <span style={{ fontWeight: 600, color: ev.booked ? GREEN : ev.changed ? AMBER : 'var(--ds-t1)' }}>{ev.to}</span>
-                {ev.booked && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>booked</span>}
-                {ev.changed && <span style={{ fontSize: 10.5, fontWeight: 700, color: AMBER }}>changed after booking</span>}
+                {ev.kind === 'appt' && (
+                  <>
+                    <span style={{ color: 'var(--ds-t3)', textDecoration: 'line-through' }}>{ev.from}</span>
+                    <span style={{ color: 'var(--ds-t3)' }}>→</span>
+                    <span style={{ fontWeight: 600, color: ev.booked ? GREEN : ev.changed ? AMBER : 'var(--ds-t1)' }}>{ev.to}</span>
+                    {ev.booked && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>booked</span>}
+                    {ev.changed && <span style={{ fontSize: 10.5, fontWeight: 700, color: AMBER }}>changed after booking</span>}
+                    {ev.resolvedMove && <span style={{ fontSize: 10.5, fontWeight: 700, color: GREEN }}>move request resolved</span>}
+                  </>
+                )}
+                {ev.kind === 'move-requested' && (
+                  <span style={{ fontWeight: 700, color: AMBER }}>⚠ move requested — appt was {ev.from}</span>
+                )}
+                {ev.kind === 'move-withdrawn' && (
+                  <span style={{ fontWeight: 600, color: 'var(--ds-t2)' }}>move request withdrawn (no change made)</span>
+                )}
+                {ev.kind === 'proof-added' && (
+                  <span style={{ fontWeight: 600, color: GREEN }}>📎 {ev.proofLabel} screenshot added</span>
+                )}
+                {ev.kind === 'proof-removed' && (
+                  <span style={{ fontWeight: 600, color: RED }}>📎 {ev.proofLabel} screenshot removed</span>
+                )}
                 <span style={{ color: 'var(--ds-t3)' }}>by {ev.user || '—'}</span>
               </div>
             ))}

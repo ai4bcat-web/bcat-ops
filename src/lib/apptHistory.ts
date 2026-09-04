@@ -18,11 +18,21 @@ import type { ApptType, AuditLogEntry, Load, Stop, StopType } from '@/types'
  * so the comparison has to be on the appointment fields, not on "was `stops` in changes".
  */
 
+export type ApptHistoryEventKind =
+  | 'appt'            // the appointment itself was set, booked, or changed
+  | 'move-requested'  // someone flagged the booked appt NEEDS TO BE MOVED
+  | 'move-withdrawn'  // the flag was cleared by hand, without a rebooking
+  | 'proof-added'     // a confirmation screenshot (E2Open / email) was uploaded
+  | 'proof-removed'   // a confirmation screenshot was taken off
+
 export interface ApptHistoryEvent {
   /** ISO instant of the save. */
   at: string
   user: string
   stopKind: StopType
+  kind: ApptHistoryEventKind
+  /** For proof events: which screenshot. */
+  proofLabel?: string
   /** Before, as a person reads it — "Aug 20, 2026 · NEED"; "—" when there was none. */
   from: string
   /** After, same format. */
@@ -31,9 +41,16 @@ export interface ApptHistoryEvent {
   booked: boolean
   /** True when a time that was already booked got moved or unbooked. */
   changed: boolean
+  /** True when this appt change is the one that RESOLVED an open move request. */
+  resolvedMove?: boolean
 }
 
-interface ApptSnap { appt: string; apptType: ApptType; apptEnd: string }
+interface ApptSnap {
+  appt: string; apptType: ApptType; apptEnd: string
+  moveRequested: boolean
+  /** S3 keys (not booleans): a REPLACED screenshot is a new confirmation and must show. */
+  e2open: string; email: string
+}
 
 const snapKey = (s: ApptSnap) => `${s.appt}|${s.apptType}|${s.apptEnd}`
 
@@ -87,7 +104,11 @@ function sideSnaps(
   }
   const stops = getStops(merged)
   const toSnap = (s: Stop | undefined): ApptSnap | null =>
-    s ? { appt: s.appt ?? '', apptType: s.apptType ?? 'exact', apptEnd: s.apptEnd ?? '' } : null
+    s ? {
+      appt: s.appt ?? '', apptType: s.apptType ?? 'exact', apptEnd: s.apptEnd ?? '',
+      moveRequested: !!s.apptMoveRequested,
+      e2open: s.apptProofs?.e2open ?? '', email: s.apptProofs?.email ?? '',
+    } : null
   return {
     pickup: toSnap(stops.find((s) => s.type === 'pickup')),
     delivery: toSnap([...stops].reverse().find((s) => s.type === 'delivery')),
@@ -119,18 +140,40 @@ export function apptHistory(load: Load, entries: AuditLogEntry[]): ApptHistoryEv
     for (const kind of ['pickup', 'delivery'] as const) {
       const a = before[kind], b = after[kind]
       if (!a && !b) continue
-      if (a && b && snapKey(a) === snapKey(b)) continue
-      if (!a && b && !b.appt) continue // created with nothing scheduled yet
-      const wasBooked = isBooked(a), nowBooked = isBooked(b)
-      out.push({
-        at: e.createdAt,
-        user: e.user,
-        stopKind: kind,
-        from: describe(a),
-        to: describe(b),
-        booked: !wasBooked && nowBooked,
-        changed: wasBooked,
-      })
+      const base = { at: e.createdAt, user: e.user, stopKind: kind }
+
+      // The appointment itself moved.
+      if (b && (!a || snapKey(a) !== snapKey(b)) && !(!a && !b.appt)) {
+        const wasBooked = isBooked(a), nowBooked = isBooked(b)
+        out.push({
+          ...base, kind: 'appt',
+          from: describe(a), to: describe(b),
+          booked: !wasBooked && nowBooked,
+          changed: !!a && wasBooked,
+          // A rebooking on a flagged stop is the resolution the move request waited for.
+          resolvedMove: !!a?.moveRequested,
+        })
+      }
+
+      // Move-request lifecycle: who asked, and a by-hand withdrawal. (Resolution via a
+      // rebooking is carried on the appt event above rather than duplicated.)
+      if (a && b && !a.moveRequested && b.moveRequested) {
+        out.push({ ...base, kind: 'move-requested', from: describe(a), to: describe(b), booked: false, changed: false })
+      } else if (a && b && a.moveRequested && !b.moveRequested && snapKey(a) === snapKey(b)) {
+        out.push({ ...base, kind: 'move-withdrawn', from: describe(a), to: describe(b), booked: false, changed: false })
+      }
+
+      // Confirmation screenshots — each slot's own add/remove line, so "did we get the
+      // screenshots for THIS booking" is answerable from the order of events alone.
+      for (const [slot, label] of [['e2open', 'E2Open update'], ['email', 'Email confirmation']] as const) {
+        const had = a?.[slot] ?? '', has = b?.[slot] ?? ''
+        if (had === has || !b) continue
+        // A replaced screenshot (different key) counts as a fresh confirmation added.
+        out.push({
+          ...base, kind: has ? 'proof-added' : 'proof-removed', proofLabel: label,
+          from: describe(a), to: describe(b), booked: false, changed: false,
+        })
+      }
     }
   }
 

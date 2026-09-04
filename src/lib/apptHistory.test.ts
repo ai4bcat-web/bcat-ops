@@ -79,3 +79,82 @@ describe('apptHistory', () => {
     expect(ev).toEqual([])
   })
 })
+
+describe('apptHistory — move requests and confirmation screenshots', () => {
+  const booked = (over: Partial<Stop> = {}) =>
+    stop({ appt: fromDateTimeInput('2026-08-20T09:30'), ...over })
+
+  it('shows WHO asked for the appointment to be moved', () => {
+    const before = [booked()]
+    const after = [booked({ apptMoveRequested: true })]
+    const ev = apptHistory(load(after), [entry({ stops: { from: before, to: after } }, '2026-09-04T10:00:00.000Z', 'ryne')])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toMatchObject({ kind: 'move-requested', user: 'ryne', from: 'Aug 20, 2026 · 09:30' })
+  })
+
+  it('marks the rebooking that resolved the move request', () => {
+    const before = [booked({ apptMoveRequested: true, apptMoveTaskId: 't1' })]
+    const after = [booked({ appt: fromDateTimeInput('2026-08-21T14:00'), apptMoveRequested: false, apptMoveTaskId: null })]
+    const ev = apptHistory(load(after), [entry({ stops: { from: before, to: after } })])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toMatchObject({ kind: 'appt', changed: true, resolvedMove: true, to: 'Aug 21, 2026 · 14:00' })
+  })
+
+  it('records each confirmation screenshot as its own event, with who uploaded it', () => {
+    const s0 = [booked()]
+    const s1 = [booked({ apptProofs: { e2open: 'k1' } })]
+    const s2 = [booked({ apptProofs: { e2open: 'k1', email: 'k2' } })]
+    const ev = apptHistory(load(s2), [
+      entry({ stops: { from: s0, to: s1 } }, '2026-09-04T10:00:00.000Z', 'dennis'),
+      entry({ stops: { from: s1, to: s2 } }, '2026-09-04T11:00:00.000Z', 'dennis'),
+    ])
+    expect(ev.map((e) => [e.kind, e.proofLabel])).toEqual([
+      ['proof-added', 'Email confirmation'],
+      ['proof-added', 'E2Open update'],
+    ])
+    expect(ev[0].user).toBe('dennis')
+  })
+
+  it('a removed screenshot is visible too — the confirmation is no longer on file', () => {
+    const before = [booked({ apptProofs: { e2open: 'k1', email: 'k2' } })]
+    const after = [booked({ apptProofs: { e2open: 'k1', email: null } })]
+    const ev = apptHistory(load(after), [entry({ stops: { from: before, to: after } })])
+    expect(ev).toHaveLength(1)
+    expect(ev[0]).toMatchObject({ kind: 'proof-removed', proofLabel: 'Email confirmation' })
+  })
+
+  it('withdrawing a move request by hand shows as its own line', () => {
+    const before = [booked({ apptMoveRequested: true })]
+    const after = [booked({ apptMoveRequested: false })]
+    const ev = apptHistory(load(after), [entry({ stops: { from: before, to: after } })])
+    expect(ev.map((e) => e.kind)).toEqual(['move-withdrawn'])
+  })
+
+  it('the full lifecycle reads in order: booked → move asked → rebooked → re-confirmed', () => {
+    const s0 = [stop({ apptType: 'tbd' })]
+    const s1 = [booked()]
+    const s2 = [booked({ apptProofs: { e2open: 'a', email: 'b' } })]
+    const s3 = [booked({ apptProofs: { e2open: 'a', email: 'b' }, apptMoveRequested: true, apptMoveTaskId: 't1' })]
+    const s4 = [booked({ appt: fromDateTimeInput('2026-08-21T14:00'), apptProofs: { e2open: 'a', email: 'b' } })]
+    const s5 = [booked({ appt: fromDateTimeInput('2026-08-21T14:00'), apptProofs: { e2open: 'c', email: 'd' } })]
+    const hist = [
+      entry({ stops: { from: s0, to: s1 } }, '2026-09-01T10:00:00.000Z', 'ryne'),
+      entry({ stops: { from: s1, to: s2 } }, '2026-09-01T11:00:00.000Z', 'dennis'),
+      entry({ stops: { from: s2, to: s3 } }, '2026-09-03T09:00:00.000Z', 'ryne'),
+      entry({ stops: { from: s3, to: s4 } }, '2026-09-03T15:00:00.000Z', 'dennis'),
+      entry({ stops: { from: s4, to: s5 } }, '2026-09-03T16:00:00.000Z', 'dennis'),
+    ]
+    const ev = apptHistory(load(s5), hist)
+    // Newest first: fresh confirmations for the new time (replaced screenshots), the
+    // resolving rebooking, the ask, the original confirmations, the booking.
+    expect(ev.map((e) => e.kind)).toEqual([
+      'proof-added', 'proof-added',
+      'appt',
+      'move-requested',
+      'proof-added', 'proof-added',
+      'appt',
+    ])
+    expect(ev.find((e) => e.kind === 'move-requested')!.user).toBe('ryne')
+    expect(ev[2]).toMatchObject({ kind: 'appt', resolvedMove: true })
+  })
+})
