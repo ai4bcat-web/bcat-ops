@@ -27,7 +27,7 @@ export const APPT_CSV_HEADER = [
  */
 const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
 
-const STATUS_LABEL: Record<string, string> = { need: 'NEED', pending: 'Pending' }
+const STATUS_LABEL: Record<string, string> = { need: 'NEED', pending: 'Pending', move: 'MOVE' }
 
 /** One CSV row per queue row (shipment), in the order given. */
 export function apptRowsToCsv(

@@ -38,6 +38,14 @@ describe('apptNeedKind', () => {
     expect(apptNeedKind(stop())).toBeNull()
   })
 
+  it('flags a booked stop marked needs-to-be-moved as move', () => {
+    expect(apptNeedKind(stop({ apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00'), apptMoveRequested: true }))).toBe('move')
+  })
+
+  it('NEED beats move — an unbooked stop is need, whatever the flag says', () => {
+    expect(apptNeedKind(stop({ apptType: 'tbd', apptMoveRequested: true }))).toBe('need')
+  })
+
   it('leaves FCFS and range alone — neither needs a call', () => {
     // FCFS: any arrival time works. Range: a window is already agreed.
     expect(apptNeedKind(stop({ apptType: 'fcfs', appt: fromDateInput('2026-08-20') }))).toBeNull()

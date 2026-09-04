@@ -15,7 +15,11 @@ vi.mock('@/hooks/useLoads', () => ({ useLoads: () => ({ updateLoad }) }))
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: unknown) => unknown) => sel({ currentUserEmail: 'ryne@bcatcorp.com' }),
 }))
-vi.mock('@/lib/apiClient', () => ({ notifyApptNeeded: vi.fn().mockResolvedValue(null) }))
+vi.mock('@/lib/apiClient', () => ({
+  notifyApptNeeded: vi.fn().mockResolvedValue(null),
+  createApptMoveTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
+  updateIntakeItem: vi.fn().mockResolvedValue({}),
+}))
 
 import { ApptEditPopover } from './ApptEditPopover'
 

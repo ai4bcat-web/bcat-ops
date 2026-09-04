@@ -195,3 +195,30 @@ describe('appointment updates reply in the asking thread', () => {
     expect(res.ts).toBe('1712345678.000900')
   })
 })
+
+describe('needs-to-be-moved kinds', () => {
+  it('move: alerts that the booked appt must be MOVED and mentions the Dennis task', async () => {
+    const res = await handler(event({ kind: 'move', apptLabel: 'Aug 20, 2026 · 09:30' }) as never)
+    expect(res).toEqual({ ok: true, ts: '1.1' })
+    const body = postBody()
+    expect(body.text).toContain('NEEDS TO BE MOVED')
+    expect(body.text).toContain('Aug 20, 2026 · 09:30')
+    expect(body.text).toContain('Dennis')
+    expect(body.text).toContain('Pro# 12345')
+  })
+
+  it('move replies in the existing thread when a ts is passed', async () => {
+    await handler(event({ kind: 'move', threadTs: '1699.42' }) as never)
+    const raw = JSON.parse(fetchMock.mock.calls[0][1]?.body ?? '{}') as { thread_ts?: string }
+    expect(raw.thread_ts).toBe('1699.42')
+  })
+
+  it('moved: replies in the thread that the appt was rebooked and the task closed', async () => {
+    await handler(event({ kind: 'moved', threadTs: '1699.42', apptLabel: 'Aug 21, 2026 · 14:00' }) as never)
+    const raw = JSON.parse(fetchMock.mock.calls[0][1]?.body ?? '{}') as { thread_ts?: string; text: string }
+    expect(raw.thread_ts).toBe('1699.42')
+    expect(raw.text).toContain('appt moved')
+    expect(raw.text).toContain('Aug 21, 2026 · 14:00')
+    expect(raw.text.toLowerCase()).toContain('task closed')
+  })
+})

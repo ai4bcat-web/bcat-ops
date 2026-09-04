@@ -6,11 +6,12 @@ import type { ApptType, Load, Stop } from '@/types'
  * Why a stop is in the queue.
  *  - `need`    — someone explicitly flagged it NEED. A human has decided this must be booked.
  *  - `pending` — no time has been set yet. Usually a freshly created load.
+ *  - `move`    — booked, but flagged as NEEDS TO BE MOVED; the booking must be redone.
  *
  * FCFS and range stops are NOT in the queue: first-come-first-serve means any arrival time
  * is fine, and a range already has an agreed window. Neither needs a call.
  */
-export type ApptNeedKind = 'need' | 'pending'
+export type ApptNeedKind = 'need' | 'pending' | 'move'
 
 /**
  * A pointer to one editable appointment on a load — enough to both display it and write
@@ -71,6 +72,8 @@ export function loadApptRefs(load: Load): { pickup: ApptRef; delivery: ApptRef }
 export function apptNeedKind(stop: Stop): ApptNeedKind | null {
   const type = stop.apptType ?? 'exact'
   if (type === 'tbd') return 'need'
+  // A booked appointment flagged for rescheduling is open work again.
+  if (stop.apptMoveRequested) return 'move'
   // FCFS and range are settled by definition.
   if (type === 'fcfs' || type === 'range') return null
   return apptHasTime(stop.appt) ? null : 'pending'

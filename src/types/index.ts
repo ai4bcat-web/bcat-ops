@@ -248,6 +248,10 @@ export interface Stop {
    * the appointment it proves.
    */
   apptProofs?: { e2open?: string | null; email?: string | null } | null
+  /** A booked appointment that has to be RESCHEDULED — set from the appt editor. */
+  apptMoveRequested?: boolean
+  /** IntakeItem id of the open "move this appt" task, so booking the change closes it. */
+  apptMoveTaskId?: string | null
 }
 
 export interface Load {

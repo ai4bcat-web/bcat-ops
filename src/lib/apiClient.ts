@@ -603,6 +603,54 @@ export async function createIntakeItem(input: {
   return result.data.createIntakeItem
 }
 
+/**
+ * The task a NEEDS-TO-BE-MOVED appointment creates: an IntakeItem assigned to Dennis,
+ * shown on the Appt Changes page. externalId carries load+stop so the record is
+ * traceable; the timestamp suffix lets the same stop be re-flagged after a past task
+ * was completed without colliding with it.
+ */
+export const APPT_MOVE_ASSIGNEE = 'dennis@bcatcorp.com'
+export const APPT_MOVE_PREFIX = 'appt-move:'
+
+export async function createApptMoveTask(args: {
+  loadId: string
+  stopId: string
+  stopKind: 'pickup' | 'delivery'
+  aljexId?: string | null
+  pickupNumber?: string | null
+  customer?: string | null
+  location?: string | null
+  apptLabel?: string | null
+  actorName?: string | null
+}): Promise<IntakeItem> {
+  const kind = args.stopKind === 'delivery' ? 'Delivery' : 'Pickup'
+  const ref = [args.aljexId ? `Pro# ${args.aljexId}` : null, args.customer].filter(Boolean).join(' · ')
+  const result = await client.graphql({
+    query: `mutation CreateIntakeItem($input: CreateIntakeItemInput!) { createIntakeItem(input: $input) { ${INTAKE_FIELDS} } }`,
+    variables: {
+      input: {
+        source: 'IVAN_CARTAGE',
+        status: 'NEW',
+        subject: `Move ${kind.toLowerCase()} appt — ${ref || 'load'}`,
+        bodyText: [
+          `${kind} appointment needs to be MOVED.`,
+          args.apptLabel ? `Currently booked: ${args.apptLabel}` : null,
+          args.location ? `Location: ${args.location}` : null,
+          args.pickupNumber ? `PU# ${args.pickupNumber}` : null,
+          args.actorName ? `Flagged by ${args.actorName}` : null,
+        ].filter(Boolean).join('\n'),
+        assignedTo: APPT_MOVE_ASSIGNEE,
+        externalSource: 'manual',
+        externalId: `${APPT_MOVE_PREFIX}${args.loadId}:${args.stopId}:${Date.now()}`,
+        proNumber: args.aljexId ?? null,
+        builtLoadId: args.loadId,
+        receivedAt: new Date().toISOString(),
+      },
+    },
+  }) as { data: { createIntakeItem: IntakeItem } }
+  return result.data.createIntakeItem
+}
+
 export async function notifySlackStatusChange(args: {
   intakeItemId: string
   oldStatus?: string | null
@@ -1979,7 +2027,7 @@ export async function deleteDriverPayCredit(id: string): Promise<void> {
  */
 export async function notifyApptNeeded(args: {
   stopKind: 'pickup' | 'delivery'
-  kind?: 'needed' | 'updated'
+  kind?: 'needed' | 'updated' | 'move' | 'moved'
   threadTs?: string | null
   apptLabel?: string | null
   aljexId?: string | null

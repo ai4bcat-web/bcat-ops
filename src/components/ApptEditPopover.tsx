@@ -51,6 +51,10 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isPending ? 'pending' : (srcType ?? 'exact'))
   const [endVal,  setEndVal]  = useState(initEnd)
   const [saving,  setSaving]  = useState(false)
+  // "This booked appt has to be RESCHEDULED" — creates the Dennis task + Slack alert on
+  // save (the transition is detected by apptNotices, same as every other notice).
+  const [moveReq, setMoveReq] = useState(!!stop?.apptMoveRequested)
+  const canFlagMove = !!stop && (srcType ?? 'exact') !== 'tbd' && !isPending
 
   const datePart = dateVal.slice(0, 10)
   const timePart = dateVal.slice(11, 16)
@@ -88,6 +92,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
 
       if (stop) {
         const stopPatch: Partial<Stop> = { apptType: effectiveType, apptEnd: endIso }
+        if (canFlagMove) stopPatch.apptMoveRequested = moveReq
         if (iso) stopPatch.appt = iso
         next = updateStop(load, stop.id, stopPatch)
         await updateLoad(load.id, { stops: next })
@@ -155,6 +160,15 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
         <option value="fcfs">FCFS</option>
         <option value="tbd">NEED (TBD)</option>
       </select>
+
+      {canFlagMove && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer',
+          color: moveReq ? '#b45309' : 'var(--ds-t3)', fontWeight: moveReq ? 700 : 500 }}>
+          <input type="checkbox" checked={moveReq} onChange={(e) => setMoveReq(e.target.checked)}
+            aria-label="Needs to be moved" />
+          Needs to be moved{moveReq ? ' — creates a task for Dennis + alerts #appts-ivan' : ''}
+        </label>
+      )}
 
       {isRange && (
         <>

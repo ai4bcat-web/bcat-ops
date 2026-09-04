@@ -38,6 +38,8 @@ vi.mock('@/lib/apiClient', () => ({
   uploadApptProof: vi.fn().mockResolvedValue('appt-proofs/x'),
   getApptProofUrl: vi.fn().mockResolvedValue('https://example.com/x.jpg'),
   deleteApptProof: vi.fn().mockResolvedValue(undefined),
+  createApptMoveTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
+  updateIntakeItem: vi.fn().mockResolvedValue({}),
 }))
 
 import { ApptsPage } from './ApptsPage'

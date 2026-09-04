@@ -11,12 +11,14 @@ import type { Stop, StopType } from '@/types'
  * decide for themselves.
  */
 
-export type ApptNoticeKind = 'needed' | 'updated'
+export type ApptNoticeKind = 'needed' | 'updated' | 'move' | 'moved'
 
 export interface ApptNotice {
   kind: ApptNoticeKind
   stopId: string
   stopKind: StopType
+  /** For 'moved': the open move-task to mark DONE. */
+  moveTaskId?: string | null
   /** Reply in this Slack thread; absent means post a new top-level message. */
   threadTs?: string
   /**
@@ -66,7 +68,27 @@ export function apptNotices(next: Stop[], prev: Stop[] = []): ApptNotice[] {
       continue
     }
 
+    // Newly flagged NEEDS TO BE MOVED: alert the channel (in-thread when one exists)
+    // and let the sender open the Dennis task. One notice — not also an 'updated'.
+    if (s.apptMoveRequested && !was?.apptMoveRequested) {
+      out.push({ kind: 'move', stopId: s.id, stopKind: s.type, threadTs: s.apptThreadTs, apptLabel: label })
+      continue
+    }
+
     if (!was) continue
+
+    // The move request is being RESOLVED — the appointment changed (or the flag was
+    // cleared by hand). Reply in the thread and close the task.
+    const apptMoved =
+      s.appt !== was.appt || (s.apptEnd ?? '') !== (was.apptEnd ?? '') || key(s) !== key(was)
+    if (was.apptMoveRequested && (apptMoved || !s.apptMoveRequested)) {
+      out.push({
+        kind: 'moved', stopId: s.id, stopKind: s.type,
+        threadTs: s.apptThreadTs, apptLabel: label, moveTaskId: was.apptMoveTaskId ?? null,
+      })
+      continue
+    }
+    if (s.apptMoveRequested) continue // still flagged, nothing new — stay quiet
 
     // The appointment itself moved: a different instant, a different window, or the type
     // changed (NEED → a real booking is exactly what the thread was waiting to hear).

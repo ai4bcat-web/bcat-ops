@@ -163,3 +163,57 @@ describe('apptNotices — several stops at once', () => {
     ])
   })
 })
+
+describe('apptNotices — needs to be moved', () => {
+  const t1 = fromDateTimeInput('2026-08-20T09:30')
+  const t2 = fromDateTimeInput('2026-08-20T13:00')
+  const booked = (over: Partial<Stop> = {}) => stop({ appt: t1, ...over })
+
+  it('flagging a booked stop yields a move alert (new post without a thread)', () => {
+    const out = apptNotices([booked({ apptMoveRequested: true })], [booked()])
+    expect(out).toEqual([
+      { kind: 'move', stopId: 's1', stopKind: 'pickup', threadTs: undefined, apptLabel: 'Aug 20, 2026 · 09:30' },
+    ])
+  })
+
+  it('flagging replies in the existing thread when one exists', () => {
+    const out = apptNotices(
+      [booked({ apptMoveRequested: true, apptThreadTs: '1.1' })],
+      [booked({ apptThreadTs: '1.1' })],
+    )
+    expect(out[0]).toMatchObject({ kind: 'move', threadTs: '1.1' })
+  })
+
+  it('re-saving a still-flagged stop stays quiet', () => {
+    const s = [booked({ apptMoveRequested: true })]
+    expect(apptNotices(s, s)).toEqual([])
+  })
+
+  it('changing the time on a flagged stop resolves it — moved, carrying the task id', () => {
+    const out = apptNotices(
+      [booked({ appt: t2, apptMoveRequested: true, apptMoveTaskId: 'task-9', apptThreadTs: '1.1' })],
+      [booked({ apptMoveRequested: true, apptMoveTaskId: 'task-9', apptThreadTs: '1.1' })],
+    )
+    expect(out).toEqual([{
+      kind: 'moved', stopId: 's1', stopKind: 'pickup', threadTs: '1.1',
+      apptLabel: 'Aug 20, 2026 · 13:00', moveTaskId: 'task-9',
+    }])
+  })
+
+  it('withdrawing the flag by hand also resolves it', () => {
+    const out = apptNotices(
+      [booked({ apptMoveRequested: false, apptMoveTaskId: null })],
+      [booked({ apptMoveRequested: true, apptMoveTaskId: 'task-9' })],
+    )
+    expect(out.map((n) => n.kind)).toEqual(['moved'])
+    expect(out[0].moveTaskId).toBe('task-9')
+  })
+
+  it('flagging NEED wins over move — an unbooked stop cannot be "moved"', () => {
+    const out = apptNotices(
+      [booked({ apptType: 'tbd', apptMoveRequested: true })],
+      [booked()],
+    )
+    expect(out.map((n) => n.kind)).toEqual(['needed'])
+  })
+})

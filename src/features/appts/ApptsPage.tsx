@@ -57,7 +57,7 @@ function sectionTitle(dateKey: string): string {
   return `${weekday}, ${date}`
 }
 
-const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pending' }
+const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pending', move: 'MOVE' }
 
 /**
  * Booking-state chip: green Booked, red NEED / Pending.
@@ -68,14 +68,15 @@ const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pen
  */
 function KindChip({ kind }: { kind: ApptNeedKind | null }) {
   const booked = !kind
+  const move = kind === 'move'
   return (
     <span
       data-state={booked ? 'booked' : kind}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
-        background: booked ? 'var(--ds-green-bg)' : 'var(--ds-red-soft)',
-        color: booked ? GREEN : RED,
+        background: booked ? 'var(--ds-green-bg)' : move ? 'var(--ds-amber-soft)' : 'var(--ds-red-soft)',
+        color: booked ? GREEN : move ? AMBER : RED,
       }}
     >
       {booked ? <CheckCircle2 size={11} /> : <CircleAlert size={11} />}
@@ -154,6 +155,12 @@ function ApptTimeCell({ load, refr, apptField, typeField }: {
 
   return (
     <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      {stop?.apptMoveRequested && (
+        <div role="alert" style={{ fontSize: 10, fontWeight: 700, color: AMBER, background: 'var(--ds-amber-soft)',
+          borderRadius: 4, padding: '1px 5px', marginBottom: 3, display: 'inline-block', whiteSpace: 'nowrap' }}>
+          ⚠ NEEDS TO BE MOVED
+        </div>
+      )}
       <button
         onClick={() => setEditing(true)}
         title="Set this time — same as editing it on the calendar"

@@ -81,12 +81,20 @@ function stopFormToStop(
   s: StopFormValue,
   sequence: number,
   prev?: { type?: Stop['apptType']; value?: string },
+  was?: Stop,
 ): Stop {
   // FCFS is always date-only. NEED and Exact are date-only until someone types a time —
   // that's what makes an appointment read "Pending" instead of inventing midnight.
   const dateOnly =
     s.apptType === 'fcfs' || ((s.apptType === 'tbd' || s.apptType === 'exact') && s.appt.length <= 10)
   return {
+    // Carry through everything the form doesn't edit — Slack thread ts, color override,
+    // booking-proof screenshots, move-request state. Building the stop from ONLY the
+    // form fields silently wiped these on every drawer save.
+    ...(was ? {
+      colorKey: was.colorKey, apptThreadTs: was.apptThreadTs, apptProofs: was.apptProofs,
+      apptMoveRequested: was.apptMoveRequested, apptMoveTaskId: was.apptMoveTaskId,
+    } : {}),
     id: s.id,
     type: s.type,
     name: s.name?.trim() || undefined,
@@ -1044,7 +1052,7 @@ export function LoadDrawer() {
     const prevById = new Map(prevStops.map((st) => [st.id, st]))
     const stops = values.stops.map((s, i) => {
       const was = prevById.get(s.id)
-      return stopFormToStop(s, i, was && { type: was.apptType, value: formatDateTimeInput(was.appt) })
+      return stopFormToStop(s, i, was && { type: was.apptType, value: formatDateTimeInput(was.appt) }, was)
     })
     // Slack notices are decided BEFORE the save, so the comparison is against what was on
     // screen rather than what we just wrote.
