@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   apptQueue, apptNeedKind, apptQueueCount,
-  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs, rowOutstanding, apptOutstanding,
+  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs, rowOutstanding, apptOutstanding, stopConfirmed,
 } from './apptQueue'
 import { fromDateInput, fromDateTimeInput, apptTimeLabel, PENDING_LABEL } from './date'
 import type { ApptType, Load, Stop } from '@/types'
@@ -373,5 +373,32 @@ describe('a new load with no appointment time reads as Pending', () => {
     const booked = stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })
     expect(apptTimeLabel(booked.appt, booked.apptType)).toBe('09:30')
     expect(apptNeedKind(booked)).toBeNull()
+  })
+})
+describe('stopConfirmed — screenshots make a booking confirmed', () => {
+  const booked = () => stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') })
+
+  it('booked + both screenshots = confirmed', () => {
+    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1', email: 'k2' } })).toBe(true)
+  })
+
+  it('booked with one or no screenshots = not confirmed', () => {
+    expect(stopConfirmed(booked())).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1' } })).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } })).toBe(false)
+  })
+
+  it('an unbooked or flagged stop is never confirmed, screenshots or not', () => {
+    expect(stopConfirmed(stop({ apptType: 'tbd', apptProofs: { e2open: 'k1', email: 'k2' } }))).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptMoveRequested: true, apptProofs: { e2open: 'k1', email: 'k2' } })).toBe(false)
+  })
+
+  it('rows carry the confirmed flags for the chips and the CSV', () => {
+    const rows = apptQueue([load({ stops: [
+      { ...stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') }), apptProofs: { e2open: 'a', email: 'b' } },
+      stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
+    ] })])
+    expect(rows[0].pickupConfirmed).toBe(true)
+    expect(rows[0].deliveryConfirmed).toBe(false)
   })
 })

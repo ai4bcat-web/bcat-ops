@@ -66,21 +66,28 @@ const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pen
  * label still says which flavour of not. Amber Pending read as "sort of fine" and got
  * skipped over.
  */
-function KindChip({ kind }: { kind: ApptNeedKind | null }) {
+function KindChip({ kind, confirmed }: { kind: ApptNeedKind | null; confirmed?: boolean }) {
   const booked = !kind
   const move = kind === 'move'
+  // Booked splits in two: CONFIRMED once both screenshots (E2Open + email) are on
+  // file, otherwise the booking itself is still pending its proof.
+  const state = booked ? (confirmed ? 'confirmed' : 'booked-pending') : kind
+  const bg = booked
+    ? (confirmed ? 'var(--ds-green-bg)' : 'var(--ds-blue-soft, #eff6ff)')
+    : move ? 'var(--ds-amber-soft)' : 'var(--ds-red-soft)'
+  const fg = booked ? (confirmed ? GREEN : '#0369a1') : move ? AMBER : RED
   return (
     <span
-      data-state={booked ? 'booked' : kind}
+      data-state={state}
+      title={booked && !confirmed ? 'Booked — waiting on the E2Open + email confirmation screenshots (camera button)' : undefined}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
-        background: booked ? 'var(--ds-green-bg)' : move ? 'var(--ds-amber-soft)' : 'var(--ds-red-soft)',
-        color: booked ? GREEN : move ? AMBER : RED,
+        background: bg, color: fg,
       }}
     >
-      {booked ? <CheckCircle2 size={11} /> : <CircleAlert size={11} />}
-      {booked ? 'Booked' : STATUS_LABEL[kind]}
+      {booked ? (confirmed ? <CheckCircle2 size={11} /> : <Camera size={11} />) : <CircleAlert size={11} />}
+      {booked ? (confirmed ? 'Confirmed' : 'Pending') : STATUS_LABEL[kind]}
     </span>
   )
 }
@@ -326,8 +333,8 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                       <Camera size={13} />{proofs.have > 0 ? `${proofs.have}/${proofs.want}` : ''}
                     </button>
                   </td>
-                  <td style={td}><KindChip kind={r.pickupKind} /></td>
-                  <td style={td}><KindChip kind={r.deliveryKind} /></td>
+                  <td style={td}><KindChip kind={r.pickupKind} confirmed={r.pickupConfirmed} /></td>
+                  <td style={td}><KindChip kind={r.deliveryKind} confirmed={r.deliveryConfirmed} /></td>
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.pickupNumber || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.customer || '—'}</td>

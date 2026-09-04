@@ -37,8 +37,8 @@ export function apptRowsToCsv(
   const lines = [APPT_CSV_HEADER.map(q).join(',')]
   for (const r of rows) {
     lines.push([
-      r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : 'Booked',
-      r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : 'Booked',
+      r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : r.pickupConfirmed ? 'Confirmed' : 'Booked - pending confirmation',
+      r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : r.deliveryConfirmed ? 'Confirmed' : 'Booked - pending confirmation',
       r.aljexId,
       r.pickupNumber,
       r.customer,

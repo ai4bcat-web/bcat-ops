@@ -133,13 +133,13 @@ describe('ApptsPage', () => {
     expect(puOf('NOTIME')).toBe('Pending')
   })
 
-  it('shows a green Booked chip when a stop is booked, and marks the row', () => {
+  it('a booked stop without screenshots shows as Pending confirmation', () => {
     loads.mockReturnValue([pair()])
     render(<ApptsPage />)
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('12345').closest('tr')!
-    expect(row.children[2].textContent).toBe('Booked')
-    expect(row.children[2].querySelector('[data-state]')!.getAttribute('data-state')).toBe('booked')
+    expect(row.children[2].textContent).toBe('Pending')
+    expect(row.children[2].querySelector('[data-state]')!.getAttribute('data-state')).toBe('booked-pending')
     // Pickup still NEED, so the shipment as a whole is outstanding (red edge).
     expect(row.getAttribute('data-outstanding')).toBe('true')
   })
@@ -187,7 +187,30 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
     const row = screen.getByText('BOOKED').closest('tr')!
     expect(row.getAttribute('data-outstanding')).toBe('false')
-    expect(row.children[1].textContent).toBe('Booked')
+    // Booked but unproven — pending its confirmation screenshots.
+    expect(row.children[1].textContent).toBe('Pending')
+  })
+
+  it('flips to Confirmed once BOTH screenshots are on file', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'PROVEN',
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
+                     apptProofs: { e2open: 'appt-proofs/a', email: 'appt-proofs/b' } })],
+    })])
+    render(<ApptsPage />)
+    const row = screen.getByText('PROVEN').closest('tr')!
+    expect(row.children[1].textContent).toBe('Confirmed')
+    expect(row.children[1].querySelector('[data-state]')!.getAttribute('data-state')).toBe('confirmed')
+  })
+
+  it('one screenshot is not enough — still Pending', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'HALFPROOF',
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
+                     apptProofs: { e2open: 'appt-proofs/a' } })],
+    })])
+    render(<ApptsPage />)
+    expect(screen.getByText('HALFPROOF').closest('tr')!.children[1].textContent).toBe('Pending')
   })
 
   it('"Open only" hides the booked rows and shows the open count', () => {

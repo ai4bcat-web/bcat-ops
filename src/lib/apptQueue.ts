@@ -43,6 +43,9 @@ export interface ApptQueueRow {
   appt: string
   driverId: string | null
   deliveryDriverId: string | null
+  /** Booked AND both screenshots (E2Open + email) uploaded. */
+  pickupConfirmed: boolean
+  deliveryConfirmed: boolean
   /** The load's scheduled pickup and delivery — the same two the calendar shows. */
   pickup: ApptRef
   delivery: ApptRef
@@ -81,6 +84,14 @@ export function apptNeedKind(stop: Stop): ApptNeedKind | null {
 
 /** True when at least one of the shipment's two appointments is still unbooked. */
 export const rowOutstanding = (r: ApptQueueRow): boolean => !!(r.pickupKind || r.deliveryKind)
+
+/**
+ * A booked appointment counts as CONFIRMED only once BOTH proof screenshots are on
+ * file — the E2Open update and the email confirmation. Booked without them is merely
+ * "we typed a time in"; the proofs are what make it real to everyone downstream.
+ */
+export const stopConfirmed = (stop: Stop): boolean =>
+  apptNeedKind(stop) === null && !!stop.apptProofs?.e2open && !!stop.apptProofs?.email
 
 /**
  * EVERY load, one row per shipment, with the pickup and delivery booking state on it.
@@ -123,6 +134,8 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       appt: pickupStop?.appt ?? '',
       driverId: pickupStop?.driverId ?? null,
       deliveryDriverId: deliveryStop?.driverId ?? null,
+      pickupConfirmed: pickupStop ? stopConfirmed(pickupStop) : false,
+      deliveryConfirmed: deliveryStop ? stopConfirmed(deliveryStop) : false,
       pickup: refs.pickup,
       delivery: refs.delivery,
     })
