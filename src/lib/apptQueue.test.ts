@@ -375,30 +375,46 @@ describe('a new load with no appointment time reads as Pending', () => {
     expect(apptNeedKind(booked)).toBeNull()
   })
 })
-describe('stopConfirmed — screenshots make a booking confirmed', () => {
+describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
+  const BATORY = 'Batory Foods'
   const booked = () => stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') })
 
-  it('booked + both screenshots = confirmed', () => {
-    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1', email: 'k2' } })).toBe(true)
+  it('Batory: booked + both screenshots = confirmed', () => {
+    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1', email: 'k2' } }, BATORY)).toBe(true)
   })
 
-  it('booked with one or no screenshots = not confirmed', () => {
-    expect(stopConfirmed(booked())).toBe(false)
-    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1' } })).toBe(false)
-    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } })).toBe(false)
+  it('Batory: booked with one or no screenshots = still pending', () => {
+    expect(stopConfirmed(booked(), BATORY)).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1' } }, BATORY)).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } }, BATORY)).toBe(false)
   })
 
-  it('an unbooked or flagged stop is never confirmed, screenshots or not', () => {
-    expect(stopConfirmed(stop({ apptType: 'tbd', apptProofs: { e2open: 'k1', email: 'k2' } }))).toBe(false)
-    expect(stopConfirmed({ ...booked(), apptMoveRequested: true, apptProofs: { e2open: 'k1', email: 'k2' } })).toBe(false)
+  it('matches Batory case-insensitively and inside longer names', () => {
+    expect(stopConfirmed(booked(), 'BATORY FOODS INC')).toBe(false)
+    expect(stopConfirmed(booked(), 'batory')).toBe(false)
   })
 
-  it('rows carry the confirmed flags for the chips and the CSV', () => {
-    const rows = apptQueue([load({ stops: [
-      { ...stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') }), apptProofs: { e2open: 'a', email: 'b' } },
-      stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
-    ] })])
-    expect(rows[0].pickupConfirmed).toBe(true)
-    expect(rows[0].deliveryConfirmed).toBe(false)
+  it('any other customer: booked = confirmed, no screenshots needed', () => {
+    expect(stopConfirmed(booked(), 'Acme Freight')).toBe(true)
+    expect(stopConfirmed(booked(), '')).toBe(true)
+    expect(stopConfirmed(booked(), null)).toBe(true)
+  })
+
+  it('an unbooked or flagged stop is never confirmed, whoever the customer is', () => {
+    expect(stopConfirmed(stop({ apptType: 'tbd' }), 'Acme Freight')).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptMoveRequested: true }, 'Acme Freight')).toBe(false)
+    expect(stopConfirmed(stop({ apptType: 'tbd', apptProofs: { e2open: 'k1', email: 'k2' } }), BATORY)).toBe(false)
+  })
+
+  it('rows carry the per-customer rule for the chips and the CSV', () => {
+    const stops = [
+      stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') }),
+      stop({ id: 's2', type: 'delivery' as const, apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-21T14:00') }),
+    ]
+    const batory = apptQueue([load({ customer: 'Batory Foods', stops })])
+    expect(batory[0].pickupConfirmed).toBe(false)
+    const acme = apptQueue([load({ customer: 'Acme Freight', stops })])
+    expect(acme[0].pickupConfirmed).toBe(true)
+    expect(acme[0].deliveryConfirmed).toBe(true)
   })
 })

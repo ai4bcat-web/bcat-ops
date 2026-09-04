@@ -86,12 +86,24 @@ export function apptNeedKind(stop: Stop): ApptNeedKind | null {
 export const rowOutstanding = (r: ApptQueueRow): boolean => !!(r.pickupKind || r.deliveryKind)
 
 /**
- * A booked appointment counts as CONFIRMED only once BOTH proof screenshots are on
- * file — the E2Open update and the email confirmation. Booked without them is merely
- * "we typed a time in"; the proofs are what make it real to everyone downstream.
+ * Which customers must have BOTH proof screenshots (E2Open update + email confirmation)
+ * before a booking shows Confirmed. Batory is the account with the E2Open workflow;
+ * everyone else's booking is confirmed the moment the time is in. Matched
+ * case-insensitively on the word so "BATORY FOODS INC" and "Batory" both count.
  */
-export const stopConfirmed = (stop: Stop): boolean =>
-  apptNeedKind(stop) === null && !!stop.apptProofs?.e2open && !!stop.apptProofs?.email
+export const requiresApptProofs = (customer: string | null | undefined): boolean =>
+  /batory/i.test(customer ?? '')
+
+/**
+ * A booked appointment counts as CONFIRMED:
+ *  - Batory Foods — only once BOTH proof screenshots are on file; without them the
+ *    booking is merely "we typed a time in", so it shows Pending.
+ *  - every other customer — as soon as it is booked. Screenshots remain uploadable
+ *    (the camera panel is customer-agnostic) but are not required for the status.
+ */
+export const stopConfirmed = (stop: Stop, customer?: string | null): boolean =>
+  apptNeedKind(stop) === null &&
+  (!requiresApptProofs(customer) || (!!stop.apptProofs?.e2open && !!stop.apptProofs?.email))
 
 /**
  * EVERY load, one row per shipment, with the pickup and delivery booking state on it.
@@ -134,8 +146,8 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       appt: pickupStop?.appt ?? '',
       driverId: pickupStop?.driverId ?? null,
       deliveryDriverId: deliveryStop?.driverId ?? null,
-      pickupConfirmed: pickupStop ? stopConfirmed(pickupStop) : false,
-      deliveryConfirmed: deliveryStop ? stopConfirmed(deliveryStop) : false,
+      pickupConfirmed: pickupStop ? stopConfirmed(pickupStop, load.customer) : false,
+      deliveryConfirmed: deliveryStop ? stopConfirmed(deliveryStop, load.customer) : false,
       pickup: refs.pickup,
       delivery: refs.delivery,
     })

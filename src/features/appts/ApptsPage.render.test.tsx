@@ -133,8 +133,8 @@ describe('ApptsPage', () => {
     expect(puOf('NOTIME')).toBe('Pending')
   })
 
-  it('a booked stop without screenshots shows as Pending confirmation', () => {
-    loads.mockReturnValue([pair()])
+  it('a booked Batory stop without screenshots shows as Pending confirmation', () => {
+    loads.mockReturnValue([pair({ customer: 'Batory Foods' })])
     render(<ApptsPage />)
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('12345').closest('tr')!
@@ -187,13 +187,13 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
     const row = screen.getByText('BOOKED').closest('tr')!
     expect(row.getAttribute('data-outstanding')).toBe('false')
-    // Booked but unproven — pending its confirmation screenshots.
-    expect(row.children[1].textContent).toBe('Pending')
+    // Not a screenshot-gated customer — booked IS confirmed.
+    expect(row.children[1].textContent).toBe('Confirmed')
   })
 
-  it('flips to Confirmed once BOTH screenshots are on file', () => {
+  it('Batory flips to Confirmed once BOTH screenshots are on file', () => {
     loads.mockReturnValue([load({
-      aljexId: 'PROVEN',
+      aljexId: 'PROVEN', customer: 'Batory Foods',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
                      apptProofs: { e2open: 'appt-proofs/a', email: 'appt-proofs/b' } })],
     })])
@@ -203,9 +203,9 @@ describe('ApptsPage', () => {
     expect(row.children[1].querySelector('[data-state]')!.getAttribute('data-state')).toBe('confirmed')
   })
 
-  it('one screenshot is not enough — still Pending', () => {
+  it('one screenshot is not enough for Batory — still Pending', () => {
     loads.mockReturnValue([load({
-      aljexId: 'HALFPROOF',
+      aljexId: 'HALFPROOF', customer: 'Batory Foods',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
                      apptProofs: { e2open: 'appt-proofs/a' } })],
     })])
