@@ -79,7 +79,7 @@ function KindChip({ kind, confirmed }: { kind: ApptNeedKind | null; confirmed?: 
   return (
     <span
       data-state={state}
-      title={booked && !confirmed ? 'Booked — waiting on the E2Open + email confirmation screenshots (camera button)' : undefined}
+      title={booked && !confirmed ? 'Booked — waiting on the confirmation screenshot(s); use the camera button' : undefined}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',

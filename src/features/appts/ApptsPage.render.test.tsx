@@ -187,8 +187,27 @@ describe('ApptsPage', () => {
     render(<ApptsPage />)
     const row = screen.getByText('BOOKED').closest('tr')!
     expect(row.getAttribute('data-outstanding')).toBe('false')
-    // Not a screenshot-gated customer — booked IS confirmed.
-    expect(row.children[1].textContent).toBe('Confirmed')
+    // Booked but no confirmation screenshot yet — Pending for every customer.
+    expect(row.children[1].textContent).toBe('Pending')
+  })
+
+  it('a non-Batory booking is Confirmed by its single appt screenshot', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'ONESHOT', customer: 'Acme Freight',
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
+                     apptProofs: { email: 'appt-proofs/a' } })],
+    })])
+    render(<ApptsPage />)
+    expect(screen.getByText('ONESHOT').closest('tr')!.children[1].textContent).toBe('Confirmed')
+  })
+
+  it('non-Batory shipments show ONE upload slot per stop — Appt confirmation', () => {
+    loads.mockReturnValue([pair({ id: 'l7b', aljexId: 'ONESLOT', customer: 'Acme Freight' })])
+    render(<ApptsPage />)
+    fireEvent.click(screen.getByLabelText('Show booking screenshots for ONESLOT'))
+    const panel = screen.getByTestId('appt-proofs')
+    expect(within(panel).getAllByText('Appt confirmation')).toHaveLength(2)
+    expect(within(panel).queryByText('E2Open update')).toBeNull()
   })
 
   it('Batory flips to Confirmed once BOTH screenshots are on file', () => {
@@ -350,8 +369,8 @@ describe('ApptsPage', () => {
   })
 })
 describe('booking screenshots', () => {
-  it('opens the proof panel with E2Open + email slots for both stops', () => {
-    loads.mockReturnValue([pair({ id: 'l7', aljexId: 'PROOFS' })])
+  it('opens the proof panel with E2Open + email slots for both stops (Batory)', () => {
+    loads.mockReturnValue([pair({ id: 'l7', aljexId: 'PROOFS', customer: 'Batory Foods' })])
     render(<ApptsPage />)
     fireEvent.click(screen.getByLabelText('Show booking screenshots for PROOFS'))
     const panel = screen.getByTestId('appt-proofs')
@@ -363,7 +382,7 @@ describe('booking screenshots', () => {
 
   it('shows the completeness count once screenshots exist', () => {
     loads.mockReturnValue([load({
-      id: 'l8', aljexId: 'HALF',
+      id: 'l8', aljexId: 'HALF', customer: 'Batory Foods',
       stops: [
         stop({ id: 'p', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
                apptProofs: { e2open: 'appt-proofs/a', email: 'appt-proofs/b' } }),

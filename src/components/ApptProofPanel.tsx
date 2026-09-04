@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Trash2, Upload, ExternalLink, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { getStops, updateStop } from '@/lib/stops'
+import { requiresApptProofs } from '@/lib/apptQueue'
 import { uploadApptProof, getApptProofUrl, deleteApptProof, type ApptProofSlot } from '@/lib/apiClient'
 import type { Load, Stop } from '@/types'
 
@@ -15,22 +16,33 @@ import type { Load, Stop } from '@/types'
  * proof travels with the appointment — same trick as apptThreadTs).
  */
 
-const SLOTS: { slot: ApptProofSlot; label: string }[] = [
+// Batory runs the E2Open workflow → two screenshots per stop. Everyone else just
+// proves the appointment itself → one slot (stored under the 'email' key).
+const BATORY_SLOTS: { slot: ApptProofSlot; label: string }[] = [
   { slot: 'e2open', label: 'E2Open update' },
   { slot: 'email',  label: 'Email confirmation' },
 ]
+const DEFAULT_SLOTS: { slot: ApptProofSlot; label: string }[] = [
+  { slot: 'email', label: 'Appt confirmation' },
+]
+export const slotsFor = (customer: string | null | undefined) =>
+  requiresApptProofs(customer) ? BATORY_SLOTS : DEFAULT_SLOTS
 
-export function stopProofCount(s: Stop): number {
-  return (s.apptProofs?.e2open ? 1 : 0) + (s.apptProofs?.email ? 1 : 0)
+export function stopProofCount(s: Stop, customer?: string | null): number {
+  const e2 = s.apptProofs?.e2open ? 1 : 0, em = s.apptProofs?.email ? 1 : 0
+  // Non-Batory needs one screenshot per stop — either slot satisfies it (legacy uploads
+  // may sit under e2open), but it never counts past the single requirement.
+  return requiresApptProofs(customer) ? e2 + em : Math.min(e2 + em, 1)
 }
 
-/** "n/4" completeness across the shipment's pickup + delivery. */
+/** "n/4" (Batory) or "n/2" completeness across the shipment's pickup + delivery. */
 export function loadProofCount(load: Load): { have: number; want: number } {
   const stops = getStops(load)
   const pu = stops.find((s) => s.type === 'pickup')
   const de = [...stops].reverse().find((s) => s.type === 'delivery')
   const ends = [pu, de].filter(Boolean) as Stop[]
-  return { have: ends.reduce((n, s) => n + stopProofCount(s), 0), want: ends.length * 2 }
+  const per = requiresApptProofs(load.customer) ? 2 : 1
+  return { have: ends.reduce((n, s) => n + stopProofCount(s, load.customer), 0), want: ends.length * per }
 }
 
 function ProofSlot({ label, s3Key, onUpload, onRemove }: {
@@ -112,6 +124,7 @@ export function ApptProofPanel({ load, updateLoad }: {
   const stops = getStops(load)
   const pu = stops.find((s) => s.type === 'pickup')
   const de = [...stops].reverse().find((s) => s.type === 'delivery')
+  const SLOTS = slotsFor(load.customer)
 
   const save = async (stop: Stop, slot: ApptProofSlot, key: string | null) => {
     const proofs = { ...(stop.apptProofs ?? {}), [slot]: key }

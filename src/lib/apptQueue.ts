@@ -96,14 +96,16 @@ export const requiresApptProofs = (customer: string | null | undefined): boolean
 
 /**
  * A booked appointment counts as CONFIRMED:
- *  - Batory Foods — only once BOTH proof screenshots are on file; without them the
- *    booking is merely "we typed a time in", so it shows Pending.
- *  - every other customer — as soon as it is booked. Screenshots remain uploadable
- *    (the camera panel is customer-agnostic) but are not required for the status.
+ *  - Batory Foods — only once BOTH proof screenshots are on file (E2Open + email).
+ *  - every other customer — once ONE appointment-confirmation screenshot is uploaded
+ *    (there is no E2Open outside Batory, so a single proof is the whole requirement).
+ * Booked with nothing on file shows Pending for everyone.
  */
-export const stopConfirmed = (stop: Stop, customer?: string | null): boolean =>
-  apptNeedKind(stop) === null &&
-  (!requiresApptProofs(customer) || (!!stop.apptProofs?.e2open && !!stop.apptProofs?.email))
+export const stopConfirmed = (stop: Stop, customer?: string | null): boolean => {
+  if (apptNeedKind(stop) !== null) return false
+  const e2 = !!stop.apptProofs?.e2open, em = !!stop.apptProofs?.email
+  return requiresApptProofs(customer) ? e2 && em : e2 || em
+}
 
 /**
  * EVERY load, one row per shipment, with the pickup and delivery booking state on it.

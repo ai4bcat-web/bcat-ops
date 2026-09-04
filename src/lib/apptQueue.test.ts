@@ -394,10 +394,12 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
     expect(stopConfirmed(booked(), 'batory')).toBe(false)
   })
 
-  it('any other customer: booked = confirmed, no screenshots needed', () => {
-    expect(stopConfirmed(booked(), 'Acme Freight')).toBe(true)
-    expect(stopConfirmed(booked(), '')).toBe(true)
-    expect(stopConfirmed(booked(), null)).toBe(true)
+  it('any other customer: ONE screenshot confirms it — no E2Open exists for them', () => {
+    expect(stopConfirmed(booked(), 'Acme Freight')).toBe(false)
+    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } }, 'Acme Freight')).toBe(true)
+    // Legacy upload sitting in the other slot still counts as the one screenshot.
+    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1' } }, 'Acme Freight')).toBe(true)
+    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } }, null)).toBe(true)
   })
 
   it('an unbooked or flagged stop is never confirmed, whoever the customer is', () => {
@@ -408,13 +410,14 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
 
   it('rows carry the per-customer rule for the chips and the CSV', () => {
     const stops = [
-      stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') }),
+      { ...stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') }), apptProofs: { email: 'k' } },
       stop({ id: 's2', type: 'delivery' as const, apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-21T14:00') }),
     ]
+    // Batory: one screenshot is not enough. Acme: that same screenshot confirms it.
     const batory = apptQueue([load({ customer: 'Batory Foods', stops })])
     expect(batory[0].pickupConfirmed).toBe(false)
     const acme = apptQueue([load({ customer: 'Acme Freight', stops })])
-    expect(acme[0].pickupConfirmed).toBe(true)
-    expect(acme[0].deliveryConfirmed).toBe(true)
+    expect(acme[0].pickupConfirmed).toBe(true)   // has the one screenshot
+    expect(acme[0].deliveryConfirmed).toBe(false) // has none yet
   })
 })
