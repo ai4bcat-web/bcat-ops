@@ -27,6 +27,8 @@ import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
+import { rateconParser } from './functions/ratecon-parser/resource'
+import { apptReport } from './functions/appt-report/resource'
 
 const backend = defineBackend({
   auth,
@@ -50,6 +52,8 @@ const backend = defineBackend({
   googleReviews,
   paychexPaySync,
   brokerLoadAlert,
+  rateconParser,
+  apptReport,
   amazonDisputeIntake,
   tripScreenshotParser,
 })
@@ -138,6 +142,21 @@ gmailTaskFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
 // Plain env var (not a secret) so a missing channel never blocks the deploy — set
 // INTAKE_IVAN_CHANNEL_ID in the Amplify Console env to enable the Slack post.
 gmailTaskFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? '')
+
+// ── apptReport (daily 3 PM Chicago digest of unconfirmed appts → #bcat-global) ──
+const apptReportFn = backend.apptReport.resources.lambda as LambdaFunction
+const loadTableForReport = backend.data.resources.tables['Load']
+backend.apptReport.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [loadTableForReport.tableArn] })
+)
+apptReportFn.addEnvironment('LOAD_TABLE_NAME', loadTableForReport.tableName)
+apptReportFn.addEnvironment('SLACK_GLOBAL_CHANNEL_ID', process.env.SLACK_GLOBAL_CHANNEL_ID ?? '')
+// 20:00 & 21:00 UTC Mon–Fri — whichever lands on 15:00 America/Chicago posts (DST-proof).
+const apptReportRule = new Rule(apptReportFn.stack, 'ApptReportDailyRule', {
+  schedule: Schedule.cron({ minute: '0', hour: '20,21', weekDay: 'MON-FRI', month: '*' }),
+  description: 'Daily 3 PM Chicago unconfirmed-appointments digest to the global Slack channel',
+})
+apptReportRule.addTarget(new EventsLambdaTarget(apptReportFn))
 
 // ── apptNeedNotifier (pickup/delivery flagged NEED → Slack #appts-ivan) ──────
 // Defaults to the #appts-ivan channel; override with APPTS_IVAN_CHANNEL_ID in the

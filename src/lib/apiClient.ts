@@ -611,6 +611,36 @@ export async function createIntakeItem(input: {
  */
 export const APPT_MOVE_ASSIGNEE = 'dennis@bcatcorp.com'
 export const APPT_MOVE_PREFIX = 'appt-move:'
+export const APPT_TASK_PREFIX = 'appt-task:'
+
+/**
+ * A workflow task on the Appt Changes queue — used for the Batory ladder: Dennis's
+ * "request pickup for 12pm" on load build, Ruben's "pick the delivery time", and
+ * Dennis's "book the delivery for X" once Ruben has picked.
+ */
+export async function createApptTask(args: {
+  loadId: string
+  kind: 'request_pickup' | 'pick_delivery_time' | 'book_delivery'
+  assignee: string
+  subject: string
+  bodyText: string
+  aljexId?: string | null
+}): Promise<IntakeItem> {
+  const result = await client.graphql({
+    query: `mutation CreateIntakeItem($input: CreateIntakeItemInput!) { createIntakeItem(input: $input) { ${INTAKE_FIELDS} } }`,
+    variables: {
+      input: {
+        source: 'IVAN_CARTAGE', status: 'NEW',
+        subject: args.subject, bodyText: args.bodyText,
+        assignedTo: args.assignee, externalSource: 'manual',
+        externalId: `${APPT_TASK_PREFIX}${args.kind}:${args.loadId}:${Date.now()}`,
+        proNumber: args.aljexId ?? null, builtLoadId: args.loadId,
+        receivedAt: new Date().toISOString(),
+      },
+    },
+  }) as { data: { createIntakeItem: IntakeItem } }
+  return result.data.createIntakeItem
+}
 
 export async function createApptMoveTask(args: {
   loadId: string
@@ -731,6 +761,28 @@ export interface ScreenshotTrip {
  * vision, server-side). The caller downscales the image first — AppSync caps the
  * request at ~1MB — and previews the rows before importing.
  */
+export interface ParsedRateconAppt { date: string | null; time: string | null; timeEnd: string | null }
+export async function parseRateConfirm(args: {
+  fileBase64: string
+  mediaType?: string
+  todayISO?: string
+}): Promise<{ appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null; error?: string | null }> {
+  let res: unknown
+  try {
+    res = await client.graphql({
+      query: `mutation ParseRateConfirm($fileBase64: String!, $mediaType: String, $todayISO: String) {
+        parseRateConfirm(fileBase64: $fileBase64, mediaType: $mediaType, todayISO: $todayISO)
+      }`,
+      variables: args,
+    })
+  } catch (err) {
+    return { appts: null, error: graphqlErrorMessage(err) }
+  }
+  let data: unknown = (res as { data?: { parseRateConfirm?: unknown } }).data?.parseRateConfirm
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave */ } }
+  return (data ?? { appts: null, error: 'no-response' }) as { appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null; error?: string | null }
+}
+
 export async function parseTripScreenshot(args: {
   imageBase64: string
   mediaType?: string
@@ -1057,7 +1109,7 @@ export async function uploadRateConfirm(loadId: string, file: File): Promise<str
 // One screenshot per (stop, slot): slot 'e2open' = the E2Open update, 'email' = the
 // email confirmation. Pasted images arrive as Blobs with no name; type decides the ext.
 
-export type ApptProofSlot = 'e2open' | 'email'
+export type ApptProofSlot = 'request' | 'e2open' | 'email'
 
 export async function uploadApptProof(loadId: string, stopId: string, slot: ApptProofSlot, file: Blob): Promise<string> {
   const ext = file.type === 'image/png' ? 'png' : 'jpg'
@@ -2027,7 +2079,7 @@ export async function deleteDriverPayCredit(id: string): Promise<void> {
  */
 export async function notifyApptNeeded(args: {
   stopKind: 'pickup' | 'delivery'
-  kind?: 'needed' | 'updated' | 'move' | 'moved'
+  kind?: 'needed' | 'updated' | 'move' | 'moved' | 'book'
   threadTs?: string | null
   apptLabel?: string | null
   aljexId?: string | null

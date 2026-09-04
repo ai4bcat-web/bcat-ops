@@ -617,6 +617,16 @@ export const useAppStore = create<AppState>()(
 
       // ── Loads ──────────────────────────────────────────────────────────────
       addLoad: async (l) => {
+        // New BATORY loads enter the appointment ladder immediately: pickup NEED TO
+        // REQUEST (Dennis, standing 12pm rule) and delivery NEED TO BOOK (Ruben picks
+        // the time). Statuses ride the stops; the two tasks are created after the save.
+        const isBatory = /batory/i.test(l.customer ?? '')
+        if (isBatory && Array.isArray(l.stops)) {
+          l = { ...l, stops: l.stops.map((s) => ({
+            ...s,
+            apptStatus: s.apptStatus ?? (s.type === 'delivery' ? 'need_book' : 'need_request'),
+          })) }
+        }
         // If stops are set, derive the legacy pickup/delivery mirror fields (single
         // source of derivation). No-op for loads created without stops.
         const load = await api.createLoad(withDerivedLegacy(l))
@@ -624,6 +634,23 @@ export const useAppStore = create<AppState>()(
         writeAudit(get().currentUserEmail, 'Load', load.id, 'create', {
           _snapshot: { from: null, to: load },
         })
+        if (isBatory) {
+          // Fire-and-forget — a task hiccup must not fail the load save.
+          const ref = [load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer].filter(Boolean).join(' · ')
+          const puDate = load.pickupAppt ? load.pickupAppt.slice(0, 10) : 'the pickup date'
+          void api.createApptTask({
+            loadId: load.id, kind: 'request_pickup', assignee: 'dennis@bcatcorp.com',
+            subject: `Request pickup appt for 12:00 PM — ${ref || 'Batory load'}`,
+            bodyText: `New Batory load built. Email the pickup facility to request a 12:00 PM appointment for ${puDate}, then upload the request-email screenshot to move it to REQUESTED.`,
+            aljexId: load.aljexId ?? null,
+          }).catch((err) => console.error('[addLoad] pickup task failed', err))
+          void api.createApptTask({
+            loadId: load.id, kind: 'pick_delivery_time', assignee: 'ruben@bcatcorp.com',
+            subject: `Pick delivery appt time — ${ref || 'Batory load'}`,
+            bodyText: `New Batory load built. Choose the delivery time you want booked (set it on the delivery stop); Dennis is then tasked to book it.`,
+            aljexId: load.aljexId ?? null,
+          }).catch((err) => console.error('[addLoad] delivery task failed', err))
+        }
         return load
       },
 

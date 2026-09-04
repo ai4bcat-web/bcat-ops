@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Trash2, Upload, ExternalLink, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { getStops, updateStop } from '@/lib/stops'
-import { requiresApptProofs } from '@/lib/apptQueue'
 import { uploadApptProof, getApptProofUrl, deleteApptProof, type ApptProofSlot } from '@/lib/apiClient'
+import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META } from '@/lib/apptStatus'
 import type { Load, Stop } from '@/types'
 
 /**
@@ -16,33 +16,27 @@ import type { Load, Stop } from '@/types'
  * proof travels with the appointment — same trick as apptThreadTs).
  */
 
-// Batory runs the E2Open workflow → two screenshots per stop. Everyone else just
-// proves the appointment itself → one slot (stored under the 'email' key).
+// Batory's ladder needs three screenshots per stop: the REQUEST email (→ REQUESTED),
+// then the CONFIRMED email + E2Open update (→ CONFIRMED). Non-Batory loads don't use
+// screenshots at all — their confirmation is the RATECON on the load.
 const BATORY_SLOTS: { slot: ApptProofSlot; label: string }[] = [
-  { slot: 'e2open', label: 'E2Open update' },
-  { slot: 'email',  label: 'Email confirmation' },
+  { slot: 'request', label: 'Request email' },
+  { slot: 'e2open',  label: 'E2Open update' },
+  { slot: 'email',   label: 'Email confirmation' },
 ]
-const DEFAULT_SLOTS: { slot: ApptProofSlot; label: string }[] = [
-  { slot: 'email', label: 'Appt confirmation' },
-]
-export const slotsFor = (customer: string | null | undefined) =>
-  requiresApptProofs(customer) ? BATORY_SLOTS : DEFAULT_SLOTS
+export const slotsFor = (_customer: string | null | undefined) => BATORY_SLOTS
 
-export function stopProofCount(s: Stop, customer?: string | null): number {
-  const e2 = s.apptProofs?.e2open ? 1 : 0, em = s.apptProofs?.email ? 1 : 0
-  // Non-Batory needs one screenshot per stop — either slot satisfies it (legacy uploads
-  // may sit under e2open), but it never counts past the single requirement.
-  return requiresApptProofs(customer) ? e2 + em : Math.min(e2 + em, 1)
+export function stopProofCount(s: Stop, _customer?: string | null): number {
+  return (s.apptProofs?.request ? 1 : 0) + (s.apptProofs?.e2open ? 1 : 0) + (s.apptProofs?.email ? 1 : 0)
 }
 
-/** "n/4" (Batory) or "n/2" completeness across the shipment's pickup + delivery. */
+/** "n/6" completeness across a Batory shipment's pickup + delivery. */
 export function loadProofCount(load: Load): { have: number; want: number } {
   const stops = getStops(load)
   const pu = stops.find((s) => s.type === 'pickup')
   const de = [...stops].reverse().find((s) => s.type === 'delivery')
   const ends = [pu, de].filter(Boolean) as Stop[]
-  const per = requiresApptProofs(load.customer) ? 2 : 1
-  return { have: ends.reduce((n, s) => n + stopProofCount(s, load.customer), 0), want: ends.length * per }
+  return { have: ends.reduce((n, s) => n + stopProofCount(s), 0), want: ends.length * 3 }
 }
 
 function ProofSlot({ label, s3Key, onUpload, onRemove }: {
@@ -149,19 +143,71 @@ export function ApptProofPanel({ load, updateLoad }: {
     } catch (e) { toast.error(`Couldn't remove it: ${e instanceof Error ? e.message : 'unknown error'}`) }
   }
 
-  const End = ({ title, stop }: { title: string; stop?: Stop }) => (
-    <div style={{ flex: 1, minWidth: 240 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)', marginBottom: 6 }}>{title}</div>
-      {stop ? (
+  const setStatus = async (stop: Stop, status: 'requested' | 'confirmed') => {
+    try {
+      await updateLoad(load.id, { stops: updateStop(load, stop.id, {
+        apptStatus: status,
+        ...(status === 'confirmed' ? { apptMoveRequested: false, apptChangeTo: null } : {}),
+      }) })
+      toast.success(status === 'requested' ? 'Marked REQUESTED' : 'Marked CONFIRMED')
+    } catch (e) { toast.error(`Couldn't update the status: ${e instanceof Error ? e.message : 'unknown error'}`) }
+  }
+
+  const End = ({ title, stop }: { title: string; stop?: Stop }) => {
+    if (!stop) return (
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)', marginBottom: 6 }}>{title}</div>
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>No {title.toLowerCase()} stop on this load.</div>
+      </div>
+    )
+    const st = apptWorkflowStatus(stop, load)
+    const meta = STATUS_META[st]
+    return (
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)' }}>{title}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 5,
+            background: meta.tone === 'green' ? 'var(--ds-green-bg)' : meta.tone === 'amber' ? 'var(--ds-amber-soft)' : meta.tone === 'blue' ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-red-soft)',
+            color: meta.tone === 'green' ? '#15803d' : meta.tone === 'amber' ? '#b45309' : meta.tone === 'blue' ? '#0369a1' : '#dc2626' }}>{meta.label}</span>
+          {stop.apptChangeTo && st === 'change_needed' && (
+            <span style={{ fontSize: 10.5, color: '#b45309' }}>→ wants {new Date(stop.apptChangeTo).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {SLOTS.map(({ slot, label }) => (
             <ProofSlot key={slot} label={label} s3Key={stop.apptProofs?.[slot]}
               onUpload={upload(stop, slot)} onRemove={removeProof(stop, slot)} />
           ))}
         </div>
-      ) : <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>No {title.toLowerCase()} stop on this load.</div>}
-    </div>
-  )
+        {st !== 'confirmed' && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            {(st === 'need_request' || st === 'need_book' || st === 'change_needed') && (
+              <button
+                onClick={() => setStatus(stop, 'requested')}
+                disabled={!canMarkRequested(stop)}
+                title={canMarkRequested(stop) ? 'Move to REQUESTED' : 'Upload the Request-email screenshot first'}
+                style={{ height: 26, padding: '0 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                  cursor: canMarkRequested(stop) ? 'pointer' : 'not-allowed', opacity: canMarkRequested(stop) ? 1 : 0.5,
+                  border: '1px solid #fcd34d', background: 'var(--ds-surface)', color: '#b45309' }}>
+                Mark REQUESTED
+              </button>
+            )}
+            {(st === 'requested' || st === 'change_needed') && (
+              <button
+                onClick={() => setStatus(stop, 'confirmed')}
+                disabled={!canMarkConfirmed(stop)}
+                title={canMarkConfirmed(stop) ? 'Move to CONFIRMED' : 'Upload the Confirmed-email AND E2Open screenshots first'}
+                style={{ height: 26, padding: '0 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                  cursor: canMarkConfirmed(stop) ? 'pointer' : 'not-allowed', opacity: canMarkConfirmed(stop) ? 1 : 0.5,
+                  border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d' }}>
+                Mark CONFIRMED
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div data-testid="appt-proofs" style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>

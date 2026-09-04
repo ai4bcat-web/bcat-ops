@@ -116,31 +116,27 @@ describe('ApptsPage', () => {
     expect(screen.getByText('Zak Pace')).toBeTruthy()
   })
 
-  it('shows NEED and Pending chips per row — PU and Del status separately', () => {
-    // One row per shipment. PU chip in first column, Del chip in second.
+  it('shows the Batory ladder statuses per row — PU and Del separately', () => {
     loads.mockReturnValue([
-      load({ id: 'l1', aljexId: 'NEEDED', stops: [stop()] }),
-      load({ id: 'l2', aljexId: 'NOTIME', stops: [stop({ apptType: 'exact' })] }),
+      load({ id: 'l1', aljexId: 'NEEDED', customer: 'Batory Foods', stops: [
+        stop(), stop({ id: 'd', type: 'delivery', apptType: 'tbd', sequence: 1 }),
+      ] }),
     ])
     render(<ApptsPage />)
-
     const table = screen.getAllByRole('table')[0]
-    // PU status is children[0], Del status is children[1].
-    // children[0] is the history toggle; PU status is children[1], Del status children[2].
-    const puOf = (pro: string) =>
-      within(table).getByText(pro).closest('tr')!.children[1].textContent
-    expect(puOf('NEEDED')).toBe('NEED')
-    expect(puOf('NOTIME')).toBe('Pending')
+    const row = within(table).getByText('NEEDED').closest('tr')!
+    // children[0] is the toggles cell; PU status children[1], Del children[2].
+    expect(row.children[1].textContent).toBe('NEED TO REQUEST')
+    expect(row.children[2].textContent).toBe('NEED TO BOOK')
   })
 
-  it('a booked Batory stop without screenshots shows as Pending confirmation', () => {
+  it('a booked Batory stop without confirm screenshots grandfathers to REQUESTED', () => {
     loads.mockReturnValue([pair({ customer: 'Batory Foods' })])
     render(<ApptsPage />)
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('12345').closest('tr')!
-    expect(row.children[2].textContent).toBe('Pending')
-    expect(row.children[2].querySelector('[data-state]')!.getAttribute('data-state')).toBe('booked-pending')
-    // Pickup still NEED, so the shipment as a whole is outstanding (red edge).
+    expect(row.children[2].textContent).toBe('REQUESTED')
+    expect(row.children[2].querySelector('[data-state]')!.getAttribute('data-state')).toBe('requested')
     expect(row.getAttribute('data-outstanding')).toBe('true')
   })
 
@@ -179,38 +175,35 @@ describe('ApptsPage', () => {
     expect(proIds()).toEqual(['300', '200', '100'])
   })
 
-  it('keeps a fully booked shipment on the page as a green row', () => {
+  it('a booked non-Batory shipment without a ratecon shows RATECON NEEDED and stays open', () => {
     loads.mockReturnValue([load({
       aljexId: 'BOOKED',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
     })])
     render(<ApptsPage />)
     const row = screen.getByText('BOOKED').closest('tr')!
-    expect(row.getAttribute('data-outstanding')).toBe('false')
-    // Booked but no confirmation screenshot yet — Pending for every customer.
-    expect(row.children[1].textContent).toBe('Pending')
+    expect(row.getAttribute('data-outstanding')).toBe('true')
+    expect(row.children[1].textContent).toBe('RATECON NEEDED')
   })
 
-  it('a non-Batory booking is Confirmed by its single appt screenshot', () => {
+  it('a non-Batory booking confirms from the RATECON on the load', () => {
     loads.mockReturnValue([load({
-      aljexId: 'ONESHOT', customer: 'Acme Freight',
-      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
-                     apptProofs: { email: 'appt-proofs/a' } })],
-    })])
+      aljexId: 'ONESHOT', customer: 'Acme Freight', rateConfirmKey: 'rate-confirms/x',
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
+    } as Partial<Load>)])
     render(<ApptsPage />)
-    expect(screen.getByText('ONESHOT').closest('tr')!.children[1].textContent).toBe('Confirmed')
+    const row = screen.getByText('ONESHOT').closest('tr')!
+    expect(row.children[1].textContent).toBe('CONFIRMED')
+    expect(row.getAttribute('data-outstanding')).toBe('false')
   })
 
-  it('non-Batory shipments show ONE upload slot per stop — Appt confirmation', () => {
-    loads.mockReturnValue([pair({ id: 'l7b', aljexId: 'ONESLOT', customer: 'Acme Freight' })])
+  it('non-Batory shipments have NO screenshot camera at all', () => {
+    loads.mockReturnValue([pair({ id: 'l7b', aljexId: 'NOCAM', customer: 'Acme Freight' })])
     render(<ApptsPage />)
-    fireEvent.click(screen.getByLabelText('Show booking screenshots for ONESLOT'))
-    const panel = screen.getByTestId('appt-proofs')
-    expect(within(panel).getAllByText('Appt confirmation')).toHaveLength(2)
-    expect(within(panel).queryByText('E2Open update')).toBeNull()
+    expect(screen.queryByLabelText('Show booking screenshots for NOCAM')).toBeNull()
   })
 
-  it('Batory flips to Confirmed once BOTH screenshots are on file', () => {
+  it('Batory shows CONFIRMED once both confirm screenshots are on file', () => {
     loads.mockReturnValue([load({
       aljexId: 'PROVEN', customer: 'Batory Foods',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
@@ -218,23 +211,24 @@ describe('ApptsPage', () => {
     })])
     render(<ApptsPage />)
     const row = screen.getByText('PROVEN').closest('tr')!
-    expect(row.children[1].textContent).toBe('Confirmed')
+    expect(row.children[1].textContent).toBe('CONFIRMED')
     expect(row.children[1].querySelector('[data-state]')!.getAttribute('data-state')).toBe('confirmed')
   })
 
-  it('one screenshot is not enough for Batory — still Pending', () => {
+  it('one screenshot is not enough for Batory — REQUESTED, not confirmed', () => {
     loads.mockReturnValue([load({
       aljexId: 'HALFPROOF', customer: 'Batory Foods',
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
                      apptProofs: { e2open: 'appt-proofs/a' } })],
     })])
     render(<ApptsPage />)
-    expect(screen.getByText('HALFPROOF').closest('tr')!.children[1].textContent).toBe('Pending')
+    expect(screen.getByText('HALFPROOF').closest('tr')!.children[1].textContent).toBe('REQUESTED')
   })
 
-  it('"Open only" hides the booked rows and shows the open count', () => {
+  it('"Open only" hides the settled rows and shows the open count', () => {
     loads.mockReturnValue([
-      load({ id: 'l1', aljexId: 'BOOKED', stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })] }),
+      load({ id: 'l1', aljexId: 'BOOKED', rateConfirmKey: 'rc',
+        stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })] } as Partial<Load>),
       pair({ id: 'l2', aljexId: 'OPEN' }),
     ])
     render(<ApptsPage />)
@@ -390,6 +384,6 @@ describe('booking screenshots', () => {
       ],
     })])
     render(<ApptsPage />)
-    expect(screen.getByLabelText('Show booking screenshots for HALF').textContent).toContain('2/4')
+    expect(screen.getByLabelText('Show booking screenshots for HALF').textContent).toContain('2/6')
   })
 })

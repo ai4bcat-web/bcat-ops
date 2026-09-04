@@ -247,12 +247,26 @@ export interface Stop {
    * as apptThreadTs: stops is a.json(), so no schema change, and the proof travels with
    * the appointment it proves.
    */
-  apptProofs?: { e2open?: string | null; email?: string | null } | null
+  apptProofs?: { request?: string | null; e2open?: string | null; email?: string | null } | null
   /** A booked appointment that has to be RESCHEDULED — set from the appt editor. */
   apptMoveRequested?: boolean
   /** IntakeItem id of the open "move this appt" task, so booking the change closes it. */
   apptMoveTaskId?: string | null
+  /**
+   * Batory appointment-workflow status (see src/lib/apptStatus.ts). Absent on stops
+   * from before the ladder existed — apptWorkflowStatus() grandfathers those.
+   */
+  apptStatus?: ApptWorkflowStatus | null
+  /** CHANGE NEEDED: the date/time Ruben or Ryne wants instead (ISO). */
+  apptChangeTo?: string | null
 }
+
+export type ApptWorkflowStatus =
+  | 'need_request'   // pickup default — Dennis must email the request (12pm rule)
+  | 'need_book'      // delivery default — Ruben must pick the time he wants
+  | 'requested'      // request email sent (screenshot on file), waiting on confirmation
+  | 'confirmed'      // confirmed-email + E2Open screenshots on file
+  | 'change_needed'  // Ruben/Ryne want it moved to apptChangeTo — ladder restarts
 
 export interface Load {
   id: string
@@ -272,7 +286,8 @@ export interface Load {
   pickupDriverId: string | null
   deliveryDriverId: string | null
   readyToInvoice: boolean
-  rateConfirmUrl?: string   // base64 data URL of rate confirmation image
+  rateConfirmUrl?: string   // presigned URL of the uploaded rate confirmation
+  rateConfirmKey?: string   // S3 key of the rate confirmation (rate-confirms/{loadId}/…)
   // Extended fields (nullable — populated as data becomes available)
   truckId?: string | null
   rate?: number | null      // total load revenue in cents

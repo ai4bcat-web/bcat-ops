@@ -1,4 +1,5 @@
-import { notifyApptNeeded, createApptMoveTask, updateIntakeItem } from './apiClient'
+import { notifyApptNeeded, createApptMoveTask, createApptTask, updateIntakeItem } from './apiClient'
+import { apptHasTime } from './date'
 import { apptNotices } from './apptNotify'
 import { formatDateShort } from './date'
 import type { Load, Stop } from '@/types'
@@ -74,6 +75,34 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
         try { await updateIntakeItem(n.moveTaskId, { status: 'DONE' }) }
         catch (err) { console.error('[sendApptNotices] could not close the move task', err) }
       }
+    }
+  }
+
+  // Ruben picked the delivery time on a NEED TO BOOK stop: hand it to Dennis — a
+  // book-it task plus a #appts-ivan ping — and advance the ladder to NEED TO REQUEST.
+  const prevById = new Map(prev.map((s) => [s.id, s]))
+  for (const s of next) {
+    const was = prevById.get(s.id)
+    const nowTimed = apptHasTime(s.appt)
+    const hadTime = was ? apptHasTime(was.appt) : false
+    if (s.type === 'delivery' && (was?.apptStatus ?? s.apptStatus) === 'need_book' && nowTimed && !hadTime) {
+      addPatch(s.id, { apptStatus: 'need_request' })
+      const label = formatDateShort(s.appt)
+      try {
+        await createApptTask({
+          loadId: load.id, kind: 'book_delivery', assignee: 'dennis@bcatcorp.com',
+          subject: `Book delivery appt — ${[load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer].filter(Boolean).join(' · ') || 'load'}`,
+          bodyText: `Ruben wants the delivery booked. Email the facility to request it, then upload the request-email screenshot to move it to REQUESTED. Wanted: ${label}.`,
+          aljexId: load.aljexId ?? null,
+        })
+      } catch (err) { console.error('[sendApptNotices] book-delivery task failed', err) }
+      void notifyApptNeeded({
+        stopKind: 'delivery', kind: 'book', threadTs: s.apptThreadTs ?? null,
+        apptLabel: label, aljexId: load.aljexId, pickupNumber: load.pickupNumber,
+        customer: load.customer ?? null,
+        location: [s.name, s.city].filter(Boolean).join(', ') || null,
+        apptDate: label, actorName: actorName ?? null,
+      })
     }
   }
 

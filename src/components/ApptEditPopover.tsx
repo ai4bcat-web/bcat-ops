@@ -4,6 +4,7 @@ import { updateStop, getStops } from '@/lib/stops'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { useAppStore } from '@/store/useAppStore'
 import { apptTypeAfterEdit } from '@/lib/apptQueue'
+import { canSetChangeNeeded, changeNeededPatch } from '@/lib/apptStatus'
 import { formatDateTimeInput, fromDateTimeInput, fromDateInput, apptHasTime } from '@/lib/date'
 import type { Load, Stop, ApptType } from '@/types'
 
@@ -51,10 +52,11 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isPending ? 'pending' : (srcType ?? 'exact'))
   const [endVal,  setEndVal]  = useState(initEnd)
   const [saving,  setSaving]  = useState(false)
-  // "This booked appt has to be RESCHEDULED" — creates the Dennis task + Slack alert on
-  // save (the transition is detected by apptNotices, same as every other notice).
-  const [moveReq, setMoveReq] = useState(!!stop?.apptMoveRequested)
-  const canFlagMove = !!stop && (srcType ?? 'exact') !== 'tbd' && !isPending
+  // CHANGE NEEDED — Ruben/Ryne only. Records the wanted date+time, restarts the
+  // Batory ladder and clears every screenshot; Dennis re-earns REQUESTED → CONFIRMED.
+  const [moveReq, setMoveReq] = useState(stop?.apptStatus === 'change_needed' || !!stop?.apptMoveRequested)
+  const [changeTo, setChangeTo] = useState(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : '')
+  const canFlagMove = !!stop && (srcType ?? 'exact') !== 'tbd' && !isPending && canSetChangeNeeded(actor)
 
   const datePart = dateVal.slice(0, 10)
   const timePart = dateVal.slice(11, 16)
@@ -92,7 +94,17 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
 
       if (stop) {
         const stopPatch: Partial<Stop> = { apptType: effectiveType, apptEnd: endIso }
-        if (canFlagMove) stopPatch.apptMoveRequested = moveReq
+        if (canFlagMove) {
+          const wasFlagged = stop.apptStatus === 'change_needed' || !!stop.apptMoveRequested
+          if (moveReq && !wasFlagged) {
+            Object.assign(stopPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : ''))
+          } else if (!moveReq && wasFlagged) {
+            stopPatch.apptMoveRequested = false
+            stopPatch.apptChangeTo = null
+          } else if (moveReq && changeTo) {
+            stopPatch.apptChangeTo = fromDateTimeInput(changeTo)
+          }
+        }
         if (iso) stopPatch.appt = iso
         next = updateStop(load, stop.id, stopPatch)
         await updateLoad(load.id, { stops: next })
@@ -162,12 +174,24 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       </select>
 
       {canFlagMove && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer',
-          color: moveReq ? '#b45309' : 'var(--ds-t3)', fontWeight: moveReq ? 700 : 500 }}>
-          <input type="checkbox" checked={moveReq} onChange={(e) => setMoveReq(e.target.checked)}
-            aria-label="Needs to be moved" />
-          Needs to be moved{moveReq ? ' — creates a task for Dennis + alerts #appts-ivan' : ''}
-        </label>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, cursor: 'pointer',
+            color: moveReq ? '#b45309' : 'var(--ds-t3)', fontWeight: moveReq ? 700 : 500 }}>
+            <input type="checkbox" checked={moveReq} onChange={(e) => setMoveReq(e.target.checked)}
+              aria-label="Change needed" />
+            CHANGE NEEDED{moveReq ? ' — task for Dennis, screenshots reset' : ''}
+          </label>
+          {moveReq && (
+            <input
+              type="datetime-local"
+              aria-label="Change to date and time"
+              className={inputCls}
+              value={changeTo}
+              onChange={(e) => setChangeTo(e.target.value)}
+              title="The date and time you want instead"
+            />
+          )}
+        </div>
       )}
 
       {isRange && (

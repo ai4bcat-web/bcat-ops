@@ -5,7 +5,7 @@ import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { updateIntakeItem, APPT_MOVE_PREFIX, APPT_MOVE_ASSIGNEE } from '@/lib/apiClient'
+import { updateIntakeItem, APPT_MOVE_PREFIX, APPT_TASK_PREFIX, APPT_MOVE_ASSIGNEE } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import type { IntakeItem } from '@/types'
 
@@ -18,9 +18,9 @@ import type { IntakeItem } from '@/types'
  * button here is the manual fallback for a request resolved outside the app.
  */
 
-const isApptMove = (i: IntakeItem) => (i.externalId ?? '').startsWith(APPT_MOVE_PREFIX)
-const loadIdOf = (i: IntakeItem) =>
-  i.builtLoadId || (i.externalId ?? '').slice(APPT_MOVE_PREFIX.length).split(':')[0] || null
+const isApptMove = (i: IntakeItem) =>
+  (i.externalId ?? '').startsWith(APPT_MOVE_PREFIX) || (i.externalId ?? '').startsWith(APPT_TASK_PREFIX)
+const loadIdOf = (i: IntakeItem) => i.builtLoadId || null
 
 export function ApptChangesPage() {
   const isMobile = useIsMobile()

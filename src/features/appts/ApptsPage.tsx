@@ -12,6 +12,8 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
+import { STATUS_META, type EffectiveApptStatus } from '@/lib/apptStatus'
+import { requiresApptProofs } from '@/lib/apptQueue'
 import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
@@ -66,28 +68,56 @@ const STATUS_LABEL: Record<ApptNeedKind, string> = { need: 'NEED', pending: 'Pen
  * label still says which flavour of not. Amber Pending read as "sort of fine" and got
  * skipped over.
  */
-function KindChip({ kind, confirmed }: { kind: ApptNeedKind | null; confirmed?: boolean }) {
-  const booked = !kind
+const TONE_STYLE = {
+  red:   { bg: 'var(--ds-red-soft)',            fg: RED },
+  amber: { bg: 'var(--ds-amber-soft)',          fg: AMBER },
+  blue:  { bg: 'var(--ds-blue-soft, #eff6ff)',  fg: '#0369a1' },
+  green: { bg: 'var(--ds-green-bg)',            fg: GREEN },
+} as const
+
+/**
+ * The workflow chip. Batory rides the ladder (NEED TO REQUEST / NEED TO BOOK /
+ * REQUESTED / CHANGE NEEDED / CONFIRMED); non-Batory shows RATECON NEEDED until the
+ * rate confirmation is on the load, then CONFIRMED. Unbooked NEED/no-time states from
+ * the queue still surface when no ladder status applies.
+ */
+function KindChip({ kind, status }: { kind: ApptNeedKind | null; status: EffectiveApptStatus | null }) {
+  if (status) {
+    const meta = STATUS_META[status]
+    const t = TONE_STYLE[meta.tone]
+    const alert = status === 'need_request' || status === 'need_book'
+    return (
+      <span
+        data-state={status}
+        title={status === 'ratecon_needed' ? 'Upload the rate confirmation on the load — its appts confirm from the ratecon'
+          : status === 'requested' ? 'Request sent — waiting on the Confirmed-email + E2Open screenshots'
+          : status === 'change_needed' ? 'Ruben/Ryne want this appointment moved — new request + confirmation screenshots required'
+          : undefined}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
+          background: t.bg, color: t.fg,
+          ...(alert ? { outline: `1.5px solid ${t.fg}`, outlineOffset: 1 } : {}),
+        }}
+      >
+        {status === 'confirmed' ? <CheckCircle2 size={11} /> : status === 'ratecon_needed' ? <Camera size={11} /> : <CircleAlert size={11} />}
+        {meta.label}
+      </span>
+    )
+  }
+  if (!kind) return <span data-state="booked" style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>—</span>
   const move = kind === 'move'
-  // Booked splits in two: CONFIRMED once both screenshots (E2Open + email) are on
-  // file, otherwise the booking itself is still pending its proof.
-  const state = booked ? (confirmed ? 'confirmed' : 'booked-pending') : kind
-  const bg = booked
-    ? (confirmed ? 'var(--ds-green-bg)' : 'var(--ds-blue-soft, #eff6ff)')
-    : move ? 'var(--ds-amber-soft)' : 'var(--ds-red-soft)'
-  const fg = booked ? (confirmed ? GREEN : '#0369a1') : move ? AMBER : RED
   return (
     <span
-      data-state={state}
-      title={booked && !confirmed ? 'Booked — waiting on the confirmation screenshot(s); use the camera button' : undefined}
+      data-state={kind}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: 10.5, fontWeight: 700, padding: '2px 6px', borderRadius: 5, whiteSpace: 'nowrap',
-        background: bg, color: fg,
+        background: move ? 'var(--ds-amber-soft)' : 'var(--ds-red-soft)', color: move ? AMBER : RED,
       }}
     >
-      {booked ? (confirmed ? <CheckCircle2 size={11} /> : <Camera size={11} />) : <CircleAlert size={11} />}
-      {booked ? (confirmed ? 'Confirmed' : 'Pending') : STATUS_LABEL[kind]}
+      <CircleAlert size={11} />
+      {STATUS_LABEL[kind]}
     </span>
   )
 }
@@ -179,10 +209,10 @@ function ApptTimeCell({ load, refr, apptField, typeField }: {
 
   return (
     <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
-      {stop?.apptMoveRequested && (
+      {(stop?.apptStatus === 'change_needed' || stop?.apptMoveRequested) && (
         <div role="alert" style={{ fontSize: 10, fontWeight: 700, color: AMBER, background: 'var(--ds-amber-soft)',
           borderRadius: 4, padding: '1px 5px', marginBottom: 3, display: 'inline-block', whiteSpace: 'nowrap' }}>
-          ⚠ NEEDS TO BE MOVED
+          ⚠ CHANGE NEEDED{stop?.apptChangeTo ? ` → ${formatDateShort(stop.apptChangeTo)} ${new Date(stop.apptChangeTo).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}` : ''}
         </div>
       )}
       <button
@@ -314,11 +344,12 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
             </thead>
             <tbody>
               {rows.map((r) => {
-                const open = !!(r.pickupKind || r.deliveryKind)
+                const open = rowOutstanding(r)
                 const showHistory = openHistory.has(r.loadId)
                 const showProofs = openProofs.has(r.loadId)
                 const loadRec = loadsById.get(r.loadId)
-                const proofs = loadRec ? loadProofCount(loadRec) : { have: 0, want: 4 }
+                const proofs = loadRec ? loadProofCount(loadRec) : { have: 0, want: 6 }
+                const batory = !!loadRec && requiresApptProofs(loadRec.customer)
                 return (
                 <Fragment key={r.loadId}>
                 <tr
@@ -338,20 +369,22 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     >
                       <History size={13} />
                     </button>
+                    {batory && (
                     <button
                       onClick={() => toggleProofs(r.loadId)}
                       aria-label={`${showProofs ? 'Hide' : 'Show'} booking screenshots for ${r.aljexId || 'this shipment'}`}
                       aria-expanded={showProofs}
-                      title={`Booking screenshots — E2Open update + email confirmation per stop (${proofs.have}/${proofs.want})`}
+                      title={`Batory booking screenshots — request email, E2Open update + email confirmation per stop (${proofs.have}/${proofs.want})`}
                       style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer',
                         color: proofs.have >= proofs.want && proofs.want > 0 ? GREEN : showProofs ? 'var(--ds-t1)' : 'var(--ds-t3)',
                         display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, fontWeight: 700, fontFamily: 'inherit' }}
                     >
                       <Camera size={13} />{proofs.have > 0 ? `${proofs.have}/${proofs.want}` : ''}
                     </button>
+                    )}
                   </td>
-                  <td style={td}><KindChip kind={r.pickupKind} confirmed={r.pickupConfirmed} /></td>
-                  <td style={td}><KindChip kind={r.deliveryKind} confirmed={r.deliveryConfirmed} /></td>
+                  <td style={td}><KindChip kind={r.pickupKind} status={r.pickupStatus} /></td>
+                  <td style={td}><KindChip kind={r.deliveryKind} status={r.deliveryStatus} /></td>
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.pickupNumber || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.customer || '—'}</td>
@@ -389,7 +422,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     typeField="deliveryApptType"
                   />
                 </tr>
-                {showProofs && loadRec && (
+                {showProofs && batory && loadRec && (
                   <tr>
                     <td colSpan={3 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--ds-bg)' }} onClick={(e) => e.stopPropagation()}>
                       <ApptProofPanel load={loadRec} updateLoad={updateLoad} />

@@ -57,12 +57,19 @@ describe('apptNeedKind', () => {
 })
 
 describe('apptQueue', () => {
-  it('keeps a fully booked shipment on the page, marked booked on both ends', () => {
-    const rows = apptQueue([load({ stops: [stop(), stop({ id: 's2', type: 'delivery' })] })])
+  it('keeps a fully booked shipment on the page; with its ratecon it is settled', () => {
+    const rows = apptQueue([load({ rateConfirmKey: 'rate-confirms/x', stops: [stop(), stop({ id: 's2', type: 'delivery' })] } as Parameters<typeof load>[0])])
     expect(rows).toHaveLength(1)
     expect(rows[0].pickupKind).toBeNull()
     expect(rows[0].deliveryKind).toBeNull()
+    expect(rows[0].pickupStatus).toBe('confirmed')
     expect(rowOutstanding(rows[0])).toBe(false)
+  })
+
+  it('a booked non-Batory shipment WITHOUT a ratecon is still outstanding', () => {
+    const rows = apptQueue([load({ stops: [stop(), stop({ id: 's2', type: 'delivery' })] })])
+    expect(rows[0].pickupStatus).toBe('ratecon_needed')
+    expect(rowOutstanding(rows[0])).toBe(true)
   })
 
   it('is empty only when there are no loads at all', () => {
@@ -139,7 +146,7 @@ describe('apptQueue', () => {
 
   it('sorts a fully booked load BELOW the ones still open, and apptOutstanding drops it', () => {
     const loadsIn = [
-      load({ id: 'l1', stops: [
+      load({ id: 'l1', rateConfirmKey: 'rate-confirms/x', stops: [
         stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00') }),
         stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
       ] }),
@@ -171,24 +178,21 @@ describe('apptQueue', () => {
 })
 
 describe('apptQueueCount', () => {
-  const loads = [
-    load({ id: 'l1', stops: [stop({ apptType: 'tbd' })] }),
-    load({ id: 'l2', stops: [stop({ appt: fromDateInput('2026-08-20') })] }),
-    load({ id: 'l3', stops: [stop()] }),   // booked — not in the queue
-  ]
+  const settled = (id: string) => load({ id, rateConfirmKey: 'rc', stops: [
+    stop({ id: `${id}p`, apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00') }),
+    stop({ id: `${id}d`, type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
+  ] } as Parameters<typeof load>[0])
 
   it('counts loads (not stops) awaiting an appointment', () => {
-    expect(apptQueueCount(loads)).toBe(2)
+    expect(apptQueueCount([
+      settled('a'),
+      load({ id: 'b', stops: [stop({ id: 'bp', apptType: 'tbd' })] }),
+      load({ id: 'c', stops: [stop({ id: 'cp', apptType: 'tbd' }), stop({ id: 'cd', type: 'delivery', apptType: 'tbd' })] }),
+    ])).toBe(2)
   })
 
   it('counts a load once even when both stops need attention', () => {
-    const both = [
-      load({ id: 'l1', stops: [
-        stop({ apptType: 'tbd' }),
-        stop({ type: 'delivery', apptType: 'tbd' }),
-      ] }),
-    ]
-    expect(apptQueueCount(both)).toBe(1)
+    expect(apptQueueCount([load({ stops: [stop({ apptType: 'tbd' }), stop({ id: 's2', type: 'delivery', apptType: 'tbd' })] })])).toBe(1)
   })
 })
 
@@ -394,12 +398,11 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
     expect(stopConfirmed(booked(), 'batory')).toBe(false)
   })
 
-  it('any other customer: ONE screenshot confirms it — no E2Open exists for them', () => {
-    expect(stopConfirmed(booked(), 'Acme Freight')).toBe(false)
-    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } }, 'Acme Freight')).toBe(true)
-    // Legacy upload sitting in the other slot still counts as the one screenshot.
-    expect(stopConfirmed({ ...booked(), apptProofs: { e2open: 'k1' } }, 'Acme Freight')).toBe(true)
-    expect(stopConfirmed({ ...booked(), apptProofs: { email: 'k2' } }, null)).toBe(true)
+  it('any other customer: stop-level check passes when booked — the RATECON decides at load level', () => {
+    // Screenshots no longer gate non-Batory stops; apptWorkflowStatus judges the load's
+    // ratecon (see apptStatus.test.ts).
+    expect(stopConfirmed(booked(), 'Acme Freight')).toBe(true)
+    expect(stopConfirmed(stop({ apptType: 'tbd' }), 'Acme Freight')).toBe(false)
   })
 
   it('an unbooked or flagged stop is never confirmed, whoever the customer is', () => {
@@ -408,16 +411,19 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
     expect(stopConfirmed(stop({ apptType: 'tbd', apptProofs: { e2open: 'k1', email: 'k2' } }), BATORY)).toBe(false)
   })
 
-  it('rows carry the per-customer rule for the chips and the CSV', () => {
+  it('rows carry the per-customer workflow status for the chips and the CSV', () => {
     const stops = [
       { ...stop({ apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-20T09:00') }), apptProofs: { email: 'k' } },
       stop({ id: 's2', type: 'delivery' as const, apptType: 'exact' as const, appt: fromDateTimeInput('2026-08-21T14:00') }),
     ]
-    // Batory: one screenshot is not enough. Acme: that same screenshot confirms it.
+    // Batory: one screenshot grandfathers to REQUESTED, not confirmed.
     const batory = apptQueue([load({ customer: 'Batory Foods', stops })])
+    expect(batory[0].pickupStatus).toBe('requested')
     expect(batory[0].pickupConfirmed).toBe(false)
+    // Acme: ratecon missing → both ends RATECON NEEDED; with it → confirmed.
     const acme = apptQueue([load({ customer: 'Acme Freight', stops })])
-    expect(acme[0].pickupConfirmed).toBe(true)   // has the one screenshot
-    expect(acme[0].deliveryConfirmed).toBe(false) // has none yet
+    expect(acme[0].pickupStatus).toBe('ratecon_needed')
+    const acmeRc = apptQueue([load({ customer: 'Acme Freight', rateConfirmKey: 'rc', stops } as Parameters<typeof load>[0])])
+    expect(acmeRc[0].pickupStatus).toBe('confirmed')
   })
 })

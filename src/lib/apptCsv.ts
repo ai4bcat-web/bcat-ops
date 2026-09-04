@@ -1,4 +1,5 @@
 import { apptTimeLabel, formatDateShort } from './date'
+import { STATUS_META } from './apptStatus'
 import type { ApptQueueRow } from './apptQueue'
 
 /**
@@ -37,8 +38,8 @@ export function apptRowsToCsv(
   const lines = [APPT_CSV_HEADER.map(q).join(',')]
   for (const r of rows) {
     lines.push([
-      r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : r.pickupConfirmed ? 'Confirmed' : 'Booked - pending confirmation',
-      r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : r.deliveryConfirmed ? 'Confirmed' : 'Booked - pending confirmation',
+      r.pickupStatus ? STATUS_META[r.pickupStatus].label : (r.pickupKind ? (STATUS_LABEL[r.pickupKind] ?? r.pickupKind) : ''),
+      r.deliveryStatus ? STATUS_META[r.deliveryStatus].label : (r.deliveryKind ? (STATUS_LABEL[r.deliveryKind] ?? r.deliveryKind) : ''),
       r.aljexId,
       r.pickupNumber,
       r.customer,

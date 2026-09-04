@@ -8,7 +8,7 @@ import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
-import { APPT_MOVE_PREFIX } from '@/lib/apiClient'
+import { APPT_MOVE_PREFIX, APPT_TASK_PREFIX } from '@/lib/apiClient'
 import { NAV_GROUPS } from '@/lib/navItems'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
@@ -51,7 +51,8 @@ export function NavBar({
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
-  const isApptMove = (i: { externalId?: string | null }) => (i.externalId ?? '').startsWith(APPT_MOVE_PREFIX)
+  const isApptMove = (i: { externalId?: string | null }) =>
+    (i.externalId ?? '').startsWith(APPT_MOVE_PREFIX) || (i.externalId ?? '').startsWith(APPT_TASK_PREFIX)
   // Appt-move tasks ride the intake feed but are their own worklist — count them apart.
   const activeIntakeCount = intakeItems.filter(i => ACTIVE_STATUSES.has(i.status) && !isApptMove(i)).length
   const apptChangeCount = intakeItems.filter(i => ACTIVE_STATUSES.has(i.status) && isApptMove(i)).length

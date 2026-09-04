@@ -1,5 +1,6 @@
 import { getStops } from './stops'
 import { apptHasTime, chicagoDateStr } from './date'
+import { apptWorkflowStatus, type EffectiveApptStatus } from './apptStatus'
 import type { ApptType, Load, Stop } from '@/types'
 
 /**
@@ -46,6 +47,9 @@ export interface ApptQueueRow {
   /** Booked AND both screenshots (E2Open + email) uploaded. */
   pickupConfirmed: boolean
   deliveryConfirmed: boolean
+  /** The workflow ladder state per end (Batory ladder / non-Batory ratecon rule). */
+  pickupStatus: EffectiveApptStatus | null
+  deliveryStatus: EffectiveApptStatus | null
   /** The load's scheduled pickup and delivery — the same two the calendar shows. */
   pickup: ApptRef
   delivery: ApptRef
@@ -82,8 +86,11 @@ export function apptNeedKind(stop: Stop): ApptNeedKind | null {
   return apptHasTime(stop.appt) ? null : 'pending'
 }
 
-/** True when at least one of the shipment's two appointments is still unbooked. */
-export const rowOutstanding = (r: ApptQueueRow): boolean => !!(r.pickupKind || r.deliveryKind)
+/** True when at least one of the shipment's two appointments is not yet CONFIRMED. */
+export const rowOutstanding = (r: ApptQueueRow): boolean =>
+  (r.pickupStatus !== null && r.pickupStatus !== 'confirmed') ||
+  (r.deliveryStatus !== null && r.deliveryStatus !== 'confirmed') ||
+  !!(r.pickupKind || r.deliveryKind)
 
 /**
  * Which customers must have BOTH proof screenshots (E2Open update + email confirmation)
@@ -103,8 +110,13 @@ export const requiresApptProofs = (customer: string | null | undefined): boolean
  */
 export const stopConfirmed = (stop: Stop, customer?: string | null): boolean => {
   if (apptNeedKind(stop) !== null) return false
-  const e2 = !!stop.apptProofs?.e2open, em = !!stop.apptProofs?.email
-  return requiresApptProofs(customer) ? e2 && em : e2 || em
+  if (requiresApptProofs(customer)) {
+    if (stop.apptStatus) return stop.apptStatus === 'confirmed'
+    return !!stop.apptProofs?.e2open && !!stop.apptProofs?.email
+  }
+  // Non-Batory confirmation now rides the RATECON, judged at the load level in
+  // apptWorkflowStatus — a lone screenshot no longer decides anything here.
+  return true
 }
 
 /**
@@ -150,6 +162,8 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       deliveryDriverId: deliveryStop?.driverId ?? null,
       pickupConfirmed: pickupStop ? stopConfirmed(pickupStop, load.customer) : false,
       deliveryConfirmed: deliveryStop ? stopConfirmed(deliveryStop, load.customer) : false,
+      pickupStatus: pickupStop ? apptWorkflowStatus(pickupStop, load) : null,
+      deliveryStatus: deliveryStop ? apptWorkflowStatus(deliveryStop, load) : null,
       pickup: refs.pickup,
       delivery: refs.delivery,
     })

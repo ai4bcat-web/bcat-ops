@@ -67,6 +67,7 @@ export const handler = async (event: AppSyncEvent) => {
   const isUpdate = args.kind === 'updated'
   const isMove = args.kind === 'move'
   const isMoved = args.kind === 'moved'
+  const isBook = args.kind === 'book'
 
   if (!SLACK_BOT_TOKEN || !APPTS_IVAN_CHANNEL_ID) {
     console.warn('[appt-need-notifier] Slack not configured (token/channel) — skipping post')
@@ -74,7 +75,14 @@ export const handler = async (event: AppSyncEvent) => {
   }
 
   const who = args.actorName || event.identity?.claims?.email || null
-  const text = isMove
+  const text = isBook
+    ? [
+        `:calendar: *Delivery appt time picked* — book it for ${args.apptLabel || 'the chosen time'}`,
+        `${referenceLine(args)}`,
+        'Dennis has a task to email the facility and book this delivery appointment.',
+        who ? `_Picked by ${who}_` : null,
+      ].filter(Boolean).join('\n')
+    : isMove
     ? [
         `:rotating_light: *${kind} appt NEEDS TO BE MOVED* — ${args.apptLabel || 'currently booked'}`,
         `${referenceLine(args)}`,
@@ -107,7 +115,7 @@ export const handler = async (event: AppSyncEvent) => {
       text,
       // Reply inside the asking thread. Without a ts there is no thread to join, so the
       // update posts at top level rather than being silently dropped.
-      ...((isUpdate || isMove || isMoved) && args.threadTs ? { thread_ts: args.threadTs } : {}),
+      ...((isUpdate || isMove || isMoved || isBook) && args.threadTs ? { thread_ts: args.threadTs } : {}),
     }),
   })
   const json = await res.json() as { ok: boolean; error?: string; ts?: string }
