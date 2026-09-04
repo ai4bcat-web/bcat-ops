@@ -241,6 +241,13 @@ export interface Stop {
   // travels with the stop it belongs to. Legacy loads (no stops array) have nowhere to
   // keep it, so those post standalone messages.
   apptThreadTs?: string
+  /**
+   * S3 keys of the booking-proof screenshots for THIS stop's appointment — the E2Open
+   * update and the email confirmation. On the stop (not a column) for the same reason
+   * as apptThreadTs: stops is a.json(), so no schema change, and the proof travels with
+   * the appointment it proves.
+   */
+  apptProofs?: { e2open?: string | null; email?: string | null } | null
 }
 
 export interface Load {

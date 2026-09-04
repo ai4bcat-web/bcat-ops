@@ -28,6 +28,12 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    // Appointment-confirmation screenshots (E2Open update + email confirmation),
+    // pasted/uploaded per stop from the Appts page. Keyed appt-proofs/{loadId}/{stopId}/…
+    'appt-proofs/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
     // DOT compliance documents (driver + truck). Internal staff read/write/delete.
     // The driver portal uploads via a presigned PUT from the onboarding-portal-api
     // Lambda (Phase 3) using the bucket's IAM grant, so no guest access is exposed here.

@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useMemo, useState } from 'react'
-import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock } from 'lucide-react'
+import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -12,6 +12,7 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
+import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
@@ -201,13 +202,14 @@ function SortHeader({ label, active, dir, onClick }: {
   )
 }
 
-function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort, onSort, onExport }: {
+function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, onOpen, sort, onSort, onExport }: {
   title: string
   hint: string
   rows: ApptQueueRow[]
   drivers: { id: string; name: string }[]
   loadsById: Map<string, Load>
   auditLog: AuditLogEntry[]
+  updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>
   onOpen: (loadId: string) => void
   sort: { key: ApptSortKey; dir: SortDir } | null
   onSort: (key: ApptSortKey) => void
@@ -220,6 +222,9 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort
   const [openHistory, setOpenHistory] = useState<Set<string>>(new Set())
   const toggleHistory = (id: string) =>
     setOpenHistory((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const [openProofs, setOpenProofs] = useState<Set<string>>(new Set())
+  const toggleProofs = (id: string) =>
+    setOpenProofs((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -280,7 +285,9 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort
               {rows.map((r) => {
                 const open = !!(r.pickupKind || r.deliveryKind)
                 const showHistory = openHistory.has(r.loadId)
+                const showProofs = openProofs.has(r.loadId)
                 const loadRec = loadsById.get(r.loadId)
+                const proofs = loadRec ? loadProofCount(loadRec) : { have: 0, want: 4 }
                 return (
                 <Fragment key={r.loadId}>
                 <tr
@@ -289,7 +296,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort
                   style={{ cursor: 'pointer', boxShadow: `inset 3px 0 0 ${open ? RED : GREEN}` }}
                   title="Open this load to set the appointment"
                 >
-                  <td style={{ ...td, padding: '10px 4px 10px 10px' }} onClick={(e) => e.stopPropagation()}>
+                  <td style={{ ...td, padding: '10px 4px 10px 10px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => toggleHistory(r.loadId)}
                       aria-label={`${showHistory ? 'Hide' : 'Show'} appointment history for ${r.aljexId || 'this shipment'}`}
@@ -299,6 +306,17 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort
                         color: showHistory ? 'var(--ds-t1)' : 'var(--ds-t3)', display: 'inline-flex' }}
                     >
                       <History size={13} />
+                    </button>
+                    <button
+                      onClick={() => toggleProofs(r.loadId)}
+                      aria-label={`${showProofs ? 'Hide' : 'Show'} booking screenshots for ${r.aljexId || 'this shipment'}`}
+                      aria-expanded={showProofs}
+                      title={`Booking screenshots — E2Open update + email confirmation per stop (${proofs.have}/${proofs.want})`}
+                      style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer',
+                        color: proofs.have >= proofs.want && proofs.want > 0 ? GREEN : showProofs ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                        display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 10, fontWeight: 700, fontFamily: 'inherit' }}
+                    >
+                      <Camera size={13} />{proofs.have > 0 ? `${proofs.have}/${proofs.want}` : ''}
                     </button>
                   </td>
                   <td style={td}><KindChip kind={r.pickupKind} /></td>
@@ -340,6 +358,13 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort
                     typeField="deliveryApptType"
                   />
                 </tr>
+                {showProofs && loadRec && (
+                  <tr>
+                    <td colSpan={3 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--ds-bg)' }} onClick={(e) => e.stopPropagation()}>
+                      <ApptProofPanel load={loadRec} updateLoad={updateLoad} />
+                    </td>
+                  </tr>
+                )}
                 {showHistory && (
                   <HistoryRow events={loadRec ? apptHistory(loadRec, auditLog) : []} colSpan={3 + COLUMNS.length} />
                 )}
@@ -365,7 +390,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, onOpen, sort
  */
 export function ApptsPage() {
   const isMobile = useIsMobile()
-  const { loads } = useLoads()
+  const { loads, updateLoad } = useLoads()
   const { drivers } = useDrivers()
   const [query, setQuery] = useState('')
   const [showPast, setShowPast] = useState(false)
@@ -470,6 +495,7 @@ export function ApptsPage() {
             drivers={drivers}
             loadsById={loadsById}
             auditLog={auditLog}
+            updateLoad={updateLoad}
             onOpen={openById}
             sort={sort}
             onSort={onSort}

@@ -1005,6 +1005,29 @@ export async function uploadRateConfirm(loadId: string, file: File): Promise<str
   return key
 }
 
+// ── Appointment booking proofs (Appts page) ────────────────────────────────────
+// One screenshot per (stop, slot): slot 'e2open' = the E2Open update, 'email' = the
+// email confirmation. Pasted images arrive as Blobs with no name; type decides the ext.
+
+export type ApptProofSlot = 'e2open' | 'email'
+
+export async function uploadApptProof(loadId: string, stopId: string, slot: ApptProofSlot, file: Blob): Promise<string> {
+  const ext = file.type === 'image/png' ? 'png' : 'jpg'
+  // Timestamped so a re-upload never collides with a cached old proof.
+  const key = `appt-proofs/${loadId}/${stopId.replace(/[^\w.\-]+/g, '_')}/${slot}-${Date.now()}.${ext}`
+  await uploadData({ path: key, data: file, options: { contentType: file.type || 'image/jpeg' } }).result
+  return key
+}
+
+export async function getApptProofUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+export async function deleteApptProof(key: string): Promise<void> {
+  await remove({ path: key })
+}
+
 export async function getRateConfirmUrl(key: string): Promise<string> {
   const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
   return result.url.toString()

@@ -33,7 +33,12 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 
 const notifyApptNeeded = vi.fn().mockResolvedValue('1699999999.000100')
-vi.mock('@/lib/apiClient', () => ({ notifyApptNeeded: (a: unknown) => notifyApptNeeded(a) }))
+vi.mock('@/lib/apiClient', () => ({
+  notifyApptNeeded: (a: unknown) => notifyApptNeeded(a),
+  uploadApptProof: vi.fn().mockResolvedValue('appt-proofs/x'),
+  getApptProofUrl: vi.fn().mockResolvedValue('https://example.com/x.jpg'),
+  deleteApptProof: vi.fn().mockResolvedValue(undefined),
+}))
 
 import { ApptsPage } from './ApptsPage'
 
@@ -317,5 +322,30 @@ describe('ApptsPage', () => {
     screen.getByText('12345').closest('tr')!.click()
     // 'edit' — booking the time is the whole reason the row was clicked.
     expect(setSelectedLoad).toHaveBeenCalledWith('l7', 'edit')
+  })
+})
+describe('booking screenshots', () => {
+  it('opens the proof panel with E2Open + email slots for both stops', () => {
+    loads.mockReturnValue([pair({ id: 'l7', aljexId: 'PROOFS' })])
+    render(<ApptsPage />)
+    fireEvent.click(screen.getByLabelText('Show booking screenshots for PROOFS'))
+    const panel = screen.getByTestId('appt-proofs')
+    expect(within(panel).getByText('Pickup')).toBeTruthy()
+    expect(within(panel).getByText('Delivery')).toBeTruthy()
+    expect(within(panel).getAllByText('E2Open update')).toHaveLength(2)
+    expect(within(panel).getAllByText('Email confirmation')).toHaveLength(2)
+  })
+
+  it('shows the completeness count once screenshots exist', () => {
+    loads.mockReturnValue([load({
+      id: 'l8', aljexId: 'HALF',
+      stops: [
+        stop({ id: 'p', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'),
+               apptProofs: { e2open: 'appt-proofs/a', email: 'appt-proofs/b' } }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact', appt: fromDateTimeInput('2099-01-02T14:30') }),
+      ],
+    })])
+    render(<ApptsPage />)
+    expect(screen.getByLabelText('Show booking screenshots for HALF').textContent).toContain('2/4')
   })
 })
