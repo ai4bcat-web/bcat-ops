@@ -606,6 +606,41 @@ function NewLoadDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
+  // Batory defaults: when the customer field is set to Batory on a new load, the
+  // pickup defaults to NEED with 12:00 PM and the delivery defaults to NEED.
+  // Only applies in create mode and only when the stops are still at their vanilla
+  // defaults (no names, no times) — never overwrites deliberate edits.
+  useEffect(() => {
+    if (mode !== 'create') return
+    const customer = watch('customer')
+    if (!customer || !/batory/i.test(customer)) return
+
+    const stops = watch('stops') ?? []
+    if (stops.length === 0) return
+
+    // Only apply when stops are untouched — no facility names, no times set.
+    const isVanilla = stops.every((s) =>
+      !s.name && !s.city &&
+      (s.apptType === 'exact') &&
+      (!s.appt || s.appt.length <= 10), // date-only, no time chosen yet
+    )
+    if (!isVanilla) return
+
+    // Apply Batory defaults: pickup → NEED with noon, delivery → NEED.
+    stops.forEach((s, i) => {
+      if (s.type === 'pickup') {
+        const date = s.appt?.slice(0, 10) || ''
+        const apptWithTime = date ? `${date}T12:00` : ''
+        setValue(`stops.${i}.apptType`, 'tbd', { shouldDirty: true })
+        if (apptWithTime) setValue(`stops.${i}.appt`, apptWithTime, { shouldDirty: true })
+      }
+      if (s.type === 'delivery') {
+        setValue(`stops.${i}.apptType`, 'tbd', { shouldDirty: true })
+      }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watch('customer')])
+
   // Mirror a chosen pickup driver onto every delivery stop (non-split loads).
   const syncDeliveriesToDriver = (value: string | null) => {
     const stops = watch('stops') ?? []
