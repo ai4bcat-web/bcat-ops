@@ -681,6 +681,66 @@ export async function createApptMoveTask(args: {
   return result.data.createIntakeItem
 }
 
+// ── Directory: customers & locations ─────────────────────────────────────────
+
+export interface CustomerRecord {
+  id: string
+  name: string
+  contactName?: string | null
+  contactEmail?: string | null
+  contactPhone?: string | null
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
+}
+export interface LocationRecord {
+  id: string
+  name: string
+  city?: string | null
+  customerName?: string | null
+  apptContactName?: string | null
+  apptContactEmail?: string | null
+  apptContactPhone?: string | null
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const CUSTOMER_FIELDS = `id name contactName contactEmail contactPhone notes createdAt updatedAt`
+const LOCATION_FIELDS = `id name city customerName apptContactName apptContactEmail apptContactPhone notes createdAt updatedAt`
+
+export async function listCustomers(): Promise<CustomerRecord[]> {
+  const r = await client.graphql({ query: `query L { listCustomers(limit: 1000) { items { ${CUSTOMER_FIELDS} } } }` }) as { data: { listCustomers: { items: CustomerRecord[] } } }
+  return r.data.listCustomers.items ?? []
+}
+export async function createCustomer(input: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<CustomerRecord> {
+  const r = await client.graphql({ query: `mutation C($input: CreateCustomerInput!) { createCustomer(input: $input) { ${CUSTOMER_FIELDS} } }`, variables: { input } }) as { data: { createCustomer: CustomerRecord } }
+  return r.data.createCustomer
+}
+export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>>): Promise<CustomerRecord> {
+  const r = await client.graphql({ query: `mutation U($input: UpdateCustomerInput!) { updateCustomer(input: $input) { ${CUSTOMER_FIELDS} } }`, variables: { input: { id, ...patch } } }) as { data: { updateCustomer: CustomerRecord } }
+  return r.data.updateCustomer
+}
+export async function deleteCustomer(id: string): Promise<void> {
+  await client.graphql({ query: `mutation D($input: DeleteCustomerInput!) { deleteCustomer(input: $input) { id } }`, variables: { input: { id } } })
+}
+
+export async function listLocations(): Promise<LocationRecord[]> {
+  const r = await client.graphql({ query: `query L { listLocations(limit: 2000) { items { ${LOCATION_FIELDS} } } }` }) as { data: { listLocations: { items: LocationRecord[] } } }
+  return r.data.listLocations.items ?? []
+}
+export async function createLocation(input: Omit<LocationRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<LocationRecord> {
+  const r = await client.graphql({ query: `mutation C($input: CreateLocationInput!) { createLocation(input: $input) { ${LOCATION_FIELDS} } }`, variables: { input } }) as { data: { createLocation: LocationRecord } }
+  return r.data.createLocation
+}
+export async function updateLocation(id: string, patch: Partial<Omit<LocationRecord, 'id' | 'createdAt' | 'updatedAt'>>): Promise<LocationRecord> {
+  const r = await client.graphql({ query: `mutation U($input: UpdateLocationInput!) { updateLocation(input: $input) { ${LOCATION_FIELDS} } }`, variables: { input: { id, ...patch } } }) as { data: { updateLocation: LocationRecord } }
+  return r.data.updateLocation
+}
+export async function deleteLocation(id: string): Promise<void> {
+  await client.graphql({ query: `mutation D($input: DeleteLocationInput!) { deleteLocation(input: $input) { id } }`, variables: { input: { id } } })
+}
+
 export async function notifySlackStatusChange(args: {
   intakeItemId: string
   oldStatus?: string | null

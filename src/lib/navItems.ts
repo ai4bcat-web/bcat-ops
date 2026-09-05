@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, FileSignature, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Waves, Repeat, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, FileSignature, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Waves, Repeat, Building2, MapPin, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -44,6 +44,9 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff' },
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
+      // The directory: reusable customers + locations behind the Load form.
+      { to: '/customers', label: 'Customers', icon: Building2,       pageKey: 'customers' },
+      { to: '/locations', label: 'Locations', icon: MapPin,          pageKey: 'locations' },
     ],
   },
   {

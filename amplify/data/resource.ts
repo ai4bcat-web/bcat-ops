@@ -339,6 +339,31 @@ const schema = a.schema({
 
   // ── Intake queue ──────────────────────────────────────────────────────────
   // Records created by the slack-intake-webhook Lambda when Slack messages arrive.
+  // ── Directory: customers & locations ───────────────────────────────────────
+  // The reusable address book behind the Load form. A Customer carries ITS contact;
+  // a Location carries the APPOINTMENT contact used to request/book appt times.
+  Customer: a
+    .model({
+      name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
+      contactName:  a.string(),
+      contactEmail: a.string(),
+      contactPhone: a.string(),
+      notes:        a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
+  Location: a
+    .model({
+      name:             a.string().required(),  // facility, e.g. "BATORY'S OAKLEY CHICAGO"
+      city:             a.string(),             // "CHICAGO, IL"
+      customerName:     a.string(),             // which customer's network it belongs to
+      apptContactName:  a.string(),
+      apptContactEmail: a.string(),             // where appointment requests are emailed
+      apptContactPhone: a.string(),
+      notes:            a.string(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
   IntakeItem: a
     .model({
       source:               a.enum(['IVAN_CARTAGE', 'BCAT_LOGISTICS']),

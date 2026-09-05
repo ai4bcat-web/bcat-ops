@@ -20,6 +20,7 @@ import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
 import { apptTypeAfterEdit } from '@/lib/apptQueue'
 import { apptNotices } from '@/lib/apptNotify'
 import { sendApptNotices } from '@/lib/sendApptNotices'
+import { useDirectory } from '@/hooks/useDirectory'
 import {
   formatDateTime, formatDateTimeInput, fromDateTimeInput,
   formatDateInput, fromDateInput, formatDateShort, apptHasTime, PENDING_LABEL,
@@ -449,7 +450,7 @@ function DriverPicker({
 
 function StopCard({
   index, control, register, errors, drivers, onRemove, canRemove, onCityBlur,
-  stopType, split, onPickupDriverChange,
+  stopType, split, onPickupDriverChange, locations, onAutoFillCity,
 }: {
   index: number
   control: Control<LoadFormValues>
@@ -463,6 +464,9 @@ function StopCard({
   split: boolean
   // Called after a pickup stop's driver changes so deliveries can mirror it (non-split).
   onPickupDriverChange: (value: string | null) => void
+  /** Directory suggestions for the facility field (typed once, reselected forever). */
+  locations: { name: string; city?: string | null }[]
+  onAutoFillCity: (city: string) => void
 }) {
   const stopErr = errors.stops?.[index]
   return (
@@ -487,7 +491,13 @@ function StopCard({
       {/* Name + city */}
       <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
         <Field label="Facility / Name">
-          <Input {...register(`stops.${index}.name`)} placeholder="Shipper / Consignee" className="h-9" />
+          <Input {...register(`stops.${index}.name`)} list="dir-location-names" placeholder="Shipper / Consignee" className="h-9"
+            onBlur={(e) => {
+              register(`stops.${index}.name`).onBlur(e)
+              // Exact directory match → fill the city too (typed once, reselected forever).
+              const hit = locations.find((l) => l.name.toLowerCase() === e.target.value.trim().toLowerCase())
+              if (hit?.city) onAutoFillCity(hit.city)
+            }} />
         </Field>
         <Field label="City">
           <Input
@@ -577,6 +587,8 @@ function NewLoadDialog({
   aljexId?: string
   onDelete?: () => void
 }) {
+  // The reusable address book: customer + facility names suggest as you type.
+  const directory = useDirectory()
   const [milesLoading, setMilesLoading] = useState(false)
 
   const { fields: stopFields, append, remove } = useFieldArray({ control, name: 'stops' })
@@ -678,7 +690,13 @@ function NewLoadDialog({
                 </Field>
               </div>
               <Field label="Customer / Broker">
-                <Input {...register('customer')} placeholder="Arrive Logistics, Echo Global…" className="h-9" />
+                <Input {...register('customer')} list="dir-customer-names" placeholder="Arrive Logistics, Echo Global…" className="h-9" />
+                <datalist id="dir-customer-names">
+                  {directory.customers.map((c) => <option key={c.id} value={c.name} />)}
+                </datalist>
+                <datalist id="dir-location-names">
+                  {directory.locations.map((l) => <option key={l.id} value={l.name}>{l.city ?? ''}</option>)}
+                </datalist>
               </Field>
             </div>
 
@@ -704,6 +722,8 @@ function NewLoadDialog({
 
               {stopFields.map((f, i) => (
                 <StopCard
+                  locations={directory.locations}
+                  onAutoFillCity={(city) => setValue(`stops.${i}.city`, city, { shouldDirty: true })}
                   key={f.id}
                   index={i}
                   control={control}

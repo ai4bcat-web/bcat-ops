@@ -14,6 +14,7 @@ import { FinancesPage } from '@/features/finances/FinancesPage'
 import { CashFlowPage } from '@/features/cash-flow/CashFlowPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { ApptChangesPage } from '@/features/appt-changes/ApptChangesPage'
+import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
@@ -66,6 +67,8 @@ export default function App() {
               <Route path="/cash-flow" element={<RequirePage page="cashFlow"><CashFlowPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
               <Route path="/appt-changes" element={<RequirePage page="apptChanges"><ApptChangesPage /></RequirePage>} />
+              <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />
+              <Route path="/locations" element={<RequirePage page="locations"><LocationsPage /></RequirePage>} />
               <Route path="/insurance" element={<RequirePage page="insurance"><InsurancePage /></RequirePage>} />
               <Route path="/schedule" element={<RequirePage page="schedule"><SchedulePage /></RequirePage>} />
               <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
