@@ -29,6 +29,7 @@ import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
 import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
+import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 
 const backend = defineBackend({
   auth,
@@ -54,6 +55,7 @@ const backend = defineBackend({
   brokerLoadAlert,
   rateconParser,
   apptReport,
+  apptRequestEmailer,
   amazonDisputeIntake,
   tripScreenshotParser,
 })
@@ -157,6 +159,14 @@ const apptReportRule = new Rule(apptReportFn.stack, 'ApptReportDailyRule', {
   description: 'Daily 3 PM Chicago unconfirmed-appointments digest to the global Slack channel',
 })
 apptReportRule.addTarget(new EventsLambdaTarget(apptReportFn))
+
+// ── apptRequestEmailer (Appts page → facility appointment contact) ───────────
+backend.apptRequestEmailer.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] })
+)
+;(backend.apptRequestEmailer.resources.lambda as LambdaFunction).addEnvironment(
+  'FROM_ADDRESS', process.env.APPT_REQUEST_FROM_ADDRESS ?? 'dennis@bcatcorp.com',
+)
 
 // ── apptNeedNotifier (pickup/delivery flagged NEED → Slack #appts-ivan) ──────
 // Defaults to the #appts-ivan channel; override with APPTS_IVAN_CHANNEL_ID in the

@@ -5,6 +5,7 @@ import { onboardingEmailer } from '../functions/onboarding-emailer/resource'
 import { driverPayEmailer } from '../functions/driver-pay-emailer/resource'
 import { tripScreenshotParser } from '../functions/trip-screenshot-parser/resource'
 import { rateconParser } from '../functions/ratecon-parser/resource'
+import { apptRequestEmailer } from '../functions/appt-request-emailer/resource'
 import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource'
 import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
@@ -957,6 +958,20 @@ const schema = a.schema({
   // downscales the image and previews the rows before anything is saved.
   // Read a rate confirmation (PDF/image) into pickup/delivery appointment date-times.
   // Non-Batory loads auto-fill + auto-confirm their appts from this.
+  // Send an appointment-request email to a facility's appt contact (Appts page).
+  sendApptRequestEmail: a
+    .mutation()
+    .arguments({
+      to:      a.string().required(),
+      cc:      a.string(),
+      subject: a.string().required(),
+      body:    a.string().required(),
+      replyTo: a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(apptRequestEmailer)),
+
   parseRateConfirm: a
     .mutation()
     .arguments({

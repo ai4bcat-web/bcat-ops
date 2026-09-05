@@ -821,6 +821,23 @@ export interface ScreenshotTrip {
  * vision, server-side). The caller downscales the image first — AppSync caps the
  * request at ~1MB — and previews the rows before importing.
  */
+export async function sendApptRequestEmail(args: {
+  to: string; cc?: string | null; subject: string; body: string; replyTo?: string | null
+}): Promise<{ ok: boolean; error?: string | null }> {
+  let res: unknown
+  try {
+    res = await client.graphql({
+      query: `mutation SendApptRequestEmail($to: String!, $cc: String, $subject: String!, $body: String!, $replyTo: String) {
+        sendApptRequestEmail(to: $to, cc: $cc, subject: $subject, body: $body, replyTo: $replyTo)
+      }`,
+      variables: args,
+    })
+  } catch (err) { return { ok: false, error: graphqlErrorMessage(err) } }
+  let data: unknown = (res as { data?: { sendApptRequestEmail?: unknown } }).data?.sendApptRequestEmail
+  if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave */ } }
+  return (data ?? { ok: false, error: 'no-response' }) as { ok: boolean; error?: string | null }
+}
+
 export interface ParsedRateconAppt { date: string | null; time: string | null; timeEnd: string | null }
 export async function parseRateConfirm(args: {
   fileBase64: string

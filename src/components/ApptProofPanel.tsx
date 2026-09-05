@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { Trash2, Upload, ExternalLink, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { getStops, updateStop } from '@/lib/stops'
-import { uploadApptProof, getApptProofUrl, deleteApptProof, type ApptProofSlot } from '@/lib/apiClient'
+import { uploadApptProof, getApptProofUrl, deleteApptProof, sendApptRequestEmail, type ApptProofSlot } from '@/lib/apiClient'
+import { useDirectory } from '@/hooks/useDirectory'
+import { formatDateShort, apptTimeLabel } from '@/lib/date'
+import { BATORY_PICKUP_REQUEST_TIME } from '@/lib/apptStatus'
+import { Mail } from 'lucide-react'
 import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META } from '@/lib/apptStatus'
 import type { Load, Stop } from '@/types'
 
@@ -115,6 +119,8 @@ export function ApptProofPanel({ load, updateLoad }: {
   load: Load
   updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>
 }) {
+  const { locations } = useDirectory()
+  const [emailFor, setEmailFor] = useState<Stop | null>(null)
   const stops = getStops(load)
   const pu = stops.find((s) => s.type === 'pickup')
   const de = [...stops].reverse().find((s) => s.type === 'delivery')
@@ -180,7 +186,15 @@ export function ApptProofPanel({ load, updateLoad }: {
           ))}
         </div>
         {st !== 'confirmed' && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setEmailFor(stop)}
+              title="Email the appointment request to this facility's appt contact (from the Locations directory) — sending marks it REQUESTED"
+              style={{ height: 26, padding: '0 10px', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                cursor: 'pointer', border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: '#0369a1',
+                display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <Mail size={12} /> Email appt request
+            </button>
             {(st === 'need_request' || st === 'need_book' || st === 'change_needed') && (
               <button
                 onClick={() => setStatus(stop, 'requested')}
@@ -213,6 +227,104 @@ export function ApptProofPanel({ load, updateLoad }: {
     <div data-testid="appt-proofs" style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
       <End title="Pickup" stop={pu} />
       <End title="Delivery" stop={de} />
+      {emailFor && (
+        <ApptRequestEmailModal
+          load={load} stop={emailFor} locations={locations}
+          onSent={async () => {
+            // Sending the request IS the request — the ladder advances without a screenshot
+            // (the app itself is the record; the audit history logs the transition).
+            await updateLoad(load.id, { stops: updateStop(load, emailFor.id, { apptStatus: 'requested' }) })
+            setEmailFor(null)
+          }}
+          onClose={() => setEmailFor(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * Compose + send the appointment-request email for one stop. To/phone prefill from the
+ * Locations directory (matched by facility name); the body prefills the Batory rules —
+ * 12:00 PM pickups, Ruben's chosen delivery time, or the CHANGE NEEDED target.
+ */
+function ApptRequestEmailModal({ load, stop, locations, onSent, onClose }: {
+  load: Load
+  stop: Stop
+  locations: { name: string; city?: string | null; apptContactEmail?: string | null; apptContactPhone?: string | null; apptContactName?: string | null }[]
+  onSent: () => Promise<void>
+  onClose: () => void
+}) {
+  const loc = locations.find((l) => l.name.toLowerCase() === (stop.name ?? '').trim().toLowerCase())
+  const kind = stop.type === 'delivery' ? 'delivery' : 'pickup'
+  const dateStr = stop.appt ? formatDateShort(stop.appt) : 'the scheduled date'
+  const wanted = stop.apptChangeTo
+    ? `${formatDateShort(stop.apptChangeTo)} at ${apptTimeLabel(stop.apptChangeTo, 'exact')}`
+    : kind === 'pickup'
+      ? `${dateStr} at ${BATORY_PICKUP_REQUEST_TIME}`
+      : `${dateStr}${stop.appt && apptTimeLabel(stop.appt, stop.apptType, stop.apptEnd) !== '—' ? ` at ${apptTimeLabel(stop.appt, stop.apptType, stop.apptEnd)}` : ''}`
+  const ref = [load.aljexId ? `Pro# ${load.aljexId}` : null, load.pickupNumber ? `PU# ${load.pickupNumber}` : null].filter(Boolean).join(' · ')
+
+  const [to, setTo] = useState(loc?.apptContactEmail ?? '')
+  const [cc, setCc] = useState('')
+  const [subject, setSubject] = useState(`Appointment request — ${ref || 'load'} — ${stop.name ?? ''}`.trim())
+  const [body, setBody] = useState([
+    `Hello${loc?.apptContactName ? ` ${loc.apptContactName}` : ''},`,
+    '',
+    stop.apptChangeTo
+      ? `We need to MOVE our ${kind} appointment for ${ref || 'the load below'} to ${wanted}. Please confirm the new time.`
+      : `We would like to request a ${kind} appointment for ${ref || 'the load below'} on ${wanted}.`,
+    '',
+    `Facility: ${[stop.name, stop.city].filter(Boolean).join(' — ')}`,
+    load.customer ? `Customer: ${load.customer}` : '',
+    '',
+    'Please reply to confirm. Thank you!',
+    '',
+    'Dennis — Ivan Cartage / BCAT dispatch',
+  ].filter((l) => l !== null).join('\n'))
+  const [sending, setSending] = useState(false)
+
+  const inp: React.CSSProperties = { height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box' }
+
+  const send = async () => {
+    if (!to.trim()) { toast.error('No appointment email — add one to this facility on the Locations page, or type it here.'); return }
+    setSending(true)
+    try {
+      const res = await sendApptRequestEmail({ to: to.trim(), cc: cc.trim() || null, subject, body, replyTo: null })
+      if (!res.ok) { toast.error(`Send failed: ${res.error ?? 'unknown error'}`); setSending(false); return }
+      toast.success(`Request emailed to ${to.trim()} — marked REQUESTED`)
+      await onSent()
+    } catch (e) { toast.error(e instanceof Error ? e.message : String(e)); setSending(false) }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 70, background: 'rgba(15,23,42,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onMouseDown={onClose}>
+      <div style={{ width: 560, maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto', background: 'var(--ds-surface)', borderRadius: 14, padding: 20 }} onMouseDown={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ds-t1)' }}>Email appointment request</div>
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2, marginBottom: 12 }}>
+          Sends from dennis@bcatcorp.com — the facility's reply lands with Dennis. Sending marks this {kind} REQUESTED.
+          {loc?.apptContactPhone && <> · Phone: <b>{loc.apptContactPhone}</b></>}
+          {!loc && <> · <span style={{ color: '#b45309' }}>Facility not found in the Locations directory — add it there to prefill this next time.</span></>}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+          <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>To *</div>
+            <input style={inp} value={to} onChange={(e) => setTo(e.target.value)} placeholder="appointments@facility.com" aria-label="Request to" /></div>
+          <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>Cc</div>
+            <input style={inp} value={cc} onChange={(e) => setCc(e.target.value)} placeholder="optional" /></div>
+        </div>
+        <div style={{ marginBottom: 10 }}><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>Subject</div>
+          <input style={inp} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+        <div><div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 3 }}>Message</div>
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={10}
+            style={{ ...inp, height: 'auto', padding: 10, fontFamily: 'inherit', resize: 'vertical' }} aria-label="Request body" /></div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+          <button onClick={onClose} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', fontSize: 12.5, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
+          <button onClick={send} disabled={sending}
+            style={{ height: 32, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--ds-blue, #2563eb)', color: '#fff', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', opacity: sending ? 0.6 : 1, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Mail size={13} /> {sending ? 'Sending…' : 'Send request'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
