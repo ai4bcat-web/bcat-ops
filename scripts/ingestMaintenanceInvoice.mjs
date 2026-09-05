@@ -40,6 +40,7 @@ const UNIT_TO_EQUIPMENT = {
   '530':  'eq-mnevuhxgs5jf',  // Volvo VNL
   '685':  'eq-mnevvq8q6tcx',  // Volvo VNL
   '780':  'eq-mnevwst30vwt',  // Mack
+  '89510': 'equip-1781464883907',  // Volvo VNL 740 (2017)
   'TBD':  'eq-mnmpmycmsojj',  // Kenworth T680
   // Trailers
   '53103':  'eq-mnex02osubxo',  // Utility
