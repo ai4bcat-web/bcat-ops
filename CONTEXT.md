@@ -1,7 +1,7 @@
 # BCAT Ops — Platform Context
 
 > Auto-generated context file for handing to Claude Desktop / other tools.
-> Last updated: 2026-09-06
+> Last updated: 2026-09-07
 
 ## What it is
 Internal operations dashboard for BCAT dispatch — calendar scheduling, load management, driver schedules, fleet/equipment registry, live truck tracking, maintenance, maintenance invoices, expense/fuel tracking, insurance premium tracking, weekly fleet profitability, a fleet-manager dashboard (PM/DOT-due tracking), finances, a manual weekly cash-flow forecast, an appointment-booking board (every shipment with its pickup/delivery booking-workflow status and booking history, plus an Appt Changes worklist and a daily unconfirmed-appointments Slack digest), a Customers & Locations directory (the reusable address book behind the Load form; a Location carries the appointment contact emailed to request appt times), driver pay (Amazon + box-truck), Amazon driver disputes, email/Slack intake, DOT compliance & driver onboarding, a Files hub (the driver roster plus everything on file per driver/truck, downloadable as one PDF packet), driver documents with tokenized e-signature, Best Care Auto Transport vehicle-quote and booking-confirmation emailers, a Reddit reply queue (marketing), and audit logging. Access is per-page: every route is gated by `RequirePage` on Cognito `page-<key>` groups (allowlist — a non-admin with no page groups sees everything; granting any group restricts them to those pages).
