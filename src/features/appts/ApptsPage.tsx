@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useMemo, useState } from 'react'
-import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera, X } from 'lucide-react'
+import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
+import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera, X, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -13,7 +13,7 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
-import { STATUS_META, canSetChangeNeeded, canMarkRequested, canMarkConfirmed, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
+import { STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
@@ -21,6 +21,7 @@ import { saveBlob } from '@/lib/download'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { getStops, updateStop } from '@/lib/stops'
 import { sendApptNotices } from '@/lib/sendApptNotices'
+import { uploadApptProof, type ApptProofSlot } from '@/lib/apiClient'
 import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime, formatDateTimeInput, fromDateTimeInput, apptHasTime } from '@/lib/date'
 import type { AuditLogEntry, Load, Stop } from '@/types'
 
@@ -190,10 +191,10 @@ const COLUMNS: { key: ApptSortKey; label: string }[] = [
 ]
 
 /** Available next-status choices for one stop, given its current state. */
-function statusChoices(stop: Stop | undefined, actor: string | null | undefined): { target: ApptWorkflowStatus; label: string; needs: string | null }[] {
+function statusChoices(stop: Stop | undefined, actor: string | null | undefined): { target: ApptWorkflowStatus; label: string; needs: string | null; missingSlots: ApptProofSlot[] }[] {
   if (!stop) return []
   const current = stop.apptStatus
-  const choices: { target: ApptWorkflowStatus; label: string; needs: string | null }[] = []
+  const choices: { target: ApptWorkflowStatus; label: string; needs: string | null; missingSlots: ApptProofSlot[] }[] = []
   const isSetter = canSetChangeNeeded(actor)
 
   if (current !== 'requested') {
@@ -201,15 +202,22 @@ function statusChoices(stop: Stop | undefined, actor: string | null | undefined)
     choices.push({
       target: 'requested',
       label: 'REQUESTED',
-      needs: hasReq ? null : 'Request-email screenshot',
+      needs: hasReq ? null : 'Upload the Request-email screenshot',
+      missingSlots: hasReq ? [] : ['request'],
     })
   }
   if (current !== 'confirmed') {
-    const hasConf = canMarkConfirmed(stop)
+    const hasE2 = !!stop.apptProofs?.e2open
+    const hasEmail = !!stop.apptProofs?.email
+    const both = hasE2 && hasEmail
+    const missing: ApptProofSlot[] = []
+    if (!hasE2) missing.push('e2open')
+    if (!hasEmail) missing.push('email')
     choices.push({
       target: 'confirmed',
       label: 'CONFIRMED',
-      needs: hasConf ? null : 'Confirmed-email + E2Open screenshots',
+      needs: both ? null : missing.length === 1 ? `Upload the ${missing[0] === 'e2open' ? 'E2Open update' : 'email confirmation'} screenshot` : 'Upload E2Open + email confirmation screenshots',
+      missingSlots: missing,
     })
   }
   // CHANGE NEEDED matches the ApptEditPopover guard: Ruben/Ryne only, and the stop must
@@ -221,6 +229,7 @@ function statusChoices(stop: Stop | undefined, actor: string | null | undefined)
       target: 'change_needed',
       label: 'CHANGE NEEDED',
       needs: null, // prompts for date/time inline
+      missingSlots: [],
     })
   }
   return choices
@@ -249,6 +258,12 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
   const [toggling, setToggling] = useState(false)
   const [saving, setSaving] = useState(false)
   const [changeTo, setChangeTo] = useState('')
+  // When the user clicks a status that needs screenshots, we flip into upload mode
+  // for that target instead of applying immediately.
+  const [pendingTarget, setPendingTarget] = useState<ApptWorkflowStatus | null>(null)
+  const [uploadedChSlots, setUploadedChSlots] = useState<Set<string>>(new Set())
+  const [uploadBusy, setUploadBusy] = useState(false)
+  const uploadFileRef = useRef<HTMLInputElement>(null)
   const actor = useAppStore((s) => s.currentUserEmail)
   const label = apptTimeLabel(refr.appt, refr.apptType, refr.apptEnd)
   const unset = label === '—' || label === PENDING_LABEL
@@ -285,6 +300,42 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
 
   const chipHeight = 22
 
+  /** Upload one screenshot, save to the stop, and track it as done for this session. */
+  const uploadForSlot = async (slot: ApptProofSlot, file: Blob) => {
+    if (!load || !stop) return
+    setUploadBusy(true)
+    try {
+      const key = await uploadApptProof(load.id, stop.id, slot, file)
+      const proofs = { ...(stop.apptProofs ?? {}), [slot]: key }
+      await updateLoad(load.id, { stops: updateStop(load, stop.id, { apptProofs: proofs }) })
+      setUploadedChSlots((s) => new Set(s).add(slot))
+      toast.success(`${slot === 'request' ? 'Request email' : slot === 'e2open' ? 'E2Open update' : 'Email confirmation'} saved`)
+    } catch (e) { toast.error(`Couldn't save: ${e instanceof Error ? e.message : 'unknown error'}`) }
+    finally { setUploadBusy(false) }
+  }
+
+  /** Called when a status button is clicked — if screenshots are needed, show upload slots. */
+  const handleStatusClick = (ch: typeof choices[number]) => {
+    if (ch.missingSlots.length > 0) {
+      setPendingTarget(ch.target)
+      setUploadedChSlots(new Set())
+      return
+    }
+    void applyStatus(ch.target)
+  }
+
+  /** After all required screenshots are uploaded for the pending target, apply the status. */
+  const finishPending = () => {
+    if (!pendingTarget) return
+    void applyStatus(pendingTarget)
+  }
+
+  // Check whether every missing slot for the pending target has been uploaded.
+  const pendingChoice = pendingTarget ? choices.find((c) => c.target === pendingTarget) : null
+  const pendingDone = pendingChoice
+    ? pendingChoice.missingSlots.every((s) => uploadedChSlots.has(s))
+    : false
+
   return (
     <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
       {(stop?.apptStatus === 'change_needed' || stop?.apptMoveRequested) && (
@@ -296,7 +347,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       <div style={{ marginBottom: 3, position: 'relative' }}>
         {isToggleable ? (
           <button
-            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : '') }}
+            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : ''); setPendingTarget(null); setUploadedChSlots(new Set()) }}
             title="Toggle appointment status"
             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
           >
@@ -308,25 +359,103 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
         {toggling && (
           <div
             className="absolute z-50 top-full left-0 mt-1 p-2.5 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl flex flex-col gap-2"
-            style={{ width: 240 }}
+            style={{ width: 260 }}
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t1)' }}>
-                {status ? STATUS_META[status].label : 'Change status'}
+                {pendingTarget ? `→ ${STATUS_META[pendingTarget].label}` : status ? STATUS_META[status].label : 'Change status'}
               </span>
               <button
-                onClick={() => setToggling(false)}
+                onClick={() => { setToggling(false); setPendingTarget(null) }}
                 style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--ds-t3)', display: 'inline-flex' }}
               ><X size={13} /></button>
             </div>
             <div style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>
               {refr.appt ? formatDateShort(refr.appt) : 'no date'} · {stop?.type === 'delivery' ? 'Delivery' : 'Pickup'}
             </div>
+
+            {/* Upload prompt: shown when user clicked a status that needs screenshots */}
+            {pendingTarget && pendingChoice && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: AMBER }}>
+                  {pendingChoice.missingSlots.length === 1
+                    ? pendingChoice.needs
+                    : 'Upload the required screenshots'}
+                </div>
+                {pendingChoice.missingSlots.map((slot) => {
+                  const done = uploadedChSlots.has(slot)
+                  const label = slot === 'request' ? 'Request email' : slot === 'e2open' ? 'E2Open update' : 'Email confirmation'
+                  return (
+                    <div key={slot}
+                      role="button" tabIndex={0}
+                      aria-label={`Upload ${label} — click, then paste (⌘V) or pick a file`}
+                      title={done ? `${label} uploaded ✓` : `Click + paste (⌘V) or click to browse — ${label}`}
+                      onPaste={(e) => { const f = Array.from(e.clipboardData.files)[0]; if (f && /^image\//.test(f.type)) { e.preventDefault(); void uploadForSlot(slot, f) } }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && /^image\//.test(f.type)) void uploadForSlot(slot, f) }}
+                      onClick={() => uploadFileRef.current?.click()}
+                      style={{
+                        border: `1px dashed ${done ? GREEN : 'var(--ds-border)'}`, borderRadius: 8, minHeight: 48,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                        padding: 8, background: done ? 'var(--ds-green-bg)' : 'var(--ds-surface)',
+                        cursor: done ? 'default' : 'pointer', flexDirection: 'column',
+                      }}
+                    >
+                      {done ? (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: GREEN, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <CheckCircle2 size={12} /> {label} uploaded
+                        </span>
+                      ) : uploadBusy ? (
+                        <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Uploading…</span>
+                      ) : (
+                        <>
+                          <ImagePlus size={14} style={{ color: 'var(--ds-t3)' }} />
+                          <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', textAlign: 'center' }}>
+                            Click + paste screenshot for {label}<br />
+                            <span style={{ color: 'var(--ds-blue)' }}>or browse JPG/PNG</span>
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+                <input ref={uploadFileRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file && pendingChoice && pendingChoice.missingSlots.length > 0) {
+                      // Upload to the first remaining missing slot
+                      const slot = pendingChoice.missingSlots.find((s) => !uploadedChSlots.has(s))
+                      if (slot) void uploadForSlot(slot, file)
+                    }
+                    e.target.value = ''
+                  }} />
+                {pendingDone && (
+                  <button
+                    onClick={finishPending}
+                    disabled={saving}
+                    style={{
+                      height: 28, padding: '0 12px', borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+                      cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+                      border: `1px solid ${pendingTarget === 'confirmed' ? '#86efac' : '#fcd34d'}`,
+                      background: 'var(--ds-surface)',
+                      color: pendingTarget === 'confirmed' ? GREEN : AMBER,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                    }}
+                  >
+                    {saving ? 'Saving…' : `Mark ${STATUS_META[pendingTarget].label}`}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Status choice buttons (shown when not in upload mode) */}
+            {!pendingTarget && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               {choices.map((ch) => {
                 const isCurrent = stop?.apptStatus === ch.target
                 const needsChangeTo = ch.target === 'change_needed'
+                const needsUpload = ch.missingSlots.length > 0
                 return (
                   <div key={ch.target} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {needsChangeTo && (
@@ -341,32 +470,35 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                       />
                     )}
                     <button
-                      onClick={() => applyStatus(ch.target)}
-                      disabled={saving || isCurrent || (!!ch.needs && !needsChangeTo) || (needsChangeTo && !changeTo)}
-                      title={isCurrent ? `Already ${ch.label}` : ch.needs ? `Need: ${ch.needs}` : needsChangeTo && !changeTo ? 'Pick the wanted date and time first' : `Move to ${ch.label}`}
+                      onClick={() => handleStatusClick(ch)}
+                      disabled={saving || isCurrent || (needsChangeTo && !changeTo)}
+                      title={isCurrent ? `Already ${ch.label}` : needsChangeTo && !changeTo ? 'Pick the wanted date and time first' : needsUpload ? ch.needs! : `Move to ${ch.label}`}
                       style={{
                         height: chipHeight, padding: '0 8px', borderRadius: 6, fontSize: 10.5, fontWeight: 600, fontFamily: 'inherit',
                         cursor: isCurrent || saving ? 'default' : 'pointer',
                         opacity: isCurrent ? 0.5 : saving ? 0.6 : 1,
-                        border: `1px solid ${ch.needs ? 'var(--ds-border)' : 'var(--ds-blue)'}`,
+                        border: `1px solid ${needsUpload ? 'var(--ds-amber-soft)' : 'var(--ds-blue)'}`,
                         background: isCurrent ? 'var(--ds-bg)' : 'var(--ds-surface)',
-                        color: ch.needs ? 'var(--ds-t3)' : 'var(--ds-t1)',
+                        color: isCurrent ? 'var(--ds-t3)' : 'var(--ds-t1)',
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                         width: '100%',
                       }}
                     >
-                      {needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : ch.label}
+                      {needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : needsUpload ? (
+                        <>{ch.label} <ImagePlus size={10} /></>
+                      ) : ch.label}
                     </button>
                     {ch.needs && (
                       <div style={{ fontSize: 10, color: AMBER, display: 'flex', alignItems: 'center', gap: 4 }}>
                         <CircleAlert size={10} />
-                        Requires: {ch.needs}
+                        {ch.needs}
                       </div>
                     )}
                   </div>
                 )
               })}
             </div>
+            )}
           </div>
         )}
       </div>
