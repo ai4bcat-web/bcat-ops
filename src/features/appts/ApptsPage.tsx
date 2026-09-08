@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useMemo, useState } from 'react'
-import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera } from 'lucide-react'
+import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera, X } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
@@ -12,14 +13,16 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
-import { STATUS_META, type EffectiveApptStatus } from '@/lib/apptStatus'
+import { STATUS_META, canSetChangeNeeded, canMarkRequested, canMarkConfirmed, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
-import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime } from '@/lib/date'
-import type { AuditLogEntry, Load } from '@/types'
+import { getStops, updateStop } from '@/lib/stops'
+import { sendApptNotices } from '@/lib/sendApptNotices'
+import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDayHeader, fromDateInput, formatDateTime, formatDateTimeInput, fromDateTimeInput, apptHasTime } from '@/lib/date'
+import type { AuditLogEntry, Load, Stop } from '@/types'
 
 const RED = '#dc2626'
 const AMBER = '#b45309'
@@ -186,22 +189,67 @@ const COLUMNS: { key: ApptSortKey; label: string }[] = [
   { key: 'driver',       label: 'Driver' },
 ]
 
+/** Available next-status choices for one stop, given its current state. */
+function statusChoices(stop: Stop | undefined, actor: string | null | undefined): { target: ApptWorkflowStatus; label: string; needs: string | null }[] {
+  if (!stop) return []
+  const current = stop.apptStatus
+  const choices: { target: ApptWorkflowStatus; label: string; needs: string | null }[] = []
+  const isSetter = canSetChangeNeeded(actor)
+
+  if (current !== 'requested') {
+    const hasReq = canMarkRequested(stop)
+    choices.push({
+      target: 'requested',
+      label: 'REQUESTED',
+      needs: hasReq ? null : 'Request-email screenshot',
+    })
+  }
+  if (current !== 'confirmed') {
+    const hasConf = canMarkConfirmed(stop)
+    choices.push({
+      target: 'confirmed',
+      label: 'CONFIRMED',
+      needs: hasConf ? null : 'Confirmed-email + E2Open screenshots',
+    })
+  }
+  // CHANGE NEEDED matches the ApptEditPopover guard: Ruben/Ryne only, and the stop must
+  // actually have a time set (you can't move an appointment that doesn't exist yet).
+  if (isSetter && current !== 'change_needed'
+    && (stop.apptType ?? 'exact') !== 'tbd'
+    && apptHasTime(stop.appt)) {
+    choices.push({
+      target: 'change_needed',
+      label: 'CHANGE NEEDED',
+      needs: null, // prompts for date/time inline
+    })
+  }
+  return choices
+}
+
 /**
  * The load's scheduled pickup or delivery time — click to edit it right here.
  *
  * Shows exactly what the calendar shows (apptTimeLabel is the same labeller), and writes
  * through the same ApptEditPopover, so a time set here and a time set on the calendar are
  * the same operation.
+ *
+ * The status chip is now a toggle — click it to advance the Batory ladder. Each transition
+ * tells you what is required (screenshots, change-to date) before it will take effect.
  */
-function ApptTimeCell({ load, refr, apptField, typeField, kind, status }: {
+function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLoad }: {
   load: Load | undefined
   refr: ApptRef
   apptField: 'pickupAppt' | 'deliveryAppt'
   typeField: 'pickupApptType' | 'deliveryApptType'
   kind: ApptNeedKind | null
   status: EffectiveApptStatus | null
+  updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>
 }) {
   const [editing, setEditing] = useState(false)
+  const [toggling, setToggling] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [changeTo, setChangeTo] = useState('')
+  const actor = useAppStore((s) => s.currentUserEmail)
   const label = apptTimeLabel(refr.appt, refr.apptType, refr.apptEnd)
   const unset = label === '—' || label === PENDING_LABEL
 
@@ -211,6 +259,32 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status }: {
     ? (load.stops ?? []).find((s) => s.id === refr.stopId)
     : undefined
 
+  const choices = statusChoices(stop, actor)
+  const isToggleable = choices.length > 0
+
+  const applyStatus = async (target: ApptWorkflowStatus) => {
+    if (!load || !stop) return
+    setSaving(true)
+    try {
+      const stopPatch: Partial<Stop> = { apptStatus: target }
+      if (target === 'change_needed') {
+        Object.assign(stopPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : stop.apptChangeTo || ''))
+      } else if (target === 'confirmed') {
+        stopPatch.apptMoveRequested = false
+        stopPatch.apptChangeTo = null
+      }
+      const next = updateStop(load, stop.id, stopPatch)
+      await updateLoad(load.id, { stops: next })
+      // Fire notices so Slack + task plumbing stays in sync — same as every other editor.
+      void sendApptNotices({ load, next, prev: getStops(load), actorName: actor, updateLoad })
+      toast.success(`Marked ${STATUS_META[target].label}`)
+      setToggling(false)
+    } catch (e) { toast.error(`Couldn't update the status: ${e instanceof Error ? e.message : 'unknown error'}`) }
+    finally { setSaving(false) }
+  }
+
+  const chipHeight = 22
+
   return (
     <td style={{ ...td, position: 'relative' }} onClick={(e) => e.stopPropagation()}>
       {(stop?.apptStatus === 'change_needed' || stop?.apptMoveRequested) && (
@@ -219,7 +293,83 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status }: {
           ⚠ CHANGE NEEDED{stop?.apptChangeTo ? ` → ${formatDateShort(stop.apptChangeTo)} ${new Date(stop.apptChangeTo).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}` : ''}
         </div>
       )}
-      <div style={{ marginBottom: 3 }}><KindChip kind={kind} status={status} /></div>
+      <div style={{ marginBottom: 3, position: 'relative' }}>
+        {isToggleable ? (
+          <button
+            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : '') }}
+            title="Toggle appointment status"
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+          >
+            <KindChip kind={kind} status={status} />
+          </button>
+        ) : (
+          <KindChip kind={kind} status={status} />
+        )}
+        {toggling && (
+          <div
+            className="absolute z-50 top-full left-0 mt-1 p-2.5 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl flex flex-col gap-2"
+            style={{ width: 240 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t1)' }}>
+                {status ? STATUS_META[status].label : 'Change status'}
+              </span>
+              <button
+                onClick={() => setToggling(false)}
+                style={{ background: 'none', border: 'none', padding: 2, cursor: 'pointer', color: 'var(--ds-t3)', display: 'inline-flex' }}
+              ><X size={13} /></button>
+            </div>
+            <div style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>
+              {refr.appt ? formatDateShort(refr.appt) : 'no date'} · {stop?.type === 'delivery' ? 'Delivery' : 'Pickup'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {choices.map((ch) => {
+                const isCurrent = stop?.apptStatus === ch.target
+                const needsChangeTo = ch.target === 'change_needed'
+                return (
+                  <div key={ch.target} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {needsChangeTo && (
+                      <input
+                        type="datetime-local"
+                        aria-label="Change to date and time"
+                        className="h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={changeTo}
+                        onChange={(e) => setChangeTo(e.target.value)}
+                        placeholder="Wanted date/time"
+                        title="The date and time you want instead"
+                      />
+                    )}
+                    <button
+                      onClick={() => applyStatus(ch.target)}
+                      disabled={saving || isCurrent || (!!ch.needs && !needsChangeTo) || (needsChangeTo && !changeTo)}
+                      title={isCurrent ? `Already ${ch.label}` : ch.needs ? `Need: ${ch.needs}` : needsChangeTo && !changeTo ? 'Pick the wanted date and time first' : `Move to ${ch.label}`}
+                      style={{
+                        height: chipHeight, padding: '0 8px', borderRadius: 6, fontSize: 10.5, fontWeight: 600, fontFamily: 'inherit',
+                        cursor: isCurrent || saving ? 'default' : 'pointer',
+                        opacity: isCurrent ? 0.5 : saving ? 0.6 : 1,
+                        border: `1px solid ${ch.needs ? 'var(--ds-border)' : 'var(--ds-blue)'}`,
+                        background: isCurrent ? 'var(--ds-bg)' : 'var(--ds-surface)',
+                        color: ch.needs ? 'var(--ds-t3)' : 'var(--ds-t1)',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                        width: '100%',
+                      }}
+                    >
+                      {needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : ch.label}
+                    </button>
+                    {ch.needs && (
+                      <div style={{ fontSize: 10, color: AMBER, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <CircleAlert size={10} />
+                        Requires: {ch.needs}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
       <button
         onClick={() => setEditing(true)}
         title="Set this time — same as editing it on the calendar"
@@ -393,6 +543,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     typeField="pickupApptType"
                     kind={r.pickupKind}
                     status={r.pickupStatus}
+                    updateLoad={updateLoad}
                   />
                   <ApptTimeCell
                     load={loadRec}
@@ -401,6 +552,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                     typeField="deliveryApptType"
                     kind={r.deliveryKind}
                     status={r.deliveryStatus}
+                    updateLoad={updateLoad}
                   />
                   <td style={{ ...td, fontVariantNumeric: 'tabular-nums' }}>{r.aljexId || '—'}</td>
                   <td style={{ ...td, color: 'var(--ds-t2)' }}>{r.pickupNumber || '—'}</td>
