@@ -1,5 +1,6 @@
 import { requiresApptProofs } from './apptQueue'
 import { apptHasTime, formatDateInput, fromDateTimeInput } from './date'
+import { getStops } from './stops'
 import type { Load, Stop, ApptWorkflowStatus } from '@/types'
 
 /**
@@ -86,6 +87,27 @@ export function changeNeededPatch(changeTo: string): Partial<Stop> {
     apptMoveRequested: true,           // rides the existing Slack-thread + task plumbing
     apptProofs: { request: null, e2open: null, email: null },
   }
+}
+
+/** Tone → colors, shared by the Appts page and both calendar views so the SAME
+ *  status renders identically everywhere. */
+export const STATUS_TONE_COLORS = {
+  red:   { bg: 'var(--ds-red-soft)',           fg: '#dc2626' },
+  amber: { bg: 'var(--ds-amber-soft)',         fg: '#b45309' },
+  blue:  { bg: 'var(--ds-blue-soft, #eff6ff)', fg: '#0369a1' },
+  green: { bg: 'var(--ds-green-bg)',           fg: '#15803d' },
+} as const
+
+/**
+ * The workflow status for one END of a load (first pickup / last delivery) — the same
+ * rule the Appts page rows use, so the calendar can show identical chips.
+ */
+export function endStatus(load: Load, end: 'pickup' | 'delivery'): EffectiveApptStatus | null {
+  const stops = getStops(load)
+  const stop = end === 'pickup'
+    ? stops.find((s) => s.type === 'pickup')
+    : [...stops].reverse().find((s) => s.type === 'delivery')
+  return stop ? apptWorkflowStatus(stop, load) : null
 }
 
 /** The chip label. Kept stop-type aware in signature for future splits; today

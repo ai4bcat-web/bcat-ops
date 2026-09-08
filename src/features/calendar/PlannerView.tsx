@@ -25,6 +25,7 @@ import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
+import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, type EffectiveApptStatus } from '@/lib/apptStatus'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
 const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
@@ -63,8 +64,11 @@ function chicagoDateStr(iso: string | null | undefined): string | null {
 }
 
 // ── Appt cell (date + time stacked) ──────────────────────────────────────────
-function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
+function ApptCell({ iso, type, apptEnd, colorCls, yard, city, status, stopKind }: {
   iso?: string; type?: string; apptEnd?: string; colorCls: string; yard?: boolean; city?: string
+  /** Workflow ladder status — same chip the Appts page shows for this end. */
+  status?: EffectiveApptStatus | null
+  stopKind?: 'pickup' | 'delivery'
 }) {
   const w = COL.puAppt
 
@@ -84,12 +88,20 @@ function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
   const noTime = type !== 'fcfs' && type !== 'tbd' && type !== 'range' && !apptHasTime(iso)
   const isSpecial = type === 'fcfs' || type === 'tbd' || noTime
   const specialLabel = type === 'tbd' ? needLabel(iso) : noTime ? PENDING_LABEL : type!.toUpperCase()
+  const tone = status ? STATUS_TONE_COLORS[STATUS_META[status].tone] : null
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
       <span className="text-[11px] font-medium truncate">
         {isSpecial ? specialLabel : formatApptTime(iso, type, apptEnd)}
       </span>
+      {status && tone && (
+        <span className="text-[8px] font-bold truncate rounded px-0.5"
+          style={{ background: tone.bg, color: tone.fg, width: 'fit-content', maxWidth: '100%' }}
+          title="Same status as the Appts page">
+          {statusLabel(status, stopKind)}
+        </span>
+      )}
     </div>
   )
 }
@@ -574,6 +586,8 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           colorCls="text-blue-600"
           yard={puYard}
           city={puYard ? load.destinationCity : undefined}
+          status={puYard ? null : stopMode ? (role === 'pickup' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'pickup')}
+          stopKind="pickup"
         />
         {(!stopMode || role === 'pickup') && (
           <button
@@ -598,6 +612,8 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           colorCls="text-violet-600"
           yard={deYard}
           city={deYard ? load.destinationCity : undefined}
+          status={deYard ? null : stopMode ? (role === 'delivery' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'delivery')}
+          stopKind="delivery"
         />
         {(!stopMode || role === 'delivery') && (
           <button

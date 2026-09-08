@@ -15,6 +15,7 @@ import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
+import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS } from '@/lib/apptStatus'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 const DAY_COL_W = 252   // px per day column
@@ -157,6 +158,9 @@ function LoadCard({
   const deYard = stopMode ? false : (role === 'pickup')
   const puTime = apptDisplay(puIso, puTyp, puYard)
   const deTime = apptDisplay(deIso, deTyp, deYard)
+  // Same workflow chips as the Appts page, per end.
+  const puStatus = puYard ? null : stopMode ? (role === 'pickup' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'pickup')
+  const deStatus = deYard ? null : stopMode ? (role === 'delivery' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'delivery')
   const puDate = puYard ? '' : apptDate(puIso)
   const deDate = deYard ? '' : apptDate(deIso)
 
@@ -278,6 +282,13 @@ function LoadCard({
         <span style={{ fontSize: 10.5, fontWeight: puTime.startsWith('NEED') ? 700 : 500, color: puTime.startsWith('NEED') ? '#dc2626' : puYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {puTime}
         </span>
+        {puStatus && (
+          <span style={{ fontSize: 8, fontWeight: 700, padding: '0 3px', borderRadius: 3,
+            background: STATUS_TONE_COLORS[STATUS_META[puStatus].tone].bg,
+            color: STATUS_TONE_COLORS[STATUS_META[puStatus].tone].fg, whiteSpace: 'nowrap' }}>
+            {statusLabel(puStatus, 'pickup')}
+          </span>
+        )}
       </div>
 
       {/* Row 5: DE appt */}
@@ -287,6 +298,13 @@ function LoadCard({
         <span style={{ fontSize: 10.5, fontWeight: deTime.startsWith('NEED') ? 700 : 500, color: deTime.startsWith('NEED') ? '#dc2626' : deYard ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
           {deTime}
         </span>
+        {deStatus && (
+          <span style={{ fontSize: 8, fontWeight: 700, padding: '0 3px', borderRadius: 3,
+            background: STATUS_TONE_COLORS[STATUS_META[deStatus].tone].bg,
+            color: STATUS_TONE_COLORS[STATUS_META[deStatus].tone].fg, whiteSpace: 'nowrap' }}>
+            {statusLabel(deStatus, 'delivery')}
+          </span>
+        )}
       </div>
 
       {/* Row 6: slot circle + driver + rate + RTI + paint bucket */}
