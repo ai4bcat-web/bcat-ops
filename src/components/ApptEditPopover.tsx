@@ -145,11 +145,11 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
           onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
         />
         <input
-          type="text"
+          type="time"
           placeholder="14:30"
           aria-label="Appointment time"
           className={inputCls}
-          style={{ width: 60, flexShrink: 0 }}
+          style={{ width: 92, flexShrink: 0 }}
           value={timePart}
           onChange={(e) => setDateVal(combineDateTime(datePart, e.target.value))}
           onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
@@ -208,11 +208,11 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
               onKeyDown={(e) => { if (e.key === 'Enter' && !badWindow) commit(); if (e.key === 'Escape') onClose() }}
             />
             <input
-              type="text"
+              type="time"
               placeholder="17:00"
               aria-label="Window end time"
               className={inputCls}
-              style={{ width: 56, flexShrink: 0 }}
+              style={{ width: 92, flexShrink: 0 }}
               value={endTimePart}
               onChange={(e) => setEndVal(combineDateTime(endDatePart || datePart, e.target.value))}
               onKeyDown={(e) => { if (e.key === 'Enter' && !badWindow) commit(); if (e.key === 'Escape') onClose() }}

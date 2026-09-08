@@ -185,7 +185,7 @@ function DateTimeInput({
         style={{ width: 136, borderRadius: '6px 0 0 6px', borderRight: 'none' }}
       />
       <input
-        type="text"
+        type="time"
         placeholder="14:30"
         className={inputCls}
         value={time}
