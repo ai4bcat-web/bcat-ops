@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  apptWorkflowStatus, canMarkRequested, canMarkConfirmed, changeNeededPatch, canSetChangeNeeded, defaultRequestedFor,
+  apptWorkflowStatus, canMarkRequested, canMarkConfirmed, changeNeededPatch, canSetChangeNeeded, defaultRequestedFor, statusLabel,
 } from './apptStatus'
 import { fromDateInput, fromDateTimeInput } from './date'
 import type { Load, Stop } from '@/types'
@@ -77,5 +77,17 @@ describe('defaultRequestedFor — what the request asks for', () => {
   })
   it('no date at all → nothing to ask for', () => {
     expect(defaultRequestedFor(stop({ appt: '' }))).toBeNull()
+  })
+})
+
+describe('statusLabel — who is up next', () => {
+  it('delivery in need_request (Ruben picked) reads NEED DENNIS; pickup reads NEED TO BOOK', () => {
+    expect(statusLabel('need_request', 'delivery')).toBe('NEED DENNIS')
+    expect(statusLabel('need_request', 'pickup')).toBe('NEED TO BOOK')
+  })
+  it('everything else keeps its one label on both ends', () => {
+    expect(statusLabel('need_book', 'delivery')).toBe('NEED RUBEN')
+    expect(statusLabel('requested', 'delivery')).toBe('REQUESTED')
+    expect(statusLabel('confirmed', 'pickup')).toBe('CONFIRMED')
   })
 })

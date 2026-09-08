@@ -7,7 +7,7 @@ import { useDirectory } from '@/hooks/useDirectory'
 import { formatDateShort, apptTimeLabel } from '@/lib/date'
 import { BATORY_PICKUP_REQUEST_TIME, defaultRequestedFor } from '@/lib/apptStatus'
 import { Mail } from 'lucide-react'
-import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META } from '@/lib/apptStatus'
+import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META, statusLabel } from '@/lib/apptStatus'
 import type { Load, Stop } from '@/types'
 
 /**
@@ -175,7 +175,7 @@ export function ApptProofPanel({ load, updateLoad }: {
           <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)' }}>{title}</span>
           <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 5,
             background: meta.tone === 'green' ? 'var(--ds-green-bg)' : meta.tone === 'amber' ? 'var(--ds-amber-soft)' : meta.tone === 'blue' ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-red-soft)',
-            color: meta.tone === 'green' ? '#15803d' : meta.tone === 'amber' ? '#b45309' : meta.tone === 'blue' ? '#0369a1' : '#dc2626' }}>{meta.label}</span>
+            color: meta.tone === 'green' ? '#15803d' : meta.tone === 'amber' ? '#b45309' : meta.tone === 'blue' ? '#0369a1' : '#dc2626' }}>{statusLabel(st, stop.type)}</span>
           {stop.apptChangeTo && st === 'change_needed' && (
             <span style={{ fontSize: 10.5, color: '#b45309' }}>→ wants {new Date(stop.apptChangeTo).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
           )}

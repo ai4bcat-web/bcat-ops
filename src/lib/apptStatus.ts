@@ -88,6 +88,16 @@ export function changeNeededPatch(changeTo: string): Partial<Stop> {
   }
 }
 
+/**
+ * The chip label, stop-type aware: NEED TO BOOK on a DELIVERY means Ruben has picked
+ * the time and it is Dennis's turn to book it — so it reads NEED DENNIS. Pickups keep
+ * NEED TO BOOK (also Dennis, 12:00 PM rule).
+ */
+export function statusLabel(status: EffectiveApptStatus, stopType?: 'pickup' | 'delivery'): string {
+  if (status === 'need_request' && stopType === 'delivery') return 'NEED DENNIS'
+  return STATUS_META[status].label
+}
+
 export const STATUS_META: Record<EffectiveApptStatus, { label: string; tone: 'red' | 'amber' | 'blue' | 'green' }> = {
   // Pickups (and deliveries once Ruben has picked the time) enter here — Dennis books.
   need_request:   { label: 'NEED TO BOOK', tone: 'red' },

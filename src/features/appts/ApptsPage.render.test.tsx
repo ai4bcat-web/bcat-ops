@@ -437,3 +437,20 @@ describe('notes column', () => {
     expect(screen.getByText('liftgate required — call ahead')).toBeTruthy()
   })
 })
+
+describe('NEED DENNIS handoff', () => {
+  it('a delivery whose time Ruben picked reads NEED DENNIS', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'HANDOFF', customer: 'Batory Foods',
+      stops: [
+        stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'), apptStatus: 'requested', apptRequestedFor: fromDateTimeInput('2099-01-01T12:00') }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact',
+               appt: fromDateTimeInput('2099-01-02T14:00'), apptStatus: 'need_request' }),
+      ],
+    })])
+    render(<ApptsPage />)
+    const row = screen.getByText('HANDOFF').closest('tr')!
+    expect(row.children[2].textContent).toContain('NEED DENNIS')
+    expect(row.children[1].textContent).not.toContain('DENNIS')
+  })
+})

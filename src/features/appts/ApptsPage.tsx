@@ -13,7 +13,7 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
-import { defaultRequestedFor, STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
+import { statusLabel, defaultRequestedFor, STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
@@ -85,9 +85,10 @@ const TONE_STYLE = {
  * rate confirmation is on the load, then CONFIRMED. Unbooked NEED/no-time states from
  * the queue still surface when no ladder status applies.
  */
-function KindChip({ kind, status }: { kind: ApptNeedKind | null; status: EffectiveApptStatus | null }) {
+function KindChip({ kind, status, stopType }: { kind: ApptNeedKind | null; status: EffectiveApptStatus | null; stopType?: 'pickup' | 'delivery' }) {
   if (status) {
     const meta = STATUS_META[status]
+    const chipLabel = statusLabel(status, stopType)
     const t = TONE_STYLE[meta.tone]
     const alert = status === 'need_request' || status === 'need_book'
     return (
@@ -105,7 +106,7 @@ function KindChip({ kind, status }: { kind: ApptNeedKind | null; status: Effecti
         }}
       >
         {status === 'confirmed' ? <CheckCircle2 size={11} /> : status === 'ratecon_needed' ? <Camera size={11} /> : <CircleAlert size={11} />}
-        {meta.label}
+        {chipLabel}
       </span>
     )
   }
@@ -373,10 +374,10 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
             title="Toggle appointment status"
             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
           >
-            <KindChip kind={kind} status={status} />
+            <KindChip kind={kind} status={status} stopType={apptField === 'deliveryAppt' ? 'delivery' : 'pickup'} />
           </button>
         ) : (
-          <KindChip kind={kind} status={status} />
+          <KindChip kind={kind} status={status} stopType={apptField === 'deliveryAppt' ? 'delivery' : 'pickup'} />
         )}
         {toggling && (
           <div

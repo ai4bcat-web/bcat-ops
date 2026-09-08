@@ -92,7 +92,7 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
         await createApptTask({
           loadId: load.id, kind: 'book_delivery', assignee: 'dennis@bcatcorp.com',
           subject: `Book delivery appt — ${[load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer].filter(Boolean).join(' · ') || 'load'}`,
-          bodyText: `Ruben wants the delivery booked. Email the facility to request it, then upload the request-email screenshot to move it to REQUESTED. Wanted: ${label}.`,
+          bodyText: `Ruben picked the delivery time — Dennis books it. Email the facility to request it, then upload the request-email screenshot to move it to REQUESTED. Wanted: ${label}.`,
           aljexId: load.aljexId ?? null,
         })
       } catch (err) { console.error('[sendApptNotices] book-delivery task failed', err) }
