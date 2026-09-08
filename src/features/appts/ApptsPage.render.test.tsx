@@ -126,7 +126,7 @@ describe('ApptsPage', () => {
     const table = screen.getAllByRole('table')[0]
     const row = within(table).getByText('NEEDED').closest('tr')!
     // children[0] is the toggles cell; PU time cell children[1], Del children[2].
-    expect(row.children[1].textContent).toContain('NEED TO BOOK')
+    expect(row.children[1].textContent).toContain('NEED DENNIS')
     expect(row.children[2].textContent).toContain('NEED RUBEN')
   })
 
@@ -399,7 +399,7 @@ describe('ladder time labels', () => {
     })])
     render(<ApptsPage />)
     const cell = screen.getByText('FRESH').closest('tr')!.children[1]
-    expect(cell.textContent).toContain('NEED TO BOOK')
+    expect(cell.textContent).toContain('NEED DENNIS')
     expect(cell.textContent).toContain('NEED 12:00 PM')
     expect(cell.textContent).not.toContain('requested')
   })
@@ -451,6 +451,5 @@ describe('NEED DENNIS handoff', () => {
     render(<ApptsPage />)
     const row = screen.getByText('HANDOFF').closest('tr')!
     expect(row.children[2].textContent).toContain('NEED DENNIS')
-    expect(row.children[1].textContent).not.toContain('DENNIS')
   })
 })

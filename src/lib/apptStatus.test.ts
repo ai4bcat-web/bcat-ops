@@ -81,9 +81,9 @@ describe('defaultRequestedFor — what the request asks for', () => {
 })
 
 describe('statusLabel — who is up next', () => {
-  it('delivery in need_request (Ruben picked) reads NEED DENNIS; pickup reads NEED TO BOOK', () => {
+  it('need_request reads NEED DENNIS on both ends — Dennis books everything', () => {
     expect(statusLabel('need_request', 'delivery')).toBe('NEED DENNIS')
-    expect(statusLabel('need_request', 'pickup')).toBe('NEED TO BOOK')
+    expect(statusLabel('need_request', 'pickup')).toBe('NEED DENNIS')
   })
   it('everything else keeps its one label on both ends', () => {
     expect(statusLabel('need_book', 'delivery')).toBe('NEED RUBEN')

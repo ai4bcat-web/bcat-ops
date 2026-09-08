@@ -78,8 +78,8 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
     }
   }
 
-  // Ruben picked the delivery time on a NEED TO BOOK stop: hand it to Dennis — a
-  // book-it task plus a #appts-ivan ping — and advance the ladder to NEED TO BOOK (Dennis).
+  // Ruben picked the delivery time on a NEED RUBEN stop: hand it to Dennis — a
+  // book-it task plus a #appts-ivan ping — and advance the ladder to NEED DENNIS.
   const prevById = new Map(prev.map((s) => [s.id, s]))
   for (const s of next) {
     const was = prevById.get(s.id)

@@ -80,7 +80,7 @@ const TONE_STYLE = {
 } as const
 
 /**
- * The workflow chip. Batory rides the ladder (NEED TO BOOK / NEED RUBEN /
+ * The workflow chip. Batory rides the ladder (NEED DENNIS / NEED RUBEN /
  * REQUESTED / CHANGE NEEDED / CONFIRMED); non-Batory shows RATECON NEEDED until the
  * rate confirmation is on the load, then CONFIRMED. Unbooked NEED/no-time states from
  * the queue still surface when no ladder status applies.

@@ -68,14 +68,13 @@ const hasTime = (iso?: string): boolean => {
 export function statusOf(stop: Stop, load: LoadRow): string {
   if (!/batory/i.test(load.customer ?? '')) return load.rateConfirmKey ? 'confirmed' : 'RATECON NEEDED'
   if (stop.apptStatus) return stop.apptStatus === 'confirmed' ? 'confirmed'
-    : stop.apptStatus === 'need_request' ? (stop.type === 'delivery' ? 'NEED DENNIS' : 'NEED TO BOOK')
-    : { need_book: 'NEED RUBEN', requested: 'REQUESTED', change_needed: 'CHANGE NEEDED' }[stop.apptStatus] ?? stop.apptStatus
+    : { need_request: 'NEED DENNIS', need_book: 'NEED RUBEN', requested: 'REQUESTED', change_needed: 'CHANGE NEEDED' }[stop.apptStatus] ?? stop.apptStatus
   if (stop.apptMoveRequested) return 'CHANGE NEEDED'
   const booked = (stop.apptType ?? 'exact') !== 'tbd' &&
     (stop.apptType === 'fcfs' || stop.apptType === 'range' || hasTime(stop.appt))
   if (booked) return (stop.apptProofs?.e2open && stop.apptProofs?.email) ? 'confirmed' : 'REQUESTED'
-  // Grandfathered unbooked stops: deliveries wait on Ruben's time, pickups on the booking.
-  return stop.type === 'delivery' ? 'NEED RUBEN' : 'NEED TO BOOK'
+  // Grandfathered unbooked stops: deliveries wait on Ruben's time, pickups on Dennis.
+  return stop.type === 'delivery' ? 'NEED RUBEN' : 'NEED DENNIS'
 }
 
 export const handler = async (event?: { force?: boolean }) => {

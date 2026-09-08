@@ -618,7 +618,7 @@ export const useAppStore = create<AppState>()(
       // ── Loads ──────────────────────────────────────────────────────────────
       addLoad: async (l) => {
         // New BATORY loads enter the appointment ladder immediately: pickup NEED TO
-        // REQUEST (Dennis, standing 12pm rule) and delivery NEED TO BOOK (Ruben picks
+        // DENNIS (standing 12pm rule) and delivery NEED RUBEN (Ruben picks
         // the time). Statuses ride the stops; the two tasks are created after the save.
         const isBatory = /batory/i.test(l.customer ?? '')
         if (isBatory && Array.isArray(l.stops)) {

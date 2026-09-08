@@ -6,8 +6,8 @@ import type { Load, Stop, ApptWorkflowStatus } from '@/types'
  * The Batory appointment workflow ladder, and the non-Batory ratecon rule.
  *
  * Batory (per stop):
- *   pickup:   NEED TO BOOK (12:00 PM target) → REQUESTED → CONFIRMED
- *   delivery: NEED RUBEN (Ruben inputs the time) → NEED TO BOOK (Dennis books)
+ *   pickup:   NEED DENNIS (12:00 PM target, straight from load build) → REQUESTED → CONFIRMED
+ *   delivery: NEED RUBEN (Ruben inputs the time) → NEED DENNIS (Dennis books)
  *             → REQUESTED → CONFIRMED
  *   any:      CHANGE NEEDED (Ruben/Ryne only, with the wanted time) → REQUESTED → CONFIRMED
  *
@@ -88,19 +88,16 @@ export function changeNeededPatch(changeTo: string): Partial<Stop> {
   }
 }
 
-/**
- * The chip label, stop-type aware: NEED TO BOOK on a DELIVERY means Ruben has picked
- * the time and it is Dennis's turn to book it — so it reads NEED DENNIS. Pickups keep
- * NEED TO BOOK (also Dennis, 12:00 PM rule).
- */
-export function statusLabel(status: EffectiveApptStatus, stopType?: 'pickup' | 'delivery'): string {
-  if (status === 'need_request' && stopType === 'delivery') return 'NEED DENNIS'
+/** The chip label. Kept stop-type aware in signature for future splits; today
+ *  need_request reads NEED DENNIS on both ends — Dennis books every appointment. */
+export function statusLabel(status: EffectiveApptStatus, _stopType?: 'pickup' | 'delivery'): string {
   return STATUS_META[status].label
 }
 
 export const STATUS_META: Record<EffectiveApptStatus, { label: string; tone: 'red' | 'amber' | 'blue' | 'green' }> = {
-  // Pickups (and deliveries once Ruben has picked the time) enter here — Dennis books.
-  need_request:   { label: 'NEED TO BOOK', tone: 'red' },
+  // Pickups (from load build, 12:00 PM target) and deliveries once Ruben has picked
+  // the time both land here — Dennis books every appointment.
+  need_request:   { label: 'NEED DENNIS', tone: 'red' },
   // Deliveries enter here — Ruben must input the wanted time before Dennis can book.
   need_book:      { label: 'NEED RUBEN',   tone: 'red' },
   requested:      { label: 'REQUESTED',       tone: 'amber' },
