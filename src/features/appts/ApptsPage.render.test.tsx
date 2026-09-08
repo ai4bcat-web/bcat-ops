@@ -427,3 +427,13 @@ describe('ladder time labels', () => {
     expect(cell.textContent).not.toContain('12:00')
   })
 })
+
+describe('notes column', () => {
+  it('shows the load notes (same field the calendar shows) as the last column', () => {
+    loads.mockReturnValue([pair({ id: 'ln1', aljexId: 'NOTED', notes: 'liftgate required — call ahead' } as Partial<Load>)])
+    render(<ApptsPage />)
+    const headers = screen.getAllByRole('table')[0].querySelectorAll('th')
+    expect(headers[headers.length - 1].textContent).toContain('Notes')
+    expect(screen.getByText('liftgate required — call ahead')).toBeTruthy()
+  })
+})

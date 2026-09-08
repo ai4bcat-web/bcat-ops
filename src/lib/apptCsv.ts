@@ -15,7 +15,7 @@ import type { ApptQueueRow } from './apptQueue'
 export const APPT_CSV_HEADER = [
   'PU Status', 'Del Status', 'Pro #', 'PU #', 'Customer',
   'PU Location', 'Del Location', 'Appt date', 'Driver', 'Del Driver',
-  'PU time', 'Delivery time',
+  'PU time', 'Delivery time', 'Notes',
 ] as const
 
 /**
@@ -50,6 +50,7 @@ export function apptRowsToCsv(
       r.deliveryDriverId ? driverName(r.deliveryDriverId) : '',
       apptTimeLabel(r.pickup.appt, r.pickup.apptType, r.pickup.apptEnd),
       apptTimeLabel(r.delivery.appt, r.delivery.apptType, r.delivery.apptEnd),
+      r.notes,
     ].map(q).join(','))
   }
   return lines.join('\n')

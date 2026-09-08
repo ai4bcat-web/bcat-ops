@@ -38,6 +38,8 @@ export interface ApptQueueRow {
   customer: string
   /** Pickup facility and/or city, joined for display. */
   location: string
+  /** The load's notes — same field the calendar shows. */
+  notes: string
   /** Delivery facility and/or city, joined for display. */
   deliveryLocation: string
   /** ISO date of the (unscheduled) pickup appointment — grouping key. */
@@ -156,6 +158,7 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       pickupNumber: load.pickupNumber ?? '',
       customer: load.customer ?? '',
       location: pickupStop ? [pickupStop.name, pickupStop.city].filter(Boolean).join(', ') : '',
+      notes: load.notes ?? '',
       deliveryLocation: deliveryStop ? [deliveryStop.name, deliveryStop.city].filter(Boolean).join(', ') : '',
       appt: pickupStop?.appt ?? '',
       driverId: pickupStop?.driverId ?? null,
@@ -220,7 +223,7 @@ export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
 
 export type ApptSortKey =
   | 'aljexId' | 'pickupNumber' | 'customer' | 'location' | 'appt' | 'driver'
-  | 'pickupTime' | 'deliveryTime'
+  | 'pickupTime' | 'deliveryTime' | 'notes'
 export type SortDir = 'asc' | 'desc'
 
 /**

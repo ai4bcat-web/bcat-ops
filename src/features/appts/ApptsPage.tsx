@@ -188,6 +188,7 @@ const COLUMNS: { key: ApptSortKey; label: string }[] = [
   { key: 'location',     label: 'Location' },
   { key: 'appt',         label: 'Date' },
   { key: 'driver',       label: 'Driver' },
+  { key: 'notes',        label: 'Notes' },
 ]
 
 /** Available next-status choices for one stop, given its current state. */
@@ -731,6 +732,11 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                       </div>
                     )}
                   </td>
+                  <td style={{ ...td, color: 'var(--ds-t3)', fontSize: 12, maxWidth: 200, whiteSpace: 'normal' }} title={r.notes || undefined}>
+                    {r.notes
+                      ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{r.notes}</span>
+                      : '—'}
+                  </td>
                 </tr>
                 {showProofs && batory && loadRec && (
                   <tr>
@@ -785,7 +791,7 @@ export function ApptsPage() {
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>
-      [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation].some((v) => v.toLowerCase().includes(q)),
+      [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation, r.notes].some((v) => v.toLowerCase().includes(q)),
     )
   }, [loads, query, onlyOpen])
   const openTotal = useMemo(() => apptQueue(loads).filter(rowOutstanding).length, [loads])
