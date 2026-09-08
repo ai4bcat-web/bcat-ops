@@ -13,7 +13,7 @@ import {
   type ApptNeedKind,
 } from '@/lib/apptQueue'
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
-import { STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
+import { defaultRequestedFor, STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
@@ -274,6 +274,19 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
     ? (load.stops ?? []).find((s) => s.id === refr.stopId)
     : undefined
 
+  // Under a REQUESTED/CONFIRMED chip a raw "NEED"/"Pending" time reads as a
+  // contradiction — the ask is out (or answered). Show WHAT WE REQUESTED instead:
+  // the stamped apptRequestedFor, falling back to the standing rules (12 PM pickups).
+  const fmtChi = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })
+  const requestedFor = stop ? (stop.apptRequestedFor ?? defaultRequestedFor(stop)) : null
+  const contradictory = label === '—' || label === PENDING_LABEL || label.startsWith('NEED')
+  const displayLabel = (status === 'requested' || status === 'confirmed') && contradictory
+    ? (requestedFor ? `requested ${fmtChi(requestedFor)}` : '—')
+    : status === 'requested' && requestedFor && apptHasTime(refr.appt) && requestedFor !== refr.appt
+      ? `${label} · req ${fmtChi(requestedFor)}`
+      : label
+
   const choices = statusChoices(stop, actor)
   const isToggleable = choices.length > 0
 
@@ -282,6 +295,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
     setSaving(true)
     try {
       const stopPatch: Partial<Stop> = { apptStatus: target }
+      if (target === 'requested') stopPatch.apptRequestedFor = stop.apptRequestedFor ?? defaultRequestedFor(stop)
       if (target === 'change_needed') {
         Object.assign(stopPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : stop.apptChangeTo || ''))
       } else if (target === 'confirmed') {
@@ -513,7 +527,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
         <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
           {refr.appt ? formatDateShort(refr.appt) : ''}
         </div>
-        {label}
+        {displayLabel}
       </button>
       {editing && (
         <ApptEditPopover

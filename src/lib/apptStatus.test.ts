@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  apptWorkflowStatus, canMarkRequested, canMarkConfirmed, changeNeededPatch, canSetChangeNeeded,
+  apptWorkflowStatus, canMarkRequested, canMarkConfirmed, changeNeededPatch, canSetChangeNeeded, defaultRequestedFor,
 } from './apptStatus'
 import { fromDateInput, fromDateTimeInput } from './date'
 import type { Load, Stop } from '@/types'
@@ -58,5 +58,24 @@ describe('CHANGE NEEDED', () => {
     expect(p.apptChangeTo).toBe(fromDateTimeInput('2026-09-12T13:00'))
     expect(p.apptMoveRequested).toBe(true)
     expect(p.apptProofs).toEqual({ request: null, e2open: null, email: null })
+  })
+})
+
+describe('defaultRequestedFor — what the request asks for', () => {
+  it('CHANGE NEEDED target wins', () => {
+    const t = fromDateTimeInput('2026-09-12T13:00')
+    expect(defaultRequestedFor(stop({ apptChangeTo: t }))).toBe(t)
+  })
+  it('pickup with no time → the standing 12:00 PM rule on the appt date', () => {
+    const got = defaultRequestedFor(stop({ appt: fromDateInput('2026-09-10') }))
+    expect(got).toBe(fromDateTimeInput('2026-09-10T12:00'))
+  })
+  it('a stop with a real time asks for that time', () => {
+    const t = fromDateTimeInput('2026-09-10T09:30')
+    expect(defaultRequestedFor(stop({ appt: t }))).toBe(t)
+    expect(defaultRequestedFor(stop({ type: 'delivery', appt: t }))).toBe(t)
+  })
+  it('no date at all → nothing to ask for', () => {
+    expect(defaultRequestedFor(stop({ appt: '' }))).toBeNull()
   })
 })

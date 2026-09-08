@@ -5,7 +5,7 @@ import { getStops, updateStop } from '@/lib/stops'
 import { uploadApptProof, getApptProofUrl, deleteApptProof, sendApptRequestEmail, type ApptProofSlot } from '@/lib/apiClient'
 import { useDirectory } from '@/hooks/useDirectory'
 import { formatDateShort, apptTimeLabel } from '@/lib/date'
-import { BATORY_PICKUP_REQUEST_TIME } from '@/lib/apptStatus'
+import { BATORY_PICKUP_REQUEST_TIME, defaultRequestedFor } from '@/lib/apptStatus'
 import { Mail } from 'lucide-react'
 import { apptWorkflowStatus, canMarkRequested, canMarkConfirmed, STATUS_META } from '@/lib/apptStatus'
 import type { Load, Stop } from '@/types'
@@ -153,6 +153,7 @@ export function ApptProofPanel({ load, updateLoad }: {
     try {
       await updateLoad(load.id, { stops: updateStop(load, stop.id, {
         apptStatus: status,
+        ...(status === 'requested' ? { apptRequestedFor: stop.apptRequestedFor ?? defaultRequestedFor(stop) } : {}),
         ...(status === 'confirmed' ? { apptMoveRequested: false, apptChangeTo: null } : {}),
       }) })
       toast.success(status === 'requested' ? 'Marked REQUESTED' : 'Marked CONFIRMED')
@@ -233,7 +234,11 @@ export function ApptProofPanel({ load, updateLoad }: {
           onSent={async () => {
             // Sending the request IS the request — the ladder advances without a screenshot
             // (the app itself is the record; the audit history logs the transition).
-            await updateLoad(load.id, { stops: updateStop(load, emailFor.id, { apptStatus: 'requested' }) })
+            await updateLoad(load.id, { stops: updateStop(load, emailFor.id, {
+              apptStatus: 'requested',
+              // What the email actually asked for — shown on the chip as "requested 12:00 PM".
+              apptRequestedFor: emailFor.apptRequestedFor ?? defaultRequestedFor(emailFor),
+            }) })
             setEmailFor(null)
           }}
           onClose={() => setEmailFor(null)}

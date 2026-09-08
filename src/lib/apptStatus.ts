@@ -1,5 +1,5 @@
 import { requiresApptProofs } from './apptQueue'
-import { apptHasTime } from './date'
+import { apptHasTime, formatDateInput, fromDateTimeInput } from './date'
 import type { Load, Stop, ApptWorkflowStatus } from '@/types'
 
 /**
@@ -36,6 +36,20 @@ export const RUBEN  = 'ruben@bcatcorp.com'
 export const BATORY_PICKUP_REQUEST_TIME = '12:00 PM'
 
 export type EffectiveApptStatus = ApptWorkflowStatus | 'ratecon_needed'
+
+/**
+ * The date/time a request for this stop asks for: the CHANGE NEEDED target when one is
+ * set; otherwise the Batory standing rule for pickups with no time yet (the appt date
+ * at 12:00 PM); otherwise whatever time is already on the stop.
+ */
+export function defaultRequestedFor(stop: Pick<Stop, 'type' | 'appt' | 'apptChangeTo'>): string | null {
+  if (stop.apptChangeTo) return stop.apptChangeTo
+  if (!stop.appt) return null
+  if (stop.type === 'pickup' && !apptHasTime(stop.appt)) {
+    return fromDateTimeInput(`${formatDateInput(stop.appt)}T12:00`)
+  }
+  return stop.appt
+}
 
 /**
  * The status in force for a stop, grandfathering stops from before the ladder:

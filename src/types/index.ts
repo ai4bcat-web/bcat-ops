@@ -259,6 +259,9 @@ export interface Stop {
   apptStatus?: ApptWorkflowStatus | null
   /** CHANGE NEEDED: the date/time Ruben or Ryne wants instead (ISO). */
   apptChangeTo?: string | null
+  /** The date/time we ASKED the facility for (ISO) — stamped when a request is sent
+   *  or the status is moved to REQUESTED, so the chip can say what was requested. */
+  apptRequestedFor?: string | null
 }
 
 export type ApptWorkflowStatus =
