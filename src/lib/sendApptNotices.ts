@@ -85,7 +85,8 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
     const was = prevById.get(s.id)
     const nowTimed = apptHasTime(s.appt)
     const hadTime = was ? apptHasTime(was.appt) : false
-    if (s.type === 'delivery' && (was?.apptStatus ?? s.apptStatus) === 'need_book' && nowTimed && !hadTime) {
+    const explicitHandoff = was?.apptStatus === 'need_book' && s.apptStatus === 'need_request'
+    if (s.type === 'delivery' && ((was?.apptStatus ?? s.apptStatus) === 'need_book' && nowTimed && !hadTime || explicitHandoff)) {
       addPatch(s.id, { apptStatus: 'need_request' })
       const label = formatDateShort(s.appt)
       try {

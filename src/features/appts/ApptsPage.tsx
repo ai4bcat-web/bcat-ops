@@ -193,11 +193,26 @@ const COLUMNS: { key: ApptSortKey; label: string }[] = [
 ]
 
 /** Available next-status choices for one stop, given its current state. */
-function statusChoices(stop: Stop | undefined, actor: string | null | undefined): { target: ApptWorkflowStatus; label: string; needs: string | null; missingSlots: ApptProofSlot[] }[] {
+interface StatusChoice {
+  target: ApptWorkflowStatus
+  label: string
+  needs: string | null
+  missingSlots: ApptProofSlot[]
+  /** This transition wants a date+time picked inline (Ruben's handoff, CHANGE NEEDED). */
+  needsDateTime?: boolean
+}
+
+function statusChoices(stop: Stop | undefined, actor: string | null | undefined, effective: EffectiveApptStatus | null): StatusChoice[] {
   if (!stop) return []
   const current = stop.apptStatus
-  const choices: { target: ApptWorkflowStatus; label: string; needs: string | null; missingSlots: ApptProofSlot[] }[] = []
+  const choices: StatusChoice[] = []
   const isSetter = canSetChangeNeeded(actor)
+
+  // NEED RUBEN → NEED DENNIS: Ruben picks the day + time right here; the save books his
+  // time, advances the ladder, and fires Dennis's task + the #appts-ivan ping.
+  if (effective === 'need_book') {
+    choices.push({ target: 'need_request', label: 'NEED DENNIS', needs: null, missingSlots: [], needsDateTime: true })
+  }
 
   if (current !== 'requested') {
     const hasReq = canMarkRequested(stop)
@@ -296,14 +311,19 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       ? `${label} · req ${fmtChi(stamped)}`
       : label
 
-  const choices = statusChoices(stop, actor)
+  const choices = statusChoices(stop, actor, status)
   const isToggleable = choices.length > 0
 
-  const applyStatus = async (target: ApptWorkflowStatus) => {
+  const applyStatus = async (target: ApptWorkflowStatus, pickedDateTime?: string) => {
     if (!load || !stop) return
     setSaving(true)
     try {
       const stopPatch: Partial<Stop> = { apptStatus: target }
+      if (target === 'need_request' && pickedDateTime) {
+        // Ruben's handoff: his picked day+time becomes the appointment Dennis books.
+        stopPatch.appt = fromDateTimeInput(pickedDateTime)
+        stopPatch.apptType = 'exact'
+      }
       if (target === 'requested') stopPatch.apptRequestedFor = stop.apptRequestedFor ?? defaultRequestedFor(stop)
       if (target === 'change_needed') {
         Object.assign(stopPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : stop.apptChangeTo || ''))
@@ -370,7 +390,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       <div style={{ marginBottom: 3, position: 'relative' }}>
         {isToggleable ? (
           <button
-            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : ''); setPendingTarget(null); setUploadedChSlots(new Set()) }}
+            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : (status === 'need_book' && stop?.appt && apptHasTime(stop.appt)) ? formatDateTimeInput(stop.appt) : ''); setPendingTarget(null); setUploadedChSlots(new Set()) }}
             title="Toggle appointment status"
             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
           >
@@ -481,21 +501,21 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                 const needsUpload = ch.missingSlots.length > 0
                 return (
                   <div key={ch.target} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {needsChangeTo && (
+                    {(needsChangeTo || ch.needsDateTime) && (
                       <input
                         type="datetime-local"
-                        aria-label="Change to date and time"
+                        aria-label={ch.needsDateTime ? 'Delivery day and time' : 'Change to date and time'}
                         className="h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         value={changeTo}
                         onChange={(e) => setChangeTo(e.target.value)}
                         placeholder="Wanted date/time"
-                        title="The date and time you want instead"
+                        title={ch.needsDateTime ? 'The delivery day and time you want booked' : 'The date and time you want instead'}
                       />
                     )}
                     <button
-                      onClick={() => handleStatusClick(ch)}
-                      disabled={saving || isCurrent || (needsChangeTo && !changeTo)}
-                      title={isCurrent ? `Already ${ch.label}` : needsChangeTo && !changeTo ? 'Pick the wanted date and time first' : needsUpload ? ch.needs! : `Move to ${ch.label}`}
+                      onClick={() => ch.needsDateTime ? void applyStatus(ch.target, changeTo) : handleStatusClick(ch)}
+                      disabled={saving || isCurrent || ((needsChangeTo || ch.needsDateTime) && !changeTo)}
+                      title={isCurrent ? `Already ${ch.label}` : (needsChangeTo || ch.needsDateTime) && !changeTo ? 'Pick the date and time first' : needsUpload ? ch.needs! : `Move to ${ch.label}`}
                       style={{
                         height: chipHeight, padding: '0 8px', borderRadius: 6, fontSize: 10.5, fontWeight: 600, fontFamily: 'inherit',
                         cursor: isCurrent || saving ? 'default' : 'pointer',
@@ -507,7 +527,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                         width: '100%',
                       }}
                     >
-                      {needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : needsUpload ? (
+                      {ch.needsDateTime ? `→ NEED DENNIS ${changeTo ? '@ ' + new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '(pick day & time)'}` : needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : needsUpload ? (
                         <>{ch.label} <ImagePlus size={10} /></>
                       ) : ch.label}
                     </button>

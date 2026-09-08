@@ -453,3 +453,29 @@ describe('NEED DENNIS handoff', () => {
     expect(row.children[2].textContent).toContain('NEED DENNIS')
   })
 })
+
+describe('Ruben clicks NEED RUBEN', () => {
+  it('the chip menu offers NEED DENNIS with a day+time picker, and the save books it', async () => {
+    loads.mockReturnValue([load({
+      id: 'lr1', aljexId: 'RUBENPICK', customer: 'Batory Foods',
+      stops: [
+        stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'), apptStatus: 'requested', apptRequestedFor: fromDateTimeInput('2099-01-01T12:00') }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact',
+               appt: fromDateInput('2099-01-02'), apptStatus: 'need_book' }),
+      ],
+    })])
+    render(<ApptsPage />)
+    const row = screen.getByText('RUBENPICK').closest('tr')!
+    expect(row.children[2].textContent).toContain('NEED RUBEN')
+    // Click the chip → the menu opens with the handoff option
+    fireEvent.click(within(row.children[2] as HTMLElement).getByText('NEED RUBEN'))
+    fireEvent.change(screen.getByLabelText('Delivery day and time'), { target: { value: '2099-01-02T14:00' } })
+    fireEvent.click(screen.getByText(/→ NEED DENNIS @/))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const [, patch] = updateLoad.mock.calls[0]
+    const del = patch.stops.find((s: { id: string }) => s.id === 'd')
+    expect(del.apptStatus).toBe('need_request')
+    expect(del.appt).toBe(fromDateTimeInput('2099-01-02T14:00'))
+    expect(del.apptType).toBe('exact')
+  })
+})
