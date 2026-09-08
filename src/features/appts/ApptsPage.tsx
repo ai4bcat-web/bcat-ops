@@ -274,17 +274,24 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
     ? (load.stops ?? []).find((s) => s.id === refr.stopId)
     : undefined
 
-  // Under a REQUESTED/CONFIRMED chip a raw "NEED"/"Pending" time reads as a
-  // contradiction — the ask is out (or answered). Show WHAT WE REQUESTED instead:
-  // the stamped apptRequestedFor, falling back to the standing rules (12 PM pickups).
+  // The label follows the ladder, not just the raw appt fields:
+  //  - NEED states show the TARGET ask ("NEED 12:00 PM" — the standing pickup rule,
+  //    Ruben's delivery time, or the CHANGE NEEDED target) so a fresh Batory load
+  //    reads NEED 12:00 PM until someone actually requests it.
+  //  - REQUESTED/CONFIRMED show "requested <time>" ONLY from the stamp written when
+  //    the request went out — never a defaulted guess.
   const fmtChi = (iso: string) =>
     new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })
-  const requestedFor = stop ? (stop.apptRequestedFor ?? defaultRequestedFor(stop)) : null
-  const contradictory = label === '—' || label === PENDING_LABEL || label.startsWith('NEED')
-  const displayLabel = (status === 'requested' || status === 'confirmed') && contradictory
-    ? (requestedFor ? `requested ${fmtChi(requestedFor)}` : '—')
-    : status === 'requested' && requestedFor && apptHasTime(refr.appt) && requestedFor !== refr.appt
-      ? `${label} · req ${fmtChi(requestedFor)}`
+  const bare = label === '—' || label === PENDING_LABEL || label === 'NEED'
+  const needAsk = stop ? defaultRequestedFor(stop) : null
+  const stamped = stop?.apptRequestedFor ?? null
+  const displayLabel =
+    (status === 'need_request' || status === 'need_book' || status === 'change_needed') && bare && needAsk
+      ? `NEED ${fmtChi(needAsk)}`
+    : (status === 'requested' || status === 'confirmed') && (bare || label.startsWith('NEED'))
+      ? (stamped ? `requested ${fmtChi(stamped)}` : '—')
+    : status === 'requested' && stamped && apptHasTime(refr.appt) && stamped !== refr.appt
+      ? `${label} · req ${fmtChi(stamped)}`
       : label
 
   const choices = statusChoices(stop, actor)

@@ -390,3 +390,40 @@ describe('booking screenshots', () => {
     expect(screen.getByLabelText('Show booking screenshots for HALF').textContent).toContain('2/6')
   })
 })
+
+describe('ladder time labels', () => {
+  it('a fresh Batory pickup reads NEED 12:00 PM until it is actually requested', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'FRESH', customer: 'Batory Foods',
+      stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01') })],
+    })])
+    render(<ApptsPage />)
+    const cell = screen.getByText('FRESH').closest('tr')!.children[1]
+    expect(cell.textContent).toContain('NEED TO REQUEST')
+    expect(cell.textContent).toContain('NEED 12:00 PM')
+    expect(cell.textContent).not.toContain('requested')
+  })
+
+  it('REQUESTED shows the stamped requested time, never a default', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'STAMPED', customer: 'Batory Foods',
+      stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01'),
+                     apptStatus: 'requested', apptRequestedFor: fromDateTimeInput('2099-01-01T12:00') })],
+    })])
+    render(<ApptsPage />)
+    const cell = screen.getByText('STAMPED').closest('tr')!.children[1]
+    expect(cell.textContent).toContain('REQUESTED')
+    expect(cell.textContent).toContain('requested 12:00 PM')
+  })
+
+  it('a legacy requested stop with no stamp shows no invented time', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'LEGACYREQ', customer: 'Batory Foods',
+      stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01'), apptStatus: 'requested' })],
+    })])
+    render(<ApptsPage />)
+    const cell = screen.getByText('LEGACYREQ').closest('tr')!.children[1]
+    expect(cell.textContent).toContain('REQUESTED')
+    expect(cell.textContent).not.toContain('12:00')
+  })
+})
