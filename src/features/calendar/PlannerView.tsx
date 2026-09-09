@@ -28,9 +28,24 @@ import type { DriverAvailability } from '@/lib/apiClient'
 import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, type EffectiveApptStatus } from '@/lib/apptStatus'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 168, deAppt: 168, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
+const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
+
+// ── Status cell — the SAME workflow chip the Appts page shows, in its own column ──
+function StatusCell({ status, kind }: { status: EffectiveApptStatus | null; kind: 'pickup' | 'delivery' }) {
+  if (!status) return <div className="shrink-0 px-1 text-[11px] text-slate-300" style={{ width: COL.status }}>—</div>
+  const tone = STATUS_TONE_COLORS[STATUS_META[status].tone]
+  return (
+    <div className="shrink-0 flex items-center px-1" style={{ width: COL.status }}>
+      <span className="text-[9px] font-bold rounded px-1 py-0.5 truncate"
+        style={{ background: tone.bg, color: tone.fg }}
+        title="Same status as the Appts page">
+        {statusLabel(status, kind)}
+      </span>
+    </div>
+  )
+}
 
 // ── Hex bg helper ─────────────────────────────────────────────────────────────
 function hexBg(hex: string, alpha: number): string {
@@ -64,11 +79,8 @@ function chicagoDateStr(iso: string | null | undefined): string | null {
 }
 
 // ── Appt cell (date + time stacked) ──────────────────────────────────────────
-function ApptCell({ iso, type, apptEnd, colorCls, yard, city, status, stopKind }: {
+function ApptCell({ iso, type, apptEnd, colorCls, yard, city }: {
   iso?: string; type?: string; apptEnd?: string; colorCls: string; yard?: boolean; city?: string
-  /** Workflow ladder status — same chip the Appts page shows for this end. */
-  status?: EffectiveApptStatus | null
-  stopKind?: 'pickup' | 'delivery'
 }) {
   const w = COL.puAppt
 
@@ -88,20 +100,12 @@ function ApptCell({ iso, type, apptEnd, colorCls, yard, city, status, stopKind }
   const noTime = type !== 'fcfs' && type !== 'tbd' && type !== 'range' && !apptHasTime(iso)
   const isSpecial = type === 'fcfs' || type === 'tbd' || noTime
   const specialLabel = type === 'tbd' ? needLabel(iso) : noTime ? PENDING_LABEL : type!.toUpperCase()
-  const tone = status ? STATUS_TONE_COLORS[STATUS_META[status].tone] : null
   return (
     <div className={`flex flex-col justify-center px-1.5 leading-tight ${colorCls}`} style={{ width: w }}>
       <span className="text-[10px] text-slate-400 truncate">{formatDateShort(iso)}</span>
       <span className="text-[11px] font-medium truncate">
         {isSpecial ? specialLabel : formatApptTime(iso, type, apptEnd)}
       </span>
-      {status && tone && (
-        <span className="text-[8px] font-bold truncate rounded px-0.5"
-          style={{ background: tone.bg, color: tone.fg, width: 'fit-content', maxWidth: '100%' }}
-          title="Same status as the Appts page">
-          {statusLabel(status, stopKind)}
-        </span>
-      )}
     </div>
   )
 }
@@ -588,8 +592,6 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           colorCls="text-blue-600"
           yard={puYard}
           city={puYard ? load.destinationCity : undefined}
-          status={puYard ? null : stopMode ? (role === 'pickup' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'pickup')}
-          stopKind="pickup"
         />
         {(!stopMode || role === 'pickup') && (
           <button
@@ -605,6 +607,10 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         )}
       </div>
 
+      {/* PU Status — its own column so the chip never crowds the time */}
+      <StatusCell kind="pickup"
+        status={puYard ? null : stopMode ? (role === 'pickup' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'pickup')} />
+
       {/* DE Appt */}
       <div className="relative group/appt shrink-0">
         <ApptCell
@@ -614,8 +620,6 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           colorCls="text-violet-600"
           yard={deYard}
           city={deYard ? load.destinationCity : undefined}
-          status={deYard ? null : stopMode ? (role === 'delivery' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'delivery')}
-          stopKind="delivery"
         />
         {(!stopMode || role === 'delivery') && (
           <button
@@ -630,6 +634,10 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
           <ApptEditPopover load={load} stop={stop} apptField="deliveryAppt" typeField="deliveryApptType" onClose={() => setEditingAppt(null)} />
         )}
       </div>
+
+      {/* DE Status */}
+      <StatusCell kind="delivery"
+        status={deYard ? null : stopMode ? (role === 'delivery' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'delivery')} />
 
       {/* Driver (with slot badge) — pickup row sets pickupDriverId, delivery row sets deliveryDriverId */}
       <div
@@ -943,7 +951,9 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
         <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>
+        <ColHeader width={COL.status}>PU Status</ColHeader>
         <ColHeader width={COL.deAppt}>DE Appt</ColHeader>
+        <ColHeader width={COL.status}>DE Status</ColHeader>
         <ColHeader width={COL.driver}>Driver</ColHeader>
         <ColHeader width={16}>{''}</ColHeader>
         <ColHeader width={COL.notes}>Notes</ColHeader>
