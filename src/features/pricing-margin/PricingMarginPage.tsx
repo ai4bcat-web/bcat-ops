@@ -441,14 +441,14 @@ export function PricingMarginPage() {
           </section>
 
           <section style={{ ...cardStyle, background: '#fefce8', borderColor: '#fde68a' }}>
-            <h3 style={{ ...sectionTitleStyle, color: '#92400e' }}>⚠️ Plugin Update Required</h3>
+            <h3 style={{ ...sectionTitleStyle, color: '#92400e' }}>⚡ PHP Bridge Required (One-Time Setup)</h3>
             <p style={{ fontSize: 13, color: '#92400e', margin: 0, lineHeight: 1.6 }}>
-              This page saves the margin config to the WordPress site, but the{' '}
-              <strong>bcat-pricing-integration</strong> plugin (v1.0.4) needs to be updated
-              to read the margin from the <code>bcat_pricing_margin_percent</code> WordPress option
-              instead of using a hardcoded value. The plugin currently fetches from Super Dispatch
-              and applies a fixed margin. Once updated, changes made here will take effect
-              immediately on the live quote tool.
+              The config is live on the WordPress site at{' '}
+              <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>/bcat-pricing-margin-config/</code>.
+              For the <strong>bcat-pricing-integration</strong> plugin to read it, upload the PHP bridge file
+              from <code style={{ background: '#fef3c7', padding: '1px 5px', borderRadius: 3 }}>bcat-ops/wordpress/bcat-pricing-margin-api.php</code>{' '}
+              to <strong>wp-content/mu-plugins/</strong> via GoDaddy cPanel → File Manager.
+              Once uploaded, changes here take effect immediately on the live quote tool.
             </p>
           </section>
         </div>
