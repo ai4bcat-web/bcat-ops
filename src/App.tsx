@@ -36,6 +36,7 @@ import { FilesPage } from '@/features/files/FilesPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { DocumentSigningPage } from '@/features/driver-docs/DocumentSigningPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
+import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 
 export default function App() {
@@ -94,6 +95,8 @@ export default function App() {
               <Route path="/compliance/truck/:truckId" element={<Navigate to="/files" replace />} />
               {/* Marketing */}
               <Route path="/reddit-queue" element={<RequirePage page="redditQueue"><RedditQueuePage /></RequirePage>} />
+              {/* Sales — pricing margin control */}
+              <Route path="/pricing-margin" element={<RequirePage page="pricingMargin"><PricingMarginPage /></RequirePage>} />
               {/* legacy redirects */}
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
