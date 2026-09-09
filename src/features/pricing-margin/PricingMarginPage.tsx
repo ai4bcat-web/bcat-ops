@@ -54,15 +54,19 @@ export function PricingMarginPage() {
   const [config, setConfig] = useState<MarginConfig>(DEFAULT_CONFIG)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [wpPass, setWpPass] = useState('')
+  // Lazy-init from localStorage so the field never flashes empty —
+  // the stored password persists across sessions on the same origin.
+  const [wpPass, setWpPass] = useState<string>(() => {
+    try { return localStorage.getItem('bcat_wp_app_password') || '' }
+    catch { return '' }
+  })
+  // Track whether the password was loaded from storage vs typed fresh
+  const [wpPassLoaded, setWpPassLoaded] = useState<boolean>(() => {
+  void wpPassLoaded; void setWpPassLoaded // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
+    try { return !!localStorage.getItem('bcat_wp_app_password') }
+    catch { return false }
+  })
   const [exampleQuote, setExampleQuote] = useState<ExampleQuote | null>(null)
-
-  // Load WP password from localStorage (set once per session by the vehicle-quote page,
-  // or entered manually here)
-  useEffect(() => {
-    const stored = localStorage.getItem('bcat_wp_app_password') || ''
-    if (stored) setWpPass(stored)
-  }, [])
 
   // Fetch current config from WordPress
   const fetchConfig = useCallback(async () => {
@@ -251,6 +255,15 @@ export function PricingMarginPage() {
             <h3 style={sectionTitleStyle}>WordPress Connection</h3>
             <p style={{ fontSize: 13, color: 'var(--ds-t3)', margin: '0 0 12px' }}>
               Margin config is stored on the Best Care WordPress site so the quote tool can read it.
+              {wpPassLoaded && (
+                <span style={{
+                  marginLeft: 8, padding: '2px 8px', borderRadius: 4,
+                  background: '#dcfce7', color: '#166534', fontSize: 11,
+                  fontWeight: 600,
+                }}>
+                  ✓ Auto-loaded — enter once, persists forever on this device
+                </span>
+              )}
             </p>
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
               <div style={{ flex: 1 }}>
@@ -261,7 +274,20 @@ export function PricingMarginPage() {
                   value={wpPass}
                   onChange={(e) => {
                     setWpPass(e.target.value)
-                    localStorage.setItem('bcat_wp_app_password', e.target.value)
+                    setWpPassLoaded(false)
+                    try {
+                      localStorage.setItem('bcat_wp_app_password', e.target.value)
+                    } catch {}
+                  }}
+                  onFocus={() => {
+                    // If the field is empty but localStorage still has a value,
+                    // restore it (handles edge case of state desync)
+                    if (!wpPass) {
+                      try {
+                        const stored = localStorage.getItem('bcat_wp_app_password')
+                        if (stored) { setWpPass(stored); setWpPassLoaded(true) }
+                      } catch {}
+                    }
                   }}
                 />
               </div>

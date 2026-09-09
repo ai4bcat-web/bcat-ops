@@ -185,10 +185,12 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
   })
 }
 
-/** Only the shipments still waiting on at least one appointment. */
-export const apptOutstanding = (loads: Load[]): ApptQueueRow[] => apptQueue(loads).filter(rowOutstanding)
+/** Only the shipments still waiting on at least one appointment — stale rows (every
+ *  date > STALE_AFTER_DAYS past) are no longer considered open. */
+export const apptOutstanding = (loads: Load[]): ApptQueueRow[] =>
+  apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r))
 
-/** Outstanding shipment count, for the sidebar badge — booked shipments don't count. */
+/** Open shipment count, for the sidebar badge — settled AND stale shipments don't count. */
 export const apptQueueCount = (loads: Load[]): number => apptOutstanding(loads).length
 
 /* ── past appointments ──────────────────────────────────────────────────────── */
@@ -211,15 +213,38 @@ export function isPastAppt(appt: string, todayIso: string = new Date().toISOStri
   return day < today
 }
 
+/** Days an OUTSTANDING appointment stays on the working list after its dates pass. */
+export const STALE_AFTER_DAYS = 5
+
+/**
+ * True when every dated end of the row is more than STALE_AFTER_DAYS behind today —
+ * the appointment window is long gone and nobody is going to book it now. Stale rows
+ * leave the working view and stop counting as open (they live under the past toggle,
+ * never deleted). Compared as Chicago calendar dates.
+ */
+export function isStaleRow(r: ApptQueueRow, todayIso: string = new Date().toISOString()): boolean {
+  const today = chicagoDateStr(todayIso)
+  const cutoff = (() => {
+    const d = new Date(`${today}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - STALE_AFTER_DAYS)
+    return d.toISOString().slice(0, 10)
+  })()
+  const days = [r.pickup.appt, r.delivery.appt].filter(Boolean).map((iso) => chicagoDateStr(iso))
+  if (days.length === 0) return false // undated = unscheduled, not stale
+  return days.every((day) => day < cutoff)
+}
+
 /**
  * Split the queue into what can still be actioned and what has already gone by.
  *
- * A row with ANY outstanding end is NEVER past, whatever its pickup date: a load picked
- * up last week whose delivery is still NEED must stay on the working list — hiding it
- * behind the past-shipments toggle is exactly how Pro# 14267's open delivery got missed.
+ * An OUTSTANDING row stays current while any of its dates is within the 5-day grace
+ * window — a load picked up last week whose delivery is still NEED must not vanish
+ * (the Pro# 14267 miss). Beyond the grace window it is stale: cleared from view and
+ * no longer open. Settled rows age out as soon as their pickup date passes.
  */
 export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
-  const isPastRow = (r: ApptQueueRow) => isPastAppt(r.appt, todayIso) && !rowOutstanding(r)
+  const isPastRow = (r: ApptQueueRow) =>
+    (isPastAppt(r.appt, todayIso) && !rowOutstanding(r)) || isStaleRow(r, todayIso)
   return {
     current: rows.filter((r) => !isPastRow(r)),
     past: rows.filter(isPastRow),

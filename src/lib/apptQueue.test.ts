@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   apptQueue, apptNeedKind, apptQueueCount,
-  isPastAppt, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs, rowOutstanding, apptOutstanding, stopConfirmed,
+  isPastAppt, isStaleRow, splitPastAppts, sortApptRows, apptTypeAfterEdit, loadApptRefs, rowOutstanding, apptOutstanding, stopConfirmed,
 } from './apptQueue'
 import { fromDateInput, fromDateTimeInput, apptTimeLabel, PENDING_LABEL } from './date'
 import type { ApptType, Load, Stop } from '@/types'
@@ -145,12 +145,13 @@ describe('apptQueue', () => {
   })
 
   it('sorts a fully booked load BELOW the ones still open, and apptOutstanding drops it', () => {
+    // Future dates — apptOutstanding also drops rows gone stale on the real clock.
     const loadsIn = [
       load({ id: 'l1', rateConfirmKey: 'rate-confirms/x', stops: [
-        stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00') }),
-        stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
+        stop({ id: 's1', apptType: 'exact', appt: fromDateTimeInput('2099-08-20T09:00') }),
+        stop({ id: 's2', type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2099-08-21T14:00') }),
       ] }),
-      load({ id: 'l2', stops: [stop({ apptType: 'tbd' })] }),
+      load({ id: 'l2', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2099-08-20') })] }),
     ]
     const rows = apptQueue(loadsIn)
     expect(rows.map((r) => r.loadId)).toEqual(['l2', 'l1'])
@@ -178,21 +179,27 @@ describe('apptQueue', () => {
 })
 
 describe('apptQueueCount', () => {
+  // Future dates throughout — the badge excludes rows gone stale on the real clock.
+  const FUT = fromDateInput('2099-08-20')
   const settled = (id: string) => load({ id, rateConfirmKey: 'rc', stops: [
-    stop({ id: `${id}p`, apptType: 'exact', appt: fromDateTimeInput('2026-08-20T09:00') }),
-    stop({ id: `${id}d`, type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2026-08-21T14:00') }),
+    stop({ id: `${id}p`, apptType: 'exact', appt: fromDateTimeInput('2099-08-20T09:00') }),
+    stop({ id: `${id}d`, type: 'delivery', apptType: 'exact', appt: fromDateTimeInput('2099-08-21T14:00') }),
   ] } as Parameters<typeof load>[0])
 
   it('counts loads (not stops) awaiting an appointment', () => {
     expect(apptQueueCount([
       settled('a'),
-      load({ id: 'b', stops: [stop({ id: 'bp', apptType: 'tbd' })] }),
-      load({ id: 'c', stops: [stop({ id: 'cp', apptType: 'tbd' }), stop({ id: 'cd', type: 'delivery', apptType: 'tbd' })] }),
+      load({ id: 'b', stops: [stop({ id: 'bp', apptType: 'tbd', appt: FUT })] }),
+      load({ id: 'c', stops: [stop({ id: 'cp', apptType: 'tbd', appt: FUT }), stop({ id: 'cd', type: 'delivery', apptType: 'tbd', appt: FUT })] }),
     ])).toBe(2)
   })
 
   it('counts a load once even when both stops need attention', () => {
-    expect(apptQueueCount([load({ stops: [stop({ apptType: 'tbd' }), stop({ id: 's2', type: 'delivery', apptType: 'tbd' })] })])).toBe(1)
+    expect(apptQueueCount([load({ stops: [stop({ apptType: 'tbd', appt: FUT }), stop({ id: 's2', type: 'delivery', apptType: 'tbd', appt: FUT })] })])).toBe(1)
+  })
+
+  it('a stale outstanding load (all dates 5+ days past) no longer counts as open', () => {
+    expect(apptQueueCount([load({ stops: [stop({ apptType: 'tbd', appt: fromDateInput('2020-01-01') })] })])).toBe(0)
   })
 })
 
@@ -218,17 +225,37 @@ describe('isPastAppt / splitPastAppts', () => {
     expect(isPastAppt('', TODAY)).toBe(false)
   })
 
-  it('an OUTSTANDING row is never past — open work stays on the working list', () => {
-    // The Pro# 14267 case: pickup date long gone, delivery still NEED.
+  it('an OUTSTANDING row within the 5-day grace stays on the working list', () => {
+    // The Pro# 14267 case: pickup date gone, delivery still NEED but recent.
     const rows = apptQueue([
       load({ id: 'open-old', customer: 'Batory Foods', stops: [
-        stop({ apptType: 'exact', appt: fromDateTimeInput('2026-08-10T09:00'), apptStatus: 'confirmed' }),
-        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2026-08-20') }),
+        stop({ apptType: 'exact', appt: fromDateTimeInput('2026-08-14T09:00'), apptStatus: 'confirmed' }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2026-08-15') }),
       ] }),
     ])
-    const { current, past } = splitPastAppts(rows, TODAY)
+    const { current, past } = splitPastAppts(rows, TODAY) // TODAY = 08-17, within 5 days
     expect(current.map((r) => r.loadId)).toEqual(['open-old'])
     expect(past).toEqual([])
+  })
+
+  it('an outstanding row OVER 5 days old auto-clears from view and stops counting as open', () => {
+    const stale = load({ id: 'stale', customer: 'Batory Foods', stops: [
+      stop({ apptType: 'exact', appt: fromDateTimeInput('2026-08-01T09:00'), apptStatus: 'confirmed' }),
+      stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2026-08-02') }),
+    ] })
+    const rows = apptQueue([stale])
+    expect(isStaleRow(rows[0], TODAY)).toBe(true)
+    const { current, past } = splitPastAppts(rows, TODAY)
+    expect(current).toEqual([])
+    expect(past.map((r) => r.loadId)).toEqual(['stale'])
+  })
+
+  it('one live date keeps the row from going stale, however old the other end is', () => {
+    const rows = apptQueue([load({ id: 'live', stops: [
+      stop({ apptType: 'exact', appt: fromDateTimeInput('2026-07-01T09:00') }),
+      stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2026-08-20') }),
+    ] })])
+    expect(isStaleRow(rows[0], TODAY)).toBe(false)
   })
 
   it('splits settled rows by pickup date without losing any', () => {

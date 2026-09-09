@@ -7,7 +7,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAuditLog } from '@/hooks/useAuditLog'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import {
+import { isStaleRow,
   apptQueue, rowOutstanding, splitPastAppts, sortApptRows, groupByPickupDate,
   type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir, type ApptDateSection,
   type ApptNeedKind,
@@ -866,14 +866,14 @@ export function ApptsPage() {
   )
 
   const matched = useMemo(() => {
-    const all = onlyOpen ? apptQueue(loads).filter(rowOutstanding) : apptQueue(loads)
+    const all = onlyOpen ? apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r)) : apptQueue(loads)
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>
       [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation, r.notes].some((v) => v.toLowerCase().includes(q)),
     )
   }, [loads, query, onlyOpen])
-  const openTotal = useMemo(() => apptQueue(loads).filter(rowOutstanding).length, [loads])
+  const openTotal = useMemo(() => apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r)).length, [loads])
 
   // Appointment dates that have already gone by are almost always dead history — they
   // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.
@@ -979,8 +979,8 @@ export function ApptsPage() {
           >
             <History size={13} />
             {showPast
-              ? `Hide ${past.length} past shipment${past.length === 1 ? '' : 's'}`
-              : `Show ${past.length} past shipment${past.length === 1 ? '' : 's'}`}
+              ? `Hide ${past.length} past / cleared shipment${past.length === 1 ? '' : 's'}`
+              : `Show ${past.length} past / cleared shipment${past.length === 1 ? '' : 's'} (overdue 5+ days auto-clear)`}
           </button>
         )}
 

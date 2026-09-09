@@ -141,16 +141,21 @@ describe('ApptsPage', () => {
     expect(row.getAttribute('data-outstanding')).toBe('true')
   })
 
-  it('hides a SETTLED shipment whose date has gone by — but never open work', () => {
+  it('hides settled past rows AND auto-clears open work overdue 5+ days', () => {
+    const recent = new Date(); recent.setDate(recent.getDate() - 2)
+    const recentIso = recent.toISOString().slice(0, 10)
     loads.mockReturnValue([
       load({ id: 'p1', aljexId: 'OLDDONE', rateConfirmKey: 'rc',
         stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2020-01-01T09:00') })] } as Partial<Load>),
-      load({ id: 'p2', aljexId: 'OLDOPEN', stops: [stop({ appt: fromDateInput('2020-01-01') })] }),
+      load({ id: 'p2', aljexId: 'STALEOPEN', stops: [stop({ appt: fromDateInput('2020-01-01') })] }),
+      load({ id: 'p3', aljexId: 'FRESHOVERDUE', stops: [stop({ appt: fromDateInput(recentIso) })] }),
     ])
     render(<ApptsPage />)
     expect(screen.queryByText('OLDDONE')).toBeNull()
-    // Outstanding (no ratecon → not confirmed): stays visible however old the date is.
-    expect(screen.getByText('OLDOPEN')).toBeTruthy()
+    // Over 5 days past → cleared from view, no longer open.
+    expect(screen.queryByText('STALEOPEN')).toBeNull()
+    // Overdue but inside the 5-day grace → still front and center.
+    expect(screen.getByText('FRESHOVERDUE')).toBeTruthy()
   })
 
   it('offers to show the past ones rather than dropping them silently', () => {
@@ -158,7 +163,7 @@ describe('ApptsPage', () => {
       stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2020-01-01T09:00') })] } as Partial<Load>)])
     render(<ApptsPage />)
 
-    const toggle = screen.getByText('Show 1 past shipment')
+    const toggle = screen.getByText(/Show 1 past \/ cleared shipment/)
     fireEvent.click(toggle)
     expect(screen.getByText('OLD')).toBeTruthy()
   })
