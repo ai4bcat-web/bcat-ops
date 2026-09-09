@@ -21,6 +21,7 @@ vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({ drivers: [{ id: 'd1', name: 'Zak Pace' }] }),
 }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
+vi.mock('@/lib/rateconUpload', () => ({ uploadRateconAndApply: vi.fn().mockResolvedValue(true) }))
 const auditLog = vi.fn<() => AuditLogEntry[]>(() => [])
 vi.mock('@/hooks/useAuditLog', () => ({ useAuditLog: () => ({ entries: auditLog() }) }))
 // The drawer pulls in the whole load-editing tree; the queue is what's under test.
@@ -482,5 +483,21 @@ describe('Ruben clicks NEED RUBEN', () => {
     expect(del.apptStatus).toBe('need_request')
     expect(del.appt).toBe(fromDateTimeInput('2099-01-02T14:00'))
     expect(del.apptType).toBe('exact')
+  })
+})
+
+describe('non-Batory ratecon-only prompt', () => {
+  it('the chip asks for ONE document — the ratecon — never the Batory screenshots', () => {
+    loads.mockReturnValue([load({
+      aljexId: 'RCONLY', customer: 'Acme Freight',
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') })],
+    })])
+    render(<ApptsPage />)
+    const row = screen.getByText('RCONLY').closest('tr')!
+    fireEvent.click(within(row.children[1] as HTMLElement).getByText('RATECON NEEDED'))
+    fireEvent.click(screen.getByText('CONFIRMED'))
+    expect(screen.getByLabelText(/Upload the ratecon/)).toBeTruthy()
+    expect(screen.queryByText(/Request email/)).toBeNull()
+    expect(screen.queryByText(/E2Open/)).toBeNull()
   })
 })

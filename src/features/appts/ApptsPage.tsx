@@ -200,10 +200,22 @@ interface StatusChoice {
   missingSlots: ApptProofSlot[]
   /** This transition wants a date+time picked inline (Ruben's handoff, CHANGE NEEDED). */
   needsDateTime?: boolean
+  /** Non-Batory: the ONE required document — the ratecon (PDF or screenshot). */
+  rateconUpload?: boolean
 }
 
-function statusChoices(stop: Stop | undefined, actor: string | null | undefined, effective: EffectiveApptStatus | null): StatusChoice[] {
+function statusChoices(stop: Stop | undefined, actor: string | null | undefined, effective: EffectiveApptStatus | null, needsProofs = true): StatusChoice[] {
   if (!stop) return []
+
+  // Non-Batory shipments never see the Batory screenshot ladder. Their entire
+  // requirement is the ratecon: one upload, which also auto-fills the appt times.
+  if (!needsProofs) {
+    if (effective === 'ratecon_needed') {
+      return [{ target: 'confirmed', label: 'CONFIRMED', rateconUpload: true, missingSlots: [],
+        needs: 'Upload the ratecon (PDF or screenshot)' }]
+    }
+    return []
+  }
   const current = stop.apptStatus
   const choices: StatusChoice[] = []
   const isSetter = canSetChangeNeeded(actor)
@@ -278,6 +290,8 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
   // When the user clicks a status that needs screenshots, we flip into upload mode
   // for that target instead of applying immediately.
   const [pendingTarget, setPendingTarget] = useState<ApptWorkflowStatus | null>(null)
+  const [rateconMode, setRateconMode] = useState(false)
+  const rateconFileRef = useRef<HTMLInputElement>(null)
   const [uploadedChSlots, setUploadedChSlots] = useState<Set<string>>(new Set())
   const [uploadBusy, setUploadBusy] = useState(false)
   const uploadFileRef = useRef<HTMLInputElement>(null)
@@ -311,7 +325,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       ? `${label} · req ${fmtChi(stamped)}`
       : label
 
-  const choices = statusChoices(stop, actor, status)
+  const choices = statusChoices(stop, actor, status, requiresApptProofs(load.customer))
   const isToggleable = choices.length > 0
 
   const applyStatus = async (target: ApptWorkflowStatus, pickedDateTime?: string) => {
@@ -357,8 +371,22 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
     finally { setUploadBusy(false) }
   }
 
+  const handleRatecon = async (file: Blob | null | undefined) => {
+    if (!file || !load) return
+    if (!/^image\//.test(file.type) && file.type !== 'application/pdf') {
+      toast.error('Ratecon must be a PDF or an image'); return
+    }
+    setUploadBusy(true)
+    try {
+      const { uploadRateconAndApply } = await import('@/lib/rateconUpload')
+      const ok = await uploadRateconAndApply(load, file, updateLoad)
+      if (ok) { setToggling(false); setRateconMode(false) }
+    } finally { setUploadBusy(false) }
+  }
+
   /** Called when a status button is clicked — if screenshots are needed, show upload slots. */
   const handleStatusClick = (ch: typeof choices[number]) => {
+    if (ch.rateconUpload) { setRateconMode(true); return }
     if (ch.missingSlots.length > 0) {
       setPendingTarget(ch.target)
       setUploadedChSlots(new Set())
@@ -390,7 +418,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       <div style={{ marginBottom: 3, position: 'relative' }}>
         {isToggleable ? (
           <button
-            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : (status === 'need_book' && stop?.appt && apptHasTime(stop.appt)) ? formatDateTimeInput(stop.appt) : ''); setPendingTarget(null); setUploadedChSlots(new Set()) }}
+            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : (status === 'need_book' && stop?.appt && apptHasTime(stop.appt)) ? formatDateTimeInput(stop.appt) : ''); setPendingTarget(null); setRateconMode(false); setUploadedChSlots(new Set()) }}
             title="Toggle appointment status"
             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
           >
@@ -492,8 +520,38 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
               </div>
             )}
 
+            {/* Non-Batory: the single ratecon upload — PDF or screenshot */}
+            {rateconMode && (
+              <div
+                role="button" tabIndex={0}
+                aria-label="Upload the ratecon — click, then paste a screenshot, or browse for a PDF/image"
+                title="Click + paste a screenshot (⌘V), drop a file, or browse — PDF or image"
+                onPaste={(e) => { const f = Array.from(e.clipboardData.files)[0]; if (f) { e.preventDefault(); void handleRatecon(f) } }}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); void handleRatecon(e.dataTransfer.files[0]) }}
+                onClick={() => rateconFileRef.current?.click()}
+                style={{ border: '1px dashed var(--ds-border)', borderRadius: 8, minHeight: 56,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  padding: 8, background: 'var(--ds-surface)', cursor: 'pointer', flexDirection: 'column' }}
+              >
+                {uploadBusy ? (
+                  <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Uploading…</span>
+                ) : (
+                  <>
+                    <ImagePlus size={14} style={{ color: 'var(--ds-t3)' }} />
+                    <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', textAlign: 'center' }}>
+                      Upload the RATECON — the one document this shipment needs<br />
+                      <span style={{ color: 'var(--ds-blue)' }}>paste a screenshot, or browse PDF / JPG / PNG</span>
+                    </span>
+                  </>
+                )}
+                <input ref={rateconFileRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+                  onChange={(e) => { void handleRatecon(e.target.files?.[0]); e.target.value = '' }} />
+              </div>
+            )}
+
             {/* Status choice buttons (shown when not in upload mode) */}
-            {!pendingTarget && (
+            {!pendingTarget && !rateconMode && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               {choices.map((ch) => {
                 const isCurrent = stop?.apptStatus === ch.target
