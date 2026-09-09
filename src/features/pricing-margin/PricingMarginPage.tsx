@@ -27,9 +27,7 @@ const DEFAULT_CONFIG: MarginConfig = {
 }
 
 // WordPress page slug used to persist config
-const CONFIG_SLUG = 'bcat-pricing-margin-config'
-const WP_API = 'https://bestcareautotransport.com/wp-json/wp/v2'
-// WP creds are read from the same source as vehicle-quote
+// Reads/writes via PHP bridge at /wp-json/bcat-pricing/v1/margin
 const WP_USER = 'ai4bcat@gmail.com'
 const WP_PASS = '' // will be read from env at runtime
 void WP_PASS // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
@@ -68,36 +66,24 @@ export function PricingMarginPage() {
   void wpPassLoaded; void setWpPassLoaded // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
   const [exampleQuote, setExampleQuote] = useState<ExampleQuote | null>(null)
 
-  // Fetch current config from WordPress
+  // Fetch current config from the PHP bridge (returns clean JSON, no HTML entities)
   const fetchConfig = useCallback(async () => {
-    if (!wpPass) { setLoading(false); return }
     try {
-      const auth = btoa(`${WP_USER}:${wpPass}`)
-      // Try to read the config page
-      const res = await fetch(`${WP_API}/pages?slug=${CONFIG_SLUG}`, {
-        headers: { 'Authorization': `Basic ${auth}` },
-      })
+      // Read from the bridge endpoint — always public, always clean JSON
+      const res = await fetch('https://bestcareautotransport.com/wp-json/bcat-pricing/v1/margin')
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const pages = await res.json()
-      if (pages && pages.length > 0) {
-        const page = pages[0]
-        try {
-          const parsed = JSON.parse(page.content?.rendered?.replace(/<[^>]+>/g, '') || '{}')
-          setConfig({ ...DEFAULT_CONFIG, ...parsed, updatedAt: page.modified })
-        } catch {
-          // Content is not valid JSON — use defaults
-        }
-      }
+      const data = await res.json()
+      setConfig({ ...DEFAULT_CONFIG, ...data, updatedAt: data.updatedAt || new Date().toISOString() })
     } catch (err) {
-      console.warn('Could not fetch margin config from WordPress:', err)
+      console.warn('Could not fetch margin config:', err)
     } finally {
       setLoading(false)
     }
-  }, [wpPass])
+  }, [])  // no deps — runs once on mount
 
   useEffect(() => { fetchConfig() }, [fetchConfig])
 
-  // Persist config to WordPress (as a page with JSON content)
+  // Persist config via the PHP bridge (handles both option + page sync)
   const saveConfig = async () => {
     if (!wpPass) {
       toast.error('WP App Password required. Enter it below.')
@@ -106,50 +92,26 @@ export function PricingMarginPage() {
     setSaving(true)
     try {
       const auth = btoa(`${WP_USER}:${wpPass}`)
-      const payload = {
-        title: 'BCAT Pricing Margin Config',
-        content: JSON.stringify({
-          percent: config.percent,
-          flatAmount: config.flatAmount,
-          mode: config.mode,
-          updatedAt: new Date().toISOString(),
-        }, null, 2),
-        status: 'publish',
-        slug: CONFIG_SLUG,
-      }
-
-      // Check if existing page
-      const existing = await fetch(`${WP_API}/pages?slug=${CONFIG_SLUG}`, {
-        headers: { 'Authorization': `Basic ${auth}` },
+      const body = JSON.stringify({
+        percent: config.percent,
+        flatAmount: config.flatAmount,
+        mode: config.mode,
+        updatedAt: new Date().toISOString(),
       })
-      const existingPages = await existing.json()
 
-      let res: Response
-      if (existingPages && existingPages.length > 0) {
-        // Update
-        res = await fetch(`${WP_API}/pages/${existingPages[0].id}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ content: payload.content }),
-        })
-      } else {
-        // Create
-        res = await fetch(`${WP_API}/pages`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Basic ${auth}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        })
-      }
+      // POST to the bridge endpoint — it writes to WP option AND syncs to page
+      const res = await fetch('https://bestcareautotransport.com/wp-json/bcat-pricing/v1/margin', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${auth}`,
+          'Content-Type': 'application/json',
+        },
+        body,
+      })
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error((err as any).message || `HTTP ${res.status}`)
+        throw new Error((err as any).error || `HTTP ${res.status}`)
       }
 
       toast.success('Margin config saved to Best Care website')
