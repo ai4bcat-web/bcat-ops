@@ -62,10 +62,10 @@ export function PricingMarginPage() {
   })
   // Track whether the password was loaded from storage vs typed fresh
   const [wpPassLoaded, setWpPassLoaded] = useState<boolean>(() => {
-  void wpPassLoaded; void setWpPassLoaded // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
     try { return !!localStorage.getItem('bcat_wp_app_password') }
     catch { return false }
   })
+  void wpPassLoaded; void setWpPassLoaded // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
   const [exampleQuote, setExampleQuote] = useState<ExampleQuote | null>(null)
 
   // Fetch current config from WordPress
