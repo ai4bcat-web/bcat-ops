@@ -32,6 +32,7 @@ const WP_API = 'https://bestcareautotransport.com/wp-json/wp/v2'
 // WP creds are read from the same source as vehicle-quote
 const WP_USER = 'ai4bcat@gmail.com'
 const WP_PASS = '' // will be read from env at runtime
+void WP_PASS // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
 
 // ── Styles (consistent with the app's convention) ───────────────────────────
 const cardStyle: React.CSSProperties = {
