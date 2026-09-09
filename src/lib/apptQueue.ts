@@ -40,6 +40,8 @@ export interface ApptQueueRow {
   location: string
   /** The load's notes — same field the calendar shows. */
   notes: string
+  /** Manually cleared from the queue (per-day Clear, Ryne/Ruben only). */
+  cleared: boolean
   /** Delivery facility and/or city, joined for display. */
   deliveryLocation: string
   /** ISO date of the (unscheduled) pickup appointment — grouping key. */
@@ -159,6 +161,8 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       customer: load.customer ?? '',
       location: pickupStop ? [pickupStop.name, pickupStop.city].filter(Boolean).join(', ') : '',
       notes: load.notes ?? '',
+      cleared: [pickupStop, deliveryStop].filter(Boolean).every((s) => !!s!.apptCleared) &&
+               !!(pickupStop || deliveryStop),
       deliveryLocation: deliveryStop ? [deliveryStop.name, deliveryStop.city].filter(Boolean).join(', ') : '',
       appt: pickupStop?.appt ?? '',
       driverId: pickupStop?.driverId ?? null,
@@ -188,7 +192,7 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
 /** Only the shipments still waiting on at least one appointment — stale rows (every
  *  date > STALE_AFTER_DAYS past) are no longer considered open. */
 export const apptOutstanding = (loads: Load[]): ApptQueueRow[] =>
-  apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r))
+  apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r) && !r.cleared)
 
 /** Open shipment count, for the sidebar badge — settled AND stale shipments don't count. */
 export const apptQueueCount = (loads: Load[]): number => apptOutstanding(loads).length
@@ -244,7 +248,7 @@ export function isStaleRow(r: ApptQueueRow, todayIso: string = new Date().toISOS
  */
 export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
   const isPastRow = (r: ApptQueueRow) =>
-    (isPastAppt(r.appt, todayIso) && !rowOutstanding(r)) || isStaleRow(r, todayIso)
+    r.cleared || (isPastAppt(r.appt, todayIso) && !rowOutstanding(r)) || isStaleRow(r, todayIso)
   return {
     current: rows.filter((r) => !isPastRow(r)),
     past: rows.filter(isPastRow),

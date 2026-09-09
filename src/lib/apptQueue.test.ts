@@ -467,3 +467,27 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
     expect(acmeRc[0].pickupStatus).toBe('confirmed')
   })
 })
+
+describe('manual per-day clear', () => {
+  it('a cleared row leaves the working view and stops counting as open, whatever its dates', () => {
+    const cleared = load({ id: 'cl', stops: [
+      stop({ apptType: 'tbd', appt: fromDateInput('2099-08-20'), apptCleared: true }),
+      stop({ id: 'd', type: 'delivery', apptType: 'tbd', appt: fromDateInput('2099-08-21'), apptCleared: true }),
+    ] })
+    const rows = apptQueue([cleared])
+    expect(rows[0].cleared).toBe(true)
+    const { current, past } = splitPastAppts(rows)
+    expect(current).toEqual([])
+    expect(past.map((r) => r.loadId)).toEqual(['cl'])
+    expect(apptQueueCount([cleared])).toBe(0)
+  })
+
+  it('one uncleared end keeps the row live', () => {
+    const rows = apptQueue([load({ id: 'half', stops: [
+      stop({ apptType: 'tbd', appt: fromDateInput('2099-08-20'), apptCleared: true }),
+      stop({ id: 'd', type: 'delivery', apptType: 'tbd', appt: fromDateInput('2099-08-21') }),
+    ] })])
+    expect(rows[0].cleared).toBe(false)
+    expect(splitPastAppts(rows).current).toHaveLength(1)
+  })
+})

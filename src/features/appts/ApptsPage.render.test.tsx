@@ -506,3 +506,17 @@ describe('non-Batory ratecon-only prompt', () => {
     expect(screen.queryByText(/E2Open/)).toBeNull()
   })
 })
+
+describe('per-day Clear (Ryne/Ruben only)', () => {
+  it('Ryne sees the Clear day button and clearing writes apptCleared to every stop', async () => {
+    // store mock signs in as ryne@bcatcorp.com — a permitted clearer.
+    loads.mockReturnValue([pair({ id: 'cd1', aljexId: 'CLEARME' })])
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<ApptsPage />)
+    fireEvent.click(screen.getByText('Clear day'))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const [, patch] = updateLoad.mock.calls[0]
+    expect(patch.stops.every((s: { apptCleared?: boolean }) => s.apptCleared === true)).toBe(true)
+    confirmSpy.mockRestore()
+  })
+})

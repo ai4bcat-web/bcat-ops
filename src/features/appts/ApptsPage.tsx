@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
-import { HelpCircle, Truck, Search, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera, X, ImagePlus } from 'lucide-react'
+import { HelpCircle, Truck, Search, Trash2, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera, X, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
@@ -665,6 +665,23 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
   onExport: () => void
 }) {
   const driverName = (id: string | null) => (id ? drivers.find((d) => d.id === id)?.name ?? '—' : '—')
+  const actor = useAppStore((s) => s.currentUserEmail)
+  const canClear = canSetChangeNeeded(actor)
+  const [clearing, setClearing] = useState(false)
+  const clearDay = async () => {
+    if (!window.confirm(`Clear all ${rows.length} shipment${rows.length === 1 ? '' : 's'} in "${title}" from the queue?\n\nThey move under the past/cleared toggle (recoverable) and stop counting as open.`)) return
+    setClearing(true)
+    try {
+      for (const r of rows) {
+        const rec = loadsById.get(r.loadId)
+        if (!rec) continue
+        const stops = getStops(rec).map((s) => ({ ...s, apptCleared: true }))
+        await updateLoad(rec.id, { stops })
+      }
+      toast.success(`Cleared ${rows.length} shipment${rows.length === 1 ? '' : 's'} from "${title}"`)
+    } catch (e) { toast.error(`Clear failed: ${e instanceof Error ? e.message : 'unknown error'}`) }
+    finally { setClearing(false) }
+  }
   const needCount = rows.filter((r) => r.pickupKind === 'need' || r.deliveryKind === 'need').length
   const openCount = rows.filter(rowOutstanding).length
   const bookedCount = rows.length - openCount
@@ -695,6 +712,19 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
           </div>
           <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>{hint}</div>
         </div>
+        {canClear && rows.length > 0 && (
+          <button
+            onClick={clearDay}
+            disabled={clearing}
+            title="Clear this whole day from the queue — Ryne/Ruben only. Rows move under the past/cleared toggle."
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
+              padding: '5px 10px', borderRadius: 7, border: '1px solid #fca5a5',
+              background: 'var(--ds-surface)', color: '#dc2626', fontSize: 12, cursor: 'pointer',
+              fontFamily: 'inherit', opacity: clearing ? 0.6 : 1 }}
+          >
+            <Trash2 size={12} /> {clearing ? 'Clearing…' : 'Clear day'}
+          </button>
+        )}
         <button
           onClick={onExport}
           title="Download this day as CSV"
