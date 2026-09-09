@@ -211,11 +211,18 @@ export function isPastAppt(appt: string, todayIso: string = new Date().toISOStri
   return day < today
 }
 
-/** Split the queue into what can still be actioned and what has already gone by. */
+/**
+ * Split the queue into what can still be actioned and what has already gone by.
+ *
+ * A row with ANY outstanding end is NEVER past, whatever its pickup date: a load picked
+ * up last week whose delivery is still NEED must stay on the working list — hiding it
+ * behind the past-shipments toggle is exactly how Pro# 14267's open delivery got missed.
+ */
 export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
+  const isPastRow = (r: ApptQueueRow) => isPastAppt(r.appt, todayIso) && !rowOutstanding(r)
   return {
-    current: rows.filter((r) => !isPastAppt(r.appt, todayIso)),
-    past: rows.filter((r) => isPastAppt(r.appt, todayIso)),
+    current: rows.filter((r) => !isPastRow(r)),
+    past: rows.filter(isPastRow),
   }
 }
 

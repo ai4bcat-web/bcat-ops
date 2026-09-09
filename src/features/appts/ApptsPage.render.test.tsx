@@ -140,21 +140,26 @@ describe('ApptsPage', () => {
     expect(row.getAttribute('data-outstanding')).toBe('true')
   })
 
-  it('hides an appointment whose date has already gone by', () => {
-    // Hundreds of historical loads would otherwise bury the stops still worth calling about.
-    loads.mockReturnValue([load({ aljexId: 'OLD', stops: [stop({ appt: fromDateInput('2020-01-01') })] })])
+  it('hides a SETTLED shipment whose date has gone by — but never open work', () => {
+    loads.mockReturnValue([
+      load({ id: 'p1', aljexId: 'OLDDONE', rateConfirmKey: 'rc',
+        stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2020-01-01T09:00') })] } as Partial<Load>),
+      load({ id: 'p2', aljexId: 'OLDOPEN', stops: [stop({ appt: fromDateInput('2020-01-01') })] }),
+    ])
     render(<ApptsPage />)
-    expect(screen.queryByText('OLD')).toBeNull()
+    expect(screen.queryByText('OLDDONE')).toBeNull()
+    // Outstanding (no ratecon → not confirmed): stays visible however old the date is.
+    expect(screen.getByText('OLDOPEN')).toBeTruthy()
   })
 
   it('offers to show the past ones rather than dropping them silently', () => {
-    loads.mockReturnValue([load({ aljexId: 'OLD', stops: [stop({ appt: fromDateInput('2020-01-01') })] })])
+    loads.mockReturnValue([load({ aljexId: 'OLD', rateConfirmKey: 'rc',
+      stops: [stop({ apptType: 'exact', appt: fromDateTimeInput('2020-01-01T09:00') })] } as Partial<Load>)])
     render(<ApptsPage />)
 
     const toggle = screen.getByText('Show 1 past shipment')
     fireEvent.click(toggle)
     expect(screen.getByText('OLD')).toBeTruthy()
-    expect(screen.getByText(/d overdue/)).toBeTruthy()
   })
 
   it('sorts a column on click and reverses it on a second click', () => {

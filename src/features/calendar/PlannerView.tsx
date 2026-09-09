@@ -497,7 +497,9 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         selected && 'ring-1 ring-inset ring-violet-400',
       )}
       style={{
-        height: ROW_H,
+        // minHeight, not height: the appt cells stack date + time + status chip, and a
+        // clipped row was unreadable. Rows now grow to whatever their content needs.
+        minHeight: ROW_H,
         background: load.readyToInvoice
           ? (dragOver ? '#16a34a' : '#22c55e')
           : dragOver    ? hexBg(highlightHex ?? '#94a3b8', 0.30)

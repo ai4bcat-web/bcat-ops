@@ -218,12 +218,25 @@ describe('isPastAppt / splitPastAppts', () => {
     expect(isPastAppt('', TODAY)).toBe(false)
   })
 
-  it('splits the queue without losing rows', () => {
+  it('an OUTSTANDING row is never past — open work stays on the working list', () => {
+    // The Pro# 14267 case: pickup date long gone, delivery still NEED.
     const rows = apptQueue([
-      load({ id: 'old', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-08-10') })] }),
-      load({ id: 'now', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-08-17') })] }),
-      load({ id: 'fut', stops: [stop({ apptType: 'tbd', appt: fromDateInput('2026-09-01') })] }),
+      load({ id: 'open-old', customer: 'Batory Foods', stops: [
+        stop({ apptType: 'exact', appt: fromDateTimeInput('2026-08-10T09:00'), apptStatus: 'confirmed' }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2026-08-20') }),
+      ] }),
     ])
+    const { current, past } = splitPastAppts(rows, TODAY)
+    expect(current.map((r) => r.loadId)).toEqual(['open-old'])
+    expect(past).toEqual([])
+  })
+
+  it('splits settled rows by pickup date without losing any', () => {
+    const settled = (id: string, day: string) => load({ id, rateConfirmKey: 'rc', stops: [
+      stop({ id: `${id}p`, apptType: 'exact', appt: fromDateTimeInput(`${day}T09:00`) }),
+      stop({ id: `${id}d`, type: 'delivery', sequence: 1, apptType: 'exact', appt: fromDateTimeInput(`${day}T15:00`) }),
+    ] } as Parameters<typeof load>[0])
+    const rows = apptQueue([settled('old', '2026-08-10'), settled('now', '2026-08-17'), settled('fut', '2026-09-01')])
     const { current, past } = splitPastAppts(rows, TODAY)
     expect(current.map((r) => r.loadId).sort()).toEqual(['fut', 'now'])
     expect(past.map((r) => r.loadId)).toEqual(['old'])
