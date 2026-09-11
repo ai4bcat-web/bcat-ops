@@ -9,8 +9,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useCarrierCampaigns, useCarrierContacts } from '@/hooks/useCarrierBlast'
 import { carrierBlast } from '@/lib/apiClient'
 import { useAuth } from '@/hooks/useAuth'
+import type { CarrierCapacity } from '@/lib/apiClient'
 import type { CarrierLane, CarrierCampaign } from '@/types'
 import { LANE_LABEL } from '@/types'
+
+/**
+ * Mailboxes that may never send carrier mail, mirroring SENDER_DENYLIST in
+ * amplify/functions/carrier-blast-api/handler.ts. The cowtown domains belong to a separate
+ * freight brand in the same Instantly workspace and are off-limits for BCAT sending.
+ */
+const DENIED_SENDER = /cowtown|haulcowtown|sidekickmlo/i
 
 interface InstantlyAccount {
   email: string
@@ -40,7 +48,7 @@ const FALLBACK_DEFAULT_PER_MAILBOX = 12
 const FALLBACK_RESERVE_PER_MAILBOX = 25
 const FALLBACK_MAX_PER_MAILBOX = 15
 
-export function CampaignsTab() {
+export function CampaignsTab({ capacity }: { capacity?: CarrierCapacity | null }) {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { items: campaigns, loading, addCampaign, runAction } = useCarrierCampaigns()
@@ -101,6 +109,7 @@ export function CampaignsTab() {
           defaultPerMailbox={defaultPerMailbox}
           reservePerMailbox={reservePerMailbox}
           maxPerMailbox={maxPerMailbox}
+          capacity={capacity}
           onSave={async (draft) => {
             const created = await addCampaign({ ...draft, createdBy: user?.email ?? null })
             setCreating(false)
@@ -309,6 +318,7 @@ function CampaignComposer({
   defaultPerMailbox,
   reservePerMailbox,
   maxPerMailbox,
+  capacity,
   onSave,
   onCancel,
   onLaunch,
@@ -319,6 +329,7 @@ function CampaignComposer({
   defaultPerMailbox: number
   reservePerMailbox: number
   maxPerMailbox: number
+  capacity?: CarrierCapacity | null
   onSave: (draft: Omit<CarrierCampaign, 'id' | 'createdAt' | 'updatedAt'>) => Promise<CarrierCampaign>
   onCancel: () => void
   onLaunch: (campaign: CarrierCampaign) => Promise<void>
@@ -333,14 +344,20 @@ function CampaignComposer({
   const [saving, setSaving] = useState(false)
   const [confirmLaunch, setConfirmLaunch] = useState<CarrierCampaign | null>(null)
 
-  const okAccounts = accounts.filter((a) => a.ok)
+  // Mirrors the server-side denylist in carrier-blast-api. The backend is the real gate
+  // (it re-checks on launch), but these must never even be offered in the picker.
+  const okAccounts = accounts.filter((a) => a.ok && !DENIED_SENDER.test(a.email))
   const activeCount = activeCounts[lane]
   const effectivePerMailbox = selectedAccounts.length > 0
     ? Math.min(Math.max(perMailboxLimit ?? defaultPerMailbox, 1), maxPerMailbox)
     : 0
   const totalDailyCap = effectivePerMailbox * selectedAccounts.length
   const days = totalDailyCap > 0 ? Math.ceil(activeCount / totalDailyCap) : null
-  const canLaunch = okAccounts.length > 0 && selectedAccounts.length > 0 && totalDailyCap > 0
+  const todayCap = capacity
+    ? Math.min(totalDailyCap, capacity.availableToday, activeCount)
+    : Math.min(totalDailyCap, activeCount)
+  const capacityLeft = !capacity || capacity.availableToday > 0
+  const canLaunch = okAccounts.length > 0 && selectedAccounts.length > 0 && totalDailyCap > 0 && capacityLeft
 
   const toggleAccount = (email: string) => {
     setSelectedAccounts((prev) => prev.includes(email) ? prev.filter((e) => e !== email) : [...prev, email])
@@ -478,6 +495,11 @@ function CampaignComposer({
           {selectedAccounts.length === 0 || totalDailyCap === 0
             ? 'Select accounts to see capacity'
             : `${selectedAccounts.length} mailbox${selectedAccounts.length === 1 ? '' : 'es'} × ${effectivePerMailbox}/day = ${totalDailyCap}/day${days != null ? ` → ~${days} day${days === 1 ? '' : 's'} for ${activeCount} contacts` : ''}`}
+          {selectedAccounts.length > 0 && totalDailyCap > 0 && days != null && (
+            <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ds-t2)' }}>
+              Today: {todayCap} of {activeCount} will send; full list takes ~{days} day{days === 1 ? '' : 's'}
+            </div>
+          )}
         </div>
       </div>
 
@@ -487,10 +509,12 @@ function CampaignComposer({
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         {!canLaunch && (
-          <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-            {okAccounts.length === 0
-              ? 'No warmed jobsdone mailboxes are available.'
-              : 'Select at least one mailbox to launch.'}
+          <span style={{ fontSize: 12, color: capacity && capacity.availableToday <= 0 ? 'var(--ds-amber)' : 'var(--ds-t3)' }}>
+            {capacity && capacity.availableToday <= 0
+              ? "No capacity left today — JobsDone OS reserve is holding the remainder. Save as draft and launch tomorrow."
+              : okAccounts.length === 0
+                ? 'No warmed jobsdone mailboxes are available.'
+                : 'Select at least one mailbox to launch.'}
           </span>
         )}
         <div style={{ display: 'flex', gap: 10 }}>
@@ -502,31 +526,41 @@ function CampaignComposer({
         </div>
       </div>
 
-      {confirmLaunch && (
-        <Dialog open onOpenChange={(open) => { if (!open) setConfirmLaunch(null) }}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Launch campaign?</DialogTitle>
-              <DialogDescription>
-                This will push {confirmLaunch.leadCount} active {LANE_LABEL[confirmLaunch.lane]} contacts to Instantly
-                from {confirmLaunch.senderAccounts.length} mailbox{confirmLaunch.senderAccounts.length === 1 ? '' : 'es'}.
-                {days != null && ` Estimated ~${days} day${days === 1 ? '' : 's'} to reach all contacts.`}
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmLaunch(null)}>Cancel</Button>
-              <Button
-                onClick={() => {
-                  void onLaunch(confirmLaunch)
-                  setConfirmLaunch(null)
-                }}
-              >
-                <Play size={14} /> Launch
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+      {confirmLaunch && (() => {
+        const confirmDaily = (confirmLaunch.dailyLimit ?? 0) * confirmLaunch.senderAccounts.length
+        const confirmDays = confirmDaily > 0 ? Math.ceil(confirmLaunch.leadCount / confirmDaily) : null
+        const confirmTodayCap = capacity
+          ? Math.min(confirmDaily, capacity.availableToday, confirmLaunch.leadCount)
+          : Math.min(confirmDaily, confirmLaunch.leadCount)
+        const canConfirmLaunch = confirmTodayCap > 0
+        return (
+          <Dialog open onOpenChange={(open) => { if (!open) setConfirmLaunch(null) }}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Launch campaign?</DialogTitle>
+                <DialogDescription>
+                  This will push {confirmLaunch.leadCount} active {LANE_LABEL[confirmLaunch.lane]} contacts to Instantly
+                  from {confirmLaunch.senderAccounts.length} mailbox{confirmLaunch.senderAccounts.length === 1 ? '' : 'es'}.
+                  Today: {confirmTodayCap} will send; the remaining {confirmLaunch.leadCount - confirmTodayCap} will queue for following days.
+                  {confirmDays != null && ` Estimated ~${confirmDays} day${confirmDays === 1 ? '' : 's'} to reach all contacts.`}
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConfirmLaunch(null)}>Cancel</Button>
+                <Button
+                  disabled={!canConfirmLaunch}
+                  onClick={() => {
+                    void onLaunch(confirmLaunch)
+                    setConfirmLaunch(null)
+                  }}
+                >
+                  <Play size={14} /> Launch
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )
+      })()}
     </div>
   )
 }

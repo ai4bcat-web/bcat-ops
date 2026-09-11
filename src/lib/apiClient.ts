@@ -2444,6 +2444,7 @@ export async function deleteCarrierReply(id: string): Promise<void> {
 
 export type CarrierBlastAction =
   | 'listAccounts'
+  | 'capacity'
   | 'launchCampaign'
   | 'pauseCampaign'
   | 'resumeCampaign'
@@ -2451,6 +2452,32 @@ export type CarrierBlastAction =
   | 'syncReplies'
   | 'sendReply'
   | 'ensureWebhook'
+
+export interface CarrierCapacityMailbox {
+  email: string
+  dailyLimit: number
+  sentToday: number
+  reserved: number
+  available: number
+}
+
+export interface CarrierCapacity {
+  ok: boolean
+  asOf: string
+  date: string
+  mailboxes: number
+  perMailboxLimit: number
+  sentToday: number
+  reservedForJobsDone: number
+  availableToday: number
+  perMailbox: CarrierCapacityMailbox[]
+  jobsDone: {
+    reachable: boolean
+    sharedClientsActive: number
+    source: 'jobsdone-os' | 'static-fallback'
+    note?: string
+  }
+}
 
 export interface CarrierBlastResult {
   ok: boolean

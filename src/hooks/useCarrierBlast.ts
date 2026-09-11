@@ -12,6 +12,7 @@ import {
   batchCreateCarrierContacts,
 } from '@/lib/apiClient'
 import type { CarrierContact, CarrierCampaign, CarrierReply, CarrierLane } from '@/types'
+import type { CarrierCapacity } from '@/lib/apiClient'
 
 const POLL_MS = 30_000
 
@@ -210,4 +211,55 @@ export function useCarrierReplies(filter?: CarrierReplyFilter) {
   }, [])
 
   return { items, loading, refresh: load, setStatus, setAssignedTo, sendReply }
+}
+
+// ── Live capacity ─────────────────────────────────────────────────────────────
+
+const CAPACITY_NORMAL_MS = 60_000
+const CAPACITY_ERROR_MS = 5 * 60_000
+
+export interface UseCarrierCapacityResult {
+  capacity: CarrierCapacity | null
+  loading: boolean
+  error: Error | null
+  refresh: () => void
+}
+
+export function useCarrierCapacity(): UseCarrierCapacityResult {
+  const [capacity, setCapacity] = useState<CarrierCapacity | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<Error | null>(null)
+  const [intervalMs, setIntervalMs] = useState(CAPACITY_NORMAL_MS)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await carrierBlast('capacity')
+      if (!res.ok) throw new Error(res.error ?? 'capacity failed')
+      setCapacity(res as unknown as CarrierCapacity)
+      setError(null)
+      setIntervalMs(CAPACITY_NORMAL_MS)
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+      setIntervalMs(CAPACITY_ERROR_MS)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    const id = setInterval(() => load(), intervalMs)
+    return () => clearInterval(id)
+  }, [load, intervalMs])
+
+  const refresh = useCallback(() => {
+    setIntervalMs(CAPACITY_NORMAL_MS)
+    load()
+  }, [load])
+
+  return { capacity, loading, error, refresh }
 }

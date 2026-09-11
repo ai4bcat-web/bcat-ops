@@ -29,9 +29,11 @@ import {
   replyToEmail,
   listWebhooks,
   createWebhook,
+  accountDailySends,
   type InstantlyAccount,
   type InstantlyEmail,
 } from './instantly'
+import { fetchJobsDoneClients } from './jobsdone'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const lambda = new LambdaClient({})
@@ -148,6 +150,22 @@ export function daysToReach(activeCount: number, dailyCapacity: number): number 
  * reserve 25/day/mailbox for the engine and let carrier blasts use only what is left.
  */
 export const SENDER_ALLOWLIST = /jobsdone/i
+/**
+ * Hard denylist — these mailboxes may NEVER send a carrier blast, under any setting.
+ *
+ * The cowtown domains are a separate freight brand in the same Instantly workspace and
+ * several are already in an error state (status -3). sidekickmlo is unrelated. This is a
+ * belt-and-braces check: the allowlist above would already exclude them, but the denylist
+ * means loosening the allowlist later still cannot leak sends onto these domains. Checked
+ * at every send path — mailbox selection, campaign launch, and replying to a carrier.
+ */
+export const SENDER_DENYLIST = /cowtown|haulcowtown|sidekickmlo/i
+
+/** True when this mailbox is permitted to send carrier mail at all. */
+export function senderAllowed(email: string): boolean {
+  return SENDER_ALLOWLIST.test(email) && !SENDER_DENYLIST.test(email)
+}
+
 /** Per-mailbox sends/day held back for the JobsDone OS engine. Never encroach on this. */
 export const JOBSDONE_RESERVE_PER_MAILBOX = 25
 /** Default carrier-blast sends/day/mailbox — conservative, well under the leftover. */
@@ -159,9 +177,9 @@ export function maxPerMailbox(account: Pick<InstantlyAccount, 'daily_limit'>): n
 }
 
 export function accountIsOk(account: InstantlyAccount): boolean {
-  // Only jobsdone mailboxes; warmed, no errors, warmup score >= 90, and enough daily
-  // allowance left over after the JobsDone OS reserve to send anything at all.
-  return SENDER_ALLOWLIST.test(account.email)
+  // Permitted domain; warmed, no errors, warmup score >= 90, and enough daily allowance
+  // left over after the JobsDone OS reserve to send anything at all.
+  return senderAllowed(account.email)
     && account.status === 1
     && account.warmup_status === 1
     && account.setup_pending === false
@@ -178,6 +196,82 @@ export function normalizeAccount(account: InstantlyAccount) {
     warmupScore: account.stat_warmup_score ?? 0,
     provider: account.provider_code,
     ok: accountIsOk(account),
+  }
+}
+
+export type CapacityInputAccount = {
+  email: string
+  dailyLimit: number
+}
+
+export type CapacityOptions = {
+  accounts: CapacityInputAccount[]
+  sentToday: Record<string, number>
+  reservePerMailbox: number
+  sharedClientsActive: number
+  jobsDoneReachable: boolean
+  claimedMailboxes: string[]
+}
+
+export type CapacityResult = {
+  mailboxes: number
+  perMailboxLimit: number
+  sentToday: number
+  reservedForJobsDone: number
+  availableToday: number
+  perMailbox: Array<{
+    email: string
+    dailyLimit: number
+    sentToday: number
+    reserved: number
+    available: number
+  }>
+}
+
+/**
+ * Pure capacity arithmetic shared by the capacity action and the launch path.
+ *
+ * Reserve is held when:
+ *   - JobsDone OS is unreachable (fail-safe), OR
+ *   - at least one ACTIVE SHARED JobsDone client exists, OR
+ *   - the mailbox is claimed by any client via non-empty instantlyMailboxes.
+ */
+export function computeCapacity(options: CapacityOptions): CapacityResult {
+  const {
+    accounts,
+    sentToday,
+    reservePerMailbox,
+    sharedClientsActive,
+    jobsDoneReachable,
+    claimedMailboxes,
+  } = options
+  const claimed = new Set(claimedMailboxes.map((e) => e.toLowerCase()))
+
+  const perMailbox = accounts.map((a) => {
+    const email = a.email.toLowerCase()
+    const dailyLimit = a.dailyLimit
+    const sent = sentToday[email] ?? 0
+    const reserve =
+      !jobsDoneReachable || sharedClientsActive > 0 || claimed.has(email)
+        ? reservePerMailbox
+        : 0
+    const available = Math.max(0, dailyLimit - sent - reserve)
+    return { email, dailyLimit, sentToday: sent, reserved: reserve, available }
+  })
+
+  const sentTotal = perMailbox.reduce((sum, m) => sum + m.sentToday, 0)
+  const reservedTotal = perMailbox.reduce((sum, m) => sum + m.reserved, 0)
+  const availableToday = perMailbox.reduce((sum, m) => sum + m.available, 0)
+  const perMailboxLimit =
+    accounts.length > 0 ? Math.max(0, ...accounts.map((a) => a.dailyLimit)) : 0
+
+  return {
+    mailboxes: accounts.length,
+    perMailboxLimit,
+    sentToday: sentTotal,
+    reservedForJobsDone: reservedTotal,
+    availableToday,
+    perMailbox,
   }
 }
 
@@ -366,6 +460,104 @@ async function listAccountsAction() {
 }
 
 /**
+ * Live, shared-mailbox-aware capacity for today.
+ *
+ * Reads JobsDone OS client state and Instantly's per-account daily analytics to compute
+ * exactly how many more carrier-blast emails may be sent today without starving the
+ * JobsDone engine. If either upstream call fails we fall back to the static reserve and
+ * say so in the returned metadata — we never return "unlimited" and we never throw.
+ */
+async function getLiveCapacity(
+  accounts?: InstantlyAccount[],
+): Promise<
+  CapacityResult & {
+    date: string
+    jobsDoneReachable: boolean
+    sharedClientsActive: number
+    source: 'jobsdone-os' | 'static-fallback'
+    note?: string
+  }
+> {
+  const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+  const resolvedAccounts = accounts ?? (await listAccounts())
+  const allowedAccounts = resolvedAccounts
+    .filter(accountIsOk)
+    .map((a) => ({ email: a.email, dailyLimit: a.daily_limit ?? 0 }))
+
+  const jobsDone = await fetchJobsDoneClients()
+  const sharedClientsActive = jobsDone.reachable
+    ? jobsDone.clients.filter((c) => c.status === 'ACTIVE' && c.instantlyMode === 'SHARED').length
+    : 0
+
+  const claimedMailboxes = jobsDone.reachable
+    ? jobsDone.clients.flatMap((c) => c.instantlyMailboxes ?? [])
+    : []
+
+  let sentToday: Record<string, number> = {}
+  let analyticsFailed = false
+  let source: 'jobsdone-os' | 'static-fallback' = 'jobsdone-os'
+  const notes: string[] = []
+
+  if (!jobsDone.reachable) {
+    source = 'static-fallback'
+    notes.push('JobsDone OS unreachable; holding full reserve as a fail-safe.')
+  }
+
+  try {
+    sentToday = await accountDailySends(allowedAccounts.map((a) => a.email), date)
+  } catch (err) {
+    analyticsFailed = true
+    source = 'static-fallback'
+    notes.push(
+      `Instantly analytics failed; falling back to static reserve. ${err instanceof Error ? err.message : String(err)}`,
+    )
+    console.error('[carrier-blast-api] getLiveCapacity analytics failed', err)
+  }
+
+  const capacity = computeCapacity({
+    accounts: allowedAccounts,
+    sentToday,
+    reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+    sharedClientsActive,
+    // Hold the reserve when JobsDone is unreachable OR when live analytics failed.
+    jobsDoneReachable: jobsDone.reachable && !analyticsFailed,
+    claimedMailboxes,
+  })
+
+  return {
+    ...capacity,
+    date,
+    jobsDoneReachable: jobsDone.reachable,
+    sharedClientsActive,
+    source,
+    note: notes.length > 0 ? notes.join(' ') : undefined,
+  }
+}
+
+async function capacityAction() {
+  const asOf = new Date().toISOString()
+  const live = await getLiveCapacity()
+
+  return {
+    ok: true,
+    asOf,
+    date: live.date,
+    mailboxes: live.mailboxes,
+    perMailboxLimit: live.perMailboxLimit,
+    sentToday: live.sentToday,
+    reservedForJobsDone: live.reservedForJobsDone,
+    availableToday: live.availableToday,
+    perMailbox: live.perMailbox,
+    jobsDone: {
+      reachable: live.jobsDoneReachable,
+      sharedClientsActive: live.sharedClientsActive,
+      source: live.source,
+      note: live.note,
+    },
+  }
+}
+
+/**
  * Launch = validate + mark `pushing` + hand off to `runLaunch` asynchronously.
  *
  * A 3,000-lead push (create + bulk adds + activate + contact stamps) runs well past the
@@ -420,6 +612,9 @@ async function runLaunchAction(payload: { campaignId: string }) {
       const byEmail = new Map(accounts.map((a) => [a.email.toLowerCase(), a]))
       const requested = campaign.senderAccounts.map((e) => e.toLowerCase())
       const senders = requested.filter((e) => {
+        // senderAllowed is checked independently of the account lookup: a mailbox that is
+        // denied, or that is not in the workspace listing at all, can never be used.
+        if (!senderAllowed(e)) return false
         const a = byEmail.get(e)
         return !!a && accountIsOk(a)
       })
@@ -435,6 +630,20 @@ async function runLaunchAction(payload: { campaignId: string }) {
         ...senders.map((e) => maxPerMailbox(byEmail.get(e)!)),
       ))
       const campaignDailyLimit = perMailbox * senders.length
+
+      // Live shared-mailbox capacity: never let a carrier blast starve the JobsDone OS
+      // engine. If today has no remaining capacity, fail fast instead of creating a
+      // no-op campaign.
+      const liveCapacity = await getLiveCapacity(accounts)
+      const availableToday = liveCapacity.availableToday
+      const effectiveDailyLimit = Math.max(0, Math.min(campaignDailyLimit, availableToday))
+
+      if (availableToday <= 0) {
+        const error = `No carrier-blast capacity left today (${liveCapacity.date}): JobsDone OS reserve and live sends have consumed the shared mailbox allowance.`
+        await updateCampaign(campaignId, { status: 'failed', errorText: error })
+        return { ok: false, error }
+      }
+
       // Persist what is ACTUALLY in force so the UI's days-to-complete math is honest.
       await updateCampaign(campaignId, {
         senderAccounts: senders,
@@ -446,7 +655,8 @@ async function runLaunchAction(payload: { campaignId: string }) {
       const created = await createCampaign({
         name: campaign.name,
         email_list: senders,
-        daily_limit: campaignDailyLimit,
+        daily_limit: effectiveDailyLimit,
+        daily_max_leads: effectiveDailyLimit,
         // Spread each mailbox's sends across the working day instead of bursting.
         email_gap: 5,
         random_wait_max: 5,
@@ -633,6 +843,11 @@ async function sendReplyAction(payload: { replyId: string; bodyText: string }) {
 
   const reply = await getReply(replyId)
   if (!reply) return { ok: false, error: 'reply not found' }
+  // A reply goes out from the mailbox that received it, so the same sender policy applies.
+  // Without this, a stray reply row could push mail out through a cowtown mailbox.
+  if (!senderAllowed(reply.toAccount)) {
+    return { ok: false, error: `mailbox ${reply.toAccount} is not permitted to send carrier mail` }
+  }
 
   await replyToEmail({
     eaccount: reply.toAccount,
@@ -706,6 +921,8 @@ export const handler = async (event: AppSyncEvent | CronEvent | Record<string, u
     switch (action) {
       case 'listAccounts':
         return await listAccountsAction()
+      case 'capacity':
+        return await capacityAction()
       case 'launchCampaign':
         return await launchCampaignAction(payload as { campaignId: string })
       case 'runLaunch':

@@ -621,6 +621,14 @@ backend.carrierBlastApi.resources.lambda.addToRolePolicy(
     resources: carrierBlastTableArns,
   })
 )
+// JobsDone OS AppSync: read the shared/dedicated client list to know whether to hold
+// the per-mailbox reserve. The ARN is a literal, so addToRolePolicy is safe here.
+carrierBlastApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['appsync:GraphQL'],
+    resources: ['arn:aws:appsync:us-east-1:273354631837:apis/ftqnqtz2jzdljhuj6t5x4wz6pa/*'],
+  })
+)
 backend.carrierBlastWebhook.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan', 'dynamodb:Query'],
@@ -631,6 +639,10 @@ backend.carrierBlastWebhook.resources.lambda.addToRolePolicy(
 carrierBlastApiFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
 carrierBlastApiFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)
 carrierBlastApiFn.addEnvironment('REPLY_TABLE',    carrierReplyTable.tableName)
+carrierBlastApiFn.addEnvironment(
+  'JOBSDONE_GRAPHQL_URL',
+  'https://pxudbnlkffhsjivz6vsnx2per4.appsync-api.us-east-1.amazonaws.com/graphql',
+)
 
 carrierBlastWebhookFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
 carrierBlastWebhookFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)

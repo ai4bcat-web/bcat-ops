@@ -302,3 +302,64 @@ export async function createWebhook(
     body: JSON.stringify(body),
   })
 }
+
+export type InstantlyDailyAnalytics = {
+  date: string
+  email_account: string
+  sent: number
+  bounced?: number
+  contacted?: number
+  replies?: number
+  unsubscribed?: number
+  [key: string]: unknown
+}
+
+const ANALYTICS_CHUNK_SIZE = 15
+
+/**
+ * Live per-mailbox send count for a single calendar day.
+ *
+ * The Instantly analytics endpoint 413s when too many emails are requested at once,
+ * so we chunk the mailbox list and merge the results. A single chunk failure is logged
+ * and those mailboxes are treated as unknown; if every chunk fails we throw so the
+ * caller can fall back to the static reserve.
+ */
+export async function accountDailySends(
+  emails: string[],
+  date: string,
+): Promise<Record<string, number>> {
+  const result: Record<string, number> = {}
+  if (emails.length === 0) return result
+
+  const chunks: string[][] = []
+  for (let i = 0; i < emails.length; i += ANALYTICS_CHUNK_SIZE) {
+    chunks.push(emails.slice(i, i + ANALYTICS_CHUNK_SIZE))
+  }
+
+  let failures = 0
+  for (const chunk of chunks) {
+    // Build the emails value ourselves: each address is URL-encoded, then joined with a
+    // literal comma. Using buildQuery would encode the comma separators a second time.
+    const emailsParam = chunk.map(encodeURIComponent).join(',')
+    const query = `?start_date=${encodeURIComponent(date)}&end_date=${encodeURIComponent(date)}&emails=${emailsParam}`
+    try {
+      const rows = await instantlyFetch<InstantlyDailyAnalytics[]>(
+        `/api/v2/accounts/analytics/daily${query}`,
+      )
+      for (const row of rows) {
+        const email = row.email_account.toLowerCase()
+        result[email] = (result[email] ?? 0) + (row.sent ?? 0)
+      }
+    } catch (err) {
+      failures++
+      console.error('[instantly] accountDailySends chunk failed', { date, chunk, err })
+    }
+  }
+
+  if (failures === chunks.length && chunks.length > 0) {
+    throw new Error(`accountDailySends failed for all ${chunks.length} chunk(s) on ${date}`)
+  }
+
+  return result
+}
+

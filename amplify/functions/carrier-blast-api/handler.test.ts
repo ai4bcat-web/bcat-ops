@@ -1,17 +1,25 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { instantlyFetch, paginateItems, chunkLeads } from './instantly'
+import {
+  instantlyFetch,
+  paginateItems,
+  chunkLeads,
+  accountDailySends,
+  type InstantlyAccount,
+} from './instantly'
 import {
   makeReplyId,
   textToHtml,
   daysToReach,
   accountIsOk,
+  senderAllowed,
   maxPerMailbox,
   JOBSDONE_RESERVE_PER_MAILBOX,
   DEFAULT_PER_MAILBOX_PER_DAY,
   normalizeAccount,
   emailToReply,
+  computeCapacity,
+  type CapacityInputAccount,
 } from './handler'
-import { type InstantlyAccount } from './instantly'
 import { headerValue } from '../carrier-blast-webhook/handler'
 
 beforeEach(() => {
@@ -110,6 +118,60 @@ describe('emailToReply', () => {
     expect(reply.isAutoReply).toBe(true)
     expect(reply.status).toBe('open')
     expect(reply.receivedAt).toBe('2026-09-11T10:00:00.000Z')
+  })
+})
+
+describe('senderAllowed', () => {
+  it('permits warmed jobsdone sending domains', () => {
+    expect(senderAllowed('rynebandolik@gojobsdone.com')).toBe(true)
+    expect(senderAllowed('ryneb@jobsdonelabs.com')).toBe(true)
+  })
+
+  it('NEVER permits a cowtown mailbox — every real cowtown address in the workspace', () => {
+    for (const email of [
+      'aidensmith@cowtownshipments.com',
+      'aidensmith@haulcowtown.com',
+      'aidensmith@cowtownfreight.com',
+      'aidensmith@cowtowntrucking.com',
+      'aidensmith@cowtowntruck.com',
+      'aidensmith@cowtownorders.com',
+      'aidensmith@cowtownflatbed.com',
+      'aidensmith@cowtownlgx.com',
+      'aidensmith@cowtownfr8.com',
+      'aidensmith@cowtowncarrier.com',
+      'aiden@cowtownlgx.com',
+      'aiden@cowtowntruck.com',
+      'aiden@cowtownfreight.com',
+      'aiden@cowtowncarrier.com',
+      'aiden@cowtownflatbed.com',
+      'aiden@cowtownshipments.com',
+      'aiden@cowtowntrucking.com',
+      'aiden@cowtownorders.com',
+      'aiden@cowtownfr8.com',
+      'aiden@haulcowtown.com',
+    ]) {
+      expect(senderAllowed(email), email).toBe(false)
+    }
+  })
+
+  it('never permits sidekickmlo or any other unrelated mailbox', () => {
+    expect(senderAllowed('charles@sidekickmlo.com')).toBe(false)
+    expect(senderAllowed('dennis@bcatcorp.com')).toBe(false)
+  })
+
+  it('denies cowtown even if the address also contains jobsdone', () => {
+    // The denylist must win over the allowlist, so loosening the allowlist can never leak.
+    expect(senderAllowed('jobsdone@cowtownfreight.com')).toBe(false)
+    expect(senderAllowed('COWTOWN@GOJOBSDONE.COM')).toBe(false)
+  })
+
+  it('keeps a denied mailbox unusable even when it is otherwise perfectly healthy', () => {
+    // A cowtown account with status 1, warmup on, score 100 and headroom still cannot send.
+    expect(accountIsOk({
+      email: 'aiden@cowtowntrucking.com',
+      status: 1, warmup_status: 1, daily_limit: 40,
+      stat_warmup_score: 100, provider_code: 2, setup_pending: false,
+    })).toBe(false)
   })
 })
 
@@ -286,5 +348,177 @@ describe('paginateItems', () => {
     const items = await paginateItems<{ email: string }>('/api/v2/accounts', { limit: 100 })
     expect(items).toEqual([{ email: 'a@b.com' }, { email: 'c@d.com' }])
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ── Live daily-send analytics chunking ──────────────────────────────────────
+
+describe('accountDailySends', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('chunks >15 emails into multiple Instantly analytics fetches and merges sent counts', async () => {
+    const emails = Array.from({ length: 18 }, (_, i) => `mbox${i}@gojobsdone.com`)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: async () => '',
+        json: async () =>
+          emails.slice(0, 15).map((email, i) => ({
+            date: '2026-09-11',
+            email_account: email,
+            sent: i + 1,
+          })),
+      } as Response)
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: async () => '',
+        json: async () =>
+          emails.slice(15).map((email, i) => ({
+            date: '2026-09-11',
+            email_account: email,
+            sent: (i + 1) * 10,
+          })),
+      } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await accountDailySends(emails, '2026-09-11')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const urls = fetchMock.mock.calls.map((c) => c[0] as string)
+    expect(urls[0]).toContain('mbox0%40gojobsdone.com')
+    expect(urls[1]).toContain('mbox15%40gojobsdone.com')
+    expect(result['mbox0@gojobsdone.com']).toBe(1)
+    expect(result['mbox15@gojobsdone.com']).toBe(10)
+    expect(result['mbox16@gojobsdone.com']).toBe(20)
+    expect(result['mbox17@gojobsdone.com']).toBe(30)
+    expect(Object.keys(result)).toHaveLength(18)
+  })
+
+  it('throws when every chunk fails so the caller can fall back', async () => {
+    const emails = Array.from({ length: 18 }, (_, i) => `mbox${i}@gojobsdone.com`)
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 500,
+      ok: false,
+      text: async () => 'server error',
+    } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const promise = accountDailySends(emails, '2026-09-11')
+    promise.catch(() => {})
+    await vi.runAllTimersAsync()
+    await expect(promise).rejects.toThrow('all')
+  })
+})
+
+// ── Live capacity arithmetic ────────────────────────────────────────────────
+
+describe('computeCapacity', () => {
+  const accounts: CapacityInputAccount[] = [
+    { email: 'a@gojobsdone.com', dailyLimit: 40 },
+    { email: 'b@gojobsdone.com', dailyLimit: 40 },
+  ]
+
+  it('applies the JobsDone reserve when a shared client is active', () => {
+    const result = computeCapacity({
+      accounts,
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+    })
+    expect(result.mailboxes).toBe(2)
+    expect(result.reservedForJobsDone).toBe(JOBSDONE_RESERVE_PER_MAILBOX * 2)
+    expect(result.availableToday).toBe((40 - JOBSDONE_RESERVE_PER_MAILBOX) * 2)
+  })
+
+  it('applies the reserve as a fail-safe when JobsDone OS is unreachable', () => {
+    const result = computeCapacity({
+      accounts,
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 0,
+      jobsDoneReachable: false,
+      claimedMailboxes: [],
+    })
+    expect(result.reservedForJobsDone).toBe(JOBSDONE_RESERVE_PER_MAILBOX * 2)
+    expect(result.availableToday).toBe((40 - JOBSDONE_RESERVE_PER_MAILBOX) * 2)
+  })
+
+  it('drops the reserve to 0 when reachable and no shared clients are active', () => {
+    const result = computeCapacity({
+      accounts,
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 0,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+    })
+    expect(result.reservedForJobsDone).toBe(0)
+    expect(result.availableToday).toBe(80)
+  })
+
+  it('never returns negative availability for a mailbox already at or over its limit', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: { 'a@gojobsdone.com': 40 },
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+    })
+    expect(result.perMailbox[0].available).toBe(0)
+    expect(result.availableToday).toBe(0)
+
+    const over = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: { 'a@gojobsdone.com': 50 },
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+    })
+    expect(over.perMailbox[0].available).toBe(0)
+    expect(over.availableToday).toBe(0)
+  })
+
+  it('computes partially-consumed mailbox availability', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: { 'a@gojobsdone.com': 4 },
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+    })
+    expect(result.availableToday).toBe(40 - 4 - JOBSDONE_RESERVE_PER_MAILBOX)
+    expect(result.perMailbox[0]).toEqual({
+      email: 'a@gojobsdone.com',
+      dailyLimit: 40,
+      sentToday: 4,
+      reserved: JOBSDONE_RESERVE_PER_MAILBOX,
+      available: 40 - 4 - JOBSDONE_RESERVE_PER_MAILBOX,
+    })
+  })
+
+  it('reserves a claimed mailbox even when the client is in DEDICATED mode', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'dedicated@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 0,
+      jobsDoneReachable: true,
+      claimedMailboxes: ['dedicated@gojobsdone.com'],
+    })
+    expect(result.reservedForJobsDone).toBe(JOBSDONE_RESERVE_PER_MAILBOX)
+    expect(result.availableToday).toBe(40 - JOBSDONE_RESERVE_PER_MAILBOX)
   })
 })
