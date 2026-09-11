@@ -130,22 +130,32 @@ function parseCsv(text: string, delimiter: string): string[][] {
 const NO_EMAIL_COLUMN_ERROR =
   'No recognizable email column. Add a header such as "Email" or "Email Address", or provide a single-column list of emails.'
 
-/** Map a sheet of raw cell strings onto contact rows. Shared by CSV and Excel. */
+/** How many leading rows may be title/banner noise above the header row. */
+const MAX_BANNER_ROWS = 5
+
+/**
+ * Map a sheet of raw cell strings onto contact rows. Shared by CSV and Excel.
+ *
+ * The header row is located by scanning the first few rows, so exports that
+ * carry a title or summary banner above the header still import.
+ */
 function rowsToCarrierRows(rows: string[][]): CsvRow[] {
   if (rows.length === 0) return []
 
-  const firstRow = rows[0].map((c) => c.trim())
-  const emailIdx = findColumnIndex(firstRow, EMAIL_HEADERS)
+  const trimmed = rows.map((row) => row.map((c) => c.trim()))
+  const headerIdx = trimmed
+    .slice(0, MAX_BANNER_ROWS)
+    .findIndex((row) => findColumnIndex(row, EMAIL_HEADERS) >= 0)
 
   let headers: string[]
   let dataRows: string[][]
 
-  if (emailIdx >= 0) {
-    headers = firstRow
-    dataRows = rows.slice(1)
-  } else if (firstRow.length === 1 && isValidEmail(firstRow[0])) {
+  if (headerIdx >= 0) {
+    headers = trimmed[headerIdx]
+    dataRows = trimmed.slice(headerIdx + 1)
+  } else if (trimmed[0].length === 1 && isValidEmail(trimmed[0][0])) {
     headers = ['email']
-    dataRows = rows
+    dataRows = trimmed
   } else {
     throw new Error(NO_EMAIL_COLUMN_ERROR)
   }

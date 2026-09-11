@@ -134,6 +134,16 @@ b@x.com,Bolt`
     const csv = 'Email,Company\na@x.com,"Acme\nb@x.com,Bolt'
     expect(() => parseCarrierCsv(csv)).toThrow(/quote/i)
   })
+
+  it('finds the header row under a title banner above it', () => {
+    const csv = 'Carrier Outreach Export\n\nEmail,Company\na@x.com,Acme'
+    expect(parseCarrierCsv(csv)).toEqual([{ email: 'a@x.com', company: 'Acme' }])
+  })
+
+  it('still rejects a file whose header row is buried too deep to trust', () => {
+    const banner = Array.from({ length: 6 }, (_, i) => `Report line ${i}`).join('\n')
+    expect(() => parseCarrierCsv(`${banner}\nEmail,Company\na@x.com,Acme`)).toThrow(/no recognizable email column/i)
+  })
 })
 
 describe('parseCarrierPaste', () => {
