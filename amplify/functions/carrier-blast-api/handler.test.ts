@@ -4,6 +4,7 @@ import {
   paginateItems,
   chunkLeads,
   accountDailySends,
+  accountDailySendsRange,
   type InstantlyAccount,
 } from './instantly'
 import {
@@ -13,8 +14,10 @@ import {
   accountIsOk,
   senderAllowed,
   maxPerMailbox,
-  JOBSDONE_RESERVE_PER_MAILBOX,
+  JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+  JOBSDONE_PEAK_WINDOW_DAYS,
   DEFAULT_PER_MAILBOX_PER_DAY,
+  jobsDonePeakReserve,
   normalizeAccount,
   emailToReply,
   computeCapacity,
@@ -213,14 +216,14 @@ describe('accountIsOk', () => {
 
   it('rejects a mailbox whose whole allowance is inside the JobsDone OS reserve', () => {
     // 25/day is reserved for the engine, so a 25/day mailbox has nothing to spare.
-    expect(accountIsOk({ ...okAccount, daily_limit: JOBSDONE_RESERVE_PER_MAILBOX })).toBe(false)
-    expect(accountIsOk({ ...okAccount, daily_limit: JOBSDONE_RESERVE_PER_MAILBOX + 1 })).toBe(true)
+    expect(accountIsOk({ ...okAccount, daily_limit: JOBSDONE_MIN_RESERVE_PER_MAILBOX })).toBe(false)
+    expect(accountIsOk({ ...okAccount, daily_limit: JOBSDONE_MIN_RESERVE_PER_MAILBOX + 1 })).toBe(true)
   })
 })
 
 describe('maxPerMailbox', () => {
   it('leaves the JobsDone OS reserve untouched', () => {
-    expect(maxPerMailbox({ daily_limit: 40 })).toBe(40 - JOBSDONE_RESERVE_PER_MAILBOX)
+    expect(maxPerMailbox({ daily_limit: 40 })).toBe(40 - JOBSDONE_MIN_RESERVE_PER_MAILBOX)
     expect(maxPerMailbox({ daily_limit: 10 })).toBe(0)
     expect(maxPerMailbox({ daily_limit: null })).toBe(0)
   })
@@ -418,6 +421,111 @@ describe('accountDailySends', () => {
   })
 })
 
+// ── Peak-demand reserve helper ──────────────────────────────────────────────
+
+describe('jobsDonePeakReserve', () => {
+  it('uses the observed peak when it is above the floor and below the daily limit', () => {
+    expect(jobsDonePeakReserve({
+      history: { '2026-09-10': 27, '2026-09-09': 4 },
+      dailyLimit: 40,
+      minReserve: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+    })).toBe(27)
+  })
+
+  it('falls back to the floor when the observed peak is lower', () => {
+    expect(jobsDonePeakReserve({
+      history: { '2026-09-10': 8 },
+      dailyLimit: 40,
+      minReserve: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+    })).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+  })
+
+  it('never reserves more than the mailbox daily limit', () => {
+    expect(jobsDonePeakReserve({
+      history: { '2026-09-10': 45 },
+      dailyLimit: 40,
+      minReserve: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+    })).toBe(40)
+  })
+
+  it('uses the floor when history is empty', () => {
+    expect(jobsDonePeakReserve({
+      history: {},
+      dailyLimit: 40,
+      minReserve: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+    })).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+  })
+
+  it('excludes today from the peak calculation', () => {
+    expect(jobsDonePeakReserve({
+      history: { '2026-09-11': 35, '2026-09-10': 27 },
+      dailyLimit: 40,
+      minReserve: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      today: '2026-09-11',
+    })).toBe(27)
+  })
+})
+
+// ── Range daily-send analytics chunking ─────────────────────────────────────
+
+describe('accountDailySendsRange', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('chunks >15 emails and returns a nested date map', async () => {
+    const emails = Array.from({ length: 18 }, (_, i) => `mbox${i}@gojobsdone.com`)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: async () => '',
+        json: async () =>
+          emails.slice(0, 15).map((email) => ({
+            date: '2026-09-10',
+            email_account: email,
+            sent: 2,
+          })),
+      } as Response)
+      .mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        text: async () => '',
+        json: async () =>
+          emails.slice(15).map((email) => ({
+            date: '2026-09-09',
+            email_account: email,
+            sent: 3,
+          })),
+      } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await accountDailySendsRange(emails, '2026-09-09', '2026-09-10')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result['mbox0@gojobsdone.com']).toEqual({ '2026-09-10': 2 })
+    expect(result['mbox15@gojobsdone.com']).toEqual({ '2026-09-09': 3 })
+  })
+
+  it('throws when every chunk fails', async () => {
+    const emails = Array.from({ length: 18 }, (_, i) => `mbox${i}@gojobsdone.com`)
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 500,
+      ok: false,
+      text: async () => 'server error',
+    } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const promise = accountDailySendsRange(emails, '2026-09-09', '2026-09-10')
+    promise.catch(() => {})
+    await vi.runAllTimersAsync()
+    await expect(promise).rejects.toThrow('all')
+  })
+})
+
 // ── Live capacity arithmetic ────────────────────────────────────────────────
 
 describe('computeCapacity', () => {
@@ -430,34 +538,34 @@ describe('computeCapacity', () => {
     const result = computeCapacity({
       accounts,
       sentToday: {},
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 1,
       jobsDoneReachable: true,
       claimedMailboxes: [],
     })
     expect(result.mailboxes).toBe(2)
-    expect(result.reservedForJobsDone).toBe(JOBSDONE_RESERVE_PER_MAILBOX * 2)
-    expect(result.availableToday).toBe((40 - JOBSDONE_RESERVE_PER_MAILBOX) * 2)
+    expect(result.reservedForJobsDone).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX * 2)
+    expect(result.availableToday).toBe((40 - JOBSDONE_MIN_RESERVE_PER_MAILBOX) * 2)
   })
 
   it('applies the reserve as a fail-safe when JobsDone OS is unreachable', () => {
     const result = computeCapacity({
       accounts,
       sentToday: {},
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 0,
       jobsDoneReachable: false,
       claimedMailboxes: [],
     })
-    expect(result.reservedForJobsDone).toBe(JOBSDONE_RESERVE_PER_MAILBOX * 2)
-    expect(result.availableToday).toBe((40 - JOBSDONE_RESERVE_PER_MAILBOX) * 2)
+    expect(result.reservedForJobsDone).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX * 2)
+    expect(result.availableToday).toBe((40 - JOBSDONE_MIN_RESERVE_PER_MAILBOX) * 2)
   })
 
   it('drops the reserve to 0 when reachable and no shared clients are active', () => {
     const result = computeCapacity({
       accounts,
       sentToday: {},
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 0,
       jobsDoneReachable: true,
       claimedMailboxes: [],
@@ -470,7 +578,7 @@ describe('computeCapacity', () => {
     const result = computeCapacity({
       accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
       sentToday: { 'a@gojobsdone.com': 40 },
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 1,
       jobsDoneReachable: true,
       claimedMailboxes: [],
@@ -481,7 +589,7 @@ describe('computeCapacity', () => {
     const over = computeCapacity({
       accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
       sentToday: { 'a@gojobsdone.com': 50 },
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 1,
       jobsDoneReachable: true,
       claimedMailboxes: [],
@@ -494,31 +602,164 @@ describe('computeCapacity', () => {
     const result = computeCapacity({
       accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
       sentToday: { 'a@gojobsdone.com': 4 },
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 1,
       jobsDoneReachable: true,
       claimedMailboxes: [],
     })
-    expect(result.availableToday).toBe(40 - 4 - JOBSDONE_RESERVE_PER_MAILBOX)
+    expect(result.availableToday).toBe(40 - 4 - JOBSDONE_MIN_RESERVE_PER_MAILBOX)
     expect(result.perMailbox[0]).toEqual({
       email: 'a@gojobsdone.com',
       dailyLimit: 40,
       sentToday: 4,
-      reserved: JOBSDONE_RESERVE_PER_MAILBOX,
-      available: 40 - 4 - JOBSDONE_RESERVE_PER_MAILBOX,
+      reserved: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      available: 40 - 4 - JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      peakObserved: 0,
     })
+    expect(result.reserveBasis).toBe('static-floor')
+    expect(result.windowDays).toBe(JOBSDONE_PEAK_WINDOW_DAYS)
   })
 
   it('reserves a claimed mailbox even when the client is in DEDICATED mode', () => {
     const result = computeCapacity({
       accounts: [{ email: 'dedicated@gojobsdone.com', dailyLimit: 40 }],
       sentToday: {},
-      reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
       sharedClientsActive: 0,
       jobsDoneReachable: true,
       claimedMailboxes: ['dedicated@gojobsdone.com'],
     })
-    expect(result.reservedForJobsDone).toBe(JOBSDONE_RESERVE_PER_MAILBOX)
-    expect(result.availableToday).toBe(40 - JOBSDONE_RESERVE_PER_MAILBOX)
+    expect(result.reservedForJobsDone).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+    expect(result.availableToday).toBe(40 - JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+  })
+
+  it('uses measured peak reserve when history is provided', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: { 'a@gojobsdone.com': 4 },
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+      history: { 'a@gojobsdone.com': { '2026-09-10': 27, '2026-09-09': 8 } },
+      today: '2026-09-11',
+    })
+    expect(result.perMailbox[0].reserved).toBe(27)
+    expect(result.perMailbox[0].peakObserved).toBe(27)
+    expect(result.availableToday).toBe(40 - 4 - 27)
+    expect(result.reserveBasis).toBe('measured-peak')
+    expect(result.peakPerMailbox).toBe(27)
+  })
+
+  it('falls back to the floor when the measured peak is below it', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+      history: { 'a@gojobsdone.com': { '2026-09-10': 8 } },
+      today: '2026-09-11',
+    })
+    expect(result.perMailbox[0].reserved).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+    expect(result.perMailbox[0].peakObserved).toBe(8)
+    expect(result.reserveBasis).toBe('measured-peak')
+  })
+
+  it('caps the reserve at the mailbox daily limit and never goes negative', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+      history: { 'a@gojobsdone.com': { '2026-09-10': 45 } },
+      today: '2026-09-11',
+    })
+    expect(result.perMailbox[0].reserved).toBe(40)
+    expect(result.perMailbox[0].available).toBe(0)
+    expect(result.availableToday).toBe(0)
+  })
+
+  it('uses the static floor when history is empty', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: {},
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+      history: {},
+      today: '2026-09-11',
+    })
+    expect(result.perMailbox[0].reserved).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+    expect(result.reserveBasis).toBe('static-floor')
+  })
+
+  it('excludes today from the measured peak', () => {
+    const result = computeCapacity({
+      accounts: [{ email: 'a@gojobsdone.com', dailyLimit: 40 }],
+      sentToday: { 'a@gojobsdone.com': 30 },
+      reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
+      sharedClientsActive: 1,
+      jobsDoneReachable: true,
+      claimedMailboxes: [],
+      history: { 'a@gojobsdone.com': { '2026-09-11': 35, '2026-09-10': 12 } },
+      today: '2026-09-11',
+    })
+    expect(result.perMailbox[0].peakObserved).toBe(12)
+    expect(result.perMailbox[0].reserved).toBe(JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+  })
+})
+
+describe('capacity is scoped to the selected mailboxes', () => {
+  // Regression: capacity was measured over the whole 61-mailbox pool while the campaign
+  // only sent from the selected mailboxes, so a 2-mailbox selection could borrow the
+  // other 59 mailboxes' headroom and overdraw the two it actually used.
+  const mk = (email: string) => ({ email, dailyLimit: 40, ok: true })
+  const pool = [mk('a@gojobsdone.com'), mk('b@gojobsdone.com'), mk('c@gojobsdone.com'), mk('d@gojobsdone.com')]
+  const sentToday = {
+    'a@gojobsdone.com': 4, 'b@gojobsdone.com': 4,
+    'c@gojobsdone.com': 0, 'd@gojobsdone.com': 0,
+  }
+  const opts = { sentToday, reservePerMailbox: 25, sharedClientsActive: 1, jobsDoneReachable: true, claimedMailboxes: [] }
+
+  it('reports only the selected mailboxes headroom, not the pool total', () => {
+    const selected = pool.slice(0, 2)
+    const scoped = computeCapacity({ ...opts, accounts: selected })
+    // each selected mailbox: 40 - 4 sent - 25 reserved = 11  ->  22 total
+    expect(scoped.availableToday).toBe(22)
+
+    const poolWide = computeCapacity({ ...opts, accounts: pool })
+    expect(poolWide.availableToday).toBe(52)
+    expect(scoped.availableToday).toBeLessThan(poolWide.availableToday)
+  })
+
+  it('binds the campaign limit so two mailboxes cannot send the pool-wide figure', () => {
+    const selected = pool.slice(0, 2)
+    const scoped = computeCapacity({ ...opts, accounts: selected })
+    const perMailbox = 15
+    const requested = perMailbox * selected.length // 30
+    // The cap must bite: 22 available, not the 30 the selection would otherwise allow.
+    expect(Math.min(requested, scoped.availableToday)).toBe(22)
+  })
+
+  it('measures peak reserve only over the selected mailboxes', () => {
+    const history = {
+      'a@gojobsdone.com': { '2026-09-10': 30 },
+      'b@gojobsdone.com': { '2026-09-10': 30 },
+      'c@gojobsdone.com': { '2026-09-10': 30 },
+      'd@gojobsdone.com': { '2026-09-10': 30 },
+    }
+    const selected = pool.slice(0, 2)
+    const scoped = computeCapacity({ ...opts, accounts: selected, history, today: '2026-09-11' })
+    expect(scoped.reservedForJobsDone).toBe(30 * 2)
+    expect(scoped.peakPerMailbox).toBe(30)
+
+    const poolWide = computeCapacity({ ...opts, accounts: pool, history, today: '2026-09-11' })
+    expect(poolWide.reservedForJobsDone).toBe(30 * 4)
+    expect(scoped.reservedForJobsDone).toBeLessThan(poolWide.reservedForJobsDone)
   })
 })

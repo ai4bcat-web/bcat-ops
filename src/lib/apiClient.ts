@@ -2459,6 +2459,7 @@ export interface CarrierCapacityMailbox {
   sentToday: number
   reserved: number
   available: number
+  peakObserved: number
 }
 
 export interface CarrierCapacity {
@@ -2471,6 +2472,9 @@ export interface CarrierCapacity {
   reservedForJobsDone: number
   availableToday: number
   perMailbox: CarrierCapacityMailbox[]
+  reserveBasis: 'measured-peak' | 'static-floor'
+  peakPerMailbox: number
+  windowDays: number
   jobsDone: {
     reachable: boolean
     sharedClientsActive: number

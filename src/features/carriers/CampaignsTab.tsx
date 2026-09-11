@@ -504,7 +504,9 @@ function CampaignComposer({
       </div>
 
       <div style={{ fontSize: 12, color: 'var(--ds-t3)', background: 'var(--ds-amber-bg)', borderRadius: 8, padding: '10px 12px' }}>
-        {reservePerMailbox}/day per mailbox stays reserved for JobsDone OS outbound. Carrier sending only uses the remainder, so the JobsDone engine is unaffected.
+        {capacity && capacity.reserveBasis === 'measured-peak'
+          ? `${capacity.peakPerMailbox}/day per mailbox is reserved for JobsDone OS (priority) based on the last ${capacity.windowDays} days. Carrier sending only uses the remainder.`
+          : `${reservePerMailbox}/day per mailbox stays reserved for JobsDone OS (priority). Carrier sending only uses the remainder, so the JobsDone engine is unaffected.`}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

@@ -363,3 +363,55 @@ export async function accountDailySends(
   return result
 }
 
+/**
+ * Live per-mailbox send counts across a date range.
+ *
+ * Returns a nested map: `{ [emailLower]: { [date]: sent } }`. Like `accountDailySends`,
+ * the analytics endpoint 413s when too many emails are requested, so we chunk the
+ * mailbox list and merge the results. A single chunk failure is logged and those
+ * mailboxes are treated as unknown; if every chunk fails we throw so the caller can
+ * fall back to the static reserve.
+ */
+export async function accountDailySendsRange(
+  emails: string[],
+  startDate: string,
+  endDate: string,
+): Promise<Record<string, Record<string, number>>> {
+  const result: Record<string, Record<string, number>> = {}
+  if (emails.length === 0) return result
+
+  const chunks: string[][] = []
+  for (let i = 0; i < emails.length; i += ANALYTICS_CHUNK_SIZE) {
+    chunks.push(emails.slice(i, i + ANALYTICS_CHUNK_SIZE))
+  }
+
+  let failures = 0
+  for (const chunk of chunks) {
+    const emailsParam = chunk.map(encodeURIComponent).join(',')
+    const query = `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}&emails=${emailsParam}`
+    try {
+      const rows = await instantlyFetch<InstantlyDailyAnalytics[]>(
+        `/api/v2/accounts/analytics/daily${query}`,
+      )
+      for (const row of rows) {
+        const email = row.email_account.toLowerCase()
+        const date = row.date
+        if (!date) continue
+        const bucket = (result[email] ??= {})
+        bucket[date] = (bucket[date] ?? 0) + (row.sent ?? 0)
+      }
+    } catch (err) {
+      failures++
+      console.error('[instantly] accountDailySendsRange chunk failed', { startDate, endDate, chunk, err })
+    }
+  }
+
+  if (failures === chunks.length && chunks.length > 0) {
+    throw new Error(
+      `accountDailySendsRange failed for all ${chunks.length} chunk(s) from ${startDate} to ${endDate}`,
+    )
+  }
+
+  return result
+}
+

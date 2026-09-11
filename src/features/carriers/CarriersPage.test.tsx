@@ -81,6 +81,9 @@ const defaultCapacityResponse = {
   reservedForJobsDone: 0,
   availableToday: 2440,
   perMailbox: [],
+  reserveBasis: 'static-floor',
+  peakPerMailbox: 0,
+  windowDays: 14,
   jobsDone: { reachable: true, sharedClientsActive: 0, source: 'jobsdone-os' },
 }
 
@@ -115,6 +118,9 @@ describe('CarriersPage', () => {
           reservedForJobsDone: 1525,
           availableToday: 291,
           perMailbox: [],
+          reserveBasis: 'measured-peak',
+          peakPerMailbox: 25,
+          windowDays: 14,
           jobsDone: { reachable: true, sharedClientsActive: 3, source: 'jobsdone-os' },
         })
       }
@@ -124,8 +130,9 @@ describe('CarriersPage', () => {
 
     const banner = await screen.findByTestId('capacity-banner')
     expect(banner.textContent).toContain('291 emails available to send today')
-    expect(banner.textContent).toContain('61 mailboxes × 40/day - 244 already sent today - 1525 reserved for JobsDone OS')
+    expect(banner.textContent).toContain('61 mailboxes × 40/day − 244 sent today − 1525 reserved for JobsDone OS (priority)')
     expect(banner.textContent).toContain('JobsDone OS: 3 active shared clients')
+    expect(banner.textContent).toContain('Reserve tracks JobsDone\'s busiest day in the last 14 days (25/mailbox)')
   })
 
   it('shows fallback note when JobsDone OS is unreachable', async () => {
@@ -141,6 +148,9 @@ describe('CarriersPage', () => {
           reservedForJobsDone: 1525,
           availableToday: 291,
           perMailbox: [],
+          reserveBasis: 'static-floor',
+          peakPerMailbox: 0,
+          windowDays: 14,
           jobsDone: { reachable: false, sharedClientsActive: 0, source: 'static-fallback', note: 'timeout' },
         })
       }
@@ -150,6 +160,7 @@ describe('CarriersPage', () => {
 
     const banner = await screen.findByTestId('capacity-banner')
     expect(banner.textContent).toContain("Couldn't reach JobsDone OS - holding the full reserve to be safe.")
+    expect(banner.textContent).toContain('Using the fallback floor reserve while JobsDone history is unavailable.')
   })
 })
 
@@ -326,6 +337,9 @@ describe('CampaignsTab', () => {
       reservedForJobsDone: 0,
       availableToday: 0,
       perMailbox: [],
+      reserveBasis: 'measured-peak',
+      peakPerMailbox: 25,
+      windowDays: 14,
       jobsDone: { reachable: true, sharedClientsActive: 3, source: 'jobsdone-os' },
     }
     carrierBlast.mockImplementation((action: string) => {
@@ -391,6 +405,9 @@ describe('CampaignsTab', () => {
       reservedForJobsDone: 0,
       availableToday: 11,
       perMailbox: [],
+      reserveBasis: 'measured-peak',
+      peakPerMailbox: 25,
+      windowDays: 14,
       jobsDone: { reachable: true, sharedClientsActive: 3, source: 'jobsdone-os' },
     }
     carrierBlast.mockImplementation((action: string) => {

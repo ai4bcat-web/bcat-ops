@@ -140,8 +140,18 @@ function CapacityBanner({
             {capacity.availableToday} emails available to send today
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', marginTop: 4 }}>
-            {capacity.mailboxes} mailboxes × {capacity.perMailboxLimit}/day - {capacity.sentToday} already sent today - {capacity.reservedForJobsDone} reserved for JobsDone OS
+            {capacity.mailboxes} mailboxes × {capacity.perMailboxLimit}/day − {capacity.sentToday} sent today − {capacity.reservedForJobsDone} reserved for JobsDone OS (priority)
           </div>
+          {capacity.reserveBasis === 'measured-peak' && (
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 4 }}>
+              Reserve tracks JobsDone's busiest day in the last {capacity.windowDays} days ({capacity.peakPerMailbox}/mailbox), so it rises automatically if JobsDone ramps up.
+            </div>
+          )}
+          {capacity.reserveBasis === 'static-floor' && (
+            <div style={{ fontSize: 12, color: 'var(--ds-amber)', marginTop: 4 }}>
+              Using the fallback floor reserve while JobsDone history is unavailable.
+            </div>
+          )}
           {isDepleted && (
             <div style={{ fontSize: 12, color: 'var(--ds-red)', fontWeight: 600, marginTop: 6 }}>
               Today's capacity is used up; sending resumes tomorrow.

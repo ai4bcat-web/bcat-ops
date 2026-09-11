@@ -30,6 +30,7 @@ import {
   listWebhooks,
   createWebhook,
   accountDailySends,
+  accountDailySendsRange,
   type InstantlyAccount,
   type InstantlyEmail,
 } from './instantly'
@@ -166,14 +167,47 @@ export function senderAllowed(email: string): boolean {
   return SENDER_ALLOWLIST.test(email) && !SENDER_DENYLIST.test(email)
 }
 
-/** Per-mailbox sends/day held back for the JobsDone OS engine. Never encroach on this. */
-export const JOBSDONE_RESERVE_PER_MAILBOX = 25
+/**
+ * Minimum per-mailbox sends/day held back for the JobsDone OS engine.
+ * This is the floor when live demand history is missing or unavailable.
+ * Never encroach on this.
+ */
+export const JOBSDONE_MIN_RESERVE_PER_MAILBOX = 25
+/** Number of full days before today used to measure JobsDone peak demand. */
+export const JOBSDONE_PEAK_WINDOW_DAYS = 14
 /** Default carrier-blast sends/day/mailbox — conservative, well under the leftover. */
 export const DEFAULT_PER_MAILBOX_PER_DAY = 12
 
 /** The most a carrier blast may take from one mailbox without touching the reserve. */
 export function maxPerMailbox(account: Pick<InstantlyAccount, 'daily_limit'>): number {
-  return Math.max(0, (account.daily_limit ?? 0) - JOBSDONE_RESERVE_PER_MAILBOX)
+  return Math.max(0, (account.daily_limit ?? 0) - JOBSDONE_MIN_RESERVE_PER_MAILBOX)
+}
+
+/**
+ * JobsDone reserve for one mailbox, derived from its measured peak demand.
+ *
+ * - The reserve is never less than `minReserve` (fail-safe floor).
+ * - The reserve is never more than the mailbox's Instantly `dailyLimit`.
+ * - Today's partial day is excluded from the peak because it is handled by `sentToday`.
+ * - Missing or empty history falls back to `minReserve`.
+ */
+export function jobsDonePeakReserve({
+  history,
+  dailyLimit,
+  minReserve,
+  today,
+}: {
+  history: Record<string, number>
+  dailyLimit: number
+  minReserve: number
+  today?: string
+}): number {
+  let peak = 0
+  for (const [date, sent] of Object.entries(history)) {
+    if (today && date === today) continue
+    if (sent > peak) peak = sent
+  }
+  return Math.min(dailyLimit, Math.max(minReserve, peak))
 }
 
 export function accountIsOk(account: InstantlyAccount): boolean {
@@ -207,10 +241,15 @@ export type CapacityInputAccount = {
 export type CapacityOptions = {
   accounts: CapacityInputAccount[]
   sentToday: Record<string, number>
+  /** Minimum reserve per mailbox; used when live demand history is unavailable. */
   reservePerMailbox: number
   sharedClientsActive: number
   jobsDoneReachable: boolean
   claimedMailboxes: string[]
+  /** Optional per-mailbox daily sends by date, used to measure JobsDone peak demand. */
+  history?: Record<string, Record<string, number>>
+  /** Today's date (YYYY-MM-DD); excluded from the peak-demand window. */
+  today?: string
 }
 
 export type CapacityResult = {
@@ -225,7 +264,11 @@ export type CapacityResult = {
     sentToday: number
     reserved: number
     available: number
+    peakObserved: number
   }>
+  reserveBasis: 'measured-peak' | 'static-floor'
+  peakPerMailbox: number
+  windowDays: number
 }
 
 /**
@@ -244,19 +287,34 @@ export function computeCapacity(options: CapacityOptions): CapacityResult {
     sharedClientsActive,
     jobsDoneReachable,
     claimedMailboxes,
+    history,
+    today,
   } = options
   const claimed = new Set(claimedMailboxes.map((e) => e.toLowerCase()))
+  const reserveBasis: CapacityResult['reserveBasis'] =
+    history != null && Object.keys(history).length > 0 ? 'measured-peak' : 'static-floor'
 
   const perMailbox = accounts.map((a) => {
     const email = a.email.toLowerCase()
     const dailyLimit = a.dailyLimit
     const sent = sentToday[email] ?? 0
-    const reserve =
+    const emailHistory = history?.[email] ?? {}
+    const peakObserved = Object.entries(emailHistory).reduce((max, [date, count]) => {
+      if (today && date === today) return max
+      return count > max ? count : max
+    }, 0)
+    const shouldReserve =
       !jobsDoneReachable || sharedClientsActive > 0 || claimed.has(email)
-        ? reservePerMailbox
-        : 0
+    const reserve = shouldReserve
+      ? jobsDonePeakReserve({
+          history: emailHistory,
+          dailyLimit,
+          minReserve: reservePerMailbox,
+          today,
+        })
+      : 0
     const available = Math.max(0, dailyLimit - sent - reserve)
-    return { email, dailyLimit, sentToday: sent, reserved: reserve, available }
+    return { email, dailyLimit, sentToday: sent, reserved: reserve, available, peakObserved }
   })
 
   const sentTotal = perMailbox.reduce((sum, m) => sum + m.sentToday, 0)
@@ -264,6 +322,7 @@ export function computeCapacity(options: CapacityOptions): CapacityResult {
   const availableToday = perMailbox.reduce((sum, m) => sum + m.available, 0)
   const perMailboxLimit =
     accounts.length > 0 ? Math.max(0, ...accounts.map((a) => a.dailyLimit)) : 0
+  const peakPerMailbox = perMailbox.reduce((max, m) => Math.max(max, m.peakObserved), 0)
 
   return {
     mailboxes: accounts.length,
@@ -272,6 +331,9 @@ export function computeCapacity(options: CapacityOptions): CapacityResult {
     reservedForJobsDone: reservedTotal,
     availableToday,
     perMailbox,
+    reserveBasis,
+    peakPerMailbox,
+    windowDays: JOBSDONE_PEAK_WINDOW_DAYS,
   }
 }
 
@@ -441,10 +503,10 @@ async function listAccountsAction() {
   const accounts = await listAccounts()
   const normalized = accounts.map(normalizeAccount)
   const usable = normalized.filter((a) => a.ok)
-  // Capacity available to carrier blasts = leftover after the JobsDone OS reserve,
+  // Capacity available to carrier blasts = leftover after the JobsDone OS reserve floor,
   // NOT each mailbox's full daily_limit.
   const totalDailyCapacity = usable.reduce(
-    (sum, a) => sum + Math.max(0, a.dailyLimit - JOBSDONE_RESERVE_PER_MAILBOX),
+    (sum, a) => sum + Math.max(0, a.dailyLimit - JOBSDONE_MIN_RESERVE_PER_MAILBOX),
     0,
   )
   return {
@@ -452,9 +514,9 @@ async function listAccountsAction() {
     accounts: normalized,
     totalDailyCapacity,
     defaultPerMailbox: DEFAULT_PER_MAILBOX_PER_DAY,
-    reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+    reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
     maxPerMailbox: usable.length
-      ? Math.min(...usable.map((a) => Math.max(0, a.dailyLimit - JOBSDONE_RESERVE_PER_MAILBOX)))
+      ? Math.min(...usable.map((a) => Math.max(0, a.dailyLimit - JOBSDONE_MIN_RESERVE_PER_MAILBOX)))
       : 0,
   }
 }
@@ -479,6 +541,15 @@ async function getLiveCapacity(
   }
 > {
   const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+  const [y, m, d] = date.split('-').map(Number)
+  const todayDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
+  const windowStartDate = new Date(todayDate)
+  windowStartDate.setUTCDate(todayDate.getUTCDate() - JOBSDONE_PEAK_WINDOW_DAYS)
+  const windowEndDate = new Date(todayDate)
+  windowEndDate.setUTCDate(todayDate.getUTCDate() - 1)
+  const startDate = windowStartDate.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+  const endDate = windowEndDate.toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+
   const resolvedAccounts = accounts ?? (await listAccounts())
   const allowedAccounts = resolvedAccounts
     .filter(accountIsOk)
@@ -493,6 +564,8 @@ async function getLiveCapacity(
     ? jobsDone.clients.flatMap((c) => c.instantlyMailboxes ?? [])
     : []
 
+  let history: Record<string, Record<string, number>> | undefined
+  let historyFailed = false
   let sentToday: Record<string, number> = {}
   let analyticsFailed = false
   let source: 'jobsdone-os' | 'static-fallback' = 'jobsdone-os'
@@ -501,6 +574,21 @@ async function getLiveCapacity(
   if (!jobsDone.reachable) {
     source = 'static-fallback'
     notes.push('JobsDone OS unreachable; holding full reserve as a fail-safe.')
+  }
+
+  try {
+    history = await accountDailySendsRange(
+      allowedAccounts.map((a) => a.email),
+      startDate,
+      endDate,
+    )
+  } catch (err) {
+    historyFailed = true
+    source = 'static-fallback'
+    notes.push(
+      `JobsDone send history unavailable; using the ${JOBSDONE_MIN_RESERVE_PER_MAILBOX}/day floor reserve.`,
+    )
+    console.error('[carrier-blast-api] getLiveCapacity history failed', err)
   }
 
   try {
@@ -517,10 +605,12 @@ async function getLiveCapacity(
   const capacity = computeCapacity({
     accounts: allowedAccounts,
     sentToday,
-    reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+    history,
+    today: date,
+    reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
     sharedClientsActive,
-    // Hold the reserve when JobsDone is unreachable OR when live analytics failed.
-    jobsDoneReachable: jobsDone.reachable && !analyticsFailed,
+    // Hold the reserve when JobsDone is unreachable OR when live analytics/history failed.
+    jobsDoneReachable: jobsDone.reachable && !analyticsFailed && !historyFailed,
     claimedMailboxes,
   })
 
@@ -548,6 +638,9 @@ async function capacityAction() {
     reservedForJobsDone: live.reservedForJobsDone,
     availableToday: live.availableToday,
     perMailbox: live.perMailbox,
+    reserveBasis: live.reserveBasis,
+    peakPerMailbox: live.peakPerMailbox,
+    windowDays: live.windowDays,
     jobsDone: {
       reachable: live.jobsDoneReachable,
       sharedClientsActive: live.sharedClientsActive,
@@ -632,14 +725,18 @@ async function runLaunchAction(payload: { campaignId: string }) {
       const campaignDailyLimit = perMailbox * senders.length
 
       // Live shared-mailbox capacity: never let a carrier blast starve the JobsDone OS
-      // engine. If today has no remaining capacity, fail fast instead of creating a
-      // no-op campaign.
-      const liveCapacity = await getLiveCapacity(accounts)
+      // engine. Capacity MUST be measured over the mailboxes this campaign will actually
+      // send from — a pool-wide figure would let a two-mailbox selection borrow headroom
+      // from the other 59 and overdraw the two it really uses.
+      const senderSet = new Set(senders)
+      const liveCapacity = await getLiveCapacity(
+        accounts.filter((a) => senderSet.has(a.email.toLowerCase())),
+      )
       const availableToday = liveCapacity.availableToday
       const effectiveDailyLimit = Math.max(0, Math.min(campaignDailyLimit, availableToday))
 
       if (availableToday <= 0) {
-        const error = `No carrier-blast capacity left today (${liveCapacity.date}): JobsDone OS reserve and live sends have consumed the shared mailbox allowance.`
+        const error = `No carrier-blast capacity left today (${liveCapacity.date}) on the selected mailboxes: the JobsDone OS reserve and today's sends have consumed their allowance.`
         await updateCampaign(campaignId, { status: 'failed', errorText: error })
         return { ok: false, error }
       }
