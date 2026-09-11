@@ -53,6 +53,11 @@ export interface PayRateOverride {
   expensesBeforePercent: boolean
 }
 
+export interface FixedExpenseMileage {
+  costPerMile: number
+  miles: number
+}
+
 /**
  * A fixed recurring charge, optionally bounded to a range of pay periods.
  *
@@ -76,6 +81,8 @@ export interface FixedExpenseInput {
   /** When this revision was ended, and by whom. */
   endedAt?: string | null
   endedBy?: string | null
+  /** Mileage-based expense basis; when present the authoritative amount is derived from it. */
+  mileage?: FixedExpenseMileage | null
 }
 
 const MS_PER_DAY = 86_400_000

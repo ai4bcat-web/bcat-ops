@@ -133,3 +133,161 @@ describe('Pending clears the time', () => {
     expect(savedStop().apptType).toBe('exact')
   })
 })
+
+const mkDeliveryStop = (over: Partial<Stop> = {}): Stop => ({
+  id: 'd', type: 'delivery', appt: fromDateInput('2026-08-21'),
+  apptType: 'tbd', driverId: null, sequence: 1, ...over,
+})
+
+const mkDeliveryLoad = (stop: Stop): Load => ({
+  id: 'l1', aljexId: '12345', tmsId: '', pickupNumber: 'PU-1', customer: 'Batory Foods',
+  pickupAppt: fromDateTimeInput('2026-08-20T08:00'), pickupApptType: 'exact',
+  deliveryAppt: stop.appt, deliveryApptType: stop.apptType, deliveryApptEnd: stop.apptEnd,
+  readyToInvoice: false,
+  createdBy: '', updatedBy: '', createdAt: '', updatedAt: '',
+  stops: [stop],
+} as unknown as Load)
+
+const openHandoff = (stop: Stop) => {
+  const load = mkDeliveryLoad(stop)
+  render(<ApptEditPopover load={load} stop={stop} apptField="deliveryAppt"
+                          typeField="deliveryApptType" intent="handoff" onClose={() => {}} />)
+  return load
+}
+
+describe('NEED RUBEN handoff from the calendar', () => {
+  it('prefills the date and leaves the time blank', () => {
+    openHandoff(mkDeliveryStop({ apptStatus: 'need_book' }))
+    expect((screen.getByLabelText('Appointment date') as HTMLInputElement).value).toBe('2026-08-21')
+    expect((screen.getByLabelText('Appointment time') as HTMLInputElement).value).toBe('')
+    expect(screen.queryByLabelText('Appointment type')).toBeNull()
+  })
+
+  it('saves NEED DENNIS with the chosen date+time and clears the booking cycle', async () => {
+    openHandoff(mkDeliveryStop({
+      apptStatus: 'need_book',
+      apptProofs: { request: 'x', e2open: 'x', email: 'x' },
+    }))
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '14:30' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const saved = savedStop()
+    expect(saved.apptStatus).toBe('need_request')
+    expect(saved.appt).toBe(fromDateTimeInput('2026-08-21T14:30'))
+    expect(saved.apptType).toBe('exact')
+    expect(saved.apptProofs).toEqual({ request: null, e2open: null, email: null })
+    expect(saved.apptRequestedFor).toBeNull()
+    expect(saved.apptMoveRequested).toBe(false)
+    expect(saved.apptChangeTo).toBeNull()
+  })
+
+  it('rejects a blank time and keeps the popover open', async () => {
+    openHandoff(mkDeliveryStop({ apptStatus: 'need_book' }))
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(true)
+    expect(updateLoad).not.toHaveBeenCalled()
+
+    // Filling the time should then allow the save.
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '09:00' } })
+    expect((screen.getByText('Save') as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    expect(savedStop().apptStatus).toBe('need_request')
+  })
+
+  it('does not submit on Enter when the time is blank', () => {
+    openHandoff(mkDeliveryStop({ apptStatus: 'need_book' }))
+    fireEvent.keyDown(screen.getByLabelText('Appointment date'), { key: 'Enter' })
+    expect(updateLoad).not.toHaveBeenCalled()
+  })
+
+  it('does not double-submit while saving', async () => {
+    // Node 20 jsdom lacks Promise.withResolvers; a never-resolving promise is enough.
+    updateLoad.mockReturnValue(new Promise(() => {}))
+    openHandoff(mkDeliveryStop({ apptStatus: 'need_book' }))
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '10:00' } })
+    fireEvent.click(screen.getByText('Save'))
+    fireEvent.keyDown(screen.getByLabelText('Appointment date'), { key: 'Enter' })
+    expect(updateLoad).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Send to Dennis for an already-timed delivery', () => {
+  it('prefills the existing time and resets proofs for a new booking cycle', async () => {
+    openHandoff(mkDeliveryStop({
+      apptStatus: 'confirmed',
+      apptType: 'exact',
+      appt: fromDateTimeInput('2026-08-21T11:00'),
+      apptProofs: { request: 'r', e2open: 'e', email: 'm' },
+      apptRequestedFor: fromDateTimeInput('2026-08-21T11:00'),
+    }))
+    expect((screen.getByLabelText('Appointment time') as HTMLInputElement).value).toBe('11:00')
+
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const saved = savedStop()
+    expect(saved.apptStatus).toBe('need_request')
+    expect(saved.appt).toBe(fromDateTimeInput('2026-08-21T11:00'))
+    expect(saved.apptType).toBe('exact')
+    expect(saved.apptProofs).toEqual({ request: null, e2open: null, email: null })
+    expect(saved.apptRequestedFor).toBeNull()
+  })
+})
+
+describe('normal editing graduates a NEED RUBEN stop when a time is entered', () => {
+  it('does not retain need_book or drop the typed time', async () => {
+    const stop = mkDeliveryStop({ apptStatus: 'need_book' })
+    const load = mkDeliveryLoad(stop)
+    render(<ApptEditPopover load={load} stop={stop} apptField="deliveryAppt"
+                            typeField="deliveryApptType" onClose={() => {}} />)
+
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '16:45' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    expect(savedStop().apptStatus).toBe('need_request')
+    expect(savedStop().appt).toBe(fromDateTimeInput('2026-08-21T16:45'))
+    expect(savedStop().apptType).toBe('exact')
+  })
+})
+
+describe('typing a time while the select reads Pending keeps the time', () => {
+  it('saves Exact Time, not a date-only Pending appointment', async () => {
+    open(mkStop({ appt: fromDateInput('2026-08-20') }))
+    expect(typeSelect().value).toBe('pending')
+
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '13:15' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    expect(savedStop().appt).toBe(fromDateTimeInput('2026-08-20T13:15'))
+    expect(savedStop().apptType).toBe('exact')
+  })
+})
+
+describe('legacy synthetic stops persist status through the stops array', () => {
+  it('writes a stops array for a handoff on a legacy load', async () => {
+    const load: Load = {
+      id: 'legacy', aljexId: 'LEG', tmsId: '', pickupNumber: 'PU-1', customer: 'Batory Foods',
+      pickupAppt: fromDateTimeInput('2026-08-20T08:00'), pickupApptType: 'exact',
+      deliveryAppt: fromDateInput('2026-08-21'), deliveryApptType: 'tbd',
+      readyToInvoice: false,
+      createdBy: '', updatedBy: '', createdAt: '', updatedAt: '',
+      stops: null,
+    } as unknown as Load
+
+    render(<ApptEditPopover load={load} apptField="deliveryAppt"
+                            typeField="deliveryApptType" intent="handoff" onClose={() => {}} />)
+
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '15:00' } })
+    fireEvent.click(screen.getByText('Save'))
+
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const patch = updateLoad.mock.calls[0][1] as { stops: Stop[] }
+    expect(patch.stops).toBeDefined()
+    const delivery = patch.stops.find((s) => s.type === 'delivery')
+    expect(delivery?.apptStatus).toBe('need_request')
+    expect(delivery?.appt).toBe(fromDateTimeInput('2026-08-21T15:00'))
+    expect(delivery?.apptType).toBe('exact')
+  })
+})

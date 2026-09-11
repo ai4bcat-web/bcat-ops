@@ -25,7 +25,6 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
   updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>
 }): Promise<void> {
   const notices = apptNotices(next, prev)
-  if (notices.length === 0) return
 
   const byId = new Map(next.map((s) => [s.id, s]))
   const started: { stopId: string; ts: string }[] = []
@@ -78,16 +77,17 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
     }
   }
 
-  // Ruben picked the delivery time on a NEED RUBEN stop: hand it to Dennis — a
-  // book-it task plus a #appts-ivan ping — and advance the ladder to NEED DENNIS.
+  // Ruben picked the delivery time on a NEED RUBEN stop, or explicitly sent a timed
+  // delivery back to Dennis: hand it to Dennis — a book-it task plus a #appts-ivan ping.
   const prevById = new Map(prev.map((s) => [s.id, s]))
   for (const s of next) {
     const was = prevById.get(s.id)
     const nowTimed = apptHasTime(s.appt)
     const hadTime = was ? apptHasTime(was.appt) : false
+    const becameNeedRequest = s.apptStatus === 'need_request' && was?.apptStatus !== 'need_request'
     const explicitHandoff = was?.apptStatus === 'need_book' && s.apptStatus === 'need_request'
-    if (s.type === 'delivery' && ((was?.apptStatus ?? s.apptStatus) === 'need_book' && nowTimed && !hadTime || explicitHandoff)) {
-      addPatch(s.id, { apptStatus: 'need_request' })
+    if (s.type === 'delivery' && ((was?.apptStatus ?? s.apptStatus) === 'need_book' && nowTimed && !hadTime || explicitHandoff || becameNeedRequest)) {
+      addPatch(s.id, { apptStatus: 'need_request', apptMoveRequested: false, apptChangeTo: null })
       const label = formatDateShort(s.appt)
       try {
         await createApptTask({

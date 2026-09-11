@@ -152,6 +152,124 @@ describe('FixedExpenseEditor', () => {
     expect(container.textContent).toContain('recorded')
   })
 
+  it('hides mileage controls by default and keeps fixed-amount behavior', () => {
+    render(<FixedExpenseEditor value={initialAdd} onChange={vi.fn()} periodDays={7} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    expect(screen.queryByRole('button', { name: /Mileage calculation/i })).toBeNull()
+    expect(screen.getByLabelText(/Amount/i)).toBeTruthy()
+  })
+
+  it('shows mileage controls when allowMileage is true', () => {
+    render(<FixedExpenseEditor value={initialAdd} onChange={vi.fn()} periodDays={7} allowMileage />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    expect(screen.getByRole('button', { name: /Fixed amount/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Mileage calculation/i })).toBeTruthy()
+  })
+
+  it('adds a mileage-based expense with calculated amount and metadata', () => {
+    const onChange = vi.fn()
+    render(<FixedExpenseEditor value={initialAdd} onChange={onChange} periodDays={7} allowMileage />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    fireEvent.change(screen.getByPlaceholderText('Insurance'), { target: { value: 'Mileage reimbursement' } })
+    fireEvent.click(screen.getByRole('button', { name: /Mileage calculation/i }))
+    fireEvent.change(screen.getByLabelText(/Cost per mile/i), { target: { value: '0.125' } })
+    fireEvent.change(screen.getByLabelText(/Miles/i), { target: { value: '2000' } })
+    expect((screen.getByLabelText(/Calculated amount/i) as HTMLInputElement).value).toBe('$250.00')
+    fireEvent.change(screen.getByLabelText(/Effective from/i), { target: { value: '2026-09-07' } })
+    fireEvent.click(screen.getByRole('button', { name: /Apply/i }))
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const next = onChange.mock.calls[0][0] as FixedExpenseInput[]
+    expect(next).toHaveLength(1)
+    expect(next[0].label).toBe('Mileage reimbursement')
+    expect(next[0].amount).toBe(250)
+    expect(next[0].mileage).toEqual({ costPerMile: 0.125, miles: 2000 })
+    expect(next[0].from).toBe('2026-09-07')
+    expect(next[0].recordedBy).toBe('tester@bcatcorp.com')
+  })
+
+  it('switches an existing fixed expense to mileage calculation', () => {
+    const onChange = vi.fn()
+    render(<FixedExpenseEditor value={initialChange} onChange={onChange} periodDays={7} allowMileage />)
+
+    fireEvent.click(screen.getByRole('radio'))
+    fireEvent.click(screen.getByRole('button', { name: /Change/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Mileage calculation/i }))
+    fireEvent.change(screen.getByLabelText(/Cost per mile/i), { target: { value: '0.50' } })
+    fireEvent.change(screen.getByLabelText(/Miles/i), { target: { value: '100' } })
+    fireEvent.change(screen.getByLabelText(/Effective from/i), { target: { value: '2026-09-15' } })
+    fireEvent.click(screen.getByRole('button', { name: /Apply/i }))
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const next = onChange.mock.calls[0][0] as FixedExpenseInput[]
+    expect(next).toHaveLength(2)
+
+    const current = next.find((r) => r.revisionId !== 'rev-1')!
+    expect(current.label).toBe('Insurance')
+    expect(current.amount).toBe(50)
+    expect(current.mileage).toEqual({ costPerMile: 0.5, miles: 100 })
+    expect(current.from).toBe('2026-09-15')
+
+    const ended = next.find((r) => r.revisionId === 'rev-1')!
+    expect(ended.until).toBe('2026-09-15')
+  })
+
+  it('loads saved mileage values when changing a mileage expense', () => {
+    const withMileage: FixedExpenseInput[] = [
+      {
+        label: 'Mileage reimbursement',
+        amount: 250,
+        from: '2026-01-01',
+        mileage: { costPerMile: 0.125, miles: 2000 },
+        revisionId: 'rev-mileage',
+        expenseId: 'exp-mileage',
+        recordedAt: '2026-01-01T00:00:00Z',
+        recordedBy: 'legacy',
+      },
+    ]
+    render(<FixedExpenseEditor value={withMileage} onChange={vi.fn()} periodDays={7} allowMileage />)
+
+    fireEvent.click(screen.getByRole('radio'))
+    fireEvent.click(screen.getByRole('button', { name: /Change/i }))
+
+    expect((screen.getByLabelText(/Cost per mile/i) as HTMLInputElement).value).toBe('0.125')
+    expect((screen.getByLabelText(/Miles/i) as HTMLInputElement).value).toBe('2000')
+  })
+
+  it('rejects garbage input with strict parsing', () => {
+    const onChange = vi.fn()
+    render(<FixedExpenseEditor value={initialAdd} onChange={onChange} periodDays={7} allowMileage />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    fireEvent.change(screen.getByPlaceholderText('Insurance'), { target: { value: 'Bad mileage' } })
+    fireEvent.click(screen.getByRole('button', { name: /Mileage calculation/i }))
+    fireEvent.change(screen.getByLabelText(/Cost per mile/i), { target: { value: '0.1abc' } })
+    fireEvent.change(screen.getByLabelText(/Miles/i), { target: { value: 'xyz' } })
+    fireEvent.click(screen.getByRole('button', { name: /Apply/i }))
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByText(/Enter a valid cost per mile/i)).toBeTruthy()
+  })
+
+  it('clears inactive mileage fields when switching modes', () => {
+    render(<FixedExpenseEditor value={initialAdd} onChange={vi.fn()} periodDays={7} allowMileage />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Mileage calculation/i }))
+    fireEvent.change(screen.getByLabelText(/Cost per mile/i), { target: { value: '0.125' } })
+    fireEvent.change(screen.getByLabelText(/Miles/i), { target: { value: '2000' } })
+    expect((screen.getByLabelText(/Calculated amount/i) as HTMLInputElement).value).toBe('$250.00')
+
+    fireEvent.click(screen.getByRole('button', { name: /Fixed amount/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Mileage calculation/i }))
+    expect((screen.getByLabelText(/Cost per mile/i) as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/Miles/i) as HTMLInputElement).value).toBe('')
+    expect((screen.getByLabelText(/Calculated amount/i) as HTMLInputElement).value).toBe('')
+  })
+
   it('a version scheduled to end on a future date still shows as current', () => {
     const endingLater: FixedExpenseInput[] = [
       { label: 'Plates', amount: 50, from: '2026-01-01', until: '2030-06-01', endedAt: '2026-09-01T00:00:00Z', endedBy: 'admin', revisionId: 'r9', expenseId: 'e9', recordedAt: '2026-01-01T00:00:00Z', recordedBy: 'admin' },

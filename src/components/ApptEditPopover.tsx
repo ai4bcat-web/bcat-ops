@@ -3,9 +3,9 @@ import { useLoads } from '@/hooks/useLoads'
 import { updateStop, getStops } from '@/lib/stops'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { useAppStore } from '@/store/useAppStore'
-import { apptTypeAfterEdit } from '@/lib/apptQueue'
-import { canSetChangeNeeded, changeNeededPatch } from '@/lib/apptStatus'
-import { formatDateTimeInput, fromDateTimeInput, fromDateInput, apptHasTime } from '@/lib/date'
+import { apptTypeAfterEdit, requiresApptProofs } from '@/lib/apptQueue'
+import { canSetChangeNeeded, changeNeededPatch, apptWorkflowStatus, endStatus } from '@/lib/apptStatus'
+import { formatDateTimeInput, fromDateTimeInput, fromDateInput, apptHasTime, chicagoDateStr } from '@/lib/date'
 import type { Load, Stop, ApptType } from '@/types'
 
 /**
@@ -18,8 +18,12 @@ import type { Load, Stop, ApptType } from '@/types'
  *
  * `stop` is present in multi-stop mode and targets that one stop; without it the write
  * goes to the load's legacy pickup/delivery mirror fields.
+ *
+ * `intent="handoff"` puts the editor into the Ruben→Dennis handoff flow: the date is
+ * prefilled, the time is blank for a NEED RUBEN stop (no fabricated midnight), and a
+ * valid date+time saves as `exact` with `apptStatus: 'need_request'` atomically.
  */
-export function ApptEditPopover({ load, stop, apptField, typeField, onClose, className }: {
+export function ApptEditPopover({ load, stop, apptField, typeField, onClose, className, intent }: {
   load: Load
   stop?: Stop
   apptField: 'pickupAppt' | 'deliveryAppt'
@@ -27,11 +31,15 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   onClose: () => void
   /** Positioning override — the table cell anchors differently than the calendar row. */
   className?: string
+  /** Handoff flow: force exact time and advance the stop to NEED DENNIS. */
+  intent?: 'handoff'
 }) {
   const { updateLoad } = useLoads()
   // The same identity the store stamps on writes and the audit log — not useAuth, which
   // would tie this leaf editor to the auth provider being mounted above it.
   const actor = useAppStore((s) => s.currentUserEmail)
+
+  const isHandoff = intent === 'handoff'
 
   // Ranges can genuinely span days (there are multi-day windows in production), so the
   // end is a full date+time like the start — a time-only field would quietly collapse a
@@ -40,23 +48,34 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const srcAppt = stop ? stop.appt : load[apptField]
   const srcType = stop ? stop.apptType : load[typeField]
   const srcEnd = stop ? stop.apptEnd : load[endField]
-  const initVal = srcAppt ? formatDateTimeInput(srcAppt) : ''
+  const srcHasTime = !!srcAppt && apptHasTime(srcAppt)
+
+  // In handoff mode we never invent a midnight time for a date-only NEED stop.
+  const handoffSrc = stop?.apptChangeTo ?? srcAppt
+  const initDate = isHandoff
+    ? (handoffSrc ? (chicagoDateStr(handoffSrc) ?? handoffSrc.slice(0, 10)) : '')
+    : (srcAppt ? formatDateTimeInput(srcAppt).slice(0, 10) : '')
+  const initTime = isHandoff
+    ? (handoffSrc && apptHasTime(handoffSrc) ? formatDateTimeInput(handoffSrc).slice(11, 16) : '')
+    : (srcAppt ? formatDateTimeInput(srcAppt).slice(11, 16) : '')
+  const initVal = initDate && initTime ? `${initDate}T${initTime}` : initDate
   const initEnd = srcEnd ? formatDateTimeInput(srcEnd) : ''
 
   // 'pending' is not a stored type — it IS `exact` with no time yet, which is how the
   // whole app already renders an unset appointment. Keeping it derived rather than adding
   // a fourth enum value means there is still exactly one representation of the state; a
   // second one would drift from the first, which is the bug class we just spent a day on.
-  const isPending = (srcType ?? 'exact') === 'exact' && !apptHasTime(srcAppt)
+  const isPending = !isHandoff && (srcType ?? 'exact') === 'exact' && !srcHasTime
   const [dateVal, setDateVal] = useState(initVal)
-  const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isPending ? 'pending' : (srcType ?? 'exact'))
+  const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isHandoff ? 'exact' : (isPending ? 'pending' : (srcType ?? 'exact')))
   const [endVal,  setEndVal]  = useState(initEnd)
   const [saving,  setSaving]  = useState(false)
+  const [error,   setError]   = useState<string | null>(null)
   // CHANGE NEEDED — Ruben/Ryne only. Records the wanted date+time, restarts the
   // Batory ladder and clears every screenshot; Dennis re-earns REQUESTED → CONFIRMED.
   const [moveReq, setMoveReq] = useState(stop?.apptStatus === 'change_needed' || !!stop?.apptMoveRequested)
   const [changeTo, setChangeTo] = useState(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : '')
-  const canFlagMove = !!stop && (srcType ?? 'exact') !== 'tbd' && !isPending && canSetChangeNeeded(actor)
+  const canFlagMove = !isHandoff && !!stop && (srcType ?? 'exact') !== 'tbd' && !isPending && canSetChangeNeeded(actor)
 
   const datePart = dateVal.slice(0, 10)
   const timePart = dateVal.slice(11, 16)
@@ -68,14 +87,38 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   // A window that ends before it starts would render as "16:00–08:00" and mean nothing.
   const badWindow = isRange && !!dateVal && !!endVal && endVal <= dateVal
 
+  const handoffValid = isHandoff ? !!datePart && !!timePart : true
+  const canSubmit = !saving && !badWindow && handoffValid
+
   const commit = async () => {
+    if (saving) return
+    if (!handoffValid) {
+      setError(isHandoff ? 'Choose a date and time to send to Dennis.' : 'A date and time are required.')
+      return
+    }
+    if (badWindow) {
+      setError('The window has to end after it starts.')
+      return
+    }
+
     setSaving(true)
+    setError(null)
+
     try {
       // Choosing Pending means "no time yet" — drop the time rather than keeping a stale one.
+      // If the user typed a real time while the select still reads Pending/NEED, we treat
+      // it as Exact Time so the input is not silently discarded.
       const pending = typeVal === 'pending'
+      const hasTime = !!timePart
       const chosen: ApptType = pending ? 'exact' : typeVal
-      const value = pending ? dateVal.slice(0, 10) : dateVal
-      const effectiveType = apptTypeAfterEdit(chosen, value, { type: srcType, value: initVal })
+      const value = pending && !hasTime ? datePart : dateVal
+      let effectiveType: ApptType
+      // A NEED stop that was given a real time graduates to Exact automatically.
+      if (chosen === 'tbd' && hasTime) {
+        effectiveType = 'exact'
+      } else {
+        effectiveType = apptTypeAfterEdit(chosen, value, { type: srcType, value: initVal })
+      }
 
       // fromDateTimeInput, not `new Date(...).toISOString()`: the input is Chicago wall
       // time, and the native parse treats it as the BROWSER's zone — which writes the
@@ -92,35 +135,78 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       // exact appointment would leave apptTimeLabel rendering a window that no longer exists.
       const endIso = effectiveType === 'range' && endVal ? fromDateTimeInput(endVal) : undefined
 
-      if (stop) {
-        const stopPatch: Partial<Stop> = { apptType: effectiveType, apptEnd: endIso }
-        if (canFlagMove) {
-          const wasFlagged = stop.apptStatus === 'change_needed' || !!stop.apptMoveRequested
-          if (moveReq && !wasFlagged) {
-            Object.assign(stopPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : ''))
-          } else if (!moveReq && wasFlagged) {
-            stopPatch.apptMoveRequested = false
-            stopPatch.apptChangeTo = null
-          } else if (moveReq && changeTo) {
-            stopPatch.apptChangeTo = fromDateTimeInput(changeTo)
-          }
+      const apptPatch: Partial<Stop> = { apptType: effectiveType }
+      if (iso) apptPatch.appt = iso
+      // Always write apptEnd so a stale window end is dropped when the type changes away
+      // from range; undefined is omitted naturally from the resulting stop object.
+      apptPatch.apptEnd = endIso
+
+      const statusPatch: Partial<Stop> = {}
+      const needsProofs = requiresApptProofs(load.customer)
+
+      if (isHandoff) {
+        // Ruben/Ryne is explicitly handing this stop back to Dennis for a new booking cycle.
+        statusPatch.apptStatus = 'need_request'
+        statusPatch.apptRequestedFor = null
+        statusPatch.apptProofs = { request: null, e2open: null, email: null }
+        statusPatch.apptMoveRequested = false
+        statusPatch.apptChangeTo = null
+      } else if (needsProofs && effectiveType === 'exact' && iso && apptHasTime(iso)) {
+        // A NEED RUBEN stop that got a time through normal editing graduates automatically.
+        const prevStatus = stop ? apptWorkflowStatus(stop, load) : endStatus(load, apptField === 'pickupAppt' ? 'pickup' : 'delivery')
+        if (prevStatus === 'need_book') {
+          statusPatch.apptStatus = 'need_request'
         }
-        if (iso) stopPatch.appt = iso
+      }
+
+      if (canFlagMove) {
+        const wasFlagged = stop.apptStatus === 'change_needed' || !!stop.apptMoveRequested
+        if (moveReq && !wasFlagged) {
+          Object.assign(statusPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : ''))
+        } else if (!moveReq && wasFlagged) {
+          statusPatch.apptMoveRequested = false
+          statusPatch.apptChangeTo = null
+        } else if (moveReq && changeTo) {
+          statusPatch.apptChangeTo = fromDateTimeInput(changeTo)
+        }
+      }
+
+      const stopPatch = { ...apptPatch, ...statusPatch }
+
+      if (stop) {
         next = updateStop(load, stop.id, stopPatch)
         await updateLoad(load.id, { stops: next })
       } else {
-        const patch: Partial<Load> = { [typeField]: effectiveType, [endField]: endIso }
-        if (iso) patch[apptField] = iso
-        await updateLoad(load.id, patch)
-        // Legacy load: getStops synthesizes from the mirror fields, so read the result
-        // back through it rather than hand-building the stop.
-        next = getStops({ ...load, ...patch } as Load)
+        // Legacy synthetic stops must persist status through the stops array, not just
+        // the mirror fields, or the Batory ladder disappears on the next render.
+        if (Object.keys(statusPatch).length > 0) {
+          const legacyStops = getStops(load)
+          const targetStop = apptField === 'pickupAppt'
+            ? legacyStops.find((s) => s.type === 'pickup')
+            : [...legacyStops].reverse().find((s) => s.type === 'delivery')
+          if (!targetStop) throw new Error(`Could not resolve ${apptField} stop`)
+          next = updateStop(load, targetStop.id, stopPatch)
+          await updateLoad(load.id, { stops: next })
+        } else {
+          const patch: Partial<Load> = { [typeField]: effectiveType, [endField]: endIso }
+          if (iso) patch[apptField] = iso
+          await updateLoad(load.id, patch)
+          // Legacy load: getStops synthesizes from the mirror fields, so read the result
+          // back through it rather than hand-building the stop.
+          next = getStops({ ...load, ...patch } as Load)
+        }
       }
 
       // Flagging NEED from the calendar or the Appts queue used to be silent — only the
       // Loads drawer notified. Same call, same rules, from every editor now.
       void sendApptNotices({ load, next, prev, actorName: actor, updateLoad })
-    } finally { setSaving(false) }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Save failed')
+      setSaving(false)
+      return
+    }
+
+    setSaving(false)
     onClose()
   }
 
@@ -133,6 +219,12 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
+      {isHandoff && (
+        <div className="text-[11px] font-semibold text-foreground">
+          Send to Dennis
+        </div>
+      )}
+
       <div className="flex gap-1">
         <input
           autoFocus
@@ -142,7 +234,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
           style={{ flex: '1 1 0', minWidth: 0 }}
           value={datePart}
           onChange={(e) => setDateVal(combineDateTime(e.target.value, timePart))}
-          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) commit(); if (e.key === 'Escape') onClose() }}
         />
         <input
           type="time"
@@ -151,27 +243,37 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
           className={inputCls}
           style={{ width: 92, flexShrink: 0 }}
           value={timePart}
-          onChange={(e) => setDateVal(combineDateTime(datePart, e.target.value))}
-          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') onClose() }}
+          onChange={(e) => {
+            setDateVal(combineDateTime(datePart, e.target.value))
+            // Typing a real time while the select still says Pending/NEED should not
+            // silently drop that time on save.
+            if (e.target.value && (typeVal === 'pending' || typeVal === 'tbd')) {
+              setTypeVal('exact')
+            }
+          }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) commit(); if (e.key === 'Escape') onClose() }}
         />
       </div>
-      <select
-        className="w-full h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        aria-label="Appointment type"
-        value={typeVal}
-        onChange={(e) => {
-          const v = e.target.value as ApptType | 'pending'
-          setTypeVal(v)
-          // Selecting Pending clears the time in the form too, so what you see is saved.
-          if (v === 'pending') setDateVal(datePart)
-        }}
-      >
-        <option value="exact">Exact Time</option>
-        <option value="pending">Pending (no time set)</option>
-        <option value="range">Window (range)</option>
-        <option value="fcfs">FCFS</option>
-        <option value="tbd">NEED (TBD)</option>
-      </select>
+
+      {!isHandoff && (
+        <select
+          className="w-full h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          aria-label="Appointment type"
+          value={typeVal}
+          onChange={(e) => {
+            const v = e.target.value as ApptType | 'pending'
+            setTypeVal(v)
+            // Selecting Pending clears the time in the form too, so what you see is saved.
+            if (v === 'pending') setDateVal(datePart)
+          }}
+        >
+          <option value="exact">Exact Time</option>
+          <option value="pending">Pending (no time set)</option>
+          <option value="range">Window (range)</option>
+          <option value="fcfs">FCFS</option>
+          <option value="tbd">NEED (TBD)</option>
+        </select>
+      )}
 
       {canFlagMove && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -205,7 +307,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
               style={{ flex: '1 1 0', minWidth: 0 }}
               value={endDatePart}
               onChange={(e) => setEndVal(combineDateTime(e.target.value, endTimePart || '00:00'))}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !badWindow) commit(); if (e.key === 'Escape') onClose() }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) commit(); if (e.key === 'Escape') onClose() }}
             />
             <input
               type="time"
@@ -215,7 +317,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
               style={{ width: 92, flexShrink: 0 }}
               value={endTimePart}
               onChange={(e) => setEndVal(combineDateTime(endDatePart || datePart, e.target.value))}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !badWindow) commit(); if (e.key === 'Escape') onClose() }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && canSubmit) commit(); if (e.key === 'Escape') onClose() }}
             />
           </div>
           {badWindow && (
@@ -225,9 +327,16 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
           )}
         </>
       )}
+
+      {error && (
+        <div className="text-[10px]" style={{ color: 'var(--ds-red)' }} role="alert">
+          {error}
+        </div>
+      )}
+
       <div className="flex gap-1.5">
         <button
-          disabled={saving || badWindow}
+          disabled={!canSubmit}
           className="flex-1 h-6 text-[11px] font-medium rounded bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 transition-colors"
           onClick={commit}
         >Save</button>

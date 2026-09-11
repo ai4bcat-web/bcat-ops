@@ -97,10 +97,15 @@ export function apptNotices(next: Stop[], prev: Stop[] = []): ApptNotice[] {
     if (!moved) continue
 
     if (s.apptThreadTs) {
-      out.push({
-        kind: 'updated', stopId: s.id, stopKind: s.type,
-        threadTs: s.apptThreadTs, apptLabel: label,
-      })
+      // Handing a stop back to Dennis is announced by the book-task path in
+      // sendApptNotices; a thread "updated" reply would duplicate that ping.
+      const becameNeedRequest = s.apptStatus === 'need_request' && was.apptStatus !== 'need_request'
+      if (!becameNeedRequest) {
+        out.push({
+          kind: 'updated', stopId: s.id, stopKind: s.type,
+          threadTs: s.apptThreadTs, apptLabel: label,
+        })
+      }
       continue
     }
 

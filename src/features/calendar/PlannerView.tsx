@@ -12,7 +12,7 @@
  *   • Order  — drag handle → reorders within day (session state)
  */
 
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
 import { addDays, formatDayHeader, formatApptTime, formatDateShort, needLabel, apptHasTime, PENDING_LABEL } from '@/lib/date'
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
@@ -25,24 +25,99 @@ import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
-import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, type EffectiveApptStatus } from '@/lib/apptStatus'
+import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, type EffectiveApptStatus } from '@/lib/apptStatus'
+import { requiresApptProofs } from '@/lib/apptQueue'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
 const COL = { color: 20, aljex: 60, tms: 80, pu: 72, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
-// ── Status cell — the SAME workflow chip the Appts page shows, in its own column ──
-function StatusCell({ status, kind }: { status: EffectiveApptStatus | null; kind: 'pickup' | 'delivery' }) {
-  if (!status) return <div className="shrink-0 px-1 text-[11px] text-slate-300" style={{ width: COL.status }}>—</div>
+function StatusHandoff({ load, stop, kind, status }: {
+  load: Load
+  stop?: Stop
+  kind: 'pickup' | 'delivery'
+  status: EffectiveApptStatus | null
+}) {
+  const actor = useAppStore((s) => s.currentUserEmail)
+  const [mode, setMode] = useState<'menu' | 'handoff' | null>(null)
+
+  useEffect(() => {
+    if (mode !== 'menu') return
+    const close = () => setMode(null)
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [mode])
+
+  if (!status) {
+    return (
+      <div className="shrink-0 flex items-center px-1 text-[11px] text-slate-300" style={{ width: COL.status }}>
+        —
+      </div>
+    )
+  }
+
   const tone = STATUS_TONE_COLORS[STATUS_META[status].tone]
+  const label = statusLabel(status, kind)
+  const canAct = canSetChangeNeeded(actor) && requiresApptProofs(load.customer)
+  const isNeedBook = status === 'need_book'
+  const isTimedHandoff = kind === 'delivery' && (status === 'requested' || status === 'confirmed' || status === 'change_needed')
+  const clickable = canAct && (isNeedBook || isTimedHandoff)
+  const targetStop = stop ?? (kind === 'pickup'
+    ? getStops(load).find((s) => s.type === 'pickup')
+    : [...getStops(load)].reverse().find((s) => s.type === 'delivery'))
+  const apptField = kind === 'pickup' ? 'pickupAppt' : 'deliveryAppt'
+  const typeField = kind === 'pickup' ? 'pickupApptType' : 'deliveryApptType'
+
+  const openHandoff = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setMode('handoff')
+  }
+  const openMenu = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setMode('menu')
+  }
+
   return (
-    <div className="shrink-0 flex items-center px-1" style={{ width: COL.status }}>
-      <span className="text-[9px] font-bold rounded px-1 py-0.5 truncate"
+    <div className="relative shrink-0 flex items-center px-1" style={{ width: COL.status }}>
+      <span
+        className={cn(
+          'text-[9px] font-bold rounded px-1 py-0.5 truncate',
+          clickable && 'cursor-pointer hover:ring-1 hover:ring-offset-1 hover:ring-ring',
+        )}
         style={{ background: tone.bg, color: tone.fg }}
-        title="Same status as the Appts page">
-        {statusLabel(status, kind)}
+        title={clickable ? (isNeedBook ? 'Click to set the time and send to Dennis' : 'Send to Dennis') : 'Same status as the Appts page'}
+        onClick={clickable ? (isNeedBook ? openHandoff : openMenu) : undefined}
+      >
+        {label}
       </span>
+
+      {mode === 'menu' && targetStop && (
+        <div
+          className="absolute z-50 top-full left-0 mt-1 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-1"
+          style={{ width: 140 }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-2 py-1 text-[11px] rounded hover:bg-accent font-medium"
+            onClick={(e) => { e.stopPropagation(); setMode('handoff') }}
+          >
+            Send to Dennis
+          </button>
+        </div>
+      )}
+
+      {mode === 'handoff' && targetStop && (
+        <ApptEditPopover
+          load={load}
+          stop={targetStop}
+          apptField={apptField}
+          typeField={typeField}
+          intent="handoff"
+          onClose={() => setMode(null)}
+          className="absolute z-50 top-full left-0 mt-1"
+        />
+      )}
     </div>
   )
 }
@@ -608,7 +683,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       </div>
 
       {/* PU Status — its own column so the chip never crowds the time */}
-      <StatusCell kind="pickup"
+      <StatusHandoff kind="pickup" load={load} stop={stop}
         status={puYard ? null : stopMode ? (role === 'pickup' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'pickup')} />
 
       {/* DE Appt */}
@@ -636,7 +711,7 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       </div>
 
       {/* DE Status */}
-      <StatusCell kind="delivery"
+      <StatusHandoff kind="delivery" load={load} stop={stop}
         status={deYard ? null : stopMode ? (role === 'delivery' ? apptWorkflowStatus(stop!, load) : null) : endStatus(load, 'delivery')} />
 
       {/* Driver (with slot badge) — pickup row sets pickupDriverId, delivery row sets deliveryDriverId */}

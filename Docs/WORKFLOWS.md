@@ -26,3 +26,9 @@
 ## Acceptable change styles
 - Add a feature in-place if it fits an existing folder.
 - Add new files/folders only when the new domain is clearly separate.
+
+## Amazon mileage expenses
+- In Amazon Driver Pay settings, add an expense or select an existing revision and choose Change, then Mileage calculation. Enter cost per mile, miles for the weekly expense, and an effective date. Apply the draft, then Save settings.
+- Amount is calculated from cost per mile × entered miles and rounded once to cents; sub-cent per-mile rates are retained. These are entered miles, not an ELD feed or automatic trip-mile total.
+- Both inputs are saved on each expense revision in the existing fixedExpenses JSON. Reopening a revision restores its calculation; changes retain previous amounts and formulas. Partial periods still prorate by calendar day.
+- Mileage controls are enabled for Amazon settings only; box-truck fixed-amount entry is unchanged.

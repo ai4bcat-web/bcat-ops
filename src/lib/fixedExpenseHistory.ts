@@ -1,7 +1,34 @@
-import type { FixedExpenseInput } from './driverPay'
+import type { FixedExpenseInput, FixedExpenseMileage } from './driverPay'
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
+}
+
+/**
+ * Compute the dollar amount for a mileage-based expense.
+ *
+ * Validates that costPerMile and miles are finite and positive, that their product is
+ * finite, and rounds the total to cents exactly once. Sub-cent costPerMile values are
+ * allowed; only the final dollar total is rounded to cents.
+ */
+export function calculateMileageExpense(mileage: FixedExpenseMileage): number {
+  if (!mileage || typeof mileage !== 'object') {
+    throw new Error('mileage must be an object')
+  }
+  const { costPerMile, miles } = mileage
+  if (!Number.isFinite(costPerMile)) throw new Error(`costPerMile must be finite, got ${costPerMile}`)
+  if (costPerMile <= 0) throw new Error(`costPerMile must be positive, got ${costPerMile}`)
+  if (!Number.isFinite(miles)) throw new Error(`miles must be finite, got ${miles}`)
+  if (miles <= 0) throw new Error(`miles must be positive, got ${miles}`)
+  const total = costPerMile * miles
+  if (!Number.isFinite(total)) {
+    throw new Error(`mileage total is not finite: ${costPerMile} * ${miles}`)
+  }
+  const amount = round2(total)
+  if (amount <= 0 || !Number.isSafeInteger(Math.round(amount * 100))) {
+    throw new Error('Mileage expense must be at least $0.01 and within the supported monetary range')
+  }
+  return amount
 }
 
 function parseISODateUTC(value: string, name = 'date'): Date {
@@ -74,13 +101,26 @@ function assertNoAmbiguousWindows(entries: FixedExpenseInput[]): void {
       }))
       .sort((a, b) => a.from.getTime() - b.from.getTime())
 
-    // unbounded-from rows (no from) must be alone and cannot coexist with dated rows
+    // unbounded-from rows (no from) cannot overlap dated rows; a legacy unbounded-from
+    // row that ends on or before the first dated row is allowed.
     const unboundedFrom = group.filter((e) => e.from == null)
-    if (unboundedFrom.length > 0 && dated.length > 0) {
-      throw new Error(`expenseId ${group[0].expenseId} has unbounded-from and dated revisions`)
-    }
     if (unboundedFrom.length > 1) {
       throw new Error(`expenseId ${group[0].expenseId} has multiple unbounded-from revisions`)
+    }
+    if (unboundedFrom.length === 1 && dated.length > 0) {
+      const u = unboundedFrom[0]
+      const firstDated = dated[0]
+      if (u.until == null) {
+        throw new Error(
+          `expenseId ${group[0].expenseId} has an active unbounded-from revision overlapping dated revisions`,
+        )
+      }
+      const uUntil = parseISODateUTC(u.until, `${u.label} until`)
+      if (uUntil > firstDated.from) {
+        throw new Error(
+          `expenseId ${group[0].expenseId} has unbounded-from revision overlapping dated revisions`,
+        )
+      }
     }
 
     for (let i = 0; i < dated.length; i++) {
@@ -108,6 +148,7 @@ export interface FixedExpenseChangeAdd {
   label: string
   amount: number
   effectiveFrom: string
+  mileage?: FixedExpenseMileage | null
 }
 
 export interface FixedExpenseChangeChange {
@@ -116,6 +157,7 @@ export interface FixedExpenseChangeChange {
   label: string
   amount: number
   effectiveFrom: string
+  mileage?: FixedExpenseMileage | null
 }
 
 export interface FixedExpenseChangeEnd {
@@ -170,12 +212,16 @@ export function applyFixedExpenseChange(
 
   if (change.kind === 'add') {
     assertNonBlankLabel(change.label)
-    assertFinitePositive2Decimals(change.amount)
     parseISODateUTC(change.effectiveFrom, 'effectiveFrom')
+
+    const mileage = change.mileage ?? null
+    const amount = mileage != null
+      ? calculateMileageExpense(mileage)
+      : (assertFinitePositive2Decimals(change.amount), round2(change.amount))
 
     const added: FixedExpenseInput = {
       label: change.label.trim(),
-      amount: round2(change.amount),
+      amount,
       from: change.effectiveFrom,
       until: null,
       revisionId: makeId(),
@@ -184,6 +230,7 @@ export function applyFixedExpenseChange(
       recordedBy: audit.by,
       endedAt: null,
       endedBy: null,
+      mileage,
     }
     const next = [...entries, added]
     assertNoAmbiguousWindows(next)
@@ -225,11 +272,21 @@ export function applyFixedExpenseChange(
 
   // change.kind === 'change'
   assertNonBlankLabel(change.label)
-  assertFinitePositive2Decimals(change.amount)
-  const newAmount = round2(change.amount)
   const newLabel = change.label.trim()
-  if (newLabel === old.label && newAmount === old.amount) {
-    throw new Error('no-op change: label and amount are unchanged')
+  const newMileage = change.mileage ?? null
+  const newAmount =
+    newMileage != null
+      ? calculateMileageExpense(newMileage)
+      : (assertFinitePositive2Decimals(change.amount), round2(change.amount))
+
+  const basisUnchanged =
+    (old.mileage == null && newMileage == null) ||
+    (old.mileage != null &&
+      newMileage != null &&
+      old.mileage.costPerMile === newMileage.costPerMile &&
+      old.mileage.miles === newMileage.miles)
+  if (newLabel === old.label && newAmount === old.amount && basisUnchanged) {
+    throw new Error('no-op change: label, amount, and mileage basis are unchanged')
   }
 
   const updatedOld: FixedExpenseInput = {
@@ -249,6 +306,7 @@ export function applyFixedExpenseChange(
     recordedBy: audit.by,
     endedAt: null,
     endedBy: null,
+    mileage: newMileage,
   }
   const next = entries.map((e, i) => (i === index ? updatedOld : e)).concat(replacement)
   assertNoAmbiguousWindows(next)

@@ -6,6 +6,7 @@ import type { FixedExpenseInput } from '@/lib/driverPay'
 import {
   prepareFixedExpenses,
   applyFixedExpenseChange,
+  calculateMileageExpense,
   type FixedExpenseChange,
   type FixedExpenseAudit,
 } from '@/lib/fixedExpenseHistory'
@@ -18,6 +19,7 @@ export type FixedExpenseEditorProps = {
   onEditingChange?: (editing: boolean) => void
   title?: string
   hint?: string
+  allowMileage?: boolean
 }
 
 type Mode = 'idle' | 'add' | 'change' | 'end'
@@ -55,6 +57,24 @@ function formatCurrency(n: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 }
 
+function formatRate(n: number) {
+  return `$${n.toLocaleString('en-US', { maximumFractionDigits: 6, useGrouping: true })}`
+}
+
+function formatMiles(n: number) {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2, useGrouping: true })
+}
+
+/** Strip cosmetic characters; reject anything that isn't a plain positive decimal. */
+function parseStrictPositive(s: string, maxDecimals?: number): number | null {
+  const cleaned = s.replace(/[$,\s]/g, '')
+  const decimals = maxDecimals == null ? '' : `{1,${maxDecimals}}`
+  const pattern = maxDecimals == null ? /^\d+(\.\d+)?$/ : new RegExp(`^\\d+(\\.\\d${decimals})?$`)
+  if (!pattern.test(cleaned)) return null
+  const n = Number(cleaned)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
 function localToday() {
   return chicagoDateStr(new Date())
 }
@@ -67,6 +87,7 @@ export function FixedExpenseEditor({
   onEditingChange,
   title = `Fixed ${periodDays === 7 ? 'weekly' : 'biweekly'} expenses`,
   hint,
+  allowMileage = false,
 }: FixedExpenseEditorProps) {
   const { user } = useAuth()
   const today = localToday()
@@ -76,6 +97,9 @@ export function FixedExpenseEditor({
   const [draftLabel, setDraftLabel] = useState('')
   const [draftAmount, setDraftAmount] = useState('')
   const [draftDate, setDraftDate] = useState(today)
+  const [amountType, setAmountType] = useState<'fixed' | 'mileage'>('fixed')
+  const [draftCostPerMile, setDraftCostPerMile] = useState('')
+  const [draftMiles, setDraftMiles] = useState('')
   const [error, setError] = useState<string | null>(null)
   const formId = useId()
 
@@ -94,6 +118,9 @@ export function FixedExpenseEditor({
     setDraftLabel('')
     setDraftAmount('')
     setDraftDate(today)
+    setAmountType('fixed')
+    setDraftCostPerMile('')
+    setDraftMiles('')
     setError(null)
   }
 
@@ -103,13 +130,20 @@ export function FixedExpenseEditor({
     setDraftLabel('')
     setDraftAmount('')
     setDraftDate(today)
+    setAmountType('fixed')
+    setDraftCostPerMile('')
+    setDraftMiles('')
     setError(null)
   }
 
   const startChange = () => {
     setMode('change')
     setDraftLabel(selected?.label ?? '')
-    setDraftAmount(selected ? String(selected.amount) : '')
+    const hasMileage = allowMileage && selected?.mileage != null
+    setAmountType(hasMileage ? 'mileage' : 'fixed')
+    setDraftAmount(hasMileage ? '' : (selected ? String(selected.amount) : ''))
+    setDraftCostPerMile(hasMileage ? String(selected!.mileage!.costPerMile) : '')
+    setDraftMiles(hasMileage ? String(selected!.mileage!.miles) : '')
     setDraftDate(today)
     setError(null)
   }
@@ -122,10 +156,9 @@ export function FixedExpenseEditor({
 
   const apply = () => {
     const labelText = draftLabel.trim()
-    const amountNum = parseFloat(draftAmount.replace(/[$,\s]/g, ''))
-    if (mode === 'add' || mode === 'change') {
-      if (!labelText) { setError('Expense type is required'); return }
-      if (!Number.isFinite(amountNum) || amountNum <= 0) { setError('Enter a positive amount'); return }
+    if ((mode === 'add' || mode === 'change') && !labelText) {
+      setError('Expense type is required')
+      return
     }
     if (!draftDate) { setError('Effective date is required'); return }
     if ((mode === 'change' || mode === 'end') && !selectedRevisionId) {
@@ -133,18 +166,50 @@ export function FixedExpenseEditor({
       return
     }
 
+    let amountNum: number | undefined
+    let mileage: { costPerMile: number; miles: number } | undefined
+
+    if ((mode === 'add' || mode === 'change') && amountType === 'mileage') {
+      const costPerMile = parseStrictPositive(draftCostPerMile)
+      const miles = parseStrictPositive(draftMiles, 3)
+      if (costPerMile == null) { setError('Enter a valid cost per mile'); return }
+      if (miles == null) { setError('Enter valid miles'); return }
+      try {
+        amountNum = calculateMileageExpense({ costPerMile, miles })
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Invalid mileage calculation')
+        return
+      }
+      mileage = { costPerMile, miles }
+    } else if (mode === 'add' || mode === 'change') {
+      const parsedAmount = parseStrictPositive(draftAmount, 2)
+      if (parsedAmount == null) { setError('Enter a positive amount'); return }
+      amountNum = parsedAmount
+    }
+
     const audit: FixedExpenseAudit = { at: new Date().toISOString(), by: user?.email ?? null }
     let change: FixedExpenseChange
     if (mode === 'add') {
-      change = { kind: 'add', label: labelText, amount: amountNum, effectiveFrom: draftDate }
+      change = mileage
+        ? { kind: 'add', label: labelText, amount: amountNum!, effectiveFrom: draftDate, mileage }
+        : { kind: 'add', label: labelText, amount: amountNum!, effectiveFrom: draftDate }
     } else if (mode === 'change') {
-      change = {
-        kind: 'change',
-        revisionId: selectedRevisionId!,
-        label: labelText,
-        amount: amountNum,
-        effectiveFrom: draftDate,
-      }
+      change = mileage
+        ? {
+            kind: 'change',
+            revisionId: selectedRevisionId!,
+            label: labelText,
+            amount: amountNum!,
+            effectiveFrom: draftDate,
+            mileage,
+          }
+        : {
+            kind: 'change',
+            revisionId: selectedRevisionId!,
+            label: labelText,
+            amount: amountNum!,
+            effectiveFrom: draftDate,
+          }
     } else {
       change = { kind: 'end', revisionId: selectedRevisionId!, effectiveFrom: draftDate }
     }
@@ -231,7 +296,11 @@ export function FixedExpenseEditor({
                         />
                       )}
                       <span style={{ flex: 1, fontSize: 12.5, color: 'var(--ds-t1)' }}>
-                        {formatCurrency(row.amount)} · {row.from ?? 'start'} → {row.until ?? 'now'}
+                        {row.mileage
+                          ? `${formatMiles(row.mileage.miles)} miles × ${formatRate(row.mileage.costPerMile)}/mi = ${formatCurrency(row.amount)}`
+                          : formatCurrency(row.amount)}
+                        {' · '}
+                        {row.from ?? 'start'} → {row.until ?? 'now'}
                       </span>
                       <span
                         style={{
@@ -298,29 +367,120 @@ export function FixedExpenseEditor({
           </div>
 
           {(mode === 'add' || mode === 'change') && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label htmlFor={`${formId}-label`} style={label}>Expense type *</label>
-                <input
-                  id={`${formId}-label`}
-                  style={input}
-                  value={draftLabel}
-                  onChange={(e) => setDraftLabel(e.target.value)}
-                  placeholder="Insurance"
-                  disabled={disabled}
-                />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <label htmlFor={`${formId}-label`} style={label}>Expense type *</label>
+                  <input
+                    id={`${formId}-label`}
+                    style={input}
+                    value={draftLabel}
+                    onChange={(e) => setDraftLabel(e.target.value)}
+                    placeholder="Insurance"
+                    disabled={disabled}
+                  />
+                </div>
+                {amountType === 'fixed' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <label htmlFor={`${formId}-amount`} style={label}>Amount *</label>
+                    <input
+                      id={`${formId}-amount`}
+                      style={input}
+                      value={draftAmount}
+                      onChange={(e) => setDraftAmount(e.target.value)}
+                      placeholder="250"
+                      disabled={disabled}
+                    />
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <label htmlFor={`${formId}-amount`} style={label}>Amount *</label>
-                <input
-                  id={`${formId}-amount`}
-                  style={input}
-                  value={draftAmount}
-                  onChange={(e) => setDraftAmount(e.target.value)}
-                  placeholder="250"
-                  disabled={disabled}
-                />
-              </div>
+
+              {allowMileage && (
+                <div>
+                  <label style={label}>Calculation</label>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                    {[
+                      { v: 'fixed' as const, t: 'Fixed amount' },
+                      { v: 'mileage' as const, t: 'Mileage calculation' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => {
+                          setAmountType(opt.v)
+                          if (opt.v === 'fixed') {
+                            setDraftCostPerMile('')
+                            setDraftMiles('')
+                          } else {
+                            setDraftAmount('')
+                          }
+                          setError(null)
+                        }}
+                        disabled={disabled}
+                        style={{
+                          flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                          border: `1.5px solid ${amountType === opt.v ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                          background: amountType === opt.v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
+                          fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)',
+                        }}
+                      >
+                        {opt.t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {allowMileage && amountType === 'mileage' && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 120px', gap: 10 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label htmlFor={`${formId}-cost-per-mile`} style={label}>Cost per mile ($/mile) *</label>
+                      <input
+                        id={`${formId}-cost-per-mile`}
+                        style={input}
+                        value={draftCostPerMile}
+                        onChange={(e) => setDraftCostPerMile(e.target.value)}
+                        placeholder="0.125"
+                        disabled={disabled}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label htmlFor={`${formId}-miles`} style={label}>Miles *</label>
+                      <input
+                        id={`${formId}-miles`}
+                        style={input}
+                        value={draftMiles}
+                        onChange={(e) => setDraftMiles(e.target.value)}
+                        placeholder="2000"
+                        disabled={disabled}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <label htmlFor={`${formId}-calculated-amount`} style={label}>Calculated amount</label>
+                      <input
+                        id={`${formId}-calculated-amount`}
+                        style={{ ...input, background: 'var(--ds-bg)' }}
+                        value={(() => {
+                          const costPerMile = parseStrictPositive(draftCostPerMile)
+                          const miles = parseStrictPositive(draftMiles, 3)
+                          if (costPerMile == null || miles == null) return ''
+                          try {
+                            return formatCurrency(calculateMileageExpense({ costPerMile, miles }))
+                          } catch {
+                            return ''
+                          }
+                        })()}
+                        readOnly
+                        disabled={disabled}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+                    Amount uses the miles you enter for this weekly expense. The existing effective-date and day proration still apply; this is not an automatic ELD download.
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -338,8 +498,8 @@ export function FixedExpenseEditor({
             />
             <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
               {mode === 'end'
-                ? 'The expense stops applying to periods starting on this date.'
-                : 'The new amount/type applies to periods starting on this date.'}
+                ? 'The expense stops on this date; a partial period is prorated by day.'
+                : 'The new amount/type starts on this date; a partial period is prorated by day.'}
             </div>
           </div>
 

@@ -96,6 +96,22 @@ export const rowOutstanding = (r: ApptQueueRow): boolean =>
   (r.deliveryStatus !== null && r.deliveryStatus !== 'confirmed') ||
   !!(r.pickupKind || r.deliveryKind)
 
+/** Statuses that represent work on the Appts page (Dennis queue + non-Batory ratecon). */
+const DENNIS_ACTIONABLE_STATUSES: EffectiveApptStatus[] = [
+  'need_request',
+  'requested',
+  'change_needed',
+  'ratecon_needed',
+]
+
+/** True when a stop status belongs in the Appts page queue — i.e. Dennis can act on it. */
+export const isDennisActionable = (status: EffectiveApptStatus | null): boolean =>
+  status !== null && DENNIS_ACTIONABLE_STATUSES.includes(status)
+
+/** True when the row has at least one end that belongs on the Appts page. */
+export const rowActionable = (r: ApptQueueRow): boolean =>
+  isDennisActionable(r.pickupStatus) || isDennisActionable(r.deliveryStatus)
+
 /**
  * Which customers must have BOTH proof screenshots (E2Open update + email confirmation)
  * before a booking shows Confirmed. Batory is the account with the E2Open workflow;
@@ -190,9 +206,10 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
 }
 
 /** Only the shipments still waiting on at least one appointment — stale rows (every
- *  date > STALE_AFTER_DAYS past) are no longer considered open. */
+ *  date > STALE_AFTER_DAYS past) are no longer considered open. Ruben-only
+ *  (need_book) rows live on the Calendar and are excluded here. */
 export const apptOutstanding = (loads: Load[]): ApptQueueRow[] =>
-  apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r) && !r.cleared)
+  apptQueue(loads).filter((r) => rowActionable(r) && !isStaleRow(r) && !r.cleared)
 
 /** Open shipment count, for the sidebar badge — settled AND stale shipments don't count. */
 export const apptQueueCount = (loads: Load[]): number => apptOutstanding(loads).length

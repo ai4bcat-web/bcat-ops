@@ -201,6 +201,17 @@ describe('apptQueueCount', () => {
   it('a stale outstanding load (all dates 5+ days past) no longer counts as open', () => {
     expect(apptQueueCount([load({ stops: [stop({ apptType: 'tbd', appt: fromDateInput('2020-01-01') })] })])).toBe(0)
   })
+
+  it('excludes Ruben-only need_book rows from the open count', () => {
+    const rubenOnly = load({
+      id: 'ro', customer: 'Batory Foods',
+      stops: [
+        stop({ id: 'p', apptType: 'exact', appt: fromDateTimeInput('2099-08-20T09:00'), apptStatus: 'confirmed', apptProofs: { e2open: 'a', email: 'b' } }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: FUT }),
+      ],
+    })
+    expect(apptQueueCount([rubenOnly])).toBe(0)
+  })
 })
 
 describe('isPastAppt / splitPastAppts', () => {

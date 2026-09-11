@@ -71,4 +71,12 @@ describe('BoxTruckSettingsModal fixed-expense wiring', () => {
     expect(ended?.until).toBe('2026-09-15')
     expect(ended?.endedBy).toBe('tester@bcatcorp.com')
   })
+
+  it('does not expose mileage calculation controls (Amazon-only feature)', () => {
+    render(<SettingsModal driver={driver} existing={existing} onSave={vi.fn()} onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    expect(screen.queryByRole('button', { name: /Mileage calculation/i })).toBeNull()
+    expect(screen.getByLabelText(/Amount/i)).toBeTruthy()
+  })
 })

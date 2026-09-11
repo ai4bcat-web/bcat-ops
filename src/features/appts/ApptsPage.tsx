@@ -7,8 +7,8 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAuditLog } from '@/hooks/useAuditLog'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { isStaleRow,
-  apptQueue, rowOutstanding, splitPastAppts, sortApptRows, groupByPickupDate,
+import {
+  apptQueue, apptOutstanding, rowOutstanding, rowActionable, splitPastAppts, sortApptRows, groupByPickupDate,
   type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir, type ApptDateSection,
   type ApptNeedKind,
 } from '@/lib/apptQueue'
@@ -198,8 +198,6 @@ interface StatusChoice {
   label: string
   needs: string | null
   missingSlots: ApptProofSlot[]
-  /** This transition wants a date+time picked inline (Ruben's handoff, CHANGE NEEDED). */
-  needsDateTime?: boolean
   /** Non-Batory: the ONE required document — the ratecon (PDF or screenshot). */
   rateconUpload?: boolean
 }
@@ -220,11 +218,9 @@ function statusChoices(stop: Stop | undefined, actor: string | null | undefined,
   const choices: StatusChoice[] = []
   const isSetter = canSetChangeNeeded(actor)
 
-  // NEED RUBEN → NEED DENNIS: Ruben picks the day + time right here; the save books his
-  // time, advances the ladder, and fires Dennis's task + the #appts-ivan ping.
-  if (effective === 'need_book') {
-    choices.push({ target: 'need_request', label: 'NEED DENNIS', needs: null, missingSlots: [], needsDateTime: true })
-  }
+  // NEED RUBEN is Ruben's job on the Calendar. The Appts page only shows the result
+  // after Ruben has picked a time and the stop lands in NEED DENNIS.
+  if (effective === 'need_book') return choices
 
   if (current !== 'requested') {
     const hasReq = canMarkRequested(stop)
@@ -317,7 +313,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
   const needAsk = stop ? defaultRequestedFor(stop) : null
   const stamped = stop?.apptRequestedFor ?? null
   const displayLabel =
-    (status === 'need_request' || status === 'need_book' || status === 'change_needed') && bare && needAsk
+    (status === 'need_request' || status === 'change_needed') && bare && needAsk
       ? `NEED ${fmtChi(needAsk)}`
     : (status === 'requested' || status === 'confirmed') && (bare || label.startsWith('NEED'))
       ? (stamped ? `requested ${fmtChi(stamped)}` : '—')
@@ -328,16 +324,11 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
   const choices = statusChoices(stop, actor, status, requiresApptProofs(load.customer))
   const isToggleable = choices.length > 0
 
-  const applyStatus = async (target: ApptWorkflowStatus, pickedDateTime?: string) => {
+  const applyStatus = async (target: ApptWorkflowStatus) => {
     if (!load || !stop) return
     setSaving(true)
     try {
       const stopPatch: Partial<Stop> = { apptStatus: target }
-      if (target === 'need_request' && pickedDateTime) {
-        // Ruben's handoff: his picked day+time becomes the appointment Dennis books.
-        stopPatch.appt = fromDateTimeInput(pickedDateTime)
-        stopPatch.apptType = 'exact'
-      }
       if (target === 'requested') stopPatch.apptRequestedFor = stop.apptRequestedFor ?? defaultRequestedFor(stop)
       if (target === 'change_needed') {
         Object.assign(stopPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : stop.apptChangeTo || ''))
@@ -418,7 +409,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       <div style={{ marginBottom: 3, position: 'relative' }}>
         {isToggleable ? (
           <button
-            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : (status === 'need_book' && stop?.appt && apptHasTime(stop.appt)) ? formatDateTimeInput(stop.appt) : ''); setPendingTarget(null); setRateconMode(false); setUploadedChSlots(new Set()) }}
+            onClick={() => { setToggling(true); setChangeTo(stop?.apptChangeTo ? formatDateTimeInput(stop.apptChangeTo) : ''); setPendingTarget(null); setRateconMode(false); setUploadedChSlots(new Set()) }}
             title="Toggle appointment status"
             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
           >
@@ -559,21 +550,21 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                 const needsUpload = ch.missingSlots.length > 0
                 return (
                   <div key={ch.target} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {(needsChangeTo || ch.needsDateTime) && (
+                    {needsChangeTo && (
                       <input
                         type="datetime-local"
-                        aria-label={ch.needsDateTime ? 'Delivery day and time' : 'Change to date and time'}
+                        aria-label="Change to date and time"
                         className="h-7 px-2 text-[11px] rounded border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         value={changeTo}
                         onChange={(e) => setChangeTo(e.target.value)}
                         placeholder="Wanted date/time"
-                        title={ch.needsDateTime ? 'The delivery day and time you want booked' : 'The date and time you want instead'}
+                        title="The date and time you want instead"
                       />
                     )}
                     <button
-                      onClick={() => ch.needsDateTime ? void applyStatus(ch.target, changeTo) : handleStatusClick(ch)}
-                      disabled={saving || isCurrent || ((needsChangeTo || ch.needsDateTime) && !changeTo)}
-                      title={isCurrent ? `Already ${ch.label}` : (needsChangeTo || ch.needsDateTime) && !changeTo ? 'Pick the date and time first' : needsUpload ? ch.needs! : `Move to ${ch.label}`}
+                      onClick={() => handleStatusClick(ch)}
+                      disabled={saving || isCurrent || (needsChangeTo && !changeTo)}
+                      title={isCurrent ? `Already ${ch.label}` : needsChangeTo && !changeTo ? 'Pick the date and time first' : needsUpload ? ch.needs! : `Move to ${ch.label}`}
                       style={{
                         height: chipHeight, padding: '0 8px', borderRadius: 6, fontSize: 10.5, fontWeight: 600, fontFamily: 'inherit',
                         cursor: isCurrent || saving ? 'default' : 'pointer',
@@ -585,7 +576,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
                         width: '100%',
                       }}
                     >
-                      {ch.needsDateTime ? `→ NEED DENNIS ${changeTo ? '@ ' + new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '(pick day & time)'}` : needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : needsUpload ? (
+                      {needsChangeTo ? `CHANGE to ${changeTo ? new Date(fromDateTimeInput(changeTo)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '…'}` : needsUpload ? (
                         <>{ch.label} <ImagePlus size={10} /></>
                       ) : ch.label}
                     </button>
@@ -603,19 +594,29 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
           </div>
         )}
       </div>
-      <button
-        onClick={() => setEditing(true)}
-        title="Set this time — same as editing it on the calendar"
-        style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
-          color: unset ? 'var(--ds-t3)' : 'var(--ds-t1)', textAlign: 'left',
-          textDecoration: 'underline', textDecorationStyle: 'dotted',
-          textUnderlineOffset: 3, textDecorationColor: 'var(--ds-border)' }}
-      >
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
-          {refr.appt ? formatDateShort(refr.appt) : ''}
+      {status === 'need_book' ? (
+        <div style={{ textAlign: 'left' }}>
+          <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+            {refr.appt ? formatDateShort(refr.appt) : ''}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t1)' }}>{displayLabel}</div>
+          <div style={{ fontSize: 10, color: 'var(--ds-t3)', marginTop: 2 }}>Awaiting Calendar time</div>
         </div>
-        {displayLabel}
-      </button>
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          title="Set this time — same as editing it on the calendar"
+          style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', cursor: 'pointer',
+            color: unset ? 'var(--ds-t3)' : 'var(--ds-t1)', textAlign: 'left',
+            textDecoration: 'underline', textDecorationStyle: 'dotted',
+            textUnderlineOffset: 3, textDecorationColor: 'var(--ds-border)' }}
+        >
+          <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+            {refr.appt ? formatDateShort(refr.appt) : ''}
+          </div>
+          {displayLabel}
+        </button>
+      )}
       {editing && (
         <ApptEditPopover
           load={load}
@@ -896,14 +897,17 @@ export function ApptsPage() {
   )
 
   const matched = useMemo(() => {
-    const all = onlyOpen ? apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r)) : apptQueue(loads)
+    // The Appts page is Dennis's work queue. Ruben-only need_book rows live on the
+    // Calendar; mixed rows stay here so Dennis can pick up the pickup side.
+    const base = apptQueue(loads).filter((r) => !rowOutstanding(r) || rowActionable(r))
+    const all = onlyOpen ? apptOutstanding(loads) : base
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>
       [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation, r.notes].some((v) => v.toLowerCase().includes(q)),
     )
   }, [loads, query, onlyOpen])
-  const openTotal = useMemo(() => apptQueue(loads).filter((r) => rowOutstanding(r) && !isStaleRow(r)).length, [loads])
+  const openTotal = useMemo(() => apptOutstanding(loads).length, [loads])
 
   // Appointment dates that have already gone by are almost always dead history — they
   // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.

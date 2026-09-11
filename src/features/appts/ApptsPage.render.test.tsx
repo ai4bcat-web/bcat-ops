@@ -21,6 +21,7 @@ vi.mock('@/hooks/useDrivers', () => ({
   useDrivers: () => ({ drivers: [{ id: 'd1', name: 'Zak Pace' }] }),
 }))
 vi.mock('@/hooks/useIsMobile', () => ({ useIsMobile: () => false }))
+vi.mock('@/hooks/useDirectory', () => ({ useDirectory: () => ({ customers: [], locations: [], loading: false }) }))
 vi.mock('@/lib/rateconUpload', () => ({ uploadRateconAndApply: vi.fn().mockResolvedValue(true) }))
 const auditLog = vi.fn<() => AuditLogEntry[]>(() => [])
 vi.mock('@/hooks/useAuditLog', () => ({ useAuditLog: () => ({ entries: auditLog() }) }))
@@ -41,6 +42,8 @@ vi.mock('@/lib/apiClient', () => ({
   deleteApptProof: vi.fn().mockResolvedValue(undefined),
   createApptMoveTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
   updateIntakeItem: vi.fn().mockResolvedValue({}),
+  listCustomers: vi.fn().mockResolvedValue([]),
+  listLocations: vi.fn().mockResolvedValue([]),
 }))
 
 import { ApptsPage } from './ApptsPage'
@@ -303,9 +306,9 @@ describe('ApptsPage', () => {
     expect(id).toBe('l5')
     const written = patch.stops.find((st: { id: string }) => st.id === 'p')
     expect(written.appt).toBe(fromDateTimeInput('2099-03-04T09:15'))
-    // Status is saved as selected: the row was NEED and nobody changed that, so adding a
-    // requested time keeps it NEED (and on the queue). Booking is choosing Exact.
-    expect(written.apptType).toBe('tbd')
+    // Typing a real time while the dropdown still reads NEED/TBD now saves as Exact
+    // so the time is never silently discarded.
+    expect(written.apptType).toBe('exact')
   })
 
   it('books the stop when Exact is chosen with the time', async () => {
@@ -325,18 +328,26 @@ describe('ApptsPage', () => {
     expect(written.apptType).toBe('exact')
   })
 
-  it('posts to #appts-ivan when a time cell flags NEED — the calendar path used to be silent', async () => {
-    loads.mockReturnValue([pair({ id: 'l9' })])
+  it('posts to #appts-ivan when a pickup is flagged NEED', async () => {
+    loads.mockReturnValue([load({
+      id: 'l9', customer: 'Batory Foods',
+      stops: [
+        stop({ id: 'p', type: 'pickup', apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30') }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact', appt: fromDateTimeInput('2099-01-02T14:30') }),
+      ],
+    })])
     render(<ApptsPage />)
 
-    // The pickup on `pair` is already NEED; move the DELIVERY (exact, 14:30) to NEED.
-    fireEvent.click(screen.getAllByTitle(/Set this time/)[1])
+    // Flag the already-booked pickup back to NEED (Dennis work) and clear the time
+    // so the shared popover writes a real TBD stop instead of keeping the typed time.
+    fireEvent.click(screen.getAllByTitle(/Set this time/)[0])
     fireEvent.change(screen.getByLabelText('Appointment type'), { target: { value: 'tbd' } })
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '' } })
     fireEvent.click(screen.getByText('Save'))
 
     await waitFor(() => expect(notifyApptNeeded).toHaveBeenCalled())
     const arg = notifyApptNeeded.mock.calls[0][0]
-    expect(arg.stopKind).toBe('delivery')
+    expect(arg.stopKind).toBe('pickup')
     expect(arg.kind).toBe('needed')
     expect(arg.actorName).toBe('ryne@bcatcorp.com')
   })
@@ -465,29 +476,48 @@ describe('NEED DENNIS handoff', () => {
   })
 })
 
-describe('Ruben clicks NEED RUBEN', () => {
-  it('the chip menu offers NEED DENNIS with a day+time picker, and the save books it', async () => {
+describe('NEED RUBEN stays on the Calendar', () => {
+  it('hides a Ruben-only load from the Appts queue', () => {
     loads.mockReturnValue([load({
-      id: 'lr1', aljexId: 'RUBENPICK', customer: 'Batory Foods',
+      id: 'lr1', aljexId: 'RUBENONLY', customer: 'Batory Foods',
       stops: [
-        stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'), apptStatus: 'requested', apptRequestedFor: fromDateTimeInput('2099-01-01T12:00') }),
-        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact',
-               appt: fromDateInput('2099-01-02'), apptStatus: 'need_book' }),
+        stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'), apptStatus: 'confirmed', apptProofs: { e2open: 'a', email: 'b' } }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2099-01-02') }),
       ],
     })])
     render(<ApptsPage />)
-    const row = screen.getByText('RUBENPICK').closest('tr')!
+    expect(screen.queryByText('RUBENONLY')).toBeNull()
+  })
+
+  it('keeps a mixed load but the NEED RUBEN delivery is not actionable', () => {
+    loads.mockReturnValue([load({
+      id: 'lr2', aljexId: 'MIXED', customer: 'Batory Foods',
+      stops: [
+        stop({ apptType: 'tbd', appt: fromDateInput('2099-01-01') }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2099-01-02') }),
+      ],
+    })])
+    render(<ApptsPage />)
+    const row = screen.getByText('MIXED').closest('tr')!
     expect(row.children[2].textContent).toContain('NEED RUBEN')
-    // Click the chip → the menu opens with the handoff option
-    fireEvent.click(within(row.children[2] as HTMLElement).getByText('NEED RUBEN'))
-    fireEvent.change(screen.getByLabelText('Delivery day and time'), { target: { value: '2099-01-02T14:00' } })
-    fireEvent.click(screen.getByText(/→ NEED DENNIS @/))
-    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
-    const [, patch] = updateLoad.mock.calls[0]
-    const del = patch.stops.find((s: { id: string }) => s.id === 'd')
-    expect(del.apptStatus).toBe('need_request')
-    expect(del.appt).toBe(fromDateTimeInput('2099-01-02T14:00'))
-    expect(del.apptType).toBe('exact')
+    expect(row.children[2].textContent).toContain('Awaiting Calendar time')
+    expect(within(row.children[2] as HTMLElement).queryByTitle('Toggle appointment status')).toBeNull()
+    expect(within(row.children[2] as HTMLElement).queryByTitle('Set this time — same as editing it on the calendar')).toBeNull()
+  })
+
+  it('shows a delivery after Ruben sends it to Dennis as NEED DENNIS with the chosen time', () => {
+    loads.mockReturnValue([load({
+      id: 'lr3', aljexId: 'RUBENSENT', customer: 'Batory Foods',
+      stops: [
+        stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'), apptStatus: 'confirmed', apptProofs: { e2open: 'a', email: 'b' } }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'exact',
+               appt: fromDateTimeInput('2099-01-02T14:00'), apptStatus: 'need_request' }),
+      ],
+    })])
+    render(<ApptsPage />)
+    const row = screen.getByText('RUBENSENT').closest('tr')!
+    expect(row.children[2].textContent).toContain('NEED DENNIS')
+    expect(row.children[2].textContent).toContain('14:00')
   })
 })
 

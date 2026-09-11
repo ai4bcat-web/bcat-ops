@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prepareFixedExpenses, applyFixedExpenseChange } from './fixedExpenseHistory'
+import { prepareFixedExpenses, applyFixedExpenseChange, calculateMileageExpense } from './fixedExpenseHistory'
 import type { FixedExpenseInput } from './driverPay'
 import { effectiveFixedExpenses } from './driverPay'
 
@@ -273,5 +273,151 @@ describe('integration with effectiveFixedExpenses', () => {
     )
     const r = effectiveFixedExpenses(entries, '2026-09-06', addDays('2026-09-06', 6))
     expect(r.map((f) => f.amount)).toEqual([42.86, 114.28])
+  })
+})
+
+describe('calculateMileageExpense', () => {
+  it('rounds total to cents and allows sub-cent rates', () => {
+    expect(calculateMileageExpense({ costPerMile: 0.1234, miles: 10 })).toBe(1.23)
+    expect(calculateMileageExpense({ costPerMile: 0.65, miles: 100 })).toBe(65)
+    expect(calculateMileageExpense({ costPerMile: 0.201, miles: 5 })).toBe(1.01)
+  })
+
+  it('rejects non-finite, zero, or negative operands', () => {
+    expect(() => calculateMileageExpense({ costPerMile: NaN, miles: 1 })).toThrow('costPerMile')
+    expect(() => calculateMileageExpense({ costPerMile: 0, miles: 1 })).toThrow('costPerMile')
+    expect(() => calculateMileageExpense({ costPerMile: -1, miles: 1 })).toThrow('costPerMile')
+    expect(() => calculateMileageExpense({ costPerMile: 1, miles: NaN })).toThrow('miles')
+    expect(() => calculateMileageExpense({ costPerMile: 1, miles: 0 })).toThrow('miles')
+    expect(() => calculateMileageExpense({ costPerMile: 1, miles: -1 })).toThrow('miles')
+    expect(() => calculateMileageExpense({ costPerMile: 0.001, miles: 1 })).toThrow()
+    expect(() => calculateMileageExpense({ costPerMile: 1e308, miles: 1 })).toThrow()
+  })
+})
+
+describe('applyFixedExpenseChange — mileage', () => {
+  it('adds a mileage-based expense and stores the computed amount and basis', () => {
+    const next = applyFixedExpenseChange(
+      [],
+      { kind: 'add', label: 'Fuel surcharge', amount: 0, effectiveFrom: '2026-09-01', mileage: { costPerMile: 0.65, miles: 100 } },
+      audit(() => 'rev-1'),
+    )
+    expect(next).toHaveLength(1)
+    expect(next[0].amount).toBe(65)
+    expect(next[0].mileage).toEqual({ costPerMile: 0.65, miles: 100 })
+  })
+
+  it('changes a fixed expense to mileage and records the new basis', () => {
+    const entries = prepareFixedExpenses([{ label: 'Truck', amount: 100, from: '2026-09-01' }], idSeq())
+    const old = entries[0]
+    const next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: old.revisionId!, label: 'Truck', amount: 0, effectiveFrom: '2026-09-15', mileage: { costPerMile: 0.5, miles: 200 } },
+      audit(() => 'rev-2'),
+    )
+    expect(next).toHaveLength(2)
+    const ended = next.find((e) => e.revisionId === old.revisionId)
+    const repl = next.find((e) => e.revisionId === 'rev-2')
+    expect(ended?.mileage).toBeUndefined()
+    expect(repl?.amount).toBe(100)
+    expect(repl?.mileage).toEqual({ costPerMile: 0.5, miles: 200 })
+  })
+
+  it('changes a mileage expense to a fixed amount and drops mileage metadata', () => {
+    const entries = prepareFixedExpenses(
+      [{ label: 'Truck', amount: 100, from: '2026-09-01', mileage: { costPerMile: 0.5, miles: 200 } }],
+      idSeq(),
+    )
+    const old = entries[0]
+    const next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: old.revisionId!, label: 'Truck', amount: 75, effectiveFrom: '2026-09-15' },
+      audit(() => 'rev-2'),
+    )
+    expect(next).toHaveLength(2)
+    const ended = next.find((e) => e.revisionId === old.revisionId)
+    const repl = next.find((e) => e.revisionId === 'rev-2')
+    expect(ended?.mileage).toEqual({ costPerMile: 0.5, miles: 200 })
+    expect(repl?.amount).toBe(75)
+    expect(repl?.mileage).toBeNull()
+  })
+
+  it('records a new revision when rate or miles change even if product is unchanged', () => {
+    const entries = prepareFixedExpenses(
+      [{ label: 'Truck', amount: 100, from: '2026-09-01', mileage: { costPerMile: 0.5, miles: 200 } }],
+      idSeq(),
+    )
+    const old = entries[0]
+    const next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: old.revisionId!, label: 'Truck', amount: 0, effectiveFrom: '2026-09-15', mileage: { costPerMile: 0.25, miles: 400 } },
+      audit(() => 'rev-2'),
+    )
+    expect(next).toHaveLength(2)
+    const repl = next.find((e) => e.revisionId === 'rev-2')
+    expect(repl?.amount).toBe(100)
+    expect(repl?.mileage).toEqual({ costPerMile: 0.25, miles: 400 })
+  })
+
+  it('rejects a no-op change when mileage basis is unchanged', () => {
+    const entries = prepareFixedExpenses(
+      [{ label: 'Truck', amount: 100, from: '2026-09-01', mileage: { costPerMile: 0.5, miles: 200 } }],
+      idSeq(),
+    )
+    expect(() =>
+      applyFixedExpenseChange(
+        entries,
+        { kind: 'change', revisionId: entries[0].revisionId!, label: 'Truck', amount: 0, effectiveFrom: '2026-09-15', mileage: { costPerMile: 0.5, miles: 200 } },
+        audit(),
+      ),
+    ).toThrow('no-op')
+  })
+
+  it('rejects malformed mileage operands', () => {
+    expect(() =>
+      applyFixedExpenseChange(
+        [],
+        { kind: 'add', label: 'X', amount: 1, effectiveFrom: '2026-09-01', mileage: { costPerMile: -0.5, miles: 100 } },
+        audit(),
+      ),
+    ).toThrow('costPerMile')
+    expect(() =>
+      applyFixedExpenseChange(
+        [],
+        { kind: 'add', label: 'X', amount: 1, effectiveFrom: '2026-09-01', mileage: { costPerMile: 0.5, miles: 0 } },
+        audit(),
+      ),
+    ).toThrow('miles')
+  })
+})
+
+describe('legacy unbounded-from revisions', () => {
+  it('allows changing a legacy unbounded-from charge to mileage and then to a fixed amount', () => {
+    const entries = prepareFixedExpenses([{ label: 'LEGACY', amount: 50 }], idSeq())
+    const first = entries[0]
+
+    let next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: first.revisionId!, label: 'LEGACY', amount: 0, effectiveFrom: '2026-09-15', mileage: { costPerMile: 0.5, miles: 100 } },
+      audit(() => 'rev-2'),
+    )
+    expect(next).toHaveLength(2)
+    const ended = next.find((e) => e.revisionId === first.revisionId)
+    expect(ended?.from).toBeUndefined()
+    expect(ended?.until).toBe('2026-09-15')
+    const mileageRev = next.find((e) => e.revisionId === 'rev-2')
+    expect(mileageRev?.amount).toBe(50)
+    expect(mileageRev?.mileage).toEqual({ costPerMile: 0.5, miles: 100 })
+
+    next = applyFixedExpenseChange(
+      next,
+      { kind: 'change', revisionId: mileageRev!.revisionId!, label: 'LEGACY', amount: 60, effectiveFrom: '2026-10-01' },
+      audit(() => 'rev-3'),
+    )
+    expect(next).toHaveLength(3)
+    const fixedRev = next.find((e) => e.revisionId === 'rev-3')
+    expect(fixedRev?.amount).toBe(60)
+    expect(fixedRev?.mileage).toBeNull()
+    expect(fixedRev?.from).toBe('2026-10-01')
   })
 })

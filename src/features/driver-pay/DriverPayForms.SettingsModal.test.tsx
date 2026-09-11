@@ -98,6 +98,31 @@ describe('DriverPaySettingsModal fixed-expense wiring', () => {
     expect(added?.revisionId).toBeTruthy()
   })
 
+  it('saves a mileage-based fixed expense through the Amazon settings modal', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(<SettingsModal driver={driver} existing={existing} onSave={onSave} onClose={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    expect(screen.getByRole('button', { name: /Mileage calculation/i })).toBeTruthy()
+
+    fireEvent.change(screen.getByPlaceholderText('Insurance'), { target: { value: 'Mileage reimbursement' } })
+    fireEvent.click(screen.getByRole('button', { name: /Mileage calculation/i }))
+    fireEvent.change(screen.getByLabelText(/Cost per mile/i), { target: { value: '0.125' } })
+    fireEvent.change(screen.getByLabelText(/Miles/i), { target: { value: '2000' } })
+    fireEvent.change(screen.getByLabelText(/Effective from/i), { target: { value: '2026-09-08' } })
+    fireEvent.click(screen.getByRole('button', { name: /Apply/i }))
+
+    fireEvent.click(screen.getByRole('button', { name: /Save settings/i }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const [patch] = onSave.mock.calls[0]
+    const expenses = (patch as DriverPaySetting).fixedExpenses as FixedExpenseInput[]
+    const mileageExpense = expenses.find((e) => e.label === 'Mileage reimbursement')
+    expect(mileageExpense?.amount).toBe(250)
+    expect(mileageExpense?.mileage).toEqual({ costPerMile: 0.125, miles: 2000 })
+    expect(mileageExpense?.from).toBe('2026-09-08')
+  })
+
   it('disables Save and explains why while a fixed-expense draft is open', () => {
     render(<SettingsModal driver={driver} existing={existing} onSave={vi.fn()} onClose={vi.fn()} />)
 

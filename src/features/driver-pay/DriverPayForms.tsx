@@ -543,6 +543,7 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
           periodDays={7}
           onEditingChange={setFixedEditing}
           title="Fixed weekly expenses"
+          allowMileage
         />
       </div>
 

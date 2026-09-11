@@ -11,11 +11,13 @@ import { getColor, getHighlightHex, LOAD_HIGHLIGHT_PALETTE } from '@/lib/driverC
 import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { updateStop, getStops } from '@/lib/stops'
+import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
+import { requiresApptProofs } from '@/lib/apptQueue'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
-import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS } from '@/lib/apptStatus'
+import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, type EffectiveApptStatus } from '@/lib/apptStatus'
 
 // ── Layout constants ──────────────────────────────────────────────────────────
 const DAY_COL_W = 252   // px per day column
@@ -76,6 +78,86 @@ function apptDate(iso: string | undefined | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+function handoffStopGrid(load: Load, kind: 'pickup' | 'delivery', stop?: Stop): Stop | undefined {
+  if (stop) return stop
+  const stops = getStops(load)
+  return kind === 'pickup'
+    ? stops.find((s) => s.type === 'pickup')
+    : [...stops].reverse().find((s) => s.type === 'delivery')
+}
+
+/** Clickable status chip for the grid calendar. NEED RUBEN opens the handoff popover;
+ *  timed delivery statuses open a small "Send to Dennis" menu for Ruben/Ryne. */
+function StatusHandoffGrid({ load, stop, kind, status }: {
+  load: Load
+  stop?: Stop
+  kind: 'pickup' | 'delivery'
+  status: EffectiveApptStatus
+}) {
+  const actor = useAppStore((s) => s.currentUserEmail)
+  const [mode, setMode] = useState<'menu' | 'handoff' | null>(null)
+
+  useEffect(() => {
+    if (mode !== 'menu') return
+    const close = () => setMode(null)
+    window.addEventListener('mousedown', close)
+    return () => window.removeEventListener('mousedown', close)
+  }, [mode])
+
+  const tone = STATUS_TONE_COLORS[STATUS_META[status].tone]
+  const label = statusLabel(status, kind)
+  const canAct = canSetChangeNeeded(actor) && requiresApptProofs(load.customer)
+  const isNeedBook = status === 'need_book'
+  const isTimedHandoff = kind === 'delivery' && (status === 'requested' || status === 'confirmed' || status === 'change_needed')
+  const clickable = canAct && (isNeedBook || isTimedHandoff)
+  const targetStop = handoffStopGrid(load, kind, stop)
+  const apptField = kind === 'pickup' ? 'pickupAppt' : 'deliveryAppt'
+  const typeField = kind === 'pickup' ? 'pickupApptType' : 'deliveryApptType'
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-block' }}>
+      <span
+        style={{
+          fontSize: 8, fontWeight: 700, padding: '0 3px', borderRadius: 3,
+          background: tone.bg, color: tone.fg, whiteSpace: 'nowrap',
+          cursor: clickable ? 'pointer' : undefined,
+        }}
+        title={clickable ? (isNeedBook ? 'Click to set the time and send to Dennis' : 'Send to Dennis') : 'Same status as the Appts page'}
+        onClick={clickable ? (e) => { e.stopPropagation(); setMode(isNeedBook ? 'handoff' : 'menu') } : undefined}
+      >
+        {label}
+      </span>
+
+      {mode === 'menu' && targetStop && (
+        <div
+          className="absolute z-50 top-full left-0 mt-1 rounded-lg border border-border bg-popover text-popover-foreground shadow-xl p-1"
+          style={{ width: 140 }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-2 py-1 text-[11px] rounded hover:bg-accent font-medium"
+            onClick={(e) => { e.stopPropagation(); setMode('handoff') }}
+          >
+            Send to Dennis
+          </button>
+        </div>
+      )}
+
+      {mode === 'handoff' && targetStop && (
+        <ApptEditPopover
+          load={load}
+          stop={targetStop}
+          apptField={apptField}
+          typeField={typeField}
+          intent="handoff"
+          onClose={() => setMode(null)}
+          className="absolute z-50 top-full left-0 mt-1"
+        />
+      )}
+    </div>
+  )
 }
 
 // Card-move date helpers (computeMoveDates / computeStopMove / shiftApptToDay)
@@ -283,11 +365,7 @@ function LoadCard({
           {puTime}
         </span>
         {puStatus && (
-          <span style={{ fontSize: 8, fontWeight: 700, padding: '0 3px', borderRadius: 3,
-            background: STATUS_TONE_COLORS[STATUS_META[puStatus].tone].bg,
-            color: STATUS_TONE_COLORS[STATUS_META[puStatus].tone].fg, whiteSpace: 'nowrap' }}>
-            {statusLabel(puStatus, 'pickup')}
-          </span>
+          <StatusHandoffGrid load={load} stop={stop} kind="pickup" status={puStatus} />
         )}
       </div>
 
@@ -299,11 +377,7 @@ function LoadCard({
           {deTime}
         </span>
         {deStatus && (
-          <span style={{ fontSize: 8, fontWeight: 700, padding: '0 3px', borderRadius: 3,
-            background: STATUS_TONE_COLORS[STATUS_META[deStatus].tone].bg,
-            color: STATUS_TONE_COLORS[STATUS_META[deStatus].tone].fg, whiteSpace: 'nowrap' }}>
-            {statusLabel(deStatus, 'delivery')}
-          </span>
+          <StatusHandoffGrid load={load} stop={stop} kind="delivery" status={deStatus} />
         )}
       </div>
 
