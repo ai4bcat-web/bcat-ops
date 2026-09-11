@@ -42,9 +42,9 @@ a@x.com,Al,Be,Co`
     expect(rows).toEqual([{ email: 'a@x.com', firstName: 'Al', lastName: 'Be', company: 'Co' }])
   })
 
-  it('returns empty when email column is missing', () => {
+  it('throws an actionable error when the email column is missing', () => {
     const csv = `Name,Company\nAl,Acme`
-    expect(parseCarrierCsv(csv)).toHaveLength(0)
+    expect(() => parseCarrierCsv(csv)).toThrow(/no recognizable email column/i)
   })
 
   it('lower-cases and trims emails', () => {
@@ -57,6 +57,82 @@ a@x.com,Al,Be,Co`
     const rows = parseCarrierCsv(csv)
     expect(rows[0].email).toBe('q@x.com')
     expect(rows[0].company).toBe('"Quoted" Co')
+  })
+
+  it('handles commas inside quoted fields', () => {
+    const csv = `Email,Company
+a@x.com,"Acme, Inc."
+b@x.com,"Bolt, LLC"`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toEqual({ email: 'a@x.com', company: 'Acme, Inc.' })
+    expect(rows[1]).toEqual({ email: 'b@x.com', company: 'Bolt, LLC' })
+  })
+
+  it('handles escaped quotes inside quoted fields', () => {
+    const csv = `Email,Company
+a@x.com,"""The ""Best"" Carrier"""`
+    const rows = parseCarrierCsv(csv)
+    expect(rows[0].company).toBe('"The "Best" Carrier"')
+  })
+
+  it('handles multiline quoted fields', () => {
+    const csv = `Email,Company
+a@x.com,"Acme Inc.
+Multi-line note"
+b@x.com,Bolt`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toEqual({ email: 'a@x.com', company: 'Acme Inc.\nMulti-line note' })
+    expect(rows[1]).toEqual({ email: 'b@x.com', company: 'Bolt' })
+  })
+
+  it('strips the UTF-8 BOM', () => {
+    const csv = `\uFEFFEmail,First Name\na@x.com,Al`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toEqual([{ email: 'a@x.com', firstName: 'Al' }])
+  })
+
+  it('handles CRLF line endings', () => {
+    const csv = `Email,Company\r\na@x.com,Acme\r\nb@x.com,Bolt`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toEqual({ email: 'a@x.com', company: 'Acme' })
+    expect(rows[1]).toEqual({ email: 'b@x.com', company: 'Bolt' })
+  })
+
+  it('auto-detects tab delimiter', () => {
+    const csv = `Email\tFirst Name\na@x.com\tAl`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toEqual([{ email: 'a@x.com', firstName: 'Al' }])
+  })
+
+  it('auto-detects semicolon delimiter', () => {
+    const csv = `Email;Company\na@x.com;Acme Inc.`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toEqual([{ email: 'a@x.com', company: 'Acme Inc.' }])
+  })
+
+  it('supports headerless single-column email lists', () => {
+    const csv = `a@x.com\nb@x.com\nc@x.com`
+    const rows = parseCarrierCsv(csv)
+    expect(rows).toHaveLength(3)
+    expect(rows.map((r) => r.email)).toEqual(['a@x.com', 'b@x.com', 'c@x.com'])
+  })
+
+  it('returns empty for an empty file', () => {
+    expect(parseCarrierCsv('')).toHaveLength(0)
+    expect(parseCarrierCsv('\n\n  \n')).toHaveLength(0)
+  })
+
+  it('returns empty for a header-only file', () => {
+    const csv = `Email,First Name,Last Name,Company`
+    expect(parseCarrierCsv(csv)).toHaveLength(0)
+  })
+
+  it('rejects unterminated quotes instead of silently swallowing later contacts', () => {
+    const csv = 'Email,Company\na@x.com,"Acme\nb@x.com,Bolt'
+    expect(() => parseCarrierCsv(csv)).toThrow(/quote/i)
   })
 })
 

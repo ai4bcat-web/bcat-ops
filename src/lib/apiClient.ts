@@ -2244,15 +2244,15 @@ export async function listCarrierContacts(lane?: CarrierLane): Promise<CarrierCo
   const contacts: CarrierContact[] = []
   let nextToken: string | null = null
   do {
-    const filter = lane ? `filter: { lane: { eq: "${lane}" } }` : ''
+    const filter = lane ? { lane: { eq: lane } } : undefined
     const result = await client.graphql({
-      query: `query ListCarrierContacts($nextToken: String) {
-        listCarrierContacts(limit: 1000, nextToken: $nextToken${filter ? `, ${filter}` : ''}) {
+      query: `query ListCarrierContacts($nextToken: String, $filter: ModelCarrierContactFilterInput) {
+        listCarrierContacts(limit: 1000, nextToken: $nextToken, filter: $filter) {
           items { ${CARRIER_CONTACT_FIELDS} }
           nextToken
         }
       }`,
-      variables: { nextToken },
+      variables: { nextToken, filter },
     }) as { data: { listCarrierContacts: { items: CarrierContact[]; nextToken?: string | null } } }
     const page = result.data.listCarrierContacts
     for (const item of page.items ?? []) {
@@ -2317,15 +2317,15 @@ export async function listCarrierCampaigns(lane?: CarrierLane): Promise<CarrierC
   const campaigns: CarrierCampaign[] = []
   let nextToken: string | null = null
   do {
-    const filter = lane ? `filter: { lane: { eq: "${lane}" } }` : ''
+    const filter = lane ? { lane: { eq: lane } } : undefined
     const result = await client.graphql({
-      query: `query ListCarrierCampaigns($nextToken: String) {
-        listCarrierCampaigns(limit: 1000, nextToken: $nextToken${filter ? `, ${filter}` : ''}) {
+      query: `query ListCarrierCampaigns($nextToken: String, $filter: ModelCarrierCampaignFilterInput) {
+        listCarrierCampaigns(limit: 1000, nextToken: $nextToken, filter: $filter) {
           items { ${CARRIER_CAMPAIGN_FIELDS} }
           nextToken
         }
       }`,
-      variables: { nextToken },
+      variables: { nextToken, filter },
     }) as { data: { listCarrierCampaigns: { items: CarrierCampaign[]; nextToken?: string | null } } }
     const page = result.data.listCarrierCampaigns
     for (const item of page.items ?? []) {
@@ -2381,21 +2381,21 @@ export interface CarrierReplyFilter {
 export async function listCarrierReplies(filter?: CarrierReplyFilter): Promise<CarrierReply[]> {
   const replies: CarrierReply[] = []
   let nextToken: string | null = null
-  const conditions: string[] = []
-  if (filter?.status) conditions.push(`status: { eq: "${filter.status}" }`)
-  if (filter?.campaignId) conditions.push(`campaignId: { eq: "${filter.campaignId}" }`)
-  if (filter?.lane) conditions.push(`lane: { eq: "${filter.lane}" }`)
-  const filterArg = conditions.length > 0 ? `filter: { ${conditions.join(', ')} }` : ''
+  const conditions = {
+    ...(filter?.status ? { status: { eq: filter.status } } : {}),
+    ...(filter?.campaignId ? { campaignId: { eq: filter.campaignId } } : {}),
+    ...(filter?.lane ? { lane: { eq: filter.lane } } : {}),
+  }
 
   do {
     const result = await client.graphql({
-      query: `query ListCarrierReplies($nextToken: String) {
-        listCarrierReplies(limit: 1000, nextToken: $nextToken${filterArg ? `, ${filterArg}` : ''}) {
+      query: `query ListCarrierReplies($nextToken: String, $filter: ModelCarrierReplyFilterInput) {
+        listCarrierReplies(limit: 1000, nextToken: $nextToken, filter: $filter) {
           items { ${CARRIER_REPLY_FIELDS} }
           nextToken
         }
       }`,
-      variables: { nextToken },
+      variables: { nextToken, filter: Object.keys(conditions).length ? conditions : undefined },
     }) as { data: { listCarrierReplies: { items: CarrierReply[]; nextToken?: string | null } } }
     const page = result.data.listCarrierReplies
     for (const item of page.items ?? []) {
