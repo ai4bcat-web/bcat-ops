@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table'
 import { useCarrierContacts } from '@/hooks/useCarrierBlast'
 import {
-  parseCarrierCsv,
+  parseCarrierFile,
   parseCarrierPaste,
   buildImportPreview,
   previewToContactInputs,
@@ -26,7 +26,7 @@ interface LanePanelProps {
 function LanePanel({ lane }: LanePanelProps) {
   const { user } = useAuth()
   const { items, counts, loading, saving, refresh, importContacts, setStatus } = useCarrierContacts(lane)
-  const [mode, setMode] = useState<'csv' | 'paste'>('csv')
+  const [mode, setMode] = useState<'file' | 'paste'>('file')
   const [pasteText, setPasteText] = useState('')
   const [preview, setPreview] = useState<{ new: CsvRow[]; duplicates: CsvRow[]; invalid: CsvRow[] } | null>(null)
   const [search, setSearch] = useState('')
@@ -52,16 +52,15 @@ function LanePanel({ lane }: LanePanelProps) {
     setFileName(file.name)
     setReading(true)
     try {
-      const text = await file.text()
-      const rows = parseCarrierCsv(text)
+      const rows = await parseCarrierFile(file)
       if (rows.length === 0) {
         setFileError('No contacts found. Use an email column or one email address per row.')
         return
       }
       setPreview(buildImportPreview(rows, items, lane))
-      setMode('csv')
+      setMode('file')
     } catch (err) {
-      setFileError(`Couldn't read file: ${err instanceof Error ? err.message : 'unknown error'}`)
+      setFileError(err instanceof Error ? err.message : 'unknown error')
     } finally {
       setReading(false)
     }
@@ -78,7 +77,12 @@ function LanePanel({ lane }: LanePanelProps) {
 
   const handleImport = async () => {
     if (!preview || preview.new.length === 0) return
-    const source = mode === 'csv' ? 'csv-upload' : 'paste'
+    const source =
+      mode === 'paste'
+        ? 'paste'
+        : /\.xlsx$/i.test(fileName)
+          ? 'xlsx-upload'
+          : 'csv-upload'
     const inputs = previewToContactInputs(preview.new, lane, source, user?.email ?? '')
     try {
       await importContacts(inputs)
@@ -120,21 +124,21 @@ function LanePanel({ lane }: LanePanelProps) {
         <button
           disabled={saving || reading}
           onClick={() => {
-            if (mode !== 'csv') { setPreview(null); setFileError(null); setFileName('') }
-            setMode('csv')
+            if (mode !== 'file') { setPreview(null); setFileError(null); setFileName('') }
+            setMode('file')
             fileInputRef.current?.click()
           }}
           style={{
             fontSize: 12.5, fontWeight: 500, padding: '4px 10px', borderRadius: 6,
-            border: 'none', background: mode === 'csv' ? 'var(--ds-blue-bg)' : 'transparent',
-            color: mode === 'csv' ? 'var(--ds-blue-dark)' : 'var(--ds-t3)', cursor: 'pointer', fontFamily: 'inherit',
+            border: 'none', background: mode === 'file' ? 'var(--ds-blue-bg)' : 'transparent',
+            color: mode === 'file' ? 'var(--ds-blue-dark)' : 'var(--ds-t3)', cursor: 'pointer', fontFamily: 'inherit',
           }}
         >
-          Upload CSV
+          Upload CSV / Excel
         </button>
         <button
           disabled={saving || reading}
-          onClick={() => { setMode('paste'); setPreview(null); setFileError(null) }}
+          onClick={() => { setMode('paste'); setPreview(null); setFileError(null); setFileName('') }}
           style={{
             fontSize: 12.5, fontWeight: 500, padding: '4px 10px', borderRadius: 6,
             border: 'none', background: mode === 'paste' ? 'var(--ds-blue-bg)' : 'transparent',
@@ -148,8 +152,8 @@ function LanePanel({ lane }: LanePanelProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values,text/plain"
-        aria-label={`CSV file for ${lane === 'IL_IA' ? 'IL → IA' : 'IL → WI'}`}
+        accept=".csv,.tsv,.txt,.xlsx,text/csv,text/tab-separated-values,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        aria-label={`CSV or Excel file for ${lane === 'IL_IA' ? 'IL → IA' : 'IL → WI'}`}
         disabled={saving || reading}
         onChange={(e) => {
           const file = e.target.files?.[0]
@@ -158,16 +162,17 @@ function LanePanel({ lane }: LanePanelProps) {
         }}
         style={{ display: 'none' }}
       />
-      {mode === 'csv' ? (
+      {mode === 'file' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={saving || reading}>
-            <FileSpreadsheet size={14} /> {reading ? 'Reading file…' : 'Choose CSV file'}
+            <FileSpreadsheet size={14} /> {reading ? 'Reading file…' : 'Choose CSV or Excel file'}
           </Button>
           {fileName && <span style={{ fontSize: 12, color: 'var(--ds-t2)' }}>{fileName}</span>}
           {fileError && <p role="alert" style={{ fontSize: 12, color: 'var(--ds-red)', margin: 0 }}>{fileError}</p>}
           <p style={{ fontSize: 11, color: 'var(--ds-t3)', margin: 0 }}>
             Choose a file, review the counts, then click Import. Uploading does not send emails.
             Use an email column (optional: first_name, last_name, company), or one email per row.
+            Excel workbooks use the first worksheet only.
           </p>
         </div>
       ) : (

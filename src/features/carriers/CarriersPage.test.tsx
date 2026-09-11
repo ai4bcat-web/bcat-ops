@@ -66,6 +66,7 @@ import { CarriersPage } from './CarriersPage'
 import { ListsTab } from './ListsTab'
 import { CampaignsTab } from './CampaignsTab'
 import { RepliesTab } from './RepliesTab'
+import * as carrierCsv from './carrierCsv'
 
 function renderPage() {
   return render(<MemoryRouter><CarriersPage /></MemoryRouter>)
@@ -209,6 +210,39 @@ describe('ListsTab', () => {
         expect.arrayContaining([
           expect.objectContaining({ email: 'alice@carrier.com', status: 'active' }),
           expect.objectContaining({ email: 'bob@carrier.com', status: 'active' }),
+        ])
+      )
+    })
+  })
+
+  it('imports an Excel file using the xlsx-upload source', async () => {
+    vi.spyOn(carrierCsv, 'parseCarrierFile').mockResolvedValue([
+      { email: 'excel@carrier.com', firstName: 'Excel', lastName: 'User', company: 'XLSX Co' },
+    ])
+    listCarrierContacts.mockResolvedValue([])
+    render(<ListsTab />)
+
+    const fileInput = screen.getAllByLabelText(/CSV or Excel file for/i)[0]
+    const file = new File([''], 'contacts.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText((_, el) => el?.textContent === '1 new')).toBeTruthy()
+    })
+
+    act(() => {
+      fireEvent.click(screen.getAllByRole('button', { name: /Import 1 contact/i })[0])
+    })
+
+    await waitFor(() => {
+      expect(batchCreateCarrierContacts).toHaveBeenCalledTimes(1)
+      expect(batchCreateCarrierContacts).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ email: 'excel@carrier.com', source: 'xlsx-upload' }),
         ])
       )
     })
