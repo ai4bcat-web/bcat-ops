@@ -4,6 +4,7 @@ import type { Load, Driver, AuditLogEntry, EntityType, AuditAction } from '@/typ
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import type { FixedExpenseInput } from './driverPay'
+import type { CarrierLane, CarrierContact, CarrierCampaign, CarrierReply } from '@/types'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
@@ -1611,10 +1612,20 @@ const MAINT_INVOICE_FIELDS = `
 `
 
 export async function listMaintenanceInvoices(): Promise<MaintenanceInvoice[]> {
-  const result = await client.graphql({
-    query: `query ListMaintenanceInvoices { listMaintenanceInvoices(limit: 5000) { items { ${MAINT_INVOICE_FIELDS} } } }`,
-  }) as { data: { listMaintenanceInvoices: { items: MaintenanceInvoice[] } } }
-  return result.data.listMaintenanceInvoices.items ?? []
+  const invoices: MaintenanceInvoice[] = []
+  let nextToken: string | null = null
+  do {
+    const result = await client.graphql({
+      query: `query ListMaintenanceInvoices($nextToken: String) { listMaintenanceInvoices(limit: 1000, nextToken: $nextToken) { items { ${MAINT_INVOICE_FIELDS} } nextToken } }`,
+      variables: { nextToken },
+    }) as { data: { listMaintenanceInvoices: { items: (MaintenanceInvoice | null)[]; nextToken?: string | null } } }
+    const page = result.data.listMaintenanceInvoices
+    for (const invoice of page.items ?? []) {
+      if (invoice) invoices.push(invoice)
+    }
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return invoices
 }
 
 export async function createMaintenanceInvoice(input: MaintenanceInvoice): Promise<MaintenanceInvoice> {
@@ -2201,4 +2212,294 @@ export async function notifyApptNeeded(args: {
     console.error('[notifyApptNeeded] failed', err)
     return null
   }
+}
+
+// ── Carrier Blast ─────────────────────────────────────────────────────────────
+
+const CARRIER_CONTACT_FIELDS = `
+  id lane email firstName lastName company status source addedBy addedAt
+  lastCampaignId lastSentAt notes createdAt updatedAt
+`
+
+const CARRIER_CAMPAIGN_FIELDS = `
+  id lane name subject bodyHtml instantlyCampaignId senderAccounts dailyLimit status
+  leadCount pushedCount errorText sentCount openCount replyCount bounceCount
+  unsubscribeCount analyticsAt createdBy startedAt completedAt createdAt updatedAt
+`
+
+const CARRIER_REPLY_FIELDS = `
+  id instantlyEmailId instantlyCampaignId campaignId lane contactId fromEmail fromName
+  toAccount subject textBody htmlBody snippet threadId receivedAt isAutoReply status
+  assignedTo handledBy handledAt uniboxUrl lastOutboundAt createdAt updatedAt
+`
+
+/** Simple RFC-ish email validation used client-side for imports. */
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+// ── Contacts ──────────────────────────────────────────────────────────────────
+
+export async function listCarrierContacts(lane?: CarrierLane): Promise<CarrierContact[]> {
+  const contacts: CarrierContact[] = []
+  let nextToken: string | null = null
+  do {
+    const filter = lane ? `filter: { lane: { eq: "${lane}" } }` : ''
+    const result = await client.graphql({
+      query: `query ListCarrierContacts($nextToken: String) {
+        listCarrierContacts(limit: 1000, nextToken: $nextToken${filter ? `, ${filter}` : ''}) {
+          items { ${CARRIER_CONTACT_FIELDS} }
+          nextToken
+        }
+      }`,
+      variables: { nextToken },
+    }) as { data: { listCarrierContacts: { items: CarrierContact[]; nextToken?: string | null } } }
+    const page = result.data.listCarrierContacts
+    for (const item of page.items ?? []) {
+      if (item) contacts.push(item)
+    }
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return contacts
+}
+
+export async function createCarrierContact(
+  input: Omit<CarrierContact, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<CarrierContact> {
+  const result = await client.graphql({
+    query: `mutation CreateCarrierContact($input: CreateCarrierContactInput!) {
+      createCarrierContact(input: $input) { ${CARRIER_CONTACT_FIELDS} }
+    }`,
+    variables: { input },
+  }) as { data: { createCarrierContact: CarrierContact } }
+  return result.data.createCarrierContact
+}
+
+export async function updateCarrierContact(
+  id: string,
+  patch: Partial<Omit<CarrierContact, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<CarrierContact> {
+  const result = await client.graphql({
+    query: `mutation UpdateCarrierContact($input: UpdateCarrierContactInput!) {
+      updateCarrierContact(input: $input) { ${CARRIER_CONTACT_FIELDS} }
+    }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateCarrierContact: CarrierContact } }
+  return result.data.updateCarrierContact
+}
+
+export async function deleteCarrierContact(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteCarrierContact($input: DeleteCarrierContactInput!) {
+      deleteCarrierContact(input: $input) { id }
+    }`,
+    variables: { input: { id } },
+  })
+}
+
+/** Create contacts in batches of 25 so a large import doesn't hammer the API. */
+export async function batchCreateCarrierContacts(
+  inputs: Omit<CarrierContact, 'id' | 'createdAt' | 'updatedAt'>[]
+): Promise<CarrierContact[]> {
+  const created: CarrierContact[] = []
+  const BATCH = 25
+  for (let i = 0; i < inputs.length; i += BATCH) {
+    const slice = inputs.slice(i, i + BATCH)
+    const page = await Promise.all(slice.map((input) => createCarrierContact(input)))
+    created.push(...page)
+  }
+  return created
+}
+
+// ── Campaigns ─────────────────────────────────────────────────────────────────
+
+export async function listCarrierCampaigns(lane?: CarrierLane): Promise<CarrierCampaign[]> {
+  const campaigns: CarrierCampaign[] = []
+  let nextToken: string | null = null
+  do {
+    const filter = lane ? `filter: { lane: { eq: "${lane}" } }` : ''
+    const result = await client.graphql({
+      query: `query ListCarrierCampaigns($nextToken: String) {
+        listCarrierCampaigns(limit: 1000, nextToken: $nextToken${filter ? `, ${filter}` : ''}) {
+          items { ${CARRIER_CAMPAIGN_FIELDS} }
+          nextToken
+        }
+      }`,
+      variables: { nextToken },
+    }) as { data: { listCarrierCampaigns: { items: CarrierCampaign[]; nextToken?: string | null } } }
+    const page = result.data.listCarrierCampaigns
+    for (const item of page.items ?? []) {
+      if (item) campaigns.push(item)
+    }
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return campaigns
+}
+
+export async function createCarrierCampaign(
+  input: Omit<CarrierCampaign, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<CarrierCampaign> {
+  const result = await client.graphql({
+    query: `mutation CreateCarrierCampaign($input: CreateCarrierCampaignInput!) {
+      createCarrierCampaign(input: $input) { ${CARRIER_CAMPAIGN_FIELDS} }
+    }`,
+    variables: { input },
+  }) as { data: { createCarrierCampaign: CarrierCampaign } }
+  return result.data.createCarrierCampaign
+}
+
+export async function updateCarrierCampaign(
+  id: string,
+  patch: Partial<Omit<CarrierCampaign, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<CarrierCampaign> {
+  const result = await client.graphql({
+    query: `mutation UpdateCarrierCampaign($input: UpdateCarrierCampaignInput!) {
+      updateCarrierCampaign(input: $input) { ${CARRIER_CAMPAIGN_FIELDS} }
+    }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateCarrierCampaign: CarrierCampaign } }
+  return result.data.updateCarrierCampaign
+}
+
+export async function deleteCarrierCampaign(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteCarrierCampaign($input: DeleteCarrierCampaignInput!) {
+      deleteCarrierCampaign(input: $input) { id }
+    }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Replies ───────────────────────────────────────────────────────────────────
+
+export interface CarrierReplyFilter {
+  status?: CarrierReply['status']
+  campaignId?: string | null
+  lane?: CarrierLane | null
+}
+
+export async function listCarrierReplies(filter?: CarrierReplyFilter): Promise<CarrierReply[]> {
+  const replies: CarrierReply[] = []
+  let nextToken: string | null = null
+  const conditions: string[] = []
+  if (filter?.status) conditions.push(`status: { eq: "${filter.status}" }`)
+  if (filter?.campaignId) conditions.push(`campaignId: { eq: "${filter.campaignId}" }`)
+  if (filter?.lane) conditions.push(`lane: { eq: "${filter.lane}" }`)
+  const filterArg = conditions.length > 0 ? `filter: { ${conditions.join(', ')} }` : ''
+
+  do {
+    const result = await client.graphql({
+      query: `query ListCarrierReplies($nextToken: String) {
+        listCarrierReplies(limit: 1000, nextToken: $nextToken${filterArg ? `, ${filterArg}` : ''}) {
+          items { ${CARRIER_REPLY_FIELDS} }
+          nextToken
+        }
+      }`,
+      variables: { nextToken },
+    }) as { data: { listCarrierReplies: { items: CarrierReply[]; nextToken?: string | null } } }
+    const page = result.data.listCarrierReplies
+    for (const item of page.items ?? []) {
+      if (item) replies.push(item)
+    }
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return replies.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
+}
+
+export async function createCarrierReply(
+  input: Omit<CarrierReply, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<CarrierReply> {
+  const result = await client.graphql({
+    query: `mutation CreateCarrierReply($input: CreateCarrierReplyInput!) {
+      createCarrierReply(input: $input) { ${CARRIER_REPLY_FIELDS} }
+    }`,
+    variables: { input },
+  }) as { data: { createCarrierReply: CarrierReply } }
+  return result.data.createCarrierReply
+}
+
+export async function updateCarrierReply(
+  id: string,
+  patch: Partial<Omit<CarrierReply, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<CarrierReply> {
+  const result = await client.graphql({
+    query: `mutation UpdateCarrierReply($input: UpdateCarrierReplyInput!) {
+      updateCarrierReply(input: $input) { ${CARRIER_REPLY_FIELDS} }
+    }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateCarrierReply: CarrierReply } }
+  return result.data.updateCarrierReply
+}
+
+export async function deleteCarrierReply(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteCarrierReply($input: DeleteCarrierReplyInput!) {
+      deleteCarrierReply(input: $input) { id }
+    }`,
+    variables: { input: { id } },
+  })
+}
+
+// ── Instantly custom mutation ─────────────────────────────────────────────────
+
+export type CarrierBlastAction =
+  | 'listAccounts'
+  | 'launchCampaign'
+  | 'pauseCampaign'
+  | 'resumeCampaign'
+  | 'syncCampaign'
+  | 'syncReplies'
+  | 'sendReply'
+  | 'ensureWebhook'
+
+export interface CarrierBlastResult {
+  ok: boolean
+  error?: string | null
+  [key: string]: unknown
+}
+
+export async function carrierBlast(
+  action: CarrierBlastAction,
+  payload?: Record<string, unknown>
+): Promise<CarrierBlastResult> {
+  let res: unknown
+  try {
+    res = await client.graphql({
+      query: `mutation CarrierBlast($action: String!, $payload: AWSJSON) {
+        carrierBlast(action: $action, payload: $payload)
+      }`,
+      variables: { action, payload: payload ? JSON.stringify(payload) : null },
+    })
+  } catch (err) {
+    return { ok: false, error: graphqlErrorMessage(err) }
+  }
+  let data: unknown = (res as { data?: { carrierBlast?: unknown } }).data?.carrierBlast
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data) } catch { /* leave as-is */ }
+  }
+  return (data ?? { ok: false, error: 'no-response' }) as CarrierBlastResult
+}
+
+// ── CSV export helper ─────────────────────────────────────────────────────────
+
+export function downloadCarrierContactsCsv(filename: string, contacts: CarrierContact[]) {
+  const headers = ['email', 'first_name', 'last_name', 'company', 'status', 'added_at']
+  const rows = contacts.map((c) => [
+    c.email,
+    c.firstName ?? '',
+    c.lastName ?? '',
+    c.company ?? '',
+    c.status,
+    c.addedAt,
+  ])
+  const csv = [headers.join(','), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }

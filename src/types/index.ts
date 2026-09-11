@@ -357,3 +357,89 @@ export interface IntakeItem {
   createdAt: string
   updatedAt: string
 }
+
+// ── Carrier Blast ────────────────────────────────────────────────────────────
+
+export type CarrierLane = 'IL_IA' | 'IL_WI'
+
+export const LANE_LABEL: Record<CarrierLane, string> = {
+  IL_IA: 'IL → IA',
+  IL_WI: 'IL → WI',
+}
+
+export type CarrierContactStatus = 'active' | 'bounced' | 'unsubscribed' | 'removed'
+
+export interface CarrierContact {
+  id: string
+  lane: CarrierLane
+  email: string
+  firstName?: string | null
+  lastName?: string | null
+  company?: string | null
+  status: CarrierContactStatus
+  source?: string | null
+  addedBy?: string | null
+  addedAt: string
+  lastCampaignId?: string | null
+  lastSentAt?: string | null
+  notes?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type CarrierCampaignStatus = 'draft' | 'pushing' | 'sending' | 'paused' | 'completed' | 'failed'
+
+export interface CarrierCampaign {
+  id: string
+  lane: CarrierLane
+  name: string
+  subject: string
+  bodyHtml: string
+  instantlyCampaignId?: string | null
+  senderAccounts: string[]
+  dailyLimit?: number | null
+  status: CarrierCampaignStatus
+  leadCount: number
+  pushedCount: number
+  errorText?: string | null
+  sentCount: number
+  openCount: number
+  replyCount: number
+  bounceCount: number
+  unsubscribeCount: number
+  analyticsAt?: string | null
+  createdBy?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type CarrierReplyStatus = 'open' | 'handled'
+
+export interface CarrierReply {
+  id: string
+  instantlyEmailId: string
+  instantlyCampaignId?: string | null
+  campaignId?: string | null
+  lane?: CarrierLane | null
+  contactId?: string | null
+  fromEmail: string
+  fromName?: string | null
+  toAccount: string
+  subject: string
+  textBody?: string | null
+  htmlBody?: string | null
+  snippet?: string | null
+  threadId?: string | null
+  receivedAt: string
+  isAutoReply: boolean
+  status: CarrierReplyStatus
+  assignedTo?: string | null
+  handledBy?: string | null
+  handledAt?: string | null
+  uniboxUrl?: string | null
+  lastOutboundAt?: string | null
+  createdAt: string
+  updatedAt: string
+}

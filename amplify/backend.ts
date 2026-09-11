@@ -1,5 +1,5 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
@@ -30,6 +30,8 @@ import { tripScreenshotParser } from './functions/trip-screenshot-parser/resourc
 import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
+import { carrierBlastApi } from './functions/carrier-blast-api/resource'
+import { carrierBlastWebhook } from './functions/carrier-blast-webhook/resource'
 
 const backend = defineBackend({
   auth,
@@ -58,6 +60,8 @@ const backend = defineBackend({
   apptRequestEmailer,
   amazonDisputeIntake,
   tripScreenshotParser,
+  carrierBlastApi,
+  carrierBlastWebhook,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -592,6 +596,77 @@ complianceScannerFn.addEnvironment('INVITE_TABLE_NAME',   onboardingInviteTable.
 complianceScannerFn.addEnvironment('AUDIT_TABLE_NAME',    auditLogTable.tableName)
 complianceScannerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
+
+// ── carrierBlast (Instantly.ai carrier email blast) ─────────────────────────
+
+const carrierContactTable  = backend.data.resources.tables['CarrierContact']
+const carrierCampaignTable = backend.data.resources.tables['CarrierCampaign']
+const carrierReplyTable    = backend.data.resources.tables['CarrierReply']
+
+const carrierBlastApiFn     = backend.carrierBlastApi.resources.lambda as LambdaFunction
+const carrierBlastWebhookFn = backend.carrierBlastWebhook.resources.lambda as LambdaFunction
+
+const carrierBlastTableArns = [
+  carrierContactTable.tableArn,
+  carrierCampaignTable.tableArn,
+  carrierReplyTable.tableArn,
+  `${carrierContactTable.tableArn}/index/*`,
+  `${carrierCampaignTable.tableArn}/index/*`,
+  `${carrierReplyTable.tableArn}/index/*`,
+]
+
+backend.carrierBlastApi.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan', 'dynamodb:Query'],
+    resources: carrierBlastTableArns,
+  })
+)
+backend.carrierBlastWebhook.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan', 'dynamodb:Query'],
+    resources: carrierBlastTableArns,
+  })
+)
+
+carrierBlastApiFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
+carrierBlastApiFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)
+carrierBlastApiFn.addEnvironment('REPLY_TABLE',    carrierReplyTable.tableName)
+
+carrierBlastWebhookFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
+carrierBlastWebhookFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)
+carrierBlastWebhookFn.addEnvironment('REPLY_TABLE',    carrierReplyTable.tableName)
+
+// Function URL — Instantly posts webhook events here.
+const carrierBlastWebhookUrl = new FunctionUrl(carrierBlastWebhookFn.stack, 'CarrierBlastWebhookUrl', {
+  function: carrierBlastWebhookFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+
+new CfnOutput(carrierBlastWebhookFn.stack, 'CarrierBlastWebhookFunctionUrl', {
+  value:       carrierBlastWebhookUrl.url,
+  description: 'Instantly webhook target for carrier-blast events',
+})
+
+carrierBlastApiFn.addEnvironment('WEBHOOK_URL', carrierBlastWebhookUrl.url)
+
+// Self-invoke permission for async launch (Lambda → async Event → same Lambda).
+// Standalone AWS::IAM::Policy avoids a circular dependency — the Function role's
+// DefaultPolicy would reference the Function ARN if we used addToRolePolicy or grantInvoke.
+new Policy(carrierBlastApiFn.stack, 'CarrierBlastApiSelfInvokePolicy', {
+  statements: [new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [carrierBlastApiFn.functionArn],
+  })],
+}).attachToRole(carrierBlastApiFn.role!)
+
+// EventBridge cron — every 15 minutes, sync replies and refresh sending campaigns.
+const carrierBlastRule = new Rule(carrierBlastApiFn.stack, 'CarrierBlastCronRule', {
+  schedule:    Schedule.rate(Duration.minutes(15)),
+  description: 'Carrier Blast: sync replies and sending campaigns every 15 minutes',
+})
+carrierBlastRule.addTarget(new EventsLambdaTarget(carrierBlastApiFn, {
+  event: RuleTargetInput.fromObject({ action: 'cron' }),
+}))
 
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an

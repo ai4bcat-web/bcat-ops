@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, FileSignature, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Waves, Repeat, Building2, MapPin, TrendingUp, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, FileSignature, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Waves, Repeat, Building2, MapPin, TrendingUp, Mail, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -47,6 +47,8 @@ export const NAV_GROUPS: NavSection[] = [
       // The directory: reusable customers + locations behind the Load form.
       { to: '/customers', label: 'Customers', icon: Building2,       pageKey: 'customers' },
       { to: '/locations', label: 'Locations', icon: MapPin,          pageKey: 'locations' },
+      // Carrier outreach through Instantly warmed mailboxes.
+      { to: '/carriers',  label: 'Carriers',  icon: Mail,            pageKey: 'carriers', badgeKey: 'carriers' },
     ],
   },
   {

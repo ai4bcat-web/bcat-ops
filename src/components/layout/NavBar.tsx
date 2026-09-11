@@ -7,6 +7,7 @@ import { apptQueueCount } from '@/lib/apptQueue'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
+import { useCarrierReplies } from '@/hooks/useCarrierBlast'
 import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
 import { APPT_MOVE_PREFIX, APPT_TASK_PREFIX } from '@/lib/apiClient'
 import { NAV_GROUPS } from '@/lib/navItems'
@@ -19,6 +20,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   maintenance: { bg: 'var(--ds-red-soft)',         color: '#dc2626' },
   review:      { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
   truckDocs:   { bg: 'var(--ds-red-soft)',          color: '#dc2626' },
+  carriers:    { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {
@@ -48,6 +50,7 @@ export function NavBar({
   const { items: intakeItems } = useIntakeItems()
   const { pendingCount: reviewCount } = useReviewQueue()
   const { outOfDateCount: truckDocAlerts } = useTruckDocAlerts()
+  const { items: openReplies } = useCarrierReplies({ status: 'open' })
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
@@ -69,6 +72,7 @@ export function NavBar({
     if (key === 'apptChanges') return apptChangeCount || null
     if (key === 'review') return reviewCount || null
     if (key === 'truckDocs') return truckDocAlerts || null
+    if (key === 'carriers') return openReplies.length || null
     return null
   }
 

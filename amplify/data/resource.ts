@@ -9,6 +9,7 @@ import { apptRequestEmailer } from '../functions/appt-request-emailer/resource'
 import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource'
 import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
+import { carrierBlastApi } from '../functions/carrier-blast-api/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -332,9 +333,9 @@ const schema = a.schema({
       // manually-added invoices are unaffected; only new emailed invoices enter the queue.
       status:        a.string(),
       reviewedBy:    a.string(),                       // who posted/archived it
-      // Stable identity of the SOURCE document (hash of date+vendor+amount+invoice #),
-      // set once at ingest. Deliberately excludes equipmentId, which staff change while
-      // reviewing — keying on it made reviewed/archived invoices reappear in the queue.
+      // Stable source identity: date+vendor+amount and invoice # (or source document ID
+      // for unnumbered invoices), frozen at ingest. Excludes the editable equipmentId
+      // so assigning a truck cannot make reviewed/archived invoices reappear.
       // See scripts/invoiceDedup.mjs.
       externalId:    a.string(),
     })
@@ -888,6 +889,83 @@ const schema = a.schema({
     .secondaryIndexes((index) => [index('periodId')])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Carrier Blast (Instantly.ai email outreach) ────────────────────────────
+  CarrierContact: a
+    .model({
+      lane:       a.enum(['IL_IA', 'IL_WI']),
+      email:      a.string().required(),
+      firstName:  a.string(),
+      lastName:   a.string(),
+      company:    a.string(),
+      status:     a.enum(['active', 'bounced', 'unsubscribed', 'removed']),
+      source:     a.string(),            // file name / 'paste'
+      addedBy:    a.string(),
+      addedAt:    a.datetime().required(),
+      lastCampaignId: a.string(),
+      lastSentAt: a.datetime(),
+      notes:      a.string(),
+    })
+    .secondaryIndexes((index) => [index('lane'), index('email')])
+    .authorization((allow) => [allow.authenticated()]),
+
+  CarrierCampaign: a
+    .model({
+      lane:                a.enum(['IL_IA', 'IL_WI']),
+      name:                a.string().required(),
+      subject:             a.string().required(),
+      bodyHtml:            a.string().required(),
+      instantlyCampaignId: a.string(),
+      senderAccounts:      a.string().array().required(),
+      dailyLimit:          a.integer(),
+      status:              a.enum(['draft', 'pushing', 'sending', 'paused', 'completed', 'failed']),
+      leadCount:           a.integer().required(),
+      pushedCount:         a.integer().required(),
+      errorText:           a.string(),
+      sentCount:           a.integer().required(),
+      openCount:           a.integer().required(),
+      replyCount:          a.integer().required(),
+      bounceCount:         a.integer().required(),
+      unsubscribeCount:    a.integer().required(),
+      analyticsAt:         a.datetime(),
+      createdBy:           a.string(),
+      startedAt:           a.datetime(),
+      completedAt:         a.datetime(),
+    })
+    .secondaryIndexes((index) => [index('lane'), index('instantlyCampaignId')])
+    .authorization((allow) => [allow.authenticated()]),
+
+  CarrierReply: a
+    .model({
+      instantlyEmailId:    a.string().required(),
+      instantlyCampaignId: a.string(),
+      campaignId:          a.string(),
+      lane:                a.enum(['IL_IA', 'IL_WI']),
+      contactId:           a.string(),
+      fromEmail:           a.string().required(),
+      fromName:            a.string(),
+      toAccount:           a.string().required(),
+      subject:             a.string().required(),
+      textBody:            a.string(),
+      htmlBody:            a.string(),
+      snippet:             a.string(),
+      threadId:            a.string(),
+      receivedAt:          a.datetime().required(),
+      isAutoReply:         a.boolean().required(),
+      status:              a.enum(['open', 'handled']),
+      assignedTo:          a.string(),
+      handledBy:           a.string(),
+      handledAt:           a.datetime(),
+      uniboxUrl:           a.string(),
+      lastOutboundAt:      a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index('status'),
+      index('campaignId'),
+      index('fromEmail'),
+      index('instantlyEmailId'),
+    ])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.
@@ -1089,6 +1167,18 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(apptNeedNotifier)),
+
+  // Instantly.ai-backed carrier email-blast dispatcher. All actions are routed
+  // through a single Lambda to keep the AppSync schema small.
+  carrierBlast: a
+    .mutation()
+    .arguments({
+      action:  a.string().required(),   // listAccounts | launchCampaign | pauseCampaign | resumeCampaign | syncCampaign | syncReplies | sendReply | ensureWebhook
+      payload: a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(carrierBlastApi)),
 
   // Live Google rating + review count for the Best Care Auto Transport listing,
   // shown as a CTA in the quote email. Returns { configured, ok, rating, total, url }.
