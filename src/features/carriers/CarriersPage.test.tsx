@@ -74,17 +74,20 @@ function renderPage() {
 const defaultCapacityResponse = {
   ok: true,
   asOf: new Date().toISOString(),
+  cachedAt: new Date().toISOString(),
+  stale: false,
   date: '2026-09-11',
   mailboxes: 61,
   perMailboxLimit: 40,
   sentToday: 0,
+  carrierSentToday: 0,
   reservedForJobsDone: 0,
   availableToday: 2440,
   perMailbox: [],
   reserveBasis: 'static-floor',
   peakPerMailbox: 0,
   windowDays: 14,
-  jobsDone: { reachable: true, sharedClientsActive: 0, source: 'jobsdone-os' },
+  jobsDone: { reachable: true, sharedClientsActive: 0, source: 'unconditional-reserve' },
 }
 
 beforeEach(() => {
@@ -106,22 +109,26 @@ describe('CarriersPage', () => {
   })
 
   it('shows live capacity banner with availableToday and breakdown', async () => {
-    carrierBlast.mockImplementation((action: string) => {
+    carrierBlast.mockImplementation((action: string, payload?: Record<string, unknown>) => {
       if (action === 'capacity') {
+        expect(payload).toBeUndefined()
         return Promise.resolve({
           ok: true,
           asOf: new Date().toISOString(),
+          cachedAt: new Date().toISOString(),
+          stale: false,
           date: '2026-09-11',
           mailboxes: 61,
           perMailboxLimit: 40,
           sentToday: 244,
+          carrierSentToday: 0,
           reservedForJobsDone: 1525,
-          availableToday: 291,
+          availableToday: 915,
           perMailbox: [],
           reserveBasis: 'measured-peak',
           peakPerMailbox: 25,
           windowDays: 14,
-          jobsDone: { reachable: true, sharedClientsActive: 3, source: 'jobsdone-os' },
+          jobsDone: { reachable: true, sharedClientsActive: 3, source: 'unconditional-reserve' },
         })
       }
       return Promise.resolve({ ok: true, accounts: [] })
@@ -129,10 +136,12 @@ describe('CarriersPage', () => {
     renderPage()
 
     const banner = await screen.findByTestId('capacity-banner')
-    expect(banner.textContent).toContain('291 emails available to send today')
-    expect(banner.textContent).toContain('61 mailboxes × 40/day − 244 sent today − 1525 reserved for JobsDone OS (priority)')
-    expect(banner.textContent).toContain('JobsDone OS: 3 active shared clients')
+    expect(banner.textContent).toContain('915 emails available to send today')
+    expect(banner.textContent).toContain('61 mailboxes × 40/day − 0 already sent by carrier campaigns today − 1525 reserved for JobsDone OS (priority)')
+    expect(banner.textContent).toContain('JobsDone OS reserve is held unconditionally (priority). 3 active shared clients.')
     expect(banner.textContent).toContain('Reserve tracks JobsDone\'s busiest day in the last 14 days (25/mailbox)')
+    expect(banner.textContent).toContain('Updated')
+    expect(banner.textContent).toContain('ago')
   })
 
   it('shows fallback note when JobsDone OS is unreachable', async () => {
@@ -141,17 +150,20 @@ describe('CarriersPage', () => {
         return Promise.resolve({
           ok: true,
           asOf: new Date().toISOString(),
+          cachedAt: new Date().toISOString(),
+          stale: false,
           date: '2026-09-11',
           mailboxes: 61,
           perMailboxLimit: 40,
           sentToday: 244,
+          carrierSentToday: 0,
           reservedForJobsDone: 1525,
-          availableToday: 291,
+          availableToday: 915,
           perMailbox: [],
           reserveBasis: 'static-floor',
           peakPerMailbox: 0,
           windowDays: 14,
-          jobsDone: { reachable: false, sharedClientsActive: 0, source: 'static-fallback', note: 'timeout' },
+          jobsDone: { reachable: false, sharedClientsActive: 0, source: 'unconditional-reserve', note: 'timeout' },
         })
       }
       return Promise.resolve({ ok: true, accounts: [] })
@@ -159,7 +171,7 @@ describe('CarriersPage', () => {
     renderPage()
 
     const banner = await screen.findByTestId('capacity-banner')
-    expect(banner.textContent).toContain("Couldn't reach JobsDone OS - holding the full reserve to be safe.")
+    expect(banner.textContent).toContain("Couldn't reach JobsDone OS - reserve is held anyway to be safe.")
     expect(banner.textContent).toContain('Using the fallback floor reserve while JobsDone history is unavailable.')
   })
 })

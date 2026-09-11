@@ -222,7 +222,7 @@ export interface UseCarrierCapacityResult {
   capacity: CarrierCapacity | null
   loading: boolean
   error: Error | null
-  refresh: () => void
+  refresh: (force?: boolean) => void
 }
 
 export function useCarrierCapacity(): UseCarrierCapacityResult {
@@ -231,10 +231,10 @@ export function useCarrierCapacity(): UseCarrierCapacityResult {
   const [error, setError] = useState<Error | null>(null)
   const [intervalMs, setIntervalMs] = useState(CAPACITY_NORMAL_MS)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force?: boolean) => {
     setLoading(true)
     try {
-      const res = await carrierBlast('capacity')
+      const res = await carrierBlast('capacity', force ? { refresh: true } : undefined)
       if (!res.ok) throw new Error(res.error ?? 'capacity failed')
       setCapacity(res as unknown as CarrierCapacity)
       setError(null)
@@ -256,9 +256,9 @@ export function useCarrierCapacity(): UseCarrierCapacityResult {
     return () => clearInterval(id)
   }, [load, intervalMs])
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((force?: boolean) => {
     setIntervalMs(CAPACITY_NORMAL_MS)
-    load()
+    load(force)
   }, [load])
 
   return { capacity, loading, error, refresh }

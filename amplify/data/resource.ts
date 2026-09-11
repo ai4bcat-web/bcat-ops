@@ -966,6 +966,16 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  CarrierCapacitySnapshot: a
+    .model({
+      snapshotId: a.string().required(),  // well-known key: 'current'
+      cachedAt:   a.datetime().required(), // when this snapshot was computed
+      stale:      a.boolean().required(), // true if this is a fallback snapshot
+      data:       a.string().required(), // JSON-serialized capacity payload
+    })
+    .identifier(['snapshotId'])
+    .authorization((allow) => [allow.authenticated()]),
+
   // Admin-only: manage Cognito users via Lambda.
   // Authorization is allow.authenticated() so the Lambda receives the call and can
   // inspect event.identity.claims.email — the Lambda throws for non-admin callers.

@@ -415,3 +415,32 @@ export async function accountDailySendsRange(
   return result
 }
 
+export type InstantlyCampaignDailyAnalytics = {
+  date: string
+  sent: number
+  [key: string]: unknown
+}
+
+/**
+ * Today's sent count for a single Instantly campaign.
+ *
+ * Uses the per-campaign daily analytics endpoint (`/api/v2/campaigns/analytics/daily`)
+ * when possible. The endpoint returns one row per date, so this helper sums `sent` for
+ * the requested date.
+ */
+export async function campaignDailySends(
+  campaignId: string,
+  date: string,
+): Promise<number> {
+  const rows = await instantlyFetch<InstantlyCampaignDailyAnalytics[]>(
+    `/api/v2/campaigns/analytics/daily${buildQuery({
+      campaign_id: campaignId,
+      start_date: date,
+      end_date: date,
+    })}`,
+  )
+  return rows.reduce((sum, row) => {
+    if (row.date && row.date !== date) return sum
+    return sum + (row.sent ?? 0)
+  }, 0)
+}

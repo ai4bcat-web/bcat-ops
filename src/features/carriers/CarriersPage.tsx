@@ -57,7 +57,7 @@ export function CarriersPage() {
           ))}
         </div>
 
-        <CapacityBanner capacity={capacity} loading={loading} error={error} onRefresh={refresh} />
+        <CapacityBanner capacity={capacity} loading={loading} error={error} onRefresh={() => refresh(true)} />
 
         <div style={{ flex: 1, minHeight: 0 }}>
           {tab === 'lists' && <ListsTab />}
@@ -115,15 +115,16 @@ function CapacityBanner({
   }
 
   const isDepleted = capacity.availableToday === 0
-  const updatedMs = Math.max(0, now - new Date(capacity.asOf).getTime())
+  const updatedAt = capacity.cachedAt ?? capacity.asOf
+  const updatedMs = Math.max(0, now - new Date(updatedAt).getTime())
   const updatedText = formatUpdated(updatedMs)
 
   return (
     <div
       data-testid="capacity-banner"
       style={{
-        background: isDepleted ? 'var(--ds-red-bg)' : 'var(--ds-blue-bg)',
-        border: isDepleted ? '1px solid var(--ds-red)' : '1px solid var(--ds-blue)',
+        background: isDepleted ? 'var(--ds-red-bg)' : capacity.stale ? 'var(--ds-amber-bg)' : 'var(--ds-blue-bg)',
+        border: isDepleted ? '1px solid var(--ds-red)' : capacity.stale ? '1px solid var(--ds-amber)' : '1px solid var(--ds-blue)',
         borderRadius: 10,
         padding: 12,
       }}
@@ -140,7 +141,7 @@ function CapacityBanner({
             {capacity.availableToday} emails available to send today
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', marginTop: 4 }}>
-            {capacity.mailboxes} mailboxes × {capacity.perMailboxLimit}/day − {capacity.sentToday} sent today − {capacity.reservedForJobsDone} reserved for JobsDone OS (priority)
+            {capacity.mailboxes} mailboxes × {capacity.perMailboxLimit}/day − {capacity.carrierSentToday} already sent by carrier campaigns today − {capacity.reservedForJobsDone} reserved for JobsDone OS (priority)
           </div>
           {capacity.reserveBasis === 'measured-peak' && (
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 4 }}>
@@ -160,13 +161,17 @@ function CapacityBanner({
           <div
             style={{
               fontSize: 12,
-              color: capacity.jobsDone.reachable ? 'var(--ds-t3)' : 'var(--ds-amber)',
+              color: capacity.stale ? 'var(--ds-amber)' : 'var(--ds-t3)',
               marginTop: 6,
             }}
           >
             {capacity.jobsDone.reachable
-              ? `JobsDone OS: ${capacity.jobsDone.sharedClientsActive} active shared client${capacity.jobsDone.sharedClientsActive === 1 ? '' : 's'}.`
-              : "Couldn't reach JobsDone OS - holding the full reserve to be safe."}
+              ? `JobsDone OS reserve is held unconditionally (priority). ${capacity.jobsDone.sharedClientsActive} active shared client${capacity.jobsDone.sharedClientsActive === 1 ? '' : 's'}.`
+              : "Couldn't reach JobsDone OS - reserve is held anyway to be safe."}
+            {capacity.stale && ' Showing cached data.'}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 4 }}>
+            Updated {updatedText} ago
           </div>
         </div>
         <button

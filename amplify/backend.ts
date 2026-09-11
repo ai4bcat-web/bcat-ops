@@ -602,6 +602,7 @@ complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
 const carrierContactTable  = backend.data.resources.tables['CarrierContact']
 const carrierCampaignTable = backend.data.resources.tables['CarrierCampaign']
 const carrierReplyTable    = backend.data.resources.tables['CarrierReply']
+const carrierCapacitySnapshotTable = backend.data.resources.tables['CarrierCapacitySnapshot']
 
 const carrierBlastApiFn     = backend.carrierBlastApi.resources.lambda as LambdaFunction
 const carrierBlastWebhookFn = backend.carrierBlastWebhook.resources.lambda as LambdaFunction
@@ -610,6 +611,7 @@ const carrierBlastTableArns = [
   carrierContactTable.tableArn,
   carrierCampaignTable.tableArn,
   carrierReplyTable.tableArn,
+  carrierCapacitySnapshotTable.tableArn,
   `${carrierContactTable.tableArn}/index/*`,
   `${carrierCampaignTable.tableArn}/index/*`,
   `${carrierReplyTable.tableArn}/index/*`,
@@ -639,6 +641,7 @@ backend.carrierBlastWebhook.resources.lambda.addToRolePolicy(
 carrierBlastApiFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
 carrierBlastApiFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)
 carrierBlastApiFn.addEnvironment('REPLY_TABLE',    carrierReplyTable.tableName)
+carrierBlastApiFn.addEnvironment('CAPACITY_SNAPSHOT_TABLE', carrierCapacitySnapshotTable.tableName)
 carrierBlastApiFn.addEnvironment(
   'JOBSDONE_GRAPHQL_URL',
   'https://pxudbnlkffhsjivz6vsnx2per4.appsync-api.us-east-1.amazonaws.com/graphql',

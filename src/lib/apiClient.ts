@@ -2457,6 +2457,7 @@ export interface CarrierCapacityMailbox {
   email: string
   dailyLimit: number
   sentToday: number
+  carrierSent: number
   reserved: number
   available: number
   peakObserved: number
@@ -2469,16 +2470,19 @@ export interface CarrierCapacity {
   mailboxes: number
   perMailboxLimit: number
   sentToday: number
+  carrierSentToday: number
   reservedForJobsDone: number
   availableToday: number
   perMailbox: CarrierCapacityMailbox[]
   reserveBasis: 'measured-peak' | 'static-floor'
   peakPerMailbox: number
   windowDays: number
+  cachedAt?: string
+  stale?: boolean
   jobsDone: {
     reachable: boolean
     sharedClientsActive: number
-    source: 'jobsdone-os' | 'static-fallback'
+    source: string
     note?: string
   }
 }

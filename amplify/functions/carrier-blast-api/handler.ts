@@ -25,6 +25,7 @@ import {
   activateCampaign,
   pauseCampaign,
   campaignAnalytics,
+  campaignDailySends,
   listReceivedEmails,
   replyToEmail,
   listWebhooks,
@@ -44,6 +45,7 @@ const getCampaignTable = () => process.env.CAMPAIGN_TABLE!
 const getReplyTable = () => process.env.REPLY_TABLE!
 const getWebhookUrl = () => process.env.WEBHOOK_URL!
 const getWebhookSecret = () => process.env.INSTANTLY_WEBHOOK_SECRET!
+const getCapacitySnapshotTable = () => process.env.CAPACITY_SNAPSHOT_TABLE!
 
 export type Lane = 'IL_IA' | 'IL_WI'
 
@@ -243,9 +245,9 @@ export type CapacityOptions = {
   sentToday: Record<string, number>
   /** Minimum reserve per mailbox; used when live demand history is unavailable. */
   reservePerMailbox: number
-  sharedClientsActive: number
-  jobsDoneReachable: boolean
   claimedMailboxes: string[]
+  /** Sends already attributed to our own carrier campaigns today, by mailbox. */
+  carrierSent?: Record<string, number>
   /** Optional per-mailbox daily sends by date, used to measure JobsDone peak demand. */
   history?: Record<string, Record<string, number>>
   /** Today's date (YYYY-MM-DD); excluded from the peak-demand window. */
@@ -256,12 +258,14 @@ export type CapacityResult = {
   mailboxes: number
   perMailboxLimit: number
   sentToday: number
+  carrierSentToday: number
   reservedForJobsDone: number
   availableToday: number
   perMailbox: Array<{
     email: string
     dailyLimit: number
     sentToday: number
+    carrierSent: number
     reserved: number
     available: number
     peakObserved: number
@@ -274,23 +278,24 @@ export type CapacityResult = {
 /**
  * Pure capacity arithmetic shared by the capacity action and the launch path.
  *
- * Reserve is held when:
- *   - JobsDone OS is unreachable (fail-safe), OR
- *   - at least one ACTIVE SHARED JobsDone client exists, OR
- *   - the mailbox is claimed by any client via non-empty instantlyMailboxes.
+ * JobsDone's reserve is held unconditionally. Instantly's `sentToday` includes both
+ * JobsDone and carrier-blast sends, so we first subtract carrier sends to estimate
+ * JobsDone's own consumption, then hold the larger of the measured reserve and the
+ * JobsDone sends already seen today. Dedicated-client mailboxes (claimed via non-empty
+ * `instantlyMailboxes`) are fully reserved at their daily limit.
  */
 export function computeCapacity(options: CapacityOptions): CapacityResult {
   const {
     accounts,
     sentToday,
     reservePerMailbox,
-    sharedClientsActive,
-    jobsDoneReachable,
     claimedMailboxes,
+    carrierSent: rawCarrierSent,
     history,
     today,
   } = options
   const claimed = new Set(claimedMailboxes.map((e) => e.toLowerCase()))
+  const carrierSent: Record<string, number> = rawCarrierSent ?? {}
   const reserveBasis: CapacityResult['reserveBasis'] =
     history != null && Object.keys(history).length > 0 ? 'measured-peak' : 'static-floor'
 
@@ -298,26 +303,35 @@ export function computeCapacity(options: CapacityOptions): CapacityResult {
     const email = a.email.toLowerCase()
     const dailyLimit = a.dailyLimit
     const sent = sentToday[email] ?? 0
+    const carrier = carrierSent[email] ?? 0
+    const jobsDoneSent = Math.max(0, sent - carrier)
     const emailHistory = history?.[email] ?? {}
     const peakObserved = Object.entries(emailHistory).reduce((max, [date, count]) => {
       if (today && date === today) return max
       return count > max ? count : max
     }, 0)
-    const shouldReserve =
-      !jobsDoneReachable || sharedClientsActive > 0 || claimed.has(email)
-    const reserve = shouldReserve
-      ? jobsDonePeakReserve({
-          history: emailHistory,
-          dailyLimit,
-          minReserve: reservePerMailbox,
-          today,
-        })
-      : 0
-    const available = Math.max(0, dailyLimit - sent - reserve)
-    return { email, dailyLimit, sentToday: sent, reserved: reserve, available, peakObserved }
+    // Dedicated-client mailboxes are fully reserved; otherwise use measured peak/floor.
+    const measuredReserve = jobsDonePeakReserve({
+      history: emailHistory,
+      dailyLimit,
+      minReserve: reservePerMailbox,
+      today,
+    })
+    const reserve = claimed.has(email) ? dailyLimit : measuredReserve
+    const available = Math.max(0, dailyLimit - Math.max(reserve, jobsDoneSent) - carrier)
+    return {
+      email,
+      dailyLimit,
+      sentToday: sent,
+      carrierSent: carrier,
+      reserved: reserve,
+      available,
+      peakObserved,
+    }
   })
 
   const sentTotal = perMailbox.reduce((sum, m) => sum + m.sentToday, 0)
+  const carrierTotal = perMailbox.reduce((sum, m) => sum + m.carrierSent, 0)
   const reservedTotal = perMailbox.reduce((sum, m) => sum + m.reserved, 0)
   const availableToday = perMailbox.reduce((sum, m) => sum + m.available, 0)
   const perMailboxLimit =
@@ -328,12 +342,166 @@ export function computeCapacity(options: CapacityOptions): CapacityResult {
     mailboxes: accounts.length,
     perMailboxLimit,
     sentToday: sentTotal,
+    carrierSentToday: carrierTotal,
     reservedForJobsDone: reservedTotal,
     availableToday,
     perMailbox,
     reserveBasis,
     peakPerMailbox,
     windowDays: JOBSDONE_PEAK_WINDOW_DAYS,
+  }
+}
+
+export const CAPACITY_CACHE_TTL_MS = 15 * 60 * 1000
+export const CAPACITY_SNAPSHOT_ID = 'current'
+
+export type CapacitySnapshot = CapacityResult & {
+  date: string
+  jobsDone: {
+    reachable: boolean
+    sharedClientsActive: number
+    source: string
+    note?: string
+  }
+  asOf: string
+  cachedAt: string
+  stale: boolean
+  note?: string
+}
+
+/** Distribute a campaign's daily sends evenly across its sender mailboxes. */
+function distributeCampaignSends(
+  total: number,
+  mailboxes: string[],
+): Record<string, number> {
+  const recipients = mailboxes.map((e) => e.toLowerCase())
+  const n = recipients.length
+  if (n === 0) return {}
+  const base = Math.floor(total / n)
+  const rem = total % n
+  const result: Record<string, number> = {}
+  recipients.forEach((email, i) => {
+    result[email] = base + (i < rem ? 1 : 0)
+  })
+  return result
+}
+
+/**
+ * Fetch today's carrier-blast sends attributed back to each mailbox.
+ *
+ * For each CarrierCampaign with a non-null instantlyCampaignId and status
+ * sending/paused/completed, ask Instantly for today's per-campaign daily analytics.
+ * Per-campaign analytics are not split by mailbox, so the campaign total is distributed
+ * evenly across that campaign's senderAccounts. This is exact when one campaign owns a
+ * mailbox (the normal case) and a conservative approximation otherwise.
+ */
+async function getCarrierSentToday(
+  date: string,
+): Promise<Record<string, number>> {
+  const result: Record<string, number> = {}
+  const table = getCampaignTable()
+  const campaigns = await scanAll<CarrierCampaign>(table, {
+    expression:
+      'attribute_exists(instantlyCampaignId) AND #status IN (:sending, :paused, :completed)',
+    names: { '#status': 'status' },
+    values: {
+      ':sending': 'sending',
+      ':paused': 'paused',
+      ':completed': 'completed',
+    },
+  })
+
+  for (const campaign of campaigns) {
+    if (!campaign.instantlyCampaignId || campaign.senderAccounts.length === 0) continue
+
+    let sentToday = 0
+    try {
+      sentToday = await campaignDailySends(campaign.instantlyCampaignId, date)
+    } catch (err) {
+      console.error(
+        '[carrier-blast-api] campaignDailySends failed; falling back to campaign analytics',
+        { campaignId: campaign.id, instantlyCampaignId: campaign.instantlyCampaignId, err },
+      )
+      // Fallback: diff the campaign's total sent count from the last snapshot we stored.
+      try {
+        const rows = await campaignAnalytics(campaign.instantlyCampaignId)
+        const row = rows.find((r) => r.campaign_id === campaign.instantlyCampaignId)
+        if (row) {
+          const total = row.emails_sent_count ?? 0
+          const prior = campaign.sentCount ?? 0
+          sentToday = Math.max(0, total - prior)
+        }
+      } catch (fallbackErr) {
+        console.error(
+          '[carrier-blast-api] campaign analytics fallback also failed',
+          { campaignId: campaign.id, fallbackErr },
+        )
+      }
+    }
+
+    if (sentToday <= 0) continue
+    const byMailbox = distributeCampaignSends(sentToday, campaign.senderAccounts)
+    for (const [email, count] of Object.entries(byMailbox)) {
+      result[email] = (result[email] ?? 0) + count
+    }
+  }
+
+  return result
+}
+
+type CapacitySnapshotRow = {
+  snapshotId: string
+  cachedAt: string
+  stale: boolean
+  data: string
+}
+
+async function getCapacitySnapshot(): Promise<CapacitySnapshot | null> {
+  const table = getCapacitySnapshotTable()
+  if (!table) return null
+  const res = await ddb.send(
+    new GetCommand({ TableName: table, Key: { snapshotId: CAPACITY_SNAPSHOT_ID } }),
+  )
+  const row = res.Item as CapacitySnapshotRow | undefined
+  if (!row?.data) return null
+  try {
+    const parsed = JSON.parse(row.data) as CapacitySnapshot
+    return { ...parsed, cachedAt: row.cachedAt, stale: row.stale }
+  } catch {
+    console.error('[carrier-blast-api] failed to parse capacity snapshot')
+    return null
+  }
+}
+
+async function putCapacitySnapshot(snapshot: CapacitySnapshot): Promise<void> {
+  const table = getCapacitySnapshotTable()
+  if (!table) return
+  const row: CapacitySnapshotRow = {
+    snapshotId: CAPACITY_SNAPSHOT_ID,
+    cachedAt: snapshot.cachedAt,
+    stale: snapshot.stale,
+    data: JSON.stringify(snapshot),
+  }
+  await ddb.send(new PutCommand({ TableName: table, Item: row }))
+}
+
+function buildCapacitySnapshot(
+  live: LiveCapacityResult,
+  asOf: string,
+): CapacitySnapshot {
+  const { jobsDoneReachable, sharedClientsActive, source, note, ...capacity } = live
+  return {
+    ...capacity,
+    date: live.date,
+    jobsDone: {
+      reachable: jobsDoneReachable,
+      sharedClientsActive,
+      source,
+      note,
+    },
+    asOf,
+    cachedAt: asOf,
+    stale: false,
   }
 }
 
@@ -529,17 +697,15 @@ async function listAccountsAction() {
  * JobsDone engine. If either upstream call fails we fall back to the static reserve and
  * say so in the returned metadata — we never return "unlimited" and we never throw.
  */
-async function getLiveCapacity(
-  accounts?: InstantlyAccount[],
-): Promise<
-  CapacityResult & {
-    date: string
-    jobsDoneReachable: boolean
-    sharedClientsActive: number
-    source: 'jobsdone-os' | 'static-fallback'
-    note?: string
-  }
-> {
+type LiveCapacityResult = CapacityResult & {
+  date: string
+  jobsDoneReachable: boolean
+  sharedClientsActive: number
+  source: string
+  note?: string
+}
+
+async function getLiveCapacity(accounts?: InstantlyAccount[]): Promise<LiveCapacityResult> {
   const date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
   const [y, m, d] = date.split('-').map(Number)
   const todayDate = new Date(Date.UTC(y, m - 1, d, 12, 0, 0))
@@ -560,6 +726,9 @@ async function getLiveCapacity(
     ? jobsDone.clients.filter((c) => c.status === 'ACTIVE' && c.instantlyMode === 'SHARED').length
     : 0
 
+  // The JobsDone reserve is unconditional. The JobsDone OS poll now only removes capacity:
+  // any mailbox listed in a non-empty instantlyMailboxes array is dedicated and fully
+  // reserved. An empty array is a no-op, and a failed poll cannot increase capacity.
   const claimedMailboxes = jobsDone.reachable
     ? jobsDone.clients.flatMap((c) => c.instantlyMailboxes ?? [])
     : []
@@ -568,13 +737,7 @@ async function getLiveCapacity(
   let historyFailed = false
   let sentToday: Record<string, number> = {}
   let analyticsFailed = false
-  let source: 'jobsdone-os' | 'static-fallback' = 'jobsdone-os'
   const notes: string[] = []
-
-  if (!jobsDone.reachable) {
-    source = 'static-fallback'
-    notes.push('JobsDone OS unreachable; holding full reserve as a fail-safe.')
-  }
 
   try {
     history = await accountDailySendsRange(
@@ -584,7 +747,6 @@ async function getLiveCapacity(
     )
   } catch (err) {
     historyFailed = true
-    source = 'static-fallback'
     notes.push(
       `JobsDone send history unavailable; using the ${JOBSDONE_MIN_RESERVE_PER_MAILBOX}/day floor reserve.`,
     )
@@ -595,11 +757,18 @@ async function getLiveCapacity(
     sentToday = await accountDailySends(allowedAccounts.map((a) => a.email), date)
   } catch (err) {
     analyticsFailed = true
-    source = 'static-fallback'
     notes.push(
       `Instantly analytics failed; falling back to static reserve. ${err instanceof Error ? err.message : String(err)}`,
     )
     console.error('[carrier-blast-api] getLiveCapacity analytics failed', err)
+  }
+
+  let carrierSent: Record<string, number> = {}
+  try {
+    carrierSent = await getCarrierSentToday(date)
+  } catch (err) {
+    notes.push('Carrier-send attribution failed; capacity may include uncounted carrier sends.')
+    console.error('[carrier-blast-api] getLiveCapacity carrier sent failed', err)
   }
 
   const capacity = computeCapacity({
@@ -608,45 +777,60 @@ async function getLiveCapacity(
     history,
     today: date,
     reservePerMailbox: JOBSDONE_MIN_RESERVE_PER_MAILBOX,
-    sharedClientsActive,
-    // Hold the reserve when JobsDone is unreachable OR when live analytics/history failed.
-    jobsDoneReachable: jobsDone.reachable && !analyticsFailed && !historyFailed,
     claimedMailboxes,
+    carrierSent,
   })
+
+  if (historyFailed || analyticsFailed) {
+    notes.push('Reserve is held unconditionally; no code path can release it.')
+  }
 
   return {
     ...capacity,
     date,
     jobsDoneReachable: jobsDone.reachable,
     sharedClientsActive,
-    source,
+    source: 'unconditional-reserve',
     note: notes.length > 0 ? notes.join(' ') : undefined,
   }
 }
 
-async function capacityAction() {
+async function capacityAction(payload: { refresh?: boolean } = {}) {
   const asOf = new Date().toISOString()
-  const live = await getLiveCapacity()
+  let cached: CapacitySnapshot | null = null
+  try {
+    cached = await getCapacitySnapshot()
+  } catch (err) {
+    console.error('[carrier-blast-api] getCapacitySnapshot failed', err)
+  }
+  const cacheAgeMs = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity
+  const isStale = cacheAgeMs >= CAPACITY_CACHE_TTL_MS
 
-  return {
-    ok: true,
-    asOf,
-    date: live.date,
-    mailboxes: live.mailboxes,
-    perMailboxLimit: live.perMailboxLimit,
-    sentToday: live.sentToday,
-    reservedForJobsDone: live.reservedForJobsDone,
-    availableToday: live.availableToday,
-    perMailbox: live.perMailbox,
-    reserveBasis: live.reserveBasis,
-    peakPerMailbox: live.peakPerMailbox,
-    windowDays: live.windowDays,
-    jobsDone: {
-      reachable: live.jobsDoneReachable,
-      sharedClientsActive: live.sharedClientsActive,
-      source: live.source,
-      note: live.note,
-    },
+  if (!payload.refresh && cached && !isStale) {
+    return { ok: true, ...cached, stale: false }
+  }
+
+  try {
+    const live = await getLiveCapacity()
+    const snapshot = buildCapacitySnapshot(live, asOf)
+    try {
+      await putCapacitySnapshot(snapshot)
+    } catch (err) {
+      console.error('[carrier-blast-api] putCapacitySnapshot failed', err)
+    }
+    return { ok: true, ...snapshot }
+  } catch (err) {
+    if (cached) {
+      const note = `Live recompute failed; showing cached snapshot from ${cached.cachedAt}.${cached.note ? ` ${cached.note}` : ''}`
+      return {
+        ok: true,
+        ...cached,
+        stale: true,
+        note,
+        jobsDone: { ...cached.jobsDone, note },
+      }
+    }
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
@@ -1001,6 +1185,16 @@ async function cronAction() {
       synced.push({ campaignId: c.id, ok: false, error: (err as Error).message })
     }
   }
+
+  // The 15-minute cron also refreshes the cached capacity snapshot so reads are fast.
+  try {
+    const live = await getLiveCapacity()
+    const snapshot = buildCapacitySnapshot(live, nowIso())
+    await putCapacitySnapshot(snapshot)
+  } catch (err) {
+    console.error('[carrier-blast-api] cron capacity snapshot failed', err)
+  }
+
   return { ok: true, replies, synced }
 }
 
@@ -1019,7 +1213,7 @@ export const handler = async (event: AppSyncEvent | CronEvent | Record<string, u
       case 'listAccounts':
         return await listAccountsAction()
       case 'capacity':
-        return await capacityAction()
+        return await capacityAction(payload as { refresh?: boolean })
       case 'launchCampaign':
         return await launchCampaignAction(payload as { campaignId: string })
       case 'runLaunch':
