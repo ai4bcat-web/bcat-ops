@@ -130,9 +130,12 @@ describe('CampaignsTab', () => {
     carrierBlast.mockResolvedValue({
       ok: true,
       accounts: [
-        { email: 'warm@instantly.ai', status: '1', warmupStatus: 'active', dailyLimit: 200, warmupScore: 80, provider: 'google', ok: true },
+        { email: 'warm@jobsdone.com', status: '1', warmupStatus: 'active', dailyLimit: 40, warmupScore: 95, provider: 'google', ok: true },
       ],
-      totalDailyCapacity: 200,
+      totalDailyCapacity: 15,
+      defaultPerMailbox: 12,
+      reservePerMailbox: 25,
+      maxPerMailbox: 15,
     })
     const activeContacts = Array.from({ length: 600 }, (_, i) => ({
       id: `c-${i}`,
@@ -159,7 +162,7 @@ describe('CampaignsTab', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByText(/warm@instantly\.ai/i)).toBeTruthy()
+      expect(screen.getByText(/warm@jobsdone\.com/i)).toBeTruthy()
     })
 
     act(() => {
@@ -168,15 +171,80 @@ describe('CampaignsTab', () => {
       fireEvent.change(screen.getByPlaceholderText(/Plain text/i), { target: { value: 'Body text' } })
     })
 
-    const warmCheckbox = screen.getByRole('checkbox', { name: /warm@instantly\.ai/i })
+    const warmCheckbox = screen.getByRole('checkbox', { name: /warm@jobsdone\.com/i })
     act(() => {
       fireEvent.click(warmCheckbox)
     })
 
     await waitFor(() => {
       const estimate = screen.getByTestId('campaign-estimate')
-      expect(estimate.textContent).toContain('30 emails/day')
-      expect(estimate.textContent).toContain('~20 days to reach 600 active contacts')
+      expect(estimate.textContent).toContain('1 mailbox × 12/day = 12/day')
+      expect(estimate.textContent).toContain('~50 days for 600 contacts')
+    })
+  })
+
+  it('clamps per-mailbox to maxPerMailbox and excludes non-jobsdone accounts', async () => {
+    carrierBlast.mockResolvedValue({
+      ok: true,
+      accounts: [
+        { email: 'a@jobsdone.com', status: '1', warmupStatus: 'active', dailyLimit: 40, warmupScore: 95, provider: 'google', ok: true },
+        { email: 'b@jobsdone.com', status: '1', warmupStatus: 'active', dailyLimit: 40, warmupScore: 92, provider: 'google', ok: true },
+        { email: 'bad@cowtown.com', status: '1', warmupStatus: 'active', dailyLimit: 40, warmupScore: 95, provider: 'google', ok: false },
+      ],
+      totalDailyCapacity: 30,
+      defaultPerMailbox: 12,
+      reservePerMailbox: 25,
+      maxPerMailbox: 15,
+    })
+    const activeContacts = Array.from({ length: 3000 }, (_, i) => ({
+      id: `c-${i}`,
+      lane: 'IL_IA' as const,
+      email: `carrier${i}@x.com`,
+      firstName: null,
+      lastName: null,
+      company: null,
+      status: 'active' as const,
+      source: null,
+      addedBy: null,
+      addedAt: '2025-01-01T00:00:00.000Z',
+      lastCampaignId: null,
+      lastSentAt: null,
+      notes: null,
+      createdAt: '2025-01-01T00:00:00.000Z',
+      updatedAt: '2025-01-01T00:00:00.000Z',
+    }))
+    listCarrierContacts.mockResolvedValue(activeContacts)
+    render(<MemoryRouter><CampaignsTab /></MemoryRouter>)
+
+    act(() => {
+      fireEvent.click(screen.getByRole('button', { name: /New campaign/i }))
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/a@jobsdone\.com/i)).toBeTruthy()
+      expect(screen.getByText(/b@jobsdone\.com/i)).toBeTruthy()
+    })
+
+    expect(screen.queryByRole('checkbox', { name: /bad@cowtown\.com/i })).toBeNull()
+
+    act(() => {
+      fireEvent.click(screen.getByRole('checkbox', { name: /a@jobsdone\.com/i }))
+      fireEvent.click(screen.getByRole('checkbox', { name: /b@jobsdone\.com/i }))
+    })
+
+    const limitInput = screen.getByTestId('per-mailbox-limit')
+    act(() => {
+      fireEvent.change(limitInput, { target: { value: '20' } })
+    })
+
+    await waitFor(() => {
+      expect((limitInput as HTMLInputElement).value).toBe('15')
+    })
+
+    await waitFor(() => {
+      const estimate = screen.getByTestId('campaign-estimate')
+      expect(estimate.textContent).toContain('2 mailboxes × 15/day = 30/day')
+      expect(estimate.textContent).toContain('~100 days for 3000 contacts')
     })
   })
 })

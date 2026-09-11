@@ -5,6 +5,9 @@ import {
   textToHtml,
   daysToReach,
   accountIsOk,
+  maxPerMailbox,
+  JOBSDONE_RESERVE_PER_MAILBOX,
+  DEFAULT_PER_MAILBOX_PER_DAY,
   normalizeAccount,
   emailToReply,
 } from './handler'
@@ -113,40 +116,76 @@ describe('emailToReply', () => {
 // ── Account normalization ───────────────────────────────────────────────────
 
 describe('accountIsOk', () => {
-  it('returns true only for active, warmed-up, fully-set-up accounts', () => {
-    const okAccount: InstantlyAccount = {
-      email: 'a@b.com',
-      status: 1,
-      warmup_status: 1,
-      daily_limit: 40,
-      stat_warmup_score: 95,
-      provider_code: 2,
-      setup_pending: false,
-    }
+  const okAccount: InstantlyAccount = {
+    email: 'rynebandolik@gojobsdone.com',
+    status: 1,
+    warmup_status: 1,
+    daily_limit: 40,
+    stat_warmup_score: 100,
+    provider_code: 2,
+    setup_pending: false,
+  }
+
+  it('accepts a jobsdone mailbox that is active, warmed, and has allowance left', () => {
     expect(accountIsOk(okAccount)).toBe(true)
+  })
+
+  it('rejects paused, unwarmed, or still-setting-up mailboxes', () => {
     expect(accountIsOk({ ...okAccount, status: 2 })).toBe(false)
+    expect(accountIsOk({ ...okAccount, status: -3 })).toBe(false)
     expect(accountIsOk({ ...okAccount, warmup_status: 0 })).toBe(false)
     expect(accountIsOk({ ...okAccount, setup_pending: true })).toBe(false)
+  })
+
+  it('rejects a warmup score below 90', () => {
+    expect(accountIsOk({ ...okAccount, stat_warmup_score: 89 })).toBe(false)
+    expect(accountIsOk({ ...okAccount, stat_warmup_score: 90 })).toBe(true)
+    expect(accountIsOk({ ...okAccount, stat_warmup_score: null })).toBe(false)
+  })
+
+  it('rejects mailboxes outside the jobsdone allowlist', () => {
+    // Shared workspace also holds cowtown/sidekick mailboxes — never send carrier blasts from them.
+    expect(accountIsOk({ ...okAccount, email: 'aiden@cowtowntrucking.com' })).toBe(false)
+    expect(accountIsOk({ ...okAccount, email: 'charles@sidekickmlo.com' })).toBe(false)
+  })
+
+  it('rejects a mailbox whose whole allowance is inside the JobsDone OS reserve', () => {
+    // 25/day is reserved for the engine, so a 25/day mailbox has nothing to spare.
+    expect(accountIsOk({ ...okAccount, daily_limit: JOBSDONE_RESERVE_PER_MAILBOX })).toBe(false)
+    expect(accountIsOk({ ...okAccount, daily_limit: JOBSDONE_RESERVE_PER_MAILBOX + 1 })).toBe(true)
+  })
+})
+
+describe('maxPerMailbox', () => {
+  it('leaves the JobsDone OS reserve untouched', () => {
+    expect(maxPerMailbox({ daily_limit: 40 })).toBe(40 - JOBSDONE_RESERVE_PER_MAILBOX)
+    expect(maxPerMailbox({ daily_limit: 10 })).toBe(0)
+    expect(maxPerMailbox({ daily_limit: null })).toBe(0)
+  })
+
+  it('keeps the default per-mailbox take within the leftover allowance', () => {
+    // Guards against someone raising the default above what the reserve permits.
+    expect(DEFAULT_PER_MAILBOX_PER_DAY).toBeLessThanOrEqual(maxPerMailbox({ daily_limit: 40 }))
   })
 })
 
 describe('normalizeAccount', () => {
   it('maps Instantly fields to the frontend shape', () => {
     const normalized = normalizeAccount({
-      email: 'a@b.com',
+      email: 'rynebandolik@gojobsdone.com',
       status: 1,
       warmup_status: 1,
       daily_limit: 40,
-      stat_warmup_score: 95,
+      stat_warmup_score: 100,
       provider_code: 2,
       setup_pending: false,
     })
     expect(normalized).toEqual({
-      email: 'a@b.com',
+      email: 'rynebandolik@gojobsdone.com',
       status: 1,
       warmupStatus: 1,
       dailyLimit: 40,
-      warmupScore: 95,
+      warmupScore: 100,
       provider: 2,
       ok: true,
     })

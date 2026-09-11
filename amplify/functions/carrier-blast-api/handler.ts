@@ -136,15 +136,37 @@ export function daysToReach(activeCount: number, dailyCapacity: number): number 
   return Math.ceil(activeCount / dailyCapacity)
 }
 
-/** Conservative per-mailbox sends/day; mailboxes' own Instantly limits cap this further. */
-export const DEFAULT_PER_MAILBOX_PER_DAY = 30
+/**
+ * Sending-mailbox policy.
+ *
+ * These mailboxes are SHARED with the JobsDone OS outbound engine, which sends from them
+ * every day. Instantly's per-account `daily_limit` is consumed across ALL campaigns in the
+ * workspace, so an unbounded carrier blast would eat the engine's allowance and silently
+ * starve it (and stack more volume on domains that already tripped Bounce Protect once).
+ *
+ * Measured JobsDone usage: peak 21–24 sends/day/mailbox against a 40/day limit. So we
+ * reserve 25/day/mailbox for the engine and let carrier blasts use only what is left.
+ */
+export const SENDER_ALLOWLIST = /jobsdone/i
+/** Per-mailbox sends/day held back for the JobsDone OS engine. Never encroach on this. */
+export const JOBSDONE_RESERVE_PER_MAILBOX = 25
+/** Default carrier-blast sends/day/mailbox — conservative, well under the leftover. */
+export const DEFAULT_PER_MAILBOX_PER_DAY = 12
+
+/** The most a carrier blast may take from one mailbox without touching the reserve. */
+export function maxPerMailbox(account: Pick<InstantlyAccount, 'daily_limit'>): number {
+  return Math.max(0, (account.daily_limit ?? 0) - JOBSDONE_RESERVE_PER_MAILBOX)
+}
 
 export function accountIsOk(account: InstantlyAccount): boolean {
-  // Warmed, not in setup, no errors, and the Instantly warmup score is >= 90.
-  return account.status === 1
+  // Only jobsdone mailboxes; warmed, no errors, warmup score >= 90, and enough daily
+  // allowance left over after the JobsDone OS reserve to send anything at all.
+  return SENDER_ALLOWLIST.test(account.email)
+    && account.status === 1
     && account.warmup_status === 1
     && account.setup_pending === false
     && (account.stat_warmup_score ?? 0) >= 90
+    && maxPerMailbox(account) > 0
 }
 
 export function normalizeAccount(account: InstantlyAccount) {
@@ -324,10 +346,23 @@ export function emailToReply(
 async function listAccountsAction() {
   const accounts = await listAccounts()
   const normalized = accounts.map(normalizeAccount)
-  const totalDailyCapacity = normalized
-    .filter((a) => a.ok)
-    .reduce((sum, a) => sum + (a.dailyLimit || 0), 0)
-  return { ok: true, accounts: normalized, totalDailyCapacity }
+  const usable = normalized.filter((a) => a.ok)
+  // Capacity available to carrier blasts = leftover after the JobsDone OS reserve,
+  // NOT each mailbox's full daily_limit.
+  const totalDailyCapacity = usable.reduce(
+    (sum, a) => sum + Math.max(0, a.dailyLimit - JOBSDONE_RESERVE_PER_MAILBOX),
+    0,
+  )
+  return {
+    ok: true,
+    accounts: normalized,
+    totalDailyCapacity,
+    defaultPerMailbox: DEFAULT_PER_MAILBOX_PER_DAY,
+    reservePerMailbox: JOBSDONE_RESERVE_PER_MAILBOX,
+    maxPerMailbox: usable.length
+      ? Math.min(...usable.map((a) => Math.max(0, a.dailyLimit - JOBSDONE_RESERVE_PER_MAILBOX)))
+      : 0,
+  }
 }
 
 /**
@@ -378,27 +413,36 @@ async function runLaunchAction(payload: { campaignId: string }) {
   let instantlyCampaignId = campaign.instantlyCampaignId
   try {
     if (!instantlyCampaignId) {
-      // Reputation guard for the (jobsdone) sending mailboxes: the stored dailyLimit is
-      // PER MAILBOX. Instantly's campaign daily_limit is a campaign-wide total, so it is
-      // per-mailbox × mailbox count, and each mailbox is further capped at its own
-      // Instantly daily_limit. Only warmed, healthy, active mailboxes are used — a
-      // paused/erroring or un-warmed account is dropped rather than burned.
+      // Reputation + capacity guard. These mailboxes are shared with the JobsDone OS
+      // engine, so the per-mailbox take is clamped to (account daily_limit - reserve).
+      // Instantly's campaign daily_limit is a campaign-wide TOTAL, hence × sender count.
       const accounts = await listAccounts()
       const byEmail = new Map(accounts.map((a) => [a.email.toLowerCase(), a]))
-      const senders = campaign.senderAccounts
-        .map((e) => e.toLowerCase())
-        .filter((e) => {
-          const a = byEmail.get(e)
-          return !!a && accountIsOk(a)
-        })
+      const requested = campaign.senderAccounts.map((e) => e.toLowerCase())
+      const senders = requested.filter((e) => {
+        const a = byEmail.get(e)
+        return !!a && accountIsOk(a)
+      })
+      const skipped = requested.filter((e) => !senders.includes(e))
       if (senders.length === 0) {
-        throw new Error('None of the selected sending mailboxes are active with warmup enabled')
+        throw new Error(
+          'No usable sending mailboxes: must be jobsdone addresses that are active, warmed (score >= 90), and have allowance left after the JobsDone OS reserve',
+        )
       }
+      // Never exceed any selected mailbox's leftover allowance.
       const perMailbox = Math.max(1, Math.min(
         campaign.dailyLimit ?? DEFAULT_PER_MAILBOX_PER_DAY,
-        ...senders.map((e) => byEmail.get(e)!.daily_limit || DEFAULT_PER_MAILBOX_PER_DAY),
+        ...senders.map((e) => maxPerMailbox(byEmail.get(e)!)),
       ))
       const campaignDailyLimit = perMailbox * senders.length
+      // Persist what is ACTUALLY in force so the UI's days-to-complete math is honest.
+      await updateCampaign(campaignId, {
+        senderAccounts: senders,
+        dailyLimit: perMailbox,
+        errorText: skipped.length
+          ? `${skipped.length} mailbox(es) skipped (not jobsdone / not warmed / no allowance left): ${skipped.slice(0, 5).join(', ')}`
+          : '',
+      })
       const created = await createCampaign({
         name: campaign.name,
         email_list: senders,
