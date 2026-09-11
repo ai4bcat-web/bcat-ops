@@ -20,8 +20,13 @@ function cityState(desc: string | null): string {
   return (i >= 0 ? desc.slice(i + 4) : desc).trim()
 }
 
-/** "Moving · 25m" / "Idle · 3h" from the truck's motion state + motionSince. */
-function motionLabel(loc: TruckLocation): { text: string; moving: boolean } {
+/**
+ * "Moving · 25m" / "Idle · 3h" from the truck's motion state + motionSince.
+ * A fix older than STALE_MS is "No signal · 7d" — Idle implies the truck is confirmed
+ * parked, but a week-old 0 mph ping only says the ELD stopped reporting (unit 310, Sep 2026).
+ */
+function motionLabel(loc: TruckLocation, stale: boolean): { text: string; moving: boolean } {
+  if (stale) return { text: `No signal · ${formatDistanceToNowStrict(new Date(loc.locatedAt))}`, moving: false }
   const moving = loc.motion === 'MOVING'
   const since = loc.motionSince ? formatDistanceToNowStrict(new Date(loc.motionSince)) : null
   const base = moving ? 'Moving' : 'Idle'
@@ -114,7 +119,7 @@ export function TruckMapWidget() {
 
             {rows.map((loc) => {
               const stale = now - new Date(loc.locatedAt).getTime() > STALE_MS
-              const { text: motionText, moving } = motionLabel(loc)
+              const { text: motionText, moving } = motionLabel(loc, stale)
               const unit = canonicalUnit(loc.unitNumber)
               // Match this Motive truck to a fleet truck by (canonical) unit number — works
               // whether the location's truckId is an Equipment id or a `motive:<n>` fallback.

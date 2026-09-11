@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { calcDriverPay, tripPayAmount, effectivePayRate, effectiveFixedExpenses } from './driverPay'
-import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride } from './driverPay'
+import { calcDriverPay, tripPayAmount, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
+import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride, FixedExpenseInput } from './driverPay'
+
+const addDays = (iso: string, days: number): string => {
+  const d = new Date(`${iso}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
 
 // Each "trip set" is reduced to its freight total; the calc only needs the sum.
 const tripsTotaling = (gross: number): PayTripInput[] => [{ freightAmount: gross }]
@@ -176,7 +182,7 @@ describe('debits — money off the check at 100%, AFTER the net', () => {
   })
 })
 
-describe('effectiveFixedExpenses — week-bounded fixed charges', () => {
+describe('effectiveFixedExpenses — daily-prorated fixed charges', () => {
   // Chad's real case: PLATES was deleted from settings and every past week lost it.
   // Bounded charges keep history: PLATES applies to weeks BEFORE 2026-08-30 only.
   const charges = [
@@ -186,20 +192,103 @@ describe('effectiveFixedExpenses — week-bounded fixed charges', () => {
   ]
 
   it('a past week keeps the since-ended charge', () => {
-    expect(effectiveFixedExpenses(charges, '2026-08-23').map((f) => f.label)).toEqual(['ELD', 'PLATES'])
+    expect(effectiveFixedExpenses(charges, '2026-08-23', addDays('2026-08-23', 6)).map((f) => f.label))
+      .toEqual(['ELD', 'PLATES'])
   })
 
   it('the week it ends on no longer has it', () => {
-    expect(effectiveFixedExpenses(charges, '2026-08-30').map((f) => f.label)).toEqual(['ELD'])
+    expect(effectiveFixedExpenses(charges, '2026-08-30', addDays('2026-08-30', 6)).map((f) => f.label))
+      .toEqual(['ELD'])
   })
 
   it('a future-dated charge starts on its from week, not before', () => {
-    expect(effectiveFixedExpenses(charges, '2026-09-06').map((f) => f.label)).toEqual(['ELD', 'NEW ESCROW'])
+    expect(effectiveFixedExpenses(charges, '2026-09-06', addDays('2026-09-06', 6)).map((f) => f.label))
+      .toEqual(['ELD', 'NEW ESCROW'])
   })
 
   it('unbounded charges (every existing row) apply everywhere', () => {
-    expect(effectiveFixedExpenses([{ label: 'ELD', amount: 20 }], '1999-01-03')).toHaveLength(1)
-    expect(effectiveFixedExpenses(null, '2026-08-23')).toEqual([])
+    expect(effectiveFixedExpenses([{ label: 'ELD', amount: 20 }], '1999-01-03', addDays('1999-01-03', 6)))
+      .toHaveLength(1)
+    expect(effectiveFixedExpenses(null, '2026-08-23', addDays('2026-08-23', 6))).toEqual([])
+  })
+
+  it('full-period aligned windows keep the original amount', () => {
+    const r = effectiveFixedExpenses(
+      [{ label: 'ELD', amount: 20 }],
+      '2026-08-23',
+      addDays('2026-08-23', 6),
+    )
+    expect(r[0].amount).toBe(20)
+  })
+
+  it('prorates a midweek amount change across the same expenseId series', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'INSURANCE', amount: 100, from: '2026-09-06', until: '2026-09-09', revisionId: 'r1', expenseId: 'e1' },
+      { label: 'INSURANCE', amount: 200, from: '2026-09-09', until: null, revisionId: 'r2', expenseId: 'e1' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r.map((f) => f.amount)).toEqual([42.86, 114.28])
+    expect(r.reduce((s, f) => s + f.amount, 0)).toBeCloseTo(157.14, 2)
+  })
+
+  it('names the day fraction on partial-period lines only, so the sheet explains the odd amount', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'ELD', amount: 20 },
+      { label: 'INSURANCE', amount: 100, from: '2026-09-06', until: '2026-09-09', revisionId: 'r1', expenseId: 'e1' },
+      { label: 'INSURANCE', amount: 200, from: '2026-09-09', until: null, revisionId: 'r2', expenseId: 'e1' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r.map(fixedExpenseLineLabel)).toEqual(['ELD', 'INSURANCE (3/7 days)', 'INSURANCE (4/7 days)'])
+  })
+
+  it('same-rate split cannot create or lose a cent', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'INSURANCE', amount: 100, from: '2026-09-06', until: '2026-09-09', revisionId: 'r1', expenseId: 'e1' },
+      { label: 'INSURANCE', amount: 100, from: '2026-09-09', until: null, revisionId: 'r2', expenseId: 'e1' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r.reduce((s, f) => s + f.amount, 0)).toBe(100)
+  })
+
+  it('prorates 14-day biweekly new and ended charges', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'OLD', amount: 100, from: '2026-09-01', until: '2026-09-10', revisionId: 'r1', expenseId: 'e1' },
+      { label: 'NEW', amount: 100, from: '2026-09-13', until: null, revisionId: 'r2', expenseId: 'e2' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 13))
+    expect(r).toHaveLength(2)
+    expect(r.find((f) => f.label === 'OLD')?.amount).toBeCloseTo(28.57, 2)
+    expect(r.find((f) => f.label === 'NEW')?.amount).toBe(50)
+  })
+
+  it('handles multiple scheduled versions including a midweek type change', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'INSURANCE-A', amount: 100, from: '2026-09-06', until: '2026-09-09', revisionId: 'r1', expenseId: 'e1' },
+      { label: 'INSURANCE-B', amount: 150, from: '2026-09-09', until: '2026-09-12', revisionId: 'r2', expenseId: 'e1' },
+      { label: 'INSURANCE-C', amount: 200, from: '2026-09-12', until: null, revisionId: 'r3', expenseId: 'e1' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r.map((f) => f.amount)).toEqual([42.86, 64.28, 28.57])
+    expect(r.reduce((s, f) => s + f.amount, 0)).toBeCloseTo(135.71, 2)
+  })
+
+  it('does not charge a revision that does not overlap the period', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'FUTURE', amount: 100, from: '2026-09-13', until: null, revisionId: 'r1', expenseId: 'e1' },
+    ]
+    expect(effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))).toEqual([])
+  })
+
+  it('respects until exclusive', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'X', amount: 70, from: '2026-09-06', until: '2026-09-09', revisionId: 'r1', expenseId: 'e1' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r[0].amount).toBeCloseTo(30, 2)
+  })
+
+  it('rejects an inverted period range', () => {
+    expect(() => effectiveFixedExpenses([], '2026-09-06', '2026-09-05')).toThrow()
   })
 
   it('a negative one-off offsets a fixed charge exactly, under BOTH pay models', () => {

@@ -10,7 +10,7 @@ import {
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { useLoads } from './useLoads'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -51,7 +51,7 @@ export interface BoxTruckPayState {
   pushTripToNextPeriod: (id: string) => Promise<string>
   /** Delete every shipment in the current period. Returns how many were removed. */
   clearPeriod:    () => Promise<number>
-  saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => Promise<void>
+  saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => Promise<void>
   addDeduction:   (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   removeDeduction:(id: string) => Promise<void>
   addCredit:      (input: DriverPayCreditInput) => Promise<void>
@@ -127,7 +127,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
         const ded: PayDeductionInput[] = [
-          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart).map((f) => ({ label: f.label, amount: f.amount })),
+          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart, end).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
           ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
@@ -213,10 +213,10 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
     return created.length
   }, [trips, periodStart, deliveredLoadsFor])
 
-  const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => {
+  const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => {
     const existing = settings.find((s) => s.driverId === driverId && s.payGroup === 'BOX_TRUCK')
     if (existing) {
-      const updated = await updateDriverPaySetting(existing.id, patch)
+      const updated = await updateDriverPaySetting(existing.id, patch, expectedUpdatedAt ?? '')
       setSettings((p) => p.map((s) => s.id === existing.id ? updated : s))
     } else {
       const created = await createDriverPaySetting({ driverId, ...patch })

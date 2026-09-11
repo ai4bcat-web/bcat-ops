@@ -46,11 +46,15 @@ function headers(apiKey: string): Record<string, string> {
 
 async function getJson(url: string, apiKey: string): Promise<unknown> {
   const res = await fetch(url, { headers: headers(apiKey) })
+  const body = await res.text().catch(() => '')
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
     throw new Error(`Blue Ink Tech API ${res.status} ${res.statusText} — ${url}\n${body}`)
   }
-  return res.json()
+  // BIT's PHP backend sometimes prepends a "Deprecated: ..." notice before the JSON
+  // body (seen on /vehicle_route/, Sep 2026). Parse from the first brace.
+  const start = body.indexOf('{')
+  if (start < 0) throw new Error(`Blue Ink Tech API returned no JSON — ${url}\n${body.slice(0, 200)}`)
+  return JSON.parse(body.slice(start))
 }
 
 /** Normalise a BIT timestamp (no TZ) to an ISO-8601 UTC string. */

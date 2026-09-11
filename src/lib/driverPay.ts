@@ -67,16 +67,124 @@ export interface FixedExpenseInput {
   amount: number
   from?:  string | null
   until?: string | null
+  /** Stable id of this revision; every prepared row has one. */
+  revisionId?: string | null
+  /** Stable id grouping all revisions of the same expense. */
+  expenseId?:  string | null
+  recordedAt?: string | null
+  recordedBy?: string | null
+  /** When this revision was ended, and by whom. */
+  endedAt?: string | null
+  endedBy?: string | null
 }
 
-/** The fixed charges in force for the period starting `periodStart`. */
+const MS_PER_DAY = 86_400_000
+
+function parseISODateUTC(value: string): Date {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`Invalid date ${JSON.stringify(value)}`)
+  }
+  const [y, m, d] = value.split('-').map(Number)
+  const ts = Date.UTC(y, m - 1, d)
+  const dt = new Date(ts)
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
+    throw new Error(`Invalid calendar date ${value}`)
+  }
+  return dt
+}
+
+/** A charge in force for a period, with the day fraction it was prorated by (absent = full period). */
+export type ProratedFixedExpense<T extends FixedExpenseInput> = T & { proratedDays?: { days: number; periodDays: number } }
+
+/** Statement label for a fixed charge — names the day fraction so a transition-period amount is explained on the sheet. */
+export function fixedExpenseLineLabel(f: ProratedFixedExpense<FixedExpenseInput>): string {
+  return f.proratedDays ? `${f.label} (${f.proratedDays.days}/${f.proratedDays.periodDays} days)` : f.label
+}
+
+/** The fixed charges in force for the period [periodStart, periodEndInclusive].
+ *
+ * Each overlapping revision is prorated by actual calendar days inside the period,
+ * rounded to integer cents. Rounding error is allocated per `expenseId` series so a
+ * same-rate split across revisions cannot create or lose a cent over the period.
+ * Partial-period lines carry `proratedDays` so statements can show the fraction.
+ */
 export function effectiveFixedExpenses<T extends FixedExpenseInput>(
   fixedExpenses: T[] | null | undefined,
   periodStart: string,
-): T[] {
-  return (fixedExpenses ?? []).filter(
-    (f) => (!f.from || f.from <= periodStart) && (!f.until || periodStart < f.until),
-  )
+  periodEndInclusive: string,
+): ProratedFixedExpense<T>[] {
+  const start = parseISODateUTC(periodStart)
+  const end = parseISODateUTC(periodEndInclusive)
+  if (end < start) {
+    throw new Error(`periodEndInclusive ${periodEndInclusive} is before periodStart ${periodStart}`)
+  }
+  const periodDays = Math.round((end.getTime() - start.getTime()) / MS_PER_DAY) + 1
+  const periodEndExclusive = new Date(end.getTime() + MS_PER_DAY)
+
+  type Item = {
+    entry: T
+    overlapDays: number
+    exactCents: number
+    baseCents: number
+    frac: number
+  }
+  const items: Item[] = []
+
+  for (const entry of fixedExpenses ?? []) {
+    const from = entry.from ? parseISODateUTC(entry.from) : null
+    const until = entry.until ? parseISODateUTC(entry.until) : null
+    if (from && until && from > until) {
+      throw new Error(`Invalid fixed-expense window: ${entry.from} > ${entry.until}`)
+    }
+    const overlapStart = from && from > start ? from : start
+    const overlapEnd = until && until < periodEndExclusive ? until : periodEndExclusive
+    if (overlapEnd.getTime() <= overlapStart.getTime()) continue
+
+    const overlapDays = Math.round((overlapEnd.getTime() - overlapStart.getTime()) / MS_PER_DAY)
+    if (overlapDays <= 0) continue
+
+    const amountCents = Math.round(entry.amount * 100)
+    const exactCents = (amountCents * overlapDays) / periodDays
+    const baseCents = Math.floor(exactCents)
+    items.push({
+      entry,
+      overlapDays,
+      exactCents,
+      baseCents,
+      frac: exactCents - baseCents,
+    })
+  }
+
+  // Allocate rounding per expenseId series.
+  const noIdKey = Symbol('no-expense-id')
+  const groups = new Map<string | symbol, Item[]>()
+  for (const item of items) {
+    const key = item.entry.expenseId ?? noIdKey
+    const arr = groups.get(key) ?? []
+    arr.push(item)
+    groups.set(key, arr)
+  }
+
+  for (const group of groups.values()) {
+    const totalExact = group.reduce((sum, item) => sum + item.exactCents, 0)
+    const target = Math.round(totalExact)
+    const baseSum = group.reduce((sum, item) => sum + item.baseCents, 0)
+    let extra = target - baseSum
+    const ordered = group
+      .map((item, index) => ({ item, index, frac: item.frac }))
+      .sort((a, b) => b.frac - a.frac || a.index - b.index)
+    for (const { item } of ordered) {
+      if (extra <= 0) break
+      item.baseCents += 1
+      extra -= 1
+    }
+  }
+
+  return items.map(({ entry, baseCents, overlapDays }) => ({
+    ...entry,
+    amount: Math.round((baseCents / 100 + Number.EPSILON) * 100) / 100,
+    ...(overlapDays < periodDays ? { proratedDays: { days: overlapDays, periodDays } } : {}),
+  }))
 }
 
 /**

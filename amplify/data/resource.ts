@@ -252,7 +252,10 @@ const schema = a.schema({
       expensesBeforePercent: a.boolean().required(), // true = % applied AFTER expenses (Chad)
       email:                 a.string(),             // where the weekly report is sent
       fuelCardNumber:        a.string(),             // EFS card prefix → pulls weekly fuel
-      fixedExpenses:         a.json(),               // [{ label, amount }] applied every week
+      // Dated expense revisions [{ label, amount, from, until, revisionId, expenseId,
+      // recordedAt/By, endedAt/By }] — prorated by calendar day per settlement; a change
+      // ends the old revision and appends a new one, so history is never rewritten.
+      fixedExpenses:         a.json(),
       // Pinned past rate windows [{ from, until, payPercent, expensesBeforePercent }] —
       // pay weeks starting in [from, until) use that model instead of the base fields,
       // so changing a driver's current rate never rewrites already-paid history.

@@ -3,6 +3,7 @@ import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction } from '@/types'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
+import type { FixedExpenseInput } from './driverPay'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
@@ -1970,8 +1971,8 @@ export async function deleteBoxTruckTrip(id: string): Promise<void> {
   })
 }
 
-/** `from`/`until` (period-start dates, [from, until)) bound the charge to a range of pay periods; absent = always. */
-export interface FixedExpense { label: string; amount: number; from?: string | null; until?: string | null }
+/** Calendar-dated expense revisions, persisted intact in the existing JSON field. */
+export type FixedExpense = FixedExpenseInput
 
 export interface DriverPaySetting {
   id:                    string
@@ -2024,12 +2025,25 @@ export async function createDriverPaySetting(input: Omit<DriverPaySetting, 'id' 
   return normalizePaySetting(result.data.createDriverPaySetting)
 }
 
-export async function updateDriverPaySetting(id: string, patch: Partial<Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt'>>): Promise<DriverPaySetting> {
-  const result = await client.graphql({
-    query: `mutation UpdateDriverPaySetting($input: UpdateDriverPaySettingInput!) { updateDriverPaySetting(input: $input) { ${PAY_SETTING_FIELDS} } }`,
-    variables: { input: serializePaySetting({ id, ...patch }) },
-  }) as { data: { updateDriverPaySetting: DriverPaySetting } }
-  return normalizePaySetting(result.data.updateDriverPaySetting)
+export async function updateDriverPaySetting(
+  id: string,
+  patch: Partial<Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt'>>,
+  expectedUpdatedAt: string,
+): Promise<DriverPaySetting> {
+  if (!expectedUpdatedAt) throw new Error('Reload driver pay settings before saving changes.')
+  try {
+    const result = await client.graphql({
+      query: `mutation UpdateDriverPaySetting($input: UpdateDriverPaySettingInput!, $condition: ModelDriverPaySettingConditionInput) { updateDriverPaySetting(input: $input, condition: $condition) { ${PAY_SETTING_FIELDS} } }`,
+      variables: { input: serializePaySetting({ id, ...patch }), condition: { updatedAt: { eq: expectedUpdatedAt } } },
+    }) as { data: { updateDriverPaySetting: DriverPaySetting } }
+    return normalizePaySetting(result.data.updateDriverPaySetting)
+  } catch (err) {
+    const errors = (err as { errors?: { errorType?: string }[] })?.errors
+    if (errors?.some((error) => error.errorType?.includes('ConditionalCheckFailed'))) {
+      throw new Error('These pay settings changed since you opened them. Reload before saving to preserve expense history.')
+    }
+    throw err
+  }
 }
 
 export async function deleteDriverPaySetting(id: string): Promise<void> {

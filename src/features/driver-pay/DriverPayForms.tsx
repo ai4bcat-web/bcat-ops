@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
-import { X, Plus, Trash2, Upload, Image as ImageIcon } from 'lucide-react'
+import { X, Upload, Image as ImageIcon } from 'lucide-react'
 import type { Driver } from '@/types'
-import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, FixedExpense } from '@/hooks/useAmazonPay'
+import type { AmazonTrip, DriverPaySetting, DriverPayDeduction } from '@/hooks/useAmazonPay'
 import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv'
 import { parseTripScreenshot, graphqlErrorMessage } from '@/lib/apiClient'
 import { imageToUploadableBase64, imageFromClipboard, screenshotTripToRaw } from '@/lib/screenshotImport'
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 import { CREDIT_REASONS, DEFAULT_CREDIT_REASON, DEBIT_REASONS, DEFAULT_DEBIT_REASON } from '@/lib/payCredits'
 import type { DriverPayCredit, DriverPayCreditInput } from '@/lib/apiClient'
+import { FixedExpenseEditor } from './FixedExpenseEditor'
+import type { FixedExpenseInput } from '@/lib/driverPay'
 
 type TripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 type SettingPatch = Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>
@@ -40,11 +42,11 @@ function Field({ children, l, half }: { children: React.ReactNode; l: string; ha
 const saveBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }
 const cancelBtn: React.CSSProperties = { height: 36, padding: '0 16px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }
 
-function Footer({ onClose, onSave, saving, label: lbl = 'Save' }: { onClose: () => void; onSave: () => void; saving?: boolean; label?: string }) {
+function Footer({ onClose, onSave, saving, disabled, label: lbl = 'Save' }: { onClose: () => void; onSave: () => void; saving?: boolean; disabled?: boolean; label?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 16 }}>
       <button type="button" onClick={onClose} style={cancelBtn}>Cancel</button>
-      <button type="button" onClick={onSave} disabled={saving} style={{ ...saveBtn, opacity: saving ? 0.6 : 1 }}>{saving ? 'Saving…' : lbl}</button>
+      <button type="button" onClick={onSave} disabled={saving || disabled} style={{ ...saveBtn, opacity: saving || disabled ? 0.6 : 1 }}>{saving ? 'Saving…' : lbl}</button>
     </div>
   )
 }
@@ -475,28 +477,27 @@ export function DeductionModal({ driverId, periodStart, onSave, onClose }: { dri
 }
 
 // ── Per-driver pay settings ─────────────────────────────────────────────────
-export function SettingsModal({ driver, existing, onSave, onClose }: { driver: Driver; existing?: DriverPaySetting; onSave: (patch: SettingPatch) => Promise<void>; onClose: () => void }) {
+export function SettingsModal({ driver, existing, onSave, onClose }: { driver: Driver; existing?: DriverPaySetting; onSave: (patch: SettingPatch, expectedUpdatedAt: string | undefined) => Promise<void>; onClose: () => void }) {
   const [percent, setPercent] = useState(existing ? String(Math.round(existing.payPercent * 100)) : '')
   const [afterExp, setAfterExp] = useState(existing?.expensesBeforePercent ?? false)
   const [email, setEmail] = useState(existing?.email ?? driver.email ?? '')
   const [fuelCard, setFuelCard] = useState(existing?.fuelCardNumber ?? '')
-  const [fixed, setFixed] = useState<FixedExpense[]>(existing?.fixedExpenses ?? [])
+  const [fixed, setFixed] = useState<FixedExpenseInput[]>(existing?.fixedExpenses ?? [])
+  const [capturedUpdatedAt] = useState(existing?.updatedAt)
+  const [fixedEditing, setFixedEditing] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-
-  const setFixedItem = (i: number, patch: Partial<FixedExpense>) => setFixed((p) => p.map((x, j) => (j === i ? { ...x, ...patch } : x)))
 
   const save = async () => {
     const p = num(percent)
     if (p == null || p <= 0 || p > 100) { setErr('Enter a pay percent between 1 and 100'); return }
-    const cleanFixed = fixed.filter((x) => x.label.trim() && x.amount > 0).map((x) => ({ label: x.label.trim(), amount: x.amount, from: x.from || null, until: x.until || null }))
     setSaving(true)
     try {
       await onSave({
         payGroup: 'AMAZON', payPercent: p / 100, expensesBeforePercent: afterExp,
         email: email.trim() || null, fuelCardNumber: fuelCard.trim() || null,
-        fixedExpenses: cleanFixed, active: true, notes: existing?.notes ?? null,
-      })
+        fixedExpenses: fixed, active: true, notes: existing?.notes ?? null,
+      }, capturedUpdatedAt)
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
   }
 
@@ -536,33 +537,23 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-          <label style={label}>Fixed weekly expenses</label>
-          <button type="button" onClick={() => setFixed((p) => [...p, { label: '', amount: 0 }])} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer' }}><Plus size={13} /> Add</button>
-        </div>
-        <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginBottom: 8 }}>Deducted every week (ELD, insurance, occupational, plates, tablet…). Fuel pulls from the card automatically — don't add it here. Blank dates = always; set “until” (a Sunday) to END a charge going forward without touching past weeks — deleting removes it from history too.</div>
-        {fixed.length === 0 && <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No fixed expenses.</div>}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {fixed.map((x, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input style={{ ...input, flex: 1 }} value={x.label} onChange={(e) => setFixedItem(i, { label: e.target.value })} placeholder="Insurance" />
-                <input style={{ ...input, width: 120 }} value={x.amount ? String(x.amount) : ''} onChange={(e) => setFixedItem(i, { amount: num(e.target.value) ?? 0 })} placeholder="$250" />
-                <button type="button" title="Delete outright — past weeks lose it too; to stop it going forward, set an 'until' date instead" onClick={() => setFixed((p) => p.filter((_, j) => j !== i))} style={{ ...cancelBtn, width: 36, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={14} /></button>
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 10.5, color: 'var(--ds-t3)', width: 34, textAlign: 'right' }}>from</span>
-                <input type="date" aria-label={`${x.label || 'charge'} applies from`} style={{ ...input, height: 28, fontSize: 11.5, flex: 1 }} value={x.from ?? ''} onChange={(e) => setFixedItem(i, { from: e.target.value || null })} />
-                <span style={{ fontSize: 10.5, color: 'var(--ds-t3)' }}>until</span>
-                <input type="date" aria-label={`${x.label || 'charge'} ends before`} style={{ ...input, height: 28, fontSize: 11.5, flex: 1 }} value={x.until ?? ''} onChange={(e) => setFixedItem(i, { until: e.target.value || null })} />
-              </div>
-            </div>
-          ))}
-        </div>
+        <FixedExpenseEditor
+          value={fixed}
+          onChange={setFixed}
+          periodDays={7}
+          onEditingChange={setFixedEditing}
+          title="Fixed weekly expenses"
+        />
       </div>
 
+      {fixedEditing && (
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 8 }}>
+          Finish or cancel the fixed-expense edit before saving settings.
+        </div>
+      )}
+
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 12 }}>{err}</div>}
-      <Footer onClose={onClose} onSave={save} saving={saving} label="Save settings" />
+      <Footer onClose={onClose} onSave={save} saving={saving} disabled={fixedEditing} label="Save settings" />
     </Modal>
   )
 }

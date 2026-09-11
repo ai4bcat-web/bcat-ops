@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { listDriverPaySettings, type DriverPaySetting } from '@/lib/apiClient'
 import { useAppStore } from '@/store/useAppStore'
+import { effectiveFixedExpenses } from '@/lib/driverPay'
+import { chicagoDateStr } from '@/lib/date'
 
 // Settlements run on different cadences, so a fixed-expense line annualizes differently:
 // Amazon pays weekly (52/yr); box truck pays every 14 days (26/yr). See useAmazonPay
@@ -48,12 +50,14 @@ export function useInsuranceRecovery() {
 
   return useMemo(() => {
     const nameById = new Map(drivers.map((d) => [d.id, d.name]))
+    const today = chicagoDateStr(new Date())
     const rows: RecoveryRow[] = []
     for (const s of settings) {
       if (s.active === false) continue
       const group = s.payGroup
       if (group !== 'AMAZON' && group !== 'BOX_TRUCK') continue
-      const perSettlement = (s.fixedExpenses ?? [])
+      // Annualized run-rate uses only the expense versions in force today.
+      const perSettlement = effectiveFixedExpenses(s.fixedExpenses, today, today)
         .filter((f) => isInsuranceLabel(f.label))
         .reduce((sum, f) => sum + (f.amount || 0), 0)
       if (perSettlement <= 0) continue

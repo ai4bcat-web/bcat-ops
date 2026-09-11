@@ -9,7 +9,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -65,7 +65,7 @@ export interface AmazonPayState {
   removeTrip:     (id: string) => Promise<void>
   /** Delete every trip in the current pay week. Returns how many were removed. */
   clearWeek:      () => Promise<number>
-  saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => Promise<void>
+  saveSetting:    (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => Promise<void>
   addDeduction:   (input: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   removeDeduction:(id: string) => Promise<void>
   addCredit:      (input: DriverPayCreditInput) => Promise<void>
@@ -138,7 +138,7 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
         const ded: PayDeductionInput[] = [
-          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart).map((f) => ({ label: f.label, amount: f.amount })),
+          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart, end).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
           ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
@@ -191,10 +191,10 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
     setTrips((p) => p.filter((t) => t.periodStart !== periodStart))
     return ids.length
   }, [trips, periodStart])
-  const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>) => {
+  const saveSetting = useCallback(async (driverId: string, patch: Omit<DriverPaySetting, 'id' | 'createdAt' | 'updatedAt' | 'driverId'>, expectedUpdatedAt: string | undefined) => {
     const existing = settings.find((s) => s.driverId === driverId)
     if (existing) {
-      const updated = await updateDriverPaySetting(existing.id, patch)
+      const updated = await updateDriverPaySetting(existing.id, patch, expectedUpdatedAt ?? '')
       setSettings((p) => p.map((s) => s.id === existing.id ? updated : s))
     } else {
       const created = await createDriverPaySetting({ driverId, ...patch })

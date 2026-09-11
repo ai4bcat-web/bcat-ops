@@ -252,7 +252,7 @@ export function BoxTruckPayPage() {
           onClose={() => setCreditFor(null)}
         />
       )}
-      {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.setting} onSave={async (patch) => { await pay.saveSetting(settingsFor.id, patch); setSettings(null) }} onClose={() => setSettings(null)} />}
+      {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.setting} onSave={async (patch, expectedUpdatedAt) => { await pay.saveSetting(settingsFor.id, patch, expectedUpdatedAt); setSettings(null) }} onClose={() => setSettings(null)} />}
       {emailFor && (() => {
         const r = emailFor
         const firstName = r.driver.name.trim().split(/\s+/)[0] || 'there'
