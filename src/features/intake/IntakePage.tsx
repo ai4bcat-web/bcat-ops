@@ -178,17 +178,22 @@ export function AssigneeSelect({
 export function QueueCard({
   item,
   onBuildLoad,
+  onUpdateLoad,
   onMarkDone,
   onStatusChange,
   onAssigneeChange,
 }: {
   item: IntakeItem
   onBuildLoad: (item: IntakeItem) => void
+  onUpdateLoad: (item: IntakeItem) => void
   onMarkDone: (item: IntakeItem) => void
   onStatusChange: (id: string, status: IntakeStatus) => void
   onAssigneeChange: (id: string, email: string) => void
 }) {
   const isIvan  = item.source === 'IVAN_CARTAGE'
+  // Appointment tasks (Dennis/Ruben ladder) already point at their load — there is
+  // nothing to build; the work is an update to the existing load.
+  const hasLoad = !!item.builtLoadId
   const hasPdfs = (item.s3KeyPdfAttachments?.length ?? 0) > 0
   const badge   = STATUS_BADGE[item.status]
 
@@ -263,7 +268,16 @@ export function QueueCard({
 
       {/* Actions */}
       <div className="flex items-center gap-2 pt-0.5">
-        {isIvan ? (
+        {isIvan && hasLoad ? (
+          <Button
+            size="sm"
+            className="h-7 text-xs gap-1.5 flex-1"
+            onClick={() => onUpdateLoad(item)}
+          >
+            <CheckCircle2 className="size-3" />
+            Update Load
+          </Button>
+        ) : isIvan ? (
           <Button
             size="sm"
             className="h-7 text-xs gap-1.5 flex-1"
@@ -454,6 +468,13 @@ export function IntakePage() {
     setSelectedLoad(null, 'create')
   }
 
+  const handleUpdateLoad = (item: IntakeItem) => {
+    if (item.status === 'NEW') {
+      updateItem(item.id, { status: 'IN_PROGRESS' }, { actorName: actorEmail }).catch(() => {})
+    }
+    setSelectedLoad(item.builtLoadId!, 'edit')
+  }
+
   const handleMarkDone = (item: IntakeItem) => {
     setProModalItem(item)
   }
@@ -579,6 +600,7 @@ export function IntakePage() {
                   key={item.id}
                   item={item}
                   onBuildLoad={handleBuildLoad}
+                  onUpdateLoad={handleUpdateLoad}
                   onMarkDone={handleMarkDone}
                   onStatusChange={handleStatusChange}
                   onAssigneeChange={handleAssigneeChange}

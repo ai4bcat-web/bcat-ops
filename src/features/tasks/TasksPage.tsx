@@ -132,6 +132,15 @@ export function TasksPage() {
     setSelectedLoad(null, 'create')
   }
 
+  const handleUpdateLoad = (item: IntakeItem) => {
+    if (item.status === 'NEW') {
+      updateTask(item.id, { status: 'IN_PROGRESS', actorName: actorEmail })
+        .then((updated) => applyLocalPatch(item.id, updated))
+        .catch(() => {})
+    }
+    setSelectedLoad(item.builtLoadId!, 'edit')
+  }
+
   const handleMarkDone = (item: IntakeItem) => {
     setProModalItem(item)
   }
@@ -237,6 +246,7 @@ export function TasksPage() {
                     key={item.id}
                     item={item}
                     onBuildLoad={handleBuildLoad}
+                    onUpdateLoad={handleUpdateLoad}
                     onMarkDone={handleMarkDone}
                     onStatusChange={handleStatusChange}
                     onAssigneeChange={handleAssigneeChange}
