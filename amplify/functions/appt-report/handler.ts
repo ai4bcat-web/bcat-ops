@@ -77,6 +77,13 @@ export function statusOf(stop: Stop, load: LoadRow): string {
   return stop.type === 'delivery' ? 'NEED RUBEN' : 'NEED DENNIS'
 }
 
+/**
+ * What the 3 PM digest is for: appointments still waiting on Dennis, on Ruben, or on a
+ * carrier's answer. A missing ratecon is paperwork, not scheduling — it belongs to the
+ * loads board, and mixing it in buried the rows Dennis and Ruben have to act on.
+ */
+const REPORTED = new Set(['NEED DENNIS', 'NEED RUBEN', 'REQUESTED', 'CHANGE NEEDED'])
+
 export const handler = async (event?: { force?: boolean }) => {
   const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN
   const CHANNEL = process.env.SLACK_GLOBAL_CHANNEL_ID
@@ -111,7 +118,7 @@ export const handler = async (event?: { force?: boolean }) => {
       const day = chicagoDate(stop.appt)
       if (!daySet.has(day)) continue
       const st = statusOf(stop, load)
-      if (st === 'confirmed') continue
+      if (!REPORTED.has(st)) continue
       const kind = stop.type === 'delivery' ? 'DEL' : 'PU'
       lines.push(`• ${day} ${kind} — *${st}* — ${[load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer, stop.name || stop.city].filter(Boolean).join(' · ')}`)
     }
@@ -119,8 +126,11 @@ export const handler = async (event?: { force?: boolean }) => {
   lines.sort()
 
   const text = lines.length
-    ? [`:clipboard: *Appointment report — ${lines.length} appt${lines.length === 1 ? '' : 's'} in the next 5 business days still not confirmed*`, ...lines].join('\n')
-    : ':white_check_mark: *Appointment report* — every appointment in the next 5 business days is confirmed.'
+    ? [
+        `:clipboard: *Appointment report — ${lines.length} appt${lines.length === 1 ? '' : 's'} in the next 5 business days still waiting on Dennis, Ruben, or a confirmation*`,
+        ...lines,
+      ].join('\n')
+    : ':white_check_mark: *Appointment report* — nothing in the next 5 business days is waiting on Dennis or Ruben.'
 
   const res = await fetch('https://slack.com/api/chat.postMessage', {
     method: 'POST',
