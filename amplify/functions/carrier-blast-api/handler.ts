@@ -115,6 +115,8 @@ export type CarrierReply = {
   handledAt?: string
   uniboxUrl?: string
   lastOutboundAt?: string
+  createdAt: string
+  updatedAt: string
 }
 
 type AppSyncEvent = {
@@ -664,6 +666,9 @@ export function emailToReply(
     isAutoReply: email.is_auto_reply === 1,
     status: 'open',
     uniboxUrl: undefined,
+    // Direct DynamoDB writes must supply the timestamps AppSync requires on reads.
+    createdAt: receivedAt,
+    updatedAt: receivedAt,
   }
 }
 

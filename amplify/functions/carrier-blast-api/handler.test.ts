@@ -192,6 +192,8 @@ describe('emailToReply', () => {
     expect(reply.isAutoReply).toBe(true)
     expect(reply.status).toBe('open')
     expect(reply.receivedAt).toBe('2026-09-11T10:00:00.000Z')
+    expect(reply.createdAt).toBe(reply.receivedAt)
+    expect(reply.updatedAt).toBe(reply.receivedAt)
   })
 })
 
