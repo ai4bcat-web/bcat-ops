@@ -1,3 +1,4 @@
+import { readSheet } from 'read-excel-file/browser'
 import { isValidEmail } from '@/lib/apiClient'
 import type { CarrierContact, CarrierLane } from '@/types'
 
@@ -222,7 +223,8 @@ export async function parseCarrierFile(file: File): Promise<CsvRow[]> {
   }
 
   if (isExcelFile(file)) {
-    const { readSheet } = await import('read-excel-file/browser')
+    // Bundled with the page, not fetched on click: a tab opened before a deploy can no
+    // longer load a hashed lazy chunk, which failed the upload instead of reading it.
     const sheet = await readSheet(file)
     return rowsToCarrierRows(sheet.map((row) => row.map(excelCellToString)))
   }
