@@ -181,6 +181,16 @@ export const JOBSDONE_MIN_RESERVE_PER_MAILBOX = 25
 export const JOBSDONE_PEAK_WINDOW_DAYS = 14
 /** Default carrier-blast sends/day/mailbox — conservative, well under the leftover. */
 export const DEFAULT_PER_MAILBOX_PER_DAY = 12
+/**
+ * Inter-send pacing, in minutes, per mailbox (`random_wait_max` adds 0–N minutes of
+ * jitter on top). The daily volume per mailbox is unchanged — the reserve math above
+ * still caps it — so this only controls how tightly that allowance is packed. At 1 + 2
+ * a mailbox's ~15 sends land inside ~30 minutes instead of ~75, which is what "go out
+ * together" needs, while the jitter keeps the sends from looking machine-timed.
+ */
+export const SEND_GAP_MINUTES = 1
+export const SEND_JITTER_MAX_MINUTES = 2
+
 
 /** The most a carrier blast may take from one mailbox without touching the reserve. */
 export function maxPerMailbox(account: Pick<InstantlyAccount, 'daily_limit'>): number {
@@ -943,9 +953,8 @@ async function runLaunchAction(payload: { campaignId: string }) {
         email_list: senders,
         daily_limit: effectiveDailyLimit,
         daily_max_leads: effectiveDailyLimit,
-        // Spread each mailbox's sends across the working day instead of bursting.
-        email_gap: 5,
-        random_wait_max: 5,
+        email_gap: SEND_GAP_MINUTES,
+        random_wait_max: SEND_JITTER_MAX_MINUTES,
         sequences: [
           {
             steps: [

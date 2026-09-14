@@ -1165,5 +1165,15 @@ describe('runLaunchAction recomputes live capacity', () => {
       typeof c[0] === 'string' && c[0].includes('/api/v2/accounts/analytics/daily'),
     )
     expect(analyticsFetch).toBeTruthy()
+
+    // Pacing: the campaign must ask Instantly to pack each mailbox's allowance tightly
+    // (with jitter) rather than trickle it across the whole day.
+    const createCall = fetchMock.mock.calls.find((c) =>
+      typeof c[0] === 'string' && c[0].endsWith('/api/v2/campaigns') && (c[1]?.method ?? 'GET') === 'POST',
+    )
+    expect(createCall).toBeTruthy()
+    const createBody = JSON.parse(String(createCall![1]!.body))
+    expect(createBody.email_gap).toBe(1)
+    expect(createBody.random_wait_max).toBe(2)
   })
 })

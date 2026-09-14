@@ -159,11 +159,16 @@ function CampaignCard({
 }) {
   const [busy, setBusy] = useState(false)
 
-  const handleAction = async (action: 'pauseCampaign' | 'resumeCampaign' | 'syncCampaign') => {
+  const handleAction = async (action: 'launchCampaign' | 'pauseCampaign' | 'resumeCampaign' | 'syncCampaign') => {
     setBusy(true)
     try {
       await onAction(campaign.id, action)
-      toast.success(action === 'syncCampaign' ? 'Campaign synced' : `Campaign ${action === 'pauseCampaign' ? 'paused' : 'resumed'}`)
+      toast.success(
+        action === 'syncCampaign' ? 'Campaign synced'
+        : action === 'pauseCampaign' ? 'Campaign paused'
+        : action === 'launchCampaign' ? 'Campaign launched'
+        : 'Campaign resumed',
+      )
     } catch (err) {
       toast.error(`Action failed: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally {
@@ -201,7 +206,8 @@ function CampaignCard({
           </Button>
         )}
         {(campaign.status === 'paused' || campaign.status === 'draft') && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void handleAction('resumeCampaign')}>
+          <Button variant="outline" size="sm" disabled={busy}
+            onClick={() => void handleAction(campaign.status === 'draft' ? 'launchCampaign' : 'resumeCampaign')}>
             <Play size={13} /> {campaign.status === 'draft' ? 'Launch' : 'Resume'}
           </Button>
         )}
@@ -226,11 +232,11 @@ function CampaignDetail({
 }) {
   const [busy, setBusy] = useState(false)
 
-  const handle = async (action: 'pauseCampaign' | 'resumeCampaign' | 'syncCampaign') => {
+  const handle = async (action: 'launchCampaign' | 'pauseCampaign' | 'resumeCampaign' | 'syncCampaign') => {
     setBusy(true)
     try {
       await onAction(campaign.id, action)
-      toast.success(action === 'syncCampaign' ? 'Synced' : 'Updated')
+      toast.success(action === 'syncCampaign' ? 'Synced' : action === 'launchCampaign' ? 'Campaign launched' : 'Updated')
     } catch (err) {
       toast.error(`Action failed: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally {
@@ -264,7 +270,8 @@ function CampaignDetail({
           </Button>
         )}
         {(campaign.status === 'paused' || campaign.status === 'draft') && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void handle('resumeCampaign')}>
+          <Button variant="outline" size="sm" disabled={busy}
+            onClick={() => void handle(campaign.status === 'draft' ? 'launchCampaign' : 'resumeCampaign')}>
             <Play size={13} /> {campaign.status === 'draft' ? 'Launch' : 'Resume'}
           </Button>
         )}

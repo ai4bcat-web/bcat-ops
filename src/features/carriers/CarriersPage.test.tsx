@@ -515,6 +515,28 @@ describe('CampaignsTab', () => {
       expect(estimate.textContent).toContain('Today: 11 of 600 will send; full list takes ~20 days')
     })
   })
+
+  it('launches a saved draft instead of resuming a campaign Instantly never received', async () => {
+    const draft = {
+      id: 'camp-draft', lane: 'IL_IA' as const, name: 'IL > IA', subject: 'Ready now',
+      bodyHtml: '<p>body</p>', instantlyCampaignId: null, senderAccounts: ['a@jobsdone.com'],
+      dailyLimit: 15, status: 'draft' as const, leadCount: 728, pushedCount: 0, errorText: null,
+      sentCount: 0, openCount: 0, replyCount: 0, bounceCount: 0, unsubscribeCount: 0,
+      analyticsAt: null, createdBy: 'ryne@bcatcorp.com', startedAt: null, completedAt: null,
+      createdAt: '2026-09-14T16:47:55.510Z', updatedAt: '2026-09-14T16:47:55.510Z',
+    }
+    listCarrierCampaigns.mockResolvedValue([draft])
+    carrierBlast.mockResolvedValue({ ok: true, accounts: [] })
+    render(<MemoryRouter><CampaignsTab /></MemoryRouter>)
+
+    const launch = await screen.findByRole('button', { name: /Launch/i })
+    act(() => { fireEvent.click(launch) })
+
+    await waitFor(() => {
+      expect(carrierBlast).toHaveBeenCalledWith('launchCampaign', { campaignId: 'camp-draft' })
+    })
+    expect(carrierBlast).not.toHaveBeenCalledWith('resumeCampaign', expect.anything())
+  })
 })
 
 describe('RepliesTab', () => {
