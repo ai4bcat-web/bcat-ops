@@ -274,6 +274,23 @@ describe('reading the carrier\'s own words', () => {
     expect(outcome.newEmail).toBeUndefined()
     expect(updatesFor('c1')).toEqual([])
   })
+
+  it('never repoints a contact at the stand-in named in an out-of-office reply', async () => {
+    contactsByEmail({ 'dispatch@carrier.com': [contactRow()], 'jane@carrier.com': [] })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      // Webhook shape: Instantly sends no auto-reply flag, so only the wording betrays it.
+      subject: 'Automatic reply: IL > IA READY NOW',
+      text: 'I am out of the office until Monday. Please contact jane@carrier.com in the meantime.',
+      toAccount: 'ryneb@gojobsdone.com',
+      replyFrom: 'dispatch@carrier.com',
+    })
+
+    expect(outcome.newEmail).toBeUndefined()
+    expect(updatesFor('c1')).toEqual([])
+  })
 })
 
 describe('emailToReply', () => {

@@ -133,6 +133,7 @@ export const handler = async (event: FunctionUrlEvent) => {
           text: payload.reply_text ?? payload.reply_text_snippet ?? '',
           toAccount: reply.toAccount,
           replyFrom: reply.fromEmail,
+          subject: reply.subject,
         })
         return respond(200, { ok: true, replyId: reply.id, contact: outcome })
       }

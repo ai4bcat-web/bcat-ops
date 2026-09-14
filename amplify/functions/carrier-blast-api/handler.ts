@@ -668,6 +668,16 @@ export function repliedOptOut(text: string): boolean {
     .test(stripQuotedReply(text))
 }
 
+/**
+ * A machine-generated reply. Instantly flags these on synced emails but sends no such
+ * flag on the webhook, so the wording has to carry it: an out-of-office naming a
+ * stand-in must never repoint the contact at whoever is covering this week.
+ */
+export function looksAutomated(text: string): boolean {
+  return /(?:out of (?:the )?office|automatic reply|auto[\s-]?reply|autoresponder|away from (?:my |the )?(?:desk|office)|on (?:vacation|holiday|leave|maternity|paternity)|no longer with|has left the company|undeliverable|delivery (?:status notification|has failed))/i
+    .test(text)
+}
+
 /** Our own mailboxes and brands — never mistake them for the carrier's new address. */
 const OWN_ADDRESS = /(?:bcatcorp|jobsdone|bestcareauto|noreply|no-reply|donotreply|postmaster|mailer-daemon)/i
 
@@ -733,6 +743,13 @@ export async function applyReplyToContact(params: {
   toAccount?: string
   /** The address the reply actually came FROM, when Instantly reports it separately. */
   replyFrom?: string
+  /** Subject line — carries "Automatic reply" when the body does not. */
+  subject?: string
+  /**
+   * Instantly's own auto-reply flag, when the source provides one. The webhook does
+   * not, so `looksAutomated` decides from the wording as well.
+   */
+  isAutoReply?: boolean
 }): Promise<ReplyOutcome> {
   const { lane, leadEmail, text } = params
   if (!leadEmail) return { optedOut: false }
@@ -757,8 +774,15 @@ export async function applyReplyToContact(params: {
     repliedFrom && repliedFrom !== leadEmail.toLowerCase().trim() && !OWN_ADDRESS.test(repliedFrom)
       ? repliedFrom
       : null
+  // An out-of-office names whoever is covering this week, not a corrected contact, so a
+  // machine reply may only move the contact via the address it actually came from.
+  const automated =
+    params.isAutoReply === true || looksAutomated(`${params.subject ?? ''}\n${text}`)
   const replacement =
-    fromNewAddress ?? replacementEmail({ text, contactEmail: leadEmail, toAccount: params.toAccount })
+    fromNewAddress ??
+    (automated
+      ? null
+      : replacementEmail({ text, contactEmail: leadEmail, toAccount: params.toAccount }))
   if (!replacement) return { optedOut: false }
 
   const existing = await findContactsByLaneEmail(lane, replacement)
@@ -1265,6 +1289,8 @@ async function syncRepliesAction(payload: { campaignId?: string; sinceISO?: stri
           text: reply.textBody ?? reply.snippet ?? '',
           toAccount: reply.toAccount,
           replyFrom: reply.fromEmail,
+          subject: reply.subject,
+          isAutoReply: reply.isAutoReply,
         })
         if (outcome.optedOut || outcome.newEmail) contactsUpdated++
       }
