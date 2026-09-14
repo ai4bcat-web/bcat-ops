@@ -5,7 +5,7 @@
  * The digest is a worklist for Dennis and Ruben, so what it LEAVES OUT matters as much
  * as what it lists: a load missing its ratecon is paperwork and must not appear.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { send } = vi.hoisted(() => {
   process.env.SLACK_BOT_TOKEN = 'xoxb-test'
@@ -49,6 +49,17 @@ const load = (over: Record<string, unknown>) => ({
 })
 
 describe('appt-report digest', () => {
+  // Monday 2026-09-14, 15:00 America/Chicago — a weekday at posting time, so the
+  // business-day window and the 3 PM gate are both fixed rather than clock-dependent.
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-09-14T20:00:00.000Z')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   const scanReturns = (...items: Record<string, unknown>[]) => {
     send.mockReset()
     send.mockResolvedValue({ Items: items, LastEvaluatedKey: undefined })
@@ -61,7 +72,8 @@ describe('appt-report digest', () => {
       load({ id: 'l2', aljexId: '14341', stops: [{ type: 'delivery', appt: apptSoon(), apptStatus: 'need_book' }] }),
     )
 
-    const res = await handler({ force: true })
+    // No `force`: at 15:00 Chicago the scheduled run is the one that posts.
+    const res = await handler()
 
     expect(res).toMatchObject({ ok: true, count: 2 })
     expect(postedText()).toContain('NEED DENNIS')

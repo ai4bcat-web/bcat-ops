@@ -1311,8 +1311,8 @@ describe('runLaunchAction recomputes live capacity', () => {
   })
 })
 
-describe('resuming a campaign that was never launched', () => {
-  it('launches the draft instead of failing on a missing Instantly campaign', async () => {
+describe('acting on a campaign that was never launched', () => {
+  const draftOnly = () => {
     mockDdbSend.mockReset()
     mockLambdaSend.mockReset()
     mockLambdaSend.mockResolvedValue({})
@@ -1326,6 +1326,10 @@ describe('resuming a campaign that was never launched', () => {
       }
       return {}
     })
+  }
+
+  it('launches the draft instead of failing on a missing Instantly campaign', async () => {
+    draftOnly()
 
     const res = (await handler({
       arguments: { action: 'resumeCampaign', payload: { campaignId: 'camp-draft' } },
@@ -1333,5 +1337,16 @@ describe('resuming a campaign that was never launched', () => {
 
     expect(res).toMatchObject({ ok: true, status: 'pushing' })
     expect(mockLambdaSend).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a Sync on a draft as a no-op rather than an error', async () => {
+    draftOnly()
+
+    const res = (await handler({
+      arguments: { action: 'syncCampaign', payload: { campaignId: 'camp-draft' } },
+    } as Record<string, unknown>)) as { ok: boolean; ignored?: boolean; error?: string }
+
+    expect(res).toMatchObject({ ok: true, ignored: true })
+    expect(res.error).toBeUndefined()
   })
 })

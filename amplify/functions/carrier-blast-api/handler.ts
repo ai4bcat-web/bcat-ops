@@ -1199,7 +1199,9 @@ async function pauseCampaignAction(payload: { campaignId: string }) {
   const { campaignId } = payload
   if (!campaignId) return { ok: false, error: 'campaignId required' }
   const campaign = await getCampaign(campaignId)
-  if (!campaign?.instantlyCampaignId) return { ok: false, error: 'campaign has no instantlyCampaignId' }
+  if (!campaign) return { ok: false, error: 'campaign not found' }
+  // A draft is already not sending. Nothing to do, and nothing went wrong.
+  if (!campaign.instantlyCampaignId) return { ok: true, ignored: true, reason: 'not launched yet' }
   await pauseCampaign(campaign.instantlyCampaignId)
   await updateCampaign(campaignId, { status: 'paused' })
   return { ok: true }
@@ -1226,7 +1228,10 @@ async function syncCampaignAction(payload: { campaignId: string }) {
   const { campaignId } = payload
   if (!campaignId) return { ok: false, error: 'campaignId required' }
   const campaign = await getCampaign(campaignId)
-  if (!campaign?.instantlyCampaignId) return { ok: false, error: 'campaign has no instantlyCampaignId' }
+  if (!campaign) return { ok: false, error: 'campaign not found' }
+  // Sync is rendered for every campaign, drafts included. There are no Instantly stats
+  // to pull before a launch, which is not a failure the dispatcher should see.
+  if (!campaign.instantlyCampaignId) return { ok: true, ignored: true, reason: 'not launched yet' }
 
   const rows = await campaignAnalytics(campaign.instantlyCampaignId)
   const row = rows.find((r) => r.campaign_id === campaign.instantlyCampaignId)
