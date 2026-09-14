@@ -20,6 +20,7 @@ import {
   jobsDonePeakReserve,
   normalizeAccount,
   emailToReply,
+  applyReplyToContact,
   computeCapacity,
   handler,
   type CapacityInputAccount,
@@ -157,6 +158,121 @@ describe('daysToReach', () => {
 describe('makeReplyId', () => {
   it('prefixes the Instantly email id', () => {
     expect(makeReplyId('abc-123')).toBe('instantly:abc-123')
+  })
+})
+
+describe('reading the carrier\'s own words', () => {
+  const contactRow = (over: Record<string, unknown> = {}) => ({
+    id: 'c1', lane: 'IL_IA', email: 'dispatch@carrier.com', status: 'active',
+    addedAt: '2026-09-11T12:00:00.000Z', ...over,
+  })
+
+  /** Answer contact scans per queried email so lane lookups stay independent. */
+  const contactsByEmail = (rows: Record<string, Record<string, unknown>[]>) => {
+    mockDdbSend.mockReset()
+    mockDdbSend.mockImplementation((cmd: {
+      TableName?: string
+      ExpressionAttributeValues?: Record<string, unknown>
+    }) => {
+      if (cmd.TableName !== 'CarrierContact') return {}
+      const asked = String(cmd.ExpressionAttributeValues?.[':email'] ?? '')
+      return { Items: rows[asked] ?? [], LastEvaluatedKey: undefined }
+    })
+  }
+
+  const updatesFor = (id: string) =>
+    mockDdbSend.mock.calls
+      .map((call) => call[0])
+      .filter((cmd) => cmd.TableName === 'CarrierContact' && cmd.Key?.id === id)
+      .map((cmd) => cmd.ExpressionAttributeValues as Record<string, unknown>)
+
+  it('stops mailing a carrier who asks to be taken off the list', async () => {
+    contactsByEmail({ 'dispatch@carrier.com': [contactRow()] })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      text: 'Please take me off this list.',
+      toAccount: 'ryneb@gojobsdone.com',
+    })
+
+    expect(outcome.optedOut).toBe(true)
+    expect(updatesFor('c1')[0][':status']).toBe('unsubscribed')
+  })
+
+  it('keeps a carrier who is only declining this load', async () => {
+    contactsByEmail({ 'dispatch@carrier.com': [contactRow()] })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      text: 'Not interested at that rate, but send us the next one.',
+      toAccount: 'ryneb@gojobsdone.com',
+    })
+
+    expect(outcome.optedOut).toBe(false)
+    expect(updatesFor('c1')).toEqual([])
+  })
+
+  it('moves the contact to the address named in the reply', async () => {
+    contactsByEmail({ 'dispatch@carrier.com': [contactRow()], 'ops@carrier.com': [] })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      text: 'I have moved roles — email ops@carrier.com going forward.',
+      toAccount: 'ryneb@gojobsdone.com',
+    })
+
+    expect(outcome.newEmail).toBe('ops@carrier.com')
+    expect(updatesFor('c1')[0][':email']).toBe('ops@carrier.com')
+  })
+
+  it('takes the address a carrier replies FROM over one quoted below', async () => {
+    contactsByEmail({ 'dispatch@carrier.com': [contactRow()], 'night@carrier.com': [] })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      text: 'We can cover it.\n\nOn Mon, BCAT <ryneb@gojobsdone.com> wrote:\n> reply to old@carrier.com',
+      toAccount: 'ryneb@gojobsdone.com',
+      replyFrom: 'night@carrier.com',
+    })
+
+    expect(outcome.newEmail).toBe('night@carrier.com')
+    expect(updatesFor('c1')[0][':email']).toBe('night@carrier.com')
+  })
+
+  it('retires the old row instead of duplicating an address already on the lane', async () => {
+    contactsByEmail({
+      'dispatch@carrier.com': [contactRow()],
+      'ops@carrier.com': [contactRow({ id: 'c2', email: 'ops@carrier.com' })],
+    })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      text: 'Use ops@carrier.com instead.',
+      toAccount: 'ryneb@gojobsdone.com',
+    })
+
+    expect(outcome.duplicate).toBe(true)
+    expect(updatesFor('c1')[0][':status']).toBe('removed')
+    expect(updatesFor('c1')[0][':email']).toBeUndefined()
+  })
+
+  it('ignores an ambiguous reply naming two addresses', async () => {
+    contactsByEmail({ 'dispatch@carrier.com': [contactRow()] })
+
+    const outcome = await applyReplyToContact({
+      lane: 'IL_IA',
+      leadEmail: 'dispatch@carrier.com',
+      text: 'Copy ops@carrier.com and billing@carrier.com on rates.',
+      toAccount: 'ryneb@gojobsdone.com',
+    })
+
+    expect(outcome.newEmail).toBeUndefined()
+    expect(updatesFor('c1')).toEqual([])
   })
 })
 

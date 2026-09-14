@@ -643,6 +643,143 @@ export async function updateContactStatus(email: string, lane: Lane, status: Car
   }
 }
 
+/**
+ * Everything below reads the carrier's own words, because Instantly only reports the
+ * mechanical events (bounce, unsubscribe-link click). A dispatcher who types "take me
+ * off this list" or "use dispatch@… instead" never trips those, so without this the list
+ * keeps mailing an address the carrier already corrected or asked us to stop using.
+ */
+
+/** Quoted history repeats OUR copy and old addresses — judge only what they typed. */
+export function stripQuotedReply(text: string): string {
+  const cut = text.search(
+    /^\s*(?:>|On .*wrote:|-{2,}\s*Original Message|From:\s|Sent from my)/im,
+  )
+  return (cut >= 0 ? text.slice(0, cut) : text).trim()
+}
+
+/**
+ * An explicit ask to stop emailing. Deliberately narrow: "not interested" is a decline
+ * on THIS load, not a standing opt-out, and treating it as one silently deletes a
+ * reusable carrier from the lane.
+ */
+export function repliedOptOut(text: string): boolean {
+  return /\b(?:unsubscribe|remove (?:me|us|this|our)|opt[\s-]?out|take (?:me|us) off|stop (?:emailing|sending|contacting)|do not (?:email|contact)|no longer (?:email|contact))\b/i
+    .test(stripQuotedReply(text))
+}
+
+/** Our own mailboxes and brands — never mistake them for the carrier's new address. */
+const OWN_ADDRESS = /(?:bcatcorp|jobsdone|bestcareauto|noreply|no-reply|donotreply|postmaster|mailer-daemon)/i
+
+/**
+ * The address a carrier tells us to use instead. Only returned when the reply names
+ * exactly ONE usable address: "email dispatch@ or ops@" is ambiguous, and guessing
+ * would move the contact to a mailbox nobody asked for.
+ */
+export function replacementEmail(params: {
+  text: string
+  contactEmail: string
+  toAccount?: string
+}): string | null {
+  const body = stripQuotedReply(params.text)
+  const current = params.contactEmail.toLowerCase().trim()
+  const ours = (params.toAccount ?? '').toLowerCase().trim()
+  const found = body.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? []
+  const candidates = new Set(
+    found
+      .map((e) => e.toLowerCase().replace(/[.,;:)\]]+$/, ''))
+      .filter((e) => e !== current && e !== ours && !OWN_ADDRESS.test(e)),
+  )
+  return candidates.size === 1 ? [...candidates][0] : null
+}
+
+async function findContactsByLaneEmail(lane: Lane, email: string): Promise<CarrierContact[]> {
+  return scanAll<CarrierContact>(getContactTable(), {
+    expression: '#email = :email AND #lane = :lane',
+    names: { '#email': 'email', '#lane': 'lane' },
+    values: { ':email': email.toLowerCase().trim(), ':lane': lane },
+  })
+}
+
+async function patchContact(id: string, patch: Partial<CarrierContact>): Promise<void> {
+  const names: Record<string, string> = { '#updatedAt': 'updatedAt' }
+  const values: Record<string, unknown> = { ':updatedAt': nowIso() }
+  const sets = ['#updatedAt = :updatedAt']
+  for (const [key, value] of Object.entries(patch)) {
+    names[`#${key}`] = key
+    values[`:${key}`] = value
+    sets.push(`#${key} = :${key}`)
+  }
+  await ddb.send(new UpdateCommand({
+    TableName: getContactTable(),
+    Key: { id },
+    UpdateExpression: `SET ${sets.join(', ')}`,
+    ExpressionAttributeNames: names,
+    ExpressionAttributeValues: values,
+  }))
+}
+
+export type ReplyOutcome = { optedOut: boolean; newEmail?: string; duplicate?: boolean }
+
+/**
+ * Act on what a reply says about the contact itself: stop mailing them, or mail them
+ * somewhere else. Runs for webhook and cron-synced replies alike, so a reply that
+ * arrives either way lands the same change.
+ */
+export async function applyReplyToContact(params: {
+  lane: Lane
+  leadEmail: string
+  text: string
+  toAccount?: string
+  /** The address the reply actually came FROM, when Instantly reports it separately. */
+  replyFrom?: string
+}): Promise<ReplyOutcome> {
+  const { lane, leadEmail, text } = params
+  if (!leadEmail) return { optedOut: false }
+
+  const contacts = await findContactsByLaneEmail(lane, leadEmail)
+  if (contacts.length === 0) return { optedOut: false }
+
+  if (repliedOptOut(text)) {
+    for (const contact of contacts) {
+      await patchContact(contact.id, {
+        status: 'unsubscribed',
+        notes: [contact.notes, `Opted out by reply ${nowIso()}`].filter(Boolean).join(' · '),
+      })
+    }
+    return { optedOut: true }
+  }
+
+  // Answering from a different mailbox IS the new address — a stronger signal than any
+  // address typed in the body, so it wins.
+  const repliedFrom = (params.replyFrom ?? '').toLowerCase().trim()
+  const fromNewAddress =
+    repliedFrom && repliedFrom !== leadEmail.toLowerCase().trim() && !OWN_ADDRESS.test(repliedFrom)
+      ? repliedFrom
+      : null
+  const replacement =
+    fromNewAddress ?? replacementEmail({ text, contactEmail: leadEmail, toAccount: params.toAccount })
+  if (!replacement) return { optedOut: false }
+
+  const existing = await findContactsByLaneEmail(lane, replacement)
+  for (const contact of contacts) {
+    if (existing.length > 0) {
+      // The new address is already on the lane — retire the old row instead of
+      // creating a second contact that would get the same blast twice.
+      await patchContact(contact.id, {
+        status: 'removed',
+        notes: [contact.notes, `Replaced by existing contact ${replacement}`].filter(Boolean).join(' · '),
+      })
+    } else {
+      await patchContact(contact.id, {
+        email: replacement,
+        notes: [contact.notes, `Email updated by reply from ${leadEmail}`].filter(Boolean).join(' · '),
+      })
+    }
+  }
+  return { optedOut: false, newEmail: replacement, duplicate: existing.length > 0 }
+}
+
 export function emailToReply(
   email: InstantlyEmail,
   campaignMap: Record<string, { id: string; lane: Lane }>,
@@ -1114,11 +1251,23 @@ async function syncRepliesAction(payload: { campaignId?: string; sinceISO?: stri
   const contactMap = await loadContactMapByLaneEmail(needed)
 
   let upserted = 0
+  let contactsUpdated = 0
   for (const email of emails) {
     try {
       const reply = emailToReply(email, campaignMap, contactMap)
       await putReply(reply)
       upserted++
+      // Only for a reply we had not seen: re-applying would re-stamp notes every sync.
+      if (reply.lane) {
+        const outcome = await applyReplyToContact({
+          lane: reply.lane,
+          leadEmail: (email.lead ?? reply.fromEmail).toLowerCase().trim(),
+          text: reply.textBody ?? reply.snippet ?? '',
+          toAccount: reply.toAccount,
+          replyFrom: reply.fromEmail,
+        })
+        if (outcome.optedOut || outcome.newEmail) contactsUpdated++
+      }
     } catch (err) {
       if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
         // already synced
@@ -1128,7 +1277,7 @@ async function syncRepliesAction(payload: { campaignId?: string; sinceISO?: stri
     }
   }
 
-  return { ok: true, upserted, scanned: emails.length }
+  return { ok: true, upserted, scanned: emails.length, contactsUpdated }
 }
 
 async function sendReplyAction(payload: { replyId: string; bodyText: string }) {
@@ -1183,6 +1332,16 @@ async function ensureWebhookAction() {
 
 async function cronAction() {
   const sinceISO = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+  // Bounces and unsubscribes only reach us through the webhook, so a missing or revoked
+  // registration silently keeps mailing dead addresses. Re-assert it every run; the call
+  // is a no-op when the hook is already there.
+  let webhook: unknown
+  try {
+    webhook = await ensureWebhookAction()
+  } catch (err) {
+    console.error('[carrier-blast-api] cron ensureWebhook failed', err)
+    webhook = { ok: false, error: (err as Error).message }
+  }
   const replies = await syncRepliesAction({ sinceISO })
   const sending = await scanAll<CarrierCampaign>(getCampaignTable(), {
     expression: '#status = :status',
@@ -1209,7 +1368,7 @@ async function cronAction() {
     console.error('[carrier-blast-api] cron capacity snapshot failed', err)
   }
 
-  return { ok: true, replies, synced }
+  return { ok: true, replies, synced, webhook }
 }
 
 export const handler = async (event: AppSyncEvent | CronEvent | Record<string, unknown>) => {

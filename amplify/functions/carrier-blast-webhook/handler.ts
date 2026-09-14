@@ -14,6 +14,7 @@ import {
   loadCampaignMapByInstantlyId,
   loadContactMapByLaneEmail,
   putReply,
+  applyReplyToContact,
   updateCampaign,
   updateContactStatus,
   type CarrierReply,
@@ -124,7 +125,16 @@ export const handler = async (event: FunctionUrlEvent) => {
         const reply = emailToReply(email, campaignMap, contactMap)
         if (payload.unibox_url) reply.uniboxUrl = payload.unibox_url
         await putReply(reply)
-        return respond(200, { ok: true, replyId: reply.id })
+        // The carrier's own words can carry an opt-out or a corrected address; Instantly
+        // reports neither as an event, so read them here too.
+        const outcome = await applyReplyToContact({
+          lane,
+          leadEmail: fromEmail || reply.fromEmail,
+          text: payload.reply_text ?? payload.reply_text_snippet ?? '',
+          toAccount: reply.toAccount,
+          replyFrom: reply.fromEmail,
+        })
+        return respond(200, { ok: true, replyId: reply.id, contact: outcome })
       }
 
       case 'email_bounced':
