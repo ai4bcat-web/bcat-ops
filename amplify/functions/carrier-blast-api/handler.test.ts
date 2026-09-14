@@ -1310,3 +1310,28 @@ describe('runLaunchAction recomputes live capacity', () => {
     expect(createBody.random_wait_max).toBe(2)
   })
 })
+
+describe('resuming a campaign that was never launched', () => {
+  it('launches the draft instead of failing on a missing Instantly campaign', async () => {
+    mockDdbSend.mockReset()
+    mockLambdaSend.mockReset()
+    mockLambdaSend.mockResolvedValue({})
+    mockDdbSend.mockImplementation((cmd: { TableName?: string; Key?: Record<string, unknown> }) => {
+      if (cmd.TableName === 'CarrierCampaign' && cmd.Key?.id === 'camp-draft') {
+        // A saved draft: leads picked, nothing pushed to Instantly yet.
+        return { Item: { id: 'camp-draft', lane: 'IL_IA', name: 'IL > IA', status: 'draft' } }
+      }
+      if (cmd.TableName === 'CarrierContact') {
+        return { Items: [{ id: 'c1', lane: 'IL_IA', email: 'a@carrier.com', status: 'active' }] }
+      }
+      return {}
+    })
+
+    const res = (await handler({
+      arguments: { action: 'resumeCampaign', payload: { campaignId: 'camp-draft' } },
+    } as Record<string, unknown>)) as { ok: boolean; status?: string; error?: string }
+
+    expect(res).toMatchObject({ ok: true, status: 'pushing' })
+    expect(mockLambdaSend).toHaveBeenCalledTimes(1)
+  })
+})

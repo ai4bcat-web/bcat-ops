@@ -1205,11 +1205,18 @@ async function pauseCampaignAction(payload: { campaignId: string }) {
   return { ok: true }
 }
 
+/**
+ * Resume an Instantly campaign that is already sending on their side. A campaign that
+ * was never launched has nothing to resume, so this launches it instead — an old browser
+ * tab asking to resume a draft is the common way to get here, and failing it just tells
+ * the dispatcher "action failed" for a campaign they can plainly see.
+ */
 async function resumeCampaignAction(payload: { campaignId: string }) {
   const { campaignId } = payload
   if (!campaignId) return { ok: false, error: 'campaignId required' }
   const campaign = await getCampaign(campaignId)
-  if (!campaign?.instantlyCampaignId) return { ok: false, error: 'campaign has no instantlyCampaignId' }
+  if (!campaign) return { ok: false, error: 'campaign not found' }
+  if (!campaign.instantlyCampaignId) return await launchCampaignAction({ campaignId })
   await activateCampaign(campaign.instantlyCampaignId)
   await updateCampaign(campaignId, { status: 'sending' })
   return { ok: true }
