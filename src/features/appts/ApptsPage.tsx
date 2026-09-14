@@ -8,7 +8,7 @@ import { useAuditLog } from '@/hooks/useAuditLog'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
-  apptQueue, apptOutstanding, rowOutstanding, rowActionable, splitPastAppts, sortApptRows, groupByPickupDate,
+  apptQueue, apptOutstanding, rowOutstanding, splitPastAppts, sortApptRows, groupByPickupDate,
   type ApptQueueRow, type ApptRef, type ApptSortKey, type SortDir, type ApptDateSection,
   type ApptNeedKind,
 } from '@/lib/apptQueue'
@@ -897,10 +897,9 @@ export function ApptsPage() {
   )
 
   const matched = useMemo(() => {
-    // The Appts page is Dennis's work queue. Ruben-only need_book rows live on the
-    // Calendar; mixed rows stay here so Dennis can pick up the pickup side.
-    const base = apptQueue(loads).filter((r) => !rowOutstanding(r) || rowActionable(r))
-    const all = onlyOpen ? apptOutstanding(loads) : base
+    // All shipments retains booked work even when the other end is waiting on Ruben.
+    // Restrict to Dennis's actionable work only when Open only is selected.
+    const all = onlyOpen ? apptOutstanding(loads) : apptQueue(loads)
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>

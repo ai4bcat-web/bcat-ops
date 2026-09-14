@@ -476,17 +476,40 @@ describe('NEED DENNIS handoff', () => {
   })
 })
 
-describe('NEED RUBEN stays on the Calendar', () => {
-  it('hides a Ruben-only load from the Appts queue', () => {
-    loads.mockReturnValue([load({
-      id: 'lr1', aljexId: 'RUBENONLY', customer: 'Batory Foods',
+describe('NEED RUBEN handoff visibility', () => {
+  it('keeps a shipment visible after pickup confirmation while delivery awaits Ruben', async () => {
+    const shipment = load({
+      id: 'lr1', aljexId: '14340', customer: 'Batory Foods',
       stops: [
-        stop({ apptType: 'exact', appt: fromDateTimeInput('2099-01-01T09:30'), apptStatus: 'confirmed', apptProofs: { e2open: 'a', email: 'b' } }),
-        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd', appt: fromDateInput('2099-01-02') }),
+        stop({ apptType: 'tbd', appt: fromDateTimeInput('2099-01-01T07:00'),
+               apptStatus: 'requested', apptRequestedFor: fromDateTimeInput('2099-01-01T07:00'),
+               apptProofs: { request: 'request', e2open: 'e2open', email: 'email' } }),
+        stop({ id: 'd', type: 'delivery', sequence: 1, apptType: 'tbd',
+               appt: fromDateTimeInput('2099-01-02T10:00') }),
       ],
-    })])
-    render(<ApptsPage />)
-    expect(screen.queryByText('RUBENONLY')).toBeNull()
+    })
+    loads.mockReturnValue([shipment])
+    updateLoad.mockImplementationOnce(async (_id, patch) => {
+      loads.mockReturnValue([{ ...shipment, ...patch }])
+    })
+    const { rerender } = render(<ApptsPage />)
+    fireEvent.change(screen.getByLabelText('Filter appointments'), { target: { value: '14340' } })
+    const pickup = screen.getByText('14340').closest('tr')!.children[1] as HTMLElement
+    fireEvent.click(within(pickup).getByTitle('Toggle appointment status'))
+    fireEvent.click(within(pickup).getByRole('button', { name: 'CONFIRMED' }))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    rerender(<ApptsPage />)
+
+    const row = screen.getByText('14340').closest('tr')!
+    expect(row.children[1].textContent).toContain('CONFIRMED')
+    expect(row.children[2].textContent).toContain('NEED RUBEN')
+    expect(row.children[2].textContent).toContain('Awaiting Calendar time')
+    expect(within(row.children[2] as HTMLElement).queryByTitle('Toggle appointment status')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'All shipments · 0 open' }))
+    expect(screen.queryByText('14340')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open only (0)' }))
+    expect(screen.getByText('14340')).toBeTruthy()
   })
 
   it('keeps a mixed load but the NEED RUBEN delivery is not actionable', () => {
