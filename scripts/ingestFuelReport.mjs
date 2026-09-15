@@ -216,6 +216,7 @@ async function main() {
   if (!idToken) { console.error('No ID token after sign-in'); process.exit(1) }
 
   const cardToTruck = await buildCardMap(idToken)
+  console.log(`Card → truck: ${Object.entries(cardToTruck).map(([c, id]) => `${c}→${id}`).join(', ')}`)
 
   // Dedup against existing rows.
   const listed = await callAppSync(LIST_QUERY, {}, idToken)
