@@ -65,8 +65,11 @@ export function TruckMapWidget() {
   // Equipment-keyed (real id) then the freshest fix, so a truck never shows twice.
   const rows = useMemo(() => {
     const isOrphanKey = (id: string) => id.startsWith('motive:') || id.startsWith('blueink:')
+    // A retired truck's last fix stays in the table forever — never show it.
+    const retired = new Set(equipment.filter((e) => e.type === 'truck' && e.active === false).map((e) => e.id))
     const byUnit = new Map<string, TruckLocation>()
     for (const loc of locations) {
+      if (retired.has(loc.truckId)) continue
       const key = canonicalUnit(loc.unitNumber)
       const prev = byUnit.get(key)
       if (!prev) { byUnit.set(key, loc); continue }
@@ -77,7 +80,7 @@ export function TruckMapWidget() {
     }
     return [...byUnit.values()].sort((a, b) =>
       canonicalUnit(a.unitNumber).localeCompare(canonicalUnit(b.unitNumber), undefined, { numeric: true }))
-  }, [locations])
+  }, [locations, equipment])
 
   const freshest = useMemo(() => {
     if (rows.length === 0) return null

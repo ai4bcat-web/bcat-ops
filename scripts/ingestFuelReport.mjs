@@ -25,17 +25,36 @@ const outputs = JSON.parse(readFileSync(resolve(__dirname, '../amplify_outputs.j
 const APPSYNC_URL = outputs.data.url
 Amplify.configure(outputs)
 
-// ─── Card → truck mapping (matches useAppStore / seedFuelData) ────────────────
-const CARD_TO_TRUCK = {
+// ─── Card → truck mapping ─────────────────────────────────────────────────────
+// SOURCE OF TRUTH is Equipment.fuelCardNumbers (edited in the truck form; cards move
+// with the truck, e.g. 00056 went from retired 299 to leased 423166). This hardcoded
+// map is only a fallback if the Equipment query fails. Mirrors the fuel-import Lambda.
+const FALLBACK_CARD_TO_TRUCK = {
   '00049': 'eq-mnmpi9jxwd12',  // Unit 009
-  '00056': 'eq-mnevxuyoxpd8',  // Unit 299
   '00031': 'eq-mnevuhxgs5jf',  // Unit 530
   '00007': 'eq-mnevvq8q6tcx',  // Unit 685
   '00023': 'eq-mnevwst30vwt',  // Unit 780
-  '00064': null,              // Unit 0012 — TODO: replace null with equipment ID when truck is added to bcat-ops
-  '00080': null,              // Unit 0012 — TODO: replace null with equipment ID when truck is added to bcat-ops
-  '89510': null,              // Unit 0080 — TODO: replace null with equipment ID when truck is added to bcat-ops
 };
+
+async function buildCardMap(idToken) {
+  const map = { ...FALLBACK_CARD_TO_TRUCK }
+  try {
+    let nextToken = null
+    do {
+      const res = await callAppSync(
+        `query Eq($nextToken: String) { listEquipment(limit: 1000, nextToken: $nextToken) { items { id fuelCardNumbers } nextToken } }`,
+        { nextToken }, idToken)
+      if (res.errors) throw new Error(res.errors[0].message)
+      for (const e of res.data.listEquipment.items ?? []) {
+        for (const card of e.fuelCardNumbers ?? []) if (card) map[String(card)] = e.id   // data wins over the fallback
+      }
+      nextToken = res.data.listEquipment.nextToken
+    } while (nextToken)
+  } catch (err) {
+    console.error('Equipment lookup failed — using fallback card map:', err.message)
+  }
+  return map
+}
 
 // ─── Parser (same logic as src/lib/parsers/efsTransactionReport.ts) ───────────
 // Kept in sync manually; if the app parser changes, update here too.
@@ -196,6 +215,8 @@ async function main() {
   const idToken = session.tokens?.idToken?.toString()
   if (!idToken) { console.error('No ID token after sign-in'); process.exit(1) }
 
+  const cardToTruck = await buildCardMap(idToken)
+
   // Dedup against existing rows.
   const listed = await callAppSync(LIST_QUERY, {}, idToken)
   if (listed.errors) { console.error('List failed:', listed.errors[0].message); process.exit(1) }
@@ -215,7 +236,7 @@ async function main() {
       cardNumber: tx.cardNumber,
       ...(tx.invoiceNumber && { invoiceNumber: tx.invoiceNumber }),
       ...(tx.unitNumber && { unitNumber: tx.unitNumber }),
-      ...(CARD_TO_TRUCK[tx.cardNumber] && { truckId: CARD_TO_TRUCK[tx.cardNumber] }),
+      ...(cardToTruck[tx.cardNumber] && { truckId: cardToTruck[tx.cardNumber] }),
       ...(tx.driverName && { driverName: tx.driverName }),
       ...(tx.odometer != null && { odometer: tx.odometer }),
       ...(tx.locationName && { locationName: tx.locationName }),

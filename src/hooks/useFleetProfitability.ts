@@ -56,10 +56,11 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
   )
 
   const members = useMemo<MemberTruck[]>(() => {
-    // 1. Equipment-backed members — fleetGroup is the source of truth. Retired
-    //    (inactive) trucks drop out so their per-truck fixed costs stop accruing.
+    // 1. Equipment-backed members — fleetGroup is the source of truth. Inactive
+    //    (retired) trucks stay: they own their historical months, and retirement has
+    //    no date. Stop a retired truck's costs by ending its RecurringExpenses.
     const equipMembers: MemberTruck[] = equipment
-      .filter((e) => e.type === 'truck' && e.fleetGroup === group && e.active !== false)
+      .filter((e) => e.type === 'truck' && e.fleetGroup === group)
       .map((e) => ({
         truckId:      e.id,
         unitNumber:   e.unitNumber,

@@ -154,8 +154,8 @@ interface SyncTarget {
  * else its unitNumber. Inactive trucks never claim a Motive vehicle, so a retired
  * unit can hand its ELD/number to its replacement.
  */
-async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string; unitNumber: string }>> {
-  const map = new Map<string, { id: string; unitNumber: string }>()
+async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string; unitNumber: string; override: boolean }>> {
+  const map = new Map<string, { id: string; unitNumber: string; override: boolean }>()
   let token: Record<string, unknown> | undefined
   do {
     const result = await dynamo.send(new ScanCommand({
@@ -172,8 +172,11 @@ async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string;
       const eld = item.eldSource ? String(item.eldSource) : ''
       if (eld === 'manual' || eld === 'blueink') continue
       if (!item.unitNumber || !item.id) continue
-      const motiveNumber = item.motiveVehicleNumber ? String(item.motiveVehicleNumber) : String(item.unitNumber)
-      map.set(motiveNumber, { id: String(item.id), unitNumber: String(item.unitNumber) })
+      const override = item.motiveVehicleNumber ? String(item.motiveVehicleNumber) : null
+      const key = override ?? String(item.unitNumber)
+      // An explicit override beats another truck's plain unit number, whatever the scan order.
+      if (!override && map.get(key)?.override) continue
+      map.set(key, { id: String(item.id), unitNumber: String(item.unitNumber), override: override != null })
     }
     token = result.LastEvaluatedKey
   } while (token)
