@@ -20,7 +20,7 @@ export function CombinedMonthlyProfit() {
   const range = monthRange(monthOffset)
   const ivan = useFleetMonthlyNet(range)
   const { rows, loading: amzLoading } = useAmazonProfitability()
-  const amazon = useMemo(() => aggregateAmazon(rows, range.start, range.end), [rows, range.start, range.end])
+  const amazon = useMemo(() => aggregateAmazon(rows, range.start, range.end, { prorate: true }), [rows, range.start, range.end])
   const combined = ivan.net + amazon.profit
   const loading = ivan.loading && amzLoading
 

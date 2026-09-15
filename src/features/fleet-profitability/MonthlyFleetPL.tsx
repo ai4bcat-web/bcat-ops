@@ -92,7 +92,7 @@ export function MonthlyFleetPL() {
   const range = monthRange(monthOffset)
   const { data, members, loading, refresh } = useFleetProfitability(range, group)
   const { rows: amzRows, loading: amzLoading } = useAmazonProfitability()
-  const amzAgg = useMemo(() => aggregateAmazon(amzRows, range.start, range.end), [amzRows, range.start, range.end])
+  const amzAgg = useMemo(() => aggregateAmazon(amzRows, range.start, range.end, { prorate: true }), [amzRows, range.start, range.end])
   const amzDrivers = useMemo(() => new Set(amzAgg.rows.map((r) => r.driverId)).size, [amzAgg])
   const isAmazon = group === 'AMAZON'
   const { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount } = useFleetFixedCosts()

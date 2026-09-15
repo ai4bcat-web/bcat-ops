@@ -9,7 +9,14 @@ import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLi
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
-/** Aggregate of driver-week rows whose pay-week start falls in [startIso, endIso]. */
+/** Inclusive day count between two YYYY-MM-DD dates (UTC, calendar days). */
+function inclusiveDays(start: string, end: string): number {
+  const s = Date.UTC(+start.slice(0, 4), +start.slice(5, 7) - 1, +start.slice(8, 10))
+  const e = Date.UTC(+end.slice(0, 4), +end.slice(5, 7) - 1, +end.slice(8, 10))
+  return Math.floor((e - s) / 86_400_000) + 1
+}
+
+/** Aggregate of driver-week rows whose pay week falls in [startIso, endIso]. */
 export interface AmazonAgg {
   revenue:   number   // gross billed
   driverPay: number
@@ -17,14 +24,52 @@ export interface AmazonAgg {
   profit:    number   // to the company
   rows:      DriverWeekProfit[]
 }
-export function aggregateAmazon(rows: DriverWeekProfit[], startIso: string, endIso: string): AmazonAgg {
-  const inRange = rows.filter((r) => r.periodStart >= startIso && r.periodStart <= endIso)
+export function aggregateAmazon(
+  rows: DriverWeekProfit[],
+  startIso: string,
+  endIso: string,
+  opts?: { prorate?: boolean },
+): AmazonAgg {
+  const prorate = opts?.prorate ?? false
+  if (!prorate) {
+    const inRange = rows.filter((r) => r.periodStart >= startIso && r.periodStart <= endIso)
+    return {
+      revenue:   round2(inRange.reduce((s, r) => s + r.gross, 0)),
+      driverPay: round2(inRange.reduce((s, r) => s + r.driverPay, 0)),
+      expenses:  round2(inRange.reduce((s, r) => s + r.expenses, 0)),
+      profit:    round2(inRange.reduce((s, r) => s + r.profit, 0)),
+      rows:      inRange,
+    }
+  }
+
+  // Monthly / multi-week view: prorate each weekly row by the days that overlap
+  // [startIso, endIso]. Matches the fleet profitability engine's pay proration.
+  const scaled: DriverWeekProfit[] = []
+  for (const r of rows) {
+    const rEnd = periodEnd(r.periodStart)
+    const oStart = r.periodStart > startIso ? r.periodStart : startIso
+    const oEnd = rEnd < endIso ? rEnd : endIso
+    if (oStart > oEnd) continue
+    const overlapDays = inclusiveDays(oStart, oEnd)
+    const totalDays = inclusiveDays(r.periodStart, rEnd)
+    const f = overlapDays / totalDays
+    const gross = round2(r.gross * f)
+    const driverPay = round2(r.driverPay * f)
+    const expenses = round2(r.expenses * f)
+    scaled.push({
+      ...r,
+      gross,
+      driverPay,
+      expenses,
+      profit: round2(gross - driverPay - expenses),
+    })
+  }
   return {
-    revenue:   round2(inRange.reduce((s, r) => s + r.gross, 0)),
-    driverPay: round2(inRange.reduce((s, r) => s + r.driverPay, 0)),
-    expenses:  round2(inRange.reduce((s, r) => s + r.expenses, 0)),
-    profit:    round2(inRange.reduce((s, r) => s + r.profit, 0)),
-    rows:      inRange,
+    revenue:   round2(scaled.reduce((s, r) => s + r.gross, 0)),
+    driverPay: round2(scaled.reduce((s, r) => s + r.driverPay, 0)),
+    expenses:  round2(scaled.reduce((s, r) => s + r.expenses, 0)),
+    profit:    round2(scaled.reduce((s, r) => s + r.profit, 0)),
+    rows:      scaled,
   }
 }
 
