@@ -119,6 +119,9 @@ const schema = a.schema({
       // 'manual' = own ELD, excluded from Motive mileage sync. null = treated as motive.
       eldSource:               a.string(),
       eldSerialNumber:         a.string(),             // own-ELD device serial (manual trucks)
+      // Motive vehicle number when it differs from unitNumber — e.g. the ELD carried
+      // over from a retired truck still reports under the old number. null = unitNumber.
+      motiveVehicleNumber:     a.string(),
       // Fleet grouping for profitability — LOCAL (Ivan) vs AMAZON. Optional: legacy
       // records read null and are treated as "ungrouped" by the profitability view.
       // This is the SOURCE OF TRUTH for fleet membership (no hardcoded unit lists).

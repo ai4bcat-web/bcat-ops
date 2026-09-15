@@ -148,9 +148,14 @@ interface SyncTarget {
   motiveVehicleId: number
 }
 
-/** Map of Equipment unitNumber → Equipment.id, for trucks only. */
-async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
+/**
+ * Map of Motive vehicle number → Equipment (trucks only). A truck reports under
+ * Equipment.motiveVehicleNumber when set (ELD carried over from a retired truck),
+ * else its unitNumber. Inactive trucks never claim a Motive vehicle, so a retired
+ * unit can hand its ELD/number to its replacement.
+ */
+async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string; unitNumber: string }>> {
+  const map = new Map<string, { id: string; unitNumber: string }>()
   let token: Record<string, unknown> | undefined
   do {
     const result = await dynamo.send(new ScanCommand({
@@ -161,11 +166,14 @@ async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
       ExclusiveStartKey:         token as Record<string, never> | undefined,
     }))
     for (const item of result.Items ?? []) {
+      if (item.active === false) continue
       // Skip trucks on a non-Motive ELD (own device, or Blue Ink Tech) — they are
       // synced elsewhere, not by Motive.
       const eld = item.eldSource ? String(item.eldSource) : ''
       if (eld === 'manual' || eld === 'blueink') continue
-      if (item.unitNumber && item.id) map.set(String(item.unitNumber), String(item.id))
+      if (!item.unitNumber || !item.id) continue
+      const motiveNumber = item.motiveVehicleNumber ? String(item.motiveVehicleNumber) : String(item.unitNumber)
+      map.set(motiveNumber, { id: String(item.id), unitNumber: String(item.unitNumber) })
     }
     token = result.LastEvaluatedKey
   } while (token)
@@ -248,20 +256,23 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
   if (!MOTIVE_API_KEY) throw new Error('MOTIVE_API_KEY secret not set')
 
   // Every vehicle in Motive is synced, regardless of ownership/config. Match each
-  // to an Equipment record by unit number when possible (so mileage attributes to
-  // the right truck for cost-per-mile); otherwise key it by the Motive number.
+  // to an active Equipment record by Motive number when possible (so mileage
+  // attributes to the right truck for cost-per-mile); otherwise key it by the Motive number.
   const vehicleMap = await fetchVehicleMap(MOTIVE_API_KEY)
   if (vehicleMap.size === 0) {
     console.log('[motive-mileage-sync] no vehicles returned by Motive — nothing to sync')
     return
   }
-  const equipmentByUnit = await fetchEquipmentByUnit()
-  const trucks: SyncTarget[] = [...vehicleMap.values()].map((v) => ({
-    truckId:         equipmentByUnit.get(v.number) ?? `motive:${v.number}`,
-    unitNumber:      v.number,
-    motiveVehicleId: v.id,
-  }))
-  console.log(`[motive-mileage-sync] syncing ${trucks.length} Motive vehicle(s) (${equipmentByUnit.size} matched to Equipment)`)
+  const equipmentByMotive = await fetchEquipmentByMotiveNumber()
+  const trucks: SyncTarget[] = [...vehicleMap.values()].map((v) => {
+    const eq = equipmentByMotive.get(v.number)
+    return {
+      truckId:         eq?.id ?? `motive:${v.number}`,
+      unitNumber:      eq?.unitNumber ?? v.number,
+      motiveVehicleId: v.id,
+    }
+  })
+  console.log(`[motive-mileage-sync] syncing ${trucks.length} Motive vehicle(s) (${equipmentByMotive.size} matched to Equipment)`)
 
   // Determine periods to sync
   let periods: Period[]

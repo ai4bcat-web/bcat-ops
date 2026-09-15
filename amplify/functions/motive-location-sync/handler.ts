@@ -34,9 +34,13 @@ const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME!
 const TRUCK_LOCATION_HISTORY_TABLE = process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME!
 const MOTIVE_API_KEY       = process.env.MOTIVE_API_KEY!
 
-/** Map of Equipment unitNumber → Equipment.id, for trucks only. */
-async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
+/**
+ * Map of Motive vehicle number → Equipment (trucks only). A truck reports under
+ * Equipment.motiveVehicleNumber when set (ELD carried over from a retired truck),
+ * else its unitNumber. Inactive trucks never claim a Motive vehicle.
+ */
+async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string; unitNumber: string }>> {
+  const map = new Map<string, { id: string; unitNumber: string }>()
   let token: Record<string, unknown> | undefined
   do {
     const result = await dynamo.send(new ScanCommand({
@@ -47,7 +51,10 @@ async function fetchEquipmentByUnit(): Promise<Map<string, string>> {
       ExclusiveStartKey:         token as Record<string, never> | undefined,
     }))
     for (const item of result.Items ?? []) {
-      if (item.unitNumber && item.id) map.set(String(item.unitNumber), String(item.id))
+      if (item.active === false) continue
+      if (!item.unitNumber || !item.id) continue
+      const motiveNumber = item.motiveVehicleNumber ? String(item.motiveVehicleNumber) : String(item.unitNumber)
+      map.set(motiveNumber, { id: String(item.id), unitNumber: String(item.unitNumber) })
     }
     token = result.LastEvaluatedKey
   } while (token)
@@ -66,16 +73,17 @@ export const handler = async (): Promise<void> => {
     return
   }
 
-  // Link to truck records by unit number where possible; no ownership filter.
-  const equipmentByUnit = await fetchEquipmentByUnit()
+  // Link to active truck records by Motive number where possible; no ownership filter.
+  const equipmentByMotive = await fetchEquipmentByMotiveNumber()
 
   const now = new Date().toISOString()
   let synced = 0
 
   for (const loc of locations) {
-    // Match to an Equipment record when the unit number lines up, else key by
+    // Match to an Equipment record when the Motive number lines up, else key by
     // the Motive number so the vehicle is still tracked on the map.
-    const truckId = equipmentByUnit.get(loc.number) ?? `motive:${loc.number}`
+    const eq = equipmentByMotive.get(loc.number)
+    const truckId = eq?.id ?? `motive:${loc.number}`
 
     // Moving vs. sitting, from the ping's speed (mph). >=1 mph avoids GPS jitter.
     const motion = loc.speed != null && loc.speed >= 1 ? 'MOVING' : 'STATIONARY'
@@ -98,7 +106,7 @@ export const handler = async (): Promise<void> => {
     }
 
     const base = {
-      unitNumber:  loc.number,
+      unitNumber:  eq?.unitNumber ?? loc.number,
       lat:         loc.lat,
       lon:         loc.lon,
       bearing:     loc.bearing,
@@ -143,5 +151,5 @@ export const handler = async (): Promise<void> => {
     }
   }
 
-  console.log(`[motive-location-sync] complete — ${synced}/${locations.length} truck(s) updated (${equipmentByUnit.size} matched to Equipment)`)
+  console.log(`[motive-location-sync] complete — ${synced}/${locations.length} truck(s) updated (${equipmentByMotive.size} matched to Equipment)`)
 }

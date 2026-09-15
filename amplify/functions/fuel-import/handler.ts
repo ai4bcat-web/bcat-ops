@@ -31,7 +31,7 @@ const SECRET               = process.env.FUEL_IMPORT_SECRET!
 // Equipment scan fails or a record predates the fuelCardNumbers field.
 const FALLBACK_CARD_MAP: Record<string, string> = {
   '00049': 'eq-mnmpi9jxwd12', // truck 009
-  '00056': 'eq-mnevxuyoxpd8', // truck 299
+  // 00056 moved from retired truck 299 to leased 423166 (2026-09) — data-backed only.
   '00031': 'eq-mnevuhxgs5jf', // truck 530
   '00007': 'eq-mnevvq8q6tcx', // truck 685
   '00023': 'eq-mnevwst30vwt', // truck 780

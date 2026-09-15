@@ -25,6 +25,7 @@ import {
 import { thBase, tdBase } from '@/features/maintenance/maintenanceUi'
 import { cn, formatVin } from '@/lib/utils'
 import { driverForTruck } from '@/lib/assignments'
+import { isPosted } from '@/lib/invoiceStatus'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice, EquipmentType, Ownership, EldSource, FleetGroup, TaskPriority, TaskStatus } from '@/types/equipment'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -189,6 +190,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
     fleetManagerAssignee:    initial?.fleetManagerAssignee ?? '',
     eldSource:               (initial?.eldSource ?? 'motive') as EldSource,
     eldSerialNumber:         initial?.eldSerialNumber ?? '',
+    motiveVehicleNumber:     initial?.motiveVehicleNumber ?? '',
     fleetGroup:              (initial?.fleetGroup ?? '') as '' | FleetGroup,
     lastPmDate:              initial?.lastPmDate ?? '',
     lastPmMileage:           initial?.lastPmMileage?.toString() ?? '',
@@ -242,6 +244,8 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
       // ELD source applies to trucks only; manual keeps an optional serial.
       eldSource: isTruck ? form.eldSource : undefined,
       eldSerialNumber: isTruck && form.eldSource === 'manual' ? (form.eldSerialNumber.trim() || undefined) : undefined,
+      // Motive reports under this number when the ELD came over from another truck.
+      motiveVehicleNumber: isTruck && form.eldSource === 'motive' ? (form.motiveVehicleNumber.trim() || null) : null,
       // Fleet group + fuel card (trucks only) — drive profitability grouping and the
       // data-backed fuel-card → truck mapping (no code edit needed to add a truck).
       fleetGroup: isTruck ? (form.fleetGroup || null) : null,
@@ -347,9 +351,12 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
                         <ToggleGroupItem value="manual" className="gap-2"><Wrench className="size-3.5" /> Manual</ToggleGroupItem>
                       </ToggleGroup>
                       {form.eldSource === 'motive' && (
-                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
-                          <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage &amp; location auto-sync from Motive, matched on the unit number above.
-                        </div>
+                        <>
+                          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
+                            <CheckCircle2 size={13} style={{ flexShrink: 0 }} /> Mileage &amp; location auto-sync from Motive, matched on the unit number above{form.motiveVehicleNumber.trim() ? ` — overridden to Motive vehicle #${form.motiveVehicleNumber.trim()}` : ''}.
+                          </div>
+                          <Input value={form.motiveVehicleNumber} onChange={(e) => set('motiveVehicleNumber', e.target.value)} placeholder="Motive vehicle # if different (e.g. ELD moved from a retired truck)" className="h-9 mt-2" />
+                        </>
                       )}
                       {form.eldSource === 'blueink' && (
                         <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-blue-soft, #eff6ff)', color: '#0369a1', fontSize: 12 }}>
@@ -846,7 +853,7 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
 
   const upcomingTasks = tasks.filter((t) => t.status === 'upcoming')
   const highTasks     = upcomingTasks.filter((t) => t.priority === 'high')
-  const repairSpend   = invoices.reduce((s, i) => s + i.amount, 0)
+  const repairSpend   = invoices.filter(isPosted).reduce((s, i) => s + i.amount, 0)
   const isTruck       = equip.type === 'truck'
 
   return (
@@ -1025,7 +1032,7 @@ export function TrucksPage() {
   // Per-truck values used for both display and column sorting.
   const complianceDatesOf = useComplianceDates()
   const taskCountOf = (e: Equipment) => maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
-  const repairOf    = (e: Equipment) => maintenanceInvoices.filter((inv) => inv.equipmentId === e.id).reduce((s, inv) => s + inv.amount, 0)
+  const repairOf    = (e: Equipment) => maintenanceInvoices.filter((inv) => inv.equipmentId === e.id && isPosted(inv)).reduce((s, inv) => s + inv.amount, 0)
   const driverNameOf = (e: Equipment) => driverForTruck(e.id, drivers)?.name ?? ''
   const complianceRankOf = (e: Equipment) => {
     const isTruck = e.type === 'truck'
@@ -1229,7 +1236,7 @@ export function TrucksPage() {
               {filtered.map((e) => {
                 const driver = driverForTruck(e.id, drivers)
                 const taskCount = maintenanceTasks.filter((t) => t.equipmentId === e.id && t.status === 'upcoming').length
-                const repair = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id).reduce((s, inv) => s + inv.amount, 0)
+                const repair = maintenanceInvoices.filter((inv) => inv.equipmentId === e.id && isPosted(inv)).reduce((s, inv) => s + inv.amount, 0)
                 return (
                   <button
                     key={e.id}
