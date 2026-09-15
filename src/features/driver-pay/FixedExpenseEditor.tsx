@@ -428,6 +428,10 @@ export function FixedExpenseEditor({
                       </button>
                     ))}
                   </div>
+                  <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+                    Either way this is an expense — an after-expenses driver bears only their pay % of it.
+                    Lease mileage and IFTA the driver owes in full go in as a <b>Debit</b> on the settlement, not here.
+                  </div>
                 </div>
               )}
 
