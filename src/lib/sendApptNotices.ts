@@ -97,7 +97,8 @@ export async function sendApptNotices({ load, next, prev, actorName, updateLoad 
           aljexId: load.aljexId ?? null,
         })
       } catch (err) { console.error('[sendApptNotices] book-delivery task failed', err) }
-      void notifyApptNeeded({
+      // A newly NEED delivery already received its scheduling ping above.
+      if (!notices.some((n) => n.stopId === s.id && n.kind === 'needed')) void notifyApptNeeded({
         stopKind: 'delivery', kind: 'book', threadTs: s.apptThreadTs ?? null,
         apptLabel: label, aljexId: load.aljexId, pickupNumber: load.pickupNumber,
         customer: load.customer ?? null,

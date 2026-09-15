@@ -48,6 +48,38 @@ const typeSelect = () => screen.getByLabelText('Appointment type') as HTMLSelect
 
 beforeEach(() => { updateLoad.mockClear() })
 
+describe('reopening a confirmed appointment', () => {
+  it.each(['before', 'after'])('keeps NEED 14:00 when NEED is selected %s entering the time', async (order) => {
+    const stop = mkStop({ apptStatus: 'confirmed', apptProofs: { request: 'r', email: 'e', e2open: 'p' }, apptRequestedFor: fromDateTimeInput('2026-08-20T08:00') })
+    const load = { ...mkLoad(stop), customer: 'Batory Foods' }
+    const { rerender } = render(<ApptEditPopover load={load} stop={stop} apptField="pickupAppt" typeField="pickupApptType" onClose={() => {}} />)
+    const chooseNeed = () => fireEvent.change(typeSelect(), { target: { value: 'tbd' } })
+    if (order === 'before') chooseNeed()
+    fireEvent.change(screen.getByLabelText('Appointment time'), { target: { value: '14:00' } })
+    if (order === 'after') chooseNeed()
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    const saved = savedStop()
+    expect(saved.apptType).toBe('tbd')
+    expect(saved.apptStatus).toBe('need_request')
+    expect(saved.appt).toBe(fromDateTimeInput('2026-08-20T14:00'))
+    expect(saved.apptProofs).toEqual({ request: null, e2open: null, email: null })
+    expect(saved.apptRequestedFor).toBeNull()
+    rerender(<ApptEditPopover key="reopened" load={{ ...load, stops: [saved] }} stop={saved} apptField="pickupAppt" typeField="pickupApptType" onClose={() => {}} />)
+    expect(typeSelect().value).toBe('tbd')
+    expect((screen.getByLabelText('Appointment time') as HTMLInputElement).value).toBe('14:00')
+  })
+
+  it('preserves the current booking cycle when a NEED stop is saved without reopening it', async () => {
+    const stop = mkStop({ apptType: 'tbd', apptStatus: 'requested', apptProofs: { request: 'request-proof', email: null, e2open: null } })
+    render(<ApptEditPopover load={{ ...mkLoad(stop), customer: 'Batory Foods' }} stop={stop} apptField="pickupAppt" typeField="pickupApptType" onClose={() => {}} />)
+    fireEvent.click(screen.getByText('Save'))
+    await waitFor(() => expect(updateLoad).toHaveBeenCalled())
+    expect(savedStop().apptStatus).toBe('requested')
+    expect(savedStop().apptProofs?.request).toBe('request-proof')
+  })
+})
+
 describe('the type select tells the truth about the stored type', () => {
   it('shows Window for a range stop rather than claiming Exact Time', () => {
     open(mkStop({ apptType: 'range', apptEnd: fromDateTimeInput('2026-08-20T12:00') }))

@@ -87,6 +87,15 @@ describe('handoff to Dennis', () => {
     expect(notifyApptNeeded).toHaveBeenCalledWith(expect.objectContaining({ kind: 'book' }))
   })
 
+  it('posts one scheduling notice and creates the task when confirmed delivery becomes NEED with a time', async () => {
+    const prev = [stop({ apptType: 'exact', apptStatus: 'confirmed', appt: fromDateTimeInput('2026-08-21T10:00') })]
+    const next = [stop({ apptType: 'tbd', apptStatus: 'need_request', appt: fromDateTimeInput('2026-08-21T14:00') })]
+    await sendApptNotices({ load: load(), next, prev, actorName: 'ryne@bcatcorp.com', updateLoad })
+    expect(notifyApptNeeded).toHaveBeenCalledTimes(1)
+    expect(notifyApptNeeded).toHaveBeenCalledWith(expect.objectContaining({ kind: 'needed' }))
+    expect(createApptTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'book_delivery', assignee: 'dennis@bcatcorp.com' }))
+  })
+
   it('does not duplicate the channel notice when a handoff also moves an appointment in a thread', async () => {
     const prev = [stop({
       apptStatus: 'need_book',

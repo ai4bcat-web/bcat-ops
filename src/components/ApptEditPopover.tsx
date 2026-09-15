@@ -68,6 +68,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
   const isPending = !isHandoff && (srcType ?? 'exact') === 'exact' && !srcHasTime
   const [dateVal, setDateVal] = useState(initVal)
   const [typeVal, setTypeVal] = useState<ApptType | 'pending'>(isHandoff ? 'exact' : (isPending ? 'pending' : (srcType ?? 'exact')))
+  const [needSelected, setNeedSelected] = useState(false)
   const [endVal,  setEndVal]  = useState(initEnd)
   const [saving,  setSaving]  = useState(false)
   const [error,   setError]   = useState<string | null>(null)
@@ -105,20 +106,12 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
     setError(null)
 
     try {
-      // Choosing Pending means "no time yet" — drop the time rather than keeping a stale one.
-      // If the user typed a real time while the select still reads Pending/NEED, we treat
-      // it as Exact Time so the input is not silently discarded.
+      // A requested time is valid on NEED; only Pending without a time is date-only.
       const pending = typeVal === 'pending'
       const hasTime = !!timePart
       const chosen: ApptType = pending ? 'exact' : typeVal
       const value = pending && !hasTime ? datePart : dateVal
-      let effectiveType: ApptType
-      // A NEED stop that was given a real time graduates to Exact automatically.
-      if (chosen === 'tbd' && hasTime) {
-        effectiveType = 'exact'
-      } else {
-        effectiveType = apptTypeAfterEdit(chosen, value, { type: srcType, value: initVal })
-      }
+      const effectiveType = apptTypeAfterEdit(chosen, value, { type: srcType, value: initVal })
 
       // fromDateTimeInput, not `new Date(...).toISOString()`: the input is Chicago wall
       // time, and the native parse treats it as the BROWSER's zone — which writes the
@@ -144,9 +137,12 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       const statusPatch: Partial<Stop> = {}
       const needsProofs = requiresApptProofs(load.customer)
 
-      if (isHandoff) {
-        // Ruben/Ryne is explicitly handing this stop back to Dennis for a new booking cycle.
-        statusPatch.apptStatus = 'need_request'
+      const reopen = isHandoff || (needsProofs && effectiveType === 'tbd' && needSelected)
+      if (reopen) {
+        // Reopening starts a fresh booking cycle, retaining the requested time but not
+        // the previous confirmation or its screenshots.
+        const kind = stop?.type ?? (apptField === 'pickupAppt' ? 'pickup' : 'delivery')
+        statusPatch.apptStatus = isHandoff || kind === 'pickup' || hasTime ? 'need_request' : 'need_book'
         statusPatch.apptRequestedFor = null
         statusPatch.apptProofs = { request: null, e2open: null, email: null }
         statusPatch.apptMoveRequested = false
@@ -159,7 +155,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
         }
       }
 
-      if (canFlagMove) {
+      if (canFlagMove && !reopen) {
         const wasFlagged = stop.apptStatus === 'change_needed' || !!stop.apptMoveRequested
         if (moveReq && !wasFlagged) {
           Object.assign(statusPatch, changeNeededPatch(changeTo ? fromDateTimeInput(changeTo) : ''))
@@ -245,9 +241,9 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
           value={timePart}
           onChange={(e) => {
             setDateVal(combineDateTime(datePart, e.target.value))
-            // Typing a real time while the select still says Pending/NEED should not
-            // silently drop that time on save.
-            if (e.target.value && (typeVal === 'pending' || typeVal === 'tbd')) {
+            // Preserve an explicitly selected NEED and its requested time. The existing
+            // time-only Ruben handoff still advances when NEED was not explicitly chosen.
+            if (e.target.value && (typeVal === 'pending' || (typeVal === 'tbd' && !needSelected && !srcHasTime))) {
               setTypeVal('exact')
             }
           }}
@@ -263,6 +259,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
           onChange={(e) => {
             const v = e.target.value as ApptType | 'pending'
             setTypeVal(v)
+            setNeedSelected(v === 'tbd')
             // Selecting Pending clears the time in the form too, so what you see is saved.
             if (v === 'pending') setDateVal(datePart)
           }}
