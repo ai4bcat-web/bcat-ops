@@ -37,6 +37,8 @@ export const DEFAULT_CREDIT_REASON = 'DETENTION'
  */
 export const DEBIT_REASONS: CreditReason[] = [
   { code: 'CASH_ADVANCE',   label: 'Cash advance',            hint: 'Money fronted to the driver, paid back off this check' },
+  { code: 'LEASE_MILEAGE', label: 'Lease mileage',           hint: 'Per-mile charge on the leasing company\'s invoice — driver pays 100%' },
+  { code: 'IFTA',          label: 'IFTA fuel tax',           hint: 'Quarterly IFTA bill for the leased truck — driver pays 100%' },
   { code: 'DAMAGE',         label: 'Damage / claim',          hint: 'Cargo or equipment damage charged to the driver' },
   { code: 'ESCROW',         label: 'Escrow / reserve',        hint: 'Held back into the driver reserve account' },
   { code: 'OVERPAYMENT',    label: 'Overpayment recovery',    hint: 'Clawing back an amount overpaid on an earlier check' },

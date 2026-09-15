@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { listAmazonTrips, listDriverPaySettings, listDriverPayDeductions } from '@/lib/apiClient'
-import type { AmazonTrip, DriverPaySetting, DriverPayDeduction } from '@/lib/apiClient'
+import { listAmazonTrips, listDriverPaySettings, listDriverPayDeductions, listDriverPayCredits } from '@/lib/apiClient'
+import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, DriverPayCredit } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel } from '@/lib/driverPay'
+import { creditLineLabel } from '@/lib/payCredits'
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
@@ -79,8 +80,8 @@ export interface DriverWeekProfit {
   driverId:    string
   driverName:  string
   gross:       number   // freight billed (revenue this driver generated)
-  expenses:    number   // fuel + fixed + one-off deductions
-  driverPay:   number   // the driver's check this week
+  expenses:    number   // fuel + fixed + one-off deductions + costs recovered via debits
+  driverPay:   number   // the driver's check this week (after credits and debits)
   profit:      number   // to the company = gross − driverPay − expenses
 }
 
@@ -96,7 +97,13 @@ export interface AmazonProfitabilityState {
  * Per-driver, per-week Amazon profitability: how much each driver grosses, what the
  * expenses are, and the resulting profit to the company. Covers every pay week that
  * has trips. Mirrors useAmazonPay's statement math (calcDriverPay + tolerant fuel-card
- * match) but rolled across all weeks.
+ * match + credits/debits) but rolled across all weeks.
+ *
+ * Credits (detention, bonus…) are money the company pays on top of the % model, so
+ * they reduce profit. Debits recover, at 100%, a cost the company already paid on the
+ * driver's behalf (lease mileage, IFTA, a cash advance…) — that cost is not booked
+ * anywhere else in the Amazon P&L, so it is counted as an expense here and the debit
+ * takes it back out of the check: profit is unchanged, driver pay is the real check.
  */
 export function useAmazonProfitability(): AmazonProfitabilityState {
   const { drivers } = useDrivers()
@@ -105,14 +112,15 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
   const [trips, setTrips]           = useState<AmazonTrip[]>([])
   const [settings, setSettings]     = useState<DriverPaySetting[]>([])
   const [deductions, setDeductions] = useState<DriverPayDeduction[]>([])
+  const [credits, setCredits]       = useState<DriverPayCredit[]>([])
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const [t, s, d] = await Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions()])
-      setTrips(t); setSettings(s); setDeductions(d)
+      const [t, s, d, c] = await Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
+      setTrips(t); setSettings(s); setDeductions(d); setCredits(c)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally { setLoading(false) }
@@ -146,18 +154,26 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 
+        const mine = credits.filter((c) => c.driverId === setting.driverId && c.periodStart === periodStart)
+        // null kind = CREDIT: rows written before debits existed are credits (same as useAmazonPay).
+        const driverCredits = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT').map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))
+        const driverDebits  = mine.filter((c) => c.kind === 'DEBIT').map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))
+
         const st = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.freightAmount, status: t.status })),
           effectivePayRate(setting, periodStart), // pinned window if one covers this week
           ded,
+          driverCredits,
+          driverDebits,
         )
-        const profit = Math.round((st.gross - st.checkAmount - st.totalDeductions) * 100) / 100
+        const expenses = round2(st.totalDeductions + st.totalDebits)
+        const profit = round2(st.gross - st.checkAmount - expenses)
         rows.push({
           periodStart,
           driverId:   setting.driverId,
           driverName: driverById.get(setting.driverId)?.name ?? 'Unknown driver',
           gross:      st.gross,
-          expenses:   st.totalDeductions,
+          expenses,
           driverPay:  st.checkAmount,
           profit,
         })
@@ -165,7 +181,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
     }
     rows.sort((a, b) => (a.periodStart !== b.periodStart ? (a.periodStart < b.periodStart ? 1 : -1) : a.driverName.localeCompare(b.driverName)))
     return { weeks, rows }
-  }, [trips, settings, deductions, fuelTxs, drivers])
+  }, [trips, settings, deductions, credits, fuelTxs, drivers])
 
   return { loading, error, weeks, rows, refresh: load }
 }
