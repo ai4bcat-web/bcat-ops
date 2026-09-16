@@ -207,12 +207,10 @@ export function FixedExpenseEditor({
 
     const afterPercent = chargeMode === 'after' ? true : (null as boolean | null)
     let companyAmount: number | null = null
-    if (chargeMode === 'after') {
-      if (draftCompanyAmount.trim()) {
-        const parsed = parseNonNegativeCents(draftCompanyAmount)
-        if (parsed == null) { setError("Company's separate share must be a non-negative amount with at most 2 decimals"); return }
-        companyAmount = parsed
-      }
+    if (draftCompanyAmount.trim()) {
+      const parsed = parseNonNegativeCents(draftCompanyAmount)
+      if (parsed == null) { setError("Company's separate share must be a non-negative amount with at most 2 decimals"); return }
+      companyAmount = parsed
     }
 
     const audit: FixedExpenseAudit = { at: new Date().toISOString(), by: user?.email ?? null }
@@ -552,22 +550,20 @@ export function FixedExpenseEditor({
                     </button>
                   ))}
                 </div>
-                {chargeMode === 'after' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
-                    <label htmlFor={`${formId}-company-share`} style={label}>Company's separate share ($/period)</label>
-                    <input
-                      id={`${formId}-company-share`}
-                      style={{ ...input, maxWidth: 160 }}
-                      value={draftCompanyAmount}
-                      onChange={(e) => setDraftCompanyAmount(e.target.value)}
-                      placeholder="0.00"
-                      disabled={disabled}
-                    />
-                    <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
-                      Off the driver's statement; counted as a company cost in Finances.
-                    </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+                  <label htmlFor={`${formId}-company-share`} style={label}>Company's separate share ($/period)</label>
+                  <input
+                    id={`${formId}-company-share`}
+                    style={{ ...input, maxWidth: 160 }}
+                    value={draftCompanyAmount}
+                    onChange={(e) => setDraftCompanyAmount(e.target.value)}
+                    placeholder="0.00"
+                    disabled={disabled}
+                  />
+                  <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+                    Off the driver's statement; counted as a company cost in Finances.
                   </div>
-                )}
+                </div>
               </div>
             </div>
           )}

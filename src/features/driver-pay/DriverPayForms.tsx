@@ -453,23 +453,68 @@ export function EmailModal({ driverName, defaultTo, defaultCc, defaultSubject, d
 }
 
 // ── One-off deduction ───────────────────────────────────────────────────────
+// "Mileage" mode computes the amount from miles × $/mile (lease mileage invoices) and
+// writes the basis into the label so the statement shows how it was derived. The
+// DriverPayDeduction row itself stays label + amount.
 export function DeductionModal({ driverId, periodStart, onSave, onClose }: { driverId: string; periodStart: string; onSave: (d: Omit<DriverPayDeduction, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>; onClose: () => void }) {
-  const [f, setF] = useState({ label: '', amount: '', date: '' })
+  const [f, setF] = useState({ label: '', amount: '', date: '', miles: '', costPerMile: '' })
+  const [mileage, setMileage] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const set = (k: keyof typeof f, v: string) => setF((p) => ({ ...p, [k]: v }))
+
+  const milesNum = num(f.miles), rateNum = num(f.costPerMile)
+  const computed = (() => {
+    if (!mileage || milesNum == null || rateNum == null) return null
+    try { return calculateMileageExpense({ miles: milesNum, costPerMile: rateNum }) } catch { return null }
+  })()
+
   const save = async () => {
+    if (mileage) {
+      if (milesNum == null || rateNum == null) { setErr('Enter miles and a cost per mile'); return }
+      let amount: number
+      try { amount = calculateMileageExpense({ miles: milesNum, costPerMile: rateNum }) }
+      catch (e) { setErr(e instanceof Error ? e.message : 'Invalid mileage calculation'); return }
+      const basis = `${milesNum} mi @ $${rateNum}/mi`
+      const label = f.label.trim() ? `${f.label.trim()} — ${basis}` : `Lease mileage — ${basis}`
+      setSaving(true)
+      try { await onSave({ driverId, periodStart, label, amount, date: f.date || null }) }
+      catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
+      return
+    }
     const amount = num(f.amount)
     if (!f.label.trim() || amount == null || amount === 0) { setErr('Enter a label and a non-zero amount (negative refunds a charge for this week)'); return }
     setSaving(true)
     try { await onSave({ driverId, periodStart, label: f.label.trim(), amount, date: f.date || null }) }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
   }
+
+  const toggle: React.CSSProperties = { flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)' }
   return (
-    <Modal title="Add expense" sub="A one-off deduction for this week — a NEGATIVE amount refunds/waives a charge for this week only" onClose={onClose} width={440}>
+    <Modal title="Add expense" sub="A one-off deduction for this week — a NEGATIVE amount refunds/waives a charge for this week only" onClose={onClose} width={480}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {([[false, 'Fixed amount'], [true, 'Miles × cost per mile']] as const).map(([v, t]) => (
+          <button key={t} type="button" onClick={() => { setMileage(v); setErr(null) }}
+            style={{ ...toggle, border: `1.5px solid ${mileage === v ? 'var(--ds-blue)' : 'var(--ds-border)'}`, background: mileage === v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)' }}>
+            {t}
+          </button>
+        ))}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-        <Field l="Description"><input style={input} value={f.label} onChange={(e) => setF((p) => ({ ...p, label: e.target.value }))} placeholder="NM Permit one-time charge" /></Field>
-        <Field l="Amount *" half><input style={input} value={f.amount} onChange={(e) => setF((p) => ({ ...p, amount: e.target.value }))} placeholder="$98.00" /></Field>
-        <Field l="Date" half><input type="date" style={input} value={f.date} onChange={(e) => setF((p) => ({ ...p, date: e.target.value }))} /></Field>
+        <Field l={mileage ? 'Description (optional)' : 'Description'}><input style={input} value={f.label} onChange={(e) => set('label', e.target.value)} placeholder={mileage ? 'Lease mileage' : 'NM Permit one-time charge'} /></Field>
+        {mileage ? (
+          <>
+            <Field l="Miles *" half><input style={input} aria-label="Miles" value={f.miles} onChange={(e) => set('miles', e.target.value)} placeholder="e.g. 2494" /></Field>
+            <Field l="Cost per mile *" half><input style={input} aria-label="Cost per mile" value={f.costPerMile} onChange={(e) => set('costPerMile', e.target.value)} placeholder=".086" /></Field>
+            <Field l="Amount (computed)" half><input style={input} aria-label="Amount" value={computed == null ? '' : numStr(computed)} readOnly /></Field>
+          </>
+        ) : (
+          <Field l="Amount *" half><input style={input} value={f.amount} onChange={(e) => set('amount', e.target.value)} placeholder="$98.00" /></Field>
+        )}
+        <Field l="Date" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
+      </div>
+      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--ds-t3)' }}>
+        Deducted before the pay split, this week only{computed != null ? <> — <b>{moneyFmt(computed)}</b> on this sheet</> : ''}.
       </div>
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label="Add expense" />

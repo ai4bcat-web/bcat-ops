@@ -104,9 +104,9 @@ export interface AmazonProfitabilityState {
  * driver's behalf (lease mileage, IFTA, a cash advance…) — that cost is not booked
  * anywhere else in the Amazon P&L, so it is counted as an expense here and the debit
  * takes it back out of the check: profit is unchanged, driver pay is the real check.
- * After-split fixed charges work the same way, with an optional `companyAmount` that
- * is the company's own share of the split charge: it is a real cost that never appears
- * on the statement, so it is added to expenses here.
+ * A fixed charge may also carry a `companyAmount` — the company's own share of a split
+ * charge (e.g. its half of a truck lease). It is a real cost that never appears on the
+ * statement, so it is added to expenses here whether the driver's side is pre- or after-split.
  */
 export function useAmazonProfitability(): AmazonProfitabilityState {
   const { drivers } = useDrivers()
@@ -175,7 +175,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
           driverCredits,
           [...fixedDebits, ...driverDebits],
         )
-        const companyExpense = round2(fixed.reduce((s, f) => s + (f.afterPercent ? (f.companyAmount ?? 0) : 0), 0))
+        const companyExpense = round2(fixed.reduce((s, f) => s + (f.companyAmount ?? 0), 0))
         const expenses = round2(st.totalDeductions + st.totalDebits + companyExpense)
         const profit = round2(st.gross - st.checkAmount - expenses)
         rows.push({
