@@ -32,3 +32,4 @@
 - Amount is calculated from cost per mile × entered miles and rounded once to cents; sub-cent per-mile rates are retained. These are entered miles, not an ELD feed or automatic trip-mile total.
 - Both inputs are saved on each expense revision in the existing fixedExpenses JSON. Reopening a revision restores its calculation; changes retain previous amounts and formulas. Partial periods still prorate by calendar day.
 - Mileage controls are enabled for Amazon settings only; box-truck fixed-amount entry is unchanged.
+- A fixed-expense mileage line is an ordinary expense: an after-expenses driver bears only their pay % of it. Lease mileage and IFTA the driver owes in full go on the weekly settlement as a **Debit** (reason Lease mileage / IFTA fuel tax): enter miles and cost per mile, the amount is computed and comes off the check at 100% after the split, and it applies only to the selected week. The miles and rate are stored on the debit and printed on the statement.

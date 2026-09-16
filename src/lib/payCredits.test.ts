@@ -36,6 +36,11 @@ describe('pay credit reason codes', () => {
     expect(label).toBe('Lease mileage — Ryder invoice (1234 mi @ $0.18/mi = $222.12)')
   })
 
+  it('prints the stored amount, not a recomputation, so the line matches the check', () => {
+    expect(creditLineLabel({ reasonCode: 'LEASE_MILEAGE', miles: 1234, costPerMile: 0.18, amount: 200 }))
+      .toBe('Lease mileage — 1234 mi @ $0.18/mi = $200.00')
+  })
+
   it('preserves legacy amount-only lease-mileage labels (no invented basis)', () => {
     expect(creditLineLabel({ reasonCode: 'LEASE_MILEAGE', label: 'Ryder invoice' }))
       .toBe('Lease mileage — Ryder invoice')

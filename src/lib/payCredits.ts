@@ -64,19 +64,22 @@ export function creditReasonLabel(code?: string | null): string {
   return creditReason(code)?.label ?? (code || 'Credit')
 }
 
-function mileageBasisText(credit: { miles?: number | null; costPerMile?: number | null }): string | undefined {
+function mileageBasisText(credit: { miles?: number | null; costPerMile?: number | null; amount?: number | null }): string | undefined {
   const miles = credit.miles
   const costPerMile = credit.costPerMile
   if (miles == null || costPerMile == null) return undefined
   if (!Number.isFinite(miles) || !Number.isFinite(costPerMile)) return undefined
   if (miles <= 0 || costPerMile <= 0) return undefined
-  try {
-    const amount = calculateMileageExpense({ miles, costPerMile })
-    return `${miles} mi @ $${costPerMile}/mi = $${amount.toFixed(2)}`
-  } catch {
-    // Defensive: if persisted basis is somehow invalid, still show the inputs.
-    return `${miles} mi @ $${costPerMile}/mi`
+  // Print what the check actually deducts (the stored amount); only recompute when a
+  // row somehow carries a basis without an amount, so the line can never disagree
+  // with the check.
+  let amount = credit.amount
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) {
+    try { amount = calculateMileageExpense({ miles, costPerMile }) } catch { amount = undefined }
   }
+  return amount == null
+    ? `${miles} mi @ $${costPerMile}/mi`
+    : `${miles} mi @ $${costPerMile}/mi = $${amount.toFixed(2)}`
 }
 
 /** The statement line for a credit: "Detention — Kroger 4hr wait" (note is optional).
@@ -88,6 +91,7 @@ export function creditLineLabel(credit: {
   label?: string | null
   miles?: number | null
   costPerMile?: number | null
+  amount?: number | null
 }): string {
   const reason = creditReasonLabel(credit.reasonCode)
   const note = credit.label?.trim()
