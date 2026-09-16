@@ -8,6 +8,7 @@ import { imageToUploadableBase64, imageFromClipboard, screenshotTripToRaw } from
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 import { CREDIT_REASONS, DEFAULT_CREDIT_REASON, DEBIT_REASONS, DEFAULT_DEBIT_REASON } from '@/lib/payCredits'
 import type { DriverPayCredit, DriverPayCreditInput } from '@/lib/apiClient'
+import { calculateMileageExpense } from '@/lib/fixedExpenseHistory'
 import { FixedExpenseEditor } from './FixedExpenseEditor'
 import type { FixedExpenseInput } from '@/lib/driverPay'
 
@@ -583,28 +584,103 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
     date:       initial?.date ?? '',
     loadRef:    initial?.loadRef ?? '',
     notes:      initial?.notes ?? '',
+    miles:      numStr(initial?.miles),
+    costPerMile: numStr(initial?.costPerMile),
   })
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }))
 
+  const setReason = (code: string) => {
+    setF((p) => {
+      const next = { ...p, reasonCode: code }
+      if (code !== 'LEASE_MILEAGE') { next.miles = ''; next.costPerMile = '' }
+      return next
+    })
+  }
+
   const reason = REASONS.find((r) => r.code === f.reasonCode)
+  const isLeaseMileage = debit && f.reasonCode === 'LEASE_MILEAGE'
+  const hasMileageBasis = isLeaseMileage && num(f.miles) != null && num(f.costPerMile) != null
   const amount = num(f.amount)
+
+  const updateMiles = (v: string) => {
+    setF((p) => {
+      const next = { ...p, miles: v }
+      const milesNum = num(v)
+      const rateNum = num(next.costPerMile)
+      if (milesNum != null && rateNum != null) {
+        try {
+          next.amount = numStr(calculateMileageExpense({ miles: milesNum, costPerMile: rateNum }))
+        } catch {
+          // leave amount as-is when basis is temporarily invalid
+        }
+      }
+      return next
+    })
+  }
+
+  const updateCostPerMile = (v: string) => {
+    setF((p) => {
+      const next = { ...p, costPerMile: v }
+      const milesNum = num(next.miles)
+      const rateNum = num(v)
+      if (milesNum != null && rateNum != null) {
+        try {
+          next.amount = numStr(calculateMileageExpense({ miles: milesNum, costPerMile: rateNum }))
+        } catch {
+          // leave amount as-is when basis is temporarily invalid
+        }
+      }
+      return next
+    })
+  }
 
   const save = async () => {
     if (!f.reasonCode) { setErr('Pick a reason code'); return }
-    if (amount == null || amount <= 0) { setErr(`Enter a positive ${noun} amount`); return }
+
+    let finalAmount: number
+    let miles: number | null = null
+    let costPerMile: number | null = null
+
+    if (isLeaseMileage) {
+      const milesNum = num(f.miles)
+      const rateNum = num(f.costPerMile)
+      if (f.miles.trim() || f.costPerMile.trim()) {
+        if (milesNum == null) { setErr('Enter valid miles'); return }
+        if (rateNum == null) { setErr('Enter a valid cost per mile'); return }
+        try {
+          finalAmount = calculateMileageExpense({ miles: milesNum, costPerMile: rateNum })
+        } catch (e) {
+          setErr(e instanceof Error ? e.message : 'Invalid mileage calculation')
+          return
+        }
+        miles = milesNum
+        costPerMile = rateNum
+      } else {
+        const a = num(f.amount)
+        if (a == null || a <= 0) { setErr(`Enter a positive ${noun} amount`); return }
+        finalAmount = a
+      }
+    } else {
+      const a = num(f.amount)
+      if (a == null || a <= 0) { setErr(`Enter a positive ${noun} amount`); return }
+      finalAmount = a
+    }
+
     setSaving(true)
     try {
       await onSave({
         driverId, periodStart, kind,
         reasonCode: f.reasonCode,
-        amount,
+        amount: finalAmount,
         label:   f.label.trim() || null,
         date:    f.date || null,
         loadRef: f.loadRef.trim() || null,
         notes:   f.notes.trim() || null,
         createdBy: initial?.createdBy ?? createdBy ?? null,
+        miles,
+        costPerMile,
       })
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
   }
@@ -613,15 +689,34 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
     <Modal title={editing ? `Edit ${noun}` : `Add ${noun}`} sub={debit ? `Taken off ${driverName}'s ${periodLabel} check, after the net` : `Extra pay for ${driverName} on the ${periodLabel} check`} onClose={onClose} width={520}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field l="Reason code *" half>
-          <select style={input} value={f.reasonCode} onChange={(e) => set('reasonCode', e.target.value)}>
+          <select style={input} value={f.reasonCode} onChange={(e) => setReason(e.target.value)} aria-label="Reason code">
             {REASONS.map((r) => <option key={r.code} value={r.code}>{r.label}</option>)}
           </select>
         </Field>
-        <Field l="Amount *" half><input style={input} value={f.amount} onChange={(e) => set('amount', e.target.value)} placeholder="$150.00" /></Field>
-        <Field l="Description"><input style={input} value={f.label} onChange={(e) => set('label', e.target.value)} placeholder={reason?.hint ?? 'What is this credit for?'} /></Field>
-        <Field l="Date earned" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} /></Field>
-        <Field l="Related Load / Trip ID" half><input style={input} value={f.loadRef} onChange={(e) => set('loadRef', e.target.value)} placeholder="111Y19HML" /></Field>
-        <Field l="Internal note"><input style={input} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Approved by…" /></Field>
+        {isLeaseMileage && (
+          <>
+            <Field l="Miles" half>
+              <input style={input} value={f.miles} onChange={(e) => updateMiles(e.target.value)} placeholder="e.g. 1842" inputMode="decimal" aria-label="Miles" />
+            </Field>
+            <Field l="Cost per mile" half>
+              <input style={input} value={f.costPerMile} onChange={(e) => updateCostPerMile(e.target.value)} placeholder="$0.65" inputMode="decimal" aria-label="Cost per mile" />
+            </Field>
+          </>
+        )}
+        <Field l={hasMileageBasis ? 'Amount (computed)' : 'Amount *'} half>
+          <input
+            style={input}
+            value={f.amount}
+            onChange={hasMileageBasis ? () => {} : (e) => set('amount', e.target.value)}
+            placeholder={hasMileageBasis ? 'Computed from miles × rate' : '$150.00'}
+            readOnly={hasMileageBasis}
+            aria-label="Amount"
+          />
+        </Field>
+        <Field l="Description"><input style={input} value={f.label} onChange={(e) => set('label', e.target.value)} placeholder={reason?.hint ?? 'What is this credit for?'} aria-label="Description" /></Field>
+        <Field l="Date earned" half><input type="date" style={input} value={f.date} onChange={(e) => set('date', e.target.value)} aria-label="Date earned" /></Field>
+        <Field l="Related Load / Trip ID" half><input style={input} value={f.loadRef} onChange={(e) => set('loadRef', e.target.value)} placeholder="111Y19HML" aria-label="Related Load / Trip ID" /></Field>
+        <Field l="Internal note"><input style={input} value={f.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Approved by…" aria-label="Internal note" /></Field>
       </div>
 
       <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', fontSize: 12.5, color: 'var(--ds-t2)' }}>
@@ -630,6 +725,12 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
           : <>Credits are added to the check <b>in full</b> — the driver's pay percentage is not applied.</>}
         {amount != null && amount > 0 && <> This check goes {debit ? 'down' : 'up'} by <b style={{ color: debit ? '#dc2626' : '#15803d' }}>{moneyFmt(amount)}</b>.</>}
       </div>
+
+      {isLeaseMileage && (
+        <div style={{ marginTop: 10, fontSize: 12, color: 'var(--ds-t3)' }}>
+          This mileage charge applies only to the selected week ({periodLabel}).
+        </div>
+      )}
 
       {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 10 }}>{err}</div>}
       <Footer onClose={onClose} onSave={save} saving={saving} label={editing ? `Save ${noun}` : `Add ${noun}`} />

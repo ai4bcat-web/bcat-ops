@@ -328,6 +328,7 @@ export function DriverPayPage() {
       )}
       {creditFor && (
         <CreditModal
+          key={creditFor.credit?.id ?? 'new'}
           driverId={creditFor.row.driver.id}
           driverName={creditFor.row.driver.name}
           periodStart={periodStart}

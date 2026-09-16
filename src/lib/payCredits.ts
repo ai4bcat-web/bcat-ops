@@ -1,3 +1,5 @@
+import { calculateMileageExpense } from './fixedExpenseHistory'
+
 /**
  * Reason codes for driver-pay credits — extra money added to a settlement check that
  * didn't come from a shipment's gross profit (detention, layover, bonuses, refunds of
@@ -62,9 +64,35 @@ export function creditReasonLabel(code?: string | null): string {
   return creditReason(code)?.label ?? (code || 'Credit')
 }
 
-/** The statement line for a credit: "Detention — Kroger 4hr wait" (note is optional). */
-export function creditLineLabel(credit: { reasonCode?: string | null; label?: string | null }): string {
+function mileageBasisText(credit: { miles?: number | null; costPerMile?: number | null }): string | undefined {
+  const miles = credit.miles
+  const costPerMile = credit.costPerMile
+  if (miles == null || costPerMile == null) return undefined
+  if (!Number.isFinite(miles) || !Number.isFinite(costPerMile)) return undefined
+  if (miles <= 0 || costPerMile <= 0) return undefined
+  try {
+    const amount = calculateMileageExpense({ miles, costPerMile })
+    return `${miles} mi @ $${costPerMile}/mi = $${amount.toFixed(2)}`
+  } catch {
+    // Defensive: if persisted basis is somehow invalid, still show the inputs.
+    return `${miles} mi @ $${costPerMile}/mi`
+  }
+}
+
+/** The statement line for a credit: "Detention — Kroger 4hr wait" (note is optional).
+ *  For rows with a mileage basis, the calculation is shown so the statement/PDF/CSV
+ *  preserves how the amount was derived (e.g. "Lease mileage — 1234 mi @ $0.18/mi = $222.12").
+ */
+export function creditLineLabel(credit: {
+  reasonCode?: string | null
+  label?: string | null
+  miles?: number | null
+  costPerMile?: number | null
+}): string {
   const reason = creditReasonLabel(credit.reasonCode)
   const note = credit.label?.trim()
+  const basis = mileageBasisText(credit)
+  if (basis && note) return `${reason} — ${note} (${basis})`
+  if (basis) return `${reason} — ${basis}`
   return note ? `${reason} — ${note}` : reason
 }

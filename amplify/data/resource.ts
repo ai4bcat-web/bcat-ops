@@ -296,6 +296,11 @@ const schema = a.schema({
       reasonCode:  a.string().required(),  // 'DETENTION' | 'LAYOVER' | 'BONUS' | …
       label:       a.string(),             // free-text note shown next to the reason
       amount:      a.float().required(),   // dollars ADDED to the check (positive)
+      // Optional mileage basis for per-mile charges (e.g. LEASE_MILEAGE debits).
+      // When present, amount should equal miles * costPerMile; both are nullable so
+      // legacy amount-only rows and ordinary credits/debits are unaffected.
+      miles:       a.float(),
+      costPerMile: a.float(),
       date:        a.string(),             // YYYY-MM-DD when earned (display only)
       loadRef:     a.string(),             // optional Aljex PRO / PU # the credit relates to
       createdBy:   a.string(),             // user email who added it (audit trail)

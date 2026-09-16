@@ -25,6 +25,23 @@ describe('pay credit reason codes', () => {
     expect(creditLineLabel({ reasonCode: 'BONUS', label: '  ' })).toBe('Bonus')
     expect(creditLineLabel({ reasonCode: 'LAYOVER' })).toBe('Layover')
   })
+
+  it('shows persisted mileage calculation for lease-mileage debits', () => {
+    const label = creditLineLabel({ reasonCode: 'LEASE_MILEAGE', miles: 1234, costPerMile: 0.18 })
+    expect(label).toBe('Lease mileage — 1234 mi @ $0.18/mi = $222.12')
+  })
+
+  it('appends mileage calculation after a note when both are present', () => {
+    const label = creditLineLabel({ reasonCode: 'LEASE_MILEAGE', label: 'Ryder invoice', miles: 1234, costPerMile: 0.18 })
+    expect(label).toBe('Lease mileage — Ryder invoice (1234 mi @ $0.18/mi = $222.12)')
+  })
+
+  it('preserves legacy amount-only lease-mileage labels (no invented basis)', () => {
+    expect(creditLineLabel({ reasonCode: 'LEASE_MILEAGE', label: 'Ryder invoice' }))
+      .toBe('Lease mileage — Ryder invoice')
+    expect(creditLineLabel({ reasonCode: 'LEASE_MILEAGE' }))
+      .toBe('Lease mileage')
+  })
 })
 
 import { DEBIT_REASONS, DEFAULT_DEBIT_REASON, creditReasonLabel as lbl } from './payCredits'
