@@ -472,7 +472,7 @@ export function FixedExpenseEditor({
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
                     Shared through the split by default — an after-expenses driver bears only their pay % of it.
-                    For lease mileage or IFTA the driver owes in full, choose <b>Driver pays in full, after the split</b> below.
+                    For a charge the driver owes outright, choose <b>Driver pays in full, after the split</b> below.
                   </div>
                 </div>
               )}
