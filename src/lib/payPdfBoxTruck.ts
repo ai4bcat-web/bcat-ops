@@ -76,13 +76,14 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   })
 
   // Debits — taken off the check at 100%, AFTER the net
-  if (row.debits.length) {
+  if (row.fixedDebits.length || row.debits.length) {
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(11, 13, 18)
     doc.text('Debits (after net)', M, y); y += 6
     autoTable(doc, {
       startY: y,
       body: [
+        ...row.fixedDebits.map((d) => [d.label, '', `(${money(d.amount)})`]),
         ...row.debits.map((c) => [
           creditLineLabel(c),
           [c.date ? fmtDate(c.date) : '', c.loadRef ?? ''].filter(Boolean).join('  ·  '),

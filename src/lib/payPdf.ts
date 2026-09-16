@@ -173,7 +173,7 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   }
 
   // ── Debits — taken off the check at 100%, AFTER the net ─────────────────────
-  if (row.debits.length) {
+  if (row.fixedDebits.length || row.debits.length) {
     y += 10
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9)
@@ -182,6 +182,13 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
     y += 14
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(10)
+    for (const d of row.fixedDebits) {
+      doc.setTextColor(55, 65, 81)
+      doc.text(d.label, M, y)
+      doc.setTextColor(220, 38, 38)
+      doc.text(`(${money(d.amount)})`, W - M, y, { align: 'right' })
+      y += 15
+    }
     for (const c of row.debits) {
       doc.setTextColor(55, 65, 81)
       doc.text(creditLineLabel(c), M, y)

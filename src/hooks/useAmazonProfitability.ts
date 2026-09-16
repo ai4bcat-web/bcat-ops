@@ -5,7 +5,7 @@ import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -104,6 +104,9 @@ export interface AmazonProfitabilityState {
  * driver's behalf (lease mileage, IFTA, a cash advance…) — that cost is not booked
  * anywhere else in the Amazon P&L, so it is counted as an expense here and the debit
  * takes it back out of the check: profit is unchanged, driver pay is the real check.
+ * After-split fixed charges work the same way, with an optional `companyAmount` that
+ * is the company's own share of the split charge: it is a real cost that never appears
+ * on the statement, so it is added to expenses here.
  */
 export function useAmazonProfitability(): AmazonProfitabilityState {
   const { drivers } = useDrivers()
@@ -148,8 +151,14 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
         const fuel = sumFuel(matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end))
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
+
+        const fixed = effectiveFixedExpenses(setting.fixedExpenses, periodStart, end)
+        const fixedDebits: PayDebitInput[] = fixed
+          .filter((f) => f.afterPercent)
+          .map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
+
         const ded = [
-          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart, end).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
+          ...fixed.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
           ...(fuel > 0 ? [{ label: 'Fuel', amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
@@ -164,9 +173,10 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
           effectivePayRate(setting, periodStart), // pinned window if one covers this week
           ded,
           driverCredits,
-          driverDebits,
+          [...fixedDebits, ...driverDebits],
         )
-        const expenses = round2(st.totalDeductions + st.totalDebits)
+        const companyExpense = round2(fixed.reduce((s, f) => s + (f.afterPercent ? (f.companyAmount ?? 0) : 0), 0))
+        const expenses = round2(st.totalDeductions + st.totalDebits + companyExpense)
         const profit = round2(st.gross - st.checkAmount - expenses)
         rows.push({
           periodStart,

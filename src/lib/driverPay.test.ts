@@ -301,3 +301,48 @@ describe('effectiveFixedExpenses — daily-prorated fixed charges', () => {
     expect(gross.checkAmount).toBeCloseTo(1_760, 2)
   })
 })
+
+describe('afterPercent fixed charges — driver bears the full line after the % model', () => {
+  it('does not reduce the pre-% pot but comes off the check in full', () => {
+    // Chad-style: 50% after expenses. ELD is pre-split; lease is after-split.
+    const fixed: FixedExpenseInput[] = [
+      { label: 'ELD', amount: 20 },
+      { label: 'Lease', amount: 496, afterPercent: true, companyAmount: 496 },
+    ]
+    const periodStart = '2026-09-06'
+    const periodEnd = addDays(periodStart, 6)
+    const effective = effectiveFixedExpenses(fixed, periodStart, periodEnd)
+    const deductions = effective.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
+    const fixedDebits = effective.filter((f) => f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
+
+    const r = calcDriverPay(
+      tripsTotaling(4_000),
+      { payPercent: 0.5, expensesBeforePercent: true },
+      deductions,
+      [],
+      fixedDebits,
+    )
+    expect(r.totalDeductions).toBeCloseTo(20, 2)
+    expect(r.totalDebits).toBeCloseTo(496, 2)
+    expect(r.checkAmount).toBeCloseTo(0.5 * (4_000 - 20) - 496, 2) // 1494
+  })
+})
+
+describe('effectiveFixedExpenses — companyAmount proration', () => {
+  it('prorates companyAmount on after-split lines and omits it when absent', () => {
+    const rows: FixedExpenseInput[] = [
+      { label: 'Lease', amount: 496, afterPercent: true, companyAmount: 496, from: '2026-09-06', until: '2026-09-09', revisionId: 'r1', expenseId: 'e1' },
+    ]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r).toHaveLength(1)
+    expect(r[0].amount).toBeCloseTo(212.57, 2)
+    expect(r[0].companyAmount).toBeCloseTo(212.57, 2)
+    expect(r[0].proratedDays).toEqual({ days: 3, periodDays: 7 })
+  })
+
+  it('omits companyAmount when the source charge has none', () => {
+    const rows: FixedExpenseInput[] = [{ label: 'ELD', amount: 20 }]
+    const r = effectiveFixedExpenses(rows, '2026-09-06', addDays('2026-09-06', 6))
+    expect(r[0].companyAmount).toBeUndefined()
+  })
+})

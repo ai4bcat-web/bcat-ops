@@ -391,6 +391,93 @@ describe('applyFixedExpenseChange — mileage', () => {
   })
 })
 
+describe('afterPercent and companyAmount', () => {
+  it('add carries both fields onto the new revision', () => {
+    const next = applyFixedExpenseChange(
+      [],
+      { kind: 'add', label: 'Lease', amount: 992, effectiveFrom: '2026-09-06', afterPercent: true, companyAmount: 496 },
+      audit(),
+    )
+    expect(next[0].afterPercent).toBe(true)
+    expect(next[0].companyAmount).toBe(496)
+  })
+
+  it('add defaults both fields to null when omitted', () => {
+    const next = applyFixedExpenseChange(
+      [],
+      { kind: 'add', label: 'ELD', amount: 20, effectiveFrom: '2026-09-06' },
+      audit(),
+    )
+    expect(next[0].afterPercent).toBeNull()
+    expect(next[0].companyAmount).toBeNull()
+  })
+
+  it('change preserves both fields when not specified', () => {
+    const entries = prepareFixedExpenses(
+      [{ label: 'Lease', amount: 992, from: '2026-09-01', afterPercent: true, companyAmount: 496 }],
+      idSeq(),
+    )
+    const old = entries[0]
+    const next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: old.revisionId!, label: 'Lease', amount: 900, effectiveFrom: '2026-09-15' },
+      audit(() => 'rev-2'),
+    )
+    const repl = next.find((e) => e.revisionId === 'rev-2')
+    expect(repl?.afterPercent).toBe(true)
+    expect(repl?.companyAmount).toBe(496)
+  })
+
+  it('change treats changing only afterPercent as a real change', () => {
+    const entries = prepareFixedExpenses(
+      [{ label: 'Lease', amount: 992, from: '2026-09-01', afterPercent: false, companyAmount: 496 }],
+      idSeq(),
+    )
+    const old = entries[0]
+    const next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: old.revisionId!, label: 'Lease', amount: 992, effectiveFrom: '2026-09-15', afterPercent: true },
+      audit(() => 'rev-2'),
+    )
+    expect(next).toHaveLength(2)
+    const repl = next.find((e) => e.revisionId === 'rev-2')
+    expect(repl?.afterPercent).toBe(true)
+    expect(repl?.companyAmount).toBe(496)
+  })
+
+  it('change allows clearing companyAmount with an explicit null', () => {
+    const entries = prepareFixedExpenses(
+      [{ label: 'Lease', amount: 992, from: '2026-09-01', afterPercent: true, companyAmount: 496 }],
+      idSeq(),
+    )
+    const old = entries[0]
+    const next = applyFixedExpenseChange(
+      entries,
+      { kind: 'change', revisionId: old.revisionId!, label: 'Lease', amount: 992, effectiveFrom: '2026-09-15', companyAmount: null },
+      audit(() => 'rev-2'),
+    )
+    const repl = next.find((e) => e.revisionId === 'rev-2')
+    expect(repl?.companyAmount).toBeNull()
+  })
+
+  it('rejects a malformed companyAmount', () => {
+    expect(() =>
+      applyFixedExpenseChange(
+        [],
+        { kind: 'add', label: 'X', amount: 10, effectiveFrom: '2026-09-06', companyAmount: -1 },
+        audit(),
+      ),
+    ).toThrow('companyAmount')
+    expect(() =>
+      applyFixedExpenseChange(
+        [],
+        { kind: 'add', label: 'X', amount: 10, effectiveFrom: '2026-09-06', companyAmount: 10.555 },
+        audit(),
+      ),
+    ).toThrow('companyAmount')
+  })
+})
+
 describe('legacy unbounded-from revisions', () => {
   it('allows changing a legacy unbounded-from charge to mileage and then to a fixed amount', () => {
     const entries = prepareFixedExpenses([{ label: 'LEGACY', amount: 50 }], idSeq())

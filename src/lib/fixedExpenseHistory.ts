@@ -57,6 +57,15 @@ function assertFinitePositive2Decimals(amount: number, name = 'amount'): void {
   }
 }
 
+function assertFiniteNonNegative2Decimals(amount: number, name = 'amount'): void {
+  if (!Number.isFinite(amount)) throw new Error(`${name} must be finite, got ${amount}`)
+  if (amount < 0) throw new Error(`${name} must be non-negative, got ${amount}`)
+  const scaled = amount * 100
+  if (Math.abs(Math.round(scaled) - scaled) > 1e-9) {
+    throw new Error(`${name} must have at most 2 decimal places, got ${amount}`)
+  }
+}
+
 function assertNonBlankLabel(label: string): void {
   if (typeof label !== 'string' || label.trim().length === 0) {
     throw new Error(`label must be a non-blank string, got ${JSON.stringify(label)}`)
@@ -149,6 +158,8 @@ export interface FixedExpenseChangeAdd {
   amount: number
   effectiveFrom: string
   mileage?: FixedExpenseMileage | null
+  afterPercent?: boolean | null
+  companyAmount?: number | null
 }
 
 export interface FixedExpenseChangeChange {
@@ -158,6 +169,8 @@ export interface FixedExpenseChangeChange {
   amount: number
   effectiveFrom: string
   mileage?: FixedExpenseMileage | null
+  afterPercent?: boolean | null
+  companyAmount?: number | null
 }
 
 export interface FixedExpenseChangeEnd {
@@ -218,6 +231,9 @@ export function applyFixedExpenseChange(
     const amount = mileage != null
       ? calculateMileageExpense(mileage)
       : (assertFinitePositive2Decimals(change.amount), round2(change.amount))
+    const afterPercent = change.afterPercent ?? null
+    const companyAmount = change.companyAmount ?? null
+    if (companyAmount != null) assertFiniteNonNegative2Decimals(companyAmount, 'companyAmount')
 
     const added: FixedExpenseInput = {
       label: change.label.trim(),
@@ -231,6 +247,8 @@ export function applyFixedExpenseChange(
       endedAt: null,
       endedBy: null,
       mileage,
+      afterPercent,
+      companyAmount,
     }
     const next = [...entries, added]
     assertNoAmbiguousWindows(next)
@@ -278,6 +296,9 @@ export function applyFixedExpenseChange(
     newMileage != null
       ? calculateMileageExpense(newMileage)
       : (assertFinitePositive2Decimals(change.amount), round2(change.amount))
+  const newAfterPercent = change.afterPercent !== undefined ? change.afterPercent : (old.afterPercent ?? null)
+  const newCompanyAmount = change.companyAmount !== undefined ? change.companyAmount : (old.companyAmount ?? null)
+  if (newCompanyAmount != null) assertFiniteNonNegative2Decimals(newCompanyAmount, 'companyAmount')
 
   const basisUnchanged =
     (old.mileage == null && newMileage == null) ||
@@ -285,8 +306,10 @@ export function applyFixedExpenseChange(
       newMileage != null &&
       old.mileage.costPerMile === newMileage.costPerMile &&
       old.mileage.miles === newMileage.miles)
-  if (newLabel === old.label && newAmount === old.amount && basisUnchanged) {
-    throw new Error('no-op change: label, amount, and mileage basis are unchanged')
+  const oldAfterPercent = old.afterPercent ?? null
+  const oldCompanyAmount = old.companyAmount ?? null
+  if (newLabel === old.label && newAmount === old.amount && newAfterPercent === oldAfterPercent && newCompanyAmount === oldCompanyAmount && basisUnchanged) {
+    throw new Error('no-op change: label, amount, afterPercent, companyAmount, and mileage basis are unchanged')
   }
 
   const updatedOld: FixedExpenseInput = {
@@ -307,6 +330,8 @@ export function applyFixedExpenseChange(
     endedAt: null,
     endedBy: null,
     mileage: newMileage,
+    afterPercent: newAfterPercent,
+    companyAmount: newCompanyAmount,
   }
   const next = entries.map((e, i) => (i === index ? updatedOld : e)).concat(replacement)
   assertNoAmbiguousWindows(next)

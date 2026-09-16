@@ -10,7 +10,7 @@ import {
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { useLoads } from './useLoads'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -30,6 +30,8 @@ export interface BoxTruckPayRow {
   oneOffs:    DriverPayDeduction[]
   credits:    DriverPayCredit[]     // extra pay added to the check at 100% (detention, bonus…)
   debits:     DriverPayCredit[]     // taken OFF the check at 100%, after the net (advance, damage…)
+  /** After-split fixed charges — shown on the statement and subtracted in full after the % model. */
+  fixedDebits: PayDebitInput[]
   statement:  DriverPayStatement
   /** Loads the driver delivered this period that aren't yet pulled in (count). */
   unpulledLoadCount: number
@@ -126,8 +128,13 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
+        const fixed = effectiveFixedExpenses(setting.fixedExpenses, periodStart, end)
+        const fixedDebits: PayDebitInput[] = fixed
+          .filter((f) => f.afterPercent)
+          .map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
+
         const ded: PayDeductionInput[] = [
-          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart, end).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
+          ...fixed.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
           ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
@@ -141,15 +148,16 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
 
         // Gross = Σ gross profit. Pay model is the driver's setting (Zak = 50% after expenses).
         // Credits are added to the check in full, after the % model.
+        // After-split fixed charges are debits too, so they cost the driver the whole dollar.
         const statement = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.grossProfit, status: t.status })),
           effectivePayRate(setting, periodStart), // pinned window if one covers this period
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
-          driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
+          [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, statement, unpulledLoadCount }
+        return { driver, setting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, unpulledLoadCount }
       })
       .filter((r): r is BoxTruckPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))

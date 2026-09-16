@@ -62,8 +62,9 @@ function statementCsv(row: DriverPayRow, periodStart: string): string {
     for (const c of row.credits) L.push([q(creditLineLabel(c)), q(c.reasonCode), q(c.date), q(c.loadRef), q(c.amount)].join(','))
     L.push([q('Total credits'), '', '', '', q(row.statement.totalCredits)].join(','))
   }
-  if (row.debits.length) {
+  if (row.fixedDebits.length || row.debits.length) {
     L.push(''); L.push([q('Debits (after net)'), q('Reason code'), q('Date'), q('Ref'), q('Amount')].join(','))
+    for (const d of row.fixedDebits) L.push([q(d.label), '', '', '', q(d.amount)].join(','))
     for (const c of row.debits) L.push([q(creditLineLabel(c)), q(c.reasonCode), q(c.date), q(c.loadRef), q(c.amount)].join(','))
     L.push([q('Total debits'), '', '', '', q(row.statement.totalDebits)].join(','))
   }
@@ -640,10 +641,17 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
       </div>
 
       {/* Debits — taken off the check at 100%, AFTER the net */}
-      {row.debits.length > 0 && (
+      {(row.fixedDebits.length > 0 || row.debits.length > 0) && (
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
           <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Debits (after net)</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {row.fixedDebits.map((d, i) => (
+              <div key={`fixed-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.label}</span>
+                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>({money(d.amount)})</span>
+                <span style={{ width: 40 }} />
+              </div>
+            ))}
             {row.debits.map((c) => (
               <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
                 <span style={{ flex: 1, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

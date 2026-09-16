@@ -1,5 +1,31 @@
-import { describe, it, expect } from 'vitest'
-import { aggregateAmazon, type DriverWeekProfit } from './useAmazonProfitability'
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { renderHook, waitFor } from '@testing-library/react'
+import { aggregateAmazon, useAmazonProfitability, type DriverWeekProfit } from './useAmazonProfitability'
+
+const { listAmazonTrips, listDriverPaySettings, listDriverPayDeductions, listDriverPayCredits } = vi.hoisted(() => ({
+  listAmazonTrips: vi.fn(),
+  listDriverPaySettings: vi.fn(),
+  listDriverPayDeductions: vi.fn(),
+  listDriverPayCredits: vi.fn(),
+}))
+
+vi.mock('@/lib/apiClient', () => ({
+  listAmazonTrips: () => listAmazonTrips(),
+  listDriverPaySettings: () => listDriverPaySettings(),
+  listDriverPayDeductions: () => listDriverPayDeductions(),
+  listDriverPayCredits: () => listDriverPayCredits(),
+}))
+
+vi.mock('./useDrivers', () => ({ useDrivers: () => ({ drivers: [{ id: 'd1', name: 'Chad' }] }) }))
+vi.mock('./useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
+
+beforeEach(() => {
+  listAmazonTrips.mockReset()
+  listDriverPaySettings.mockReset()
+  listDriverPayDeductions.mockReset()
+  listDriverPayCredits.mockReset()
+})
 
 const row = (overrides: Partial<DriverWeekProfit> & Pick<DriverWeekProfit, 'periodStart'>): DriverWeekProfit => ({
   driverId:    'd1',
@@ -83,5 +109,42 @@ describe('aggregateAmazon', () => {
     const agg = aggregateAmazon(rows, '2026-09-01', '2026-09-30', { prorate: true })
     const r = agg.rows[0]
     expect(r.profit).toBe(r.gross - r.driverPay - r.expenses)
+  })
+})
+
+describe('useAmazonProfitability', () => {
+  it('counts the companyAmount of after-split fixed charges as a company expense', async () => {
+    listAmazonTrips.mockResolvedValue([
+      { id: 't1', driverId: 'd1', periodStart: '2026-09-06', freightAmount: 4_000, status: 'Completed', createdAt: '2026-09-06T00:00:00Z', updatedAt: '2026-09-06T00:00:00Z' },
+    ])
+    listDriverPaySettings.mockResolvedValue([
+      {
+        id: 's1',
+        driverId: 'd1',
+        payGroup: 'AMAZON',
+        payPercent: 0.5,
+        expensesBeforePercent: true,
+        fixedExpenses: [
+          { label: 'ELD', amount: 20 },
+          { label: 'Lease', amount: 496, afterPercent: true, companyAmount: 496 },
+        ],
+        active: true,
+        createdAt: '2026-09-01T00:00:00Z',
+        updatedAt: '2026-09-01T00:00:00Z',
+      },
+    ])
+    listDriverPayDeductions.mockResolvedValue([])
+    listDriverPayCredits.mockResolvedValue([])
+
+    const { result } = renderHook(() => useAmazonProfitability())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    expect(result.current.error).toBeNull()
+    expect(result.current.rows).toHaveLength(1)
+    const r = result.current.rows[0]
+    expect(r.gross).toBe(4_000)
+    expect(r.driverPay).toBeCloseTo(1_494, 2)
+    expect(r.expenses).toBe(20 + 496 + 496)
+    expect(r.profit).toBeCloseTo(4_000 - 1_494 - 1_012, 2)
   })
 })

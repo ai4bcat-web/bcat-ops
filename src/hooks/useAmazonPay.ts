@@ -9,7 +9,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput } from '@/lib/driverPay'
+import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -45,6 +45,8 @@ export interface DriverPayRow {
   credits:    DriverPayCredit[]
   /** Money taken OFF the check at 100%, after the net (cash advance, damage…). */
   debits:     DriverPayCredit[]
+  /** After-split fixed charges — shown on the statement and subtracted in full after the % model. */
+  fixedDebits: PayDebitInput[]
   statement:  DriverPayStatement
   /** Ids of this week's trips whose Load ID also appears in the previous week (likely a duplicate import). */
   duplicateTripIds: Set<string>
@@ -137,8 +139,13 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
+        const fixed = effectiveFixedExpenses(setting.fixedExpenses, periodStart, end)
+        const fixedDebits: PayDebitInput[] = fixed
+          .filter((f) => f.afterPercent)
+          .map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
+
         const ded: PayDeductionInput[] = [
-          ...effectiveFixedExpenses(setting.fixedExpenses, periodStart, end).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
+          ...fixed.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
           ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
@@ -151,15 +158,16 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         const driverDebits  = mine.filter((c) => c.kind === 'DEBIT')
 
         // Credits are added to the check in full, after the % model — same as box-truck.
+        // After-split fixed charges are debits too, so they cost the driver the whole dollar.
         const statement = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.freightAmount, status: t.status })),
           { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
-          driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
+          [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, statement, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
       })
       .filter((r): r is DriverPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))

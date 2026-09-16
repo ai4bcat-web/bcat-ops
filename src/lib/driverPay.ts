@@ -83,6 +83,17 @@ export interface FixedExpenseInput {
   endedBy?: string | null
   /** Mileage-based expense basis; when present the authoritative amount is derived from it. */
   mileage?: FixedExpenseMileage | null
+  /**
+   * True → the driver bears this line in full, subtracted AFTER the % model (like a debit).
+   * Null/false → today's pre-split deduction.
+   */
+  afterPercent?: boolean | null
+  /**
+   * Only with afterPercent: the company's separate share of the same charge per period.
+   * NOT on the statement; counted as a company expense in profitability. Prorated by days
+   * exactly like `amount`.
+   */
+  companyAmount?: number | null
 }
 
 const MS_PER_DAY = 86_400_000
@@ -101,7 +112,10 @@ function parseISODateUTC(value: string): Date {
 }
 
 /** A charge in force for a period, with the day fraction it was prorated by (absent = full period). */
-export type ProratedFixedExpense<T extends FixedExpenseInput> = T & { proratedDays?: { days: number; periodDays: number } }
+export type ProratedFixedExpense<T extends FixedExpenseInput> = T & {
+  proratedDays?: { days: number; periodDays: number }
+  companyAmount?: number
+}
 
 /** Statement label for a fixed charge — names the day fraction so a transition-period amount is explained on the sheet. */
 export function fixedExpenseLineLabel(f: ProratedFixedExpense<FixedExpenseInput>): string {
@@ -187,11 +201,17 @@ export function effectiveFixedExpenses<T extends FixedExpenseInput>(
     }
   }
 
-  return items.map(({ entry, baseCents, overlapDays }) => ({
-    ...entry,
-    amount: Math.round((baseCents / 100 + Number.EPSILON) * 100) / 100,
-    ...(overlapDays < periodDays ? { proratedDays: { days: overlapDays, periodDays } } : {}),
-  }))
+  return items.map(({ entry, baseCents, overlapDays }) => {
+    const companyAmount = entry.companyAmount != null
+      ? round2((entry.companyAmount * overlapDays) / periodDays)
+      : undefined
+    return {
+      ...entry,
+      amount: Math.round((baseCents / 100 + Number.EPSILON) * 100) / 100,
+      ...(companyAmount !== undefined ? { companyAmount } : {}),
+      ...(overlapDays < periodDays ? { proratedDays: { days: overlapDays, periodDays } } : {}),
+    }
+  })
 }
 
 /**

@@ -50,6 +50,27 @@ describe('FixedExpenseEditor', () => {
     vi.clearAllMocks()
   })
 
+  it('charges the driver in full after the split with an optional company share', () => {
+    const onChange = vi.fn()
+    render(<FixedExpenseEditor value={initialAdd} onChange={onChange} periodDays={7} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add expense type/i }))
+    fireEvent.change(screen.getByPlaceholderText('Insurance'), { target: { value: 'Truck lease' } })
+    fireEvent.change(screen.getByPlaceholderText('250'), { target: { value: '992' } })
+    fireEvent.click(screen.getByRole('button', { name: /Driver pays in full, after the split/i }))
+    fireEvent.change(screen.getByLabelText(/Company's separate share/i), { target: { value: '496' } })
+    fireEvent.change(screen.getByLabelText(/Effective from/i), { target: { value: '2026-09-07' } })
+    fireEvent.click(screen.getByRole('button', { name: /Apply/i }))
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    const next = onChange.mock.calls[0][0] as FixedExpenseInput[]
+    expect(next).toHaveLength(1)
+    expect(next[0].label).toBe('Truck lease')
+    expect(next[0].amount).toBe(992)
+    expect(next[0].afterPercent).toBe(true)
+    expect(next[0].companyAmount).toBe(496)
+  })
+
   it('renders an empty state when there are no expenses', () => {
     render(<FixedExpenseEditor value={[]} onChange={vi.fn()} periodDays={7} />)
     expect(screen.getByText(/Fixed weekly expenses/i)).toBeTruthy()

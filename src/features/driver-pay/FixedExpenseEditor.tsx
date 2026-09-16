@@ -65,14 +65,24 @@ function formatMiles(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2, useGrouping: true })
 }
 
-/** Strip cosmetic characters; reject anything that isn't a plain positive decimal. */
+/** Strip cosmetic characters; reject anything that isn't a plain positive decimal (".086" is fine). */
 function parseStrictPositive(s: string, maxDecimals?: number): number | null {
-  const cleaned = s.replace(/[$,\s]/g, '')
+  const cleaned = s.replace(/[$,\s]/g, '').replace(/^\./, '0.')
   const decimals = maxDecimals == null ? '' : `{1,${maxDecimals}}`
   const pattern = maxDecimals == null ? /^\d+(\.\d+)?$/ : new RegExp(`^\\d+(\\.\\d${decimals})?$`)
   if (!pattern.test(cleaned)) return null
   const n = Number(cleaned)
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/** Strip cosmetic characters; blank → null, otherwise a finite non-negative amount with at most 2 decimals. */
+function parseNonNegativeCents(s: string): number | null {
+  const trimmed = s.trim()
+  if (!trimmed) return null
+  const cleaned = trimmed.replace(/[$,\s]/g, '').replace(/^\./, '0.')
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null
+  const n = Number(cleaned)
+  return Number.isFinite(n) && n >= 0 ? n : null
 }
 
 function localToday() {
@@ -100,6 +110,8 @@ export function FixedExpenseEditor({
   const [amountType, setAmountType] = useState<'fixed' | 'mileage'>('fixed')
   const [draftCostPerMile, setDraftCostPerMile] = useState('')
   const [draftMiles, setDraftMiles] = useState('')
+  const [chargeMode, setChargeMode] = useState<'split' | 'after'>('split')
+  const [draftCompanyAmount, setDraftCompanyAmount] = useState('')
   const [error, setError] = useState<string | null>(null)
   const formId = useId()
 
@@ -121,6 +133,8 @@ export function FixedExpenseEditor({
     setAmountType('fixed')
     setDraftCostPerMile('')
     setDraftMiles('')
+    setChargeMode('split')
+    setDraftCompanyAmount('')
     setError(null)
   }
 
@@ -133,6 +147,8 @@ export function FixedExpenseEditor({
     setAmountType('fixed')
     setDraftCostPerMile('')
     setDraftMiles('')
+    setChargeMode('split')
+    setDraftCompanyAmount('')
     setError(null)
   }
 
@@ -144,6 +160,8 @@ export function FixedExpenseEditor({
     setDraftAmount(hasMileage ? '' : (selected ? String(selected.amount) : ''))
     setDraftCostPerMile(hasMileage ? String(selected!.mileage!.costPerMile) : '')
     setDraftMiles(hasMileage ? String(selected!.mileage!.miles) : '')
+    setChargeMode(selected?.afterPercent ? 'after' : 'split')
+    setDraftCompanyAmount(selected?.companyAmount != null ? String(selected.companyAmount) : '')
     setDraftDate(today)
     setError(null)
   }
@@ -187,12 +205,22 @@ export function FixedExpenseEditor({
       amountNum = parsedAmount
     }
 
+    const afterPercent = chargeMode === 'after' ? true : (null as boolean | null)
+    let companyAmount: number | null = null
+    if (chargeMode === 'after') {
+      if (draftCompanyAmount.trim()) {
+        const parsed = parseNonNegativeCents(draftCompanyAmount)
+        if (parsed == null) { setError("Company's separate share must be a non-negative amount with at most 2 decimals"); return }
+        companyAmount = parsed
+      }
+    }
+
     const audit: FixedExpenseAudit = { at: new Date().toISOString(), by: user?.email ?? null }
     let change: FixedExpenseChange
     if (mode === 'add') {
       change = mileage
-        ? { kind: 'add', label: labelText, amount: amountNum!, effectiveFrom: draftDate, mileage }
-        : { kind: 'add', label: labelText, amount: amountNum!, effectiveFrom: draftDate }
+        ? { kind: 'add', label: labelText, amount: amountNum!, effectiveFrom: draftDate, mileage, afterPercent, companyAmount }
+        : { kind: 'add', label: labelText, amount: amountNum!, effectiveFrom: draftDate, afterPercent, companyAmount }
     } else if (mode === 'change') {
       change = mileage
         ? {
@@ -202,6 +230,8 @@ export function FixedExpenseEditor({
             amount: amountNum!,
             effectiveFrom: draftDate,
             mileage,
+            afterPercent,
+            companyAmount,
           }
         : {
             kind: 'change',
@@ -209,6 +239,8 @@ export function FixedExpenseEditor({
             label: labelText,
             amount: amountNum!,
             effectiveFrom: draftDate,
+            afterPercent,
+            companyAmount,
           }
     } else {
       change = { kind: 'end', revisionId: selectedRevisionId!, effectiveFrom: draftDate }
@@ -312,6 +344,18 @@ export function FixedExpenseEditor({
                       >
                         {styles.label}
                       </span>
+                      {row.afterPercent && (
+                        <span
+                          style={{
+                            fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+                            padding: '2px 6px', borderRadius: 4,
+                            color: 'var(--ds-blue)',
+                            background: 'var(--ds-blue-soft, #eff6ff)',
+                          }}
+                        >
+                          after split
+                        </span>
+                      )}
                     </label>
                   )
                 })}
@@ -485,6 +529,46 @@ export function FixedExpenseEditor({
                   </div>
                 </>
               )}
+              <div>
+                <label style={label}>How it's charged</label>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                  {[
+                    { v: 'split' as const, t: 'Shared through the pay split' },
+                    { v: 'after' as const, t: 'Driver pays in full, after the split' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      onClick={() => { setChargeMode(opt.v); setError(null) }}
+                      disabled={disabled}
+                      style={{
+                        flex: 1, textAlign: 'left', padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                        border: `1.5px solid ${chargeMode === opt.v ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                        background: chargeMode === opt.v ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
+                        fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)',
+                      }}
+                    >
+                      {opt.t}
+                    </button>
+                  ))}
+                </div>
+                {chargeMode === 'after' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
+                    <label htmlFor={`${formId}-company-share`} style={label}>Company's separate share ($/period)</label>
+                    <input
+                      id={`${formId}-company-share`}
+                      style={{ ...input, maxWidth: 160 }}
+                      value={draftCompanyAmount}
+                      onChange={(e) => setDraftCompanyAmount(e.target.value)}
+                      placeholder="0.00"
+                      disabled={disabled}
+                    />
+                    <div style={{ fontSize: 11, color: 'var(--ds-t3)' }}>
+                      Off the driver's statement; counted as a company cost in Finances.
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
