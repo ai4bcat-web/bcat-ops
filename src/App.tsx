@@ -12,6 +12,7 @@ import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
 import { CashFlowPage } from '@/features/cash-flow/CashFlowPage'
+import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { ApptChangesPage } from '@/features/appt-changes/ApptChangesPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
@@ -67,6 +68,7 @@ export default function App() {
               <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
               <Route path="/cash-flow" element={<RequirePage page="cashFlow"><CashFlowPage /></RequirePage>} />
+              <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
               <Route path="/appt-changes" element={<RequirePage page="apptChanges"><ApptChangesPage /></RequirePage>} />
               <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />

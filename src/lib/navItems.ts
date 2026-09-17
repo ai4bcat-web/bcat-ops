@@ -84,6 +84,7 @@ export const NAV_GROUPS: NavSection[] = [
     items: [
       { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances' },
       { to: '/cash-flow', label: 'Cash Flow', icon: Waves,     pageKey: 'cashFlow' },
+      { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn' },
       { to: '/insurance', label: 'Insurance', icon: Umbrella,  pageKey: 'insurance' },
     ],
   },

@@ -1,0 +1,479 @@
+<title>BCAT Weekly Cash Check-in</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F2F4F3; --surface:#FFFFFF; --surface-2:#E9EDEC; --ink:#16202A; --muted:#5E6B78; --rule:#D5DBDE; --rule-strong:#B9C2C7;
+  --accent:#1F6FB5; --accent-ink:#FFFFFF; --plan:#1F6FB5; --actual:#C2711F;
+  --good:#2E7D4F; --good-bg:#E4F1E9; --bad:#B4432F; --bad-bg:#F6E5E1; --warn:#8A6A12; --warn-bg:#F5EDD4;
+  --input-bg:#FBFCFB; --focus:#1F6FB5;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#10161C; --surface:#182029; --surface-2:#1F2A35; --ink:#E8ECEF; --muted:#93A0AC; --rule:#2A3540; --rule-strong:#3B4956;
+    --accent:#4A9BE0; --accent-ink:#0B1319; --plan:#4A9BE0; --actual:#C97E22;
+    --good:#5DBB84; --good-bg:#17301F; --bad:#E27A65; --bad-bg:#3A1F19; --warn:#D9B24A; --warn-bg:#332A12;
+    --input-bg:#121A21; --focus:#4A9BE0;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#10161C; --surface:#182029; --surface-2:#1F2A35; --ink:#E8ECEF; --muted:#93A0AC; --rule:#2A3540; --rule-strong:#3B4956;
+  --accent:#4A9BE0; --accent-ink:#0B1319; --plan:#4A9BE0; --actual:#C97E22;
+  --good:#5DBB84; --good-bg:#17301F; --bad:#E27A65; --bad-bg:#3A1F19; --warn:#D9B24A; --warn-bg:#332A12;
+  --input-bg:#121A21; --focus:#4A9BE0;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.45;margin:0}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 24px 64px}
+h1,h2,h3{font-family:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;font-weight:600;letter-spacing:-.01em;margin:0;text-wrap:balance}
+h1{font-size:30px;line-height:1.1} h2{font-size:18px} h3{font-size:15px}
+.num,input[type=number],input[type=date]{font-family:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.muted{color:var(--muted)}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:22px;padding-bottom:16px;border-bottom:2px solid var(--ink)}
+header .sub{color:var(--muted);margin-top:4px;max-width:62ch}
+.status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.status .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.status.saved .dot{background:var(--good)} .status.saving .dot,.status.local .dot{background:var(--warn)}
+section{margin-top:28px}
+.sec-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.sec-head p{margin:0;color:var(--muted);max-width:70ch}
+.strip{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--rule-strong);background:var(--surface)}
+.strip>div{padding:14px 16px;border-right:1px solid var(--rule)}
+.strip>div:last-child{border-right:0}
+.strip .big{font-size:26px;font-weight:500;margin-top:4px;line-height:1.1}
+.strip .foot{font-size:12px;color:var(--muted);margin-top:4px}
+.pos{color:var(--good)} .neg{color:var(--bad)}
+@media (max-width:760px){.strip{grid-template-columns:repeat(2,1fr)} .strip>div:nth-child(2){border-right:0} .strip>div:nth-child(-n+2){border-bottom:1px solid var(--rule)}}
+
+/* check-in form */
+.form{background:var(--surface);border:1px solid var(--rule-strong);border-top:3px solid var(--accent);padding:16px 18px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px 18px}
+.grid.three{grid-template-columns:repeat(3,1fr)}
+.f label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.f .sub{font-size:11px;color:var(--muted);margin-top:3px}
+input[type=number],input[type=date],input[type=text]{width:100%;background:var(--input-bg);color:var(--ink);border:1px solid var(--rule-strong);border-radius:3px;padding:7px 9px;font-size:14px;text-align:right}
+input[type=date],input[type=text]{text-align:left;font-family:"IBM Plex Sans",system-ui,sans-serif}
+input:focus{outline:2px solid var(--focus);outline-offset:-1px}
+input::placeholder{color:var(--muted);opacity:.7}
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.group{margin-top:14px;padding-top:12px;border-top:1px solid var(--rule)}
+.group h3{margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline}
+.group h3 span{font-family:"IBM Plex Sans";font-size:12px;font-weight:400;color:var(--muted)}
+.actions{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
+button{font:inherit;font-size:13px;padding:8px 14px;border-radius:3px;border:1px solid var(--rule-strong);background:var(--surface);color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:500}
+button:hover{border-color:var(--ink)} button.primary:hover{filter:brightness(1.08)}
+button:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.note{font-size:12px;color:var(--muted)}
+
+/* assumptions */
+.centers{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.center{background:var(--surface);border:1px solid var(--rule-strong);padding:14px 16px}
+.center h3{display:flex;justify-content:space-between;align-items:baseline}
+.center h3 .tag{font-family:"IBM Plex Sans";font-size:11px;font-weight:500;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.field{display:grid;grid-template-columns:1fr 110px;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--rule)}
+.field:first-of-type{border-top:0;margin-top:8px}
+.field label{color:var(--muted);font-size:13px}
+.field input{padding:5px 8px;font-size:13px}
+.field .out{text-align:right;font-weight:500}
+.hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.4}
+@media (max-width:820px){.centers,.grid,.grid.three{grid-template-columns:1fr 1fr}}
+@media (max-width:520px){.centers,.grid,.grid.three{grid-template-columns:1fr}}
+
+/* tables */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule-strong);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:13px}
+th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:500;text-align:right;padding:8px 10px;border-bottom:1px solid var(--rule-strong);background:var(--surface-2);white-space:nowrap}
+th.l,td.l{text-align:left}
+td{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:right;white-space:nowrap}
+td.month{font-weight:600}
+tr.now td{background:var(--good-bg)}
+tr.now td.month::after{content:" · now";font-weight:400;color:var(--muted)}
+td .pill{display:inline-block;font-size:11px;font-weight:500;letter-spacing:.04em;padding:2px 7px;border-radius:2px;text-transform:uppercase}
+.pill.ok{background:var(--good-bg);color:var(--good)} .pill.low{background:var(--warn-bg);color:var(--warn)} .pill.short{background:var(--bad-bg);color:var(--bad)}
+td button{padding:3px 8px;font-size:11px}
+tr.editing td{background:var(--warn-bg)}
+
+/* chart */
+.chart{background:var(--surface);border:1px solid var(--rule-strong);padding:14px 16px 8px;position:relative}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{font-family:"IBM Plex Mono",monospace;font-size:11px;fill:var(--muted)}
+.chart .grid{stroke:var(--rule)} .chart .zero{stroke:var(--rule-strong)}
+.chart .bar{fill:var(--plan)} .chart .bar.hist{fill:var(--actual)}
+.chart .lbl{fill:var(--ink);font-weight:500}
+.legend{display:flex;gap:16px;font-size:12px;color:var(--muted);align-items:center;flex-wrap:wrap}
+.legend i{width:12px;height:12px;display:inline-block;background:var(--plan);margin-right:6px;vertical-align:-1px}
+.legend i.hist{background:var(--actual)}
+.notes{margin-top:24px;padding:14px 16px;background:var(--surface-2);border-left:3px solid var(--accent);max-width:78ch;font-size:13px}
+.notes p{margin:0 0 6px} .notes p:last-child{margin:0}
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <div class="eyebrow">BCAT Corp · weekly review</div>
+    <h1>BCAT Weekly Cash Check-in</h1>
+    <div class="sub">Every Friday: log cash, receivables, payables, and each center's profit for the month so far. The 6-month outlook re-bases from the latest check-in.</div>
+  </div>
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">Loading…</span></div>
+</header>
+
+<div class="strip" id="strip"></div>
+
+<section>
+  <div class="sec-head">
+    <h2>This week's check-in</h2>
+    <p>Whole dollars. Profit fields are month-to-date for the month the check-in date falls in; the outlook scales them to a full month.</p>
+  </div>
+  <div class="form" id="form">
+    <div class="grid">
+      <div class="f"><label for="ci-date">Check-in date</label><input type="date" id="ci-date"></div>
+      <div class="f"><label for="ci-cash">Cash on hand (all accounts)</label><input type="number" id="ci-cash" step="100" placeholder="0"><div class="sub">Bank balance at close</div></div>
+      <div class="f"><label for="ci-ar">Receivables outstanding</label><input type="number" id="ci-ar" step="100" placeholder="0"><div class="sub">AR report grand total</div></div>
+      <div class="f"><label for="ci-ap">Payables outstanding</label><input type="number" id="ci-ap" step="100" placeholder="0"><div class="sub">Cash Requirements grand total</div></div>
+    </div>
+    <div class="group">
+      <h3>Profit this month so far <span>revenue − all expenses, month-to-date</span></h3>
+      <div class="grid three">
+        <div class="f"><label for="ci-bcat">BCAT Logistics</label><input type="number" id="ci-bcat" step="100" placeholder="0"></div>
+        <div class="f"><label for="ci-ivan">Ivan Cartage</label><input type="number" id="ci-ivan" step="100" placeholder="0"></div>
+        <div class="f"><label for="ci-amazon">Amazon DSP</label><input type="number" id="ci-amazon" step="100" placeholder="0"></div>
+      </div>
+    </div>
+    <div class="group">
+      <div class="grid">
+        <div class="f" style="grid-column:span 2"><label for="ci-note">Note</label><input type="text" id="ci-note" placeholder="what moved this week"></div>
+        <div class="f"><label for="ci-cards">Credit cards owed</label><input type="number" id="ci-cards" step="100" placeholder="0"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="save">Save check-in</button>
+      <button id="clear" hidden>Cancel edit</button>
+      <span class="note" id="formNote"></span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Cash outlook</h2>
+    <span class="legend"><span><i class="hist"></i>Logged</span><span><i></i>Projected</span><span id="fxLegend" hidden><i style="background:none;border-top:2px dashed var(--ink);height:0;vertical-align:3px"></i>With factoring</span></span>
+  </div>
+  <div class="chart" id="chart"></div>
+  <div class="tablewrap" style="margin-top:12px">
+    <table id="outlook"><thead><tr>
+      <th class="l">Month</th><th>BCAT</th><th>Ivan</th><th>Amazon</th><th>Group net</th><th>Other items</th><th>Cash on hand</th><th id="fxTh" hidden>With factoring</th><th class="l">Status</th>
+    </tr></thead><tbody id="outlookBody"></tbody></table>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Run-rate assumptions</h2>
+    <p>Used for every month after the current one. Fixed expenses are what goes out even in a slow month; profit is what each center nets in a normal one.</p>
+  </div>
+  <div class="centers" id="centers"></div>
+  <div class="centers" style="margin-top:12px">
+    <div class="center">
+      <div class="eyebrow">Guardrails</div>
+      <div class="field"><label for="s-floor">Cash floor to hold</label><input type="number" id="s-floor" step="500"></div>
+      <div class="field"><label for="s-months">Months in outlook</label><input type="number" id="s-months" min="3" max="12" step="1"></div>
+      <div class="hint">Below the floor shows as a warning; below zero as short.</div>
+    </div>
+    <div class="center" style="grid-column:span 2">
+      <div class="eyebrow">One-time items</div>
+      <div class="hint" style="margin-top:4px">Cash that lands in a specific month outside the run-rate: paying off the cards, a hire's first month, a truck payment, tax deposit, Danisco reprice kicking in. Positive = in, negative = out.</div>
+      <div id="items" style="margin-top:8px"></div>
+      <div class="actions" style="margin-top:8px"><button id="addItem">Add item</button></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Factoring scenario</h2>
+    <p>Model a go-forward facility on the customers you can factor. The outlook shows both lines so you can see the step-up, the monthly fee, and what happens when you stop.</p>
+  </div>
+  <div class="centers">
+    <div class="center">
+      <div class="eyebrow">Facility</div>
+      <div class="field"><label for="fx-on">Include in outlook</label><div style="text-align:right"><input type="checkbox" id="fx-on" style="width:18px;height:18px"></div></div>
+      <div class="field"><label for="fx-start">Start month</label><input type="text" id="fx-start" placeholder="2026-10" pattern="\d{4}-\d{2}"></div>
+      <div class="field"><label for="fx-stop">Stop month (optional)</label><input type="text" id="fx-stop" placeholder="leave blank"></div>
+      <div class="hint">Go-forward only: existing receivables collect on their own schedule.</div>
+    </div>
+    <div class="center">
+      <div class="eyebrow">Terms</div>
+      <div class="field"><label for="fx-eligible">Eligible invoicing / month</label><input type="number" id="fx-eligible" step="5000"></div>
+      <div class="field"><label for="fx-fee">Fee %</label><input type="number" id="fx-fee" step="0.25" min="0"></div>
+      <div class="field"><label for="fx-advance">Advance %</label><input type="number" id="fx-advance" step="5" min="50" max="100"></div>
+      <div class="hint">Eligible = revenue from customers you're allowed to factor (everyone except Danisco, Royal, Batory, Denali).</div>
+    </div>
+    <div class="center">
+      <div class="eyebrow">What it does</div>
+      <div id="fxSummary" class="hint" style="margin-top:6px"></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <h2>Check-in history</h2>
+    <p>True liquidity = cash − cards + receivables − payables. Watch it week over week: it should climb about as fast as group profit.</p>
+  </div>
+  <div class="tablewrap">
+    <table id="hist"><thead><tr>
+      <th class="l">Date</th><th>Cash</th><th>AR</th><th>AP</th><th>Cards</th><th>True liquidity</th><th>BCAT MTD</th><th>Ivan MTD</th><th>Amazon MTD</th><th class="l">Note</th><th></th>
+    </tr></thead><tbody id="histBody"></tbody></table>
+  </div>
+</section>
+
+<div class="notes">
+  <p><b>How the outlook is built.</b> The current month starts from the latest check-in's cash. Its profit is the month-to-date figures scaled to a full month by how far through the month the check-in date is (a $6K MTD on the 15th becomes ~$12K). Every later month uses the run-rate profit for each center, plus any one-time items you've placed in that month.</p>
+  <p>Receivables and payables don't move the projection directly, because in a steady business they offset each other month to month. They feed true liquidity, which is the number that tells you whether a low bank balance is timing (liquidity high, cash low) or a real problem (both falling).</p>
+</div>
+</div>
+
+<script>
+(function(){
+const CENTERS=[
+  {key:'bcat',name:'BCAT Logistics',tag:'brokerage'},
+  {key:'ivan',name:'Ivan Cartage',tag:'asset carrier'},
+  {key:'amazon',name:'Amazon DSP',tag:'delivery'}
+];
+const DEFAULT={
+  version:1,
+  floor:25000,months:12,
+  runrate:{bcat:{fixed:30000,profit:-5000},ivan:{fixed:60000,profit:20000},amazon:{fixed:82000,profit:18000}},
+  items:[{ym:'2026-10',label:'Pay off credit cards',amount:-9000}],
+  factoring:{on:false,start:'2026-10',stop:'',eligible:100000,fee:2,advance:90},
+  checkins:[]
+};
+let state=JSON.parse(JSON.stringify(DEFAULT));
+let db=null,docRef=null,saveTimer=null,applyingRemote=false,editingId=null;
+const $=s=>document.querySelector(s);
+const num=v=>(v===''||v===null||v===undefined||isNaN(Number(v)))?null:Number(v);
+const fmt=n=>{const v=Math.round(n);return (v<0?'−$':'$')+Math.abs(v).toLocaleString('en-US');};
+const fmtK=n=>{const v=Math.round(n/1000);return (v<0?'−$':'$')+Math.abs(v)+'K';};
+const cls=n=>n<0?'neg':n>0?'pos':'';
+const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const ymOf=iso=>iso.slice(0,7);
+const addMonths=(ym,k)=>{const [y,m]=ym.split('-').map(Number);const d=new Date(y,m-1+k,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');};
+const label=ym=>{const [y,m]=ym.split('-').map(Number);return new Date(y,m-1,1).toLocaleString('en-US',{month:'short',year:'numeric'});};
+const dLabel=iso=>{const [y,m,d]=iso.split('-').map(Number);return new Date(y,m-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});};
+const daysIn=ym=>{const [y,m]=ym.split('-').map(Number);return new Date(y,m,0).getDate();};
+
+function latest(){const c=[...(state.checkins||[])].sort((a,b)=>a.date<b.date?1:-1);return c[0]||null;}
+
+// ---------- model ----------
+function outlook(){
+  const L=latest();
+  const startYm=L?ymOf(L.date):ymOf(todayISO());
+  let cash=L?(num(L.cash)??0):0;
+  const rows=[];
+  for(let i=0;i<state.months;i++){
+    const ym=addMonths(startYm,i);
+    const per={};let net=0;
+    for(const c of CENTERS){
+      let p;
+      if(i===0&&L){
+        const mtd=num(L[c.key]);
+        if(mtd!==null){const day=Number(L.date.slice(8,10));const frac=Math.max(day/daysIn(ym),0.1);p=mtd/frac;}
+        else p=state.runrate[c.key].profit;
+      }else p=state.runrate[c.key].profit;
+      per[c.key]=p;net+=p;
+    }
+    // for the current month, only the remainder of the month is still to come
+    let netToCome=net;
+    if(i===0&&L){const day=Number(L.date.slice(8,10));const frac=day/daysIn(ym);netToCome=net*(1-frac);}
+    const items=(state.items||[]).filter(it=>it.ym===ym);
+    const itemsSum=items.reduce((s,it)=>s+(num(it.amount)??0),0);
+    cash=cash+netToCome+itemsSum;
+    rows.push({ym,per,net,netToCome,items,itemsSum,cash,status:cash<0?'short':cash<state.floor?'low':'ok',current:i===0});
+  }
+  // factoring overlay: step-up in start month, reserve release next month, fee every active month, reversal at stop
+  const f=state.factoring||{};
+  if(f.on&&/^\d{4}-\d{2}$/.test(f.start||'')){
+    const E=num(f.eligible)??0,fee=(num(f.fee)??0)/100,adv=(num(f.advance)??90)/100;
+    let fx=0;
+    rows.forEach((r,i)=>{
+      const active=r.ym>=f.start&&(!f.stop||r.ym<f.stop);
+      let delta=0;
+      if(r.ym===f.start)delta+=adv*E;
+      if(r.ym===addMonths(f.start,1))delta+=(1-adv)*E;
+      if(active)delta-=fee*E;
+      if(f.stop&&r.ym===f.stop)delta-=adv*E;
+      if(f.stop&&r.ym===addMonths(f.stop,1))delta-=(1-adv)*E;
+      fx+=delta;
+      r.fxDelta=delta;r.fxCash=r.cash+fx;r.fxActive=active;
+    });
+  }
+  return rows;
+}
+
+// ---------- render ----------
+function renderStrip(){
+  const L=latest();const rows=outlook();const end=rows[rows.length-1];
+  const liq=L?(num(L.cash)??0)-(num(L.cards)??0)+(num(L.ar)??0)-(num(L.ap)??0):null;
+  const prev=[...(state.checkins||[])].sort((a,b)=>a.date<b.date?1:-1)[1];
+  const prevLiq=prev?(num(prev.cash)??0)-(num(prev.cards)??0)+(num(prev.ar)??0)-(num(prev.ap)??0):null;
+  const fixed=CENTERS.reduce((s,c)=>s+state.runrate[c.key].fixed,0);
+  const run=CENTERS.reduce((s,c)=>s+state.runrate[c.key].profit,0);
+  const low=rows.reduce((a,r)=>r.cash<a.cash?r:a,rows[0]);
+  $('#strip').innerHTML=`
+    <div><div class="eyebrow">Cash on hand${L?' · '+dLabel(L.date):''}</div><div class="big num ${L?cls(L.cash):''}">${L?fmt(L.cash):'—'}</div><div class="foot">${L?(num(L.cards)?fmt(L.cards)+' on cards · ':'')+'covers '+((num(L.cash)??0)/fixed*4.33).toFixed(1)+' weeks of fixed expenses':'log your first check-in'}</div></div>
+    <div><div class="eyebrow">True liquidity</div><div class="big num ${liq===null?'':cls(liq)}">${liq===null?'—':fmt(liq)}</div><div class="foot">${liq===null?'cash − cards + AR − AP':prevLiq!==null?((liq-prevLiq)>=0?'+':'')+fmtK(liq-prevLiq)+' vs prior check-in':fmt(num(L.ar)??0)+' AR − '+fmt(num(L.ap)??0)+' AP'}</div></div>
+    <div><div class="eyebrow">Run-rate group net / month</div><div class="big num ${cls(run)}">${fmt(run)}</div><div class="foot">${CENTERS.map(c=>c.name.split(' ')[0]+' '+fmtK(state.runrate[c.key].profit)).join(' · ')}</div></div>
+    <div><div class="eyebrow">Cash in ${label(end.ym)}</div><div class="big num ${cls(end.cash)}">${fmt(end.cash)}</div><div class="foot">${low.cash<state.floor?'dips to '+fmt(low.cash)+' in '+label(low.ym):'lowest point '+fmt(low.cash)+' · above floor'}</div></div>`;
+}
+function renderOutlook(){
+  const rows=outlook();
+  $('#outlookBody').innerHTML=rows.map(r=>`<tr class="${r.current?'now':''}">
+    <td class="l month">${label(r.ym)}</td>
+    ${CENTERS.map(c=>`<td class="num ${cls(r.per[c.key])}">${fmt(r.per[c.key])}${r.current&&latest()&&num(latest()[c.key])!==null?'<span class="muted" style="font-size:11px"> est</span>':''}</td>`).join('')}
+    <td class="num ${cls(r.net)}" style="font-weight:500">${fmt(r.net)}${r.current?`<div class="muted" style="font-size:11px">${fmt(r.netToCome)} still to come</div>`:''}</td>
+    <td class="num ${cls(r.itemsSum)}">${r.items.length?fmt(r.itemsSum)+'<div class="muted" style="font-size:11px">'+r.items.map(i=>i.label||'item').join(', ')+'</div>':'—'}</td>
+    <td class="num ${cls(r.cash)}" style="font-weight:600">${fmt(r.cash)}</td>
+    ${state.factoring&&state.factoring.on?`<td class="num ${cls(r.fxCash??r.cash)}" style="font-weight:600">${fmt(r.fxCash??r.cash)}${r.fxDelta?`<div class="muted" style="font-size:11px">${r.fxDelta>=0?'+':''}${fmtK(r.fxDelta)}${r.fxActive?' · fee in':''}</div>`:''}</td>`:''}
+    <td class="l"><span class="pill ${r.status}">${r.status==='short'?'Short':r.status==='low'?'Below floor':'Covered'}</span></td>
+  </tr>`).join('');
+  const on=!!(state.factoring&&state.factoring.on);
+  $('#fxTh').hidden=!on;$('#fxLegend').hidden=!on;
+  renderChart(rows);renderFxSummary(rows);
+}
+function renderFxSummary(rows){
+  const f=state.factoring||{};const E=num(f.eligible)??0,fee=(num(f.fee)??0)/100,adv=(num(f.advance)??90)/100;
+  const monthlyFee=fee*E;const stepUp=E;
+  const withRows=rows.filter(r=>r.fxCash!==undefined);
+  const end=withRows[withRows.length-1];const base=rows[rows.length-1];
+  const stopReady=rows.find(r=>r.fxCash!==undefined&&(r.fxCash-E)>=state.floor+CENTERS.reduce((s,c)=>s+Math.max(state.runrate[c.key].fixed,0),0)*0.4);
+  $('#fxSummary').innerHTML=f.on?`
+    <div><b class="num">${fmt(stepUp)}</b> one-time step-up (${fmt(adv*E)} in ${f.start?label(f.start):'start month'}, rest the month after)</div>
+    <div style="margin-top:4px"><b class="num neg">${fmt(monthlyFee)}</b> / month in fees (${fee*100}% of ${fmt(E)})</div>
+    ${end?`<div style="margin-top:4px">Ends ${label(end.ym)} at <b class="num">${fmt(end.fxCash)}</b> vs ${fmt(base.cash)} without · fees paid ${fmt(monthlyFee*withRows.filter(r=>r.fxActive).length)}</div>`:''}
+    <div style="margin-top:4px">${stopReady?'Could stop from <b>'+label(stopReady.ym)+'</b>: cash minus the '+fmtK(E)+' reversal still clears the cushion.':'Not yet at a point where stopping keeps you above the cushion.'}</div>`
+  :'Turn on "Include in outlook" to see the comparison.';
+}
+function niceStep(raw){const p=Math.pow(10,Math.floor(Math.log10(raw||1)));const r=raw/p;return (r<1.5?1:r<3.5?2.5:r<7.5?5:10)*p;}
+function renderChart(rows){
+  const hist=[...(state.checkins||[])].sort((a,b)=>a.date<b.date?-1:1).slice(-8);
+  const bars=[...hist.map(h=>({lbl:dLabel(h.date).replace(', 20',' ’').replace(/^(\w+) (\d+)/,'$1 $2'),v:num(h.cash)??0,hist:true})),...rows.slice(1).map(r=>({lbl:label(r.ym).replace(' 20',' ’'),v:r.cash,hist:false}))];
+  if(rows.length&&!hist.length)bars.unshift({lbl:label(rows[0].ym).replace(' 20',' ’'),v:rows[0].cash,hist:false});
+  const W=1000,H=280,pl=64,pr=16,pt=22,pb=40;
+  const vals=bars.map(b=>b.v).concat([0,state.floor]);
+  let lo=Math.min(...vals),hi=Math.max(...vals);const pad=(hi-lo)*.12||10000;lo=Math.min(0,lo-pad);hi+=pad;
+  const step=niceStep((hi-lo)/5);lo=Math.floor(lo/step)*step;hi=Math.ceil(hi/step)*step;
+  const y=v=>pt+(hi-v)/(hi-lo)*(H-pt-pb);
+  const n=bars.length,bw=(W-pl-pr)/n,gap=Math.min(14,bw*.25);
+  let g='';for(let v=lo;v<=hi+1;v+=step){g+=`<line class="${v===0?'zero':'grid'}" x1="${pl}" x2="${W-pr}" y1="${y(v)}" y2="${y(v)}"/><text x="${pl-8}" y="${y(v)+4}" text-anchor="end">${fmtK(v)}</text>`;}
+  g+=`<line x1="${pl}" x2="${W-pr}" y1="${y(state.floor)}" y2="${y(state.floor)}" stroke="var(--warn)" stroke-dasharray="2 4"/><text x="${pl-8}" y="${y(state.floor)+4}" text-anchor="end" fill="var(--warn)">floor</text>`;
+  bars.forEach((b,i)=>{const x=pl+i*bw+gap/2,w=bw-gap;const top=y(Math.max(b.v,0)),bot=y(Math.min(b.v,0));
+    g+=`<rect class="bar ${b.hist?'hist':''}" x="${x}" y="${top}" width="${w}" height="${Math.max(bot-top,1)}" rx="2"><title>${b.lbl}: ${fmt(b.v)}</title></rect>`;
+    g+=`<text class="lbl" x="${x+w/2}" y="${top-5}" text-anchor="middle">${fmtK(b.v)}</text>`;
+    g+=`<text x="${x+w/2}" y="${H-12}" text-anchor="middle">${b.lbl}</text>`;});
+  if(state.factoring&&state.factoring.on){
+    const offset=hist.length?hist.length:0;
+    const pts=rows.map((r,i)=>{const bi=i===0?(hist.length?null:0):offset+i-(hist.length?1:0);if(bi===null)return null;const x=pl+bi*bw+bw/2;return [x,y(r.fxCash??r.cash)];}).filter(Boolean);
+    if(pts.length>1){g+=`<path d="${pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--ink)" stroke-width="2" stroke-dasharray="5 4"/>`;pts.forEach(p=>{g+=`<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="var(--ink)" stroke="var(--surface)" stroke-width="2"/>`;});const last=pts[pts.length-1];const lr=rows[rows.length-1];g+=`<text class="lbl" x="${last[0]}" y="${last[1]-10}" text-anchor="middle">${fmtK(lr.fxCash??lr.cash)}</text>`;}
+  }
+  $('#chart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cash on hand: logged check-ins and projected month-ends">${g}</svg>`;
+}
+function renderCenters(){
+  $('#centers').innerHTML=CENTERS.map(c=>{const r=state.runrate[c.key];return `<div class="center">
+    <h3>${c.name}<span class="tag">${c.tag}</span></h3>
+    <div class="field"><label for="rr-${c.key}-fixed">Fixed expenses / month</label><input type="number" id="rr-${c.key}-fixed" data-c="${c.key}" data-f="fixed" value="${r.fixed}" step="1000"></div>
+    <div class="field"><label for="rr-${c.key}-profit">Run-rate profit / month</label><input type="number" id="rr-${c.key}-profit" data-c="${c.key}" data-f="profit" value="${r.profit}" step="500"></div>
+    <div class="field"><label>Break-even revenue</label><div class="out num">${fmt(r.fixed-Math.min(r.profit,0))}</div></div>
+  </div>`;}).join('');
+  $('#s-floor').value=state.floor;$('#s-months').value=state.months;
+  const f=state.factoring||DEFAULT.factoring;$('#fx-on').checked=!!f.on;$('#fx-start').value=f.start||'';$('#fx-stop').value=f.stop||'';$('#fx-eligible').value=f.eligible??'';$('#fx-fee').value=f.fee??'';$('#fx-advance').value=f.advance??'';
+  $('#items').innerHTML=(state.items||[]).map((it,i)=>`<div class="grid" style="grid-template-columns:130px 1fr 140px 80px;align-items:end;margin-bottom:6px">
+    <div class="f"><label>Month</label><input type="text" data-item="${i}" data-f="ym" value="${it.ym||''}" placeholder="2026-10" pattern="\\d{4}-\\d{2}"></div>
+    <div class="f"><label>What</label><input type="text" data-item="${i}" data-f="label" value="${(it.label||'').replace(/"/g,'&quot;')}" placeholder="e.g. new hire month 1"></div>
+    <div class="f"><label>Amount</label><input type="number" data-item="${i}" data-f="amount" value="${it.amount??''}" step="500" placeholder="−9000"></div>
+    <div class="f"><button data-del="${i}">Remove</button></div>
+  </div>`).join('')||'<div class="hint">None yet.</div>';
+}
+function renderHist(){
+  const rows=[...(state.checkins||[])].sort((a,b)=>a.date<b.date?1:-1);
+  $('#histBody').innerHTML=rows.length?rows.map(h=>{const liq=(num(h.cash)??0)-(num(h.cards)??0)+(num(h.ar)??0)-(num(h.ap)??0);return `<tr class="${editingId===h.id?'editing':''}">
+    <td class="l month">${dLabel(h.date)}</td><td class="num">${fmt(h.cash??0)}</td><td class="num">${h.ar!=null?fmt(h.ar):'—'}</td><td class="num">${h.ap!=null?fmt(h.ap):'—'}</td><td class="num">${h.cards!=null?fmt(h.cards):'—'}</td>
+    <td class="num ${cls(liq)}" style="font-weight:500">${fmt(liq)}</td>
+    ${CENTERS.map(c=>`<td class="num ${h[c.key]!=null?cls(h[c.key]):''}">${h[c.key]!=null?fmt(h[c.key]):'—'}</td>`).join('')}
+    <td class="l muted" style="white-space:normal;min-width:160px">${(h.note||'').replace(/</g,'&lt;')}</td>
+    <td><button data-edit="${h.id}">Edit</button> <button data-remove="${h.id}">Delete</button></td>
+  </tr>`;}).join(''):'<tr><td colspan="11" class="l muted">No check-ins yet. Fill in the form above and save.</td></tr>';
+}
+function renderAll(){renderStrip();renderOutlook();renderCenters();renderHist();}
+
+// ---------- form ----------
+function fillForm(h){
+  $('#ci-date').value=h?h.date:todayISO();
+  for(const k of ['cash','ar','ap','bcat','ivan','amazon','cards'])$('#ci-'+k).value=h&&h[k]!=null?h[k]:'';
+  $('#ci-note').value=h?h.note||'':'';
+  editingId=h?h.id:null;$('#clear').hidden=!h;$('#save').textContent=h?'Update check-in':'Save check-in';
+  $('#formNote').textContent=h?'Editing '+dLabel(h.date):'';
+  renderHist();
+}
+$('#save').addEventListener('click',()=>{
+  const date=$('#ci-date').value;if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){$('#formNote').textContent='Pick a date first.';return;}
+  const cash=num($('#ci-cash').value);if(cash===null){$('#formNote').textContent='Cash on hand is required.';$('#ci-cash').focus();return;}
+  const rec={id:editingId||('c'+Date.now()),date,cash,ar:num($('#ci-ar').value),ap:num($('#ci-ap').value),cards:num($('#ci-cards').value),bcat:num($('#ci-bcat').value),ivan:num($('#ci-ivan').value),amazon:num($('#ci-amazon').value),note:$('#ci-note').value.trim()};
+  state.checkins=(state.checkins||[]).filter(c=>c.id!==rec.id);state.checkins.push(rec);
+  const wasEdit=!!editingId;fillForm(null);renderAll();queueSave();
+  $('#formNote').textContent=(wasEdit?'Updated ':'Saved ')+dLabel(rec.date)+'. Outlook re-based.';
+});
+$('#clear').addEventListener('click',()=>fillForm(null));
+document.addEventListener('click',ev=>{
+  const b=ev.target.closest('button');if(!b)return;
+  if(b.dataset.edit){const h=(state.checkins||[]).find(c=>c.id===b.dataset.edit);if(h){fillForm(h);window.scrollTo({top:0,behavior:'smooth'});}}
+  if(b.dataset.remove){state.checkins=(state.checkins||[]).filter(c=>c.id!==b.dataset.remove);if(editingId===b.dataset.remove)fillForm(null);renderAll();queueSave();}
+  if(b.dataset.del!==undefined){state.items.splice(Number(b.dataset.del),1);renderAll();queueSave();}
+  if(b.id==='addItem'){state.items=state.items||[];state.items.push({ym:addMonths(ymOf(todayISO()),1),label:'',amount:null});renderCenters();queueSave();}
+});
+document.addEventListener('change',ev=>{if(ev.target&&ev.target.id==='fx-on'){ev.target.dispatchEvent(new Event('input',{bubbles:true}));}});
+document.addEventListener('input',ev=>{
+  const el=ev.target;if(!(el instanceof HTMLInputElement))return;
+  if(el.dataset.c){state.runrate[el.dataset.c][el.dataset.f]=num(el.value)??0;}
+  else if(el.dataset.item!==undefined){const it=state.items[Number(el.dataset.item)];if(!it)return;it[el.dataset.f]=el.dataset.f==='amount'?num(el.value):el.value.trim();}
+  else if(el.id.startsWith('fx-')){state.factoring=state.factoring||JSON.parse(JSON.stringify(DEFAULT.factoring));const k=el.id.slice(3);
+    if(k==='on')state.factoring.on=el.checked;else if(k==='start'||k==='stop')state.factoring[k]=el.value.trim();else state.factoring[k]=num(el.value);}
+  else if(el.id==='s-floor')state.floor=num(el.value)??0;
+  else if(el.id==='s-months')state.months=Math.max(3,Math.min(12,num(el.value)??6));
+  else return;
+  renderStrip();renderOutlook();
+  if(el.dataset.c){const card=el.closest('.center');const r=state.runrate[el.dataset.c];card.querySelector('.out').textContent=fmt(r.fixed-Math.min(r.profit,0));}
+  queueSave();
+});
+
+// ---------- persistence ----------
+const LS='bcat-weekly-checkin-v1';
+function setStatus(kind,text){$('#status').className='status '+kind;$('#statusText').textContent=text;}
+function queueSave(){clearTimeout(saveTimer);setStatus('saving','Saving…');saveTimer=setTimeout(save,500);}
+async function save(){
+  state.updatedAt=new Date().toISOString();
+  try{localStorage.setItem(LS,JSON.stringify(state));}catch(e){}
+  if(docRef){try{applyingRemote=true;await docRef.set(state);setStatus('saved','Saved · '+new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}));}
+    catch(e){setStatus('local','Saved on this device only');}finally{setTimeout(()=>applyingRemote=false,800);}}
+  else setStatus('local','Saved on this device only');
+}
+function adopt(d){if(!d||typeof d!=='object')return;state=Object.assign(JSON.parse(JSON.stringify(DEFAULT)),d);state.runrate=Object.assign({},DEFAULT.runrate,d.runrate||{});state.items=Array.isArray(d.items)?d.items:DEFAULT.items;state.checkins=Array.isArray(d.checkins)?d.checkins:[];state.factoring=Object.assign({},DEFAULT.factoring,d.factoring||{});}
+(async function init(){
+  try{const l=localStorage.getItem(LS);if(l)adopt(JSON.parse(l));}catch(e){}
+  fillForm(null);renderAll();setStatus('local','Saved on this device only');
+  try{
+    db=await window.claude.use('db');if(!db)return;
+    docRef=db.doc('checkin/state');
+    docRef.onSnapshot(snap=>{
+      if(snap.exists&&!applyingRemote&&!snap.metadata.hasPendingWrites){
+        const a=document.activeElement;const typing=a&&a.tagName==='INPUT';
+        adopt(snap.data());if(!typing){renderAll();}else{renderStrip();renderOutlook();renderHist();}
+      }
+      if(!snap.metadata.fromCache)setStatus('saved','Synced');
+    },()=>setStatus('local','Saved on this device only'));
+    const first=await docRef.get();if(!first.exists){await docRef.set(state);setStatus('saved','Synced');}
+  }catch(e){setStatus('local','Saved on this device only');}
+})();
+})();
+</script>

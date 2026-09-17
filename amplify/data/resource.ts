@@ -1143,7 +1143,7 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()]),
 
   // One appended row per week — the history log behind the trend chart. Snapshots the
-  // headline figures plus the projection they produced, so a past week still shows the
+  // headline figures plus the projection it produced, so a past week still shows the
   // forecast it was based on even after the model's assumptions change.
   CashFlowWeekLog: a
     .model({
@@ -1160,6 +1160,48 @@ const schema = a.schema({
       notes:                a.string(),
     })
     .authorization((allow) => [allow.authenticated()]),
+
+  // ── Weekly Cash Check-in ───────────────────────────────────────────────────
+  // Cash check-ins and the assumptions that drive the cash outlook. ADMIN group has
+  // full CRUD; every authenticated user can read. Floats are whole dollars on the
+  // frontend; the JSON fields hold the run-rate, one-time items, and factoring scenario.
+
+  CashCheckIn: a
+    .model({
+      date:            a.string().required(),   // YYYY-MM-DD
+      cash:            a.float().required(),    // whole dollars
+      ar:              a.float(),               // receivables outstanding
+      ap:              a.float(),               // payables outstanding
+      cards:           a.float(),               // credit cards owed
+      bcatMtdProfit:   a.float(),               // BCAT month-to-date profit
+      ivanMtdProfit:   a.float(),               // Ivan month-to-date profit
+      amazonMtdProfit: a.float(),               // Amazon DSP month-to-date profit
+      note:            a.string(),
+      createdBy:       a.string(),              // user email
+    })
+    .authorization((allow) => [
+      allow.groups(['ADMIN']),
+      allow.authenticated().to(['read']),
+    ]),
+
+  CashSettings: a
+    .model({
+      id:        a.id().required(),         // 'default'
+      floor:     a.float().default(25000),  // cash floor to hold
+      months:    a.integer().default(12),   // months in outlook (3..12)
+      runrate:   a.json().required(),       // Record<center,{fixed,profit,lagMonths}>
+      items:     a.json().required(),       // {ym,label,amount}[]
+      factoring: a.json().required(),       // {on,start,stop,eligible,fee,advance}
+      // Biweekly Slack reminder: the morning after every 14th day from payrollAnchor,
+      // posted to slackChannel by the cash-checkin-reminder Lambda. Blank = off.
+      payrollAnchor: a.string(),            // YYYY-MM-DD of a payroll day
+      slackChannel:  a.string(),            // Slack channel/user ID
+      lastReminderFor: a.string(),          // payroll date (YYYY-MM-DD) last reminded about — re-run guard
+    })
+    .authorization((allow) => [
+      allow.groups(['ADMIN']),
+      allow.authenticated().to(['read']),
+    ]),
 
   // Post to Slack #appts-ivan about an appointment. Fired by the client on a TRANSITION
   // only — into NEED, or a time change on a stop already asked about — so re-saving a

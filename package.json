@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false && tsc --noEmit -p amplify/tsconfig.json",
     "test": "vitest run",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -76,6 +77,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1067.0",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.2.4",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/d3-geo": "^3.1.0",

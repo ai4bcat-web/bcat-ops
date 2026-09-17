@@ -29,6 +29,7 @@ import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
 import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
+import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { carrierBlastApi } from './functions/carrier-blast-api/resource'
 import { carrierBlastWebhook } from './functions/carrier-blast-webhook/resource'
@@ -57,6 +58,7 @@ const backend = defineBackend({
   brokerLoadAlert,
   rateconParser,
   apptReport,
+  cashCheckinReminder,
   apptRequestEmailer,
   amazonDisputeIntake,
   tripScreenshotParser,
@@ -163,6 +165,27 @@ const apptReportRule = new Rule(apptReportFn.stack, 'ApptReportDailyRule', {
   description: 'Daily 3 PM Chicago unconfirmed-appointments digest to the global Slack channel',
 })
 apptReportRule.addTarget(new EventsLambdaTarget(apptReportFn))
+
+// ── cashCheckinReminder (Slack nudge the morning after each biweekly payroll) ──
+// Reads the "Last payroll date" + channel from the CashSettings row the Finance page
+// edits, and skips when a check-in for that payroll is already logged.
+const cashReminderFn = backend.cashCheckinReminder.resources.lambda as LambdaFunction
+const cashSettingsTable = backend.data.resources.tables['CashSettings']
+const cashCheckInTable = backend.data.resources.tables['CashCheckIn']
+backend.cashCheckinReminder.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'], resources: [cashSettingsTable.tableArn] })
+)
+backend.cashCheckinReminder.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [cashCheckInTable.tableArn] })
+)
+cashReminderFn.addEnvironment('SETTINGS_TABLE_NAME', cashSettingsTable.tableName)
+cashReminderFn.addEnvironment('CHECKIN_TABLE_NAME', cashCheckInTable.tableName)
+// 14:00 & 15:00 UTC daily — whichever lands on 09:00 America/Chicago posts (DST-proof).
+const cashReminderRule = new Rule(cashReminderFn.stack, 'CashCheckinReminderDailyRule', {
+  schedule: Schedule.cron({ minute: '0', hour: '14,15', day: '*', month: '*' }),
+  description: 'Slack reminder for the weekly cash check-in the morning after each payroll',
+})
+cashReminderRule.addTarget(new EventsLambdaTarget(cashReminderFn))
 
 // ── apptRequestEmailer (Appts page → facility appointment contact) ───────────
 backend.apptRequestEmailer.resources.lambda.addToRolePolicy(
