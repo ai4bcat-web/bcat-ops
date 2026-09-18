@@ -2,18 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import {
   Plus, Search, Trash2, Pencil, ExternalLink, FileWarning,
-  ChevronLeft, ChevronRight, RefreshCw, Link2,
+  ChevronLeft, ChevronRight, RefreshCw, Link2, Paperclip, MessageSquare,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { getDisputeEvidenceUrl } from '@/lib/apiClient'
 import { formatPayPeriod } from '@/lib/payPeriod'
-import type { AmazonDispute, DisputeEvidence, DisputeSource, DisputeStatus } from '@/types/dispute'
+import type { AmazonDispute, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
   thBase, tdBase, iconBtnStyle,
   inputStyle, btnGhost, btnPrimary, btnDanger, Field, FormSection, Modal,
   Pill,
 } from '@/features/maintenance/maintenanceUi'
+import { EvidenceGallery } from './EvidenceGallery'
+import { StatusUpdateModal, type DisputePatch } from './StatusUpdateModal'
+import { driverEvidence, responseEvidence } from './disputeEvidence'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -55,81 +57,28 @@ function sourceOf(d: AmazonDispute): DisputeSource {
   return (d.source as DisputeSource) ?? 'MANUAL'
 }
 
-// Pill-styled native select — the whole status chip is a dropdown you can change inline.
-function StatusSelect({
-  status, onChange, disabled,
-}: {
+// Pill-styled native select — the whole status chip is a dropdown. Picking a status opens
+// the update sheet so the Amazon reply is recorded with the change instead of after it.
+function StatusSelect({ status, onChange }: {
   status: DisputeStatus
   onChange: (next: DisputeStatus) => void
-  disabled?: boolean
 }) {
   const c = STATUS_STYLE[status]
   return (
     <select
       value={status}
-      disabled={disabled}
+      aria-label="Change status"
       onChange={(e) => onChange(e.target.value as DisputeStatus)}
-      title={disabled ? 'Saving…' : 'Change status'}
+      title="Change status"
       style={{
         appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
-        padding: '3px 10px', borderRadius: 999, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+        padding: '3px 10px', borderRadius: 999, border: 'none', cursor: 'pointer',
         fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', lineHeight: 1.4,
-        background: c.bg, color: c.fg, textAlign: 'center', opacity: disabled ? 0.6 : 1,
+        background: c.bg, color: c.fg, textAlign: 'center',
       }}
     >
       {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
     </select>
-  )
-}
-
-// ── Evidence list (private S3 links fetched on demand) ─────────────────────────
-
-function EvidenceList({ evidence }: { evidence: DisputeEvidence[] }) {
-  const [urls, setUrls] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState<Record<string, boolean>>({})
-
-  const open = async (item: DisputeEvidence) => {
-    const cached = urls[item.s3Key]
-    if (cached) { window.open(cached, '_blank', 'noopener,noreferrer'); return }
-    setLoading((l) => ({ ...l, [item.s3Key]: true }))
-    try {
-      const url = await getDisputeEvidenceUrl(item.s3Key)
-      setUrls((u) => ({ ...u, [item.s3Key]: url }))
-      window.open(url, '_blank', 'noopener,noreferrer')
-    } catch (err) {
-      toast.error(`Couldn't open ${item.fileName}: ${errorMessage(err)}`)
-    } finally {
-      setLoading((l) => ({ ...l, [item.s3Key]: false }))
-    }
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {evidence.map((item, i) => (
-        <button
-          key={`${item.s3Key}-${i}`}
-          type="button"
-          onClick={() => void open(item)}
-          disabled={loading[item.s3Key]}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
-            padding: '8px 10px', borderRadius: 8, border: '1px solid var(--ds-border)',
-            background: 'var(--ds-surface)', cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          <Pill tone={item.kind === 'CONFIRMATION' ? 'ok' : 'blue'}>{item.kind}</Pill>
-          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, color: 'var(--ds-t1)' }}>
-            {item.fileName}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
-            {(item.size / 1024 / 1024).toFixed(2)} MB
-          </span>
-          {loading[item.s3Key]
-            ? <RefreshCw size={14} className="animate-spin" style={{ color: 'var(--ds-t3)' }} />
-            : <ExternalLink size={14} style={{ color: 'var(--ds-blue)' }} />}
-        </button>
-      ))}
-    </div>
   )
 }
 
@@ -256,8 +205,8 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
         </FormSection>
 
         {isEdit && dispute.evidence && dispute.evidence.length > 0 && (
-          <FormSection title={`Uploaded Evidence (${dispute.evidence.length})`}>
-            <EvidenceList evidence={dispute.evidence} />
+          <FormSection title={`Attached Files (${dispute.evidence.length})`}>
+            <EvidenceGallery evidence={dispute.evidence} />
           </FormSection>
         )}
 
@@ -301,6 +250,19 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
                 </div>
               </Field>
             </div>
+            {dispute.amazonResponse && (
+              <Field label="Amazon's Response">
+                <div style={{ fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+                  {dispute.amazonResponse}
+                  {dispute.amazonResponseAt && (
+                    <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4 }}>
+                      Recorded {new Date(dispute.amazonResponseAt).toLocaleString()}
+                      {dispute.amazonResponseBy ? ` by ${dispute.amazonResponseBy}` : ''}
+                    </div>
+                  )}
+                </div>
+              </Field>
+            )}
             {dispute.externalId && (
               <Field label="External ID">
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t3)' }}>{dispute.externalId}</div>
@@ -323,13 +285,17 @@ export function DisputesPage() {
   const updateAmazonDispute = useAppStore((s) => s.updateAmazonDispute)
   const deleteAmazonDispute = useAppStore((s) => s.deleteAmazonDispute)
   const refreshAmazonDisputes = useAppStore((s) => s.refreshAmazonDisputes)
+  const currentUserEmail    = useAppStore((s) => s.currentUserEmail)
 
   const [search, setSearch]       = useState('')
   const [statusF, setStatusF]     = useState<StatusFilter>('ALL')
   const [newOpen, setNewOpen]     = useState(false)
   const [editItem, setEditItem]   = useState<AmazonDispute | null>(null)
   const [page, setPage]           = useState(1)
-  const [savingStatusId, setSavingStatusId] = useState<string | null>(null)
+  // A status change is where Amazon's reply belongs, so the row select opens the update
+  // sheet with that status preselected rather than writing a bare status on its own.
+  const [statusEdit, setStatusEdit] = useState<{ dispute: AmazonDispute; status: DisputeStatus } | null>(null)
+  const [evidenceView, setEvidenceView] = useState<AmazonDispute | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -388,20 +354,10 @@ export function DisputesPage() {
     { label: 'Recovered',      value: fmtMoney(recovered),           color: '#22c55e' },
   ]
 
-  async function changeStatus(d: AmazonDispute, next: DisputeStatus) {
-    if (next === statusOf(d) || savingStatusId) return
-    setSavingStatusId(d.id)
-    try {
-      await updateAmazonDispute(d.id, { status: next })
-      toast.success(`Marked ${STATUS_LABEL[next]}`)
-    } catch (err) {
-      toast.error(`Couldn't update status: ${errorMessage(err)}`)
-    } finally {
-      setSavingStatusId(null)
-    }
-  }
-
   const FILTERS: StatusFilter[] = ['ALL', ...STATUS_ORDER]
+  // The 30 s poll swaps row objects, so the open modals follow the live copy of the row.
+  const statusTarget = statusEdit && (amazonDisputes.find((d) => d.id === statusEdit.dispute.id) ?? statusEdit.dispute)
+  const evidenceTarget = evidenceView && (amazonDisputes.find((d) => d.id === evidenceView.id) ?? evidenceView)
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
@@ -503,20 +459,20 @@ export function DisputesPage() {
           ) : (
             <>
               <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
-                <table style={{ width: '100%', minWidth: 1240, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: 1288, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <colgroup>
                     <col style={{ width: 96 }} />
                     <col style={{ width: 110 }} />
                     <col style={{ width: 100 }} />
-                    <col style={{ width: 112 }} />
-                    <col style={{ width: 130 }} />
+                    <col style={{ width: 100 }} />
+                    <col style={{ width: 122 }} />
                     <col />
                     <col style={{ width: 100 }} />
-                    <col style={{ width: 108 }} />
-                    <col style={{ width: 108 }} />
-                    <col style={{ width: 64 }} />
+                    <col style={{ width: 100 }} />
+                    <col style={{ width: 104 }} />
+                    <col style={{ width: 104 }} />
                     <col style={{ width: 140 }} />
-                    <col style={{ width: 72 }} />
+                    <col style={{ width: 100 }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -529,7 +485,8 @@ export function DisputesPage() {
                     {paged.map((d) => {
                       const st = statusOf(d)
                       const src = sourceOf(d)
-                      const hasEvidence = (d.evidence?.length ?? 0) > 0
+                      const files = d.evidence ?? []
+                      const hasResponse = Boolean(d.amazonResponse) || responseEvidence(files).length > 0
                       return (
                         <tr key={d.id} className="maint-row">
                           <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{(d.submittedAt ?? d.createdAt).slice(0, 10)}</td>
@@ -546,16 +503,42 @@ export function DisputesPage() {
                           <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
                           <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
                           <td style={tdBase}>
-                            {hasEvidence
-                              ? <span style={{ fontSize: 11, color: 'var(--ds-blue)', fontWeight: 600 }}>{d.evidence!.length} file{d.evidence!.length === 1 ? '' : 's'}</span>
-                              : d.photoUrl
-                                ? <a href={d.photoUrl} target="_blank" rel="noreferrer" aria-label="View proof" style={{ color: 'var(--ds-blue)', display: 'inline-flex' }}><ExternalLink size={15} /></a>
-                                : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                            {/* A staff response screenshot must never push a legacy Drive
+                                link out of the column — a GOOGLE_FORM row's only proof. */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              {files.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setEvidenceView(d)}
+                                  title="View and download the attached files"
+                                  style={{
+                                    display: 'inline-flex', alignItems: 'center', gap: 5, padding: 0,
+                                    background: 'none', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+                                    color: 'var(--ds-blue)', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+                                  }}
+                                >
+                                  <Paperclip size={13} /> {files.length} file{files.length === 1 ? '' : 's'}
+                                </button>
+                              )}
+                              {d.photoUrl && (
+                                <a href={d.photoUrl} target="_blank" rel="noreferrer" aria-label="View proof" title="Legacy Drive proof" style={{ color: 'var(--ds-blue)', display: 'inline-flex' }}><ExternalLink size={15} /></a>
+                              )}
+                              {files.length === 0 && !d.photoUrl && <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                            </div>
                           </td>
                           <td style={tdBase}>
-                            <StatusSelect status={st} onChange={(next) => void changeStatus(d, next)} disabled={savingStatusId === d.id} />
+                            <StatusSelect status={st} onChange={(next) => setStatusEdit({ dispute: d, status: next })} />
                           </td>
                           <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button
+                              type="button"
+                              aria-label="Record Amazon response"
+                              title={d.amazonResponse ? `Amazon: ${d.amazonResponse.slice(0, 160)}` : 'Record status, Amazon response and screenshot'}
+                              onClick={() => setStatusEdit({ dispute: d, status: st })}
+                              style={{ ...iconBtnStyle, color: hasResponse ? 'var(--ds-blue)' : 'var(--ds-t3)' }}
+                            >
+                              <MessageSquare size={13} />
+                            </button>
                             <button aria-label="Edit dispute" disabled={deletingId === d.id} onClick={() => setEditItem(d)} style={{ ...iconBtnStyle, color: 'var(--ds-t3)', opacity: deletingId === d.id ? 0.5 : 1 }}><Pencil size={13} /></button>
                             <button
                               aria-label="Delete dispute"
@@ -631,6 +614,40 @@ export function DisputesPage() {
           onDelete={async () => { await deleteAmazonDispute(editItem.id) }}
           onClose={() => setEditItem(null)}
         />
+      )}
+      {statusEdit && statusTarget && (
+        <StatusUpdateModal
+          dispute={statusTarget}
+          initialStatus={statusEdit.status}
+          statusOptions={STATUS_ORDER}
+          statusLabel={STATUS_LABEL}
+          actorEmail={currentUserEmail}
+          onSave={async (patch: DisputePatch) => { await updateAmazonDispute(statusEdit.dispute.id, patch) }}
+          onClose={() => setStatusEdit(null)}
+        />
+      )}
+      {evidenceTarget && (
+        <Modal
+          title={`Files — ${evidenceTarget.driverName}${evidenceTarget.tripNumber ? ` · ${evidenceTarget.tripNumber}` : ''}`}
+          onClose={() => setEvidenceView(null)}
+          footer={
+            <>
+              <span />
+              <button type="button" onClick={() => setEvidenceView(null)} style={btnGhost}>Close</button>
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <FormSection title={`Driver Upload (${driverEvidence(evidenceTarget.evidence).length})`}>
+              <EvidenceGallery evidence={driverEvidence(evidenceTarget.evidence)} />
+            </FormSection>
+            {responseEvidence(evidenceTarget.evidence).length > 0 && (
+              <FormSection title={`Amazon Response (${responseEvidence(evidenceTarget.evidence).length})`}>
+                <EvidenceGallery evidence={responseEvidence(evidenceTarget.evidence)} />
+              </FormSection>
+            )}
+          </div>
+        </Modal>
       )}
     </div>
   )

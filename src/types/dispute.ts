@@ -5,7 +5,9 @@
 
 export type DisputeStatus = 'PENDING' | 'POSTED' | 'PAID' | 'REJECTED'
 export type DisputeSource = 'GOOGLE_FORM' | 'MANUAL' | 'DRIVER_PORTAL'
-export type DisputeEvidenceKind = 'CONFIRMATION' | 'PHOTO'
+// CONFIRMATION/PHOTO come from the driver portal; AMAZON_RESPONSE is a staff upload of
+// what Amazon replied (screenshot or PDF), stored under dispute-responses/{disputeId}/.
+export type DisputeEvidenceKind = 'CONFIRMATION' | 'PHOTO' | 'AMAZON_RESPONSE'
 
 export interface DisputeEvidence {
   s3Key: string
@@ -25,13 +27,16 @@ export interface AmazonDispute {
   amountRequested?: number | null   // dollars requested from Amazon
   description?: string | null
   photoUrl?: string | null          // legacy Google Drive proof link
-  evidence?: DisputeEvidence[] | null // portal-uploaded proof files (AWSJSON)
+  evidence?: DisputeEvidence[] | null // portal-uploaded proof + staff response screenshots (AWSJSON)
   status?: DisputeStatus | null
   resolvedAmount?: number | null    // dollars actually recovered when PAID
   submittedAt?: string | null       // ISO — form timestamp
   source?: DisputeSource | null
   externalId?: string | null
   notes?: string | null
+  amazonResponse?: string | null    // what Amazon replied, recorded by staff
+  amazonResponseAt?: string | null  // ISO — when the response was recorded
+  amazonResponseBy?: string | null  // staff email that recorded it
   createdAt: string
   updatedAt: string
 }

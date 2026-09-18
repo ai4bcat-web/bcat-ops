@@ -1134,18 +1134,39 @@ export function subscribeToDriverAvailabilityChanges(callbacks: {
 
 import type { AmazonDispute, DisputeEvidence } from '@/types/dispute'
 
-const DISPUTE_FIELDS = `
+const DISPUTE_BASE_FIELDS = `
   id driverName tripNumber shipmentDate payPeriod amountPaid amountRequested
-  description photoUrl evidence status resolvedAmount submittedAt source externalId
+  description photoUrl status resolvedAmount submittedAt source externalId
   notes createdAt updatedAt
 `
 
-let disputesHaveEvidence = true
-const disputeFields = () =>
-  disputesHaveEvidence ? DISPUTE_FIELDS : DISPUTE_FIELDS.replace(/\s+evidence/g, '')
+// Fields added after an earlier deploy. During the ~2 min Amplify rollout the live schema
+// can still be missing them, and AppSync fails the WHOLE query on an unknown selection —
+// which used to empty the disputes page. A read drops exactly the fields the error names
+// and retries; the next read asks for everything again, so it heals itself once deployed.
+const DISPUTE_PENDING_FIELDS = ['evidence', 'amazonResponse', 'amazonResponseAt', 'amazonResponseBy'] as const
 
-function isEvidenceFieldUndefined(err: unknown): boolean {
-  return /'evidence'/i.test(safeStringify(err))
+const disputeFields = (dropped: ReadonlySet<string> = new Set()) =>
+  [DISPUTE_BASE_FIELDS, ...DISPUTE_PENDING_FIELDS.filter((f) => !dropped.has(f))].join(' ')
+
+/** Newer dispute fields an AppSync error reports as undefined (backend predates them). */
+export function undefinedDisputeFields(err: unknown): string[] {
+  const text = safeStringify(err)
+  return DISPUTE_PENDING_FIELDS.filter((f) => text.includes(`'${f}'`))
+}
+
+/**
+ * Writes never silently drop a field: losing the Amazon response text staff just typed
+ * while reporting success is worse than refusing the save.
+ */
+function rethrowDisputeWriteError(err: unknown): never {
+  const missing = undefinedDisputeFields(err)
+  if (missing.length > 0) {
+    throw new Error(
+      `The backend hasn't deployed ${missing.join(', ')} yet — nothing was saved. Retry once the Amplify deploy finishes.`,
+    )
+  }
+  throw err
 }
 
 function parseEvidence(raw: unknown): DisputeEvidence[] | null {
@@ -1174,12 +1195,12 @@ function serializeDisputeInput<T extends { evidence?: unknown }>(input: T): T {
 }
 
 export async function listAmazonDisputes(): Promise<AmazonDispute[]> {
-  const run = async () => {
+  const run = async (dropped: ReadonlySet<string>) => {
     const items: AmazonDispute[] = []
     let nextToken: string | null = null
     do {
       const result = await client.graphql({
-        query: `query ListAmazonDisputes($nextToken: String) { listAmazonDisputes(limit: 1000, nextToken: $nextToken) { items { ${disputeFields()} } nextToken } }`,
+        query: `query ListAmazonDisputes($nextToken: String) { listAmazonDisputes(limit: 1000, nextToken: $nextToken) { items { ${disputeFields(dropped)} } nextToken } }`,
         variables: { nextToken },
       }) as {
         data: {
@@ -1196,39 +1217,47 @@ export async function listAmazonDisputes(): Promise<AmazonDispute[]> {
     return items
   }
 
-  try {
-    const items = await run()
-    return items.map(normalizeDispute)
-  } catch (err) {
-    if (disputesHaveEvidence && isEvidenceFieldUndefined(err)) {
-      console.warn("[apiClient] backend has no 'evidence' field yet — querying disputes without it until deploy")
-      disputesHaveEvidence = false
-      const items = await run()
+  const dropped = new Set<string>()
+  for (;;) {
+    try {
+      const items = await run(dropped)
       return items.map(normalizeDispute)
+    } catch (err) {
+      const missing = undefinedDisputeFields(err).filter((f) => !dropped.has(f))
+      if (missing.length === 0) throw err
+      console.warn(`[apiClient] backend has no ${missing.join(', ')} on AmazonDispute yet — querying without them until deploy`)
+      for (const f of missing) dropped.add(f)
     }
-    throw err
   }
 }
 
 export async function createAmazonDispute(
   input: Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<AmazonDispute> {
-  const result = await client.graphql({
-    query: `mutation CreateAmazonDispute($input: CreateAmazonDisputeInput!) { createAmazonDispute(input: $input) { ${disputeFields()} } }`,
-    variables: { input: serializeDisputeInput(input) },
-  }) as { data: { createAmazonDispute: AmazonDispute } }
-  return normalizeDispute(result.data.createAmazonDispute)
+  try {
+    const result = await client.graphql({
+      query: `mutation CreateAmazonDispute($input: CreateAmazonDisputeInput!) { createAmazonDispute(input: $input) { ${disputeFields()} } }`,
+      variables: { input: serializeDisputeInput(input) },
+    }) as { data: { createAmazonDispute: AmazonDispute } }
+    return normalizeDispute(result.data.createAmazonDispute)
+  } catch (err) {
+    rethrowDisputeWriteError(err)
+  }
 }
 
 export async function updateAmazonDispute(
   id: string,
   patch: Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>,
 ): Promise<AmazonDispute> {
-  const result = await client.graphql({
-    query: `mutation UpdateAmazonDispute($input: UpdateAmazonDisputeInput!) { updateAmazonDispute(input: $input) { ${disputeFields()} } }`,
-    variables: { input: serializeDisputeInput({ id, ...patch }) },
-  }) as { data: { updateAmazonDispute: AmazonDispute } }
-  return normalizeDispute(result.data.updateAmazonDispute)
+  try {
+    const result = await client.graphql({
+      query: `mutation UpdateAmazonDispute($input: UpdateAmazonDisputeInput!) { updateAmazonDispute(input: $input) { ${disputeFields()} } }`,
+      variables: { input: serializeDisputeInput({ id, ...patch }) },
+    }) as { data: { updateAmazonDispute: AmazonDispute } }
+    return normalizeDispute(result.data.updateAmazonDispute)
+  } catch (err) {
+    rethrowDisputeWriteError(err)
+  }
 }
 
 export async function deleteAmazonDispute(id: string): Promise<void> {
@@ -1241,6 +1270,22 @@ export async function deleteAmazonDispute(id: string): Promise<void> {
 export async function getDisputeEvidenceUrl(key: string): Promise<string> {
   const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
   return result.url.toString()
+}
+
+/**
+ * Staff upload of Amazon's reply. Driver uploads live under dispute-proofs/ and staff have
+ * no write grant there — keeping Amazon screenshots in their own prefix leaves the driver's
+ * evidence untouchable while staff can replace their own.
+ */
+export async function uploadDisputeResponseImage(disputeId: string, file: File): Promise<string> {
+  const safeName = file.name.replace(/[^\w.-]+/g, '_').slice(-80) || 'amazon-response'
+  const key = `dispute-responses/${disputeId}/${Date.now()}-${safeName}`
+  await uploadData({ path: key, data: file, options: { contentType: file.type || 'application/octet-stream' } }).result
+  return key
+}
+
+export async function deleteDisputeResponseImage(key: string): Promise<void> {
+  await remove({ path: key })
 }
 
 // ── S3 rate confirmations ─────────────────────────────────────────────────────

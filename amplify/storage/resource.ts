@@ -48,5 +48,12 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read']),
     ],
+    // Amazon's reply to a dispute, screenshotted/uploaded by staff from /disputes.
+    // Keyed dispute-responses/{disputeId}/… — staff own these, so unlike the driver
+    // uploads above they can be replaced and removed.
+    'dispute-responses/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
   }),
 })
