@@ -172,7 +172,8 @@ function validateFile(file: File, allowPdf: boolean, prefix: string): string | n
     return `${prefix} "${file.name}" exceeds the 10 MB limit.`
   }
   const type = fileContentType(file)
-  const ok = type.startsWith('image/') || (allowPdf && type === PDF_TYPE)
+  // SVG excluded to match the Lambda: staff open evidence from a signed URL, where a scripted SVG would run.
+  const ok = (type.startsWith('image/') && !type.startsWith('image/svg')) || (allowPdf && type === PDF_TYPE)
   if (!ok) {
     return allowPdf
       ? `${prefix} "${file.name}" must be an image (screenshot, photo) or a PDF.`
@@ -990,6 +991,8 @@ function FileDrop({
             take(e.target.files)
             e.target.value = '' // allow re-picking the same file after Remove
           }}
+          // A <label htmlFor> click lands here and would bubble to the zone's onClick -> second picker.
+          onClick={(e) => e.stopPropagation()}
           className="sr-only"
         />
         <div
@@ -1039,8 +1042,12 @@ function FileDrop({
 }
 
 function PhotoPreview({ file }: { file: File }) {
-  if (!fileContentType(file).startsWith('image/')) return <FileText size={14} style={{ color: 'var(--ds-t3)' }} />
-  const url = URL.createObjectURL(file)
+  // Browsers can't decode every image type we accept (HEIC on Chrome/Firefox); fall back to an icon.
+  const [url, setUrl] = useState<string | null>(() =>
+    fileContentType(file).startsWith('image/') ? URL.createObjectURL(file) : null,
+  )
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
+  if (!url) return <FileText size={14} style={{ color: 'var(--ds-t3)' }} />
   return (
     <img
       src={url}
@@ -1048,7 +1055,7 @@ function PhotoPreview({ file }: { file: File }) {
       width={32}
       height={32}
       className="rounded object-cover"
-      onLoad={() => URL.revokeObjectURL(url)}
+      onError={() => setUrl(null)}
     />
   )
 }

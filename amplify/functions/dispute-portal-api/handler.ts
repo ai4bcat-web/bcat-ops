@@ -29,9 +29,11 @@ const MAX_BODY_BYTES = 1 * 1024 * 1024
 const MAX_DESCRIPTION_LENGTH = 4000
 const MAX_NAME_TRIP_LENGTH = 200
 
-// Any image (PNG/JPEG/HEIC/WEBP/...) is fine; the confirmation may also be a PDF.
-const IMAGE_TYPE = /^image\/[a-z0-9.+-]+$/
+// Any raster image (PNG/JPEG/HEIC/WEBP/...) is fine; the confirmation may also be a PDF.
+// SVG is excluded: staff open evidence from a signed S3 URL, where a scripted SVG would run.
+const IMAGE_TYPE = /^image\/(?!svg)[a-z0-9.+-]+$/
 const PDF_TYPE = 'application/pdf'
+const KEY_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'heic', 'heif', 'bmp', 'tif', 'tiff', 'avif', 'pdf']
 const VALID_STATUSES: Record<string, true> = {
   PENDING: true,
   POSTED: true,
@@ -147,10 +149,10 @@ function requireUuid(value: unknown, name: string): string {
 
 function safeExtension(fileName: string, contentType: string): string {
   const fromName = fileName.match(/\.([a-zA-Z0-9]{1,5})$/)?.[1].toLowerCase()
-  if (fromName) return fromName === 'jpeg' ? 'jpg' : fromName
+  if (fromName && KEY_EXTENSIONS.includes(fromName)) return fromName === 'jpeg' ? 'jpg' : fromName
   if (contentType === PDF_TYPE) return 'pdf'
-  const subtype = contentType.split('/')[1]?.replace(/[^a-z0-9]/g, '')
-  return subtype ? subtype.slice(0, 5) : 'bin'
+  const subtype = contentType.split('/')[1]?.replace(/[^a-z0-9]/g, '') ?? ''
+  return KEY_EXTENSIONS.includes(subtype) ? subtype : 'bin'
 }
 
 /** Reject bogus pagination tokens (must be a base64 JSON object like {"id":"..."}). */

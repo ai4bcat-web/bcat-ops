@@ -180,11 +180,13 @@ describe('dispute-portal-api', () => {
       })
       expect(() => validateSubmission(heic('CONFIRMATION'))).not.toThrow()
       expect(() => validateSubmission(heic('PHOTO'))).not.toThrow()
-      const zip = {
-        ...validSubmitPayload(id),
-        evidence: [{ ...validEvidence(id, 'CONFIRMATION'), contentType: 'application/zip' }],
+      for (const contentType of ['application/zip', 'image/svg+xml']) {
+        const bad = {
+          ...validSubmitPayload(id),
+          evidence: [{ ...validEvidence(id, 'CONFIRMATION'), contentType }],
+        }
+        expect(() => validateSubmission(bad)).toThrow('Invalid contentType for CONFIRMATION')
       }
-      expect(() => validateSubmission(zip)).toThrow('Invalid contentType for CONFIRMATION')
     })
 
     it('rejects evidence keys outside the submission prefix', () => {
