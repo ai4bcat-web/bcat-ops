@@ -29,8 +29,9 @@ const MAX_BODY_BYTES = 1 * 1024 * 1024
 const MAX_DESCRIPTION_LENGTH = 4000
 const MAX_NAME_TRIP_LENGTH = 200
 
-const CONFIRMATION_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf']
-const PHOTO_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+// Any image (PNG/JPEG/HEIC/WEBP/...) is fine; the confirmation may also be a PDF.
+const IMAGE_TYPE = /^image\/[a-z0-9.+-]+$/
+const PDF_TYPE = 'application/pdf'
 const VALID_STATUSES: Record<string, true> = {
   PENDING: true,
   POSTED: true,
@@ -145,18 +146,11 @@ function requireUuid(value: unknown, name: string): string {
 }
 
 function safeExtension(fileName: string, contentType: string): string {
-  const match = fileName.match(/\.([a-zA-Z0-9]+)$/)
-  if (match) {
-    const ext = match[1].toLowerCase()
-    if (['png', 'jpg', 'jpeg', 'webp', 'pdf'].includes(ext)) return ext === 'jpeg' ? 'jpg' : ext
-  }
-  switch (contentType) {
-    case 'image/png': return 'png'
-    case 'image/jpeg': return 'jpg'
-    case 'image/webp': return 'webp'
-    case 'application/pdf': return 'pdf'
-    default: return 'bin'
-  }
+  const fromName = fileName.match(/\.([a-zA-Z0-9]{1,5})$/)?.[1].toLowerCase()
+  if (fromName) return fromName === 'jpeg' ? 'jpg' : fromName
+  if (contentType === PDF_TYPE) return 'pdf'
+  const subtype = contentType.split('/')[1]?.replace(/[^a-z0-9]/g, '')
+  return subtype ? subtype.slice(0, 5) : 'bin'
 }
 
 /** Reject bogus pagination tokens (must be a base64 JSON object like {"id":"..."}). */
@@ -186,8 +180,8 @@ export function validateListToken(nextToken: unknown): Record<string, string> | 
 }
 
 function requirementFileContentType(kind: 'CONFIRMATION' | 'PHOTO', contentType: string): boolean {
-  const allowed = kind === 'CONFIRMATION' ? CONFIRMATION_CONTENT_TYPES : PHOTO_CONTENT_TYPES
-  return allowed.includes(contentType)
+  if (IMAGE_TYPE.test(contentType.toLowerCase())) return true
+  return kind === 'CONFIRMATION' && contentType === PDF_TYPE
 }
 
 function validateEvidenceItem(raw: unknown, submissionId: string, index: number): EvidenceItem {
@@ -416,8 +410,7 @@ async function handleUpload(payload: Record<string, unknown>) {
   const size = typeof payload.size === 'number' ? payload.size : Number(payload.size)
   const kind = typeof payload.kind === 'string' ? (payload.kind as 'CONFIRMATION' | 'PHOTO') : undefined
   if (kind !== 'CONFIRMATION' && kind !== 'PHOTO') throw new PortalError(400, 'kind must be CONFIRMATION or PHOTO')
-  const allowed = kind === 'CONFIRMATION' ? CONFIRMATION_CONTENT_TYPES : PHOTO_CONTENT_TYPES
-  if (!allowed.includes(contentType)) throw new PortalError(400, 'Unsupported file type')
+  if (!requirementFileContentType(kind, contentType)) throw new PortalError(400, 'Unsupported file type')
   if (!Number.isInteger(size) || size <= 0 || size > MAX_FILE_BYTES) {
     throw new PortalError(400, `size must be a positive integer <= ${MAX_FILE_BYTES}`)
   }

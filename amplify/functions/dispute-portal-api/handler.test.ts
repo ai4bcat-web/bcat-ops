@@ -170,12 +170,21 @@ describe('dispute-portal-api', () => {
       expect(() => validateSubmission(payload)).toThrow('At most 5 photos are allowed')
     })
 
-    it('rejects wrong content type for a photo', () => {
-      const payload = {
+    it('accepts any image type (phone HEIC) for both kinds and rejects non-image files', () => {
+      const heic = (kind: 'CONFIRMATION' | 'PHOTO') => ({
         ...validSubmitPayload(id),
-        evidence: [{ ...validEvidence(id, 'PHOTO'), contentType: 'application/pdf' }],
+        evidence: [
+          { ...validEvidence(id, 'CONFIRMATION'), contentType: kind === 'CONFIRMATION' ? 'image/heic' : 'application/pdf' },
+          ...(kind === 'PHOTO' ? [{ ...validEvidence(id, 'PHOTO'), contentType: 'image/heic' }] : []),
+        ],
+      })
+      expect(() => validateSubmission(heic('CONFIRMATION'))).not.toThrow()
+      expect(() => validateSubmission(heic('PHOTO'))).not.toThrow()
+      const zip = {
+        ...validSubmitPayload(id),
+        evidence: [{ ...validEvidence(id, 'CONFIRMATION'), contentType: 'application/zip' }],
       }
-      expect(() => validateSubmission(payload)).toThrow('Invalid contentType for PHOTO')
+      expect(() => validateSubmission(zip)).toThrow('Invalid contentType for CONFIRMATION')
     })
 
     it('rejects evidence keys outside the submission prefix', () => {

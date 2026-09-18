@@ -104,14 +104,15 @@ export async function submitDispute(input: SubmitInput): Promise<{ ok: true; id:
   return post('submit', input)
 }
 
-/** Upload a file to the presigned S3 URL. The If-None-Match: * header is sent
+/** Upload a file to the presigned S3 URL. `contentType` must be the value the URL was
+ *  signed for (the browser's file.type may be empty). The If-None-Match: * header is sent
  *  so retries can be idempotent when the backend signs that header. */
-export async function uploadFileToS3(file: File, uploadUrl: string): Promise<void> {
+export async function uploadFileToS3(file: File, uploadUrl: string, contentType: string): Promise<void> {
   const res = await fetch(uploadUrl, {
     method: 'PUT',
     body: file,
     headers: {
-      'content-type': file.type || 'application/octet-stream',
+      'content-type': contentType,
       'content-length': String(file.size),
       'If-None-Match': '*',
     },

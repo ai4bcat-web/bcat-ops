@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { AlertTriangle, CheckCircle2, FileText, Loader2, RefreshCw, Search, Upload } from 'lucide-react'
 import {
   portalAvailable,
@@ -18,8 +18,21 @@ const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
 const CONTACT_EMAIL = 'onboarding@bcatcorp.com'
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MiB
-const CONFIRM_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'application/pdf']
-const PHOTO_TYPES = ['image/png', 'image/jpeg', 'image/webp']
+const PDF_TYPE = 'application/pdf'
+// Browsers report no MIME type for some formats (HEIC on desktop Chrome, files from
+// unusual apps) - fall back to the extension so a real photo is never rejected.
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif',
+}
+
+/** MIME type to send for a picked file: the browser's, else inferred from the extension. */
+function fileContentType(file: File): string {
+  if (file.type) return file.type
+  const ext = file.name.match(/\.([a-zA-Z0-9]+)$/)?.[1].toLowerCase() ?? ''
+  if (ext === 'pdf') return PDF_TYPE
+  return IMAGE_EXTENSIONS[ext] ?? ''
+}
 const PAY_PERIOD_WEEKS = 104
 const POLL_MS = 30000
 
@@ -35,29 +48,17 @@ const cardStyle: CSSProperties = {
   border: '1px solid var(--ds-border)',
   borderRadius: 12,
   boxShadow: 'var(--sh-sm)',
-  padding: 18,
-}
-
-const inputStyle: CSSProperties = {
-  width: '100%',
-  borderRadius: 8,
-  border: '1px solid var(--ds-border)',
-  padding: '11px 12px',
-  fontSize: 15,
-  background: 'var(--ds-surface)',
-  color: 'var(--ds-t1)',
-  outline: 'none',
-  minHeight: 44,
+  padding: 14,
 }
 
 const btnPrimary: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  gap: 8,
+  gap: 7,
   borderRadius: 9,
-  padding: '11px 20px',
-  fontSize: 15,
+  padding: '11px 22px',
+  fontSize: 14,
   fontWeight: 600,
   background: 'var(--ds-blue)',
   color: '#fff',
@@ -65,6 +66,20 @@ const btnPrimary: CSSProperties = {
   cursor: 'pointer',
   minHeight: 44,
 }
+
+const inputStyle: CSSProperties = {
+  width: '100%',
+  borderRadius: 9,
+  border: '1px solid var(--ds-border)',
+  padding: '10px 12px',
+  fontSize: 14,
+  background: 'var(--ds-surface)',
+  color: 'var(--ds-t1)',
+  outline: 'none',
+  minHeight: 44,
+}
+
+const inputClass = 'focus:border-[var(--ds-blue)] focus:ring-2 focus:ring-[var(--ds-blue)] focus:outline-none'
 
 const chipBase: CSSProperties = {
   display: 'inline-flex',
@@ -76,6 +91,18 @@ const chipBase: CSSProperties = {
   fontWeight: 600,
   whiteSpace: 'nowrap',
 }
+
+const sectionLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  color: 'var(--ds-t3)',
+}
+
+// Centered content column — matches DriverPortalPage (720px, generous padding).
+const PORTAL_COL = 'w-full'
+const PORTAL_MAXW: CSSProperties = { maxWidth: 720 }
 
 function initialsOf(name: string): string {
   return (
@@ -140,15 +167,16 @@ function validateForm(
   return null
 }
 
-function validateFile(file: File, allowedTypes: string[], prefix: string): string | null {
+function validateFile(file: File, allowPdf: boolean, prefix: string): string | null {
   if (file.size > MAX_FILE_SIZE) {
     return `${prefix} "${file.name}" exceeds the 10 MB limit.`
   }
-  if (!allowedTypes.includes(file.type)) {
-    if (allowedTypes.includes('application/pdf')) {
-      return `${prefix} "${file.name}" must be PNG, JPEG, WEBP, or PDF.`
-    }
-    return `${prefix} "${file.name}" must be PNG, JPEG, or WEBP.`
+  const type = fileContentType(file)
+  const ok = type.startsWith('image/') || (allowPdf && type === PDF_TYPE)
+  if (!ok) {
+    return allowPdf
+      ? `${prefix} "${file.name}" must be an image (screenshot, photo) or a PDF.`
+      : `${prefix} "${file.name}" must be an image.`
   }
   return null
 }
@@ -248,14 +276,12 @@ export function DriverDisputesPage() {
   }, [boardItems, boardSearch])
 
   // ── Form handlers ---------------------------------------------------------
-  const onConfirmationChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null
+  const onConfirmationChange = (file: File | null) => {
     setSubmitError(null)
     setConfirmation(file)
   }
 
-  const onPhotosChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const incoming = Array.from(e.target.files ?? [])
+  const onPhotosChange = (incoming: File[]) => {
     setSubmitError(null)
     setPhotos((prev) => [...prev, ...incoming].slice(0, 5))
   }
@@ -296,7 +322,7 @@ export function DriverDisputesPage() {
       payPeriodOptions,
     )
     if (confirmation) {
-      const fileErr = validateFile(confirmation, CONFIRM_TYPES, 'Confirmation file')
+      const fileErr = validateFile(confirmation, true, 'Confirmation file')
       if (!validation && fileErr) {
         setSubmitError(fileErr)
         setSubmitting(false)
@@ -305,7 +331,7 @@ export function DriverDisputesPage() {
     }
     let photoErr: string | null = null
     for (const photo of photos) {
-      const err = validateFile(photo, PHOTO_TYPES, 'Photo')
+      const err = validateFile(photo, false, 'Photo')
       if (err) {
         photoErr = err
         break
@@ -324,41 +350,15 @@ export function DriverDisputesPage() {
     }
 
     try {
+      const uploadEvidence = async (file: File, kind: ProofKind): Promise<EvidenceFile> => {
+        const contentType = fileContentType(file)
+        const meta = await getUploadUrl({ submissionId, fileName: file.name, contentType, size: file.size, kind })
+        await uploadFileToS3(file, meta.uploadUrl, contentType)
+        return { s3Key: meta.s3Key, fileName: file.name, contentType, size: file.size, kind }
+      }
       const evidence: EvidenceFile[] = []
-      if (confirmation) {
-        const meta = await getUploadUrl({
-          submissionId,
-          fileName: confirmation.name,
-          contentType: confirmation.type || 'application/octet-stream',
-          size: confirmation.size,
-          kind: 'CONFIRMATION' as ProofKind,
-        })
-        await uploadFileToS3(confirmation, meta.uploadUrl)
-        evidence.push({
-          s3Key: meta.s3Key,
-          fileName: confirmation.name,
-          contentType: confirmation.type || 'application/octet-stream',
-          size: confirmation.size,
-          kind: 'CONFIRMATION',
-        })
-      }
-      for (const photo of photos) {
-        const meta = await getUploadUrl({
-          submissionId,
-          fileName: photo.name,
-          contentType: photo.type || 'application/octet-stream',
-          size: photo.size,
-          kind: 'PHOTO' as ProofKind,
-        })
-        await uploadFileToS3(photo, meta.uploadUrl)
-        evidence.push({
-          s3Key: meta.s3Key,
-          fileName: photo.name,
-          contentType: photo.type || 'application/octet-stream',
-          size: photo.size,
-          kind: 'PHOTO',
-        })
-      }
+      if (confirmation) evidence.push(await uploadEvidence(confirmation, 'CONFIRMATION'))
+      for (const photo of photos) evidence.push(await uploadEvidence(photo, 'PHOTO'))
 
       const result = await submitDispute({
         submissionId,
@@ -389,15 +389,15 @@ export function DriverDisputesPage() {
   if (!portalAvailable) {
     return (
       <Shell driverName={driverName}>
-        <div className="mx-auto max-w-md px-4 py-16 text-center">
-          <AlertTriangle className="mx-auto mb-4" size={40} style={{ color: 'var(--ds-amber)' }} />
-          <h1 className="mb-2 text-xl font-semibold" style={{ color: 'var(--ds-t1)' }}>
+        <div className="max-w-md text-center" style={{ marginLeft: 'auto', marginRight: 'auto', paddingLeft: 16, paddingRight: 16, paddingTop: 64, paddingBottom: 64 }}>
+          <AlertTriangle size={40} style={{ color: 'var(--ds-amber)', marginLeft: 'auto', marginRight: 'auto', marginBottom: 16 }} />
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--ds-t1)', marginBottom: 8 }}>
             Dispute portal unavailable
           </h1>
           <p className="text-sm" style={{ color: 'var(--ds-t2)' }}>
             This page can't connect right now. The endpoint is not configured on this preview.
           </p>
-          <p className="mt-4 text-sm" style={{ color: 'var(--ds-muted-soft)' }}>
+          <p className="text-sm" style={{ color: 'var(--ds-muted-soft)', marginTop: 16 }}>
             Staff can reach us at{' '}
             <a href={`mailto:${CONTACT_EMAIL}`} style={{ color: 'var(--ds-blue)' }}>
               {CONTACT_EMAIL}
@@ -410,211 +410,205 @@ export function DriverDisputesPage() {
 
   return (
     <Shell driverName={driverName}>
-      <div className="mx-auto w-full px-4 py-6" style={{ maxWidth: 760 }}>
-        <section aria-labelledby="dispute-form-title" style={cardStyle}>
-          <h1
-            id="dispute-form-title"
-            className="flex items-center gap-2 text-lg font-semibold"
-            style={{ color: 'var(--ds-t1)' }}
-          >
-            <FileText size={20} /> Submit an Amazon pay dispute
+      <div className={PORTAL_COL} style={{ ...PORTAL_MAXW, marginLeft: 'auto', marginRight: 'auto', paddingLeft: 16, paddingRight: 16, paddingTop: 24, paddingBottom: 24 }}>
+        <div style={{ marginBottom: 20 }}>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>
+            Submit an Amazon pay dispute
           </h1>
-          <p className="mb-4 text-sm" style={{ color: 'var(--ds-t2)', lineHeight: 1.5 }}>
-            If Amazon paid less than expected on a trip, fill this out and upload the trip
-            confirmation email. <strong>Amounts and evidence remain staff-only.</strong>{' '}
-            <a href="/disputes" className="underline" style={{ color: 'var(--ds-t3)' }}>
-              Staff view
-            </a>
+          <p className="text-sm" style={{ color: 'var(--ds-t3)', marginTop: 4 }}>
+            If Amazon paid less than expected, fill this out and upload your trip confirmation email.
+            Amounts and evidence remain staff-only.
           </p>
+        </div>
+
+        <section aria-labelledby="dispute-form-title" style={cardStyle}>
+          <h2 id="dispute-form-title" className="sr-only">
+            Dispute form
+          </h2>
 
           {submitSuccessId && (
             <div
               role="status"
-              className="mb-4 rounded-lg p-3 text-sm font-medium"
-              style={{ background: 'var(--ds-green-bg)', color: 'var(--ds-green)' }}
+              className="flex items-center gap-2 rounded-lg text-sm font-medium"
+              style={{ background: 'var(--ds-green-bg)', color: 'var(--ds-green)', marginBottom: 12, padding: 12 }}
             >
-              <CheckCircle2 size={15} className="inline align-text-bottom mr-1" />
-              Dispute submitted. Reference: <span className="font-mono">{submitSuccessId}</span>
+              <CheckCircle2 size={16} />
+              <span>
+                Dispute submitted. Reference: <span className="font-mono">{submitSuccessId}</span>
+              </span>
             </div>
           )}
 
           {submitError && (
             <div
               role="alert"
-              className="mb-4 rounded-lg p-3 text-sm font-medium"
-              style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)' }}
+              className="flex items-center gap-2 rounded-lg text-sm font-medium"
+              style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', marginBottom: 12, padding: 12 }}
             >
-              <AlertTriangle size={15} className="inline align-text-bottom mr-1" />
-              {submitError}
+              <AlertTriangle size={16} />
+              <span>{submitError}</span>
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Driver name *" htmlFor="driverName">
-              <input
-                id="driverName"
-                type="text"
-                value={driverName}
-                onChange={(e) => setDriverName(e.target.value)}
-                placeholder="Jane Driver"
-                style={inputStyle}
-                required
-              />
-            </Field>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ ...sectionLabel, marginBottom: 12 }}>
+              Trip
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Driver name *" htmlFor="driverName">
+                <input
+                  id="driverName"
+                  type="text"
+                  value={driverName}
+                  onChange={(e) => setDriverName(e.target.value)}
+                  placeholder="Jane Driver"
+                  style={inputStyle}
+                  className={inputClass}
+                  required
+                />
+              </Field>
 
-            <Field label="Trip number *" htmlFor="tripNumber">
-              <input
-                id="tripNumber"
-                type="text"
-                value={tripNumber}
-                onChange={(e) => setTripNumber(e.target.value)}
-                placeholder="e.g. 1117J7TV9"
-                style={inputStyle}
-                required
-              />
-            </Field>
+              <Field label="Trip number *" htmlFor="tripNumber">
+                <input
+                  id="tripNumber"
+                  type="text"
+                  value={tripNumber}
+                  onChange={(e) => setTripNumber(e.target.value)}
+                  placeholder="e.g. 1117J7TV9"
+                  style={inputStyle}
+                  className={inputClass}
+                  required
+                />
+              </Field>
 
-            <Field label="Pay period (Sunday–Saturday) *" htmlFor="payPeriod">
-              <select
-                id="payPeriod"
-                value={payPeriod}
-                onChange={(e) => setPayPeriod(e.target.value)}
-                style={inputStyle}
-              >
-                {payPeriodOptions.map((p) => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+              <Field label="Pay period (Sunday-Saturday) *" htmlFor="payPeriod">
+                <select
+                  id="payPeriod"
+                  value={payPeriod}
+                  onChange={(e) => setPayPeriod(e.target.value)}
+                  style={inputStyle}
+                  className={inputClass}
+                >
+                  {payPeriodOptions.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
-            <Field label="Shipment date *" htmlFor="shipmentDate">
-              <input
-                id="shipmentDate"
-                type="date"
-                max={periodEndStr}
-                value={shipmentDate}
-                onChange={(e) => setShipmentDate(e.target.value)}
-                style={inputStyle}
-                required
-              />
-              {selectedPeriod && (
-                <span className="mt-1 block text-xs" style={{ color: 'var(--ds-t3)' }}>
-                  Must be between{' '}
-                  <span className="font-mono">{toLocalDateString(selectedPeriod.start)}</span> and{' '}
-                  <span className="font-mono">{toLocalDateString(selectedPeriod.end)}</span>.
-                </span>
-              )}
-            </Field>
+              <Field label="Shipment date *" htmlFor="shipmentDate">
+                <input
+                  id="shipmentDate"
+                  type="date"
+                  max={periodEndStr}
+                  value={shipmentDate}
+                  onChange={(e) => setShipmentDate(e.target.value)}
+                  style={inputStyle}
+                  className={inputClass}
+                  required
+                />
+                {selectedPeriod && (
+                  <span className="block text-xs" style={{ color: 'var(--ds-t3)', marginTop: 4 }}>
+                    Must be between{' '}
+                    <span className="font-mono">{toLocalDateString(selectedPeriod.start)}</span> and{' '}
+                    <span className="font-mono">{toLocalDateString(selectedPeriod.end)}</span>.
+                  </span>
+                )}
+              </Field>
+            </div>
 
-            <Field label="Amount Amazon paid (USD) *" htmlFor="amountPaid">
-              <input
-                id="amountPaid"
-                type="number"
-                inputMode="decimal"
-                min={0}
-                step="0.01"
-                value={amountPaid}
-                onChange={(e) => setAmountPaid(e.target.value)}
-                placeholder="0.00"
-                style={inputStyle}
-                required
-              />
-            </Field>
-
-            <Field label="Amount we're requesting (USD) *" htmlFor="amountRequested">
-              <input
-                id="amountRequested"
-                type="number"
-                inputMode="decimal"
-                min={0.01}
-                step="0.01"
-                value={amountRequested}
-                onChange={(e) => setAmountRequested(e.target.value)}
-                placeholder="0.00"
-                style={inputStyle}
+            <Field label="Short description *" htmlFor="description" style={{ marginTop: 16 }}>
+              <textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="What happened with this trip's pay?"
+                rows={3}
+                style={{ ...inputStyle, resize: 'vertical' }}
+                className={inputClass}
                 required
               />
             </Field>
           </div>
 
-          <Field label="Short description *" htmlFor="description" className="mt-4">
-            <textarea
-              id="description"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="What happened with this trip's pay?"
-              rows={3}
-              style={{ ...inputStyle, resize: 'vertical' }}
-              required
-            />
-          </Field>
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ ...sectionLabel, marginBottom: 12 }}>
+              Amounts
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Amount Amazon paid (USD) *" htmlFor="amountPaid">
+                <input
+                  id="amountPaid"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  value={amountPaid}
+                  onChange={(e) => setAmountPaid(e.target.value)}
+                  placeholder="0.00"
+                  style={inputStyle}
+                  className={inputClass}
+                  required
+                />
+              </Field>
 
-          <div className="mt-4 space-y-4 rounded-lg p-3" style={{ background: 'var(--ds-bg-2)' }}>
-            <FileField
-              id="confirmation"
-              label="Trip confirmation email screenshot or PDF *"
-              hint="Required. PNG, JPEG, WEBP, or PDF. Max 10 MB."
-              accept="image/png,image/jpeg,image/webp,application/pdf"
-              file={confirmation}
-              onChange={onConfirmationChange}
-              icon={<Upload size={16} />}
-            />
-
-            <div>
-              <label
-                htmlFor="photos"
-                className="mb-1 flex items-center gap-1.5 text-sm font-medium"
-                style={{ color: 'var(--ds-t1)' }}
-              >
-                <Upload size={16} /> Optional photos
-              </label>
-              <p className="mb-2 text-xs" style={{ color: 'var(--ds-t3)' }}>
-                Up to 5 images (PNG, JPEG, WEBP), 10 MB each.
-              </p>
-              <input
-                id="photos"
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                multiple
-                capture="environment"
-                onChange={onPhotosChange}
-                disabled={photos.length >= 5}
-                style={{ fontSize: 14 }}
-              />
-              {photos.length > 0 && (
-                <ul className="mt-2 flex flex-wrap gap-2">
-                  {photos.map((photo, i) => (
-                    <li
-                      key={`${photo.name}-${i}`}
-                      className="flex items-center gap-2 rounded-md border px-2 py-1 text-xs"
-                      style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)' }}
-                    >
-                      <PhotoPreview file={photo} />
-                      <span className="max-w-[140px] truncate">{photo.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => removePhoto(i)}
-                        className="rounded px-1.5 py-0.5 font-medium"
-                        style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)' }}
-                        aria-label={`Remove ${photo.name}`}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <Field label="Amount we're requesting (USD) *" htmlFor="amountRequested">
+                <input
+                  id="amountRequested"
+                  type="number"
+                  inputMode="decimal"
+                  min={0.01}
+                  step="0.01"
+                  value={amountRequested}
+                  onChange={(e) => setAmountRequested(e.target.value)}
+                  placeholder="0.00"
+                  style={inputStyle}
+                  className={inputClass}
+                  required
+                />
+              </Field>
             </div>
           </div>
 
-          <div className="mt-5 flex items-center gap-3">
+          <div>
+            <div style={{ ...sectionLabel, marginBottom: 12 }}>
+              Evidence
+            </div>
+            <div className="rounded-xl" style={{ display: 'flex', flexDirection: 'column', gap: 16, background: 'var(--ds-bg-2)', padding: 12 }}>
+              <FileDrop
+                id="confirmation"
+                label="Trip confirmation email *"
+                hint="Required. A screenshot, photo, or PDF of the confirmation email. Any image type works. Max 10 MB."
+                accept="image/*,application/pdf"
+                files={confirmation ? [confirmation] : []}
+                onFiles={(files) => onConfirmationChange(files[0] ?? null)}
+                onRemove={() => onConfirmationChange(null)}
+                browseLabel={confirmation ? 'Replace file' : 'Browse files'}
+              />
+
+              <FileDrop
+                id="photos"
+                label="Optional photos"
+                hint="Up to 5 images (any type), 10 MB each."
+                accept="image/*"
+                multiple
+                files={photos}
+                onFiles={onPhotosChange}
+                onRemove={removePhoto}
+                disabled={photos.length >= 5}
+                browseLabel="Add photos"
+              />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
             <button
               type="button"
               onClick={submit}
               disabled={submitting}
-              style={{ ...btnPrimary, opacity: submitting ? 0.6 : 1, flex: 1 }}
+              className="w-full sm:w-auto"
+              style={{ ...btnPrimary, opacity: submitting ? 0.6 : 1 }}
             >
               {submitting ? (
                 <>
@@ -628,26 +622,29 @@ export function DriverDisputesPage() {
             </button>
           </div>
 
-          <p className="mt-3 text-xs" style={{ color: 'var(--ds-muted-soft)' }}>
+          <p className="text-xs" style={{ color: 'var(--ds-muted-soft)', marginTop: 12 }}>
             Submission ID (kept across retries): <span className="font-mono">{submissionId}</span>
           </p>
         </section>
 
         {/* ── Shared status board ── */}
-        <section aria-labelledby="board-title" className="mt-6" style={cardStyle}>
-          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 id="board-title" className="text-lg font-semibold" style={{ color: 'var(--ds-t1)' }}>
+        <section aria-labelledby="board-title" style={{ ...cardStyle, marginTop: 20 }}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" style={{ marginBottom: 12 }}>
+            <div className="flex items-center gap-2">
+              <h2 id="board-title" className="text-base font-semibold" style={{ color: 'var(--ds-t1)' }}>
                 Shared dispute status board
               </h2>
-              <p className="text-xs" style={{ color: 'var(--ds-t3)' }}>
-                Driver names, trip numbers, pay periods, shipment dates, and status only.
-                Amounts, descriptions, and evidence are staff-only.
-              </p>
+              <span style={{ ...chipBase, background: 'var(--ds-bg-2)', color: 'var(--ds-t2)' }}>
+                {filteredItems.length}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative flex-1 sm:flex-none">
-                <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--ds-muted-soft)' }} />
+                <Search
+                  size={15}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2"
+                  style={{ color: 'var(--ds-muted-soft)' }}
+                />
                 <input
                   type="text"
                   value={boardSearch}
@@ -655,14 +652,19 @@ export function DriverDisputesPage() {
                   placeholder="Search name or trip…"
                   aria-label="Search disputes by driver or trip"
                   style={{ ...inputStyle, paddingLeft: 30, height: 38, minHeight: 38 }}
+                  className={inputClass}
                 />
               </div>
               <button
                 type="button"
-                onClick={() => { setBoardLoading(true); setBoardError(null); loadBoard() }}
+                onClick={() => {
+                  setBoardLoading(true)
+                  setBoardError(null)
+                  loadBoard()
+                }}
                 disabled={boardLoading}
-                className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium"
-                style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)' }}
+                className="inline-flex items-center gap-1.5 rounded-lg border text-sm font-medium"
+                style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }}
               >
                 <RefreshCw size={15} className={boardLoading ? 'animate-spin' : ''} /> Refresh
               </button>
@@ -672,22 +674,83 @@ export function DriverDisputesPage() {
           {boardError && (
             <div
               role="alert"
-              className="mb-3 rounded-lg p-3 text-sm"
-              style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)' }}
+              className="flex items-center gap-2 rounded-lg text-sm font-medium"
+              style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', marginBottom: 12, padding: 12 }}
             >
-              {boardError}
+              <AlertTriangle size={16} />
+              <span>{boardError}</span>
             </div>
           )}
 
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: 14 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 6px', color: 'var(--ds-t3)', fontSize: 12, fontWeight: 600 }}>Driver</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px', color: 'var(--ds-t3)', fontSize: 12, fontWeight: 600 }}>Trip</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px', color: 'var(--ds-t3)', fontSize: 12, fontWeight: 600 }}>Pay period</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px', color: 'var(--ds-t3)', fontSize: 12, fontWeight: 600 }}>Shipment</th>
-                  <th style={{ textAlign: 'left', padding: '8px 6px', color: 'var(--ds-t3)', fontSize: 12, fontWeight: 600 }}>Status</th>
+                  <th
+                    className="uppercase"
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 6px',
+                      color: 'var(--ds-t3)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Driver
+                  </th>
+                  <th
+                    className="uppercase"
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 6px',
+                      color: 'var(--ds-t3)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Trip
+                  </th>
+                  <th
+                    className="uppercase"
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 6px',
+                      color: 'var(--ds-t3)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Pay period
+                  </th>
+                  <th
+                    className="uppercase"
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 6px',
+                      color: 'var(--ds-t3)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Shipment
+                  </th>
+                  <th
+                    className="uppercase"
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 6px',
+                      color: 'var(--ds-t3)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -709,10 +772,18 @@ export function DriverDisputesPage() {
                       <td style={{ padding: '10px 6px', color: 'var(--ds-t1)' }} className="font-medium">
                         {item.driverName}
                       </td>
-                      <td style={{ padding: '10px 6px', color: 'var(--ds-t2)', fontFamily: 'var(--font-mono, monospace)' }}>
+                      <td
+                        style={{
+                          padding: '10px 6px',
+                          color: 'var(--ds-t2)',
+                          fontFamily: 'var(--font-mono, monospace)',
+                        }}
+                      >
                         {item.tripNumber ?? '—'}
                       </td>
-                      <td style={{ padding: '10px 6px', color: 'var(--ds-t2)' }}>{item.payPeriod ? formatPayPeriod(item.payPeriod) : '—'}</td>
+                      <td style={{ padding: '10px 6px', color: 'var(--ds-t2)' }}>
+                        {item.payPeriod ? formatPayPeriod(item.payPeriod) : '—'}
+                      </td>
                       <td style={{ padding: '10px 6px', color: 'var(--ds-t2)' }}>
                         {item.shipmentDate ? formatDisplayDate(item.shipmentDate) : '—'}
                       </td>
@@ -724,6 +795,24 @@ export function DriverDisputesPage() {
             </table>
           </div>
         </section>
+
+        {/* Footer help card */}
+        <div style={{ ...cardStyle, marginTop: 24, padding: '16px 18px', background: 'var(--ds-bg)' }}>
+          <div className="text-sm font-semibold" style={{ color: 'var(--ds-t1)' }}>
+            Need a hand?
+          </div>
+          <div className="text-sm" style={{ color: 'var(--ds-t3)', marginTop: 4 }}>
+            Questions about a dispute? Our team is happy to help.
+          </div>
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm" style={{ marginTop: 8 }}>
+            <a
+              href={`mailto:${CONTACT_EMAIL}`}
+              style={{ color: 'var(--ds-blue)', fontWeight: 600, textDecoration: 'none' }}
+            >
+              {CONTACT_EMAIL}
+            </a>
+          </div>
+        </div>
       </div>
     </Shell>
   )
@@ -735,8 +824,17 @@ function Shell({ children, driverName }: { children: React.ReactNode; driverName
   const initials = initialsOf(driverName ?? '')
   return (
     <div style={{ minHeight: '100vh', background: 'var(--ds-bg)', display: 'flex', flexDirection: 'column' }}>
-      <header style={{ position: 'sticky', top: 0, zIndex: 20, background: '#0e1116', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-        <div className="mx-auto flex w-full items-center gap-3 px-4" style={{ maxWidth: 760, height: 60 }}>
+      {/* Black sticky top bar — carrier identity, always visible while the driver scrolls. */}
+      <header
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 20,
+          background: '#0e1116',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+        }}
+      >
+        <div className="flex w-full items-center gap-3" style={{ ...PORTAL_MAXW, marginLeft: 'auto', marginRight: 'auto', paddingLeft: 16, paddingRight: 16, height: 60 }}>
           <div
             className="flex h-9 w-9 items-center justify-center rounded-lg"
             style={{ background: 'linear-gradient(135deg, var(--ds-blue) 0%, var(--ds-blue-dark) 100%)' }}
@@ -751,26 +849,38 @@ function Shell({ children, driverName }: { children: React.ReactNode; driverName
             </div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 1 }}>Amazon dispute portal</div>
           </div>
-          {initials && (
-            <div
-              className="ml-auto flex items-center justify-center"
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: '50%',
-                background: 'rgba(255,255,255,0.12)',
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-              title={driverName}
+          <div className="flex items-center gap-3" style={{ marginLeft: 'auto' }}>
+            <a
+              href="/disputes"
+              className="text-sm font-semibold hover:underline"
+              style={{ color: 'var(--ds-blue)', textDecoration: 'none' }}
             >
-              {initials}
-            </div>
-          )}
+              Staff view
+            </a>
+            {initials && (
+              <div
+                className="flex items-center justify-center"
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: '50%',
+                  background: 'rgba(255,255,255,0.12)',
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+                title={driverName}
+              >
+                {initials}
+              </div>
+            )}
+          </div>
         </div>
       </header>
-      <main style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>{children}</main>
+      {/* Center the content on the page — vertically + horizontally — and scroll when it's tall. */}
+      <main style={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'flex-start' }}>
+        <div style={{ width: '100%', maxWidth: 720 }}>{children}</div>
+      </main>
     </div>
   )
 }
@@ -779,16 +889,16 @@ function Field({
   label,
   htmlFor,
   children,
-  className = '',
+  style,
 }: {
   label: string
   htmlFor: string
   children: React.ReactNode
-  className?: string
+  style?: CSSProperties
 }) {
   return (
-    <div className={className}>
-      <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium" style={{ color: 'var(--ds-t1)' }}>
+    <div style={style}>
+      <label htmlFor={htmlFor} className="block text-sm font-medium" style={{ color: 'var(--ds-t1)', marginBottom: 4 }}>
         {label}
       </label>
       {children}
@@ -796,52 +906,140 @@ function Field({
   )
 }
 
-function FileField({
+function FileDrop({
   id,
   label,
   hint,
   accept,
-  file,
-  onChange,
-  icon,
+  multiple = false,
+  disabled = false,
+  files,
+  onFiles,
+  onRemove,
+  browseLabel,
 }: {
   id: string
   label: string
   hint: string
   accept: string
-  file: File | null
-  onChange: (e: ChangeEvent<HTMLInputElement>) => void
-  icon: React.ReactNode
+  multiple?: boolean
+  disabled?: boolean
+  files: File[]
+  onFiles: (files: File[]) => void
+  onRemove: (index: number) => void
+  browseLabel: string
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+
+  const take = (list: FileList | null) => {
+    const picked = Array.from(list ?? [])
+    if (picked.length) onFiles(multiple ? picked : picked.slice(0, 1))
+  }
+
   return (
     <div>
-      <label htmlFor={id} className="mb-1 flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--ds-t1)' }}>
-        {icon} {label}
+      <label htmlFor={id} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--ds-t1)', marginBottom: 4 }}>
+        <Upload size={16} /> {label}
       </label>
-      <p className="mb-2 text-xs" style={{ color: 'var(--ds-t3)' }}>
+      <p className="text-xs" style={{ color: 'var(--ds-t3)', marginBottom: 8 }}>
         {hint}
       </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <input id={id} type="file" accept={accept} onChange={onChange} style={{ fontSize: 14 }} />
-      </div>
-      {file && (
+      <div
+        role="button"
+        tabIndex={disabled ? -1 : 0}
+        aria-disabled={disabled}
+        onClick={() => !disabled && inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault()
+            inputRef.current?.click()
+          }
+        }}
+        onDragOver={(e) => {
+          e.preventDefault()
+          if (!disabled) setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          if (!disabled) take(e.dataTransfer.files)
+        }}
+        className="flex flex-col items-center justify-center gap-2 rounded-lg text-center"
+        style={{
+          border: `2px dashed ${dragging ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+          paddingLeft: 16,
+          paddingRight: 16,
+          paddingTop: 20,
+          paddingBottom: 20,
+          background: dragging ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+          transition: 'border-color 120ms, background 120ms',
+        }}
+      >
+        <input
+          ref={inputRef}
+          id={id}
+          type="file"
+          accept={accept}
+          multiple={multiple}
+          disabled={disabled}
+          onChange={(e) => {
+            take(e.target.files)
+            e.target.value = '' // allow re-picking the same file after Remove
+          }}
+          className="sr-only"
+        />
         <div
-          className="mt-2 inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs"
-          style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)' }}
+          className="flex h-10 w-10 items-center justify-center rounded-full"
+          style={{ background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}
         >
-          <FileText size={14} style={{ color: 'var(--ds-t3)' }} />
-          <span className="max-w-[200px] truncate">{file.name}</span>
-          <span className="font-mono" style={{ color: 'var(--ds-t3)' }}>
-            {(file.size / 1024 / 1024).toFixed(2)} MB
-          </span>
+          <Upload size={18} />
         </div>
+        <span
+          className="inline-flex items-center rounded-md text-sm font-semibold"
+          style={{ background: 'var(--ds-blue)', color: '#fff', pointerEvents: 'none', paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8 }}
+        >
+          {browseLabel}
+        </span>
+        <span className="text-xs" style={{ color: 'var(--ds-t3)' }}>
+          {disabled ? 'Maximum reached' : 'or drag and drop here'}
+        </span>
+      </div>
+      {files.length > 0 && (
+        <ul className="flex flex-wrap gap-2" style={{ marginTop: 8 }}>
+          {files.map((file, i) => (
+            <li
+              key={`${file.name}-${file.size}-${i}`}
+              className="flex items-center gap-2 rounded-md border text-xs"
+              style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)', paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}
+            >
+              <PhotoPreview file={file} />
+              <span className="max-w-[160px] truncate">{file.name}</span>
+              <span className="font-mono" style={{ color: 'var(--ds-t3)' }}>
+                {(file.size / 1024 / 1024).toFixed(2)} MB
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemove(i)}
+                className="rounded font-medium"
+                style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2 }}
+                aria-label={`Remove ${file.name}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )
 }
 
 function PhotoPreview({ file }: { file: File }) {
-  if (!file.type.startsWith('image/')) return null
+  if (!fileContentType(file).startsWith('image/')) return <FileText size={14} style={{ color: 'var(--ds-t3)' }} />
   const url = URL.createObjectURL(file)
   return (
     <img
