@@ -667,7 +667,7 @@ export function DriverDisputesPage() {
               Amounts
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Amount Amazon paid (USD) *" htmlFor="amountPaid">
+              <Field label="Amount Amazon paid (USD)" htmlFor="amountPaid">
                 <input
                   id="amountPaid"
                   type="number"
@@ -676,14 +676,13 @@ export function DriverDisputesPage() {
                   step="0.01"
                   value={amountPaid}
                   onChange={(e) => setAmountPaid(e.target.value)}
-                  placeholder="0.00"
+                  placeholder="0.00 - leave blank if nothing was paid"
                   style={inputStyle}
                   className={inputClass}
-                  required
                 />
               </Field>
 
-              <Field label="Amount we're requesting (USD) *" htmlFor="amountRequested">
+              <Field label="Amount we're requesting (USD)" htmlFor="amountRequested">
                 <input
                   id="amountRequested"
                   type="number"
@@ -692,10 +691,9 @@ export function DriverDisputesPage() {
                   step="0.01"
                   value={amountRequested}
                   onChange={(e) => setAmountRequested(e.target.value)}
-                  placeholder="0.00"
+                  placeholder="0.00 - leave blank if unsure"
                   style={inputStyle}
                   className={inputClass}
-                  required
                 />
               </Field>
             </div>
