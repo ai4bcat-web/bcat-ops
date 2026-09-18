@@ -150,6 +150,11 @@ function buildPayPeriods(): { options: PayPeriodOption[]; defaultValue: string }
   return { options, defaultValue }
 }
 
+/** A blank amount means $0 - a driver paid nothing shouldn't have to type it. */
+function parseAmount(value: string): number {
+  return value.trim() === '' ? 0 : Number.parseFloat(value)
+}
+
 function validateForm(
   driverName: string,
   tripNumber: string,
@@ -172,8 +177,8 @@ function validateForm(
       return 'Shipment date must be within the selected Sunday–Saturday pay period.'
     }
   }
-  const paid = Number.parseFloat(amountPaid)
-  const requested = Number.parseFloat(amountRequested)
+  const paid = parseAmount(amountPaid)
+  const requested = parseAmount(amountRequested)
   if (Number.isNaN(paid) || paid < 0) return 'Amount paid must be a number of 0 or more.'
   if (Number.isNaN(requested) || requested < 0) return 'Amount requested must be a number of 0 or more.'
   if (!description.trim() || description.trim().length < 5) return 'Please provide a short description (at least 5 characters).'
@@ -416,8 +421,8 @@ export function DriverDisputesPage() {
         tripNumber: tripNumber.trim(),
         payPeriod,
         shipmentDate,
-        amountPaid: Number.parseFloat(amountPaid),
-        amountRequested: Number.parseFloat(amountRequested),
+        amountPaid: parseAmount(amountPaid),
+        amountRequested: parseAmount(amountRequested),
         description: description.trim(),
         evidence,
       })
