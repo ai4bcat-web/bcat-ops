@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, FileText, Loader2, RefreshCw, Search, Upload } from 'lucide-react'
 import {
   portalAvailable,
@@ -16,7 +17,18 @@ import {
 import { addDays, formatPayPeriod, formatWeekLabel, toLocalDateString } from '@/lib/payPeriod'
 
 const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
-const CONTACT_EMAIL = 'onboarding@bcatcorp.com'
+const CONTACT_EMAIL = 'help@bcatcorp.com'
+
+type PortalView = 'submit' | 'board'
+type BoardFilter = 'all' | 'pending' | 'denied' | 'resolved'
+// Driver-facing grouping of the staff statuses: "Filed with Amazon" is still pending from the
+// driver's point of view.
+const BOARD_FILTERS: { key: BoardFilter; label: string; statuses: BoardItem['status'][] | null }[] = [
+  { key: 'all', label: 'All', statuses: null },
+  { key: 'pending', label: 'Pending', statuses: ['PENDING', 'POSTED'] },
+  { key: 'denied', label: 'Denied', statuses: ['REJECTED'] },
+  { key: 'resolved', label: 'Resolved', statuses: ['PAID'] },
+]
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MiB
 const PDF_TYPE = 'application/pdf'
@@ -211,6 +223,18 @@ export function DriverDisputesPage() {
   const [boardSearch, setBoardSearch] = useState('')
   const requestGenRef = useRef(0)
 
+  // Top-level tab, shareable as ?tab=board (staff link drivers straight to the board).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const view: PortalView = searchParams.get('tab') === 'board' ? 'board' : 'submit'
+  const setView = (next: PortalView) =>
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev)
+      if (next === 'board') p.set('tab', 'board')
+      else p.delete('tab')
+      return p
+    }, { replace: true })
+  const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
+
   useEffect(() => {
     document.title = TITLE_BASE
     return () => {
@@ -276,19 +300,29 @@ export function DriverDisputesPage() {
     return () => clearInterval(interval)
   }, [boardLoading, loadBoard])
 
-  const filteredItems = useMemo(() => {
-    const q = boardSearch.trim().toLowerCase()
+  const sortedItems = useMemo(
     // Pages arrive in scan order; sort the assembled list so newest shipments lead.
-    const sorted = [...boardItems].sort(
+    () => [...boardItems].sort(
       (a, b) => (b.shipmentDate ?? '').localeCompare(a.shipmentDate ?? '') || a.driverName.localeCompare(b.driverName),
-    )
-    if (!q) return sorted
-    return sorted.filter(
+    ),
+    [boardItems],
+  )
+  const filterCounts = useMemo(() => {
+    const counts = {} as Record<BoardFilter, number>
+    for (const f of BOARD_FILTERS) {
+      counts[f.key] = f.statuses ? sortedItems.filter((i) => f.statuses!.includes(i.status)).length : sortedItems.length
+    }
+    return counts
+  }, [sortedItems])
+  const filteredItems = useMemo(() => {
+    const statuses = BOARD_FILTERS.find((f) => f.key === boardFilter)?.statuses ?? null
+    const q = boardSearch.trim().toLowerCase()
+    return sortedItems.filter(
       (item) =>
-        item.driverName.toLowerCase().includes(q) ||
-        (item.tripNumber ?? '').toLowerCase().includes(q),
+        (!statuses || statuses.includes(item.status)) &&
+        (!q || item.driverName.toLowerCase().includes(q) || (item.tripNumber ?? '').toLowerCase().includes(q)),
     )
-  }, [boardItems, boardSearch])
+  }, [sortedItems, boardFilter, boardSearch])
 
   // ── Form handlers ---------------------------------------------------------
   const onConfirmationChange = (file: File | null) => {
@@ -424,9 +458,45 @@ export function DriverDisputesPage() {
     )
   }
 
+  const tabStyle = (active: boolean): CSSProperties => ({
+    padding: '9px 16px',
+    borderRadius: 9,
+    fontSize: 14,
+    fontWeight: 600,
+    border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+    background: active ? 'var(--ds-blue)' : 'var(--ds-surface)',
+    color: active ? '#fff' : 'var(--ds-t2)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  })
+  const filterStyle = (active: boolean): CSSProperties => ({
+    padding: '6px 12px',
+    borderRadius: 999,
+    fontSize: 13,
+    fontWeight: 600,
+    border: `1px solid ${active ? 'var(--ds-blue-dark)' : 'var(--ds-border)'}`,
+    background: active ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
+    color: active ? 'var(--ds-blue-dark)' : 'var(--ds-t2)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  })
+
   return (
     <Shell driverName={driverName}>
       <div className={PORTAL_COL} style={{ ...PORTAL_MAXW, marginLeft: 'auto', marginRight: 'auto', paddingLeft: 16, paddingRight: 16, paddingTop: 24, paddingBottom: 24 }}>
+        <div role="tablist" aria-label="Portal sections" className="flex gap-2" style={{ marginBottom: 20 }}>
+          <button type="button" role="tab" aria-selected={view === 'submit'} onClick={() => setView('submit')} style={tabStyle(view === 'submit')}>
+            Submit a dispute
+          </button>
+          <button type="button" role="tab" aria-selected={view === 'board'} onClick={() => setView('board')} style={tabStyle(view === 'board')}>
+            Status board
+            <span style={{ ...chipBase, marginLeft: 8, background: view === 'board' ? 'rgba(255,255,255,0.22)' : 'var(--ds-bg-2)', color: view === 'board' ? '#fff' : 'var(--ds-t2)' }}>
+              {filterCounts.all}
+            </span>
+          </button>
+        </div>
+
+        {view === 'submit' && (<>
         <div style={{ marginBottom: 20 }}>
           <h1 className="text-2xl font-bold" style={{ color: 'var(--ds-t1)' }}>
             Submit an Amazon pay dispute
@@ -681,9 +751,11 @@ export function DriverDisputesPage() {
             Submission ID (kept across retries): <span className="font-mono">{submissionId}</span>
           </p>
         </section>
+        </>)}
 
         {/* ── Shared status board ── */}
-        <section aria-labelledby="board-title" style={{ ...cardStyle, marginTop: 20 }}>
+        {view === 'board' && (
+        <section aria-labelledby="board-title" style={cardStyle}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" style={{ marginBottom: 12 }}>
             <div className="flex items-center gap-2">
               <h2 id="board-title" className="text-base font-semibold" style={{ color: 'var(--ds-t1)' }}>
@@ -724,6 +796,20 @@ export function DriverDisputesPage() {
                 <RefreshCw size={15} className={boardLoading ? 'animate-spin' : ''} /> Refresh
               </button>
             </div>
+          </div>
+          <div role="tablist" aria-label="Filter disputes by status" className="flex flex-wrap gap-2" style={{ marginBottom: 12 }}>
+            {BOARD_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                role="tab"
+                aria-selected={boardFilter === f.key}
+                onClick={() => setBoardFilter(f.key)}
+                style={filterStyle(boardFilter === f.key)}
+              >
+                {f.label} <span style={{ opacity: 0.7, fontWeight: 500 }}>{filterCounts[f.key]}</span>
+              </button>
+            ))}
           </div>
 
           {boardError && (
@@ -850,6 +936,7 @@ export function DriverDisputesPage() {
             </table>
           </div>
         </section>
+        )}
 
         {/* Footer help card */}
         <div style={{ ...cardStyle, marginTop: 24, padding: '16px 18px', background: 'var(--ds-bg)' }}>
