@@ -78,6 +78,12 @@ export async function listDisputes(
   return post('list', nextToken ? { nextToken } : undefined)
 }
 
+/** Active drivers' names for the form's dropdown - the only Driver data the public endpoint exposes. */
+export async function listDrivers(): Promise<string[]> {
+  const res = await post<{ drivers?: unknown }>('drivers')
+  return Array.isArray(res.drivers) ? res.drivers.filter((d): d is string => typeof d === 'string') : []
+}
+
 export async function getUploadUrl(opts: {
   submissionId: string
   fileName: string

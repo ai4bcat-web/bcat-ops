@@ -22,6 +22,12 @@ const s3 = new S3Client({})
 
 const TABLE_NAME = process.env.TABLE_NAME!
 const BUCKET_NAME = process.env.BUCKET_NAME!
+const DRIVER_TABLE_NAME = process.env.DRIVER_TABLE_NAME!
+
+// The public form's driver dropdown. Names only - never phone/email/CDL - and cached per
+// container so a busy portal doesn't scan the Driver table on every page load.
+const DRIVERS_CACHE_MS = 5 * 60 * 1000
+let driversCache: { names: string[]; fetchedAt: number } | null = null
 
 const PAGE_SIZE = 100
 const MAX_FILE_BYTES = 10 * 1024 * 1024
@@ -133,11 +139,11 @@ function daysBetween(fromIso: string, toIso: string): number {
   return (Date.parse(toIso) - Date.parse(fromIso)) / (1000 * 60 * 60 * 24)
 }
 
-function requireFiniteMoney(value: unknown, name: string, allowZero: boolean): number {
+/** Amounts may be 0 (Amazon paid nothing / driver doesn't know the figure yet) but never negative. */
+function requireFiniteMoney(value: unknown, name: string): number {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) throw new PortalError(400, `${name} must be a number`)
   if (n < 0) throw new PortalError(400, `${name} cannot be negative`)
-  if (!allowZero && n <= 0) throw new PortalError(400, `${name} must be greater than zero`)
   return n
 }
 
@@ -235,8 +241,8 @@ export function validateSubmission(payload: Record<string, unknown>): {
   const driverName = requireString(payload.driverName, 'driverName', MAX_NAME_TRIP_LENGTH)
   const tripNumber = requireString(payload.tripNumber, 'tripNumber', MAX_NAME_TRIP_LENGTH)
   const dates = validateDateRange(payload.payPeriod, payload.shipmentDate)
-  const amountPaid = requireFiniteMoney(payload.amountPaid, 'amountPaid', true)
-  const amountRequested = requireFiniteMoney(payload.amountRequested, 'amountRequested', false)
+  const amountPaid = requireFiniteMoney(payload.amountPaid, 'amountPaid')
+  const amountRequested = requireFiniteMoney(payload.amountRequested, 'amountRequested')
   const description = requireString(payload.description, 'description', MAX_DESCRIPTION_LENGTH)
   if (!Array.isArray(payload.evidence)) throw new PortalError(400, 'evidence array required')
   if (payload.evidence.length === 0) throw new PortalError(400, 'evidence array required')
@@ -405,6 +411,40 @@ async function handleList(payload: Record<string, unknown>) {
   })
 }
 
+/** Active drivers' display names, deduped and sorted; the only Driver fields the portal ever sees.
+ *  Dispatch keeps placeholder rows like "BROKER COVERED" in the Driver table (type 'broker'); they are not people. */
+export function projectDriverNames(items: Record<string, unknown>[]): string[] {
+  const names = new Set<string>()
+  for (const item of items) {
+    if (item.active !== true) continue
+    if (String(item.type ?? '').toLowerCase() === 'broker') continue
+    const name = String(item.name ?? '').trim()
+    if (name) names.add(name)
+  }
+  return [...names].sort((a, b) => a.localeCompare(b))
+}
+
+async function handleDrivers() {
+  if (driversCache && Date.now() - driversCache.fetchedAt < DRIVERS_CACHE_MS) {
+    return reply(200, { drivers: driversCache.names })
+  }
+  const items: Record<string, unknown>[] = []
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const res = await ddb.send(new ScanCommand({
+      TableName: DRIVER_TABLE_NAME,
+      ProjectionExpression: '#n, active, #t',
+      ExpressionAttributeNames: { '#n': 'name', '#t': 'type' },
+      ExclusiveStartKey,
+    }))
+    items.push(...((res.Items ?? []) as Record<string, unknown>[]))
+    ExclusiveStartKey = res.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  const names = projectDriverNames(items)
+  driversCache = { names, fetchedAt: Date.now() }
+  return reply(200, { drivers: names })
+}
+
 async function handleUpload(payload: Record<string, unknown>) {
   const submissionId = requireUuid(payload.submissionId, 'submissionId')
   const fileName = requireString(payload.fileName, 'fileName', 255)
@@ -454,6 +494,8 @@ export const handler = async (event: FnUrlEvent) => {
     switch (action) {
       case 'list':
         return await handleList(payload)
+      case 'drivers':
+        return await handleDrivers()
       case 'upload':
         return await handleUpload(payload)
       case 'submit':

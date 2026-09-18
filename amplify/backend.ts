@@ -522,11 +522,19 @@ new CfnOutput(portalApiFn.stack, 'OnboardingPortalApiFunctionUrl', {
 
 const disputePortalApiFn = backend.disputePortalApi.resources.lambda as LambdaFunction
 const disputeTableForPortal = backend.data.resources.tables['AmazonDispute']
+const driverTableForPortal = backend.data.resources.tables['Driver']
 
 backend.disputePortalApi.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:Scan', 'dynamodb:GetItem', 'dynamodb:PutItem'],
     resources: [disputeTableForPortal.tableArn],
+  })
+)
+// Driver dropdown on the public form: read-only, and the handler projects name + active only.
+backend.disputePortalApi.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan'],
+    resources: [driverTableForPortal.tableArn],
   })
 )
 
@@ -545,6 +553,7 @@ storageBucket.addCorsRule({
 })
 
 disputePortalApiFn.addEnvironment('TABLE_NAME', disputeTableForPortal.tableName)
+disputePortalApiFn.addEnvironment('DRIVER_TABLE_NAME', driverTableForPortal.tableName)
 disputePortalApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
 
 const disputePortalApiUrl = new FunctionUrl(disputePortalApiFn.stack, 'DisputePortalApiUrl', {

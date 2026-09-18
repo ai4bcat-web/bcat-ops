@@ -31,6 +31,7 @@ let validateListToken: typeof HandlerModule.validateListToken
 let validateDateRange: typeof HandlerModule.validateDateRange
 let validateSubmission: typeof HandlerModule.validateSubmission
 let projectBoardItem: typeof HandlerModule.projectBoardItem
+let projectDriverNames: typeof HandlerModule.projectDriverNames
 
 beforeAll(async () => {
   process.env.TABLE_NAME = 'test-amazon-dispute'
@@ -41,6 +42,7 @@ beforeAll(async () => {
   validateDateRange = mod.validateDateRange
   validateSubmission = mod.validateSubmission
   projectBoardItem = mod.projectBoardItem
+  projectDriverNames = mod.projectDriverNames
 })
 
 function baseEvent(body: unknown, method = 'POST') {
@@ -139,6 +141,12 @@ describe('dispute-portal-api', () => {
       expect(result.amountRequested).toBe(250)
     })
 
+    it('accepts 0 for both amounts but rejects negatives', () => {
+      const zero = { ...validSubmitPayload(id), amountPaid: 0, amountRequested: 0 }
+      expect(validateSubmission(zero).amountRequested).toBe(0)
+      expect(() => validateSubmission({ ...zero, amountRequested: -1 })).toThrow('cannot be negative')
+    })
+
     it('requires at least one confirmation', () => {
       const payload = {
         ...validSubmitPayload(id),
@@ -205,6 +213,21 @@ describe('dispute-portal-api', () => {
       // Swap kind to PHOTO while keeping application/pdf
       payload.evidence[0].kind = 'PHOTO'
       expect(() => validateSubmission(payload)).toThrow('Invalid contentType for PHOTO')
+    })
+  })
+
+  describe('projectDriverNames', () => {
+    it('returns active drivers as sorted unique names and nothing else', () => {
+      const names = projectDriverNames([
+        { id: '1', name: 'Zed Adams', active: true, phone: '555', email: 'z@x.com', cdl: 'CDL-A' },
+        { id: '2', name: 'Amy Brown ', active: true },
+        { id: '3', name: 'Amy Brown', active: true },
+        { id: '4', name: 'Inactive Ike', active: false },
+        { id: '6', active: true },
+        { id: '7', name: 'BROKER COVERED', active: true, type: 'broker' },
+      ])
+      expect(names).toEqual(['Amy Brown', 'Zed Adams'])
+      expect(names.every((n) => typeof n === 'string')).toBe(true)
     })
   })
 

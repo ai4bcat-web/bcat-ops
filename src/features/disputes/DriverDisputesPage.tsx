@@ -4,6 +4,7 @@ import {
   portalAvailable,
   DisputePortalError,
   listDisputes,
+  listDrivers,
   getUploadUrl,
   submitDispute,
   uploadFileToS3,
@@ -35,6 +36,7 @@ function fileContentType(file: File): string {
 }
 const PAY_PERIOD_WEEKS = 104
 const POLL_MS = 30000
+const DRIVER_NOT_LISTED = '__not_listed__'
 
 const STATUS_META: Record<BoardItem['status'], { label: string; bg: string; fg: string }> = {
   PENDING: { label: 'Pending', bg: 'var(--ds-amber-bg)', fg: 'var(--ds-amber)' },
@@ -160,8 +162,8 @@ function validateForm(
   }
   const paid = Number.parseFloat(amountPaid)
   const requested = Number.parseFloat(amountRequested)
-  if (Number.isNaN(paid) || paid < 0) return 'Amount paid must be a number ≥ 0.'
-  if (Number.isNaN(requested) || requested <= 0) return 'Amount requested must be a number greater than 0.'
+  if (Number.isNaN(paid) || paid < 0) return 'Amount paid must be a number of 0 or more.'
+  if (Number.isNaN(requested) || requested < 0) return 'Amount requested must be a number of 0 or more.'
   if (!description.trim() || description.trim().length < 5) return 'Please provide a short description (at least 5 characters).'
   if (!confirmation) return 'A trip confirmation email screenshot or PDF is required.'
   return null
@@ -186,6 +188,9 @@ export function DriverDisputesPage() {
   const { options: payPeriodOptions, defaultValue: defaultPayPeriod } = useMemo(() => buildPayPeriods(), [])
 
   const [driverName, setDriverName] = useState('')
+  // Active drivers from the platform; empty (not configured / fetch failed) falls back to free text.
+  const [drivers, setDrivers] = useState<string[]>([])
+  const [driverNotListed, setDriverNotListed] = useState(false)
   const [tripNumber, setTripNumber] = useState('')
   const [payPeriod, setPayPeriod] = useState(defaultPayPeriod)
   const [shipmentDate, setShipmentDate] = useState('')
@@ -211,6 +216,15 @@ export function DriverDisputesPage() {
     return () => {
       document.title = 'BCAT OPS'
     }
+  }, [])
+
+  useEffect(() => {
+    if (!portalAvailable) return
+    let cancelled = false
+    listDrivers()
+      .then((names) => { if (!cancelled) setDrivers(names) })
+      .catch(() => { /* dropdown is a convenience; the text field still works */ })
+    return () => { cancelled = true }
   }, [])
 
   // ── Board loading ---------------------------------------------------------
@@ -293,6 +307,7 @@ export function DriverDisputesPage() {
 
   const resetForm = () => {
     setDriverName('')
+    setDriverNotListed(false)
     setTripNumber('')
     setPayPeriod(defaultPayPeriod)
     setShipmentDate('')
@@ -457,16 +472,55 @@ export function DriverDisputesPage() {
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Driver name *" htmlFor="driverName">
-                <input
-                  id="driverName"
-                  type="text"
-                  value={driverName}
-                  onChange={(e) => setDriverName(e.target.value)}
-                  placeholder="Jane Driver"
-                  style={inputStyle}
-                  className={inputClass}
-                  required
-                />
+                {drivers.length > 0 && !driverNotListed ? (
+                  <select
+                    id="driverName"
+                    value={driverName}
+                    onChange={(e) => {
+                      if (e.target.value === DRIVER_NOT_LISTED) {
+                        setDriverNotListed(true)
+                        setDriverName('')
+                      } else {
+                        setDriverName(e.target.value)
+                      }
+                    }}
+                    style={inputStyle}
+                    className={inputClass}
+                    required
+                  >
+                    <option value="">Select your name…</option>
+                    {drivers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                    <option value={DRIVER_NOT_LISTED}>My name isn't listed</option>
+                  </select>
+                ) : (
+                  <>
+                    <input
+                      id="driverName"
+                      type="text"
+                      value={driverName}
+                      onChange={(e) => setDriverName(e.target.value)}
+                      placeholder="Jane Driver"
+                      style={inputStyle}
+                      className={inputClass}
+                      required
+                      autoFocus={driverNotListed}
+                    />
+                    {driverNotListed && (
+                      <button
+                        type="button"
+                        onClick={() => { setDriverNotListed(false); setDriverName('') }}
+                        className="text-xs font-medium"
+                        style={{ marginTop: 6, color: 'var(--ds-blue)', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      >
+                        Back to the driver list
+                      </button>
+                    )}
+                  </>
+                )}
               </Field>
 
               <Field label="Trip number *" htmlFor="tripNumber">
@@ -559,7 +613,7 @@ export function DriverDisputesPage() {
                   id="amountRequested"
                   type="number"
                   inputMode="decimal"
-                  min={0.01}
+                  min={0}
                   step="0.01"
                   value={amountRequested}
                   onChange={(e) => setAmountRequested(e.target.value)}
