@@ -11,7 +11,6 @@ import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
-import { CashFlowPage } from '@/features/cash-flow/CashFlowPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { ApptChangesPage } from '@/features/appt-changes/ApptChangesPage'
@@ -34,10 +33,8 @@ import { VehicleConfirmationPage } from '@/features/vehicle-confirmation/Vehicle
 import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManagerDashboardPage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
 import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
-import { DriverDocumentsPage } from '@/features/driver-docs/DriverDocumentsPage'
 import { FilesPage } from '@/features/files/FilesPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
-import { DocumentSigningPage } from '@/features/driver-docs/DocumentSigningPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
@@ -50,7 +47,6 @@ export default function App() {
         <Routes>
           {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
-          <Route path="/sign/:token" element={<DocumentSigningPage />} />
           <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
           <Route path="/*" element={
             <AuthGuard>
@@ -69,7 +65,6 @@ export default function App() {
               <Route path="/invoices" element={<RequirePage page="invoices"><InvoicesPage /></RequirePage>} />
               <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
-              <Route path="/cash-flow" element={<RequirePage page="cashFlow"><CashFlowPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
               <Route path="/appt-changes" element={<RequirePage page="apptChanges"><ApptChangesPage /></RequirePage>} />
@@ -82,7 +77,6 @@ export default function App() {
               <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
               <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
-              <Route path="/driver-docs" element={<RequirePage page="driverDocs"><DriverDocumentsPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
               <Route path="/settings" element={<RequirePage page="settings"><SettingsPage /></RequirePage>} />
               <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
