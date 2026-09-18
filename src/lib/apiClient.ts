@@ -1132,29 +1132,92 @@ export function subscribeToDriverAvailabilityChanges(callbacks: {
 
 // ── Amazon disputes ─────────────────────────────────────────────────────────────
 
-import type { AmazonDispute } from '@/types/dispute'
+import type { AmazonDispute, DisputeEvidence } from '@/types/dispute'
 
 const DISPUTE_FIELDS = `
   id driverName tripNumber shipmentDate payPeriod amountPaid amountRequested
-  description photoUrl status resolvedAmount submittedAt source externalId notes
-  createdAt updatedAt
+  description photoUrl evidence status resolvedAmount submittedAt source externalId
+  notes createdAt updatedAt
 `
 
+let disputesHaveEvidence = true
+const disputeFields = () =>
+  disputesHaveEvidence ? DISPUTE_FIELDS : DISPUTE_FIELDS.replace(/\s+evidence/g, '')
+
+function isEvidenceFieldUndefined(err: unknown): boolean {
+  return /'evidence'/i.test(safeStringify(err))
+}
+
+function parseEvidence(raw: unknown): DisputeEvidence[] | null {
+  if (raw == null) return null
+  if (Array.isArray(raw)) return raw as DisputeEvidence[]
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? (parsed as DisputeEvidence[]) : null
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function normalizeDispute(d: AmazonDispute): AmazonDispute {
+  return { ...d, evidence: parseEvidence(d.evidence as unknown) }
+}
+
+function serializeDisputeInput<T extends { evidence?: unknown }>(input: T): T {
+  if (!('evidence' in (input as object))) return input
+  const { evidence, ...rest } = input as T & { evidence?: unknown }
+  if (evidence == null) return rest as T
+  return { ...rest, evidence: JSON.stringify(evidence) } as T
+}
+
 export async function listAmazonDisputes(): Promise<AmazonDispute[]> {
-  const result = await client.graphql({
-    query: `query ListAmazonDisputes { listAmazonDisputes(limit: 5000) { items { ${DISPUTE_FIELDS} } } }`,
-  }) as { data: { listAmazonDisputes: { items: AmazonDispute[] } } }
-  return result.data.listAmazonDisputes.items ?? []
+  const run = async () => {
+    const items: AmazonDispute[] = []
+    let nextToken: string | null = null
+    do {
+      const result = await client.graphql({
+        query: `query ListAmazonDisputes($nextToken: String) { listAmazonDisputes(limit: 1000, nextToken: $nextToken) { items { ${disputeFields()} } nextToken } }`,
+        variables: { nextToken },
+      }) as {
+        data: {
+          listAmazonDisputes: {
+            items: (AmazonDispute | null)[]
+            nextToken?: string | null
+          }
+        }
+      }
+      const page = result.data.listAmazonDisputes
+      for (const item of page.items ?? []) if (item) items.push(item)
+      nextToken = page.nextToken ?? null
+    } while (nextToken)
+    return items
+  }
+
+  try {
+    const items = await run()
+    return items.map(normalizeDispute)
+  } catch (err) {
+    if (disputesHaveEvidence && isEvidenceFieldUndefined(err)) {
+      console.warn("[apiClient] backend has no 'evidence' field yet — querying disputes without it until deploy")
+      disputesHaveEvidence = false
+      const items = await run()
+      return items.map(normalizeDispute)
+    }
+    throw err
+  }
 }
 
 export async function createAmazonDispute(
   input: Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>,
 ): Promise<AmazonDispute> {
   const result = await client.graphql({
-    query: `mutation CreateAmazonDispute($input: CreateAmazonDisputeInput!) { createAmazonDispute(input: $input) { ${DISPUTE_FIELDS} } }`,
-    variables: { input },
+    query: `mutation CreateAmazonDispute($input: CreateAmazonDisputeInput!) { createAmazonDispute(input: $input) { ${disputeFields()} } }`,
+    variables: { input: serializeDisputeInput(input) },
   }) as { data: { createAmazonDispute: AmazonDispute } }
-  return result.data.createAmazonDispute
+  return normalizeDispute(result.data.createAmazonDispute)
 }
 
 export async function updateAmazonDispute(
@@ -1162,10 +1225,10 @@ export async function updateAmazonDispute(
   patch: Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>,
 ): Promise<AmazonDispute> {
   const result = await client.graphql({
-    query: `mutation UpdateAmazonDispute($input: UpdateAmazonDisputeInput!) { updateAmazonDispute(input: $input) { ${DISPUTE_FIELDS} } }`,
-    variables: { input: { id, ...patch } },
+    query: `mutation UpdateAmazonDispute($input: UpdateAmazonDisputeInput!) { updateAmazonDispute(input: $input) { ${disputeFields()} } }`,
+    variables: { input: serializeDisputeInput({ id, ...patch }) },
   }) as { data: { updateAmazonDispute: AmazonDispute } }
-  return result.data.updateAmazonDispute
+  return normalizeDispute(result.data.updateAmazonDispute)
 }
 
 export async function deleteAmazonDispute(id: string): Promise<void> {
@@ -1173,6 +1236,11 @@ export async function deleteAmazonDispute(id: string): Promise<void> {
     query: `mutation DeleteAmazonDispute($input: DeleteAmazonDisputeInput!) { deleteAmazonDispute(input: $input) { id } }`,
     variables: { input: { id } },
   })
+}
+
+export async function getDisputeEvidenceUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
 }
 
 // ── S3 rate confirmations ─────────────────────────────────────────────────────

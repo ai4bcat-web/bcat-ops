@@ -26,7 +26,9 @@ import { googleReviews } from './functions/google-reviews/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
+import { disputePortalApi } from './functions/dispute-portal-api/resource'
 import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
+import { Bucket, HttpMethods } from 'aws-cdk-lib/aws-s3'
 import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
 import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
@@ -61,6 +63,7 @@ const backend = defineBackend({
   cashCheckinReminder,
   apptRequestEmailer,
   amazonDisputeIntake,
+  disputePortalApi,
   tripScreenshotParser,
   carrierBlastApi,
   carrierBlastWebhook,
@@ -460,7 +463,11 @@ const complianceSettingsTable  = backend.data.resources.tables['ComplianceSettin
 // Allowed portal origins. The prod domain is set via the PORTAL_PROD_ORIGIN env var
 // in the Amplify Console (e.g. https://ops.bcatcorp.com); localhost is for dev.
 const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com'
-const PORTAL_ORIGINS = ['http://localhost:5173', PORTAL_PROD_ORIGIN]
+const PORTAL_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  PORTAL_PROD_ORIGIN,
+]
 
 // ── onboardingPortalApi Lambda (public, token-validated Function URL) ───────
 
@@ -510,6 +517,52 @@ new CfnOutput(portalApiFn.stack, 'OnboardingPortalApiFunctionUrl', {
   value:       portalApiUrl.url,
   description: 'Set as VITE_ONBOARDING_API_URL in the frontend env (driver portal API)',
 })
+
+// ── disputePortalApi Lambda (public Amazon dispute portal) ────────────────
+
+const disputePortalApiFn = backend.disputePortalApi.resources.lambda as LambdaFunction
+const disputeTableForPortal = backend.data.resources.tables['AmazonDispute']
+
+backend.disputePortalApi.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:GetItem', 'dynamodb:PutItem'],
+    resources: [disputeTableForPortal.tableArn],
+  })
+)
+
+// Guests PUT proof files via a presigned URL; the Lambda also HEADs them on submit.
+backend.storage.resources.bucket.grantPut(disputePortalApiFn, 'dispute-proofs/*')
+backend.storage.resources.bucket.grantRead(disputePortalApiFn, 'dispute-proofs/*')
+
+// Allow the browser to complete the presigned PUT with content-type/content-length
+// and the If-None-Match: * create-only guard.
+const storageBucket = backend.storage.resources.bucket as Bucket
+storageBucket.addCorsRule({
+  allowedOrigins: PORTAL_ORIGINS,
+  allowedMethods: [HttpMethods.PUT],
+  allowedHeaders: ['*'],
+  maxAge:         300,
+})
+
+disputePortalApiFn.addEnvironment('TABLE_NAME', disputeTableForPortal.tableName)
+disputePortalApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+
+const disputePortalApiUrl = new FunctionUrl(disputePortalApiFn.stack, 'DisputePortalApiUrl', {
+  function: disputePortalApiFn,
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    allowedOrigins: PORTAL_ORIGINS,
+    allowedMethods: [HttpMethod.POST],
+    allowedHeaders: ['content-type'],
+  },
+})
+
+new CfnOutput(disputePortalApiFn.stack, 'DisputePortalApiFunctionUrl', {
+  value:       disputePortalApiUrl.url,
+  description: 'Public driver dispute portal API URL',
+})
+
+backend.addOutput({ custom: { disputePortalUrl: disputePortalApiUrl.url } })
 
 // ── onboardingEmailer Lambda (SES, custom AppSync mutation) ─────────────────
 

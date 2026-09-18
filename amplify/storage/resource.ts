@@ -41,5 +41,12 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
+    // Amazon driver-dispute proof uploads from the public dispute portal.
+    // Guests PUT via a presigned URL; authenticated staff/users can read to review.
+    // No public read or delete is granted here.
+    'dispute-proofs/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
   }),
 })

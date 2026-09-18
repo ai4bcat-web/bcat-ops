@@ -398,10 +398,11 @@ interface AppState {
   updateMaintenanceInvoice: (id: string, patch: Partial<Omit<MaintenanceInvoice, 'id' | 'createdAt'>>) => void
   deleteMaintenanceInvoice: (id: string) => void
 
-  // ── Amazon dispute actions (optimistic local update + write-through) ───────
+  // ── Amazon dispute actions (confirmed persistence + poll refresh) ──────────
   addAmazonDispute: (d: Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   updateAmazonDispute: (id: string, patch: Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<void>
   deleteAmazonDispute: (id: string) => Promise<void>
+  refreshAmazonDisputes: () => Promise<void>
 
   // ── Expense actions (local) ────────────────────────────────────────────────
   addExpense: (e: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>) => void
@@ -750,20 +751,17 @@ export const useAppStore = create<AppState>()(
       },
 
       // ── Amazon disputes ────────────────────────────────────────────────────
-      // Optimistic where possible; create awaits the server so we store the real id.
+      // Confirmed persistence: mutate first, then update local state with the server
+      // response. This prevents optimistic false-success and lets callers surface real
+      // errors. Polling refresh merges by updatedAt so a stale full-list response never
+      // overwrites a status change that just persisted.
       addAmazonDispute: async (d) => {
         const dispute = await api.createAmazonDispute(d)
         set((s) => ({ amazonDisputes: [...s.amazonDisputes, dispute] }))
       },
       updateAmazonDispute: async (id, patch) => {
-        // Optimistic local update, then persist. Amplify manages updatedAt server-side.
-        set((s) => ({ amazonDisputes: s.amazonDisputes.map((d) => d.id === id ? { ...d, ...patch, updatedAt: nowIso() } : d) }))
-        try {
-          const after = await api.updateAmazonDispute(id, patch)
-          set((s) => ({ amazonDisputes: s.amazonDisputes.map((d) => d.id === id ? after : d) }))
-        } catch (err) {
-          console.error('[store] updateAmazonDispute failed', err)
-        }
+        const after = await api.updateAmazonDispute(id, patch)
+        set((s) => ({ amazonDisputes: s.amazonDisputes.map((d) => d.id === id ? after : d) }))
       },
       deleteAmazonDispute: async (id) => {
         const before = get().amazonDisputes
@@ -771,8 +769,32 @@ export const useAppStore = create<AppState>()(
         try {
           await api.deleteAmazonDispute(id)
         } catch (err) {
-          console.error('[store] deleteAmazonDispute failed', err)
-          set({ amazonDisputes: before })  // rollback on failure
+          set({ amazonDisputes: before })
+          throw err
+        }
+      },
+      refreshAmazonDisputes: async () => {
+        try {
+          const remote = await api.listAmazonDisputes()
+          const recent = new Date(Date.now() - 15_000).toISOString()
+          set((s) => {
+            const local: Record<string, AmazonDispute> = {}
+            for (const d of s.amazonDisputes) local[d.id] = d
+            const merged: AmazonDispute[] = []
+            for (const r of remote) {
+              const l = local[r.id]
+              // Keep the local copy when it is newer, so a status update that just
+              // persisted isn't clobbered by a stale full-list response.
+              merged.push(l && (l.updatedAt ?? '') > (r.updatedAt ?? '') ? l : r)
+              delete local[r.id]
+            }
+            // Rows missing remotely were deleted elsewhere - unless they were written in
+            // the last few seconds and the (eventually consistent) scan hasn't caught up.
+            for (const l of Object.values(local)) if ((l.updatedAt ?? '') > recent) merged.push(l)
+            return { amazonDisputes: merged }
+          })
+        } catch (err) {
+          console.warn('[store] refreshAmazonDisputes failed', err)
         }
       },
 

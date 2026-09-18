@@ -198,9 +198,12 @@ const schema = a.schema({
       status:          a.enum(['PENDING', 'POSTED', 'PAID', 'REJECTED']),
       resolvedAmount:  a.float(),              // dollars actually recovered when PAID
       submittedAt:     a.string(),             // ISO — the Google Form timestamp
-      source:          a.enum(['GOOGLE_FORM', 'MANUAL']),
+      source:          a.enum(['GOOGLE_FORM', 'MANUAL', 'DRIVER_PORTAL']),
       externalId:      a.string(),             // dedup key from the form submission
       notes:           a.string(),             // internal staff notes
+      // AWSJSON array of uploaded proof objects from the public driver portal:
+      // [{ s3Key, fileName, contentType, size, kind }]. Kept off the public board.
+      evidence:        a.string(),
     })
     .secondaryIndexes((index) => [index('externalId')])
     .authorization((allow) => [allow.authenticated()]),

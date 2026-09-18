@@ -33,6 +33,7 @@ import { VehicleQuotePage } from '@/features/vehicle-quote/VehicleQuotePage'
 import { VehicleConfirmationPage } from '@/features/vehicle-confirmation/VehicleConfirmationPage'
 import { FleetManagerDashboardPage } from '@/features/fleet-dashboard/FleetManagerDashboardPage'
 import { DisputesPage } from '@/features/disputes/DisputesPage'
+import { DriverDisputesPage } from '@/features/disputes/DriverDisputesPage'
 import { DriverDocumentsPage } from '@/features/driver-docs/DriverDocumentsPage'
 import { FilesPage } from '@/features/files/FilesPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
@@ -50,6 +51,7 @@ export default function App() {
           {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
           <Route path="/sign/:token" element={<DocumentSigningPage />} />
+          <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
           <Route path="/*" element={
             <AuthGuard>
               <Routes>
