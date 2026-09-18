@@ -4,6 +4,7 @@ import { DollarSign, ChevronRight } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useAppStore } from '@/store/useAppStore'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
+import { isPosted } from '@/lib/invoiceStatus'
 import type { FleetGroup } from '@/types/equipment'
 
 function money(cents: number): string {
@@ -70,6 +71,7 @@ export function RepairSpendWidget() {
 
   const filtered = useMemo(
     () => invoices.filter((i) => {
+      if (!isPosted(i)) return false
       if (fleet !== 'all' && (equipMap.get(i.equipmentId)?.fleetGroup ?? null) !== fleet) return false
       if (equipId !== 'all' && i.equipmentId !== equipId) return false
       const d = i.date ?? ''

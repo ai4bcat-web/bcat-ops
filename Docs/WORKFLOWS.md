@@ -27,9 +27,23 @@
 - Add a feature in-place if it fits an existing folder.
 - Add new files/folders only when the new domain is clearly separate.
 
+## Repair invoice intake
+- `scripts/ingestMaintenanceInvoice.mjs` writes emailed invoices as `PENDING`; staff post or archive them in the invoice Review Queue. Fleet spending excludes pending and archived records.
+- Intake and the app invoice list follow every AppSync `nextToken` page. Intake fails closed on incomplete list/create responses.
+- Numbered invoices retain the document-content `externalId` (date, normalized vendor, amount, normalized invoice number). Unnumbered invoices can supply `sourceDocumentId` to distinguish separate documents with equal totals. Source identity must be stable across retries.
+- New emailed records use deterministic IDs. AppSync create conflicts count as duplicates only after retrieving the existing record and verifying its immutable `externalId`. Reviewed and archived rows remain in duplicate checks.
+- `node scripts/dedupeMaintenanceInvoices.mjs` is a read-only preview; `--apply` archives only unambiguous extras. No records are deleted. Groups spanning different assigned units require manual review, since a legacy invoice may be split across trucks. Unnumbered records are not grouped by content alone.
+- Do not use an invoice date cutoff to hide missing historical invoices, or email Seen status as proof of successful ingestion. Do not claim complete repairs-address coverage from the forwarded Gmail copy alone.
+
 ## Amazon mileage expenses
 - In Amazon Driver Pay settings, add an expense or select an existing revision and choose Change, then Mileage calculation. Enter cost per mile, miles for the weekly expense, and an effective date. Apply the draft, then Save settings.
 - Amount is calculated from cost per mile × entered miles and rounded once to cents; sub-cent per-mile rates are retained. These are entered miles, not an ELD feed or automatic trip-mile total.
 - Both inputs are saved on each expense revision in the existing fixedExpenses JSON. Reopening a revision restores its calculation; changes retain previous amounts and formulas. Partial periods still prorate by calendar day.
 - Mileage controls are enabled for Amazon settings only; box-truck fixed-amount entry is unchanged.
 - A fixed expense is shared through the pay split by default (an after-expenses driver bears only their pay % of it); "Driver pays in full, after the split" is available per line for charges the driver owes outright. An optional company share on any line stays off the statement and is booked as a company cost in Finances (e.g. the company's half of a truck lease). Weekly lease mileage: on the settlement week, Add expense → **Miles × cost per mile** — the amount is computed, the basis is written into the description, and it is deducted before the split for that week only.
+
+## Amazon disputes (driver portal)
+- Drivers file disputes at `/amazon-disputes` (public, no login). The form requires the trip confirmation email (image or PDF) and accepts up to 5 photos; files go to `dispute-proofs/{submissionId}/` via a presigned PUT, then the `dispute-portal-api` Lambda verifies each object and writes one `AmazonDispute` row (`source DRIVER_PORTAL`, `status PENDING`). Retrying a submission reuses its id, so a retry never creates a second row.
+- The same page shows a shared status board: driver name, trip number, pay period, shipment date, status - for every dispute. Amounts, descriptions, uploads, and staff notes are never sent to the public endpoint.
+- Staff work the queue at `/disputes` (same page as before). Rows from the portal show their evidence files; status changes are saved before the UI confirms them. The list polls every ~30 s because portal writes bypass AppSync subscriptions.
+- The endpoint is published as `custom.disputePortalUrl` in `amplify_outputs.json`; `VITE_DISPUTE_PORTAL_API_URL` overrides it locally.

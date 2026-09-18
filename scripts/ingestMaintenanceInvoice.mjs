@@ -11,18 +11,31 @@
  *   node scripts/ingestMaintenanceInvoice.mjs --email-body /tmp/invoice.txt [--dry-run]
  *
  * Dedup: each invoice gets a stable `externalId` derived from what the source document
- * says (date, vendor, amount, invoice #) — NOT equipmentId, which the office changes when
- * it assigns the repair to a truck. See scripts/invoiceDedup.mjs. Reviewed and archived
- * invoices therefore stay out of the queue instead of being re-inserted on the next run.
- * Exit codes: 0 ok, 1 fatal error, 2 zero inserted (possible dupes or parse issue).
+ * says (date, vendor, amount, invoice #; sourceDocumentId for unnumbered documents) —
+ * NOT the equipmentId assigned during review. Source identifiers must remain stable
+ * across retries. See scripts/invoiceDedup.mjs.
+ *
+ * To prevent concurrent ingests from inserting the same email twice, every create uses a
+ * deterministic id derived from externalId. A conditional conflict is treated as a
+ * duplicate only after get-by-id confirms the existing invoice carries the same immutable
+ * externalId; any other error or externalId mismatch is reported and fails the run.
+ *
+ * Exit codes: 0 ok, 1 fatal error or any insert failure (no silent loss).
  */
 
-import { readFileSync, existsSync } from 'fs'
-import { fileURLToPath } from 'url'
-import { dirname, resolve, basename } from 'path'
+import { readFileSync, existsSync } from 'node:fs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { dirname, resolve, basename } from 'node:path'
 import { Amplify } from 'aws-amplify'
-import { invoiceExternalId, legacyContentKey, buildSeenIndex, isAlreadyIngested } from './invoiceDedup.mjs'
 import { signIn, fetchAuthSession } from 'aws-amplify/auth'
+import {
+  invoiceExternalId,
+  legacyContentKey,
+  buildSeenIndex,
+  classifyDedup,
+  dedupIsDuplicate,
+  dedupIsAmbiguous,
+} from './invoiceDedup.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -30,18 +43,23 @@ const outputs = JSON.parse(readFileSync(resolve(__dirname, '../amplify_outputs.j
 const APPSYNC_URL = outputs.data.url
 Amplify.configure(outputs)
 
-// ─── Unit number → equipment mapping ────────────────────────────────────────
+const DEFAULT_PAGE_LIMIT = 5000
+const EMAIL_SOURCE = 'EMAIL'
+const PENDING_STATUS = 'PENDING'
+const ID_PREFIX = 'inv-email'
+
+// ─── Unit number → equipment mapping ──────────────────────────────────────────
 // Matches SEED_EQUIPMENT in bcat-ops/src/store/useAppStore.ts
 const UNIT_TO_EQUIPMENT = {
   // Trucks
-  '009':  'eq-mnmpi9jxwd12',  // Freightliner Cascadia
-  '9':    'eq-mnmpi9jxwd12',
-  '299':  'eq-mnevxuyoxpd8',  // Freightliner Cascadia
-  '530':  'eq-mnevuhxgs5jf',  // Volvo VNL
-  '685':  'eq-mnevvq8q6tcx',  // Volvo VNL
-  '780':  'eq-mnevwst30vwt',  // Mack
-  '89510': 'equip-1781464883907',  // Volvo VNL 740 (2017)
-  'TBD':  'eq-mnmpmycmsojj',  // Kenworth T680
+  '009':   'eq-mnmpi9jxwd12',   // Freightliner Cascadia
+  '9':     'eq-mnmpi9jxwd12',
+  '299':   'eq-mnevxuyoxpd8',   // Freightliner Cascadia
+  '530':   'eq-mnevuhxgs5jf',   // Volvo VNL
+  '685':   'eq-mnevvq8q6tcx',   // Volvo VNL
+  '780':   'eq-mnevwst30vwt',   // Mack
+  '89510': 'equip-1781464883907', // Volvo VNL 740 (2017)
+  'TBD':   'eq-mnmpmycmsojj',   // Kenworth T680
   // Trailers
   '53103':  'eq-mnex02osubxo',  // Utility
   '53105':  'eq-mnewzfg20sho',  // Utility
@@ -59,21 +77,18 @@ const UNIT_TO_EQUIPMENT = {
  * Try to match a unit reference from text to an equipment ID.
  * Handles: "Unit 530", "truck 530", "#530", "530", "Volvo 530", "Trailer 53103"
  */
-function findEquipmentId(text) {
+export function findEquipmentId(text) {
   if (!text) return null
 
-  // Direct match against the mapping table
   const clean = String(text).trim()
   const direct = UNIT_TO_EQUIPMENT[clean]
   if (direct) return direct
 
-  // Try stripping leading zeros for short numbers
   const stripped = clean.replace(/^0+/, '')
   if (stripped !== clean && UNIT_TO_EQUIPMENT[stripped]) {
     return UNIT_TO_EQUIPMENT[stripped]
   }
 
-  // Fuzzy: extract any 3-6 digit number and try matching
   const numMatch = clean.match(/\b(\d{3,6})\b/)
   if (numMatch) {
     const num = numMatch[1]
@@ -81,7 +96,6 @@ function findEquipmentId(text) {
     for (const [key, val] of Object.entries(UNIT_TO_EQUIPMENT)) {
       if (key === num || key === stripped2) return val
     }
-    // Partial match: "531" in "53103"
     for (const [key, val] of Object.entries(UNIT_TO_EQUIPMENT)) {
       if (key.includes(num) || num.includes(key)) return val
     }
@@ -94,7 +108,7 @@ function findEquipmentId(text) {
  * Resolve an invoice's equipment ID: explicit id wins, then unitNumber, then
  * a unit reference embedded in the description. Used by both dry-run and writes.
  */
-function resolveEquipmentId(raw) {
+export function resolveEquipmentId(raw) {
   if (raw.equipmentId) return raw.equipmentId
   if (raw.unitNumber) {
     const byUnit = findEquipmentId(String(raw.unitNumber))
@@ -104,20 +118,34 @@ function resolveEquipmentId(raw) {
   return null
 }
 
+/**
+ * Deterministic record id for an invoice. Derived from its immutable externalId so
+ * concurrent ingests race on the same DynamoDB key instead of creating two rows.
+ */
+export function deriveInvoiceId(externalId) {
+  return `${ID_PREFIX}-${externalId}`
+}
+
 // ─── GraphQL ──────────────────────────────────────────────────────────────────
 
-const listQuery = (withExternalId) => `query ListMaintenanceInvoices {
-  listMaintenanceInvoices(limit: 5000) {
-    items { id date equipmentId vendor amount invoiceNumber status${withExternalId ? ' externalId' : ''} }
+const LIST_INVOICES_QUERY = `query ListMaintenanceInvoices($nextToken: String, $limit: Int) {
+  listMaintenanceInvoices(nextToken: $nextToken, limit: $limit) {
+    items { id date equipmentId vendor amount invoiceNumber status externalId source }
+    nextToken
   }
+}`
+
+const GET_INVOICE_QUERY = `query GetMaintenanceInvoice($id: ID!) {
+  getMaintenanceInvoice(id: $id) { id externalId }
 }`
 
 const CREATE_MUTATION = `mutation CreateMaintenanceInvoice($input: CreateMaintenanceInvoiceInput!) {
   createMaintenanceInvoice(input: $input) {
-    id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate
+    id equipmentId date vendor description amount invoiceNumber paymentMethod paymentDate source externalId
   }
 }`
 
+/** Default AppSync transport. Replace at the function boundary for tests. */
 async function callAppSync(query, variables, idToken) {
   const res = await fetch(APPSYNC_URL, {
     method: 'POST',
@@ -130,6 +158,29 @@ async function callAppSync(query, variables, idToken) {
   return res.json()
 }
 
+/**
+ * Page through every MaintenanceInvoice in the backend, following nextToken even
+ * through empty pages. An error at any page fails closed.
+ */
+export async function listAllInvoices(callAppSync, idToken, limit = DEFAULT_PAGE_LIMIT) {
+  const items = []
+  let nextToken = null
+  do {
+    const raw = await callAppSync(LIST_INVOICES_QUERY, { limit, nextToken }, idToken)
+    if (raw.errors) {
+      throw new Error(raw.errors.map((e) => e.message ?? JSON.stringify(e)).join('; '))
+    }
+    const page = raw.data?.listMaintenanceInvoices
+    if (typeof page !== 'object' || page === null) {
+      throw new Error('listMaintenanceInvoices returned malformed response (missing connection)')
+    }
+    const pageItems = Array.isArray(page.items) ? page.items.filter((item) => item != null) : []
+    items.push(...pageItems)
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return items
+}
+
 // ─── Parsing ──────────────────────────────────────────────────────────────────
 
 /**
@@ -137,7 +188,7 @@ async function callAppSync(query, variables, idToken) {
  * Returns a single invoice object (best-effort).
  * The LLM cron agent should produce better results; this is a fallback.
  */
-function parseEmailBody(text) {
+export function parseEmailBody(text) {
   const inv = {}
 
   // Amount: look for dollar amounts (total, amount due, etc.)
@@ -148,8 +199,7 @@ function parseEmailBody(text) {
   if (!inv.amount) {
     const dollarMatch = text.match(/\$([\d,]+\.\d{2})/g)
     if (dollarMatch) {
-      // Take the largest amount as likely the total
-      const amounts = dollarMatch.map(d => parseFloat(d.replace(/[$,]/g, '')))
+      const amounts = dollarMatch.map((d) => parseFloat(d.replace(/[$,]/g, '')))
       inv.amount = Math.round(Math.max(...amounts) * 100)
     }
   }
@@ -157,11 +207,11 @@ function parseEmailBody(text) {
   // Date: YYYY-MM-DD or MM/DD/YYYY or Month DD, YYYY
   const dateMatch = text.match(/(?:date|invoice\s*date|dated?)\s*[:]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})/i)
   if (dateMatch) {
-    const raw = dateMatch[1]
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      inv.date = raw
-    } else if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(raw)) {
-      const [m, d, y] = raw.split('/')
+    const rawDate = dateMatch[1]
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+      inv.date = rawDate
+    } else if (/\d{1,2}\/\d{1,2}\/\d{2,4}/.test(rawDate)) {
+      const [m, d, y] = rawDate.split('/')
       inv.date = `${y.length === 2 ? '20' + y : y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
     }
   }
@@ -171,7 +221,7 @@ function parseEmailBody(text) {
   if (invNumMatch) inv.invoiceNumber = invNumMatch[1]
 
   // Vendor: look for company name patterns near the top
-  const vendorMatch = text.match(/(?:from|vendor|shop|dealer|billed\s*by)\s*[:]?\s*([^\n]{3,60})/i)
+  const vendorMatch = text.match(/(?:from|vendor|shop|dealer|billed\s*by)\s*[:]?(\s*[^\n]{3,60})/i)
   if (vendorMatch) inv.vendor = vendorMatch[1].trim().replace(/[<>]/g, '')
 
   // Unit number
@@ -181,14 +231,127 @@ function parseEmailBody(text) {
   }
 
   // Description: first paragraph or service description
-  const descMatch = text.match(/(?:description|service|work\s*performed|repair)\s*[:]?\s*\n?\s*([^\n]{10,300})/i)
-  if (descMatch) inv.description = descMatch[1].trim()
+  const descMatch = text.match(/(?:description|service|work\s*performed|repair)\s*[:]?(\s*\n?\s*[^\n]{10,300})/i)
+  if (descMatch) inv.description = descMatch[1].trim().replace(/^\s+/, '')
 
   // Payment method
-  const payMatch = text.match(/(?:payment\s*method|paid\s*(?:via|by|with))\s*[:]?\s*(credit|debit|cash|check|zelle|ach|wire|card)/i)
-  if (payMatch) inv.paymentMethod = payMatch[1].charAt(0).toUpperCase() + payMatch[1].slice(1).toLowerCase()
+  const payMatch = text.match(/(?:payment\s*method|paid\s*(?:via|by|with))\s*[:]?(\s*(credit|debit|cash|check|zelle|ach|wire|card))/i)
+  if (payMatch) inv.paymentMethod = payMatch[2].charAt(0).toUpperCase() + payMatch[2].slice(1).toLowerCase()
 
   return inv
+}
+
+// ─── Write path ───────────────────────────────────────────────────────────────
+
+/**
+ * Ingest an array of parsed invoices. Authentication and transport are injected via
+ * callAppSync so tests can mock the backend without touching real data.
+ *
+ * Returns { inserted, duplicates, failed }.
+ */
+export async function processInvoices(invoices, { idToken, callAppSync }) {
+  if (!idToken) throw new Error('idToken required')
+  if (typeof callAppSync !== 'function') throw new Error('callAppSync transport required')
+
+  const allExisting = await listAllInvoices(callAppSync, idToken)
+  const seen = buildSeenIndex(allExisting)
+
+  let inserted = 0
+  let duplicates = 0
+  let failed = 0
+
+  for (const raw of invoices) {
+    const equipmentId = resolveEquipmentId(raw) || 'unassigned'
+    const externalId = invoiceExternalId(raw)
+    const id = deriveInvoiceId(externalId)
+
+    const input = {
+      equipmentId,
+      ...(raw.date && { date: raw.date }),
+      ...(raw.vendor && { vendor: raw.vendor }),
+      ...(raw.description && { description: raw.description }),
+      amount: raw.amount ?? 0,
+      ...(raw.invoiceNumber && { invoiceNumber: raw.invoiceNumber }),
+      ...(raw.paymentMethod && { paymentMethod: raw.paymentMethod }),
+      ...(raw.paymentDate && { paymentDate: raw.paymentDate }),
+      ...(raw.assignee && { assignee: raw.assignee }),
+      source: EMAIL_SOURCE,
+      status: PENDING_STATUS,
+    }
+
+    if (!input.vendor && !input.amount) {
+      console.error(`  SKIP: no vendor or amount: ${JSON.stringify(raw)}`)
+      failed++
+      continue
+    }
+
+    const dedup = classifyDedup(raw, seen)
+    if (dedupIsDuplicate(dedup)) {
+      console.error(`  DUPLICATE (already ingested): ${input.vendor ?? '?'} ${input.invoiceNumber ?? ''} ${input.amount ?? 0}`)
+      duplicates++
+      continue
+    }
+    if (dedupIsAmbiguous(dedup)) {
+      console.error(`  AMBIGUOUS (needs manual review): ${input.vendor ?? '?'} ${input.invoiceNumber ?? ''} ${input.amount ?? 0} sourceDocumentId=${raw.sourceDocumentId ?? 'none'}`)
+      failed++
+      continue
+    }
+
+    const result = await callAppSync(
+      CREATE_MUTATION,
+      { input: { ...input, id, externalId } },
+      idToken,
+    )
+
+    if (result.errors) {
+      const isConflict = result.errors.some(
+        (e) =>
+          e.errorType === 'ConditionalCheckFailedException' ||
+          e.errorType === 'DynamoDB:ConditionalCheckFailedException',
+      )
+
+      if (isConflict) {
+        const got = await callAppSync(GET_INVOICE_QUERY, { id }, idToken)
+        if (got.errors) {
+          console.error(`  FAIL: duplicate id but get-by-id failed — ${got.errors.map((e) => e.message).join('; ')}`)
+          failed++
+          continue
+        }
+        const existing = got.data?.getMaintenanceInvoice
+        if (existing?.externalId === externalId) {
+          console.error(`  DUPLICATE (concurrent): ${input.vendor ?? '?'} ${input.invoiceNumber ?? ''} ${input.amount ?? 0}`)
+          duplicates++
+          continue
+        }
+        console.error(
+          `  FAIL: duplicate id did not match expected externalId — id=${id} expectedExternalId=${externalId} existing=${JSON.stringify(existing)}`,
+        )
+        failed++
+        continue
+      }
+
+      console.error(`  FAIL: ${result.errors[0].message} — ${JSON.stringify(input)}`)
+      failed++
+      continue
+    }
+
+    const created = result.data?.createMaintenanceInvoice
+    if (created?.id !== id || created?.externalId !== externalId) {
+      console.error(`  FAIL: create returned mismatched or missing id/externalId — expected id=${id} externalId=${externalId} got=${JSON.stringify(created)}`)
+      failed++
+      continue
+    }
+
+    seen.byExternalId.add(externalId)
+    if (String(raw?.sourceDocumentId ?? '') === '') {
+      seen.byClassicExternalId.add(externalId)
+    }
+    seen.byContent.add(legacyContentKey(raw))
+    inserted++
+    console.error(`  OK: ${created.id} vendor=${input.vendor} amount=${input.amount} equipment=${input.equipmentId || 'unassigned'}`)
+  }
+
+  return { inserted, duplicates, failed }
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -199,7 +362,6 @@ async function main() {
 
   let invoices = []
 
-  // Determine input source
   const emailBodyPath = args.includes('--email-body')
     ? args[args.indexOf('--email-body') + 1]
     : null
@@ -215,7 +377,6 @@ async function main() {
     const text = readFileSync(emailBodyPath, 'utf8')
     console.error(`Parsing email body: ${basename(emailBodyPath)} (${text.length} chars)`)
     const parsed = parseEmailBody(text)
-    // Only include if we got at least something useful
     if (parsed.vendor || parsed.amount) {
       invoices.push(parsed)
     } else {
@@ -232,7 +393,6 @@ async function main() {
       process.exit(1)
     }
   } else {
-    // Read JSON from stdin
     let stdin = ''
     process.stdin.setEncoding('utf8')
     for await (const chunk of process.stdin) {
@@ -262,14 +422,12 @@ async function main() {
 
   if (dryRun) {
     for (const inv of invoices) {
-      // Resolve equipment the same way the write path does, so dry-run previews match.
-      console.log(JSON.stringify({ ...inv, resolvedEquipmentId: resolveEquipmentId(inv) }, null, 2))
+      console.log(JSON.stringify({ ...inv, resolvedEquipmentId: resolveEquipmentId(inv) }))
     }
     console.error('\n--dry-run: nothing written.')
     return
   }
 
-  // Authenticate
   const email = process.env.BCAT_EMAIL
   const password = process.env.BCAT_PASSWORD
   if (!email || !password) {
@@ -285,73 +443,15 @@ async function main() {
     process.exit(1)
   }
 
-  // Dedup against everything already ingested, in ANY review state — an archived
-  // invoice must stay archived rather than reappear on the next run.
-  let hasExternalId = true
-  let listed = await callAppSync(listQuery(true), {}, idToken)
-  if (listed.errors && /externalId/i.test(JSON.stringify(listed.errors))) {
-    // Backend predates the externalId field — fall back to content matching only.
-    console.error('  note: externalId not deployed yet; matching on document content')
-    hasExternalId = false
-    listed = await callAppSync(listQuery(false), {}, idToken)
-  }
-  if (listed.errors) {
-    console.error('List failed:', listed.errors[0].message)
-    process.exit(1)
-  }
-  const seen = buildSeenIndex(listed.data.listMaintenanceInvoices.items ?? [])
-
-  let inserted = 0, duplicates = 0, failed = 0
-
-  for (const raw of invoices) {
-    // Map equipment from explicit id, unit number, or a unit ref in the description.
-    const equipmentId = resolveEquipmentId(raw)
-
-    const input = {
-      equipmentId: equipmentId || 'unassigned',  // schema requires NonNull; use 'unassigned' when unit unknown
-      ...(raw.date && { date: raw.date }),
-      ...(raw.vendor && { vendor: raw.vendor }),
-      ...(raw.description && { description: raw.description }),
-      amount: raw.amount || 0,  // cents, required
-      ...(raw.invoiceNumber && { invoiceNumber: raw.invoiceNumber }),
-      ...(raw.paymentMethod && { paymentMethod: raw.paymentMethod }),
-      ...(raw.paymentDate && { paymentDate: raw.paymentDate }),
-      ...(raw.assignee && { assignee: raw.assignee }),
-      source: 'EMAIL',   // ingested from the repairs@bcatcorp.com pipeline
-    }
-
-    // Skip if nothing useful
-    if (!input.vendor && !input.amount) {
-      console.error(`  SKIP: no vendor or amount: ${JSON.stringify(raw)}`)
-      failed++
-      continue
-    }
-
-    // Dedup check — identity comes from the document, not the editable record
-    const externalId = invoiceExternalId(raw)
-    if (hasExternalId) input.externalId = externalId
-    if (isAlreadyIngested(raw, seen)) {
-      console.error(`  DUPLICATE (already ingested): ${input.vendor ?? '?'} ${input.invoiceNumber ?? ''} ${input.amount ?? 0}`)
-      duplicates++
-      continue
-    }
-
-    const result = await callAppSync(CREATE_MUTATION, { input }, idToken)
-    if (result.errors) {
-      console.error(`  FAIL: ${result.errors[0].message} — ${JSON.stringify(input)}`)
-      failed++
-    } else {
-      // Remember it so a repeated invoice within THIS batch is caught too.
-      seen.byExternalId.add(externalId)
-      seen.byContent.add(legacyContentKey(raw))
-      inserted++
-      const created = result.data.createMaintenanceInvoice
-      console.error(`  OK: ${created.id} vendor=${input.vendor} amount=${input.amount} equipment=${input.equipmentId || 'unassigned'}`)
-    }
-  }
+  const { inserted, duplicates, failed } = await processInvoices(invoices, { idToken, callAppSync })
 
   console.error(`\nDone: ${inserted} inserted, ${duplicates} duplicates skipped, ${failed} failed.`)
   if (failed > 0) process.exit(1)
 }
 
-main().catch((err) => { console.error(err); process.exit(1) })
+if (process.argv.length > 1 && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

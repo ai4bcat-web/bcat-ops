@@ -3,6 +3,7 @@ import { useFleetProfitability } from './useFleetProfitability'
 import { useFleetFixedCosts } from './useFleetFixedCosts'
 import { useTrucks } from './useTrucks'
 import { useAppStore } from '@/store/useAppStore'
+import { isPosted } from '@/lib/invoiceStatus'
 import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
 import type { DateRange } from '@/lib/fleetProfitability'
 
@@ -22,7 +23,7 @@ export function useFleetMonthlyNet(range: DateRange): { revenue: number; net: nu
   const trailerMaintenance = useMemo(() => {
     const trailerIds = new Set(equipment.filter((e) => e.type === 'trailer').map((e) => e.id))
     return maintenanceInvoices
-      .filter((inv) => inv.date && inv.date >= range.start && inv.date <= range.end && trailerIds.has(inv.equipmentId))
+      .filter((inv) => inv.date && inv.date >= range.start && inv.date <= range.end && trailerIds.has(inv.equipmentId) && isPosted(inv))
       .reduce((s, inv) => s + (inv.amount ?? 0), 0) / 100
   }, [equipment, maintenanceInvoices, range.start, range.end])
 
