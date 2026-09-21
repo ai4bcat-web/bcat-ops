@@ -16,7 +16,7 @@ import {
 
 type InvoiceData = Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>
 
-interface EquipLine { equipmentId: string; amount: string }
+interface EquipLine { equipmentId: string; amount: string; description: string }
 
 function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
   invoice: MaintenanceInvoice | null
@@ -39,8 +39,8 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
   // existing invoice stays single-unit (it maps to one record); creating supports several.
   const [lines, setLines] = useState<EquipLine[]>(
     invoice != null
-      ? [{ equipmentId: invoice.equipmentId, amount: (invoice.amount / 100).toString() }]
-      : [{ equipmentId: equipment[0]?.id ?? '', amount: '' }],
+      ? [{ equipmentId: invoice.equipmentId, amount: (invoice.amount / 100).toString(), description: '' }]
+      : [{ equipmentId: equipment[0]?.id ?? '', amount: '', description: '' }],
   )
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
   const setLine = (i: number, k: keyof EquipLine, v: string) =>
@@ -48,12 +48,16 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
   const addLine = () => {
     const used = new Set(lines.map((l) => l.equipmentId))
     const next = equipment.find((e) => !used.has(e.id))?.id ?? ''
-    setLines((ls) => [...ls, { equipmentId: next, amount: '' }])
+    setLines((ls) => [...ls, { equipmentId: next, amount: '', description: '' }])
   }
   const removeLine = (i: number) => setLines((ls) => ls.filter((_, idx) => idx !== i))
 
   const parsed = lines
-    .map((l) => ({ equipmentId: l.equipmentId, cents: Math.round(parseFloat(l.amount || '0') * 100) }))
+    .map((l) => ({
+      equipmentId: l.equipmentId,
+      cents: Math.round(parseFloat(l.amount || '0') * 100),
+      description: l.description.trim(),
+    }))
     .filter((l) => l.equipmentId && l.cents > 0)
   const totalCents = parsed.reduce((s, l) => s + l.cents, 0)
 
@@ -69,7 +73,14 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
       paymentDate: form.paymentDate || undefined,
       assignee: form.assignee || undefined,
     }
-    onSave(parsed.map((l) => ({ ...shared, equipmentId: l.equipmentId, amount: l.cents })))
+    // Each line is its own invoice record, so the work done on that unit is its own
+    // description; the shared note covers lines left blank.
+    onSave(parsed.map((l) => ({
+      ...shared,
+      equipmentId: l.equipmentId,
+      amount: l.cents,
+      description: l.description || shared.description,
+    })))
     onClose()
   }
 
@@ -90,22 +101,27 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
       }
     >
       <form id="invoice-form" onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-        <FormSection title={isEdit ? 'Equipment' : 'Equipment & amounts'}>
+        <FormSection title={isEdit ? 'Equipment' : 'Equipment, amounts & work done'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {lines.map((line, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: isEdit ? 'minmax(0,1.4fr) minmax(0,1fr)' : 'minmax(0,1.4fr) minmax(0,1fr) auto', gap: 10, alignItems: 'center' }}>
-                <select style={inputStyle} value={line.equipmentId} onChange={(e) => setLine(i, 'equipmentId', e.target.value)} required>
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: isEdit ? 'minmax(0,1.4fr) minmax(0,1fr)' : 'minmax(0,1.1fr) 120px minmax(0,1.5fr) auto', gap: 10, alignItems: 'center' }}>
+                <select aria-label={`Equipment ${i + 1}`} style={inputStyle} value={line.equipmentId} onChange={(e) => setLine(i, 'equipmentId', e.target.value)} required>
                   <option value="" disabled>Select equipment…</option>
                   {equipment.map((eq) => (
                     <option key={eq.id} value={eq.id}>#{eq.unitNumber}{eq.nickname ? ` · ${eq.nickname}` : ''}</option>
                   ))}
                 </select>
-                <input type="number" step="0.01" min="0" style={inputStyle} value={line.amount} onChange={(e) => setLine(i, 'amount', e.target.value)} placeholder="Amount ($)" required />
+                <input type="number" step="0.01" min="0" aria-label={`Amount ${i + 1} ($)`} style={inputStyle} value={line.amount} onChange={(e) => setLine(i, 'amount', e.target.value)} placeholder="Amount ($)" required />
                 {!isEdit && (
-                  <button type="button" onClick={() => removeLine(i)} disabled={lines.length === 1} title="Remove"
-                    style={{ ...iconBtnStyle, opacity: lines.length === 1 ? 0.35 : 1 }}>
-                    <Trash2 size={14} />
-                  </button>
+                  <>
+                    {/* Each unit on the invoice gets its own repair record, so each one
+                        carries what was actually fixed on it. */}
+                    <input aria-label={`Work done ${i + 1}`} style={inputStyle} value={line.description} onChange={(e) => setLine(i, 'description', e.target.value)} placeholder="What was fixed on this unit" />
+                    <button type="button" onClick={() => removeLine(i)} disabled={lines.length === 1} title="Remove"
+                      style={{ ...iconBtnStyle, opacity: lines.length === 1 ? 0.35 : 1 }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </>
                 )}
               </div>
             ))}
@@ -127,7 +143,7 @@ function InvoiceModal({ invoice, equipment, onSave, onDelete, onClose }: {
           <Field label="Vendor">
             <input style={inputStyle} value={form.vendor} onChange={(e) => set('vendor', e.target.value)} placeholder="Shop / vendor name" />
           </Field>
-          <Field label="Description">
+          <Field label={isEdit ? 'Description' : 'Description (lines without their own use this)'}>
             <textarea rows={2} style={{ ...inputStyle, resize: 'vertical', minHeight: 60, lineHeight: 1.5 }} value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="What was done" />
           </Field>
         </FormSection>

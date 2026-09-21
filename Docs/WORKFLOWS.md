@@ -34,6 +34,7 @@
 - New emailed records use deterministic IDs. AppSync create conflicts count as duplicates only after retrieving the existing record and verifying its immutable `externalId`. Reviewed and archived rows remain in duplicate checks.
 - `node scripts/dedupeMaintenanceInvoices.mjs` is a read-only preview; `--apply` archives only unambiguous extras. No records are deleted. Groups spanning different assigned units require manual review, since a legacy invoice may be split across trucks. Unnumbered records are not grouped by content alone.
 - Do not use an invoice date cutoff to hide missing historical invoices, or email Seen status as proof of successful ingestion. Do not claim complete repairs-address coverage from the forwarded Gmail copy alone.
+- A new invoice can be split across several units; each line carries its own equipment, amount and "what was fixed on this unit", and becomes its own invoice record with that description. Lines left blank fall back to the invoice-level description. Editing an existing invoice stays single-unit.
 
 ## Amazon mileage expenses
 - In Amazon Driver Pay settings, add an expense or select an existing revision and choose Change, then Mileage calculation. Enter cost per mile, miles for the weekly expense, and an effective date. Apply the draft, then Save settings.

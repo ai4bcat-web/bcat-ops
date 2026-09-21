@@ -9,7 +9,7 @@ import { errorMessage } from '@/lib/utils/errorMessage'
 import { formatPayPeriod } from '@/lib/payPeriod'
 import { createAmazonTrip, updateAmazonTrip, deleteAmazonTrip } from '@/lib/apiClient'
 import { disputeRecoveredAmount, disputeTripInput, matchDisputeDriver } from '@/lib/disputeSettlement'
-import { sundayOf, shiftWeek, weekLabelLong } from '@/features/driver-pay/week'
+import { sundayOf, shiftWeek, weekLabel, weekLabelLong } from '@/features/driver-pay/week'
 import type { AmazonDispute, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
   thBase, tdBase, iconBtnStyle,
@@ -587,25 +587,27 @@ export function DisputesPage() {
           ) : (
             <>
               <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
-                <table style={{ width: '100%', minWidth: 1288, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                {/* Ten columns that fit a 1440 window with the sidebar open: the filing
+                    date rides under the source pill and the shipment date sits above its
+                    7-day period, so Status and the row actions stay on screen. Every
+                    fixed cell clips with an ellipsis and carries a title. */}
+                <table style={{ width: '100%', minWidth: 1100, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <colgroup>
-                    <col style={{ width: 96 }} />
-                    <col style={{ width: 110 }} />
+                    <col style={{ width: 116 }} />
                     <col style={{ width: 100 }} />
-                    <col style={{ width: 100 }} />
-                    <col style={{ width: 122 }} />
+                    <col style={{ width: 150 }} />
+                    <col style={{ width: 120 }} />
                     <col />
-                    <col style={{ width: 100 }} />
-                    <col style={{ width: 100 }} />
-                    <col style={{ width: 104 }} />
-                    <col style={{ width: 104 }} />
-                    <col style={{ width: 140 }} />
-                    <col style={{ width: 100 }} />
+                    <col style={{ width: 84 }} />
+                    <col style={{ width: 96 }} />
+                    <col style={{ width: 76 }} />
+                    <col style={{ width: 136 }} />
+                    <col style={{ width: 84 }} />
                   </colgroup>
                   <thead>
                     <tr>
-                      {['Submitted', 'Source', 'Trip #', 'Ship Date', '7-Day Period', 'Driver', 'Description', 'Paid', 'Requested', 'Proof', 'Status', ''].map((h, i) => (
-                        <th key={i} style={{ ...thBase, textAlign: i === 7 || i === 8 ? 'right' : 'left' }}>{h}</th>
+                      {['Source', 'Trip #', 'Shipment', 'Driver', 'Description', 'Paid', 'Requested', 'Proof', 'Status', ''].map((h, i) => (
+                        <th key={i} style={{ ...thBase, textAlign: i === 5 || i === 6 ? 'right' : 'left' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -617,20 +619,30 @@ export function DisputesPage() {
                       const hasResponse = Boolean(d.amazonResponse) || responseEvidence(files).length > 0
                       return (
                         <tr key={d.id} className="maint-row">
-                          <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{(d.submittedAt ?? d.createdAt).slice(0, 10)}</td>
-                          <td style={tdBase}>
+                          <td style={{ ...tdBase, verticalAlign: 'top' }}>
                             <Pill tone={SOURCE_TONE[src]}>{SOURCE_LABEL[src]}</Pill>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ds-t3)', marginTop: 3 }}>
+                              {(d.submittedAt ?? d.createdAt).slice(0, 10)}
+                            </div>
                           </td>
-                          <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.tripNumber || '—'}</td>
-                          <td style={{ ...tdBase, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</td>
-                          <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.payPeriod ? formatPayPeriod(d.payPeriod) : '—'}</td>
-                          <td style={{ ...tdBase, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.driverName}</td>
-                          <td style={{ ...tdBase, fontSize: 12.5, color: 'var(--ds-t3)', lineHeight: 1.45 }}>
-                            {d.description ? d.description : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                          <td title={d.tripNumber ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.tripNumber || '—'}</td>
+                          <td style={{ ...tdBase, verticalAlign: 'top', overflow: 'hidden' }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</div>
+                            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {d.payPeriod ? formatPayPeriod(d.payPeriod) : '—'}
+                            </div>
                           </td>
-                          <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
-                          <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
-                          <td style={tdBase}>
+                          <td title={d.driverName} style={{ ...tdBase, verticalAlign: 'top', fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.driverName}</td>
+                          {/* Clamped to two lines so one wordy dispute can't stretch the
+                              whole row; the full text is on hover and in the edit sheet. */}
+                          <td title={d.description ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12.5, color: 'var(--ds-t3)', lineHeight: 1.45 }}>
+                            {d.description
+                              ? <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{d.description}</span>
+                              : <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
+                          </td>
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
+                          <td style={{ ...tdBase, verticalAlign: 'top' }}>
                             {/* A staff response screenshot must never push a legacy Drive
                                 link out of the column — a GOOGLE_FORM row's only proof. */}
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -654,18 +666,18 @@ export function DisputesPage() {
                               {files.length === 0 && !d.photoUrl && <span style={{ color: 'var(--ds-muted-soft)' }}>—</span>}
                             </div>
                           </td>
-                          <td style={tdBase}>
+                          <td style={{ ...tdBase, verticalAlign: 'top' }}>
                             <StatusSelect status={st} onChange={(next) => setStatusEdit({ dispute: d, status: next })} />
                             {d.settlementPeriodStart && (
                               <div
                                 title={`Paid out as a DISPUTE shipment on the ${weekLabelLong(d.settlementPeriodStart)} settlement`}
-                                style={{ fontSize: 11, color: 'var(--ds-green)', marginTop: 3, whiteSpace: 'nowrap' }}
+                                style={{ fontSize: 11, color: 'var(--ds-green)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                               >
-                                → {weekLabelLong(d.settlementPeriodStart)}
+                                → {weekLabel(d.settlementPeriodStart)} settlement
                               </div>
                             )}
                           </td>
-                          <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
                             <button
                               type="button"
                               aria-label="Record Amazon response"
