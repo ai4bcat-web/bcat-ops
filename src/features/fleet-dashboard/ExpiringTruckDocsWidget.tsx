@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { FileText, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc } from '@/lib/truckDocs'
 
@@ -31,9 +32,11 @@ interface Row {
  * widget on the Fleet Manager Dashboard.
  */
 export function ExpiringTruckDocsWidget() {
+  const { hasPageAccess } = useAuth()
+  const canTruckDocs = hasPageAccess('truckDocs')
   const equipment = useAppStore((s) => s.equipment)
   // Shared dataset + shared "current document" rule (was its own scan and its own index).
-  const { docFor, docs, loading } = useAllComplianceDocuments()
+  const { docFor, loading } = useAllComplianceDocuments()
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = []
@@ -51,7 +54,7 @@ export function ExpiringTruckDocsWidget() {
       STATE_META[a.state].rank - STATE_META[b.state].rank ||
       (a.expiration ?? '').localeCompare(b.expiration ?? ''),
     )
-  }, [docFor, docs, equipment])
+  }, [docFor, equipment])
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
@@ -65,9 +68,11 @@ export function ExpiringTruckDocsWidget() {
             </div>
           </div>
         </div>
-        <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          View all <ChevronRight size={13} />
-        </Link>
+        {canTruckDocs && (
+          <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            View all <ChevronRight size={13} />
+          </Link>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -79,12 +84,8 @@ export function ExpiringTruckDocsWidget() {
         <div style={{ maxHeight: 320, overflowY: 'auto' }}>
           {rows.map((r, i) => {
             const meta = STATE_META[r.state]
-            return (
-              <Link
-                key={`${r.truckId}-${r.docLabel}-${i}`}
-                to="/truck-docs"
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', textDecoration: 'none' }}
-              >
+            const body = (
+              <>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)' }}>
                     <span style={{ fontFamily: 'var(--font-mono)' }}>{r.unit}</span> · {r.docLabel}
@@ -94,7 +95,23 @@ export function ExpiringTruckDocsWidget() {
                   </div>
                 </div>
                 <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+              </>
+            )
+            return canTruckDocs ? (
+              <Link
+                key={`${r.truckId}-${r.docLabel}-${i}`}
+                to="/truck-docs"
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', textDecoration: 'none' }}
+              >
+                {body}
               </Link>
+            ) : (
+              <div
+                key={`${r.truckId}-${r.docLabel}-${i}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)' }}
+              >
+                {body}
+              </div>
             )
           })}
         </div>

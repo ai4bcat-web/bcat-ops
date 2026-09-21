@@ -8,6 +8,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/useAuth'
+import { OWNER_EMAIL } from '@/lib/auth/admin'
 import {
   listCognitoUsers, createCognitoUser,
   disableCognitoUser, enableCognitoUser,
@@ -18,6 +19,7 @@ import {
 import { PERMISSION_PAGES } from '@/lib/navItems'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { Switch } from '@/components/ui/switch'
 
 const PAGE_OPTIONS = PERMISSION_PAGES
 const TOTAL_PAGES = PAGE_OPTIONS.length
@@ -74,21 +76,23 @@ interface UserCardProps {
   busyAdminId: string | null
   resettingId: string | null
   togglingId: string | null
+  savingPermissions: boolean
 }
 
-function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled, busyAdminId, resettingId, togglingId }: UserCardProps) {
+function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled, busyAdminId, resettingId, togglingId, savingPermissions }: UserCardProps) {
   const [expanded, setExpanded] = useState(false)
   const admin = isUserAdmin(user)
   const name = displayName(user)
   const color = avatarColor(user.email ?? user.username ?? '')
   const count = pageGroupCount(user)
-  const access = admin ? 'Full access' : count === 0 ? 'Unrestricted' : `${count}/${TOTAL_PAGES} pages`
+  const isOwner = user.email?.toLowerCase().trim() === OWNER_EMAIL
+  const access = isOwner ? 'Full access' : count === 0 ? 'No pages' : `${count}/${TOTAL_PAGES} pages`
   const isResetting = resettingId === user.username
   const isToggling = togglingId === user.username
   const isAdminBusy = busyAdminId === user.username
 
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+    <div data-testid="user-card" style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       {/* Header */}
       <div className="flex items-center gap-4 px-5 py-4">
         {/* Avatar + live dot */}
@@ -117,7 +121,7 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
         {/* Access summary */}
         <div className="hidden md:block shrink-0 text-right">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Access</div>
-          <div className={cn('text-xs mt-0.5', count > 0 && !admin ? 'font-mono text-foreground' : 'text-muted-foreground')}>{access}</div>
+          <div className={cn('text-xs mt-0.5', count > 0 && !isOwner ? 'font-mono text-foreground' : 'text-muted-foreground')}>{access}</div>
         </div>
 
         {/* Status */}
@@ -153,20 +157,22 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
         <div style={{ background: 'var(--ds-bg)', borderTop: '1px solid var(--ds-border)', padding: '16px 20px' }}>
           <div className="flex items-center justify-between mb-3">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Page Access</p>
-            <button
-              onClick={() => onToggleAdmin(user, !admin)}
-              disabled={isAdminBusy}
-              className={cn('inline-flex items-center gap-1 text-[11px] font-medium transition-colors', admin ? 'text-muted-foreground hover:text-destructive' : 'text-violet-600 hover:text-violet-800')}
-            >
-              {isAdminBusy ? <Loader2 className="size-3 animate-spin" /> : <Shield className="size-3" />}
-              {admin ? 'Remove admin' : 'Make admin'}
-            </button>
+            {!isOwner && (
+              <button
+                onClick={() => onToggleAdmin(user, !admin)}
+                disabled={isAdminBusy || savingPermissions}
+                className={cn('inline-flex items-center gap-1 text-[11px] font-medium transition-colors', admin ? 'text-muted-foreground hover:text-destructive' : 'text-violet-600 hover:text-violet-800')}
+              >
+                {isAdminBusy ? <Loader2 className="size-3 animate-spin" /> : <Shield className="size-3" />}
+                {admin ? 'Remove admin' : 'Make admin'}
+              </button>
+            )}
           </div>
 
-          {admin ? (
+          {isOwner ? (
             <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3">
               <ShieldCheck className="size-4 text-violet-600 shrink-0" />
-              <span className="text-sm font-medium text-violet-700">Full access to all pages</span>
+              <span className="text-sm font-medium text-violet-700">Owner — full access to all pages</span>
             </div>
           ) : (
             <>
@@ -176,9 +182,11 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
                   return (
                     <button
                       key={key}
+                      data-testid="user-page-toggle"
                       onClick={() => onTogglePage(user, key)}
+                      disabled={savingPermissions}
                       className={cn(
-                        'inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg border text-xs font-medium transition-all',
+                        'inline-flex items-center justify-center gap-1.5 h-9 px-3 rounded-lg border text-xs font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed',
                         on ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300',
                       )}
                     >
@@ -188,7 +196,7 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
                 })}
               </div>
               <p className="text-[11px] text-muted-foreground mt-3">
-                Click a page to toggle · changes save instantly. No pages selected = full access.
+                Click a page to toggle · changes save instantly. No pages selected = no access.
               </p>
             </>
           )}
@@ -214,6 +222,7 @@ export function UsersPage() {
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [busyAdminId, setBusyAdminId] = useState<string | null>(null)
+  const [savingPermissions, setSavingPermissions] = useState(false)
 
   useEffect(() => {
     if (!authLoading && !isOwner) {
@@ -255,7 +264,7 @@ export function UsersPage() {
       await createCognitoUser(email)
       try {
         if (inviteAdmin) await setUserAdmin(email, true)
-        else if (invitePages.length > 0) await setUserPageGroups(email, invitePages)
+        if (invitePages.length > 0) await setUserPageGroups(email, invitePages)
       } catch (permErr: unknown) {
         toast.error(`User invited, but setting access failed: ${errorMessage(permErr)}`)
       }
@@ -272,20 +281,29 @@ export function UsersPage() {
   }
 
   // Optimistic page-permission toggle → updateUserPermissions (setUserPageGroups).
+  // Global guard: disable all permission toggles while any save is in flight so
+  // overlapping mutations cannot race and lose choices.
   const handleTogglePage = (u: UserWithGroups, pageKey: string) => {
+    if (savingPermissions) return
     const grp = `page-${pageKey}`
     const before = u.groups
     const next = before.includes(grp) ? before.filter((g) => g !== grp) : [...before, grp]
     setUsers((prev) => prev.map((x) => (x.username === u.username ? { ...x, groups: next } : x)))
     const pages = next.filter((g) => g.startsWith('page-')).map((g) => g.replace('page-', ''))
-    setUserPageGroups(u.username, pages).catch((err: unknown) => {
-      toast.error(`Failed to update permissions: ${errorMessage(err)}`)
-      setUsers((prev) => prev.map((x) => (x.username === u.username ? { ...x, groups: before } : x)))
-    })
+    setSavingPermissions(true)
+    setUserPageGroups(u.username, pages)
+      .then(() => toast.success(`Updated page access for ${u.email}`))
+      .catch((err: unknown) => {
+        toast.error(`Failed to update permissions: ${errorMessage(err)}`)
+        setUsers((prev) => prev.map((x) => (x.username === u.username ? { ...x, groups: before } : x)))
+      })
+      .finally(() => setSavingPermissions(false))
   }
 
   const handleToggleAdmin = async (u: UserWithGroups, makeAdmin: boolean) => {
+    if (savingPermissions) return
     setBusyAdminId(u.username)
+    setSavingPermissions(true)
     const before = u.groups
     const next = makeAdmin ? [...before.filter((g) => g !== 'ADMIN'), 'ADMIN'] : before.filter((g) => g !== 'ADMIN')
     setUsers((prev) => prev.map((x) => (x.username === u.username ? { ...x, groups: next } : x)))
@@ -297,6 +315,7 @@ export function UsersPage() {
       setUsers((prev) => prev.map((x) => (x.username === u.username ? { ...x, groups: before } : x)))
     } finally {
       setBusyAdminId(null)
+      setSavingPermissions(false)
     }
   }
 
@@ -345,15 +364,6 @@ export function UsersPage() {
     { label: 'Admins',      value: adminCount,   color: '#a78bfa' },
     { label: 'Disabled',    value: disabled,     color: 'var(--ds-t3)' },
   ]
-
-  const segStyle = (active: boolean): React.CSSProperties => ({
-    flex: 1, height: 32, borderRadius: 7, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-    fontSize: 12.5, fontWeight: active ? 600 : 500,
-    background: active ? '#fff' : 'transparent',
-    color: active ? 'var(--ds-t1)' : 'var(--ds-t3)',
-    boxShadow: active ? 'var(--sh-sm)' : 'none',
-    transition: 'all 0.15s',
-  })
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
@@ -408,40 +418,40 @@ export function UsersPage() {
                   </div>
                 </div>
 
-                {/* Access level segmented toggle */}
+                {/* Admin role switch */}
                 <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Access Level</label>
-                  <div style={{ display: 'flex', gap: 3, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3 }}>
-                    <button type="button" onClick={() => setInviteAdmin(false)} style={segStyle(!inviteAdmin)}>Custom pages</button>
-                    <button type="button" onClick={() => setInviteAdmin(true)} style={segStyle(inviteAdmin)}>Admin — all</button>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Admin Role</label>
+                  <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                    <span className="text-xs text-slate-700">Grant admin privileges</span>
+                    <Switch checked={inviteAdmin} onCheckedChange={setInviteAdmin} disabled={creating} />
                   </div>
+                  <p className="text-[11px] text-muted-foreground">Admins do not automatically receive page access.</p>
                 </div>
 
-                {/* Page chips (custom only) */}
-                {!inviteAdmin && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pages</label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {PAGE_OPTIONS.map(({ key, label }) => {
-                        const on = invitePages.includes(key)
-                        return (
-                          <button
-                            key={key}
-                            type="button"
-                            onClick={() => toggleInvitePage(key)}
-                            className={cn(
-                              'inline-flex items-center gap-1 h-7 px-2.5 rounded-full border text-xs font-medium transition-all',
-                              on ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300',
-                            )}
-                          >
-                            {on && <Check className="size-3 shrink-0" />}{label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">Leave empty for full access.</p>
+                {/* Page chips */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Pages</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PAGE_OPTIONS.map(({ key, label }) => {
+                      const on = invitePages.includes(key)
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => toggleInvitePage(key)}
+                          disabled={creating}
+                          className={cn(
+                            'inline-flex items-center gap-1 h-7 px-2.5 rounded-full border text-xs font-medium transition-all disabled:opacity-60 disabled:cursor-not-allowed',
+                            on ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300',
+                          )}
+                        >
+                          {on && <Check className="size-3 shrink-0" />}{label}
+                        </button>
+                      )
+                    })}
                   </div>
-                )}
+                  <p className="text-[11px] text-muted-foreground">No pages selected = no access.</p>
+                </div>
 
                 <Button type="submit" className="gap-1.5 mt-1" disabled={creating || !newEmail.trim()}>
                   {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
@@ -489,6 +499,7 @@ export function UsersPage() {
                   busyAdminId={busyAdminId}
                   resettingId={resettingId}
                   togglingId={togglingId}
+                  savingPermissions={savingPermissions}
                 />
               ))
             ) : null}

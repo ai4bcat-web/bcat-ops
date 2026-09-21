@@ -22,13 +22,20 @@ vi.mock('@/store/useAppStore', () => ({
     amazonDisputes: disputes(),
     addAmazonDispute, updateAmazonDispute, deleteAmazonDispute, refreshAmazonDisputes,
     currentUserEmail: 'dennis@bcatcorp.com',
-    drivers: [{ id: 'drv-chad', name: 'Chad Salerno', active: true }],
+    drivers: [
+      { id: 'drv-chad', name: 'Chad Salerno', active: true },
+      { id: 'drv-zak', name: 'Zak Pace', active: true },
+      { id: 'drv-retired', name: 'Retired Driver', active: false },
+      { id: 'drv-broker', name: 'Broker Bob', active: true, type: 'broker' },
+    ],
   }),
 }))
 
 const getDisputeEvidenceUrl = vi.fn(async (key: string) => `https://signed.example/${key}`)
 const uploadDisputeResponseImage = vi.fn(async () => 'dispute-responses/d-1/9999-amazon.png')
 const deleteDisputeResponseImage = vi.fn().mockResolvedValue(undefined)
+const uploadDisputeStaffProof = vi.fn(async () => 'dispute-staff-proofs/d-1/9999-confirmation.png')
+const deleteDisputeStaffProof = vi.fn().mockResolvedValue(undefined)
 const createAmazonTrip = vi.fn(async () => ({ id: 'trip-1' }))
 const updateAmazonTrip = vi.fn().mockResolvedValue(undefined)
 const deleteAmazonTrip = vi.fn().mockResolvedValue(undefined)
@@ -36,10 +43,14 @@ vi.mock('@/lib/apiClient', () => ({
   getDisputeEvidenceUrl: (key: string) => getDisputeEvidenceUrl(key),
   uploadDisputeResponseImage: (id: string, file: File) => uploadDisputeResponseImage(id, file),
   deleteDisputeResponseImage: (key: string) => deleteDisputeResponseImage(key),
+  uploadDisputeStaffProof: (id: string, file: File, kind: string) => uploadDisputeStaffProof(id, file, kind),
+  deleteDisputeStaffProof: (key: string) => deleteDisputeStaffProof(key),
   createAmazonTrip: (input: unknown) => createAmazonTrip(input),
   updateAmazonTrip: (id: string, patch: unknown) => updateAmazonTrip(id, patch),
   deleteAmazonTrip: (id: string) => deleteAmazonTrip(id),
 }))
+
+vi.mock('@/lib/disputePortalClient', () => ({ uuid: () => 'new-dispute-id' }))
 
 const downloadFromUrl = vi.fn().mockResolvedValue(undefined)
 vi.mock('@/lib/download', () => ({ downloadFromUrl: (url: string, name: string) => downloadFromUrl(url, name) }))
@@ -328,5 +339,170 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
     const [tripId, input] = updateAmazonTrip.mock.calls[0]
     expect(tripId).toBe('trip-1')
     expect(input).toMatchObject({ periodStart: '2026-02-01', freightAmount: 200, driverId: 'drv-chad' })
+  })
+})
+
+describe('DisputesPage — DisputeModal driver roster select', () => {
+  it('creates a manual dispute with a roster driver name and confirmation proof saved to the row', async () => {
+    render(<DisputesPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Dispute' }))
+    const driverSelect = await screen.findByRole('combobox', { name: 'Driver name' })
+
+    // Brokers and inactive drivers are excluded from the roster.
+    const options = Array.from((driverSelect as HTMLSelectElement).options).map((o) => o.textContent)
+    expect(options).toContain('Chad Salerno')
+    expect(options).toContain('Zak Pace')
+    expect(options).not.toContain('Broker Bob')
+    expect(options).not.toContain('Retired Driver')
+
+    fireEvent.change(driverSelect, { target: { value: 'Zak Pace' } })
+    fireEvent.change(screen.getByPlaceholderText('112MP1BHQ'), { target: { value: 'NEW-TRIP' } })
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '99' } })
+
+    const confirmationInput = screen.getByLabelText(/Trip confirmation email/)
+    fireEvent.change(confirmationInput, { target: { files: [new File(['x'], 'confirm.png', { type: 'image/png' })] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
+
+    await waitFor(() => expect(addAmazonDispute).toHaveBeenCalledTimes(1))
+    const [input] = addAmazonDispute.mock.calls[0]
+    expect(input.driverName).toBe('Zak Pace')
+    expect(input.tripNumber).toBe('NEW-TRIP')
+    expect(input.amountRequested).toBe(99)
+    expect(input.source).toBe('MANUAL')
+    expect(input.evidence).toHaveLength(1)
+    expect(input.evidence[0]).toMatchObject({ kind: 'CONFIRMATION', s3Key: 'dispute-staff-proofs/d-1/9999-confirmation.png' })
+  })
+
+  it('preserves an unmatched driver name when editing a legacy dispute', async () => {
+    disputes.mockReturnValue([dispute({ driverName: 'Legacy Driver', status: 'PENDING' })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    const driverSelect = await screen.findByRole('combobox', { name: 'Driver name' })
+
+    expect((driverSelect as HTMLSelectElement).value).toBe('Legacy Driver')
+    expect(screen.getByRole('option', { name: /Legacy Driver \(not in roster\)/ })).toBeTruthy()
+
+    fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '110' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => expect(updateAmazonDispute).toHaveBeenCalledTimes(1))
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    expect(patch.driverName).toBe('Legacy Driver')
+    expect(patch.amountRequested).toBe(110)
+  })
+
+  it('lets staff switch an unmatched legacy driver to an active roster driver', async () => {
+    disputes.mockReturnValue([dispute({ driverName: 'Legacy Driver', status: 'PENDING' })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    const driverSelect = await screen.findByRole('combobox', { name: 'Driver name' })
+
+    fireEvent.change(driverSelect, { target: { value: 'Chad Salerno' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => expect(updateAmazonDispute).toHaveBeenCalledTimes(1))
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    expect(patch.driverName).toBe('Chad Salerno')
+  })
+
+  it('requires a confirmation file for a new manual dispute', async () => {
+    render(<DisputesPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Dispute' }))
+    await screen.findByRole('combobox', { name: 'Driver name' })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Driver name' }), { target: { value: 'Zak Pace' } })
+    fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/confirmation/i))
+    expect(addAmazonDispute).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid confirmation file and keeps the form intact', async () => {
+    render(<DisputesPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Dispute' }))
+    await screen.findByRole('combobox', { name: 'Driver name' })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Driver name' }), { target: { value: 'Zak Pace' } })
+    fireEvent.change(screen.getByPlaceholderText('112MP1BHQ'), { target: { value: 'BAD-TRIP' } })
+
+    const confirmationInput = screen.getByLabelText(/Trip confirmation email/)
+    fireEvent.change(confirmationInput, { target: { files: [new File(['x'], 'bad.svg', { type: 'image/svg+xml' })] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/screenshot/i))
+    expect(addAmazonDispute).not.toHaveBeenCalled()
+  })
+
+  it('preserves driver portal evidence and Amazon responses while editing staff proof', async () => {
+    const staffConfirmation: DisputeEvidence = {
+      s3Key: 'dispute-staff-proofs/d-1/old-confirmation.pdf',
+      fileName: 'old-confirmation.pdf',
+      contentType: 'application/pdf',
+      size: 2048,
+      kind: 'CONFIRMATION',
+    }
+    const staffPhoto: DisputeEvidence = {
+      s3Key: 'dispute-staff-proofs/d-1/old-photo.jpg',
+      fileName: 'old-photo.jpg',
+      contentType: 'image/jpeg',
+      size: 4096,
+      kind: 'PHOTO',
+    }
+    const reply: DisputeEvidence = {
+      s3Key: 'dispute-responses/d-1/amazon.png',
+      fileName: 'amazon.png',
+      contentType: 'image/png',
+      size: 1024,
+      kind: 'AMAZON_RESPONSE',
+    }
+    disputes.mockReturnValue([dispute({
+      source: 'MANUAL',
+      evidence: [confirmation, photo, staffConfirmation, staffPhoto, reply],
+    })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    await screen.findByText('Staff Proof (2)')
+
+    fireEvent.click(screen.getByRole('button', { name: /Remove old-confirmation\.pdf/ }))
+    const photoInput = screen.getByLabelText(/Optional photos/)
+    fireEvent.change(photoInput, { target: { files: [new File(['x'], 'new.jpg', { type: 'image/jpeg' })] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => expect(updateAmazonDispute).toHaveBeenCalledTimes(1))
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    const keys = patch.evidence.map((e: DisputeEvidence) => e.s3Key)
+    expect(keys).toContain(confirmation.s3Key)
+    expect(keys).toContain(photo.s3Key)
+    expect(keys).toContain(reply.s3Key)
+    expect(keys).toContain(staffPhoto.s3Key)
+    expect(keys).not.toContain(staffConfirmation.s3Key)
+    expect(keys).toContain('dispute-staff-proofs/d-1/9999-confirmation.png')
+    await waitFor(() => expect(deleteDisputeStaffProof).toHaveBeenCalledWith(staffConfirmation.s3Key))
+  })
+
+  it('cleans up newly uploaded orphan files when a manual save fails', async () => {
+    addAmazonDispute.mockRejectedValueOnce(new Error('network down'))
+    render(<DisputesPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Dispute' }))
+    await screen.findByRole('combobox', { name: 'Driver name' })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Driver name' }), { target: { value: 'Zak Pace' } })
+
+    const confirmationInput = screen.getByLabelText(/Trip confirmation email/)
+    fireEvent.change(confirmationInput, { target: { files: [new File(['x'], 'confirm.png', { type: 'image/png' })] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
+
+    await waitFor(() => expect(deleteDisputeStaffProof).toHaveBeenCalledWith('dispute-staff-proofs/d-1/9999-confirmation.png'))
+    expect(addAmazonDispute).toHaveBeenCalledTimes(1)
+    // The chosen file stays in the drop zone so the user can retry.
+    expect(screen.getByText('confirm.png')).toBeTruthy()
   })
 })

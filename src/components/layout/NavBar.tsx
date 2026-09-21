@@ -104,21 +104,23 @@ export function NavBar({
       </div>
 
       {/* Quick Add */}
-      <div style={{ padding: collapsed ? '12px 10px 8px' : '14px 14px 10px' }}>
-        <NavLink
-          to="/loads"
-          onClick={onClose}
-          title={collapsed ? 'Quick Add' : undefined}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            height: 34, borderRadius: 8, fontSize: 13, fontWeight: 600,
-            background: 'var(--ds-blue)', color: '#fff', textDecoration: 'none',
-            border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          <Plus size={14} /> {!collapsed && 'Quick Add'}
-        </NavLink>
-      </div>
+      {hasPageAccess('loads') && (
+        <div style={{ padding: collapsed ? '12px 10px 8px' : '14px 14px 10px' }}>
+          <NavLink
+            to="/loads"
+            onClick={onClose}
+            title={collapsed ? 'Quick Add' : undefined}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              height: 34, borderRadius: 8, fontSize: 13, fontWeight: 600,
+              background: 'var(--ds-blue)', color: '#fff', textDecoration: 'none',
+              border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <Plus size={14} /> {!collapsed && 'Quick Add'}
+          </NavLink>
+        </div>
+      )}
 
       {/* Nav */}
       <nav style={{ flex: 1, overflowY: 'auto', padding: '4px 10px 16px' }}>

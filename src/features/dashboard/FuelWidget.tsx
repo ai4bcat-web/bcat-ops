@@ -4,6 +4,7 @@ import { startOfWeek, endOfWeek, subWeeks } from 'date-fns'
 import { ArrowUp, ArrowDown, Minus, Fuel } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import type { FuelTransaction } from '@/hooks/useFuelTransactions'
 
 interface Props {
@@ -33,6 +34,7 @@ function filterByRange(txs: FuelTransaction[], start: Date, end: Date) {
 
 export function FuelWidget({ transactions, loading }: Props) {
   const navigate = useNavigate()
+  const { hasPageAccess } = useAuth()
   const equipment = useAppStore((s) => s.equipment)
   const trucks = useMemo(() => equipment.filter((e) => e.type === 'truck' && e.active), [equipment])
 
@@ -69,10 +71,15 @@ export function FuelWidget({ transactions, loading }: Props) {
       .slice(0, 3)
   }, [thisWeekTxs, trucks])
 
+  const canFuel = hasPageAccess('fuel')
+
   return (
     <div
-      onClick={() => navigate('/fuel?range=this-week')}
-      className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6 space-y-4 cursor-pointer hover:shadow-md transition-shadow"
+      onClick={canFuel ? () => navigate('/fuel?range=this-week') : undefined}
+      className={cn(
+        'rounded-xl border border-slate-200/60 bg-white shadow-sm p-6 space-y-4',
+        canFuel && 'cursor-pointer hover:shadow-md transition-shadow',
+      )}
     >
       <div className="flex items-start justify-between">
         <div className="size-10 rounded-lg bg-amber-50 flex items-center justify-center">

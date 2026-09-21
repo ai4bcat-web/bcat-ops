@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAllComplianceDocuments } from '@/hooks/useAllComplianceDocuments'
 import { effectiveExpiration } from '@/lib/truckDocs'
@@ -849,6 +850,8 @@ function OwnershipBadge({
 
 function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete }: EquipRowProps) {
   const navigate = useNavigate()
+  const { hasPageAccess } = useAuth()
+  const canFiles = hasPageAccess('files')
   const [expanded, setExpanded] = useState(false)
 
   const upcomingTasks = tasks.filter((t) => t.status === 'upcoming')
@@ -936,14 +939,16 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
         {/* Actions */}
         <td style={{ ...tdBase, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
           <div className="flex items-center gap-1 justify-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => navigate(`/compliance/truck/${equip.id}`)}>
-                  <ShieldCheck className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Compliance &amp; onboarding</TooltipContent>
-            </Tooltip>
+            {canFiles && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => navigate(`/compliance/truck/${equip.id}`)}>
+                    <ShieldCheck className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Compliance &amp; onboarding</TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onEdit(equip)}>
@@ -984,6 +989,9 @@ export function TrucksPage() {
   const isMobile            = useIsMobile()
   const padX                = isMobile ? 14 : 32
   const navigate            = useNavigate()
+  const { hasPageAccess }   = useAuth()
+  const canTruckDocs        = hasPageAccess('truckDocs')
+  const canMaintenance      = hasPageAccess('maintenance')
   const equipment           = useAppStore((s) => s.equipment)
   const maintenanceTasks    = useAppStore((s) => s.maintenanceTasks)
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -1090,8 +1098,8 @@ export function TrucksPage() {
     { label: 'Total Units',       value: equipment.length, color: '#1ea8f3', icon: <Truck size={14} /> },
     { label: 'Trucks',            value: trucks.length,    color: '#0369a1', icon: <Truck size={14} /> },
     { label: 'Trailers',          value: trailers.length,  color: '#a78bfa', icon: <Container size={14} /> },
-    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} />, to: '/truck-docs' },
-    { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} />, to: '/maintenance' },
+    { label: 'Compliance Alerts', value: alertCount,       color: '#ef4444', icon: <AlertTriangle size={14} />, to: canTruckDocs ? '/truck-docs' : undefined },
+    { label: 'Open Tasks',        value: openTaskCount,    color: '#f59e0b', icon: <Wrench size={14} />, to: canMaintenance ? '/maintenance' : undefined },
   ]
 
   const TABS = [

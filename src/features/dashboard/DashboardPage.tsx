@@ -21,6 +21,7 @@ import { MonthlyComparisonWidget } from './MonthlyComparisonWidget'
 import { getColor } from '@/lib/driverColors'
 import { formatPhone } from '@/lib/utils'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { useAuth } from '@/hooks/useAuth'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -73,16 +74,26 @@ function Donut({ data, size = 150, thickness = 18, centerLabel, centerValue }: {
   const r = (size - thickness) / 2
   const circ = 2 * Math.PI * r
   const total = data.reduce((s, d) => s + d.v, 0) || 1
-  let offset = 0
   const cx = size / 2
   const cy = size / 2
+
+  const offsets = useMemo(
+    () => data.reduce<{ offsets: number[]; sum: number }>(
+      (acc, seg) => ({
+        offsets: [...acc.offsets, acc.sum],
+        sum: acc.sum + (seg.v / total) * circ,
+      }),
+      { offsets: [], sum: 0 }
+    ).offsets,
+    [data, circ, total]
+  )
 
   return (
     <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
       {data.map((seg, i) => {
         const dash = (seg.v / total) * circ
         const gap = circ - dash
-        const el = (
+        return (
           <circle
             key={i}
             cx={cx} cy={cy} r={r}
@@ -90,11 +101,9 @@ function Donut({ data, size = 150, thickness = 18, centerLabel, centerValue }: {
             stroke={seg.color}
             strokeWidth={thickness}
             strokeDasharray={`${dash} ${gap}`}
-            strokeDashoffset={-offset}
+            strokeDashoffset={-offsets[i]}
           />
         )
-        offset += dash
-        return el
       })}
       {centerValue && (
         <g style={{ transform: 'rotate(90deg)', transformOrigin: '50% 50%' }}>
@@ -183,6 +192,7 @@ export function DashboardPage() {
   const metrics = useDashboardMetrics(rangeKey)
   const loads = useAppStore((s) => s.loads)
   const navigate = useNavigate()
+  const { hasPageAccess } = useAuth()
   const isMobile = useIsMobile()
   const col1 = isMobile ? '1fr' : undefined   // stack any multi-col row on mobile
 
@@ -240,16 +250,18 @@ export function DashboardPage() {
               ))}
             </div>
             <IconBtn label="Refresh"><RefreshCw size={13} /> Refresh</IconBtn>
-            <button
-              onClick={() => navigate('/loads')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7,
-                background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
-                fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
-              }}
-            >
-              <Plus size={13} /> New Load
-            </button>
+            {hasPageAccess('loads') && (
+              <button
+                onClick={() => navigate('/loads')}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 7,
+                  background: 'var(--ds-blue)', color: '#fff', border: 'none', cursor: 'pointer',
+                  fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit',
+                }}
+              >
+                <Plus size={13} /> New Load
+              </button>
+            )}
           </div>
         </div>
 
@@ -425,9 +437,11 @@ export function DashboardPage() {
             title="Driver Performance"
             sub={`${RANGES.find((r) => r.value === rangeKey)?.label} · ${metrics.rangeStart} – ${metrics.rangeEnd}`}
             right={
-              <button onClick={() => navigate('/files')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
-                View all <ChevronRight size={12} />
-              </button>
+              hasPageAccess('files') ? (
+                <button onClick={() => navigate('/files')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+                  View all <ChevronRight size={12} />
+                </button>
+              ) : null
             }
             noPad
           >

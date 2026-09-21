@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { DollarSign, ChevronRight } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { isPosted } from '@/lib/invoiceStatus'
 import type { FleetGroup } from '@/types/equipment'
@@ -45,6 +46,8 @@ const MAX_BARS = 24
  * the Maintenance page; fleet is resolved from each truck's Equipment.fleetGroup.
  */
 export function RepairSpendWidget() {
+  const { hasPageAccess } = useAuth()
+  const canInvoices = hasPageAccess('invoices')
   const invoices = useAppStore((s) => s.maintenanceInvoices)
   const equipment = useAppStore((s) => s.equipment)
 
@@ -129,9 +132,11 @@ export function RepairSpendWidget() {
             </div>
           </div>
         </div>
-        <Link to="/invoices" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          Invoices <ChevronRight size={13} />
-        </Link>
+        {canInvoices && (
+          <Link to="/invoices" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            Invoices <ChevronRight size={13} />
+          </Link>
+        )}
       </div>
 
       {/* Filters */}

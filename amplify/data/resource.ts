@@ -1027,10 +1027,6 @@ const schema = a.schema({
     .identifier(['snapshotId'])
     .authorization((allow) => [allow.authenticated()]),
 
-  // Admin-only: manage Cognito users via Lambda.
-  // Authorization is allow.authenticated() so the Lambda receives the call and can
-  // inspect event.identity.claims.email — the Lambda throws for non-admin callers.
-  // Client-side: isAdminEmail() in AuthContext gates the UI and the nav link.
   // Notify Slack when an IntakeItem status changes.
   // Called fire-and-forget from the frontend after a successful updateIntakeItem.
   notifySlackStatusChange: a

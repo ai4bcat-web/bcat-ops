@@ -1,9 +1,7 @@
 /**
- * Single source of truth for admin email addresses.
- *
- * To add a second admin: append their email to ADMIN_EMAILS — no other changes needed.
- * To move to Cognito-group-based admin in the future: replace isAdminEmail with a
- * hasGroup(user, 'admins') check and update the Lambda's identity check to match.
+ * Legacy feature-level administrators (for example, private-document controls).
+ * These addresses do NOT grant page access. Pages require explicit page groups
+ * for every non-owner account, including these administrators.
  */
 export const ADMIN_EMAILS = ['ryne@bcatcorp.com', 'dennis@bcatcorp.com'] as const
 
@@ -14,8 +12,7 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 
 /**
  * The single owner permitted to view and manage users / user permissions.
- * Stricter than isAdminEmail — admins still get full page access, but only the
- * owner can open the Users page and change other users' access. Enforced both
+ * Only the owner bypasses page grants and may manage user permissions. Enforced
  * client-side (UsersPage + NavBar) and server-side (userManagement Lambda).
  */
 export const OWNER_EMAIL = 'ryne@bcatcorp.com'

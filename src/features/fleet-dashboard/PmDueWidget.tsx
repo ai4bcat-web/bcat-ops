@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Gauge, ChevronRight, Wrench, Pencil, X } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import type { Equipment } from '@/types/equipment'
 
@@ -33,6 +34,8 @@ interface PmRow {
  * Last PM date + odometer are the only editable (manual) values here.
  */
 export function PmDueWidget() {
+  const { hasPageAccess } = useAuth()
+  const canMaintenance = hasPageAccess('maintenance')
   const equipment = useAppStore((s) => s.equipment)
   const updateEquipment = useAppStore((s) => s.updateEquipment)
   const [locations, setLocations] = useState<TruckLocation[]>([])
@@ -84,9 +87,11 @@ export function PmDueWidget() {
             </div>
           </div>
         </div>
-        <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          Maintenance <ChevronRight size={13} />
-        </Link>
+        {canMaintenance && (
+          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            Maintenance <ChevronRight size={13} />
+          </Link>
+        )}
       </div>
 
       {rows.length === 0 ? (

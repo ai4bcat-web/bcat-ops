@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Wrench, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import type { TaskPriority } from '@/types/equipment'
 
 const PRIORITY_META: Record<TaskPriority, { label: string; bg: string; fg: string; rank: number }> = {
@@ -27,6 +28,8 @@ function shortDate(d?: string): string {
  * Sources the same maintenanceTasks as the Maintenance page (not operations/intake tasks).
  */
 export function MaintenanceTasksWidget() {
+  const { hasPageAccess } = useAuth()
+  const canMaintenance = hasPageAccess('maintenance')
   const tasks = useAppStore((s) => s.maintenanceTasks)
   const equipment = useAppStore((s) => s.equipment)
   const today = todayStr()
@@ -63,9 +66,11 @@ export function MaintenanceTasksWidget() {
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{open.length} open</div>
           </div>
         </div>
-        <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          View all <ChevronRight size={13} />
-        </Link>
+        {canMaintenance && (
+          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            View all <ChevronRight size={13} />
+          </Link>
+        )}
       </div>
 
       {shown.length === 0 ? (
@@ -78,12 +83,8 @@ export function MaintenanceTasksWidget() {
           {shown.map((t) => {
             const meta = PRIORITY_META[t.priority]
             const overdue = (t.dueDate ?? '') !== '' && t.dueDate! < today
-            return (
-              <Link
-                key={t.id}
-                to="/maintenance"
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', textDecoration: 'none' }}
-              >
+            const body = (
+              <>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--ds-t2)' }}>{unitOf(t.equipmentId)}</span> · {t.title}
@@ -93,7 +94,23 @@ export function MaintenanceTasksWidget() {
                   </div>
                 </div>
                 <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+              </>
+            )
+            return canMaintenance ? (
+              <Link
+                key={t.id}
+                to="/maintenance"
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)', textDecoration: 'none' }}
+              >
+                {body}
               </Link>
+            ) : (
+              <div
+                key={t.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 20px', borderBottom: '1px solid var(--ds-border)' }}
+              >
+                {body}
+              </div>
             )
           })}
         </div>

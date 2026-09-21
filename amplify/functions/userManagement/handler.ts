@@ -116,7 +116,9 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
         ],
         DesiredDeliveryMediums: ['EMAIL'],
       }))
-      // Auto-assign the default group so new users have basic menu access immediately
+      // Auto-assign the default group for internal grouping/role bookkeeping.
+      // Page access is controlled exclusively by page-* groups; this default group
+      // does not grant any menu or page access.
       await ensureGroup(DEFAULT_GROUP)
       try {
         await cognito.send(new AdminAddUserToGroupCommand({

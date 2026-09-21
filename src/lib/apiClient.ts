@@ -3,6 +3,7 @@ import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction } from '@/types'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
+import { fileContentType } from '@/lib/disputeFiles'
 import type { FixedExpenseInput } from './driverPay'
 import type { CarrierLane, CarrierContact, CarrierCampaign, CarrierReply } from '@/types'
 
@@ -1288,6 +1289,30 @@ export async function uploadDisputeResponseImage(disputeId: string, file: File):
 }
 
 export async function deleteDisputeResponseImage(key: string): Promise<void> {
+  await remove({ path: key })
+}
+
+/**
+ * Staff upload of manual dispute proof. Driver portal uploads live under dispute-proofs/
+ * and staff have no write grant there; staff-created manual disputes keep their proof in
+ * a separate prefix so staff can manage their own files without touching the driver's.
+ */
+export async function uploadDisputeStaffProof(
+  disputeId: string,
+  file: File,
+  kind: 'CONFIRMATION' | 'PHOTO',
+): Promise<string> {
+  const safeName = file.name.replace(/[^\w.-]+/g, '_').slice(-80) || kind.toLowerCase()
+  const key = `dispute-staff-proofs/${disputeId}/${Date.now()}-${kind.toLowerCase()}-${safeName}`
+  await uploadData({
+    path: key,
+    data: file,
+    options: { contentType: fileContentType(file) || 'application/octet-stream' },
+  }).result
+  return key
+}
+
+export async function deleteDisputeStaffProof(key: string): Promise<void> {
   await remove({ path: key })
 }
 

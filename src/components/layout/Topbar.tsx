@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Bell, Settings, ChevronRight, Search, Menu } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 
 const ROUTE_LABELS: Record<string, string> = {
   dashboard:   'Dashboard',
@@ -23,6 +24,7 @@ const ROUTE_LABELS: Record<string, string> = {
 export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
   const location = useLocation()
   const navigate = useNavigate()
+  const { hasPageAccess } = useAuth()
   const searchQuery = useAppStore((s) => s.searchQuery)
   const setSearchQuery = useAppStore((s) => s.setSearchQuery)
   const [elapsed, setElapsed] = useState(0)
@@ -50,28 +52,30 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
       </div>
 
       {/* Global search — desktop only */}
-      <div className="desktop-only" style={{ flex: 1, maxWidth: 480, marginLeft: 32, position: 'relative' }}>
-        <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
-        <input
-          style={{
-            width: '100%', height: 36, paddingLeft: 34, paddingRight: 64,
-            background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8,
-            fontSize: 13, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
-            boxSizing: 'border-box',
-          }}
-          placeholder="Search loads, drivers, equipment…"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && searchQuery.trim()) navigate('/loads') }}
-          aria-label="Search loads"
-        />
-        <span style={{
-          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-          fontSize: 10, color: 'var(--ds-t3)', padding: '2px 6px',
-          background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 4,
-          fontFamily: 'var(--font-mono)', pointerEvents: 'none',
-        }}>⌘K</span>
-      </div>
+      {hasPageAccess('loads') && (
+        <div className="desktop-only" style={{ flex: 1, maxWidth: 480, marginLeft: 32, position: 'relative' }}>
+          <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
+          <input
+            style={{
+              width: '100%', height: 36, paddingLeft: 34, paddingRight: 64,
+              background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 8,
+              fontSize: 13, color: 'var(--ds-t1)', fontFamily: 'inherit', outline: 'none',
+              boxSizing: 'border-box',
+            }}
+            placeholder="Search loads, drivers, equipment…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && searchQuery.trim()) navigate('/loads') }}
+            aria-label="Search loads"
+          />
+          <span style={{
+            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+            fontSize: 10, color: 'var(--ds-t3)', padding: '2px 6px',
+            background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 4,
+            fontFamily: 'var(--font-mono)', pointerEvents: 'none',
+          }}>⌘K</span>
+        </div>
+      )}
 
       {/* Right actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
@@ -99,13 +103,15 @@ export function Topbar({ onMenuToggle }: { onMenuToggle?: () => void } = {}) {
         </button>
 
         {/* Settings */}
-        <button aria-label="Settings" style={{
-          width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'transparent', border: '1px solid transparent', borderRadius: 7,
-          cursor: 'pointer', color: 'var(--ds-t2)',
-        }}>
-          <Settings size={15} />
-        </button>
+        {hasPageAccess('settings') && (
+          <button aria-label="Settings" onClick={() => navigate('/settings')} style={{
+            width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'transparent', border: '1px solid transparent', borderRadius: 7,
+            cursor: 'pointer', color: 'var(--ds-t2)',
+          }}>
+            <Settings size={15} />
+          </button>
+        )}
       </div>
     </header>
   )

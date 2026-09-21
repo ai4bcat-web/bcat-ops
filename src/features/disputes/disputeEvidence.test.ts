@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  driverEvidence, isBrowserRenderable, mergeDisputeEvidence, responseEvidence, responseFileRejection,
+  driverEvidence, isBrowserRenderable, mergeDisputeEvidence, portalDriverEvidence, responseEvidence, responseFileRejection,
+  staffProofEvidence, staffConfirmationRejection, staffPhotoRejection,
 } from './disputeEvidence'
 import type { DisputeEvidence } from '@/types/dispute'
 
@@ -56,6 +57,38 @@ describe('thumbnail rendering', () => {
 
   it('falls back to the key extension when the stored contentType is useless', () => {
     expect(isBrowserRenderable({ ...photo, contentType: 'application/octet-stream', s3Key: 'dispute-proofs/s/d.png' })).toBe(true)
+  })
+})
+
+describe('staff manual proof split', () => {
+  const staffConfirmation: DisputeEvidence = {
+    s3Key: 'dispute-staff-proofs/d-1/c.pdf', fileName: 'staff-conf.pdf', contentType: 'application/pdf', size: 2048, kind: 'CONFIRMATION',
+  }
+  const staffPhoto: DisputeEvidence = {
+    s3Key: 'dispute-staff-proofs/d-1/p.jpg', fileName: 'staff-photo.jpg', contentType: 'image/jpeg', size: 4096, kind: 'PHOTO',
+  }
+
+  it('separates portal driver uploads from staff manual proofs', () => {
+    const all = [confirmation, staffConfirmation, photo, staffPhoto]
+    expect(portalDriverEvidence(all)).toEqual([confirmation, photo])
+    expect(staffProofEvidence(all)).toEqual([staffConfirmation, staffPhoto])
+    expect(driverEvidence(all)).toEqual([confirmation, staffConfirmation, photo, staffPhoto])
+  })
+
+  it('carries staff manual proofs through a response merge', () => {
+    const merged = mergeDisputeEvidence([confirmation, staffConfirmation, reply], [])
+    expect(merged).toEqual([confirmation, staffConfirmation])
+  })
+
+  it('accepts confirmation screenshots and PDFs', () => {
+    expect(staffConfirmationRejection({ name: 'a.png', type: 'image/png', size: 1024 })).toBeNull()
+    expect(staffConfirmationRejection({ name: 'a.pdf', type: 'application/pdf', size: 1024 })).toBeNull()
+  })
+
+  it('rejects PDFs and SVGs for supporting photos', () => {
+    expect(staffPhotoRejection({ name: 'a.png', type: 'image/png', size: 1024 })).toBeNull()
+    expect(staffPhotoRejection({ name: 'a.pdf', type: 'application/pdf', size: 1024 })).toMatch(/image/i)
+    expect(staffPhotoRejection({ name: 'a.svg', type: 'image/svg+xml', size: 1024 })).toMatch(/image/i)
   })
 })
 

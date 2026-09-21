@@ -3,13 +3,16 @@ import { useNavigate } from 'react-router-dom'
 import { ShieldAlert, ChevronRight } from 'lucide-react'
 import { useComplianceAlerts } from '@/hooks/useComplianceAlerts'
 import { SeverityBadge, daysRemainingLabel } from '@/features/compliance/components'
+import { useAuth } from '@/hooks/useAuth'
 import type { AlertSeverity } from '@/types'
 
 const SEVERITY_ORDER: Record<AlertSeverity, number> = { EXPIRED: 0, CRITICAL: 1, URGENT: 2, UPCOMING: 3 }
 
 export function ComplianceAlertsWidget() {
   const navigate = useNavigate()
+  const { hasPageAccess } = useAuth()
   const { openAlerts, loading } = useComplianceAlerts()
+  const canFiles = hasPageAccess('files')
 
   const counts = useMemo(() => ({
     EXPIRED: openAlerts.filter((a) => a.severity === 'EXPIRED').length,
@@ -32,9 +35,11 @@ export function ComplianceAlertsWidget() {
           <ShieldAlert size={16} style={{ color: counts.EXPIRED + counts.CRITICAL > 0 ? '#dc2626' : 'var(--ds-t3)' }} />
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Compliance Alerts</div>
         </div>
-        <button onClick={() => navigate('/compliance')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
-          View all <ChevronRight size={12} />
-        </button>
+        {canFiles && (
+          <button onClick={() => navigate('/compliance')} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--ds-blue)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontWeight: 500 }}>
+            View all <ChevronRight size={12} />
+          </button>
+        )}
       </div>
 
       {/* Counts */}
@@ -53,16 +58,28 @@ export function ComplianceAlertsWidget() {
           <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', padding: '8px 0' }}>Loading…</div>
         ) : top5.length === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--ds-t3)', padding: '8px 0' }}>No open alerts. ✅</div>
-        ) : top5.map((a) => (
-          <button key={a.id} onClick={() => navigate(a.entityType === 'DRIVER' ? `/compliance/driver/${a.entityId}` : `/compliance/truck/${a.entityId}`)}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--ds-border)', background: 'none', border: 'none', borderBottomStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.entityName ?? a.entityId}</div>
-              <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{a.documentTitle ?? a.documentType} · {daysRemainingLabel(a.expirationDate)}</div>
+        ) : top5.map((a) => {
+          const body = (
+            <>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.entityName ?? a.entityId}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>{a.documentTitle ?? a.documentType} · {daysRemainingLabel(a.expirationDate)}</div>
+              </div>
+              <SeverityBadge severity={a.severity} />
+            </>
+          )
+          return canFiles ? (
+            <button key={a.id} onClick={() => navigate(a.entityType === 'DRIVER' ? `/compliance/driver/${a.entityId}` : `/compliance/truck/${a.entityId}`)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--ds-border)', background: 'none', border: 'none', borderBottomStyle: 'solid', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', width: '100%' }}>
+              {body}
+            </button>
+          ) : (
+            <div key={a.id}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--ds-border)' }}>
+              {body}
             </div>
-            <SeverityBadge severity={a.severity} />
-          </button>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

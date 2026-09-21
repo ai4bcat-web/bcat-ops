@@ -55,5 +55,11 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
+    // Staff manual dispute proof uploads (create/edit from /disputes).
+    // Keyed dispute-staff-proofs/{disputeId}/… — staff own these and can replace/remove.
+    'dispute-staff-proofs/*': [
+      allow.authenticated.to(['read', 'write', 'delete']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
   }),
 })

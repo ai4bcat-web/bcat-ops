@@ -2,6 +2,10 @@ import { expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 
+vi.mock('@/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPageAccess: () => true }),
+}))
+
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (select: (state: unknown) => unknown) => select({
     equipment: [],

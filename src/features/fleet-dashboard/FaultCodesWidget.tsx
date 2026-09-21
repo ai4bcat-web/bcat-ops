@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckFaultCodes, type TruckFaultCode } from '@/lib/apiClient'
+import { useAuth } from '@/hooks/useAuth'
 
 const REFRESH_MS = 5 * 60 * 1000  // the sync writes hourly; this just keeps a left-open tab honest
 
@@ -33,11 +34,11 @@ interface TruckFaults {
  * maintenance side of the same telematics feed the PM tracker reads, so a code that
  * lands between services is visible next to the miles-until-PM countdown.
  *
- * The motive-fault-sync Lambda deletes rows Motive stops reporting, so anything shown
- * here is still active on the vehicle. Unit numbers come from the Equipment match; a
- * vehicle with no Equipment record still shows under its Motive number.
+ * Only trucks marked active in Equipment appear here; inactive and unmatched
+ * Motive vehicles are excluded from both the cards and the summary counts.
  */
 export function FaultCodesWidget() {
+  const { hasPageAccess } = useAuth()
   const equipment = useAppStore((s) => s.equipment)
   const [faults, setFaults] = useState<TruckFaultCode[]>([])
   const [loading, setLoading] = useState(true)
@@ -58,10 +59,11 @@ export function FaultCodesWidget() {
     const grouped = new Map<string, TruckFaults>()
     for (const f of faults) {
       const eq = byUnit.get(f.truckId)
+      if (!eq || eq.type !== 'truck' || eq.active === false) continue
       const entry = grouped.get(f.truckId) ?? {
         truckId: f.truckId,
-        unitNumber: eq?.unitNumber ?? f.unitNumber,
-        vehicle: [f.vehicleMake, f.vehicleModel].filter(Boolean).join(' ') || (eq?.nickname ?? ''),
+        unitNumber: eq.unitNumber,
+        vehicle: [f.vehicleMake, f.vehicleModel].filter(Boolean).join(' ') || (eq.nickname ?? ''),
         codes: [],
       }
       entry.codes.push(f)
@@ -76,33 +78,36 @@ export function FaultCodesWidget() {
       (a, b) => b.codes.length - a.codes.length || a.unitNumber.localeCompare(b.unitNumber),
     )
   }, [faults, equipment])
+  const faultCount = trucks.reduce((count, truck) => count + truck.codes.length, 0)
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertTriangle size={16} style={{ color: faults.length > 0 ? '#dc2626' : 'var(--ds-t3)' }} />
+          <AlertTriangle size={16} style={{ color: faultCount > 0 ? '#dc2626' : 'var(--ds-t3)' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Active Fault Codes · Motive</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>
               {loading
                 ? 'Loading engine diagnostics…'
-                : faults.length === 0
-                  ? 'No open codes on any vehicle'
-                  : `${faults.length} open code${faults.length === 1 ? '' : 's'} on ${trucks.length} vehicle${trucks.length === 1 ? '' : 's'}`}
+                : faultCount === 0
+                  ? 'No open codes on active vehicles'
+                  : `${faultCount} open code${faultCount === 1 ? '' : 's'} on ${trucks.length} active vehicle${trucks.length === 1 ? '' : 's'}`}
             </div>
           </div>
         </div>
-        <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          Maintenance <ChevronRight size={13} />
-        </Link>
+        {hasPageAccess('maintenance') && (
+          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            Maintenance <ChevronRight size={13} />
+          </Link>
+        )}
       </div>
 
       {trucks.length === 0 ? (
         <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           {loading
             ? <span style={{ opacity: 0.7 }}>Checking Motive…</span>
-            : <><CheckCircle2 size={22} style={{ opacity: 0.35, color: '#15803d' }} />Every vehicle is clear.</>}
+            : <><CheckCircle2 size={22} style={{ opacity: 0.35, color: '#15803d' }} />All active vehicles are clear.</>}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, padding: 16 }}>

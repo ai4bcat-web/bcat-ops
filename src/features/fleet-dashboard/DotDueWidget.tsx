@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { ClipboardCheck, ChevronRight, CheckCircle2, Truck, Container } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { TRUCK_DOC_SPECS, evaluateTruckDoc, addMonthsStr, statusFromExpiration, type DocState } from '@/lib/truckDocs'
 
 const TRAILER_DOT_MONTHS = 12
@@ -33,6 +34,8 @@ interface Row {
  * 12-month cadence off their inspection date.
  */
 export function DotDueWidget() {
+  const { hasPageAccess } = useAuth()
+  const canTruckDocs = hasPageAccess('truckDocs')
   const equipment = useAppStore((s) => s.equipment)
   const dotSpec = useMemo(() => TRUCK_DOC_SPECS.find((s) => s.dot), [])
 
@@ -73,9 +76,11 @@ export function DotDueWidget() {
             </div>
           </div>
         </div>
-        <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          Asset Documents <ChevronRight size={13} />
-        </Link>
+        {canTruckDocs && (
+          <Link to="/truck-docs" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+            Asset Documents <ChevronRight size={13} />
+          </Link>
+        )}
       </div>
 
       {rows.length === 0 ? (
@@ -88,8 +93,8 @@ export function DotDueWidget() {
           {rows.map((r) => {
             const meta = STATE_META[r.state]!
             const Icon = r.kind === 'truck' ? Truck : Container
-            return (
-              <Link key={r.id} to="/truck-docs" style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--ds-bg)', textDecoration: 'none' }}>
+            const row = (
+              <>
                 <Icon size={15} style={{ color: 'var(--ds-t3)', flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--ds-t1)', fontFamily: 'var(--font-mono)' }}>{r.unit}</div>
@@ -98,7 +103,16 @@ export function DotDueWidget() {
                   </div>
                 </div>
                 <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 999, background: meta.bg, color: meta.fg }}>{meta.label}</span>
+              </>
+            )
+            return canTruckDocs ? (
+              <Link key={r.id} to="/truck-docs" style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--ds-bg)', textDecoration: 'none' }}>
+                {row}
               </Link>
+            ) : (
+              <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '10px 12px', background: 'var(--ds-bg)' }}>
+                {row}
+              </div>
             )
           })}
         </div>

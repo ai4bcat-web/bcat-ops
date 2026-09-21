@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
   confirmSignIn, type SignInOutput,
@@ -29,30 +29,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
   const [needsNewPassword, setNeedsNewPassword] = useState(false)
+  const requestVersion = useRef(0)
 
-  const loadUser = useCallback(async () => {
+  /**
+   * Reads the signed-in identity and its CURRENT page groups. `background` marks the
+   * polled refreshes: a transient network/Cognito failure there must not sign a working
+   * user out, while a revoked session (no tokens back from a forced refresh) must.
+   */
+  const loadUser = useCallback(async (background = false) => {
+    const version = ++requestVersion.current
     try {
       const cognitoUser = await getCurrentUser()
-      const session = await fetchAuthSession()
-      const groups =
-        (session.tokens?.accessToken.payload['cognito:groups'] as string[]) ?? []
+      // Group changes must not wait for an old access token to expire.
+      const session = await fetchAuthSession({ forceRefresh: true })
+      if (version !== requestVersion.current) return
+      const accessToken = session.tokens?.accessToken
+      if (!accessToken) {
+        // Refresh token revoked or expired — sign out rather than show an
+        // account with zero page grants as if it were a permissions problem.
+        setUser(null)
+        return
+      }
       setUser({
         userId: cognitoUser.userId,
         email: cognitoUser.signInDetails?.loginId ?? cognitoUser.username,
-        groups,
+        groups: (accessToken.payload['cognito:groups'] as string[]) ?? [],
       })
     } catch {
-      setUser(null)
+      if (version === requestVersion.current && !background) setUser(null)
     } finally {
-      setLoading(false)
+      if (version === requestVersion.current) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    loadUser()
+    void loadUser()
   }, [loadUser])
 
+  // Revoking a page keeps a signed-in tab honest without a reload.
+  useEffect(() => {
+    if (!user?.userId) return
+    let pending = false
+    const refresh = () => {
+      if (pending || document.visibilityState === 'hidden') return
+      pending = true
+      void loadUser(true).finally(() => { pending = false })
+    }
+    const interval = window.setInterval(refresh, 60_000)
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [user?.userId, loadUser])
+
   const login = useCallback(async (email: string, password: string) => {
+    ++requestVersion.current
     // Clear any stale Cognito session so signIn() never throws UserAlreadyAuthenticatedException
     try { await signOut() } catch { /* no-op if nothing was signed in */ }
     const output = await signIn({ username: email, password })
@@ -72,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadUser])
 
   const logout = useCallback(async () => {
+    ++requestVersion.current
     await signOut()
     setUser(null)
     setNeedsNewPassword(false)
@@ -91,14 +126,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       isAdmin,
       isOwner,
-      // Allowlist model: admins always have access; a user with NO page-groups is
-      // unrestricted (full access); granting any page restricts them to only those.
-      hasPageAccess: (pageKey: string) => {
-        if (isAdmin) return true
-        const pageGroups = (user?.groups ?? []).filter((g) => g.startsWith('page-'))
-        if (pageGroups.length === 0) return true
-        return pageGroups.includes(`page-${pageKey}`)
-      },
+      // Only the owner bypasses page grants. ADMIN controls feature privileges,
+      // not page access; an empty allowlist grants nothing.
+      hasPageAccess: (pageKey: string) =>
+        isOwner || (user?.groups.includes(`page-${pageKey}`) ?? false),
     }}>
       {children}
     </AuthContext.Provider>

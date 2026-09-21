@@ -16,7 +16,7 @@ import { btnGhost, btnPrimary, Field, FormSection, inputStyle, Modal } from '@/f
 import type { AmazonDispute, DisputeEvidence, DisputeStatus } from '@/types/dispute'
 import { EvidenceGallery } from './EvidenceGallery'
 import {
-  driverEvidence, mergeDisputeEvidence, responseEvidence, responseFileRejection,
+  mergeDisputeEvidence, portalDriverEvidence, responseEvidence, responseFileRejection,
 } from './disputeEvidence'
 
 export type DisputePatch = Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>
@@ -71,7 +71,7 @@ export function StatusUpdateModal({
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const driverFiles = driverEvidence(dispute.evidence)
+  const driverFiles = portalDriverEvidence(dispute.evidence)
   const savedResponses = responseEvidence(dispute.evidence).filter((e) => !removedKeys.includes(e.s3Key))
   const originalResponse = dispute.amazonResponse ?? ''
 

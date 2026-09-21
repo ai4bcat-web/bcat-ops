@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import {
   Plus, Search, Trash2, Pencil, ExternalLink, FileWarning,
@@ -7,10 +7,16 @@ import {
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { formatPayPeriod } from '@/lib/payPeriod'
-import { createAmazonTrip, updateAmazonTrip, deleteAmazonTrip } from '@/lib/apiClient'
+import { uuid } from '@/lib/disputePortalClient'
+import { fileContentType } from '@/lib/disputeFiles'
+import {
+  createAmazonTrip, updateAmazonTrip, deleteAmazonTrip,
+  uploadDisputeStaffProof, deleteDisputeStaffProof,
+} from '@/lib/apiClient'
 import { disputeRecoveredAmount, disputeTripInput, matchDisputeDriver } from '@/lib/disputeSettlement'
 import { sundayOf, shiftWeek, weekLabel, weekLabelLong } from '@/features/driver-pay/week'
-import type { AmazonDispute, DisputeSource, DisputeStatus } from '@/types/dispute'
+import type { Driver } from '@/types'
+import type { AmazonDispute, DisputeEvidence, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
   thBase, tdBase, iconBtnStyle,
   inputStyle, btnGhost, btnPrimary, btnDanger, Field, FormSection, Modal,
@@ -18,7 +24,11 @@ import {
 } from '@/features/maintenance/maintenanceUi'
 import { EvidenceGallery } from './EvidenceGallery'
 import { StatusUpdateModal, type DisputePatch, type SettlementChoice } from './StatusUpdateModal'
-import { driverEvidence, responseEvidence } from './disputeEvidence'
+import {
+  portalDriverEvidence, responseEvidence, staffProofEvidence,
+  staffConfirmationRejection, staffPhotoRejection,
+} from './disputeEvidence'
+import { FileDrop } from './FileDrop'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -89,13 +99,15 @@ function StatusSelect({ status, onChange }: {
 
 type DisputeData = Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>
 
-function DisputeModal({ dispute, onSave, onDelete, onClose }: {
+function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
   dispute: AmazonDispute | null
+  drivers: Driver[]
   onSave: (data: DisputeData) => Promise<void>
   onDelete?: () => Promise<void>
   onClose: () => void
 }) {
   const isEdit = dispute !== null
+  const disputeIdRef = useRef(isEdit ? dispute.id : uuid())
   const [form, setForm] = useState({
     driverName:      dispute?.driverName ?? '',
     tripNumber:      dispute?.tripNumber ?? '',
@@ -109,16 +121,92 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
     resolvedAmount:  dispute?.resolvedAmount != null ? String(dispute.resolvedAmount) : '',
     notes:           dispute?.notes ?? '',
   })
+  const [confirmation, setConfirmation] = useState<File | null>(null)
+  const [photos, setPhotos] = useState<File[]>([])
+  const [removedProofKeys, setRemovedProofKeys] = useState<string[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const uploadedKeys = useRef(new Map<File, string>())
   const set = (k: string, v: unknown) => setForm((f) => ({ ...f, [k]: v }))
   const num = (s: string) => { const n = parseFloat(s); return Number.isFinite(n) ? n : undefined }
+
+  const portalFiles = portalDriverEvidence(dispute?.evidence)
+  const existingStaffProofs = staffProofEvidence(dispute?.evidence).filter((e) => !removedProofKeys.includes(e.s3Key))
+  const responseFiles = responseEvidence(dispute?.evidence)
+
+  const onConfirmationChange = (file: File | null) => {
+    setFileError(null)
+    setConfirmation(file)
+  }
+  const onPhotosChange = (incoming: File[]) => {
+    setFileError(null)
+    setPhotos((prev) => [...prev, ...incoming].slice(0, 5))
+  }
+  const removePhoto = (index: number) => setPhotos((prev) => prev.filter((_, i) => i !== index))
+  const removeStaffProof = (item: DisputeEvidence) => setRemovedProofKeys((keys) => [...keys, item.s3Key])
+
+  const validateFiles = (): string | null => {
+    if (!isEdit && !confirmation) return 'A trip confirmation screenshot or PDF is required.'
+    if (confirmation) {
+      const err = staffConfirmationRejection(confirmation)
+      if (err) return err
+    }
+    for (const photo of photos) {
+      const err = staffPhotoRejection(photo)
+      if (err) return err
+    }
+    return null
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.driverName.trim() || saving) return
+    const fileValidation = validateFiles()
+    if (fileValidation) {
+      setFileError(fileValidation)
+      return
+    }
     setSaving(true)
+    setFileError(null)
+    const newProofs: DisputeEvidence[] = []
     try {
+      if (confirmation) {
+        const key = uploadedKeys.current.get(confirmation) ?? await uploadDisputeStaffProof(disputeIdRef.current, confirmation, 'CONFIRMATION')
+        uploadedKeys.current.set(confirmation, key)
+        newProofs.push({
+          s3Key: key,
+          fileName: confirmation.name,
+          contentType: fileContentType(confirmation) || 'application/octet-stream',
+          size: confirmation.size,
+          kind: 'CONFIRMATION',
+        })
+      }
+      for (const photo of photos) {
+        const key = uploadedKeys.current.get(photo) ?? await uploadDisputeStaffProof(disputeIdRef.current, photo, 'PHOTO')
+        uploadedKeys.current.set(photo, key)
+        newProofs.push({
+          s3Key: key,
+          fileName: photo.name,
+          contentType: fileContentType(photo) || 'application/octet-stream',
+          size: photo.size,
+          kind: 'PHOTO',
+        })
+      }
+
+      const existingStaffConfirmations = existingStaffProofs.filter((e) => e.kind === 'CONFIRMATION')
+      const existingStaffPhotos = existingStaffProofs.filter((e) => e.kind === 'PHOTO')
+      const replacedConfirmationKeys = confirmation ? existingStaffConfirmations.map((e) => e.s3Key) : []
+      const keptStaffConfirmations = confirmation ? [] : existingStaffConfirmations
+
+      const evidence = [
+        ...portalFiles,
+        ...responseFiles,
+        ...keptStaffConfirmations,
+        ...existingStaffPhotos,
+        ...newProofs,
+      ]
+
       await onSave({
         driverName:      form.driverName.trim(),
         tripNumber:      form.tripNumber.trim() || undefined,
@@ -131,11 +219,24 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
         status:          form.status,
         resolvedAmount:  form.status === 'PAID' ? num(form.resolvedAmount) : undefined,
         notes:           form.notes.trim() || undefined,
+        evidence,
         ...(isEdit ? {} : { source: 'MANUAL' as const, submittedAt: new Date().toISOString() }),
       })
+
+      // Only delete from S3 once the row no longer references the keys.
+      for (const key of [...removedProofKeys, ...replacedConfirmationKeys]) {
+        void deleteDisputeStaffProof(key).catch(() => { /* best effort */ })
+      }
       onClose()
     } catch (err) {
       toast.error(`Couldn't save dispute: ${errorMessage(err)}`)
+      // Clean up newly uploaded orphan files; keep the chosen File objects so the user can retry.
+      for (const proof of newProofs) {
+        void deleteDisputeStaffProof(proof.s3Key).catch(() => { /* best effort */ })
+        for (const [file, key] of uploadedKeys.current) {
+          if (key === proof.s3Key) uploadedKeys.current.delete(file)
+        }
+      }
     } finally {
       setSaving(false)
     }
@@ -155,6 +256,15 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
   }
 
   const source = sourceOf(dispute ?? ({} as AmazonDispute))
+
+  const activeDrivers = useMemo(
+    () => drivers
+      .filter((d) => d.active !== false && d.type !== 'broker')
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [drivers],
+  )
+  const rosterNames = useMemo(() => new Set(activeDrivers.map((d) => d.name)), [activeDrivers])
+  const currentNameInRoster = form.driverName !== '' && rosterNames.has(form.driverName)
 
   return (
     <Modal
@@ -185,7 +295,21 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
         <FormSection title="Trip">
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
             <Field label="Driver Name" required>
-              <input style={inputStyle} value={form.driverName} onChange={(e) => set('driverName', e.target.value)} placeholder="Driver name" required />
+              <select
+                style={inputStyle}
+                value={form.driverName}
+                onChange={(e) => set('driverName', e.target.value)}
+                aria-label="Driver name"
+                required
+              >
+                <option value="" disabled>Select driver</option>
+                {form.driverName !== '' && !currentNameInRoster && (
+                  <option value={form.driverName}>{form.driverName} (not in roster)</option>
+                )}
+                {activeDrivers.map((d) => (
+                  <option key={d.id} value={d.name}>{d.name}</option>
+                ))}
+              </select>
             </Field>
             <Field label="Trip Number">
               <input style={inputStyle} value={form.tripNumber} onChange={(e) => set('tripNumber', e.target.value)} placeholder="112MP1BHQ" />
@@ -207,11 +331,67 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
           </Field>
         </FormSection>
 
-        {isEdit && dispute.evidence && dispute.evidence.length > 0 && (
-          <FormSection title={`Attached Files (${dispute.evidence.length})`}>
-            <EvidenceGallery evidence={dispute.evidence} />
+        {fileError && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: 12, borderRadius: 9,
+              background: 'var(--ds-red-bg)', color: 'var(--ds-red)',
+              fontSize: 13, fontWeight: 500,
+            }}
+          >
+            {fileError}
+          </div>
+        )}
+
+        {isEdit && portalFiles.length > 0 && (
+          <FormSection title={`Driver Evidence (${portalFiles.length})`}>
+            <EvidenceGallery evidence={portalFiles} />
+            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+              Uploaded by the driver — kept as filed.
+            </div>
           </FormSection>
         )}
+
+        {isEdit && responseFiles.length > 0 && (
+          <FormSection title={`Amazon Response (${responseFiles.length})`}>
+            <EvidenceGallery evidence={responseFiles} />
+          </FormSection>
+        )}
+
+        {isEdit && existingStaffProofs.length > 0 && (
+          <FormSection title={`Staff Proof (${existingStaffProofs.length})`}>
+            <EvidenceGallery evidence={existingStaffProofs} onRemove={removeStaffProof} />
+          </FormSection>
+        )}
+
+        <FormSection title="Evidence">
+          <FileDrop
+            id="manual-confirmation"
+            label={isEdit ? 'Trip confirmation email' : 'Trip confirmation email *'}
+            hint="Required for a new dispute. A screenshot, photo, or PDF of the confirmation email. Any image type works. Max 10 MB."
+            accept="image/*,application/pdf"
+            files={confirmation ? [confirmation] : []}
+            onFiles={(files) => onConfirmationChange(files[0] ?? null)}
+            onRemove={() => onConfirmationChange(null)}
+            browseLabel={confirmation ? 'Replace file' : 'Browse files'}
+          />
+          <div style={{ marginTop: 16 }}>
+            <FileDrop
+              id="manual-photos"
+              label="Optional photos"
+              hint="Up to 5 images (any type), 10 MB each."
+              accept="image/*"
+              multiple
+              files={photos}
+              onFiles={onPhotosChange}
+              onRemove={removePhoto}
+              disabled={photos.length >= 5}
+              browseLabel="Add photos"
+            />
+          </div>
+        </FormSection>
 
         <FormSection title="Amounts & Status">
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
@@ -751,6 +931,7 @@ export function DisputesPage() {
       {newOpen && (
         <DisputeModal
           dispute={null}
+          drivers={drivers}
           onSave={async (data) => { await addAmazonDispute(data) }}
           onClose={() => setNewOpen(false)}
         />
@@ -758,6 +939,7 @@ export function DisputesPage() {
       {editItem && (
         <DisputeModal
           dispute={editItem}
+          drivers={drivers}
           onSave={async (data) => { await saveDisputeEdit(editItem, data) }}
           onDelete={async () => { await removeDispute(editItem) }}
           onClose={() => setEditItem(null)}
@@ -789,8 +971,8 @@ export function DisputesPage() {
           }
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <FormSection title={`Driver Upload (${driverEvidence(evidenceTarget.evidence).length})`}>
-              <EvidenceGallery evidence={driverEvidence(evidenceTarget.evidence)} />
+            <FormSection title={`Driver Upload (${portalDriverEvidence(evidenceTarget.evidence).length})`}>
+              <EvidenceGallery evidence={portalDriverEvidence(evidenceTarget.evidence)} />
             </FormSection>
             {responseEvidence(evidenceTarget.evidence).length > 0 && (
               <FormSection title={`Amazon Response (${responseEvidence(evidenceTarget.evidence).length})`}>

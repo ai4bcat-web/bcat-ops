@@ -6,10 +6,12 @@ import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { TEAM_MEMBERS, ACTIVE_STATUSES } from '@/features/intake/IntakePage'
 import { createIntakeItem } from '@/lib/apiClient'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/hooks/useAuth'
 
 export function OpenTasksWidget() {
   const { items, loading, refresh } = useIntakeItems()
   const navigate = useNavigate()
+  const { hasPageAccess } = useAuth()
   const [showAdd, setShowAdd] = useState(false)
 
   const openTasks = useMemo(() =>
@@ -39,6 +41,8 @@ export function OpenTasksWidget() {
 
   const total = openTasks.length
 
+  const canTasks = hasPageAccess('tasks')
+
   return (
     <div className="rounded-xl border border-slate-200/60 bg-white shadow-sm p-6 space-y-4">
       {/* Header */}
@@ -53,12 +57,14 @@ export function OpenTasksWidget() {
           >
             <Plus className="size-3.5" /> Add task
           </button>
-          <button
-            onClick={() => navigate('/tasks')}
-            className="flex items-center gap-1 text-xs text-slate-500 hover:text-foreground font-medium transition-colors"
-          >
-            View all <ArrowRight className="size-3" />
-          </button>
+          {canTasks && (
+            <button
+              onClick={() => navigate('/tasks')}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-foreground font-medium transition-colors"
+            >
+              View all <ArrowRight className="size-3" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -75,23 +81,40 @@ export function OpenTasksWidget() {
       {/* Per-assignee rows */}
       {!loading && rows.length > 0 ? (
         <div className="space-y-1.5 pt-1 border-t border-slate-100">
-          {rows.map(({ email, name, count }) => (
-            <button
-              key={email}
-              onClick={() => navigate(email === '__unassigned__' ? '/tasks' : `/tasks?assignee=${encodeURIComponent(email as string)}`)}
-              className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors group"
-            >
-              <span className="text-sm text-slate-600 group-hover:text-foreground transition-colors">
-                {name}
-              </span>
-              <span className={cn(
-                'text-xs font-bold rounded-full px-1.5 min-w-[20px] h-[20px] flex items-center justify-center',
-                count > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-400',
-              )}>
-                {count}
-              </span>
-            </button>
-          ))}
+          {rows.map(({ email, name, count }) => {
+            const label = (
+              <>
+                <span className={cn(
+                  'text-sm transition-colors',
+                  canTasks ? 'text-slate-600 group-hover:text-foreground' : 'text-slate-600',
+                )}>
+                  {name}
+                </span>
+                <span className={cn(
+                  'text-xs font-bold rounded-full px-1.5 min-w-[20px] h-[20px] flex items-center justify-center',
+                  count > 0 ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-400',
+                )}>
+                  {count}
+                </span>
+              </>
+            )
+            return canTasks ? (
+              <button
+                key={email}
+                onClick={() => navigate(email === '__unassigned__' ? '/tasks' : `/tasks?assignee=${encodeURIComponent(email as string)}`)}
+                className="w-full flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors group"
+              >
+                {label}
+              </button>
+            ) : (
+              <div
+                key={email}
+                className="w-full flex items-center justify-between px-2 py-1.5 rounded-md"
+              >
+                {label}
+              </div>
+            )
+          })}
         </div>
       ) : !loading ? (
         <p className="text-xs text-slate-400 pt-1 border-t border-slate-100">

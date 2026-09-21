@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { Truck, Container, FileText, Wrench, CalendarOff, ChevronRight } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { useAuth } from '@/hooks/useAuth'
 import { useDriverAvailability } from '@/hooks/useDriverAvailability'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -71,6 +72,8 @@ function Card({ title, sub, right, children, noPad = false }: {
 
 // ── Time-off summary ────────────────────────────────────────────────────────────
 function TimeOffSummary() {
+  const { hasPageAccess } = useAuth()
+  const canTimeOff = hasPageAccess('timeOff')
   const drivers = useAppStore((s) => s.drivers)
   const { availabilities, loading } = useDriverAvailability()
   const driverName = useMemo(() => new Map(drivers.map((d) => [d.id, d.name])), [drivers])
@@ -88,7 +91,7 @@ function TimeOffSummary() {
     <Card
       title="Time Off"
       sub={loading ? 'Loading…' : `${upcoming.length} upcoming`}
-      right={<Link to="/time-off" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2 }}>Calendar <ChevronRight size={13} /></Link>}
+      right={canTimeOff ? <Link to="/time-off" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2 }}>Calendar <ChevronRight size={13} /></Link> : null}
       noPad
     >
       {upcoming.length === 0 ? (
@@ -120,6 +123,10 @@ function TimeOffSummary() {
 
 // ── Page ────────────────────────────────────────────────────────────────────────
 export function FleetManagerDashboardPage() {
+  const { hasPageAccess } = useAuth()
+  const canTrucks = hasPageAccess('trucks')
+  const canTruckDocs = hasPageAccess('truckDocs')
+  const canMaintenance = hasPageAccess('maintenance')
   const isMobile = useIsMobile()
   const equipment = useAppStore((s) => s.equipment)
   const maintenanceTasks = useAppStore((s) => s.maintenanceTasks)
@@ -146,11 +153,11 @@ export function FleetManagerDashboardPage() {
 
         {/* KPI strip */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
-          <StatCard label="Total Units"   value={stats.total}     color="#1ea8f3" icon={<Truck size={14} />}     to="/trucks" />
-          <StatCard label="Trucks"        value={stats.trucks}    color="#0369a1" icon={<Truck size={14} />}     to="/trucks" />
-          <StatCard label="Trailers"      value={stats.trailers}  color="#a78bfa" icon={<Container size={14} />} to="/trucks" />
-          <StatCard label="Docs Expiring" value={docsExpiring}    color="#ef4444" icon={<FileText size={14} />}  to="/truck-docs" />
-          <StatCard label="Open Tasks"    value={stats.openTasks} color="#f59e0b" icon={<Wrench size={14} />}    to="/maintenance" />
+          <StatCard label="Total Units"   value={stats.total}     color="#1ea8f3" icon={<Truck size={14} />}     to={canTrucks ? '/trucks' : undefined} />
+          <StatCard label="Trucks"        value={stats.trucks}    color="#0369a1" icon={<Truck size={14} />}     to={canTrucks ? '/trucks' : undefined} />
+          <StatCard label="Trailers"      value={stats.trailers}  color="#a78bfa" icon={<Container size={14} />} to={canTrucks ? '/trucks' : undefined} />
+          <StatCard label="Docs Expiring" value={docsExpiring}    color="#ef4444" icon={<FileText size={14} />}  to={canTruckDocs ? '/truck-docs' : undefined} />
+          <StatCard label="Open Tasks"    value={stats.openTasks} color="#f59e0b" icon={<Wrench size={14} />}    to={canMaintenance ? '/maintenance' : undefined} />
         </div>
 
         {/* DOT inspections due / overdue — trucks + trailers */}

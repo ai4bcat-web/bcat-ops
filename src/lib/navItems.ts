@@ -27,8 +27,10 @@ export interface NavSection {
  *  - becomes a `page-<key>` Cognito group, created on demand by the userManagement
  *    Lambda (which accepts any `page-*` key — no hardcoded list to keep in sync).
  *
- * Access model: a user with NO page-groups has full access; granting any page
- * restricts them to only the granted pages (admins always have full access).
+ * Access model: every non-owner user must be explicitly granted each page via a
+ * `page-<key>` Cognito group. Zero page-groups means no page access. The owner
+ * (ryne@bcatcorp.com) bypasses this allowlist. ADMIN status is managed separately
+ * and no longer grants automatic page access.
  */
 export const NAV_GROUPS: NavSection[] = [
   {
@@ -104,9 +106,20 @@ export const NAV_GROUPS: NavSection[] = [
 export const NAV_ITEMS: NavItem[] = NAV_GROUPS.flatMap((s) => s.items)
 
 /**
- * Grantable page permissions shown on the Users page — derived from NAV_ITEMS so it
- * always mirrors the sidebar. (Users management itself is owner-only, not a grantable
- * page, so it is intentionally absent.)
+ * Routes guarded by `RequirePage` that are reached from in-page links instead of the
+ * sidebar. They still need to be grantable, or they would be owner-only forever.
  */
-export const PERMISSION_PAGES: { key: string; label: string }[] =
-  NAV_ITEMS.map((i) => ({ key: i.pageKey, label: i.label }))
+const OFF_NAV_PERMISSION_PAGES: { key: string; label: string }[] = [
+  { key: 'tasks', label: 'Tasks' },
+  { key: 'schedule', label: 'Schedule' },
+]
+
+/**
+ * Grantable page permissions shown on the Users page — every `RequirePage` key in the
+ * app: the sidebar items plus the off-nav pages above. (Users management itself is
+ * owner-only, not a grantable page, so it is intentionally absent.)
+ */
+export const PERMISSION_PAGES: { key: string; label: string }[] = [
+  ...NAV_ITEMS.map((i) => ({ key: i.pageKey, label: i.label })),
+  ...OFF_NAV_PERMISSION_PAGES,
+]

@@ -5,6 +5,12 @@
 - Hooks call `src/lib/apiClient.ts`, which talks to the AppSync endpoint in `amplify_outputs.json`.
 - Auth state flows from `AuthProvider` -> hooks -> pages.
 
+## Page access
+- Only the owner (`ryne@bcatcorp.com`) bypasses page permissions. Every other account, including admins, needs an explicit `page-<key>` Cognito group for each page; no grants means no page access. Admin feature privileges do not grant pages.
+- The sidebar, global shortcuts, cross-page links, and direct-route guards use the same `hasPageAccess` check. Denied URLs redirect to an allowed landing page, or show No page access when none is granted.
+- Users page toggles save the explicit allowlist. Permission edits are disabled while a save is pending. Sessions refresh Cognito grants at startup, when the tab regains focus/visibility, and every minute while visible.
+- These checks govern web pages and navigation; they are not a substitute for AppSync or S3 resource authorization.
+
 ## UI interaction conventions
 - Forms use `react-hook-form` + `@hookform/resolvers` + Zod.
 - Toasts use `sonner`.
@@ -39,7 +45,7 @@
 ## Motive fault codes
 - `GET https://api.gomotive.com/v1/fault_codes?status=open` (header `X-Api-Key`) is the source; the `motive-fault-sync` Lambda pages it hourly, matches `vehicle.number` to Equipment the same way the mileage/location syncs do (`motiveVehicleNumber` overrides `unitNumber`, unmatched vehicles key as `motive:<number>`), and writes one `TruckFaultCode` row per (truckId, faultId).
 - The table IS the live fault list: every run deletes rows Motive no longer reports as open, including when it reports none, so a repaired truck clears itself. Nothing here is entered by hand.
-- The Fleet Manager Dashboard shows them in **Active Fault Codes · Motive**, directly under the miles-until-next-PM tracker: one card per vehicle with each code, what it means (`fmi_description`), the controller that raised it, when it was last seen and how long it has been open.
+- The Fleet Manager Dashboard shows faults only for active trucks matched to BCAT Ops Equipment in **Active Fault Codes · Motive**, directly under the miles-until-next-PM tracker. Inactive and unmatched vehicles are excluded from cards and summary counts. Each card includes the code, meaning (`fmi_description`), controller, last observation, and time open.
 
 ## Amazon mileage expenses
 - In Amazon Driver Pay settings, add an expense or select an existing revision and choose Change, then Mileage calculation. Enter cost per mile, miles for the weekly expense, and an effective date. Apply the draft, then Save settings.

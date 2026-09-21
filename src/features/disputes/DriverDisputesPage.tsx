@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { AlertTriangle, CheckCircle2, FileText, Loader2, RefreshCw, Search, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Search } from 'lucide-react'
 import {
   portalAvailable,
   DisputePortalError,
@@ -14,7 +14,10 @@ import {
   type ProofKind,
   type EvidenceFile,
 } from '@/lib/disputePortalClient'
+import { fileContentType } from '@/lib/disputeFiles'
 import { addDays, formatPayPeriod, formatWeekLabel, toLocalDateString } from '@/lib/payPeriod'
+import { FileDrop } from './FileDrop'
+import { staffConfirmationRejection, staffPhotoRejection } from './disputeEvidence'
 
 const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
 const CONTACT_EMAIL = 'help@bcatcorp.com'
@@ -30,22 +33,6 @@ const BOARD_FILTERS: { key: BoardFilter; label: string; statuses: BoardItem['sta
   { key: 'resolved', label: 'Resolved', statuses: ['PAID'] },
 ]
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MiB
-const PDF_TYPE = 'application/pdf'
-// Browsers report no MIME type for some formats (HEIC on desktop Chrome, files from
-// unusual apps) - fall back to the extension so a real photo is never rejected.
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
-  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif',
-}
-
-/** MIME type to send for a picked file: the browser's, else inferred from the extension. */
-function fileContentType(file: File): string {
-  if (file.type) return file.type
-  const ext = file.name.match(/\.([a-zA-Z0-9]+)$/)?.[1].toLowerCase() ?? ''
-  if (ext === 'pdf') return PDF_TYPE
-  return IMAGE_EXTENSIONS[ext] ?? ''
-}
 const PAY_PERIOD_WEEKS = 104
 const POLL_MS = 30000
 const DRIVER_NOT_LISTED = '__not_listed__'
@@ -183,21 +170,6 @@ function validateForm(
   if (Number.isNaN(requested) || requested < 0) return 'Amount requested must be a number of 0 or more.'
   if (!description.trim() || description.trim().length < 5) return 'Please provide a short description (at least 5 characters).'
   if (!confirmation) return 'A trip confirmation email screenshot or PDF is required.'
-  return null
-}
-
-function validateFile(file: File, allowPdf: boolean, prefix: string): string | null {
-  if (file.size > MAX_FILE_SIZE) {
-    return `${prefix} "${file.name}" exceeds the 10 MB limit.`
-  }
-  const type = fileContentType(file)
-  // SVG excluded to match the Lambda: staff open evidence from a signed URL, where a scripted SVG would run.
-  const ok = (type.startsWith('image/') && !type.startsWith('image/svg')) || (allowPdf && type === PDF_TYPE)
-  if (!ok) {
-    return allowPdf
-      ? `${prefix} "${file.name}" must be an image (screenshot, photo) or a PDF.`
-      : `${prefix} "${file.name}" must be an image.`
-  }
   return null
 }
 
@@ -377,7 +349,7 @@ export function DriverDisputesPage() {
       payPeriodOptions,
     )
     if (confirmation) {
-      const fileErr = validateFile(confirmation, true, 'Confirmation file')
+      const fileErr = staffConfirmationRejection(confirmation)
       if (!validation && fileErr) {
         setSubmitError(fileErr)
         setSubmitting(false)
@@ -386,7 +358,7 @@ export function DriverDisputesPage() {
     }
     let photoErr: string | null = null
     for (const photo of photos) {
-      const err = validateFile(photo, false, 'Photo')
+      const err = staffPhotoRejection(photo)
       if (err) {
         photoErr = err
         break
@@ -1048,159 +1020,6 @@ function Field({
       </label>
       {children}
     </div>
-  )
-}
-
-function FileDrop({
-  id,
-  label,
-  hint,
-  accept,
-  multiple = false,
-  disabled = false,
-  files,
-  onFiles,
-  onRemove,
-  browseLabel,
-}: {
-  id: string
-  label: string
-  hint: string
-  accept: string
-  multiple?: boolean
-  disabled?: boolean
-  files: File[]
-  onFiles: (files: File[]) => void
-  onRemove: (index: number) => void
-  browseLabel: string
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [dragging, setDragging] = useState(false)
-
-  const take = (list: FileList | null) => {
-    const picked = Array.from(list ?? [])
-    if (picked.length) onFiles(multiple ? picked : picked.slice(0, 1))
-  }
-
-  return (
-    <div>
-      <label htmlFor={id} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: 'var(--ds-t1)', marginBottom: 4 }}>
-        <Upload size={16} /> {label}
-      </label>
-      <p className="text-xs" style={{ color: 'var(--ds-t3)', marginBottom: 8 }}>
-        {hint}
-      </p>
-      <div
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        aria-disabled={disabled}
-        onClick={() => !disabled && inputRef.current?.click()}
-        onKeyDown={(e) => {
-          if (!disabled && (e.key === 'Enter' || e.key === ' ')) {
-            e.preventDefault()
-            inputRef.current?.click()
-          }
-        }}
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (!disabled) setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDragging(false)
-          if (!disabled) take(e.dataTransfer.files)
-        }}
-        className="flex flex-col items-center justify-center gap-2 rounded-lg text-center"
-        style={{
-          border: `2px dashed ${dragging ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
-          paddingLeft: 16,
-          paddingRight: 16,
-          paddingTop: 20,
-          paddingBottom: 20,
-          background: dragging ? 'var(--ds-blue-bg)' : 'var(--ds-surface)',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.6 : 1,
-          transition: 'border-color 120ms, background 120ms',
-        }}
-      >
-        <input
-          ref={inputRef}
-          id={id}
-          type="file"
-          accept={accept}
-          multiple={multiple}
-          disabled={disabled}
-          onChange={(e) => {
-            take(e.target.files)
-            e.target.value = '' // allow re-picking the same file after Remove
-          }}
-          // A <label htmlFor> click lands here and would bubble to the zone's onClick -> second picker.
-          onClick={(e) => e.stopPropagation()}
-          className="sr-only"
-        />
-        <div
-          className="flex h-10 w-10 items-center justify-center rounded-full"
-          style={{ background: 'var(--ds-blue-bg)', color: 'var(--ds-blue-dark)' }}
-        >
-          <Upload size={18} />
-        </div>
-        <span
-          className="inline-flex items-center rounded-md text-sm font-semibold"
-          style={{ background: 'var(--ds-blue)', color: '#fff', pointerEvents: 'none', paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8 }}
-        >
-          {browseLabel}
-        </span>
-        <span className="text-xs" style={{ color: 'var(--ds-t3)' }}>
-          {disabled ? 'Maximum reached' : 'or drag and drop here'}
-        </span>
-      </div>
-      {files.length > 0 && (
-        <ul className="flex flex-wrap gap-2" style={{ marginTop: 8 }}>
-          {files.map((file, i) => (
-            <li
-              key={`${file.name}-${file.size}-${i}`}
-              className="flex items-center gap-2 rounded-md border text-xs"
-              style={{ borderColor: 'var(--ds-border)', background: 'var(--ds-surface)', paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}
-            >
-              <PhotoPreview file={file} />
-              <span className="max-w-[160px] truncate">{file.name}</span>
-              <span className="font-mono" style={{ color: 'var(--ds-t3)' }}>
-                {(file.size / 1024 / 1024).toFixed(2)} MB
-              </span>
-              <button
-                type="button"
-                onClick={() => onRemove(i)}
-                className="rounded font-medium"
-                style={{ background: 'var(--ds-red-bg)', color: 'var(--ds-red)', paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2 }}
-                aria-label={`Remove ${file.name}`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-function PhotoPreview({ file }: { file: File }) {
-  // Browsers can't decode every image type we accept (HEIC on Chrome/Firefox); fall back to an icon.
-  const [url, setUrl] = useState<string | null>(() =>
-    fileContentType(file).startsWith('image/') ? URL.createObjectURL(file) : null,
-  )
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url) }, [url])
-  if (!url) return <FileText size={14} style={{ color: 'var(--ds-t3)' }} />
-  return (
-    <img
-      src={url}
-      alt="Photo preview"
-      width={32}
-      height={32}
-      className="rounded object-cover"
-      onError={() => setUrl(null)}
-    />
   )
 }
 
