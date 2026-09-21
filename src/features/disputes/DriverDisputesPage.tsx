@@ -17,7 +17,7 @@ import {
 import { fileContentType } from '@/lib/disputeFiles'
 import { addDays, formatPayPeriod, formatWeekLabel, toLocalDateString } from '@/lib/payPeriod'
 import { FileDrop } from './FileDrop'
-import { staffSupportingFileRejection } from './disputeEvidence'
+import { staffSupportingFileRejection, MAX_EVIDENCE_FILES } from './disputeEvidence'
 
 const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
 const CONTACT_EMAIL = 'help@bcatcorp.com'
@@ -36,8 +36,6 @@ const BOARD_FILTERS: { key: BoardFilter; label: string; statuses: BoardItem['sta
 const PAY_PERIOD_WEEKS = 104
 const POLL_MS = 30000
 const DRIVER_NOT_LISTED = '__not_listed__'
-// The confirmation plus the five supporting files the portal API accepts.
-const MAX_EVIDENCE_FILES = 6
 
 const STATUS_META: Record<BoardItem['status'], { label: string; bg: string; fg: string }> = {
   PENDING: { label: 'Pending', bg: 'var(--ds-amber-bg)', fg: 'var(--ds-amber)' },

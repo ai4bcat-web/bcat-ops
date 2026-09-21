@@ -360,7 +360,7 @@ describe('DisputesPage — DisputeModal driver roster select', () => {
     fireEvent.change(screen.getByPlaceholderText('112MP1BHQ'), { target: { value: 'NEW-TRIP' } })
     fireEvent.change(screen.getAllByPlaceholderText('0.00')[1], { target: { value: '99' } })
 
-    const confirmationInput = screen.getByLabelText(/Trip confirmation email/)
+    const confirmationInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i)
     fireEvent.change(confirmationInput, { target: { files: [new File(['x'], 'confirm.png', { type: 'image/png' })] } })
 
     fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
@@ -429,12 +429,12 @@ describe('DisputesPage — DisputeModal driver roster select', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Driver name' }), { target: { value: 'Zak Pace' } })
     fireEvent.change(screen.getByPlaceholderText('112MP1BHQ'), { target: { value: 'BAD-TRIP' } })
 
-    const confirmationInput = screen.getByLabelText(/Trip confirmation email/)
+    const confirmationInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i)
     fireEvent.change(confirmationInput, { target: { files: [new File(['x'], 'bad.svg', { type: 'image/svg+xml' })] } })
 
     fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
 
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/screenshot/i))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/Attach an image/i))
     expect(addAmazonDispute).not.toHaveBeenCalled()
   })
 
@@ -470,8 +470,8 @@ describe('DisputesPage — DisputeModal driver roster select', () => {
     await screen.findByText('Staff Proof (2)')
 
     fireEvent.click(screen.getByRole('button', { name: /Remove old-confirmation\.pdf/ }))
-    const photoInput = screen.getByLabelText(/Optional photos/)
-    fireEvent.change(photoInput, { target: { files: [new File(['x'], 'new.jpg', { type: 'image/jpeg' })] } })
+    const evidenceInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i)
+    fireEvent.change(evidenceInput, { target: { files: [new File(['x'], 'new.jpg', { type: 'image/jpeg' })] } })
 
     fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
 
@@ -495,7 +495,7 @@ describe('DisputesPage — DisputeModal driver roster select', () => {
     await screen.findByRole('combobox', { name: 'Driver name' })
     fireEvent.change(screen.getByRole('combobox', { name: 'Driver name' }), { target: { value: 'Zak Pace' } })
 
-    const confirmationInput = screen.getByLabelText(/Trip confirmation email/)
+    const confirmationInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i)
     fireEvent.change(confirmationInput, { target: { files: [new File(['x'], 'confirm.png', { type: 'image/png' })] } })
 
     fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
@@ -507,8 +507,8 @@ describe('DisputesPage — DisputeModal driver roster select', () => {
   })
 })
 
-describe('DisputesPage — DisputeModal supporting file cap', () => {
-  it('blocks a 6th supporting file when five staff photos are already stored', async () => {
+describe('DisputesPage — DisputeModal evidence file cap', () => {
+  it('blocks new files when six staff proofs are already stored', async () => {
     const staffConfirmation: DisputeEvidence = {
       s3Key: 'dispute-staff-proofs/d-1/confirmation.pdf',
       fileName: 'confirmation.pdf',
@@ -528,9 +528,64 @@ describe('DisputesPage — DisputeModal supporting file cap', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
 
-    expect(screen.getByText('Maximum number of supporting files reached.')).toBeTruthy()
-    const photoInput = screen.getByLabelText(/Optional photos or documents/i) as HTMLInputElement
-    expect(photoInput.disabled).toBe(true)
+    expect(screen.getByText(/Maximum 6 files reached/i)).toBeTruthy()
+    const evidenceInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i) as HTMLInputElement
+    expect(evidenceInput.disabled).toBe(true)
+  })
+
+  it('counts stored staff proofs against the cap when adding new files', async () => {
+    const staffPhotos: DisputeEvidence[] = Array.from({ length: 4 }, (_, i) => ({
+      s3Key: `dispute-staff-proofs/d-1/photo-${i}.jpg`,
+      fileName: `photo-${i}.jpg`,
+      contentType: 'image/jpeg',
+      size: 1024,
+      kind: 'PHOTO',
+    }))
+    disputes.mockReturnValue([dispute({ evidence: [...staffPhotos] })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    const evidenceInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i) as HTMLInputElement
+
+    // 4 stored + 2 new = 6 (allowed)
+    fireEvent.change(evidenceInput, { target: { files: [
+      new File(['a'], 'new-1.jpg', { type: 'image/jpeg' }),
+      new File(['b'], 'new-2.jpg', { type: 'image/jpeg' }),
+    ] } })
+    expect(screen.getByText('new-1.jpg')).toBeTruthy()
+    expect(screen.getByText('new-2.jpg')).toBeTruthy()
+
+    // A third new file would exceed the cap and is sliced away.
+    fireEvent.change(evidenceInput, { target: { files: [new File(['c'], 'new-3.jpg', { type: 'image/jpeg' })] } })
+    expect(screen.queryByText('new-3.jpg')).toBeNull()
+  })
+
+  it('files additional uploads as photos when a staff confirmation already survives', async () => {
+    const staffConfirmation: DisputeEvidence = {
+      s3Key: 'dispute-staff-proofs/d-1/confirmation.pdf',
+      fileName: 'confirmation.pdf',
+      contentType: 'application/pdf',
+      size: 2048,
+      kind: 'CONFIRMATION',
+    }
+    disputes.mockReturnValue([dispute({ source: 'MANUAL', evidence: [staffConfirmation] })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    const evidenceInput = screen.getByLabelText(/Trip confirmation email and any other photos for proof/i) as HTMLInputElement
+    fireEvent.change(evidenceInput, { target: { files: [
+      new File(['a'], 'extra-1.jpg', { type: 'image/jpeg' }),
+      new File(['b'], 'extra-2.jpg', { type: 'image/jpeg' }),
+    ] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => expect(updateAmazonDispute).toHaveBeenCalledTimes(1))
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    const kinds = patch.evidence.map((e: DisputeEvidence) => e.kind)
+    expect(kinds).toEqual(['CONFIRMATION', 'PHOTO', 'PHOTO'])
+    expect(uploadDisputeStaffProof).toHaveBeenCalledWith('d-1', expect.any(File), 'PHOTO')
+    expect(uploadDisputeStaffProof).not.toHaveBeenCalledWith('d-1', expect.any(File), 'CONFIRMATION')
   })
 })
 
@@ -546,7 +601,7 @@ describe('DisputesPage — DisputeModal pay period', () => {
     const period = screen.getByRole('combobox', { name: 'Pay period' }) as HTMLSelectElement
     expect(period.value).toBe('2026-09-06')
 
-    fireEvent.change(screen.getByLabelText(/Trip confirmation email/), {
+    fireEvent.change(screen.getByLabelText(/Trip confirmation email and any other photos for proof/i), {
       target: { files: [new File(['x'], 'confirm.png', { type: 'image/png' })] },
     })
     fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))

@@ -17,6 +17,9 @@ import type { DisputeEvidence } from '@/types/dispute'
 
 export { MAX_DISPUTE_FILE_BYTES, fileContentType }
 
+/** Total evidence files allowed per dispute (one confirmation + up to five supporting files). */
+export const MAX_EVIDENCE_FILES = 6
+
 /** SVG is excluded: staff open evidence from a signed S3 URL, where a scripted SVG runs. */
 const IMAGE_TYPE = /^image\/(?!svg)[a-z0-9.+-]+$/
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'heic', 'heif', 'tif', 'tiff']

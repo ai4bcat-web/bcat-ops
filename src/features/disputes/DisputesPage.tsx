@@ -25,8 +25,9 @@ import {
 import { EvidenceGallery } from './EvidenceGallery'
 import { StatusUpdateModal, type DisputePatch, type SettlementChoice } from './StatusUpdateModal'
 import {
+  MAX_EVIDENCE_FILES,
   portalDriverEvidence, responseEvidence, staffProofEvidence,
-  staffConfirmationRejection, staffSupportingFileRejection,
+  staffSupportingFileRejection,
 } from './disputeEvidence'
 import { FileDrop } from './FileDrop'
 
@@ -121,8 +122,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
     resolvedAmount:  dispute?.resolvedAmount != null ? String(dispute.resolvedAmount) : '',
     notes:           dispute?.notes ?? '',
   })
-  const [confirmation, setConfirmation] = useState<File | null>(null)
-  const [photos, setPhotos] = useState<File[]>([])
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
   const [removedProofKeys, setRemovedProofKeys] = useState<string[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -133,9 +133,9 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
 
   const portalFiles = portalDriverEvidence(dispute?.evidence)
   const existingStaffProofs = staffProofEvidence(dispute?.evidence).filter((e) => !removedProofKeys.includes(e.s3Key))
-  const existingStaffPhotos = existingStaffProofs.filter((e) => e.kind === 'PHOTO')
-  const remainingPhotoSlots = Math.max(0, 5 - existingStaffPhotos.length)
+  const existingStaffConfirmation = existingStaffProofs.filter((e) => e.kind === 'CONFIRMATION')
   const responseFiles = responseEvidence(dispute?.evidence)
+  const remainingSlots = Math.max(0, MAX_EVIDENCE_FILES - existingStaffProofs.length)
 
   // Pay period is a Sunday week, like the portal writes — free text here is what left
   // rows showing "9/11" instead of a week. Legacy values stay selectable so an edit
@@ -161,25 +161,20 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
     }))
   }
 
-  const onConfirmationChange = (file: File | null) => {
+  const onEvidenceFilesChange = (incoming: File[]) => {
     setFileError(null)
-    setConfirmation(file)
+    setEvidenceFiles((prev) => [...prev, ...incoming].slice(0, remainingSlots))
   }
-  const onPhotosChange = (incoming: File[]) => {
+  const removeEvidenceFile = (index: number) => {
     setFileError(null)
-    setPhotos((prev) => [...prev, ...incoming].slice(0, remainingPhotoSlots))
+    setEvidenceFiles((prev) => prev.filter((_, i) => i !== index))
   }
-  const removePhoto = (index: number) => setPhotos((prev) => prev.filter((_, i) => i !== index))
   const removeStaffProof = (item: DisputeEvidence) => setRemovedProofKeys((keys) => [...keys, item.s3Key])
 
   const validateFiles = (): string | null => {
-    if (!isEdit && !confirmation) return 'A trip confirmation screenshot or PDF is required.'
-    if (confirmation) {
-      const err = staffConfirmationRejection(confirmation)
-      if (err) return err
-    }
-    for (const photo of photos) {
-      const err = staffSupportingFileRejection(photo)
+    if (!isEdit && evidenceFiles.length === 0) return 'A trip confirmation screenshot or PDF is required.'
+    for (const file of evidenceFiles) {
+      const err = staffSupportingFileRejection(file)
       if (err) return err
     }
     return null
@@ -197,39 +192,25 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
     setFileError(null)
     const newProofs: DisputeEvidence[] = []
     try {
-      if (confirmation) {
-        const key = uploadedKeys.current.get(confirmation) ?? await uploadDisputeStaffProof(disputeIdRef.current, confirmation, 'CONFIRMATION')
-        uploadedKeys.current.set(confirmation, key)
+      const firstFileIsConfirmation = existingStaffConfirmation.length === 0
+      for (let i = 0; i < evidenceFiles.length; i++) {
+        const file = evidenceFiles[i]
+        const kind: DisputeEvidence['kind'] = (firstFileIsConfirmation && i === 0) ? 'CONFIRMATION' : 'PHOTO'
+        const key = uploadedKeys.current.get(file) ?? await uploadDisputeStaffProof(disputeIdRef.current, file, kind)
+        uploadedKeys.current.set(file, key)
         newProofs.push({
           s3Key: key,
-          fileName: confirmation.name,
-          contentType: fileContentType(confirmation) || 'application/octet-stream',
-          size: confirmation.size,
-          kind: 'CONFIRMATION',
+          fileName: file.name,
+          contentType: fileContentType(file) || 'application/octet-stream',
+          size: file.size,
+          kind,
         })
       }
-      for (const photo of photos) {
-        const key = uploadedKeys.current.get(photo) ?? await uploadDisputeStaffProof(disputeIdRef.current, photo, 'PHOTO')
-        uploadedKeys.current.set(photo, key)
-        newProofs.push({
-          s3Key: key,
-          fileName: photo.name,
-          contentType: fileContentType(photo) || 'application/octet-stream',
-          size: photo.size,
-          kind: 'PHOTO',
-        })
-      }
-
-      const existingStaffConfirmations = existingStaffProofs.filter((e) => e.kind === 'CONFIRMATION')
-      const existingStaffPhotos = existingStaffProofs.filter((e) => e.kind === 'PHOTO')
-      const replacedConfirmationKeys = confirmation ? existingStaffConfirmations.map((e) => e.s3Key) : []
-      const keptStaffConfirmations = confirmation ? [] : existingStaffConfirmations
 
       const evidence = [
         ...portalFiles,
         ...responseFiles,
-        ...keptStaffConfirmations,
-        ...existingStaffPhotos,
+        ...existingStaffProofs,
         ...newProofs,
       ]
 
@@ -250,7 +231,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
       })
 
       // Only delete from S3 once the row no longer references the keys.
-      for (const key of [...removedProofKeys, ...replacedConfirmationKeys]) {
+      for (const key of removedProofKeys) {
         void deleteDisputeStaffProof(key).catch(() => { /* best effort */ })
       }
       onClose()
@@ -399,35 +380,22 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
 
         <FormSection title="Evidence">
           <FileDrop
-            id="manual-confirmation"
-            label={isEdit ? 'Trip confirmation email' : 'Trip confirmation email *'}
-            hint="Required for a new dispute. A screenshot, photo, or PDF of the confirmation email. Any image type works. Max 10 MB."
+            id="staff-evidence"
+            label={isEdit ? 'Trip confirmation email and any other photos for proof' : 'Trip confirmation email and any other photos for proof *'}
+            hint={
+              evidenceFiles.length >= remainingSlots
+                ? `Maximum ${MAX_EVIDENCE_FILES} files reached. Remove a stored staff proof to add more.`
+                : `Start with the confirmation email — a screenshot, photo, or PDF — then add up to ${remainingSlots - evidenceFiles.length} more file${remainingSlots - evidenceFiles.length === 1 ? '' : 's'} as proof. 10 MB each.`
+            }
             accept="image/*,application/pdf"
-            files={confirmation ? [confirmation] : []}
-            onFiles={(files) => onConfirmationChange(files[0] ?? null)}
-            onRemove={() => onConfirmationChange(null)}
-            browseLabel={confirmation ? 'Replace file' : 'Browse files'}
+            multiple
+            markFirstAsConfirmation={existingStaffConfirmation.length === 0}
+            files={evidenceFiles}
+            onFiles={onEvidenceFilesChange}
+            onRemove={removeEvidenceFile}
+            disabled={evidenceFiles.length >= remainingSlots}
+            browseLabel="Add photos"
           />
-          <div style={{ marginTop: 16 }}>
-            <FileDrop
-              id="manual-photos"
-              label="Optional photos or documents"
-              hint={
-                remainingPhotoSlots === 5
-                  ? 'Up to 5 images or PDFs, 10 MB each.'
-                  : remainingPhotoSlots > 0
-                    ? `${remainingPhotoSlots} more image${remainingPhotoSlots === 1 ? '' : 's'} or PDF${remainingPhotoSlots === 1 ? '' : 's'} allowed, 10 MB each.`
-                    : 'Maximum number of supporting files reached.'
-              }
-              accept="image/*,application/pdf"
-              multiple
-              files={photos}
-              onFiles={onPhotosChange}
-              onRemove={removePhoto}
-              disabled={photos.length >= remainingPhotoSlots}
-              browseLabel="Add files"
-            />
-          </div>
         </FormSection>
 
         <FormSection title="Amounts & Status">
