@@ -426,6 +426,18 @@ describe('private documents are admin-only', () => {
     expect(visibleDocs(docs, false).map((d) => d.documentType)).toEqual(['cdl_copy'])
     expect(visibleDocs(docs, true)).toHaveLength(3)
   })
+
+  it('a private document with no tile on this entity still renders nowhere for a non-admin', () => {
+    // The lease is private AND absent from a company driver's slots, so it lands in the
+    // leftover bucket. That bucket must stay behind the same privacy filter as the tiles -
+    // partitioning on the visible slot list instead would publish it.
+    const companySlots = slotsForDriver('LOCAL')
+    const docs = [{ documentType: 'lease_agreement' }, { documentType: 'cdl_copy' }]
+    const leftovers = docs.filter((d) => docOutsideSlots(d.documentType, companySlots))
+    expect(leftovers.map((d) => d.documentType)).toEqual(['lease_agreement'])
+    expect(visibleDocs(leftovers, false)).toEqual([])
+    expect(visibleDocs(leftovers, true)).toHaveLength(1)
+  })
 })
 
 describe('configurable private document types', () => {
