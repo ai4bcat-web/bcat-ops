@@ -281,4 +281,52 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
     await waitFor(() => expect(createAmazonTrip).not.toHaveBeenCalled())
     expect(updateAmazonDispute).not.toHaveBeenCalled()
   })
+
+  it('deletes the settlement shipment with the dispute, so no phantom row keeps paying', async () => {
+    disputes.mockReturnValue([chadsDispute({
+      status: 'PAID', resolvedAmount: 180.5,
+      settlementTripId: 'trip-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+    })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete dispute' }))
+
+    await waitFor(() => expect(deleteAmazonTrip).toHaveBeenCalledWith('trip-1'))
+    expect(deleteAmazonDispute).toHaveBeenCalledWith('d-1')
+  })
+
+  it('drops the shipment when the edit sheet moves a posted dispute off Paid', async () => {
+    disputes.mockReturnValue([chadsDispute({
+      status: 'PAID', resolvedAmount: 180.5,
+      settlementTripId: 'trip-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+    })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    fireEvent.change(await screen.findByLabelText('Dispute status'), { target: { value: 'POSTED' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+
+    await waitFor(() => expect(deleteAmazonTrip).toHaveBeenCalledWith('trip-1'))
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    expect(patch.status).toBe('POSTED')
+    expect(patch.settlementTripId).toBeNull()
+  })
+
+  it('re-prices the posted shipment when the recovered amount is edited', async () => {
+    disputes.mockReturnValue([chadsDispute({
+      status: 'PAID', resolvedAmount: 180.5,
+      settlementTripId: 'trip-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+    })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    fireEvent.change(await screen.findByLabelText('Recovered amount ($)'), { target: { value: '200' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+
+    await waitFor(() => expect(updateAmazonTrip).toHaveBeenCalledTimes(1))
+    expect(deleteAmazonTrip).not.toHaveBeenCalled()
+    const [tripId, input] = updateAmazonTrip.mock.calls[0]
+    expect(tripId).toBe('trip-1')
+    expect(input).toMatchObject({ periodStart: '2026-02-01', freightAmount: 200, driverId: 'drv-chad' })
+  })
 })

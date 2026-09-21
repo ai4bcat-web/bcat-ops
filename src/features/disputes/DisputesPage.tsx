@@ -224,13 +224,13 @@ function DisputeModal({ dispute, onSave, onDelete, onClose }: {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
             <Field label="Status">
-              <select style={inputStyle} value={form.status} onChange={(e) => set('status', e.target.value as DisputeStatus)}>
+              <select aria-label="Dispute status" style={inputStyle} value={form.status} onChange={(e) => set('status', e.target.value as DisputeStatus)}>
                 {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
               </select>
             </Field>
             {form.status === 'PAID' && (
               <Field label="Amount Recovered ($)">
-                <input type="number" step="0.01" style={inputStyle} value={form.resolvedAmount} onChange={(e) => set('resolvedAmount', e.target.value)} placeholder="0.00" />
+                <input type="number" step="0.01" aria-label="Recovered amount ($)" style={inputStyle} value={form.resolvedAmount} onChange={(e) => set('resolvedAmount', e.target.value)} placeholder="0.00" />
               </Field>
             )}
           </div>
@@ -404,6 +404,44 @@ export function DisputesPage() {
     await updateAmazonDispute(dispute.id, { ...patch, ...settlementPatch })
     if (choice) toast.success(`Added to the ${weekLabelLong(choice.periodStart)} settlement`)
     else if (existingId) toast.success('Removed from the settlement')
+  }
+
+  /**
+   * Deleting a dispute takes its settlement shipment with it: a DISPUTE row nobody can
+   * trace back would keep inflating that week's gross and the driver's check.
+   */
+  const removeDispute = async (d: AmazonDispute) => {
+    if (d.settlementTripId) await deleteAmazonTrip(d.settlementTripId)
+    await deleteAmazonDispute(d.id)
+  }
+
+  /**
+   * The edit sheet has no settlement picker, so it keeps an existing posting honest:
+   * a status that is no longer PAID drops the shipment, and a re-keyed recovery amount
+   * re-prices it on the week it was posted to.
+   */
+  const saveDisputeEdit = async (d: AmazonDispute, data: DisputeData) => {
+    const tripId = d.settlementTripId ?? null
+    if (!tripId) { await updateAmazonDispute(d.id, data); return }
+
+    const amount = data.status === 'PAID'
+      ? disputeRecoveredAmount({ resolvedAmount: data.resolvedAmount, amountRequested: data.amountRequested })
+      : null
+    if (amount == null) {
+      await deleteAmazonTrip(tripId)
+      await updateAmazonDispute(d.id, {
+        ...data, settlementTripId: null, settlementPeriodStart: null, settlementDriverId: null,
+      })
+      toast.success('Removed from the settlement')
+      return
+    }
+    await updateAmazonTrip(tripId, disputeTripInput({
+      dispute: { ...d, ...data },
+      driverId: d.settlementDriverId!,
+      periodStart: d.settlementPeriodStart!,
+      amount,
+    }))
+    await updateAmazonDispute(d.id, data)
   }
 
   const filtered = useMemo(() => {
@@ -643,7 +681,7 @@ export function DisputesPage() {
                               disabled={deletingId === d.id}
                               onClick={() => {
                                 setDeletingId(d.id)
-                                deleteAmazonDispute(d.id)
+                                removeDispute(d)
                                   .then(() => toast.success('Dispute deleted'))
                                   .catch((err) => toast.error(`Couldn't delete: ${errorMessage(err)}`))
                                   .finally(() => setDeletingId(null))
@@ -708,8 +746,8 @@ export function DisputesPage() {
       {editItem && (
         <DisputeModal
           dispute={editItem}
-          onSave={async (data) => { await updateAmazonDispute(editItem.id, data) }}
-          onDelete={async () => { await deleteAmazonDispute(editItem.id) }}
+          onSave={async (data) => { await saveDisputeEdit(editItem, data) }}
+          onDelete={async () => { await removeDispute(editItem) }}
           onClose={() => setEditItem(null)}
         />
       )}
