@@ -14,7 +14,7 @@ import {
   uploadDisputeStaffProof, deleteDisputeStaffProof,
 } from '@/lib/apiClient'
 import { disputeRecoveredAmount, disputeTripInput, matchDisputeDriver } from '@/lib/disputeSettlement'
-import { sundayOf, shiftWeek, weekLabel, weekLabelLong } from '@/features/driver-pay/week'
+import { sundayOf, shiftWeek, weekLabel, weekLabelLong, weekStartOfISO } from '@/features/driver-pay/week'
 import type { Driver } from '@/types'
 import type { AmazonDispute, DisputeEvidence, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
@@ -136,6 +136,30 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
   const existingStaffPhotos = existingStaffProofs.filter((e) => e.kind === 'PHOTO')
   const remainingPhotoSlots = Math.max(0, 5 - existingStaffPhotos.length)
   const responseFiles = responseEvidence(dispute?.evidence)
+
+  // Pay period is a Sunday week, like the portal writes — free text here is what left
+  // rows showing "9/11" instead of a week. Legacy values stay selectable so an edit
+  // never silently rewrites one.
+  const periodWeeks = useMemo(() => {
+    const current = sundayOf()
+    const weeks = Array.from({ length: 106 }, (_, i) => shiftWeek(current, 1 - i))
+      .map((value) => ({ value, label: weekLabelLong(value) }))
+    const stored = form.payPeriod
+    return stored && !weeks.some((w) => w.value === stored)
+      ? [{ value: stored, label: `${stored} (as entered)` }, ...weeks]
+      : weeks
+  }, [form.payPeriod])
+
+  // Picking the shipment date fills the week it falls in; an explicit choice stands.
+  const onShipmentDateChange = (value: string) => {
+    setForm((f) => ({
+      ...f,
+      shipmentDate: value,
+      payPeriod: value && (!f.payPeriod || f.payPeriod === weekStartOfISO(f.shipmentDate || value))
+        ? weekStartOfISO(value)
+        : f.payPeriod,
+    }))
+  }
 
   const onConfirmationChange = (file: File | null) => {
     setFileError(null)
@@ -319,10 +343,15 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
             <Field label="Shipment Date">
-              <input type="date" style={inputStyle} value={form.shipmentDate} onChange={(e) => set('shipmentDate', e.target.value)} />
+              <input type="date" style={inputStyle} value={form.shipmentDate} onChange={(e) => onShipmentDateChange(e.target.value)} aria-label="Shipment date" />
             </Field>
             <Field label="7-Day Period">
-              <input style={inputStyle} value={form.payPeriod} onChange={(e) => set('payPeriod', e.target.value)} placeholder="4/19 - 4/25 or Sunday start" />
+              <select style={inputStyle} value={form.payPeriod} onChange={(e) => set('payPeriod', e.target.value)} aria-label="Pay period">
+                <option value="">— No period —</option>
+                {periodWeeks.map((w) => (
+                  <option key={w.value} value={w.value}>{w.label}</option>
+                ))}
+              </select>
             </Field>
           </div>
           <Field label="Description">

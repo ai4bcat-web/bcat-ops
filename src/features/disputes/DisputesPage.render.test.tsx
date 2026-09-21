@@ -533,3 +533,40 @@ describe('DisputesPage — DisputeModal supporting file cap', () => {
     expect(photoInput.disabled).toBe(true)
   })
 })
+
+describe('DisputesPage — DisputeModal pay period', () => {
+  it('files a manual dispute on the pay week its shipment date falls in', async () => {
+    render(<DisputesPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New Dispute' }))
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Driver name' }), { target: { value: 'Zak Pace' } })
+    // Sep 11 2026 is a Friday; its pay week starts Sunday Sep 6.
+    fireEvent.change(screen.getByLabelText('Shipment date'), { target: { value: '2026-09-11' } })
+
+    const period = screen.getByRole('combobox', { name: 'Pay period' }) as HTMLSelectElement
+    expect(period.value).toBe('2026-09-06')
+
+    fireEvent.change(screen.getByLabelText(/Trip confirmation email/), {
+      target: { files: [new File(['x'], 'confirm.png', { type: 'image/png' })] },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Create Dispute/ }))
+
+    await waitFor(() => expect(addAmazonDispute).toHaveBeenCalledTimes(1))
+    expect(addAmazonDispute.mock.calls[0][0].payPeriod).toBe('2026-09-06')
+  })
+
+  it('keeps a hand-typed legacy period selectable instead of rewriting it', async () => {
+    disputes.mockReturnValue([dispute({ payPeriod: '9/11', shipmentDate: '2026-09-11' })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+    const period = screen.getByRole('combobox', { name: 'Pay period' }) as HTMLSelectElement
+
+    expect(period.value).toBe('9/11')
+    fireEvent.change(period, { target: { value: '2026-09-06' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => expect(updateAmazonDispute).toHaveBeenCalledTimes(1))
+    expect(updateAmazonDispute.mock.calls[0][1].payPeriod).toBe('2026-09-06')
+  })
+})
