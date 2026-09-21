@@ -16,6 +16,7 @@ import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
 import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
 import { motiveLocationSync } from './functions/motive-location-sync/resource'
+import { motiveFaultSync } from './functions/motive-fault-sync/resource'
 import { blueinkSync } from './functions/blueink-sync/resource'
 import { complianceScanner } from './functions/compliance-scanner/resource'
 import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
@@ -50,6 +51,7 @@ const backend = defineBackend({
   motiveMileageSync,
   blueinkSync,
   motiveLocationSync,
+  motiveFaultSync,
   complianceScanner,
   onboardingPortalApi,
   onboardingEmailer,
@@ -372,6 +374,31 @@ const locationSyncRule = new Rule(motiveLocationFn.stack, 'MotiveLocationSyncRul
   description: 'Sync Motive ELD truck locations for every Motive vehicle every 10 minutes',
 })
 locationSyncRule.addTarget(new EventsLambdaTarget(motiveLocationFn))
+
+// ── motiveFaultSync Lambda ─────────────────────────────────────────────────
+
+const motiveFaultFn = backend.motiveFaultSync.resources.lambda as LambdaFunction
+
+const truckFaultCodeTable = backend.data.resources.tables['TruckFaultCode']
+
+backend.motiveFaultSync.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    // DeleteItem: a code Motive no longer reports as open is removed, so the
+    // table always IS the current fault list.
+    actions:   ['dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:DeleteItem'],
+    resources: [equipmentTable.tableArn, truckFaultCodeTable.tableArn],
+  })
+)
+
+motiveFaultFn.addEnvironment('EQUIPMENT_TABLE_NAME',        equipmentTable.tableName)
+motiveFaultFn.addEnvironment('TRUCK_FAULT_CODE_TABLE_NAME', truckFaultCodeTable.tableName)
+
+// EventBridge cron — hourly. DTCs are maintenance signals, not live telemetry.
+const faultSyncRule = new Rule(motiveFaultFn.stack, 'MotiveFaultSyncRule', {
+  schedule:    Schedule.rate(Duration.hours(1)),
+  description: 'Sync open Motive fault codes (DTCs) for every Motive vehicle hourly',
+})
+faultSyncRule.addTarget(new EventsLambdaTarget(motiveFaultFn))
 
 // ── blueinkSync Lambda (Blue Ink Tech ELD) ─────────────────────────────────
 // One Lambda, two cadences via the event payload: frequent location sync (default

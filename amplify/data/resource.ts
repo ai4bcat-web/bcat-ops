@@ -629,6 +629,33 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Open engine fault codes (DTCs) from Motive ────────────────────────────
+  // One record per truck per open Motive fault code, refreshed hourly by the
+  // motive-fault-sync Lambda: it writes every code Motive reports as `open` and
+  // deletes the rows Motive no longer reports, so the table IS the current fault
+  // list. Nothing here is entered by hand.
+  TruckFaultCode: a
+    .model({
+      truckId:         a.string().required(),  // Equipment.id, or `motive:<number>` when unmatched
+      faultId:         a.string().required(),  // Motive fault_code id — sort key
+      unitNumber:      a.string().required(),  // denormalised for display, e.g. "009"
+      code:            a.string().required(),  // code_label, e.g. "SPN-3563"
+      description:     a.string(),             // code_description
+      sourceLabel:     a.string(),             // source_address_label, e.g. "Engine #2"
+      fmiDescription:  a.string(),             // what the failure mode means in plain English
+      faultType:       a.string(),             // Motive `type`, e.g. "constant"
+      occurrenceCount: a.integer(),
+      firstObservedAt: a.string(),             // ISO — when Motive first saw the code
+      lastObservedAt:  a.string(),             // ISO — most recent observation
+      vehicleMake:     a.string(),
+      vehicleModel:    a.string(),
+      network:         a.string(),             // 'j1939' | 'obd2' …
+      source:          a.string().required(),  // 'motive'
+      syncedAt:        a.datetime().required(),
+    })
+    .identifier(['truckId', 'faultId'])
+    .authorization((allow) => [allow.authenticated()]),
+
   // ── Driver availability (dispatch-entered, calendar display only) ─────────────
   // Covers full days off and partial availability (early/late start).
   // Multi-day ranges supported via startDate/endDate pair.

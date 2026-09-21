@@ -36,6 +36,11 @@
 - Do not use an invoice date cutoff to hide missing historical invoices, or email Seen status as proof of successful ingestion. Do not claim complete repairs-address coverage from the forwarded Gmail copy alone.
 - A new invoice can be split across several units; each line carries its own equipment, amount and "what was fixed on this unit", and becomes its own invoice record with that description. Lines left blank fall back to the invoice-level description. Editing an existing invoice stays single-unit.
 
+## Motive fault codes
+- `GET https://api.gomotive.com/v1/fault_codes?status=open` (header `X-Api-Key`) is the source; the `motive-fault-sync` Lambda pages it hourly, matches `vehicle.number` to Equipment the same way the mileage/location syncs do (`motiveVehicleNumber` overrides `unitNumber`, unmatched vehicles key as `motive:<number>`), and writes one `TruckFaultCode` row per (truckId, faultId).
+- The table IS the live fault list: every run deletes rows Motive no longer reports as open, including when it reports none, so a repaired truck clears itself. Nothing here is entered by hand.
+- The Fleet Manager Dashboard shows them in **Active Fault Codes · Motive**, directly under the miles-until-next-PM tracker: one card per vehicle with each code, what it means (`fmi_description`), the controller that raised it, when it was last seen and how long it has been open.
+
 ## Amazon mileage expenses
 - In Amazon Driver Pay settings, add an expense or select an existing revision and choose Change, then Mileage calculation. Enter cost per mile, miles for the weekly expense, and an effective date. Apply the draft, then Save settings.
 - Amount is calculated from cost per mile × entered miles and rounded once to cents; sub-cent per-mile rates are retained. These are entered miles, not an ELD feed or automatic trip-mile total.

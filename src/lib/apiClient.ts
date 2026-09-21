@@ -1843,6 +1843,49 @@ export async function listTruckLocations(): Promise<TruckLocation[]> {
   return result.data.listTruckLocations.items ?? []
 }
 
+// ── TruckFaultCode ──────────────────────────────────────────────────────────────
+
+export interface TruckFaultCode {
+  truckId:          string
+  faultId:          string
+  unitNumber:       string
+  code:             string
+  description?:     string | null
+  sourceLabel?:     string | null
+  fmiDescription?:  string | null
+  faultType?:       string | null
+  occurrenceCount?: number | null
+  firstObservedAt?: string | null
+  lastObservedAt?:  string | null
+  vehicleMake?:     string | null
+  vehicleModel?:    string | null
+  network?:         string | null
+  source:           string
+  syncedAt:         string
+}
+
+const TRUCK_FAULT_CODE_FIELDS = `truckId faultId unitNumber code description sourceLabel fmiDescription faultType occurrenceCount firstObservedAt lastObservedAt vehicleMake vehicleModel network source syncedAt`
+
+/**
+ * Every fault code Motive currently reports as open. The sync deletes rows Motive
+ * stops reporting, so what comes back IS the live fault list. Returns nothing until
+ * the model is deployed rather than breaking the dashboard around it.
+ */
+export async function listTruckFaultCodes(): Promise<TruckFaultCode[]> {
+  try {
+    const result = await client.graphql({
+      query: `query ListTruckFaultCodes { listTruckFaultCodes(limit: 5000) { items { ${TRUCK_FAULT_CODE_FIELDS} } } }`,
+    }) as { data: { listTruckFaultCodes: { items: TruckFaultCode[] } } }
+    return result.data.listTruckFaultCodes.items ?? []
+  } catch (err) {
+    if (/TruckFaultCode/i.test(safeStringify(err))) {
+      console.warn('[apiClient] TruckFaultCode not deployed yet — no fault codes shown')
+      return []
+    }
+    throw err
+  }
+}
+
 const TRUCK_LOCATION_HISTORY_FIELDS = `truckId unitNumber lat lon bearing speed locatedAt description source syncedAt`
 
 /** Breadcrumb history for one truck, oldest → newest, for drawing its trail. */

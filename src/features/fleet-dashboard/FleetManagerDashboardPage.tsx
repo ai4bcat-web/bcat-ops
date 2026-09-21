@@ -11,6 +11,7 @@ import { RepairSpendWidget } from './RepairSpendWidget'
 import { ExpiringTruckDocsWidget } from './ExpiringTruckDocsWidget'
 import { MaintenanceTasksWidget } from './MaintenanceTasksWidget'
 import { PmDueWidget } from './PmDueWidget'
+import { FaultCodesWidget } from './FaultCodesWidget'
 import { DotDueWidget } from './DotDueWidget'
 
 // ── Time-off labels ─────────────────────────────────────────────────────────────
@@ -157,6 +158,9 @@ export function FleetManagerDashboardPage() {
 
         {/* Miles until next PM — Ivan fleet, every 25k mi */}
         <PmDueWidget />
+
+        {/* Open engine fault codes from the same Motive feed the PM tracker reads */}
+        <FaultCodesWidget />
 
         {/* Repair spend by month (filterable by equipment + date) */}
         <RepairSpendWidget />
