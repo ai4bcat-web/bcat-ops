@@ -118,14 +118,14 @@ export function staffConfirmationRejection(file: { name?: string; type: string; 
   return null
 }
 
-/** Supporting photo for a staff-created manual dispute: image only, 10 MB max. */
-export function staffPhotoRejection(file: { name?: string; type: string; size: number }): string | null {
+/** Supporting file for a dispute: image or PDF, 10 MB max (up to five per dispute). */
+export function staffSupportingFileRejection(file: { name?: string; type: string; size: number }): string | null {
   const type = file.type.toLowerCase()
   const ext = file.name?.split('.').pop()?.toLowerCase() ?? ''
-  const knownType = IMAGE_TYPE.test(type)
-  const knownExtension = !type && IMAGE_EXTENSIONS.includes(ext)
+  const knownType = IMAGE_TYPE.test(type) || type === PDF_TYPE
+  const knownExtension = !type && (IMAGE_EXTENSIONS.includes(ext) || ext === 'pdf')
   if (!knownType && !knownExtension) {
-    return 'Attach an image (PNG, JPG, HEIC…).'
+    return 'Attach an image (PNG, JPG, HEIC…) or a PDF.'
   }
   if (file.size <= 0) return 'That file is empty.'
   if (file.size > MAX_DISPUTE_FILE_BYTES) {

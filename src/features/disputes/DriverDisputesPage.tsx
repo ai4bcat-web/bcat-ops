@@ -17,7 +17,7 @@ import {
 import { fileContentType } from '@/lib/disputeFiles'
 import { addDays, formatPayPeriod, formatWeekLabel, toLocalDateString } from '@/lib/payPeriod'
 import { FileDrop } from './FileDrop'
-import { staffConfirmationRejection, staffPhotoRejection } from './disputeEvidence'
+import { staffConfirmationRejection, staffSupportingFileRejection } from './disputeEvidence'
 
 const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
 const CONTACT_EMAIL = 'help@bcatcorp.com'
@@ -358,7 +358,7 @@ export function DriverDisputesPage() {
     }
     let photoErr: string | null = null
     for (const photo of photos) {
-      const err = staffPhotoRejection(photo)
+      const err = staffSupportingFileRejection(photo)
       if (err) {
         photoErr = err
         break
@@ -689,15 +689,15 @@ export function DriverDisputesPage() {
 
               <FileDrop
                 id="photos"
-                label="Optional photos"
-                hint="Up to 5 images (any type), 10 MB each."
-                accept="image/*"
+                label="Optional photos or documents"
+                hint="Up to 5 images or PDFs, 10 MB each."
+                accept="image/*,application/pdf"
                 multiple
                 files={photos}
                 onFiles={onPhotosChange}
                 onRemove={removePhoto}
                 disabled={photos.length >= 5}
-                browseLabel="Add photos"
+                browseLabel="Add files"
               />
             </div>
           </div>
@@ -867,12 +867,25 @@ export function DriverDisputesPage() {
                   >
                     Status
                   </th>
+                  <th
+                    className="uppercase"
+                    style={{
+                      textAlign: 'right',
+                      padding: '8px 6px',
+                      color: 'var(--ds-t3)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Recovered
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
+                    <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13 }}>
                       {boardLoading ? (
                         <span className="inline-flex items-center gap-2">
                           <Loader2 size={16} className="animate-spin" /> Loading disputes…
@@ -904,6 +917,16 @@ export function DriverDisputesPage() {
                         {item.shipmentDate ? formatDisplayDate(item.shipmentDate) : '—'}
                       </td>
                       <td style={{ padding: '10px 6px' }}>{statusPill(item.status)}</td>
+                      <td
+                        style={{
+                          padding: '10px 6px',
+                          color: 'var(--ds-t2)',
+                          textAlign: 'right',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {item.resolvedAmount == null ? '—' : formatCurrency(item.resolvedAmount)}
+                      </td>
                     </tr>
                   ))
                 )}
@@ -1026,6 +1049,10 @@ function Field({
 function formatDisplayDate(value: string): string {
   const d = new Date(`${value}T00:00:00`)
   return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function formatCurrency(dollars: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(dollars)
 }
 
 function statusPill(status: BoardItem['status']) {

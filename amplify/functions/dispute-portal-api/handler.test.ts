@@ -205,13 +205,30 @@ describe('dispute-portal-api', () => {
       expect(() => validateSubmission(payload)).toThrow('Invalid evidence key')
     })
 
-    it('rejects PDF photos', () => {
+    it('accepts a PDF supporting file alongside the confirmation', () => {
       const payload = {
         ...validSubmitPayload(id),
-        evidence: [validEvidence(id, 'CONFIRMATION')],
+        evidence: [
+          validEvidence(id, 'CONFIRMATION'),
+          {
+            ...validEvidence(id, 'PHOTO'),
+            s3Key: `dispute-proofs/${id}/11111111-2222-3333-4444-555566667777.pdf`,
+            fileName: 'gate-log.pdf',
+            contentType: 'application/pdf',
+          },
+        ],
       }
-      // Swap kind to PHOTO while keeping application/pdf
-      payload.evidence[0].kind = 'PHOTO'
+      expect(() => validateSubmission(payload)).not.toThrow()
+    })
+
+    it('rejects a scriptable SVG supporting file', () => {
+      const payload = {
+        ...validSubmitPayload(id),
+        evidence: [
+          validEvidence(id, 'CONFIRMATION'),
+          { ...validEvidence(id, 'PHOTO'), contentType: 'image/svg+xml' },
+        ],
+      }
       expect(() => validateSubmission(payload)).toThrow('Invalid contentType for PHOTO')
     })
   })
@@ -252,10 +269,22 @@ describe('dispute-portal-api', () => {
         payPeriod: '2026-09-13',
         shipmentDate: '2026-09-15',
         status: 'PENDING',
+        resolvedAmount: null,
       })
       expect('amountPaid' in item).toBe(false)
+      expect('amountRequested' in item).toBe(false)
       expect('description' in item).toBe(false)
       expect('evidence' in item).toBe(false)
+    })
+
+    it('surfaces resolvedAmount only on paid disputes and stays null otherwise', () => {
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'PAID', resolvedAmount: 123.45 }).resolvedAmount).toBe(123.45)
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'PAID', resolvedAmount: 0 }).resolvedAmount).toBeNull()
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'PAID' }).resolvedAmount).toBeNull()
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'PENDING', resolvedAmount: 123.45 }).resolvedAmount).toBeNull()
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'POSTED', resolvedAmount: 123.45 }).resolvedAmount).toBeNull()
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'REJECTED', resolvedAmount: 123.45 }).resolvedAmount).toBeNull()
+      expect(projectBoardItem({ id: '1', driverName: 'Juan', status: 'PAID', resolvedAmount: Number.NaN }).resolvedAmount).toBeNull()
     })
 
     it('shows legacy rows with a missing or unknown status as Pending rather than failing the board', () => {
@@ -284,6 +313,7 @@ describe('dispute-portal-api', () => {
       const cmd = mockDynamoSend.mock.calls[0][0]
       expect(cmd.Limit).toBe(100)
       expect(cmd.ProjectionExpression).toContain('driverName, tripNumber, payPeriod, shipmentDate')
+      expect(cmd.ProjectionExpression).toContain('resolvedAmount')
     })
 
     it('rejects malformed nextToken', async () => {

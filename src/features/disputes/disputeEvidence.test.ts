@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   driverEvidence, isBrowserRenderable, mergeDisputeEvidence, portalDriverEvidence, responseEvidence, responseFileRejection,
-  staffProofEvidence, staffConfirmationRejection, staffPhotoRejection,
+  staffProofEvidence, staffConfirmationRejection, staffSupportingFileRejection,
 } from './disputeEvidence'
 import type { DisputeEvidence } from '@/types/dispute'
 
@@ -85,10 +85,10 @@ describe('staff manual proof split', () => {
     expect(staffConfirmationRejection({ name: 'a.pdf', type: 'application/pdf', size: 1024 })).toBeNull()
   })
 
-  it('rejects PDFs and SVGs for supporting photos', () => {
-    expect(staffPhotoRejection({ name: 'a.png', type: 'image/png', size: 1024 })).toBeNull()
-    expect(staffPhotoRejection({ name: 'a.pdf', type: 'application/pdf', size: 1024 })).toMatch(/image/i)
-    expect(staffPhotoRejection({ name: 'a.svg', type: 'image/svg+xml', size: 1024 })).toMatch(/image/i)
+  it('takes images and PDFs as supporting files, but never a scriptable SVG', () => {
+    expect(staffSupportingFileRejection({ name: 'a.png', type: 'image/png', size: 1024 })).toBeNull()
+    expect(staffSupportingFileRejection({ name: 'a.pdf', type: 'application/pdf', size: 1024 })).toBeNull()
+    expect(staffSupportingFileRejection({ name: 'a.svg', type: 'image/svg+xml', size: 1024 })).toMatch(/PDF/i)
   })
 })
 

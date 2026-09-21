@@ -26,7 +26,7 @@ import { EvidenceGallery } from './EvidenceGallery'
 import { StatusUpdateModal, type DisputePatch, type SettlementChoice } from './StatusUpdateModal'
 import {
   portalDriverEvidence, responseEvidence, staffProofEvidence,
-  staffConfirmationRejection, staffPhotoRejection,
+  staffConfirmationRejection, staffSupportingFileRejection,
 } from './disputeEvidence'
 import { FileDrop } from './FileDrop'
 
@@ -153,7 +153,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
       if (err) return err
     }
     for (const photo of photos) {
-      const err = staffPhotoRejection(photo)
+      const err = staffSupportingFileRejection(photo)
       if (err) return err
     }
     return null
@@ -380,15 +380,15 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
           <div style={{ marginTop: 16 }}>
             <FileDrop
               id="manual-photos"
-              label="Optional photos"
-              hint="Up to 5 images (any type), 10 MB each."
-              accept="image/*"
+              label="Optional photos or documents"
+              hint="Up to 5 images or PDFs, 10 MB each."
+              accept="image/*,application/pdf"
               multiple
               files={photos}
               onFiles={onPhotosChange}
               onRemove={removePhoto}
               disabled={photos.length >= 5}
-              browseLabel="Add photos"
+              browseLabel="Add files"
             />
           </div>
         </FormSection>
@@ -767,11 +767,11 @@ export function DisputesPage() {
           ) : (
             <>
               <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
-                {/* Ten columns that fit a 1440 window with the sidebar open: the filing
+                {/* Eleven columns that fit a 1440 window with the sidebar open: the filing
                     date rides under the source pill and the shipment date sits above its
                     7-day period, so Status and the row actions stay on screen. Every
                     fixed cell clips with an ellipsis and carries a title. */}
-                <table style={{ width: '100%', minWidth: 1100, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: 1200, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <colgroup>
                     <col style={{ width: 116 }} />
                     <col style={{ width: 100 }} />
@@ -780,14 +780,15 @@ export function DisputesPage() {
                     <col />
                     <col style={{ width: 84 }} />
                     <col style={{ width: 96 }} />
+                    <col style={{ width: 100 }} />
                     <col style={{ width: 76 }} />
                     <col style={{ width: 136 }} />
                     <col style={{ width: 84 }} />
                   </colgroup>
                   <thead>
                     <tr>
-                      {['Source', 'Trip #', 'Shipment', 'Driver', 'Description', 'Paid', 'Requested', 'Proof', 'Status', ''].map((h, i) => (
-                        <th key={i} style={{ ...thBase, textAlign: i === 5 || i === 6 ? 'right' : 'left' }}>{h}</th>
+                      {['Source', 'Trip #', 'Shipment', 'Driver', 'Description', 'Paid', 'Requested', 'Recovered', 'Proof', 'Status', ''].map((h, i) => (
+                        <th key={i} style={{ ...thBase, textAlign: i >= 5 && i <= 7 ? 'right' : 'left' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -822,6 +823,10 @@ export function DisputesPage() {
                           </td>
                           <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountPaid)}</td>
                           <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ds-t1)', whiteSpace: 'nowrap' }}>{fmtMoney(d.amountRequested)}</td>
+                          {/* What Amazon actually sent back — blank until a recovery is keyed. */}
+                          <td style={{ ...tdBase, verticalAlign: 'top', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 600, color: d.resolvedAmount ? 'var(--ds-green)' : 'var(--ds-muted-soft)', whiteSpace: 'nowrap' }}>
+                            {d.resolvedAmount ? fmtMoney(d.resolvedAmount) : '—'}
+                          </td>
                           <td style={{ ...tdBase, verticalAlign: 'top' }}>
                             {/* A staff response screenshot must never push a legacy Drive
                                 link out of the column — a GOOGLE_FORM row's only proof. */}

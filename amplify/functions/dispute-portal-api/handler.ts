@@ -73,6 +73,7 @@ interface BoardItem {
   payPeriod: string | null
   shipmentDate: string | null
   status: DisputeStatus
+  resolvedAmount: number | null
 }
 
 class PortalError extends Error {
@@ -187,9 +188,10 @@ export function validateListToken(nextToken: unknown): Record<string, string> | 
   return parsed as Record<string, string>
 }
 
-function requirementFileContentType(kind: 'CONFIRMATION' | 'PHOTO', contentType: string): boolean {
-  if (IMAGE_TYPE.test(contentType.toLowerCase())) return true
-  return kind === 'CONFIRMATION' && contentType === PDF_TYPE
+/** Evidence is a screenshot/photo or a PDF — SVG stays out (staff open it from a signed URL). */
+function requirementFileContentType(_kind: 'CONFIRMATION' | 'PHOTO', contentType: string): boolean {
+  const type = contentType.toLowerCase()
+  return IMAGE_TYPE.test(type) || type === PDF_TYPE
 }
 
 function validateEvidenceItem(raw: unknown, submissionId: string, index: number): EvidenceItem {
@@ -261,6 +263,15 @@ export function projectBoardItem(raw: Record<string, unknown>): BoardItem {
   // those as Pending, and one such row must not take the whole public board down.
   const raw_status = String(raw.status ?? '')
   const status = VALID_STATUSES[raw_status] ? raw_status : 'PENDING'
+
+  // Recovered = the actual dollar amount recovered on a paid dispute. Stay null for any
+  // other status or malformed value so a single bad row cannot break the board.
+  const rawResolved = raw.resolvedAmount
+  const resolvedAmount =
+    status === 'PAID' && typeof rawResolved === 'number' && Number.isFinite(rawResolved) && rawResolved > 0
+      ? rawResolved
+      : null
+
   return {
     id: String(raw.id),
     driverName: String(raw.driverName ?? ''),
@@ -268,6 +279,7 @@ export function projectBoardItem(raw: Record<string, unknown>): BoardItem {
     payPeriod: raw.payPeriod ? String(raw.payPeriod) : null,
     shipmentDate: raw.shipmentDate ? String(raw.shipmentDate) : null,
     status: status as DisputeStatus,
+    resolvedAmount,
   }
 }
 
@@ -390,7 +402,7 @@ async function handleList(payload: Record<string, unknown>) {
   const res = await ddb.send(
     new ScanCommand({
       TableName: TABLE_NAME,
-      ProjectionExpression: 'id, driverName, tripNumber, payPeriod, shipmentDate, #s, submittedAt',
+      ProjectionExpression: 'id, driverName, tripNumber, payPeriod, shipmentDate, #s, submittedAt, resolvedAmount',
       ExpressionAttributeNames: { '#s': 'status' },
       Limit: PAGE_SIZE,
       ExclusiveStartKey: exclusiveStartKey ?? undefined,

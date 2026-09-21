@@ -34,6 +34,7 @@ export interface BoardItem {
   payPeriod?: string | null
   shipmentDate?: string | null
   status: DisputeStatus
+  resolvedAmount?: number | null
 }
 
 export interface EvidenceFile {
