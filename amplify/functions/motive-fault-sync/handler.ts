@@ -35,10 +35,17 @@ const MOTIVE_API_KEY         = process.env.MOTIVE_API_KEY!
 /**
  * Map of Motive vehicle number → Equipment (trucks only). A truck reports under
  * Equipment.motiveVehicleNumber when set (ELD carried over from a retired truck),
- * else its unitNumber. Inactive trucks never claim a Motive vehicle.
+ * else its unitNumber.
+ *
+ * Retired trucks stay in the map: their codes must keep pointing at the Equipment row
+ * so the dashboard can tell "this truck is inactive" from "we have never heard of this
+ * vehicle" — dropping them here would re-key the codes as `motive:<number>` and make a
+ * retired truck look like an unknown one. An active claim always wins the key.
  */
-async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string; unitNumber: string; override: boolean }>> {
-  const map = new Map<string, { id: string; unitNumber: string; override: boolean }>()
+type MotiveMatch = { id: string; unitNumber: string; override: boolean; active: boolean }
+
+async function fetchEquipmentByMotiveNumber(): Promise<Map<string, MotiveMatch>> {
+  const map = new Map<string, MotiveMatch>()
   let token: Record<string, unknown> | undefined
   do {
     const result = await dynamo.send(new ScanCommand({
@@ -48,14 +55,16 @@ async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string;
       ExpressionAttributeValues: { ':truck': 'truck' },
       ExclusiveStartKey:         token as Record<string, never> | undefined,
     }))
+    // Precedence for one Motive number: explicit override, then an active truck, then a retired one.
+    const rank = (over: boolean, active: boolean) => (over ? 2 : active ? 1 : 0)
     for (const item of result.Items ?? []) {
-      if (item.active === false) continue
       if (!item.unitNumber || !item.id) continue
       const override = item.motiveVehicleNumber ? String(item.motiveVehicleNumber) : null
       const key = override ?? String(item.unitNumber)
-      // An explicit override beats another truck's plain unit number, whatever the scan order.
-      if (!override && map.get(key)?.override) continue
-      map.set(key, { id: String(item.id), unitNumber: String(item.unitNumber), override: override != null })
+      const active = item.active !== false
+      const existing = map.get(key)
+      if (existing && rank(existing.override, existing.active) >= rank(override != null, active)) continue
+      map.set(key, { id: String(item.id), unitNumber: String(item.unitNumber), override: override != null, active })
     }
     token = result.LastEvaluatedKey
   } while (token)
@@ -70,7 +79,8 @@ export const handler = async (): Promise<void> => {
   const faults = await fetchOpenFaultCodes(MOTIVE_API_KEY)
   console.log(`[motive-fault-sync] fetched ${faults.length} open fault code(s)`)
 
-  // Link to active truck records by Motive number where possible; no ownership filter.
+  // Link to a truck record by Motive number where possible (retired trucks included, so
+  // the dashboard can hide them); no ownership filter.
   const equipmentByMotive = await fetchEquipmentByMotiveNumber()
 
   const now = new Date().toISOString()

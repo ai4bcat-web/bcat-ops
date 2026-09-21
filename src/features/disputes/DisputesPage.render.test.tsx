@@ -506,3 +506,30 @@ describe('DisputesPage — DisputeModal driver roster select', () => {
     expect(screen.getByText('confirm.png')).toBeTruthy()
   })
 })
+
+describe('DisputesPage — DisputeModal supporting file cap', () => {
+  it('blocks a 6th supporting file when five staff photos are already stored', async () => {
+    const staffConfirmation: DisputeEvidence = {
+      s3Key: 'dispute-staff-proofs/d-1/confirmation.pdf',
+      fileName: 'confirmation.pdf',
+      contentType: 'application/pdf',
+      size: 2048,
+      kind: 'CONFIRMATION',
+    }
+    const staffPhotos: DisputeEvidence[] = Array.from({ length: 5 }, (_, i) => ({
+      s3Key: `dispute-staff-proofs/d-1/photo-${i}.jpg`,
+      fileName: `photo-${i}.jpg`,
+      contentType: 'image/jpeg',
+      size: 1024,
+      kind: 'PHOTO',
+    }))
+    disputes.mockReturnValue([dispute({ evidence: [staffConfirmation, ...staffPhotos] })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
+
+    expect(screen.getByText('Maximum number of supporting files reached.')).toBeTruthy()
+    const photoInput = screen.getByLabelText(/Optional photos or documents/i) as HTMLInputElement
+    expect(photoInput.disabled).toBe(true)
+  })
+})

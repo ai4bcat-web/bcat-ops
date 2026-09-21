@@ -665,6 +665,7 @@ export function DriverDisputesPage() {
                 hint="Required. Start with the confirmation email — a screenshot, photo, or PDF — then add up to five more files as proof. 10 MB each."
                 accept="image/*,application/pdf"
                 multiple
+                markFirstAsConfirmation
                 files={evidenceFiles}
                 onFiles={onEvidenceChange}
                 onRemove={removeEvidence}

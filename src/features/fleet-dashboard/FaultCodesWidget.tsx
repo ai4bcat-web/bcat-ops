@@ -26,6 +26,7 @@ interface TruckFaults {
   truckId: string
   unitNumber: string
   vehicle: string          // "Freightliner Cascadia" when Motive reports it
+  unmatched: boolean       // Motive reports it, but no Equipment record claims the number
   codes: TruckFaultCode[]
 }
 
@@ -34,8 +35,9 @@ interface TruckFaults {
  * maintenance side of the same telematics feed the PM tracker reads, so a code that
  * lands between services is visible next to the miles-until-PM countdown.
  *
- * Only trucks marked active in Equipment appear here; inactive and unmatched
- * Motive vehicles are excluded from both the cards and the summary counts.
+ * Trucks retired in Equipment (active off) are hidden. A Motive vehicle with NO Equipment
+ * record still shows, flagged, under its Motive number: an open fault on a vehicle nobody
+ * has filed yet is exactly the one that must not disappear silently.
  */
 export function FaultCodesWidget() {
   const { hasPageAccess } = useAuth()
@@ -59,11 +61,13 @@ export function FaultCodesWidget() {
     const grouped = new Map<string, TruckFaults>()
     for (const f of faults) {
       const eq = byUnit.get(f.truckId)
-      if (!eq || eq.type !== 'truck' || eq.active === false) continue
+      // Retired truck: intentionally hidden. No Equipment match at all: still shown, flagged.
+      if (eq && (eq.type !== 'truck' || eq.active === false)) continue
       const entry = grouped.get(f.truckId) ?? {
         truckId: f.truckId,
-        unitNumber: eq.unitNumber,
-        vehicle: [f.vehicleMake, f.vehicleModel].filter(Boolean).join(' ') || (eq.nickname ?? ''),
+        unitNumber: eq?.unitNumber ?? f.unitNumber,
+        vehicle: [f.vehicleMake, f.vehicleModel].filter(Boolean).join(' ') || (eq?.nickname ?? ''),
+        unmatched: !eq,
         codes: [],
       }
       entry.codes.push(f)
@@ -92,7 +96,7 @@ export function FaultCodesWidget() {
                 ? 'Loading engine diagnostics…'
                 : faultCount === 0
                   ? 'No open codes on active vehicles'
-                  : `${faultCount} open code${faultCount === 1 ? '' : 's'} on ${trucks.length} active vehicle${trucks.length === 1 ? '' : 's'}`}
+                  : `${faultCount} open code${faultCount === 1 ? '' : 's'} on ${trucks.length} vehicle${trucks.length === 1 ? '' : 's'}`}
             </div>
           </div>
         </div>
@@ -121,6 +125,11 @@ export function FaultCodesWidget() {
               </div>
               {t.vehicle && (
                 <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 1 }}>{t.vehicle}</div>
+              )}
+              {t.unmatched && (
+                <div style={{ fontSize: 11, color: '#b45309', marginTop: 3 }}>
+                  Motive vehicle {t.unitNumber} — no matching truck in Fleet
+                </div>
               )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>

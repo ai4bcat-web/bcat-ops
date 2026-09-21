@@ -9,6 +9,7 @@ interface FileDropProps {
   accept: string
   multiple?: boolean
   disabled?: boolean
+  markFirstAsConfirmation?: boolean
   files: File[]
   onFiles: (files: File[]) => void
   onRemove: (index: number) => void
@@ -22,6 +23,7 @@ export function FileDrop({
   accept,
   multiple = false,
   disabled = false,
+  markFirstAsConfirmation = false,
   files,
   onFiles,
   onRemove,
@@ -117,6 +119,14 @@ export function FileDrop({
             >
               <PhotoPreview file={file} />
               <span className="max-w-[160px] truncate">{file.name}</span>
+              {markFirstAsConfirmation && i === 0 && (
+                <span
+                  className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{ background: 'var(--ds-blue)', color: '#fff' }}
+                >
+                  Trip confirmation
+                </span>
+              )}
               <span className="font-mono" style={{ color: 'var(--ds-t3)' }}>
                 {(file.size / 1024 / 1024).toFixed(2)} MB
               </span>

@@ -133,6 +133,8 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
 
   const portalFiles = portalDriverEvidence(dispute?.evidence)
   const existingStaffProofs = staffProofEvidence(dispute?.evidence).filter((e) => !removedProofKeys.includes(e.s3Key))
+  const existingStaffPhotos = existingStaffProofs.filter((e) => e.kind === 'PHOTO')
+  const remainingPhotoSlots = Math.max(0, 5 - existingStaffPhotos.length)
   const responseFiles = responseEvidence(dispute?.evidence)
 
   const onConfirmationChange = (file: File | null) => {
@@ -141,7 +143,7 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
   }
   const onPhotosChange = (incoming: File[]) => {
     setFileError(null)
-    setPhotos((prev) => [...prev, ...incoming].slice(0, 5))
+    setPhotos((prev) => [...prev, ...incoming].slice(0, remainingPhotoSlots))
   }
   const removePhoto = (index: number) => setPhotos((prev) => prev.filter((_, i) => i !== index))
   const removeStaffProof = (item: DisputeEvidence) => setRemovedProofKeys((keys) => [...keys, item.s3Key])
@@ -381,13 +383,19 @@ function DisputeModal({ dispute, drivers, onSave, onDelete, onClose }: {
             <FileDrop
               id="manual-photos"
               label="Optional photos or documents"
-              hint="Up to 5 images or PDFs, 10 MB each."
+              hint={
+                remainingPhotoSlots === 5
+                  ? 'Up to 5 images or PDFs, 10 MB each.'
+                  : remainingPhotoSlots > 0
+                    ? `${remainingPhotoSlots} more image${remainingPhotoSlots === 1 ? '' : 's'} or PDF${remainingPhotoSlots === 1 ? '' : 's'} allowed, 10 MB each.`
+                    : 'Maximum number of supporting files reached.'
+              }
               accept="image/*,application/pdf"
               multiple
               files={photos}
               onFiles={onPhotosChange}
               onRemove={removePhoto}
-              disabled={photos.length >= 5}
+              disabled={photos.length >= remainingPhotoSlots}
               browseLabel="Add files"
             />
           </div>
