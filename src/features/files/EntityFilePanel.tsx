@@ -8,7 +8,7 @@ import { getColor } from '@/lib/driverColors'
 import { ACCEPTED_DOC_EXT } from '@/lib/complianceClient'
 import { driverTrailerFieldDeployed } from '@/lib/apiClient'
 import {
-  slotsForAsset, slotsForDriver, slotState, isUnslottedDoc, DRIVER_FILE_SLOTS, driverExpiryPatch,
+  slotsForAsset, slotsForDriver, slotState, docOutsideSlots, DRIVER_FILE_SLOTS, driverExpiryPatch,
   visibleSlots, visibleDocs, responsibilityFor, RESPONSIBILITY_LABELS, type FileSlot, type SlotState,
 } from '@/lib/fileHub'
 import { evaluateTruckDoc, TRUCK_DOC_SPECS } from '@/lib/truckDocs'
@@ -91,8 +91,8 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const fields = useMemo(() => entityFields(entity, drivers, equipment), [entity, drivers, equipment])
 
   const otherDocs = useMemo(
-    () => visibleDocs(hub.docsForEntity(entityType, entityId).filter((d) => isUnslottedDoc(d.documentType) && d.s3Key), canSeePrivate),
-    [hub, entityType, entityId, canSeePrivate],
+    () => visibleDocs(hub.docsForEntity(entityType, entityId).filter((d) => docOutsideSlots(d.documentType, allSlots) && d.s3Key), canSeePrivate),
+    [hub, entityType, entityId, canSeePrivate, allSlots],
   )
 
   // On a truck, show the assigned driver's CDL and medical card in context.

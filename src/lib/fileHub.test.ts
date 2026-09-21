@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import {
-  DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, isUnslottedDoc,
+  DRIVER_FILE_SLOTS, TRUCK_FILE_SLOTS, slotsFor, docOutsideSlots,
   daysUntil, slotState, readyScore, driverExpiry, driverExpiryPatch, slotsForAsset, slotsForDriver,
   isPrivateDoc, visibleSlots, visibleDocs, setPrivateDocTypes, getPrivateDocTypes, classificationForFleet,
   DEFAULT_PRIVATE_DOC_TYPES, type SlotState,
@@ -43,12 +43,12 @@ describe('file hub slots reuse existing document keys', () => {
   })
 
   it('flags document types with no slot so they still surface as "other"', () => {
-    expect(isUnslottedDoc('cdl_copy')).toBe(false)
-    expect(isUnslottedDoc('photo_plate')).toBe(false)
+    expect(docOutsideSlots('cdl_copy', DRIVER_FILE_SLOTS)).toBe(false)
+    expect(docOutsideSlots('photo_plate', TRUCK_FILE_SLOTS)).toBe(false)
     // Action-only requirements (no file attached) are not slots — they live in the
     // onboarding checklist instead.
-    expect(isUnslottedDoc('clearinghouse_annual')).toBe(true)
-    expect(isUnslottedDoc('random_testing_enrollment')).toBe(true)
+    expect(docOutsideSlots('clearinghouse_annual', DRIVER_FILE_SLOTS)).toBe(true)
+    expect(docOutsideSlots('random_testing_enrollment', DRIVER_FILE_SLOTS)).toBe(true)
   })
 
   it('photos never expire; paperwork does', () => {
@@ -341,10 +341,20 @@ describe('driver documents by fleet', () => {
     expect(k).not.toContain('prev_employer_inquiry')
   })
 
-  it('every fleet-specific key is still recognised as slotted', () => {
-    for (const key of ['employment_application', 'employment_agreement', 'lease_agreement']) {
-      expect(isUnslottedDoc(key)).toBe(false)
-    }
+  it('every fleet-specific key is still recognised as slotted for its own fleet', () => {
+    expect(docOutsideSlots('employment_application', slotsForDriver('LOCAL'))).toBe(false)
+    expect(docOutsideSlots('employment_agreement', slotsForDriver('LOCAL'))).toBe(false)
+    expect(docOutsideSlots('lease_agreement', slotsForDriver('AMAZON'))).toBe(false)
+  })
+
+  it('a document the entity has no tile for still counts as "other" so it stays reachable', () => {
+    // A trailer that was given an IFTA scan before trailers stopped asking for one, or
+    // an Amazon truck holding an I-PASS photo, must not lose the file to a hidden slot.
+    expect(docOutsideSlots('ifta_decals', slotsForAsset('trailer', null))).toBe(true)
+    expect(docOutsideSlots('irp_cab_card', slotsForAsset('trailer', null))).toBe(true)
+    expect(docOutsideSlots('photo_ipass', slotsForAsset('truck', 'AMAZON'))).toBe(true)
+    // A company driver's file never shows the owner-operator lease, so it is "other" there.
+    expect(docOutsideSlots('lease_agreement', slotsForDriver('LOCAL'))).toBe(true)
   })
 })
 

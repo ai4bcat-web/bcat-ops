@@ -4,7 +4,7 @@
  * two produce byte-identical PDFs — including the assigned driver's phone and CDL on a
  * truck packet.
  */
-import { slotsForAsset, slotsForDriver, isUnslottedDoc, visibleSlots, isPrivateDoc } from '@/lib/fileHub'
+import { slotsForAsset, slotsForDriver, docOutsideSlots, visibleSlots, isPrivateDoc } from '@/lib/fileHub'
 import { buildFilePacket, packetFilename, type PacketField, type PacketItem, type PacketResult } from '@/lib/filePacketPdf'
 import { formatPhone, formatVin } from '@/lib/utils'
 import { saveBlob } from '@/lib/download'
@@ -87,12 +87,10 @@ export function packetItems(
   const id = entityId(entity)
   const items: PacketItem[] = []
 
-  const slots = visibleSlots(
-    entity.kind === 'TRUCK'
-      ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup)
-      : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null),
-    canSeePrivate,
-  )
+  const allSlots = entity.kind === 'TRUCK'
+    ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup)
+    : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)
+  const slots = visibleSlots(allSlots, canSeePrivate)
   for (const slot of slots) {
     const doc = hub.docFor(type, id, slot.key)
     if (doc?.s3Key) {
@@ -105,7 +103,7 @@ export function packetItems(
   }
 
   for (const doc of hub.docsForEntity(type, id)) {
-    if (isUnslottedDoc(doc.documentType) && doc.s3Key && (canSeePrivate || !isPrivateDoc(doc.documentType))) {
+    if (docOutsideSlots(doc.documentType, allSlots) && doc.s3Key && (canSeePrivate || !isPrivateDoc(doc.documentType))) {
       items.push({
         label: doc.title || doc.documentType,
         s3Key: doc.s3Key,

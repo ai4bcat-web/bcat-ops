@@ -187,10 +187,17 @@ export const slotsForAsset = (type: 'truck' | 'trailer', fleetGroup?: FleetGroup
 export const slotsFor = (entityType: 'DRIVER' | 'TRUCK'): readonly FileSlot[] =>
   entityType === 'DRIVER' ? DRIVER_FILE_SLOTS : TRUCK_FILE_SLOTS
 
-const ALL_SLOT_KEYS = new Set([...DRIVER_FILE_SLOTS, ...TRUCK_FILE_SLOTS].map((s) => s.key))
-
-/** True for a documentType the hub has no slot for — shown under "Other documents". */
-export const isUnslottedDoc = (documentType: string) => !ALL_SLOT_KEYS.has(documentType)
+/**
+ * True for a document this entity has no tile for, so it still surfaces under "Other
+ * documents" instead of vanishing. Judged against the slots THIS entity shows: a
+ * trailer carrying an old IFTA scan, or an Amazon truck with an I-PASS photo, has a
+ * document the catalog knows but its own page does not - it must stay reachable.
+ *
+ * Pass the unfiltered slot list: hiding private documents is `visibleDocs`' job, and
+ * partitioning on the visible list would spill a private doc into the public bucket.
+ */
+export const docOutsideSlots = (documentType: string, slots: readonly FileSlot[]) =>
+  !slots.some((s) => s.key === documentType)
 
 // ── Slot status ─────────────────────────────────────────────────────────────────
 
