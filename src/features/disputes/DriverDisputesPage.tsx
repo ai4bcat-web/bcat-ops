@@ -17,7 +17,7 @@ import {
 import { fileContentType } from '@/lib/disputeFiles'
 import { addDays, formatPayPeriod, formatWeekLabel, toLocalDateString } from '@/lib/payPeriod'
 import { FileDrop } from './FileDrop'
-import { staffConfirmationRejection, staffSupportingFileRejection } from './disputeEvidence'
+import { staffSupportingFileRejection } from './disputeEvidence'
 
 const TITLE_BASE = 'Ivan Cartage — Amazon Dispute Portal'
 const CONTACT_EMAIL = 'help@bcatcorp.com'
@@ -36,6 +36,8 @@ const BOARD_FILTERS: { key: BoardFilter; label: string; statuses: BoardItem['sta
 const PAY_PERIOD_WEEKS = 104
 const POLL_MS = 30000
 const DRIVER_NOT_LISTED = '__not_listed__'
+// The confirmation plus the five supporting files the portal API accepts.
+const MAX_EVIDENCE_FILES = 6
 
 const STATUS_META: Record<BoardItem['status'], { label: string; bg: string; fg: string }> = {
   PENDING: { label: 'Pending', bg: 'var(--ds-amber-bg)', fg: 'var(--ds-amber)' },
@@ -150,7 +152,7 @@ function validateForm(
   amountPaid: string,
   amountRequested: string,
   description: string,
-  confirmation: File | null,
+  evidenceCount: number,
   periods: PayPeriodOption[],
 ): string | null {
   if (!driverName.trim()) return 'Driver name is required.'
@@ -169,7 +171,7 @@ function validateForm(
   if (Number.isNaN(paid) || paid < 0) return 'Amount paid must be a number of 0 or more.'
   if (Number.isNaN(requested) || requested < 0) return 'Amount requested must be a number of 0 or more.'
   if (!description.trim() || description.trim().length < 5) return 'Please provide a short description (at least 5 characters).'
-  if (!confirmation) return 'A trip confirmation email screenshot or PDF is required.'
+  if (evidenceCount === 0) return 'Attach your trip confirmation email — a screenshot, photo, or PDF.'
   return null
 }
 
@@ -186,8 +188,8 @@ export function DriverDisputesPage() {
   const [amountPaid, setAmountPaid] = useState('')
   const [amountRequested, setAmountRequested] = useState('')
   const [description, setDescription] = useState('')
-  const [confirmation, setConfirmation] = useState<File | null>(null)
-  const [photos, setPhotos] = useState<File[]>([])
+  // One evidence list: the first file is the trip confirmation, the rest back it up.
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([])
   const [submissionId, setSubmissionId] = useState(() => uuid())
 
   const [submitting, setSubmitting] = useState(false)
@@ -302,18 +304,13 @@ export function DriverDisputesPage() {
   }, [sortedItems, boardFilter, boardSearch])
 
   // ── Form handlers ---------------------------------------------------------
-  const onConfirmationChange = (file: File | null) => {
+  const onEvidenceChange = (incoming: File[]) => {
     setSubmitError(null)
-    setConfirmation(file)
+    setEvidenceFiles((prev) => [...prev, ...incoming].slice(0, MAX_EVIDENCE_FILES))
   }
 
-  const onPhotosChange = (incoming: File[]) => {
-    setSubmitError(null)
-    setPhotos((prev) => [...prev, ...incoming].slice(0, 5))
-  }
-
-  const removePhoto = (index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index))
+  const removeEvidence = (index: number) => {
+    setEvidenceFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
   const resetForm = () => {
@@ -325,8 +322,7 @@ export function DriverDisputesPage() {
     setAmountPaid('')
     setAmountRequested('')
     setDescription('')
-    setConfirmation(null)
-    setPhotos([])
+    setEvidenceFiles([])
     setSubmitError(null)
     setSubmissionId(uuid())
   }
@@ -345,27 +341,12 @@ export function DriverDisputesPage() {
       amountPaid,
       amountRequested,
       description,
-      confirmation,
+      evidenceFiles.length,
       payPeriodOptions,
     )
-    if (confirmation) {
-      const fileErr = staffConfirmationRejection(confirmation)
-      if (!validation && fileErr) {
-        setSubmitError(fileErr)
-        setSubmitting(false)
-        return
-      }
-    }
-    let photoErr: string | null = null
-    for (const photo of photos) {
-      const err = staffSupportingFileRejection(photo)
-      if (err) {
-        photoErr = err
-        break
-      }
-    }
-    if (!validation && photoErr) {
-      setSubmitError(photoErr)
+    const fileErr = evidenceFiles.map((file) => staffSupportingFileRejection(file)).find(Boolean)
+    if (!validation && fileErr) {
+      setSubmitError(fileErr)
       setSubmitting(false)
       return
     }
@@ -383,9 +364,11 @@ export function DriverDisputesPage() {
         await uploadFileToS3(file, meta.uploadUrl, contentType)
         return { s3Key: meta.s3Key, fileName: file.name, contentType, size: file.size, kind }
       }
+      // Exactly one CONFIRMATION is required by the portal API; the first file is it.
       const evidence: EvidenceFile[] = []
-      if (confirmation) evidence.push(await uploadEvidence(confirmation, 'CONFIRMATION'))
-      for (const photo of photos) evidence.push(await uploadEvidence(photo, 'PHOTO'))
+      for (const [index, file] of evidenceFiles.entries()) {
+        evidence.push(await uploadEvidence(file, index === 0 ? 'CONFIRMATION' : 'PHOTO'))
+      }
 
       const result = await submitDispute({
         submissionId,
@@ -677,27 +660,16 @@ export function DriverDisputesPage() {
             </div>
             <div className="rounded-xl" style={{ display: 'flex', flexDirection: 'column', gap: 16, background: 'var(--ds-bg-2)', padding: 12 }}>
               <FileDrop
-                id="confirmation"
-                label="Trip confirmation email *"
-                hint="Required. A screenshot, photo, or PDF of the confirmation email. Any image type works. Max 10 MB."
-                accept="image/*,application/pdf"
-                files={confirmation ? [confirmation] : []}
-                onFiles={(files) => onConfirmationChange(files[0] ?? null)}
-                onRemove={() => onConfirmationChange(null)}
-                browseLabel={confirmation ? 'Replace file' : 'Browse files'}
-              />
-
-              <FileDrop
-                id="photos"
-                label="Optional photos or documents"
-                hint="Up to 5 images or PDFs, 10 MB each."
+                id="evidence"
+                label="Trip confirmation email and any other photos for proof *"
+                hint="Required. Start with the confirmation email — a screenshot, photo, or PDF — then add up to five more files as proof. 10 MB each."
                 accept="image/*,application/pdf"
                 multiple
-                files={photos}
-                onFiles={onPhotosChange}
-                onRemove={removePhoto}
-                disabled={photos.length >= 5}
-                browseLabel="Add files"
+                files={evidenceFiles}
+                onFiles={onEvidenceChange}
+                onRemove={removeEvidence}
+                disabled={evidenceFiles.length >= MAX_EVIDENCE_FILES}
+                browseLabel="Add photos"
               />
             </div>
           </div>
