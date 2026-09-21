@@ -22,16 +22,23 @@ vi.mock('@/store/useAppStore', () => ({
     amazonDisputes: disputes(),
     addAmazonDispute, updateAmazonDispute, deleteAmazonDispute, refreshAmazonDisputes,
     currentUserEmail: 'dennis@bcatcorp.com',
+    drivers: [{ id: 'drv-chad', name: 'Chad Salerno', active: true }],
   }),
 }))
 
 const getDisputeEvidenceUrl = vi.fn(async (key: string) => `https://signed.example/${key}`)
 const uploadDisputeResponseImage = vi.fn(async () => 'dispute-responses/d-1/9999-amazon.png')
 const deleteDisputeResponseImage = vi.fn().mockResolvedValue(undefined)
+const createDriverPayCredit = vi.fn(async () => ({ id: 'credit-1' }))
+const updateDriverPayCredit = vi.fn().mockResolvedValue(undefined)
+const deleteDriverPayCredit = vi.fn().mockResolvedValue(undefined)
 vi.mock('@/lib/apiClient', () => ({
   getDisputeEvidenceUrl: (key: string) => getDisputeEvidenceUrl(key),
   uploadDisputeResponseImage: (id: string, file: File) => uploadDisputeResponseImage(id, file),
   deleteDisputeResponseImage: (key: string) => deleteDisputeResponseImage(key),
+  createDriverPayCredit: (input: unknown) => createDriverPayCredit(input),
+  updateDriverPayCredit: (id: string, patch: unknown) => updateDriverPayCredit(id, patch),
+  deleteDriverPayCredit: (id: string) => deleteDriverPayCredit(id),
 }))
 
 const downloadFromUrl = vi.fn().mockResolvedValue(undefined)
@@ -184,5 +191,97 @@ describe('DisputesPage status update', () => {
     const [, patch] = updateAmazonDispute.mock.calls[0]
     expect(patch.evidence).toEqual([confirmation, photo, theirs])
     expect(deleteDisputeResponseImage).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * A recovered dispute is money that has to reach the driver's check exactly once: the
+ * credit id on the row is the only thing standing between "paid" and "paid twice".
+ */
+describe('DisputesPage — paying a recovery onto a settlement', () => {
+  const chadsDispute = (over: Partial<AmazonDispute> = {}) =>
+    dispute({ driverName: 'Chad Salerno', status: 'POSTED', ...over })
+
+  const openPaidSheet = async () => {
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Change status' }), { target: { value: 'PAID' } })
+    return screen.findByLabelText('Add to settlement week')
+  }
+
+  const pickCurrentWeek = (select: HTMLElement) => {
+    const option = Array.from((select as HTMLSelectElement).options).find((o) => /current week/.test(o.textContent ?? ''))!
+    fireEvent.change(select, { target: { value: option.value } })
+    return option.value
+  }
+
+  it('writes a DISPUTE credit for the matched driver on the chosen week and links it to the row', async () => {
+    disputes.mockReturnValue([chadsDispute()])
+    render(<DisputesPage />)
+
+    const week = pickCurrentWeek(await openPaidSheet())
+    fireEvent.change(screen.getByLabelText('Amount Recovered ($)'), { target: { value: '180.50' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save update' }))
+
+    await waitFor(() => expect(createDriverPayCredit).toHaveBeenCalledTimes(1))
+    expect(createDriverPayCredit.mock.calls[0][0]).toEqual({
+      driverId: 'drv-chad',
+      periodStart: week,
+      kind: 'CREDIT',
+      reasonCode: 'DISPUTE',
+      label: 'Trip 112MP1BHQ · 2026-02-03',
+      amount: 180.5,
+      date: '2026-02-03',
+      loadRef: '112MP1BHQ',
+      createdBy: 'dennis@bcatcorp.com',
+    })
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    expect(patch.settlementCreditId).toBe('credit-1')
+    expect(patch.settlementPeriodStart).toBe(week)
+    expect(patch.settlementDriverId).toBe('drv-chad')
+  })
+
+  it('moves the credit it already wrote instead of paying the recovery twice', async () => {
+    disputes.mockReturnValue([chadsDispute({
+      status: 'PAID', resolvedAmount: 180.5,
+      settlementCreditId: 'credit-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+    })])
+    render(<DisputesPage />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Record Amazon response' }))
+    const week = pickCurrentWeek(await screen.findByLabelText('Add to settlement week'))
+    fireEvent.click(screen.getByRole('button', { name: 'Save update' }))
+
+    await waitFor(() => expect(updateDriverPayCredit).toHaveBeenCalledTimes(1))
+    expect(createDriverPayCredit).not.toHaveBeenCalled()
+    const [creditId, input] = updateDriverPayCredit.mock.calls[0]
+    expect(creditId).toBe('credit-1')
+    expect(input).toMatchObject({ periodStart: week, amount: 180.5, reasonCode: 'DISPUTE' })
+  })
+
+  it('takes the credit back off the check when the recovery stops being paid', async () => {
+    disputes.mockReturnValue([chadsDispute({
+      status: 'PAID', resolvedAmount: 180.5,
+      settlementCreditId: 'credit-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+    })])
+    render(<DisputesPage />)
+
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Change status' }), { target: { value: 'REJECTED' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Save update' }))
+
+    await waitFor(() => expect(deleteDriverPayCredit).toHaveBeenCalledWith('credit-1'))
+    const [, patch] = updateAmazonDispute.mock.calls[0]
+    expect(patch.status).toBe('REJECTED')
+    expect(patch.settlementCreditId).toBeNull()
+    expect(patch.settlementPeriodStart).toBeNull()
+  })
+
+  it('refuses to post a recovery with no amount keyed', async () => {
+    disputes.mockReturnValue([chadsDispute({ amountRequested: null })])
+    render(<DisputesPage />)
+
+    pickCurrentWeek(await openPaidSheet())
+    fireEvent.click(screen.getByRole('button', { name: 'Save update' }))
+
+    await waitFor(() => expect(createDriverPayCredit).not.toHaveBeenCalled())
+    expect(updateAmazonDispute).not.toHaveBeenCalled()
   })
 })

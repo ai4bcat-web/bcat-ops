@@ -7,6 +7,9 @@ import {
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { formatPayPeriod } from '@/lib/payPeriod'
+import { createDriverPayCredit, updateDriverPayCredit, deleteDriverPayCredit } from '@/lib/apiClient'
+import { disputeCreditInput, disputeRecoveredAmount, matchDisputeDriver } from '@/lib/disputeSettlement'
+import { sundayOf, shiftWeek, weekLabelLong } from '@/features/driver-pay/week'
 import type { AmazonDispute, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
   thBase, tdBase, iconBtnStyle,
@@ -14,7 +17,7 @@ import {
   Pill,
 } from '@/features/maintenance/maintenanceUi'
 import { EvidenceGallery } from './EvidenceGallery'
-import { StatusUpdateModal, type DisputePatch } from './StatusUpdateModal'
+import { StatusUpdateModal, type DisputePatch, type SettlementChoice } from './StatusUpdateModal'
 import { driverEvidence, responseEvidence } from './disputeEvidence'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -286,6 +289,7 @@ export function DisputesPage() {
   const deleteAmazonDispute = useAppStore((s) => s.deleteAmazonDispute)
   const refreshAmazonDisputes = useAppStore((s) => s.refreshAmazonDisputes)
   const currentUserEmail    = useAppStore((s) => s.currentUserEmail)
+  const drivers             = useAppStore((s) => s.drivers)
 
   const [search, setSearch]       = useState('')
   const [statusF, setStatusF]     = useState<StatusFilter>('ALL')
@@ -314,6 +318,93 @@ export function DisputesPage() {
     } finally {
       setRefreshing(false)
     }
+  }
+
+  // ── Posting a recovery onto a driver's check ───────────────────────────────────
+  // Sunday weeks staff can pay a recovery out on: next week (a check built early)
+  // back through ten weeks, which covers Amazon's usual dispute turnaround.
+  const settlementWeeks = useMemo(() => {
+    const current = sundayOf()
+    const weeks: { value: string; label: string }[] = []
+    for (let i = 1; i >= -10; i--) {
+      const value = shiftWeek(current, i)
+      weeks.push({ value, label: `${weekLabelLong(value)}${i === 0 ? ' · current week' : ''}` })
+    }
+    return weeks
+  }, [])
+
+  const driverOptions = useMemo(
+    () => drivers
+      .filter((d) => d.active !== false)
+      .map((d) => ({ id: d.id, name: d.name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [drivers],
+  )
+
+  const settlementPicker = (d: AmazonDispute) => {
+    const posted = d.settlementPeriodStart ?? null
+    // A posting older than the rolling window still has to be visible, or re-saving the
+    // sheet would silently pull the recovery off that check.
+    const weeks = posted && !settlementWeeks.some((w) => w.value === posted)
+      ? [...settlementWeeks, { value: posted, label: weekLabelLong(posted) }]
+      : settlementWeeks
+    return {
+      weeks,
+      drivers: driverOptions,
+      initial: {
+        periodStart: posted,
+        driverId: d.settlementDriverId ?? matchDisputeDriver(d.driverName, drivers)?.id ?? null,
+      },
+      posted: Boolean(d.settlementCreditId),
+    }
+  }
+
+  /**
+   * One save: the dispute row, plus the credit that carries the recovery onto a weekly
+   * settlement. The credit id lives on the dispute, so a second save moves or re-prices
+   * that same credit — and clearing the week (or leaving PAID) deletes it.
+   */
+  const saveStatusUpdate = async (
+    dispute: AmazonDispute, patch: DisputePatch, choice: SettlementChoice | null,
+  ) => {
+    const existingId = dispute.settlementCreditId ?? null
+    let settlementPatch: DisputePatch = {}
+
+    if (choice) {
+      const amount = disputeRecoveredAmount({
+        resolvedAmount: patch.resolvedAmount ?? dispute.resolvedAmount,
+        amountRequested: dispute.amountRequested,
+      })
+      if (amount == null) throw new Error('No recovered amount to add to a settlement')
+      const input = disputeCreditInput({
+        dispute, driverId: choice.driverId, periodStart: choice.periodStart, amount,
+        actorEmail: currentUserEmail,
+      })
+      let creditId = existingId
+      if (creditId) {
+        try {
+          await updateDriverPayCredit(creditId, input)
+        } catch (err) {
+          // Only a credit someone deleted on the pay page gets written fresh; any other
+          // failure surfaces, so a network error can never pay the recovery twice.
+          if (!/conditional|not found|does not exist/i.test(errorMessage(err))) throw err
+          creditId = null
+        }
+      }
+      if (!creditId) creditId = (await createDriverPayCredit(input)).id
+      settlementPatch = {
+        settlementCreditId: creditId,
+        settlementPeriodStart: choice.periodStart,
+        settlementDriverId: choice.driverId,
+      }
+    } else if (existingId) {
+      await deleteDriverPayCredit(existingId)
+      settlementPatch = { settlementCreditId: null, settlementPeriodStart: null, settlementDriverId: null }
+    }
+
+    await updateAmazonDispute(dispute.id, { ...patch, ...settlementPatch })
+    if (choice) toast.success(`Added to the ${weekLabelLong(choice.periodStart)} settlement`)
+    else if (existingId) toast.success('Removed from the settlement')
   }
 
   const filtered = useMemo(() => {
@@ -528,6 +619,14 @@ export function DisputesPage() {
                           </td>
                           <td style={tdBase}>
                             <StatusSelect status={st} onChange={(next) => setStatusEdit({ dispute: d, status: next })} />
+                            {d.settlementPeriodStart && (
+                              <div
+                                title={`Paid out as a DISPUTE credit on the ${weekLabelLong(d.settlementPeriodStart)} settlement`}
+                                style={{ fontSize: 11, color: 'var(--ds-green)', marginTop: 3, whiteSpace: 'nowrap' }}
+                              >
+                                → {weekLabelLong(d.settlementPeriodStart)}
+                              </div>
+                            )}
                           </td>
                           <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
                             <button
@@ -622,7 +721,10 @@ export function DisputesPage() {
           statusOptions={STATUS_ORDER}
           statusLabel={STATUS_LABEL}
           actorEmail={currentUserEmail}
-          onSave={async (patch: DisputePatch) => { await updateAmazonDispute(statusEdit.dispute.id, patch) }}
+          settlement={settlementPicker(statusTarget)}
+          onSave={async (patch: DisputePatch, choice: SettlementChoice | null) => {
+            await saveStatusUpdate(statusTarget, patch, choice)
+          }}
           onClose={() => setStatusEdit(null)}
         />
       )}

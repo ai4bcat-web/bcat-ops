@@ -21,20 +21,38 @@ import {
 
 export type DisputePatch = Partial<Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>>
 
+/** Where a recovered dispute should land on a driver's check, or null for "don't add". */
+export interface SettlementChoice {
+  periodStart: string
+  driverId: string
+}
+
+export interface SettlementPicker {
+  /** Sunday weeks staff can post the recovery to, newest first. */
+  weeks: { value: string; label: string }[]
+  /** Pay accounts the credit can be written to. */
+  drivers: { id: string; name: string }[]
+  /** Pre-selected week + driver: an existing posting, else the name match on this week. */
+  initial: { periodStart: string | null; driverId: string | null }
+  /** True once this dispute already carries a credit, so the copy says "move" not "add". */
+  posted: boolean
+}
+
 interface PendingFile {
   file: File
   previewUrl: string
 }
 
 export function StatusUpdateModal({
-  dispute, initialStatus, statusOptions, statusLabel, actorEmail, onSave, onClose,
+  dispute, initialStatus, statusOptions, statusLabel, actorEmail, settlement, onSave, onClose,
 }: {
   dispute: AmazonDispute
   initialStatus: DisputeStatus
   statusOptions: DisputeStatus[]
   statusLabel: Record<DisputeStatus, string>
   actorEmail?: string | null
-  onSave: (patch: DisputePatch) => Promise<void>
+  settlement?: SettlementPicker
+  onSave: (patch: DisputePatch, settlement: SettlementChoice | null) => Promise<void>
   onClose: () => void
 }) {
   const [status, setStatus] = useState<DisputeStatus>(initialStatus)
@@ -42,6 +60,9 @@ export function StatusUpdateModal({
   const [resolvedAmount, setResolvedAmount] = useState(
     dispute.resolvedAmount != null ? String(dispute.resolvedAmount) : '',
   )
+  // '' = don't put this recovery on a check. Pre-selected from an existing posting.
+  const [settlementWeek, setSettlementWeek] = useState(settlement?.initial.periodStart ?? '')
+  const [settlementDriverId, setSettlementDriverId] = useState(settlement?.initial.driverId ?? '')
   // Not a snapshot: the row is re-bound to the live copy on every 30 s poll, so a reply
   // another dispatcher attached while this sheet is open must survive this save too.
   // Removal intent is the only thing that belongs in state.
@@ -107,8 +128,24 @@ export function StatusUpdateModal({
 
   const removeSaved = (item: DisputeEvidence) => setRemovedKeys((k) => [...k, item.s3Key])
 
+  // Chosen week + pay account, or null when this recovery stays off the checks. A
+  // non-PAID status always clears the posting: money that wasn't recovered can't ride
+  // a settlement.
+  const choice: SettlementChoice | null =
+    status === 'PAID' && settlementWeek && settlementDriverId
+      ? { periodStart: settlementWeek, driverId: settlementDriverId }
+      : null
+
   const save = async () => {
     if (saving) return
+    if (status === 'PAID' && settlementWeek && !settlementDriverId) {
+      toast.error('Pick the driver whose settlement this recovery goes on')
+      return
+    }
+    if (choice && !(parseFloat(resolvedAmount) > 0)) {
+      toast.error('Enter the amount recovered before adding it to a settlement')
+      return
+    }
     setSaving(true)
     try {
       const uploaded: DisputeEvidence[] = []
@@ -138,7 +175,7 @@ export function StatusUpdateModal({
           : {}),
       }
 
-      await onSave(patch)
+      await onSave(patch, choice)
 
       // Only once the row no longer references them: an orphaned S3 object is harmless,
       // a referenced-but-deleted one is a broken link on the dispute.
@@ -202,6 +239,43 @@ export function StatusUpdateModal({
               </Field>
             )}
           </div>
+          {status === 'PAID' && settlement && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 14 }}>
+                <Field label="Add to settlement week">
+                  <select
+                    aria-label="Add to settlement week"
+                    style={inputStyle}
+                    value={settlementWeek}
+                    onChange={(e) => setSettlementWeek(e.target.value)}
+                  >
+                    <option value="">Don't add to a settlement</option>
+                    {settlement.weeks.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
+                  </select>
+                </Field>
+                {settlementWeek && (
+                  <Field label="Driver's pay account">
+                    <select
+                      aria-label="Driver's pay account"
+                      style={inputStyle}
+                      value={settlementDriverId}
+                      onChange={(e) => setSettlementDriverId(e.target.value)}
+                    >
+                      <option value="">Select the driver…</option>
+                      {settlement.drivers.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  </Field>
+                )}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
+                {settlementWeek
+                  ? `Shows as a DISPUTE credit on that week's Amazon settlement, paid at 100%.${settlement.posted ? ' Saving moves the existing credit.' : ''}`
+                  : settlement.posted
+                    ? 'Saving removes the dispute credit already on a settlement.'
+                    : 'Pick a week to pay this recovery out on that check.'}
+              </div>
+            </div>
+          )}
         </FormSection>
 
         <FormSection title="Amazon's Response">

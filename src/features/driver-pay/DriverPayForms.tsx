@@ -9,6 +9,7 @@ import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
 import { CREDIT_REASONS, DEFAULT_CREDIT_REASON, DEBIT_REASONS, DEFAULT_DEBIT_REASON } from '@/lib/payCredits'
 import type { DriverPayCredit, DriverPayCreditInput } from '@/lib/apiClient'
 import { calculateMileageExpense } from '@/lib/fixedExpenseHistory'
+import { mileageDeductionLine } from '@/lib/mileageDeduction'
 import { FixedExpenseEditor } from './FixedExpenseEditor'
 import type { FixedExpenseInput } from '@/lib/driverPay'
 
@@ -118,7 +119,7 @@ function BlockWarning({ rows }: { rows: RawTripRow[] }) {
 }
 
 // ── CSV / paste parsing (shared, tested in src/lib/tripCsv.test.ts) ──────────
-export function rowToTrip(r: RawTripRow, driverId: string, periodStart: string): TripInput {
+function rowToTrip(r: RawTripRow, driverId: string, periodStart: string): TripInput {
   return {
     driverId, periodStart,
     loadId: r.loadId, origin: r.origin, destination: r.destination, miles: r.miles,
@@ -472,13 +473,11 @@ export function DeductionModal({ driverId, periodStart, onSave, onClose }: { dri
   const save = async () => {
     if (mileage) {
       if (milesNum == null || rateNum == null) { setErr('Enter miles and a cost per mile'); return }
-      let amount: number
-      try { amount = calculateMileageExpense({ miles: milesNum, costPerMile: rateNum }) }
+      let line: { label: string; amount: number }
+      try { line = mileageDeductionLine(milesNum, rateNum, f.label.trim() || undefined) }
       catch (e) { setErr(e instanceof Error ? e.message : 'Invalid mileage calculation'); return }
-      const basis = `${milesNum} mi @ $${rateNum}/mi`
-      const label = f.label.trim() ? `${f.label.trim()} — ${basis}` : `Lease mileage — ${basis}`
       setSaving(true)
-      try { await onSave({ driverId, periodStart, label, amount, date: f.date || null }) }
+      try { await onSave({ driverId, periodStart, label: line.label, amount: line.amount, date: f.date || null }) }
       catch (e) { setErr(e instanceof Error ? e.message : String(e)); setSaving(false) }
       return
     }

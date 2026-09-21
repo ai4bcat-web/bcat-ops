@@ -211,6 +211,12 @@ const schema = a.schema({
       // staff-uploaded Amazon response screenshots (kind 'AMAZON_RESPONSE', stored
       // under dispute-responses/). Kept off the public board.
       evidence:        a.string(),
+      // Settlement link — set when staff post a PAID dispute onto a driver's weekly
+      // check. The credit id makes re-saving idempotent: the same credit is moved or
+      // re-priced instead of paying the recovery twice.
+      settlementPeriodStart: a.string(),  // YYYY-MM-DD Sunday of the settlement week
+      settlementCreditId:    a.string(),  // DriverPayCredit.id
+      settlementDriverId:    a.string(),  // Driver.id the credit was written for
     })
     .secondaryIndexes((index) => [index('externalId')])
     .authorization((allow) => [allow.authenticated()]),

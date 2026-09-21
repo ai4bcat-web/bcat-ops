@@ -11,6 +11,7 @@ import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildPayStatementPdf, payPdfFilename, pdfToBase64 } from '@/lib/payPdf'
 import { sendDriverPayEmail, payCreditsDeployed } from '@/lib/apiClient'
 import { creditLineLabel } from '@/lib/payCredits'
+import { mileageDeductionLine } from '@/lib/mileageDeduction'
 import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
@@ -33,6 +34,7 @@ function loadRowOrder(): string[] {
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 }
+const parseNum = (s: string): number | null => { const n = parseFloat(s.replace(/[$,\s]/g, '')); return Number.isFinite(n) && n > 0 ? n : null }
 function getInitials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 }
@@ -256,7 +258,7 @@ export function DriverPayPage() {
 
         {selectedRow && (
           <StatementCard
-            key={selectedRow.driver.id}
+            key={`${selectedRow.driver.id}-${periodStart}`}
             row={selectedRow}
             periodStart={periodStart}
             onAddTrip={() => setTripModal({ driverId: selectedRow.driver.id })}
@@ -274,6 +276,10 @@ export function DriverPayPage() {
               if (!window.confirm(`Waive ${label} (${money(amount)}) for ${weekLabelLong(periodStart)} only?\n\nAdds an offsetting refund line to this week; every other week keeps the charge.`)) return
               try { await pay.addDeduction({ driverId: selectedRow.driver.id, periodStart, label: `Waived — ${label}`, amount: -amount, date: null }); toast.success(`${label} waived for this week`) }
               catch (e) { toast.error(`Couldn't waive: ${e instanceof Error ? e.message : 'unknown error'}`) }
+            }}
+            onAddMileage={async (miles, costPerMile) => {
+              try { await pay.addDeduction({ driverId: selectedRow.driver.id, periodStart, ...mileageDeductionLine(miles, costPerMile), date: null }); toast.success('Mileage deduction added') }
+              catch (e) { toast.error(`Couldn't add mileage: ${e instanceof Error ? e.message : 'unknown error'}`) }
             }}
             onUpdateTrip={(id, patch) => { void pay.updateTrip(id, patch) }}
             onExport={() => download(`pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
@@ -386,17 +392,21 @@ export function DriverPayPage() {
 // Used only to FLAG a possibly-understated week for review — never to auto-change pay.
 const BLOCK_LEG_RATE_CEILING = 1.5
 
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onWaiveDeduction, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onEditTrip: (t: AmazonTrip) => void
-  onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onWaiveDeduction: (label: string, amount: number) => void; onExport: () => void
+  onRemoveTrip: (id: string) => void; onRemoveDeduction: (id: string) => void; onWaiveDeduction: (label: string, amount: number) => void; onAddMileage: (miles: number, costPerMile: number) => Promise<void>; onExport: () => void
   onPdf: () => void; onEmail: () => void
   onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
   const { driver, setting, statement, oneOffs } = row
   const [showFuel, setShowFuel] = useState(false)
+  const [miles, setMiles] = useState('')
+  const [costPerMile, setCostPerMile] = useState('')
+  const [mileageSaving, setMileageSaving] = useState(false)
+  const [mileageErr, setMileageErr] = useState<string | null>(null)
 
   // Heuristic audit — surface a week whose trips look like understated block legs
   // (base ~$0.65/mi) so every affected driver/week is visible without re-importing.
@@ -407,15 +417,16 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
 
   // Drag-to-reorder the trip rows. dragOrder holds the working order during a drag.
   const dragId = useRef<string | null>(null)
+  const [draggingTripId, setDraggingTripId] = useState<string | null>(null)
   const [dragOrder, setDragOrder] = useState<string[] | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
-  const trips = useMemo(() => {
+  const trips = (() => {
     if (!dragOrder) return row.trips
     const byId = new Map(row.trips.map((t) => [t.id, t]))
     return dragOrder.map((id) => byId.get(id)).filter(Boolean) as typeof row.trips
-  }, [row.trips, dragOrder])
+  })()
 
-  const onTripDragStart = (id: string) => { dragId.current = id; setDragOrder(row.trips.map((t) => t.id)) }
+  const onTripDragStart = (id: string) => { dragId.current = id; setDraggingTripId(id); setDragOrder(row.trips.map((t) => t.id)) }
   const onTripDragEnter = (targetId: string) => {
     const d = dragId.current
     if (!d || d === targetId) return
@@ -432,7 +443,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
     if (dragOrder) {
       persistDragOrder(dragOrder, (id) => row.trips.find((t) => t.id === id)?.sortOrder, onUpdateTrip)
     }
-    dragId.current = null; setOverId(null); setDragOrder(null)
+    dragId.current = null; setDraggingTripId(null); setOverId(null); setDragOrder(null)
   }
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} after expenses` : `${pct(setting.payPercent)} of gross − expenses`
@@ -443,6 +454,21 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
       <Icon size={13} /> {label}
     </button>
   )
+
+  const mileageLine = (() => {
+    const m = parseNum(miles), r = parseNum(costPerMile)
+    if (m == null || r == null) return null
+    try { return mileageDeductionLine(m, r) } catch { return null }
+  })()
+  const addMileage = async () => {
+    const m = parseNum(miles), r = parseNum(costPerMile)
+    if (m == null || r == null) return
+    try { mileageDeductionLine(m, r) } catch (e) { setMileageErr(e instanceof Error ? e.message : 'Invalid mileage'); return }
+    setMileageSaving(true); setMileageErr(null)
+    try { await onAddMileage(m, r); setMiles(''); setCostPerMile('') }
+    catch (e) { setMileageErr(e instanceof Error ? e.message : String(e)) }
+    finally { setMileageSaving(false) }
+  }
 
   return (
     <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
@@ -505,6 +531,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
           </tr></thead>
           <tbody>
             {trips.length === 0 && <tr><td colSpan={8} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No trips this week — add or import them.</td></tr>}
+
             {trips.map((t) => {
               const dup = row.duplicateTripIds.has(t.id)
               return (
@@ -513,7 +540,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
                 onDragOver={(e) => e.preventDefault()}
                 style={{ borderBottom: '1px solid var(--ds-border)',
                   background: overId === t.id ? 'var(--ds-blue-bg, #eff6ff)' : dup ? 'var(--ds-red-bg, #fef2f2)' : undefined,
-                  opacity: dragId.current === t.id && dragOrder ? 0.5 : 1 }}>
+                  opacity: draggingTripId === t.id && dragOrder ? 0.5 : 1 }}>
                 <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', cursor: 'pointer', color: dup ? '#dc2626' : undefined, fontWeight: dup ? 700 : undefined }} title={dup ? 'Duplicate — this Load ID also ran last week' : 'Click to edit'}>
                   {dup && <AlertTriangle size={12} style={{ color: '#dc2626', verticalAlign: '-1px', marginRight: 4 }} />}
                   {t.loadId || '—'}
@@ -539,6 +566,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
                 </td>
               </tr>
             )})}
+
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
                 <td style={{ ...TD, textAlign: 'left' }} colSpan={3}>Gross / driver share ({pct(setting.payPercent)})</td>
@@ -577,6 +605,41 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
             })}
           </div>
         )}
+
+        {/* Weekly mileage — one-off deduction for this week only */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 12.5 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ color: 'var(--ds-t2)' }}>Weekly mileage</span>
+            <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Deducted before the split, this week only</span>
+          </div>
+          <input
+            aria-label="Mileage miles"
+            type="number"
+            value={miles}
+            onChange={(e) => setMiles(e.target.value)}
+            placeholder="Miles"
+            style={{ width: 74, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
+          />
+          <input
+            aria-label="Mileage cost per mile"
+            type="number"
+            value={costPerMile}
+            onChange={(e) => setCostPerMile(e.target.value)}
+            placeholder="$/mi"
+            style={{ width: 70, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
+          />
+          <span style={{ minWidth: 76, textAlign: 'right', color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+            {mileageLine != null ? `= ${money(mileageLine.amount)}` : ''}
+          </span>
+          <button
+            onClick={addMileage}
+            disabled={mileageSaving || mileageLine == null}
+            style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: mileageSaving || mileageLine == null ? 0.6 : 1, fontFamily: 'inherit' }}
+          >
+            {mileageSaving ? 'Adding…' : 'Add'}
+          </button>
+        </div>
+        {mileageErr && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{mileageErr}</div>}
 
         {/* Fuel breakdown — itemized so the pulled figure is auditable */}
         {row.fuelTxns.length > 0 && (

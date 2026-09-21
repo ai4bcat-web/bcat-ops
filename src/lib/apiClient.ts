@@ -1144,7 +1144,10 @@ const DISPUTE_BASE_FIELDS = `
 // can still be missing them, and AppSync fails the WHOLE query on an unknown selection —
 // which used to empty the disputes page. A read drops exactly the fields the error names
 // and retries; the next read asks for everything again, so it heals itself once deployed.
-const DISPUTE_PENDING_FIELDS = ['evidence', 'amazonResponse', 'amazonResponseAt', 'amazonResponseBy'] as const
+const DISPUTE_PENDING_FIELDS = [
+  'evidence', 'amazonResponse', 'amazonResponseAt', 'amazonResponseBy',
+  'settlementPeriodStart', 'settlementCreditId', 'settlementDriverId',
+] as const
 
 const disputeFields = (dropped: ReadonlySet<string> = new Set()) =>
   [DISPUTE_BASE_FIELDS, ...DISPUTE_PENDING_FIELDS.filter((f) => !dropped.has(f))].join(' ')
