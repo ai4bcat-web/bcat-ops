@@ -97,12 +97,19 @@ describe('truck vs trailer slots', () => {
     expect(trailerKeys).not.toContain('photo_vin_inside')
   })
 
-  it('keeps every pre-existing document on BOTH asset types', () => {
+  it('keeps shared paperwork on BOTH asset types', () => {
     // Adding appliesTo must not quietly drop paperwork trailers used to show.
-    for (const key of ['insurance_cert', 'ifta_decals', 'irp_cab_card', 'annual_dot_inspection',
+    for (const key of ['insurance_cert', 'annual_dot_inspection',
                        'photo_front', 'photo_driver_side', 'photo_passenger_side', 'photo_rear', 'photo_plate']) {
       expect(truckKeys).toContain(key)
       expect(trailerKeys).toContain(key)
+    }
+  })
+
+  it('asks trailers for no IFTA or IRP - those licence the power unit', () => {
+    for (const key of ['ifta_decals', 'irp_cab_card']) {
+      expect(truckKeys).toContain(key)
+      expect(trailerKeys).not.toContain(key)
     }
   })
 
