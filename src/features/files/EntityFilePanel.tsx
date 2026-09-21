@@ -62,9 +62,9 @@ export function EntityFilePanel({ entity, hub, onClose, onEditDriver, canSeePriv
   const entityId = entity.kind === 'DRIVER' ? entity.driver.id : entity.truck.id
   const title = entity.kind === 'DRIVER' ? entity.driver.name : `Truck ${entity.truck.unitNumber}`
 
-  const allSlots = entity.kind === 'TRUCK'
+  const allSlots = useMemo(() => (entity.kind === 'TRUCK'
     ? slotsForAsset(entity.truck.type, entity.truck.fleetGroup)
-    : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)
+    : slotsForDriver(entity.kind === 'DRIVER' ? entity.driver.fleetGroup : null)), [entity])
   // Private documents vanish for non-admins — no tile, no "missing" placeholder that
   // would reveal the document exists at all.
   const slots = visibleSlots(allSlots, canSeePrivate)
