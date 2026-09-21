@@ -37,9 +37,10 @@ export interface AmazonDispute {
   amazonResponse?: string | null    // what Amazon replied, recorded by staff
   amazonResponseAt?: string | null  // ISO — when the response was recorded
   amazonResponseBy?: string | null  // staff email that recorded it
-  // Set when a PAID dispute has been posted onto a driver's weekly settlement.
+  // Set when a PAID dispute has been posted onto a driver's weekly settlement as a
+  // DISPUTE shipment row.
   settlementPeriodStart?: string | null  // YYYY-MM-DD Sunday of the settlement week
-  settlementCreditId?: string | null     // the DriverPayCredit row it created
+  settlementTripId?: string | null       // the AmazonTrip row it created
   settlementDriverId?: string | null     // the driver whose check carries it
   createdAt: string
   updatedAt: string

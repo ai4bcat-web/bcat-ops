@@ -269,9 +269,9 @@ export function StatusUpdateModal({
               </div>
               <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 6 }}>
                 {settlementWeek
-                  ? `Shows as a DISPUTE credit on that week's Amazon settlement, paid at 100%.${settlement.posted ? ' Saving moves the existing credit.' : ''}`
+                  ? `Rides that week's Amazon settlement as a DISPUTE shipment dated to the trip, so it pays at the driver's normal percentage.${settlement.posted ? ' Saving moves the existing row.' : ''}`
                   : settlement.posted
-                    ? 'Saving removes the dispute credit already on a settlement.'
+                    ? 'Saving removes the dispute row already on a settlement.'
                     : 'Pick a week to pay this recovery out on that check.'}
               </div>
             </div>

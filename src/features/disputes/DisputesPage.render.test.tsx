@@ -29,16 +29,16 @@ vi.mock('@/store/useAppStore', () => ({
 const getDisputeEvidenceUrl = vi.fn(async (key: string) => `https://signed.example/${key}`)
 const uploadDisputeResponseImage = vi.fn(async () => 'dispute-responses/d-1/9999-amazon.png')
 const deleteDisputeResponseImage = vi.fn().mockResolvedValue(undefined)
-const createDriverPayCredit = vi.fn(async () => ({ id: 'credit-1' }))
-const updateDriverPayCredit = vi.fn().mockResolvedValue(undefined)
-const deleteDriverPayCredit = vi.fn().mockResolvedValue(undefined)
+const createAmazonTrip = vi.fn(async () => ({ id: 'trip-1' }))
+const updateAmazonTrip = vi.fn().mockResolvedValue(undefined)
+const deleteAmazonTrip = vi.fn().mockResolvedValue(undefined)
 vi.mock('@/lib/apiClient', () => ({
   getDisputeEvidenceUrl: (key: string) => getDisputeEvidenceUrl(key),
   uploadDisputeResponseImage: (id: string, file: File) => uploadDisputeResponseImage(id, file),
   deleteDisputeResponseImage: (key: string) => deleteDisputeResponseImage(key),
-  createDriverPayCredit: (input: unknown) => createDriverPayCredit(input),
-  updateDriverPayCredit: (id: string, patch: unknown) => updateDriverPayCredit(id, patch),
-  deleteDriverPayCredit: (id: string) => deleteDriverPayCredit(id),
+  createAmazonTrip: (input: unknown) => createAmazonTrip(input),
+  updateAmazonTrip: (id: string, patch: unknown) => updateAmazonTrip(id, patch),
+  deleteAmazonTrip: (id: string) => deleteAmazonTrip(id),
 }))
 
 const downloadFromUrl = vi.fn().mockResolvedValue(undefined)
@@ -213,7 +213,7 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
     return option.value
   }
 
-  it('writes a DISPUTE credit for the matched driver on the chosen week and links it to the row', async () => {
+  it('books a DISPUTE shipment for the matched driver on the chosen week and links it to the row', async () => {
     disputes.mockReturnValue([chadsDispute()])
     render(<DisputesPage />)
 
@@ -221,28 +221,25 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
     fireEvent.change(screen.getByLabelText('Amount Recovered ($)'), { target: { value: '180.50' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save update' }))
 
-    await waitFor(() => expect(createDriverPayCredit).toHaveBeenCalledTimes(1))
-    expect(createDriverPayCredit.mock.calls[0][0]).toEqual({
+    await waitFor(() => expect(createAmazonTrip).toHaveBeenCalledTimes(1))
+    expect(createAmazonTrip.mock.calls[0][0]).toMatchObject({
       driverId: 'drv-chad',
       periodStart: week,
-      kind: 'CREDIT',
-      reasonCode: 'DISPUTE',
-      label: 'Trip 112MP1BHQ · 2026-02-03',
-      amount: 180.5,
-      date: '2026-02-03',
-      loadRef: '112MP1BHQ',
-      createdBy: 'dennis@bcatcorp.com',
+      loadId: 'DISPUTE 2026-02-03',
+      freightAmount: 180.5,
+      status: 'Completed',
+      notes: 'Amazon dispute — Trip 112MP1BHQ',
     })
     const [, patch] = updateAmazonDispute.mock.calls[0]
-    expect(patch.settlementCreditId).toBe('credit-1')
+    expect(patch.settlementTripId).toBe('trip-1')
     expect(patch.settlementPeriodStart).toBe(week)
     expect(patch.settlementDriverId).toBe('drv-chad')
   })
 
-  it('moves the credit it already wrote instead of paying the recovery twice', async () => {
+  it('moves the shipment it already booked instead of paying the recovery twice', async () => {
     disputes.mockReturnValue([chadsDispute({
       status: 'PAID', resolvedAmount: 180.5,
-      settlementCreditId: 'credit-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+      settlementTripId: 'trip-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
     })])
     render(<DisputesPage />)
 
@@ -250,27 +247,27 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
     const week = pickCurrentWeek(await screen.findByLabelText('Add to settlement week'))
     fireEvent.click(screen.getByRole('button', { name: 'Save update' }))
 
-    await waitFor(() => expect(updateDriverPayCredit).toHaveBeenCalledTimes(1))
-    expect(createDriverPayCredit).not.toHaveBeenCalled()
-    const [creditId, input] = updateDriverPayCredit.mock.calls[0]
-    expect(creditId).toBe('credit-1')
-    expect(input).toMatchObject({ periodStart: week, amount: 180.5, reasonCode: 'DISPUTE' })
+    await waitFor(() => expect(updateAmazonTrip).toHaveBeenCalledTimes(1))
+    expect(createAmazonTrip).not.toHaveBeenCalled()
+    const [tripId, input] = updateAmazonTrip.mock.calls[0]
+    expect(tripId).toBe('trip-1')
+    expect(input).toMatchObject({ periodStart: week, freightAmount: 180.5, loadId: 'DISPUTE 2026-02-03' })
   })
 
-  it('takes the credit back off the check when the recovery stops being paid', async () => {
+  it('takes the shipment back off the check when the recovery stops being paid', async () => {
     disputes.mockReturnValue([chadsDispute({
       status: 'PAID', resolvedAmount: 180.5,
-      settlementCreditId: 'credit-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
+      settlementTripId: 'trip-1', settlementPeriodStart: '2026-02-01', settlementDriverId: 'drv-chad',
     })])
     render(<DisputesPage />)
 
     fireEvent.change(await screen.findByRole('combobox', { name: 'Change status' }), { target: { value: 'REJECTED' } })
     fireEvent.click(await screen.findByRole('button', { name: 'Save update' }))
 
-    await waitFor(() => expect(deleteDriverPayCredit).toHaveBeenCalledWith('credit-1'))
+    await waitFor(() => expect(deleteAmazonTrip).toHaveBeenCalledWith('trip-1'))
     const [, patch] = updateAmazonDispute.mock.calls[0]
     expect(patch.status).toBe('REJECTED')
-    expect(patch.settlementCreditId).toBeNull()
+    expect(patch.settlementTripId).toBeNull()
     expect(patch.settlementPeriodStart).toBeNull()
   })
 
@@ -281,7 +278,7 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
     pickCurrentWeek(await openPaidSheet())
     fireEvent.click(screen.getByRole('button', { name: 'Save update' }))
 
-    await waitFor(() => expect(createDriverPayCredit).not.toHaveBeenCalled())
+    await waitFor(() => expect(createAmazonTrip).not.toHaveBeenCalled())
     expect(updateAmazonDispute).not.toHaveBeenCalled()
   })
 })

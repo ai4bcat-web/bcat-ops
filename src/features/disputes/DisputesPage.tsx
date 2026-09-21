@@ -7,8 +7,8 @@ import {
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { formatPayPeriod } from '@/lib/payPeriod'
-import { createDriverPayCredit, updateDriverPayCredit, deleteDriverPayCredit } from '@/lib/apiClient'
-import { disputeCreditInput, disputeRecoveredAmount, matchDisputeDriver } from '@/lib/disputeSettlement'
+import { createAmazonTrip, updateAmazonTrip, deleteAmazonTrip } from '@/lib/apiClient'
+import { disputeRecoveredAmount, disputeTripInput, matchDisputeDriver } from '@/lib/disputeSettlement'
 import { sundayOf, shiftWeek, weekLabelLong } from '@/features/driver-pay/week'
 import type { AmazonDispute, DisputeSource, DisputeStatus } from '@/types/dispute'
 import {
@@ -355,19 +355,19 @@ export function DisputesPage() {
         periodStart: posted,
         driverId: d.settlementDriverId ?? matchDisputeDriver(d.driverName, drivers)?.id ?? null,
       },
-      posted: Boolean(d.settlementCreditId),
+      posted: Boolean(d.settlementTripId),
     }
   }
 
   /**
-   * One save: the dispute row, plus the credit that carries the recovery onto a weekly
-   * settlement. The credit id lives on the dispute, so a second save moves or re-prices
-   * that same credit — and clearing the week (or leaving PAID) deletes it.
+   * One save: the dispute row, plus the DISPUTE shipment row that carries the recovery
+   * onto a weekly settlement. The trip id lives on the dispute, so a second save moves
+   * or re-prices that same row — and clearing the week (or leaving PAID) deletes it.
    */
   const saveStatusUpdate = async (
     dispute: AmazonDispute, patch: DisputePatch, choice: SettlementChoice | null,
   ) => {
-    const existingId = dispute.settlementCreditId ?? null
+    const existingId = dispute.settlementTripId ?? null
     let settlementPatch: DisputePatch = {}
 
     if (choice) {
@@ -376,30 +376,29 @@ export function DisputesPage() {
         amountRequested: dispute.amountRequested,
       })
       if (amount == null) throw new Error('No recovered amount to add to a settlement')
-      const input = disputeCreditInput({
+      const input = disputeTripInput({
         dispute, driverId: choice.driverId, periodStart: choice.periodStart, amount,
-        actorEmail: currentUserEmail,
       })
-      let creditId = existingId
-      if (creditId) {
+      let tripId = existingId
+      if (tripId) {
         try {
-          await updateDriverPayCredit(creditId, input)
+          await updateAmazonTrip(tripId, input)
         } catch (err) {
-          // Only a credit someone deleted on the pay page gets written fresh; any other
-          // failure surfaces, so a network error can never pay the recovery twice.
+          // Only a row someone deleted on the settlement page gets written fresh; any
+          // other failure surfaces, so a network error can never pay the recovery twice.
           if (!/conditional|not found|does not exist/i.test(errorMessage(err))) throw err
-          creditId = null
+          tripId = null
         }
       }
-      if (!creditId) creditId = (await createDriverPayCredit(input)).id
+      if (!tripId) tripId = (await createAmazonTrip(input)).id
       settlementPatch = {
-        settlementCreditId: creditId,
+        settlementTripId: tripId,
         settlementPeriodStart: choice.periodStart,
         settlementDriverId: choice.driverId,
       }
     } else if (existingId) {
-      await deleteDriverPayCredit(existingId)
-      settlementPatch = { settlementCreditId: null, settlementPeriodStart: null, settlementDriverId: null }
+      await deleteAmazonTrip(existingId)
+      settlementPatch = { settlementTripId: null, settlementPeriodStart: null, settlementDriverId: null }
     }
 
     await updateAmazonDispute(dispute.id, { ...patch, ...settlementPatch })
@@ -621,7 +620,7 @@ export function DisputesPage() {
                             <StatusSelect status={st} onChange={(next) => setStatusEdit({ dispute: d, status: next })} />
                             {d.settlementPeriodStart && (
                               <div
-                                title={`Paid out as a DISPUTE credit on the ${weekLabelLong(d.settlementPeriodStart)} settlement`}
+                                title={`Paid out as a DISPUTE shipment on the ${weekLabelLong(d.settlementPeriodStart)} settlement`}
                                 style={{ fontSize: 11, color: 'var(--ds-green)', marginTop: 3, whiteSpace: 'nowrap' }}
                               >
                                 → {weekLabelLong(d.settlementPeriodStart)}

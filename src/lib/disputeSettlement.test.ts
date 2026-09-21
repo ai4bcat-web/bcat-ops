@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
-  disputeCreditInput, disputeCreditNote, disputeRecoveredAmount, matchDisputeDriver,
+  disputeRecoveredAmount, disputeTripInput, disputeTripLabel, matchDisputeDriver,
 } from './disputeSettlement'
 
 const dispute = {
   tripNumber: '1117J7TV9',
   shipmentDate: '2026-09-09',
+  payPeriod: '2026-09-06',
   resolvedAmount: 180.5,
   amountRequested: 250,
 }
@@ -51,39 +52,41 @@ describe('disputeRecoveredAmount', () => {
   })
 })
 
-describe('disputeCreditNote', () => {
-  it('ties the credit to the trip and shipment day', () => {
-    expect(disputeCreditNote(dispute)).toBe('Trip 1117J7TV9 · 2026-09-09')
-    expect(disputeCreditNote({ tripNumber: 'TRP-1', shipmentDate: null })).toBe('Trip TRP-1')
-    expect(disputeCreditNote({ tripNumber: null, shipmentDate: '2026-09-09' })).toBe('Shipment 2026-09-09')
-    expect(disputeCreditNote({ tripNumber: '  ', shipmentDate: null })).toBe('Amazon recovery')
+describe('disputeTripLabel', () => {
+  it('labels the row DISPUTE with the shipment date', () => {
+    expect(disputeTripLabel(dispute)).toBe('DISPUTE 2026-09-09')
+  })
+
+  it('falls back to the disputed pay period, then to a bare label', () => {
+    expect(disputeTripLabel({ shipmentDate: '  ', payPeriod: '4/19 - 4/25' })).toBe('DISPUTE 4/19 - 4/25')
+    expect(disputeTripLabel({ shipmentDate: null, payPeriod: null })).toBe('DISPUTE')
   })
 })
 
-describe('disputeCreditInput', () => {
-  it('writes a 100% DISPUTE credit on the chosen week for the chosen driver', () => {
-    expect(disputeCreditInput({
-      dispute, driverId: 'd1', periodStart: '2026-09-13', amount: 180.5,
-      actorEmail: 'ryne@bcatcorp.com',
-    })).toEqual({
+describe('disputeTripInput', () => {
+  it('books the recovery as a completed shipment on the chosen week, so it runs through the split', () => {
+    expect(disputeTripInput({ dispute, driverId: 'd1', periodStart: '2026-09-13', amount: 180.5 })).toEqual({
       driverId: 'd1',
       periodStart: '2026-09-13',
-      kind: 'CREDIT',
-      reasonCode: 'DISPUTE',
-      label: 'Trip 1117J7TV9 · 2026-09-09',
-      amount: 180.5,
-      date: '2026-09-09',
-      loadRef: '1117J7TV9',
-      createdBy: 'ryne@bcatcorp.com',
+      loadId: 'DISPUTE 2026-09-09',
+      origin: null,
+      destination: null,
+      miles: null,
+      equipment: null,
+      freightAmount: 180.5,
+      ratePerMile: null,
+      dispatcher: null,
+      status: 'Completed',
+      notes: 'Amazon dispute — Trip 1117J7TV9',
     })
   })
 
-  it('keeps a legacy free-text shipment date off the credit date column', () => {
-    const input = disputeCreditInput({
-      dispute: { tripNumber: 'TRP-9', shipmentDate: '4/19 - 4/25' },
+  it('still books a recovery with no trip number', () => {
+    const input = disputeTripInput({
+      dispute: { tripNumber: null, shipmentDate: '2026-09-09', payPeriod: null },
       driverId: 'd1', periodStart: '2026-09-13', amount: 50,
     })
-    expect(input.date).toBeNull()
-    expect(input.createdBy).toBeNull()
+    expect(input.notes).toBe('Amazon dispute')
+    expect(input.freightAmount).toBe(50)
   })
 })

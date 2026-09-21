@@ -27,7 +27,6 @@ export const CREDIT_REASONS: CreditReason[] = [
   { code: 'BONUS',         label: 'Bonus',                  hint: 'Performance, safety or referral bonus' },
   { code: 'ADVANCE_REPAY', label: 'Expense reversal',       hint: 'Refund of a deduction charged in error' },
   { code: 'PRIOR_PERIOD',  label: 'Prior-period adjustment', hint: 'Correcting an earlier settlement' },
-  { code: 'DISPUTE',       label: 'Dispute',                hint: 'Amazon dispute recovered — posted from the Amazon Disputes page' },
   { code: 'OTHER',         label: 'Other',                  hint: 'Anything else — describe it in the note' },
 ]
 

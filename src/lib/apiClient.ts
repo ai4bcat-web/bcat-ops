@@ -1146,7 +1146,7 @@ const DISPUTE_BASE_FIELDS = `
 // and retries; the next read asks for everything again, so it heals itself once deployed.
 const DISPUTE_PENDING_FIELDS = [
   'evidence', 'amazonResponse', 'amazonResponseAt', 'amazonResponseBy',
-  'settlementPeriodStart', 'settlementCreditId', 'settlementDriverId',
+  'settlementPeriodStart', 'settlementTripId', 'settlementDriverId',
 ] as const
 
 const disputeFields = (dropped: ReadonlySet<string> = new Set()) =>

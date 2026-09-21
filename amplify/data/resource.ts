@@ -212,11 +212,11 @@ const schema = a.schema({
       // under dispute-responses/). Kept off the public board.
       evidence:        a.string(),
       // Settlement link — set when staff post a PAID dispute onto a driver's weekly
-      // check. The credit id makes re-saving idempotent: the same credit is moved or
-      // re-priced instead of paying the recovery twice.
+      // check as a DISPUTE shipment row. The trip id makes re-saving idempotent: the
+      // same row is moved or re-priced instead of paying the recovery twice.
       settlementPeriodStart: a.string(),  // YYYY-MM-DD Sunday of the settlement week
-      settlementCreditId:    a.string(),  // DriverPayCredit.id
-      settlementDriverId:    a.string(),  // Driver.id the credit was written for
+      settlementTripId:      a.string(),  // AmazonTrip.id
+      settlementDriverId:    a.string(),  // Driver.id whose check carries it
     })
     .secondaryIndexes((index) => [index('externalId')])
     .authorization((allow) => [allow.authenticated()]),

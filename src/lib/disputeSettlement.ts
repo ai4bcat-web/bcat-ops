@@ -1,18 +1,17 @@
 /**
  * Posting a recovered Amazon dispute onto a driver's weekly settlement.
  *
- * A PAID dispute is money Amazon sent for a specific trip, so it rides that driver's
- * check as a 100% credit under reason DISPUTE — on whichever Sunday week staff pick,
- * which is usually the settlement being built now, not the week the shipment ran.
+ * Amazon pays a won dispute the way it pays freight, so the recovery rides the check as
+ * an ordinary shipment row on the settlement week staff pick — labelled DISPUTE with the
+ * shipment's date — and runs through the driver's pay split like every other load.
  *
- * The dispute row stores the credit's id, so re-saving the sheet moves/re-prices that
- * one credit instead of paying the driver a second time.
+ * The dispute row stores the trip's id, so re-saving the sheet moves/re-prices that one
+ * trip instead of paying the driver a second time.
  */
-import type { DriverPayCreditInput } from './apiClient'
+import type { AmazonTrip } from './apiClient'
 import type { AmazonDispute } from '@/types/dispute'
 
-/** Reason code the settlement, PDF and CSV print as "Dispute". */
-export const DISPUTE_REASON_CODE = 'DISPUTE'
+export type DisputeTripInput = Omit<AmazonTrip, 'id' | 'createdAt' | 'updatedAt'>
 
 const norm = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ')
 
@@ -48,41 +47,39 @@ export function disputeRecoveredAmount(
 }
 
 /**
- * The note after "Dispute —" on the statement line: the trip it recovers, and the
- * shipment date when the trip number is missing, so a driver can tie the credit to a run.
+ * How the recovery reads in the settlement's LOAD column: "DISPUTE 2026-09-09" — the
+ * shipment's own date, falling back to the disputed pay period when the date is blank.
  */
-export function disputeCreditNote(
-  dispute: Pick<AmazonDispute, 'tripNumber' | 'shipmentDate'>,
-): string {
-  const trip = dispute.tripNumber?.trim()
-  const shipped = dispute.shipmentDate?.trim()
-  if (trip && shipped) return `Trip ${trip} · ${shipped}`
-  if (trip) return `Trip ${trip}`
-  if (shipped) return `Shipment ${shipped}`
-  return 'Amazon recovery'
+export function disputeTripLabel(dispute: Pick<AmazonDispute, 'shipmentDate' | 'payPeriod'>): string {
+  const date = dispute.shipmentDate?.trim() || dispute.payPeriod?.trim()
+  return date ? `DISPUTE ${date}` : 'DISPUTE'
 }
 
 /**
- * The credit row for a recovered dispute. `amount` is the recovery in dollars; the
- * caller resolves it (and the driver) first, because a dispute with no recovered amount
- * must not reach the check at all.
+ * The shipment row for a recovered dispute. `amount` is the recovery in dollars and
+ * becomes the row's freight, so the driver earns their normal percentage of it; the
+ * caller resolves the amount and the driver first, because a dispute with no recovered
+ * amount must not reach the check at all.
  */
-export function disputeCreditInput({ dispute, driverId, periodStart, amount, actorEmail }: {
-  dispute: Pick<AmazonDispute, 'tripNumber' | 'shipmentDate'>
+export function disputeTripInput({ dispute, driverId, periodStart, amount }: {
+  dispute: Pick<AmazonDispute, 'tripNumber' | 'shipmentDate' | 'payPeriod'>
   driverId: string
   periodStart: string
   amount: number
-  actorEmail?: string | null
-}): DriverPayCreditInput {
+}): DisputeTripInput {
+  const trip = dispute.tripNumber?.trim()
   return {
     driverId,
     periodStart,
-    kind: 'CREDIT',
-    reasonCode: DISPUTE_REASON_CODE,
-    label: disputeCreditNote(dispute),
-    amount,
-    date: /^\d{4}-\d{2}-\d{2}$/.test(dispute.shipmentDate ?? '') ? dispute.shipmentDate! : null,
-    loadRef: dispute.tripNumber?.trim() || null,
-    createdBy: actorEmail ?? null,
+    loadId: disputeTripLabel(dispute),
+    origin: null,
+    destination: null,
+    miles: null,
+    equipment: null,
+    freightAmount: amount,
+    ratePerMile: null,
+    dispatcher: null,
+    status: 'Completed',
+    notes: trip ? `Amazon dispute — Trip ${trip}` : 'Amazon dispute',
   }
 }
