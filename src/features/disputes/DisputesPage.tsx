@@ -783,10 +783,10 @@ export function DisputesPage() {
                 <table style={{ width: '100%', minWidth: 1240, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <colgroup>
                     <col style={{ width: 116 }} />
-                    <col style={{ width: 96 }} />
+                    <col style={{ width: 100 }} />
                     <col style={{ width: 96 }} />
                     <col style={{ width: 156 }} />
-                    <col style={{ width: 112 }} />
+                    <col style={{ width: 120 }} />
                     <col />
                     <col style={{ width: 80 }} />
                     <col style={{ width: 92 }} />
