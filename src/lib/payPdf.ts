@@ -90,7 +90,22 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
     doc.text(driverEmail, M, y + 16)
   }
 
+  // Right column: shipment count sits left of the check amount so the two
+  // figures never share a baseline; the check amount keeps its original position.
+  const checkLabelWidth = doc.getStringUnitWidth('CHECK AMOUNT') * 9 / doc.internal.scaleFactor
+  const checkAmountWidth = Math.max(checkLabelWidth, doc.getStringUnitWidth(money(statement.checkAmount)) * 22 / doc.internal.scaleFactor)
+  const shipmentsX = W - M - checkAmountWidth - 28
   doc.setFontSize(9)
+  doc.setFont('helvetica', 'normal')
+  doc.setTextColor(107, 114, 128)
+  doc.text('SHIPMENTS', shipmentsX, y - 2, { align: 'right' })
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(22)
+  doc.setTextColor(17, 24, 39)
+  doc.text(String(trips.length), shipmentsX, y + 18, { align: 'right' })
+
+  doc.setFontSize(9)
+  doc.setFont('helvetica', 'normal')
   doc.setTextColor(107, 114, 128)
   doc.text('CHECK AMOUNT', W - M, y - 2, { align: 'right' })
   doc.setFont('helvetica', 'bold')
@@ -111,11 +126,14 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
       t.status || '—',
       money(tripPayAmount(t.freightAmount, setting)),
     ]),
-    foot: [[
-      { content: `Gross / driver share (${pct(setting.payPercent)})`, colSpan: 3 },
-      { content: money(statement.gross), colSpan: 3 },
-      money(statement.driverAmount),
-    ]],
+    foot: [
+      [{ content: 'Total shipments', colSpan: 6 }, String(trips.length)],
+      [
+        { content: `Gross / driver share (${pct(setting.payPercent)})`, colSpan: 3 },
+        { content: money(statement.gross), colSpan: 3 },
+        money(statement.driverAmount),
+      ],
+    ],
     theme: 'striped',
     headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 8.5, halign: 'right' },
     footStyles: { fillColor: [243, 244, 246], textColor: [17, 24, 39], fontStyle: 'bold', halign: 'right' },

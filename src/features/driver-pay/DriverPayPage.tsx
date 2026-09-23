@@ -54,6 +54,7 @@ function statementCsv(row: DriverPayRow, periodStart: string): string {
   for (const t of row.trips) {
     L.push([t.loadId, t.origin, t.destination, t.miles, t.equipment, t.freightAmount, t.ratePerMile, t.dispatcher, t.status, tripPayAmount(t.freightAmount, row.setting)].map(q).join(','))
   }
+  L.push(['', '', '', '', '', q('Total shipments'), q(row.trips.length), '', '', ''].join(','))
   L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), '', q(`Driver ${pct(row.setting.payPercent)}`), q(row.statement.driverAmount)].join(','))
   L.push('')
   L.push([q('Deductions'), q('Amount')].join(','))
@@ -479,9 +480,15 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{driver.name}</div>
           <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel}{setting.email ? ` · ${setting.email}` : ''}</div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Check amount</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: statement.checkAmount >= 0 ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{money(statement.checkAmount)}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shipments</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{row.trips.length}</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Check amount</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: statement.checkAmount >= 0 ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{money(statement.checkAmount)}</div>
+          </div>
         </div>
       </div>
 
@@ -568,11 +575,17 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
             )})}
 
             {trips.length > 0 && (
-              <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={3}>Gross / driver share ({pct(setting.payPercent)})</td>
-                <td style={TD} colSpan={3}>{money(statement.gross)}</td>
-                <td style={TD}>{money(statement.driverAmount)}</td><td></td>
-              </tr>
+              <>
+                <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
+                  <td style={{ ...TD, textAlign: 'left' }} colSpan={6}>Total shipments</td>
+                  <td style={TD}>{row.trips.length}</td><td></td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
+                  <td style={{ ...TD, textAlign: 'left' }} colSpan={3}>Gross / driver share ({pct(setting.payPercent)})</td>
+                  <td style={TD} colSpan={3}>{money(statement.gross)}</td>
+                  <td style={TD}>{money(statement.driverAmount)}</td><td></td>
+                </tr>
+              </>
             )}
           </tbody>
         </table>
