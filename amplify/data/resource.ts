@@ -423,6 +423,22 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
+  // ── Factoring queue (Finance page) ─────────────────────────────────────────
+  // Emails sent to factor@bcatcorp.com become rows here. The id is the literal
+  // PRO number string so duplicate PROs safely collide instead of creating
+  // multiple rows. Status is advanced by the finance team in the UI; the intake
+  // Lambda never overwrites an existing row.
+  FactoringItem: a
+    .model({
+      proNumber:  a.string().required(),
+      status:     a.enum(['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED']),
+      subject:    a.string().required(),
+      fromEmail:  a.string().required(),
+      receivedAt: a.datetime().required(),
+      messageId:  a.string().required(),
+    })
+    .authorization((allow) => [allow.authenticated()]),
+
   AuditLog: a
     .model({
       entityType: a.string().required(),

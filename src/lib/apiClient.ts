@@ -1,6 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
-import type { Load, Driver, AuditLogEntry, EntityType, AuditAction } from '@/types'
+import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus } from '@/types'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
@@ -605,6 +605,44 @@ export async function createIntakeItem(input: {
   }) as { data: { createIntakeItem: IntakeItem } }
   return result.data.createIntakeItem
 }
+
+// ── Factoring items ───────────────────────────────────────────────────────────
+
+const FACTORING_ITEM_FIELDS = `
+  id proNumber status subject fromEmail receivedAt messageId createdAt updatedAt
+`
+
+/** Fetch every FactoringItem page so direct DynamoDB email inserts are never missed. */
+export async function listFactoringItems(): Promise<FactoringItem[]> {
+  const items: FactoringItem[] = []
+  let nextToken: string | null = null
+  do {
+    const result = await client.graphql({
+      query: `query ListFactoringItems($nextToken: String) { listFactoringItems(limit: 1000, nextToken: $nextToken) { items { ${FACTORING_ITEM_FIELDS} } nextToken } }`,
+      variables: { nextToken },
+    }) as { data: { listFactoringItems: { items: (FactoringItem | null)[]; nextToken?: string | null } } }
+    const page = result.data.listFactoringItems
+    for (const item of page.items ?? []) {
+      if (item) items.push(item)
+    }
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return items
+}
+
+/** Only status mutation is exposed in the UI; creation/deletion are system-owned. */
+export async function updateFactoringItem(
+  id: string,
+  patch: { status: FactoringItemStatus },
+): Promise<FactoringItem> {
+  const result = await client.graphql({
+    query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
+    variables: { input: { id, ...patch } },
+  }) as { data: { updateFactoringItem: FactoringItem } }
+  return result.data.updateFactoringItem
+}
+
+// ── Team members / helpers ───────────────────────────────────────────────────━
 
 /**
  * The task a NEEDS-TO-BE-MOVED appointment creates: an IntakeItem assigned to Dennis,

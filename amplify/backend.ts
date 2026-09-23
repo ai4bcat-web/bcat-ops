@@ -10,6 +10,7 @@ import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
+import { factoringIntake } from './functions/factoring-intake/resource'
 import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
@@ -44,6 +45,7 @@ const backend = defineBackend({
   userManagement,
   slackIntakeWebhook,
   gmailTaskIntake,
+  factoringIntake,
   apptNeedNotifier,
   slackStatusNotifier,
   fuelImport,
@@ -216,6 +218,30 @@ const gmailTaskUrl = new FunctionUrl(gmailTaskFn.stack, 'GmailTaskIntakeUrl', {
 new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
   value:       gmailTaskUrl.url,
   description: 'POST tasks@ emails here from the Apps Script (JSON with the shared secret)',
+})
+
+// ── factoringIntake Lambda (factor@ email → FactoringItem) ──────────────────
+const factoringIntakeFn = backend.factoringIntake.resources.lambda as LambdaFunction
+const factoringTable = backend.data.resources.tables['FactoringItem']
+
+backend.factoringIntake.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:PutItem'], // create-only; duplicate PROs handled by condition
+    resources: [factoringTable.tableArn],
+  }),
+)
+
+factoringIntakeFn.addEnvironment('TABLE_NAME', factoringTable.tableName)
+
+const factoringIntakeUrl = new FunctionUrl(factoringIntakeFn.stack, 'FactoringIntakeUrl', {
+  function: factoringIntakeFn,
+  authType: FunctionUrlAuthType.NONE,
+  cors:     { allowedMethods: [HttpMethod.POST] },
+})
+
+new CfnOutput(factoringIntakeFn.stack, 'FactoringIntakeFunctionUrl', {
+  value:       factoringIntakeUrl.url,
+  description: 'POST factor@ emails here from the Gmail bridge (JSON with the shared secret)',
 })
 
 // ── amazonDisputeIntake Lambda (Google Form → AmazonDispute) ────────────────

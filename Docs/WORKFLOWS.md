@@ -42,6 +42,14 @@
 - Do not use an invoice date cutoff to hide missing historical invoices, or email Seen status as proof of successful ingestion. Do not claim complete repairs-address coverage from the forwarded Gmail copy alone.
 - A new invoice can be split across several units; each line carries its own equipment, amount and "what was fixed on this unit", and becomes its own invoice record with that description. Lines left blank fall back to the invoice-level description. Editing an existing invoice stays single-unit.
 
+## Factoring queue
+- Finance → **Factoring Queue** (`/factoring`, page grant `factoring`) tracks one row per numeric PRO from the subject `Invoice for PRO #12345`; forwards, mixed case, and whitespace are accepted. Leading zeroes are preserved.
+- New rows start **Need to factor**. Staff change the row to **Pending with OTR** or **Factored** using its status selector. These are tracking statuses; changing them does not send an invoice to OTR.
+- `scripts/factoringEmailBridge.gs` runs in the existing BCAT Intake Bridge Apps Script project, on the `ai4bcat@gmail.com` mailbox, every five minutes once installed. The factor distribution list must deliver each message to that mailbox. Setup is in `SETUP.md`, Section 10.
+- The bridge checks recipient headers, including the Google Group List-ID, regardless of read/archive status. Per-message acknowledgements allow new messages in old threads; a rotating backlog scan covers older mail. Missing/invalid PRO subjects get the Gmail `factoring-needs-review` label instead of a guessed identifier. Forward again with the corrected subject to ingest them.
+- The secret-authenticated `factoring-intake` Lambda creates `FactoringItem` with `id = proNumber` using an atomic conditional put. Re-forwarding the same PRO is a no-op, including after staff mark it Factored; it never creates a duplicate or resets the status. The page follows all AppSync pages and polls every 30 seconds.
+- Grant staff **Factoring Queue** on the Users page; other page permissions remain unchanged.
+
 ## Motive fault codes
 - `GET https://api.gomotive.com/v1/fault_codes?status=open` (header `X-Api-Key`) is the source; the `motive-fault-sync` Lambda pages it hourly, matches `vehicle.number` to Equipment the same way the mileage/location syncs do (`motiveVehicleNumber` overrides `unitNumber`, unmatched vehicles key as `motive:<number>`), and writes one `TruckFaultCode` row per (truckId, faultId). Retired trucks stay in that match map — an active claim on the same number wins — so a retired truck's codes keep pointing at its Equipment row instead of reappearing as an unknown vehicle.
 - The table IS the live fault list: every run deletes rows Motive no longer reports as open, including when it reports none, so a repaired truck clears itself. Nothing here is entered by hand.

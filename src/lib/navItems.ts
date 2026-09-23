@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Repeat, Building2, MapPin, TrendingUp, Mail, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Repeat, Building2, MapPin, TrendingUp, Mail, Banknote, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -85,6 +85,7 @@ export const NAV_GROUPS: NavSection[] = [
     items: [
       { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances' },
       { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn' },
+      { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
       { to: '/insurance', label: 'Insurance', icon: Umbrella,  pageKey: 'insurance' },
     ],
   },

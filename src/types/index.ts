@@ -327,7 +327,7 @@ export interface AuditLogEntry {
 
 export type ViewMode = 'day' | 'week' | 'month'
 
-// ── Intake queue ───────────────────────────────────────────────────────────
+// ── Intake queue ─────────────────────────────────────────────────────────────
 
 export type IntakeSource = 'IVAN_CARTAGE' | 'BCAT_LOGISTICS'
 export type IntakeStatus = 'NEW' | 'IN_PROGRESS' | 'BUILT' | 'DONE' | 'ARCHIVED'
@@ -354,6 +354,23 @@ export interface IntakeItem {
   builtLoadId?: string | null
   proNumber?: string | null
   notes?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// ── Factoring queue ───────────────────────────────────────────────────────────
+
+export type FactoringItemStatus = 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED'
+
+export interface FactoringItem {
+  /** Stable identifier — the literal PRO number, preserving leading zeroes. */
+  id: string
+  proNumber: string
+  status: FactoringItemStatus
+  subject: string
+  fromEmail: string
+  receivedAt: string
+  messageId: string
   createdAt: string
   updatedAt: string
 }

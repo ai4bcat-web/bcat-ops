@@ -1,0 +1,293 @@
+import type { AttributeValue } from '@aws-sdk/client-dynamodb'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { unmarshall } from '@aws-sdk/util-dynamodb'
+
+const { send } = vi.hoisted(() => {
+  process.env.FACTORING_INTAKE_SECRET = 'test-secret'
+  process.env.TABLE_NAME = 'FactoringItem-test'
+  return { send: vi.fn() }
+})
+
+vi.mock('@aws-sdk/client-dynamodb', () => {
+  class DynamoDBClient { send = send }
+  class PutItemCommand { input: unknown; __type = 'Put'; constructor(input: unknown) { this.input = input } }
+  return { DynamoDBClient, PutItemCommand }
+})
+
+import { handler, extractProNumber } from './handler'
+
+type MockCommand = {
+  __type?: string
+  input: {
+    TableName?: string
+    ConditionExpression?: string
+    Item?: Record<string, AttributeValue>
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+function event(payload: Record<string, unknown>, method = 'POST') {
+  return {
+    body: JSON.stringify(payload),
+    requestContext: { http: { method } },
+  }
+}
+
+describe('extractProNumber', () => {
+  it('extracts numeric PRO numbers from canonical subjects', () => {
+    expect(extractProNumber('Invoice for PRO #01234')).toBe('01234')
+    expect(extractProNumber('Invoice for PRO #12345')).toBe('12345')
+  })
+
+  it('tolerates forward prefixes, case variation, and extra whitespace', () => {
+    const cases = [
+      'Fwd: Invoice for PRO #01234',
+      'FW: invoice for pro #01234',
+      'Invoice  for   PRO # 01234',
+      'Invoice for PRO#01234',
+      'RE: Invoice for PRO  #  01234',
+    ]
+    for (const subject of cases) {
+      expect(extractProNumber(subject), subject).toBe('01234')
+    }
+  })
+
+  it('allows the same PRO number to appear more than once', () => {
+    expect(
+      extractProNumber(
+        'Invoice for PRO #01234 — see also PRO #01234',
+      ),
+    ).toBe('01234')
+  })
+
+  it('returns null when no invoice PRO phrase is present', () => {
+    expect(extractProNumber('Random subject')).toBeNull()
+    expect(extractProNumber('Invoice for PO #01234')).toBeNull()
+    expect(extractProNumber('PRO #01234')).toBeNull()
+  })
+
+  it('returns null for alphanumeric or partial IDs', () => {
+    expect(extractProNumber('Invoice for PRO #A01234')).toBeNull()
+    expect(extractProNumber('Invoice for PRO #01234A')).toBeNull()
+    expect(extractProNumber('Invoice for PRO #ABC')).toBeNull()
+  })
+
+  it('returns null for malformed tokens next to the invoice phrase', () => {
+    expect(extractProNumber('Invoice for PRO #123-45')).toBeNull()
+    expect(extractProNumber('Invoice for PRO #01234,')).toBeNull()
+    expect(extractProNumber('Invoice for PRO #BAD ref PRO #456')).toBeNull()
+  })
+
+  it('returns null when invoice phrases name different PRO numbers', () => {
+    expect(
+      extractProNumber(
+        'Invoice for PRO #01234 and Invoice for PRO #56789',
+      ),
+    ).toBeNull()
+  })
+})
+
+describe('factoring-intake handler', () => {
+  it('rejects JSON null before secret access', async () => {
+    const res = await handler({ body: 'null' })
+    expect(res.statusCode).toBe(400)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'invalid JSON body' })
+  })
+
+  it('rejects missing secret as unauthorized', async () => {
+    const res = await handler(
+      event({
+        messageId: 'msg-1',
+        subject: 'Invoice for PRO #1',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(401)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'unauthorized' })
+  })
+
+  it('rejects wrong secret', async () => {
+    const res = await handler(
+      event({
+        secret: 'wrong',
+        messageId: 'msg-1',
+        subject: 'Invoice for PRO #1',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(401)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'unauthorized' })
+  })
+
+  it('rejects non-string messageId', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 123,
+        subject: 'Invoice for PRO #1',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(400)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'messageId required' })
+  })
+
+  it('rejects non-string subject', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-1',
+        subject: true,
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(400)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'subject required' })
+  })
+
+  it('rejects non-string from to avoid marshalling an object into a GraphQL string', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-1',
+        subject: 'Invoice for PRO #1',
+        from: { address: 'bridge@bcatcorp.com' },
+      }),
+    )
+    expect(res.statusCode).toBe(400)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'from must be a string' })
+  })
+
+  it('rejects non-POST methods', async () => {
+    const res = await handler(
+      event(
+        {
+          secret: 'test-secret',
+          messageId: 'msg-1',
+          subject: 'Invoice for PRO #1',
+          from: 'bridge@bcatcorp.com',
+        },
+        'GET',
+      ),
+    )
+    expect(res.statusCode).toBe(405)
+  })
+
+  it('rejects subjects without a usable PRO number', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-1',
+        subject: 'Just a regular subject',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(422)
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'no invoice PRO number' })
+  })
+
+  it('rejects malformed or partial invoice PRO tokens', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-1',
+        subject: 'Invoice for PRO #A01234',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(422)
+  })
+
+  it('rejects dashed/punctuated PRO tokens', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-1',
+        subject: 'Invoice for PRO #123-45',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(422)
+  })
+
+  it('rejects multiple different invoice PRO numbers', async () => {
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-1',
+        subject: 'Invoice for PRO #01234 and Invoice for PRO #56789',
+        from: 'bridge@bcatcorp.com',
+      }),
+    )
+    expect(res.statusCode).toBe(422)
+  })
+
+  it('creates a FactoringItem row with NEED_TO_FACTOR status', async () => {
+    send.mockResolvedValue({})
+
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-001',
+        subject: 'Invoice for PRO #012345',
+        from: 'factor@bcatcorp.com',
+        receivedAt: '2026-09-23T10:00:00Z',
+      }),
+    )
+
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      id: '012345',
+      proNumber: '012345',
+      duplicate: false,
+    })
+
+    expect(send).toHaveBeenCalledTimes(1)
+    const command = send.mock.calls[0][0] as MockCommand
+    expect(command.__type).toBe('Put')
+    expect(command.input.TableName).toBe('FactoringItem-test')
+    expect(command.input.ConditionExpression).toBe('attribute_not_exists(id)')
+
+    const item = unmarshall(command.input.Item!)
+    expect(item).toMatchObject({
+      id: '012345',
+      proNumber: '012345',
+      __typename: 'FactoringItem',
+      status: 'NEED_TO_FACTOR',
+      subject: 'Invoice for PRO #012345',
+      fromEmail: 'factor@bcatcorp.com',
+      messageId: 'msg-001',
+    })
+    expect(item.receivedAt).toBe('2026-09-23T10:00:00.000Z')
+  })
+
+  it('returns duplicate:true without changing status on conditional-check failure', async () => {
+    const conditionalError = Object.assign(
+      new Error('The conditional request failed'),
+      { name: 'ConditionalCheckFailedException' },
+    )
+    send.mockRejectedValueOnce(conditionalError)
+
+    const res = await handler(
+      event({
+        secret: 'test-secret',
+        messageId: 'msg-002',
+        subject: 'Invoice for PRO #012345',
+        from: 'factor@bcatcorp.com',
+      }),
+    )
+
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body)).toEqual({
+      ok: true,
+      id: '012345',
+      proNumber: '012345',
+      duplicate: true,
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+})

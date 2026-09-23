@@ -37,6 +37,7 @@ import { FilesPage } from '@/features/files/FilesPage'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 import { RedditQueuePage } from '@/features/reddit-queue/RedditQueuePage'
 import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
+import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 
 export default function App() {
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
+              <Route path="/factoring" element={<RequirePage page="factoring"><FactoringPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
               <Route path="/appt-changes" element={<RequirePage page="apptChanges"><ApptChangesPage /></RequirePage>} />
               <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />
