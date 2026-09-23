@@ -2,7 +2,7 @@
  * factoring-intake Lambda
  *
  * Called by the Gmail bridge Apps Script when a message arrives for
- * factor@bcatcorp.com. It extracts the numeric PRO number from the subject
+ * ivanfactoring@bcatcorp.com. It extracts the PRO number from the subject
  * ("Invoice for PRO #<number>"), idempotently writes a FactoringItem row with
  * status NEED_TO_FACTOR, and reports the Function URL POST endpoint.
  *
@@ -80,36 +80,30 @@ function secretEquals(provided: unknown): boolean {
 }
 
 /**
- * Extract the numeric PRO number from a subject like "Invoice for PRO #01234".
+ * Extract the PRO number from a subject like "Invoice for PRO #01234".
  *
- * Supports free whitespace, mixed case, and forward prefixes (e.g. "Fwd:").
- * Rejects subjects with no matching phrase, multiple different PRO numbers, or
- * alphanumeric/partial IDs (e.g. "PRO #A01234" / "PRO #01234A").
+ * Supports free whitespace, mixed case, forward prefixes (e.g. "Fwd:"), an
+ * optional "#", trailing punctuation, and alphanumeric PROs (e.g. "945143JJ").
+ * Leading zeros are preserved and letters are upper-cased so the same PRO
+ * always maps to the same row. Rejects subjects with no matching phrase or
+ * with invoice phrases that name different PROs.
  */
 export function extractProNumber(subject: string): string | null {
   const normalized = subject.replace(/\s+/g, ' ').trim().toUpperCase()
 
-  // Bind the PRO number to an explicit "Invoice for PRO #<token>" phrase.
-  // The token immediately after # must be a pure numeric string (leading zeros
-  // are preserved). Reject malformed tokens (alphanumeric, dashed, punctuated)
-  // and multiple invoice phrases that name different PROs.
+  // Bind the PRO to an explicit "Invoice for PRO #<id>" phrase; the id is the
+  // run of letters/digits/dashes right after it, so ",", "." or " — attached"
+  // end it. A dashed id is kept whole rather than truncated to a different row.
   const matches = [
-    ...normalized.matchAll(/(?<!\w)INVOICE\s+FOR\s+PRO\s*#\s*(\S*)/gi),
+    ...normalized.matchAll(/(?<!\w)INVOICE\s+FOR\s+PRO\s*#?\s*([A-Z0-9-]*[A-Z0-9])/g),
   ]
   if (matches.length === 0) return null
 
-  let first: string | undefined
+  const first = matches[0][1]
   for (const m of matches) {
-    const token = m[1]
-    if (!/^\d+$/.test(token)) return null
-
-    if (first === undefined) {
-      first = token
-    } else if (token !== first) {
-      return null
-    }
+    if (m[1] !== first) return null
   }
-  return first ?? null
+  return first
 }
 
 function parseISOOrNow(raw?: string): string {

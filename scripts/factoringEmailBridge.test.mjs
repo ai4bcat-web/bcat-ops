@@ -165,7 +165,7 @@ function makeMessage(overrides = {}) {
   return {
     id: overrides.id ?? `msg-${Math.random().toString(36).slice(2)}`,
     threadId: overrides.threadId,
-    to: overrides.to ?? 'factor@bcatcorp.com',
+    to: overrides.to ?? 'ivanfactoring@bcatcorp.com',
     cc: overrides.cc ?? '',
     headers,
     subject: overrides.subject ?? 'Invoice for PRO #12345',
@@ -194,8 +194,8 @@ describe('factoringEmailBridge.gs', () => {
     expect(state.fetched).toHaveLength(1);
     expect(state.fetched[0].payload.messageId).toBe('m1');
     expect(state.properties['factoring:msg:m1']).toMatch(/^ok:/);
-    expect(state.searchCalls[0].query).toContain('to:factor@bcatcorp.com');
-    expect(state.searchCalls[0].query).toContain('list:factor.bcatcorp.com');
+    expect(state.searchCalls[0].query).toContain('to:ivanfactoring@bcatcorp.com');
+    expect(state.searchCalls[0].query).toContain('list:ivanfactoring.bcatcorp.com');
     expect(state.searchCalls[0].query).toContain('-in:trash -in:spam');
   });
 
@@ -218,7 +218,7 @@ describe('factoringEmailBridge.gs', () => {
     const m = makeMessage({
       id: 'fwd1',
       to: 'ai4bcat@gmail.com',
-      xOriginalTo: 'factor@bcatcorp.com',
+      xOriginalTo: 'ivanfactoring@bcatcorp.com',
       subject: 'Invoice for PRO #99999',
     });
     const { ctx, state } = makeBridge({ messages: [m] });
@@ -234,7 +234,7 @@ describe('factoringEmailBridge.gs', () => {
     const m = makeMessage({
       id: 'list1',
       to: 'ai4bcat@gmail.com',
-      listId: '<factor.bcatcorp.com>',
+      listId: '<ivanfactoring.bcatcorp.com>',
       subject: 'Invoice for PRO #55555',
     });
     const { ctx, state } = makeBridge({ messages: [m] });

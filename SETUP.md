@@ -463,16 +463,16 @@ Re-running the same `messageId` returns `{ "ok": true, "duplicate": true }` (ded
 
 ---
 
-## Section 10 — Factoring Email Queue (factor@ → one row per PRO)
+## Section 10 — Factoring Email Queue (ivanfactoring@ → one row per PRO)
 
 The backend and `/factoring` page deploy through the normal Amplify pipeline. Gmail activation is a separate one-time step:
 
-1. In Google Workspace, ensure `factor@bcatcorp.com` delivers **each email** to the existing automation mailbox `ai4bcat@gmail.com`. Do not change the domain MX or remove other distribution-list members.
+1. In Google Workspace, ensure `ivanfactoring@bcatcorp.com` delivers **each email** to the existing automation mailbox `ai4bcat@gmail.com`. Do not change the domain MX or remove other distribution-list members.
 2. Signed in as `ai4bcat@gmail.com`, open the existing **BCAT Intake Bridge** Apps Script project. Add `scripts/factoringEmailBridge.gs` as a new script file; leave all existing bridge functions/triggers intact. No Gmail filter is required.
 3. Under **Project Settings → Script properties**, set `FACTORING_WEBHOOK_URL` to `https://qck3jq2ret5kakp6i27viybmuy0gngqg.lambda-url.us-east-1.on.aws/` (the **FactoringIntakeFunctionUrl** CloudFormation output of the `data` stack; it changes only if the Function URL is recreated). Set `FACTORING_WEBHOOK_SECRET` to the existing Amplify `INTAKE_WEBHOOK_SECRET`, or reuse the project's existing `WEBHOOK_SECRET` constant. Never put secret values in logs or a committed script.
 4. Run `setupFactoringEmailBridge()` once and authorize Gmail/external-request access. It adds the `factoring-needs-review` label and one `processFactoringEmails` five-minute trigger without modifying other jobs.
 5. In BCAT Ops **Users**, grant **Factoring Queue** to the staff who should work it. The owner has access automatically; admin status alone does not grant pages.
-6. Forward an invoice with subject `Invoice for PRO #12345` to `factor@bcatcorp.com`. Run `processFactoringEmails()` manually for an immediate check, or allow five minutes for the trigger and 30 seconds for the page poll. Verify PRO `12345` appears once with **Need to factor**. Change to **Pending with OTR**, forward it again, and confirm the same row retains that status. Finally mark it **Factored**.
+6. Forward an invoice with subject `Invoice for PRO #12345` to `ivanfactoring@bcatcorp.com`. Run `processFactoringEmails()` manually for an immediate check, or allow five minutes for the trigger and 30 seconds for the page poll. Verify PRO `12345` appears once with **Need to factor**. Change to **Pending with OTR**, forward it again, and confirm the same row retains that status. Finally mark it **Factored**.
 
 Mail is selected by recipient/List-ID, not unread state. Archived and read messages are included; trash/spam are excluded. A newer message in an old thread is processed independently. Older pages are swept in the background, not abandoned after the first page. A successful webhook acknowledgement is persisted per message; network/auth/server failures remain retriable and fail the trigger visibly. Subject errors receive `factoring-needs-review` rather than a fabricated PRO: forward the email again with a corrected subject.
 

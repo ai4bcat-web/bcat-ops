@@ -69,16 +69,22 @@ describe('extractProNumber', () => {
     expect(extractProNumber('PRO #01234')).toBeNull()
   })
 
-  it('returns null for alphanumeric or partial IDs', () => {
-    expect(extractProNumber('Invoice for PRO #A01234')).toBeNull()
-    expect(extractProNumber('Invoice for PRO #01234A')).toBeNull()
-    expect(extractProNumber('Invoice for PRO #ABC')).toBeNull()
+  it('accepts alphanumeric PROs and upper-cases them', () => {
+    expect(extractProNumber('Invoice for PRO #945143JJ')).toBe('945143JJ')
+    expect(extractProNumber('Invoice for PRO #a01234')).toBe('A01234')
   })
 
-  it('returns null for malformed tokens next to the invoice phrase', () => {
-    expect(extractProNumber('Invoice for PRO #123-45')).toBeNull()
-    expect(extractProNumber('Invoice for PRO #01234,')).toBeNull()
-    expect(extractProNumber('Invoice for PRO #BAD ref PRO #456')).toBeNull()
+  it('stops at punctuation after the PRO', () => {
+    expect(extractProNumber('Invoice for PRO #01234,')).toBe('01234')
+    expect(extractProNumber('Invoice for PRO #01234. Attached')).toBe('01234')
+    expect(extractProNumber('Invoice for PRO #123-45')).toBe('123-45')
+    expect(extractProNumber('Invoice for PRO #01234-')).toBe('01234')
+    expect(extractProNumber('Invoice for PRO 01234')).toBe('01234')
+  })
+
+  it('returns null when the phrase has no id', () => {
+    expect(extractProNumber('Invoice for PRO #')).toBeNull()
+    expect(extractProNumber('Invoice for PRO # — see attached')).toBeNull()
   })
 
   it('returns null when invoice phrases name different PRO numbers', () => {
@@ -189,30 +195,6 @@ describe('factoring-intake handler', () => {
     expect(JSON.parse(res.body)).toMatchObject({ error: 'no invoice PRO number' })
   })
 
-  it('rejects malformed or partial invoice PRO tokens', async () => {
-    const res = await handler(
-      event({
-        secret: 'test-secret',
-        messageId: 'msg-1',
-        subject: 'Invoice for PRO #A01234',
-        from: 'bridge@bcatcorp.com',
-      }),
-    )
-    expect(res.statusCode).toBe(422)
-  })
-
-  it('rejects dashed/punctuated PRO tokens', async () => {
-    const res = await handler(
-      event({
-        secret: 'test-secret',
-        messageId: 'msg-1',
-        subject: 'Invoice for PRO #123-45',
-        from: 'bridge@bcatcorp.com',
-      }),
-    )
-    expect(res.statusCode).toBe(422)
-  })
-
   it('rejects multiple different invoice PRO numbers', async () => {
     const res = await handler(
       event({
@@ -233,7 +215,7 @@ describe('factoring-intake handler', () => {
         secret: 'test-secret',
         messageId: 'msg-001',
         subject: 'Invoice for PRO #012345',
-        from: 'factor@bcatcorp.com',
+        from: 'ivanfactoring@bcatcorp.com',
         receivedAt: '2026-09-23T10:00:00Z',
       }),
     )
@@ -259,7 +241,7 @@ describe('factoring-intake handler', () => {
       __typename: 'FactoringItem',
       status: 'NEED_TO_FACTOR',
       subject: 'Invoice for PRO #012345',
-      fromEmail: 'factor@bcatcorp.com',
+      fromEmail: 'ivanfactoring@bcatcorp.com',
       messageId: 'msg-001',
     })
     expect(item.receivedAt).toBe('2026-09-23T10:00:00.000Z')
@@ -277,7 +259,7 @@ describe('factoring-intake handler', () => {
         secret: 'test-secret',
         messageId: 'msg-002',
         subject: 'Invoice for PRO #012345',
-        from: 'factor@bcatcorp.com',
+        from: 'ivanfactoring@bcatcorp.com',
       }),
     )
 

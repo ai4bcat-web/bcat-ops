@@ -1,6 +1,6 @@
 // ── Factoring Email Bridge ───────────────────────────────────────────────────
 // Standalone additive Apps Script for the existing BCAT Intake Bridge project.
-// Polls Gmail every 5 min for messages delivered to factor@bcatcorp.com and
+// Polls Gmail every 5 min for messages delivered to ivanfactoring@bcatcorp.com and
 // POSTs a minimal payload to the factoring-intake Lambda Function URL.
 //
 // Dedup is per-Gmail-message-id in PropertiesService (namespaced), so a new
@@ -9,7 +9,7 @@
 // sequential newest pages first so a burst of new mail cannot block behind
 // backlog.
 
-const FACTORING_RECIPIENT = 'factor@bcatcorp.com';
+const FACTORING_RECIPIENT = 'ivanfactoring@bcatcorp.com';
 const FACTORING_NEEDS_REVIEW_LABEL = 'factoring-needs-review';
 const FACTORING_PROCESS_FN = 'processFactoringEmails';
 const FACTORING_PROP_NS = 'factoring:msg:';

@@ -129,7 +129,7 @@ export function FactoringPage() {
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Factoring Queue</h1>
           <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-            One row per PRO. Emails forwarded to factor@bcatcorp.com appear automatically.
+            One row per PRO. Emails forwarded to ivanfactoring@bcatcorp.com appear automatically.
           </p>
         </div>
         <Button
