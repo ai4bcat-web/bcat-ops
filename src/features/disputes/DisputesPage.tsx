@@ -775,24 +775,25 @@ export function DisputesPage() {
           ) : (
             <>
               <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
-                {/* Twelve columns that fit a 1440 window with the sidebar open: the filing
+                {/* Twelve columns sized to fit a 1440 window with the sidebar collapsed
+                    (~1290px); with it open the table scrolls sideways a little. The filing
                     date rides under the source pill and the 7-day pay period has its own
                     column beside the shipment date, so Status and the row actions stay on
                     screen. Every fixed cell clips with an ellipsis and carries a title. */}
-                <table style={{ width: '100%', minWidth: 1280, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                <table style={{ width: '100%', minWidth: 1240, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <colgroup>
                     <col style={{ width: 116 }} />
-                    <col style={{ width: 100 }} />
+                    <col style={{ width: 96 }} />
                     <col style={{ width: 96 }} />
                     <col style={{ width: 156 }} />
-                    <col style={{ width: 120 }} />
+                    <col style={{ width: 112 }} />
                     <col />
-                    <col style={{ width: 84 }} />
+                    <col style={{ width: 80 }} />
+                    <col style={{ width: 92 }} />
                     <col style={{ width: 96 }} />
-                    <col style={{ width: 100 }} />
-                    <col style={{ width: 76 }} />
-                    <col style={{ width: 136 }} />
-                    <col style={{ width: 84 }} />
+                    <col style={{ width: 72 }} />
+                    <col style={{ width: 132 }} />
+                    <col style={{ width: 80 }} />
                   </colgroup>
                   <thead>
                     <tr>
