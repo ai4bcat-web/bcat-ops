@@ -236,7 +236,6 @@ factoringIntakeFn.addEnvironment('TABLE_NAME', factoringTable.tableName)
 const factoringIntakeUrl = new FunctionUrl(factoringIntakeFn.stack, 'FactoringIntakeUrl', {
   function: factoringIntakeFn,
   authType: FunctionUrlAuthType.NONE,
-  cors:     { allowedMethods: [HttpMethod.POST] },
 })
 
 new CfnOutput(factoringIntakeFn.stack, 'FactoringIntakeFunctionUrl', {
