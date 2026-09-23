@@ -99,7 +99,10 @@ export function extractProNumber(subject: string): string | null {
   ]
   if (matches.length === 0) return null
 
+  // A real PRO always carries a digit; without this, "Invoice for PRO number
+  // 12345" or "Invoice for PRO from OTR" would file under NUMBER / FROM.
   const first = matches[0][1]
+  if (!/\d/.test(first)) return null
   for (const m of matches) {
     if (m[1] !== first) return null
   }

@@ -82,9 +82,12 @@ describe('extractProNumber', () => {
     expect(extractProNumber('Invoice for PRO 01234')).toBe('01234')
   })
 
-  it('returns null when the phrase has no id', () => {
+  it('returns null when the phrase has no id or the id has no digit', () => {
     expect(extractProNumber('Invoice for PRO #')).toBeNull()
     expect(extractProNumber('Invoice for PRO # — see attached')).toBeNull()
+    expect(extractProNumber('Invoice for PRO number 12345')).toBeNull()
+    expect(extractProNumber('Invoice for PRO from OTR')).toBeNull()
+    expect(extractProNumber('Invoice for PRO #ABC')).toBeNull()
   })
 
   it('returns null when invoice phrases name different PRO numbers', () => {
