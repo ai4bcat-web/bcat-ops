@@ -114,6 +114,23 @@ describe('DisputesPage evidence download', () => {
   })
 })
 
+describe('DisputesPage ordering', () => {
+  it('lists disputes by pay period, newest week first, even when filed out of order', async () => {
+    disputes.mockReturnValue([
+      dispute({ id: 'older-week-filed-last', tripNumber: 'OLDWEEK', payPeriod: '2026-01-25', submittedAt: '2026-02-10T12:00:00.000Z' }),
+      dispute({ id: 'legacy', tripNumber: 'LEGACY', payPeriod: '4/19 - 4/25', submittedAt: '2026-02-11T12:00:00.000Z' }),
+      dispute({ id: 'newest-week-filed-first', tripNumber: 'NEWWEEK', payPeriod: '2026-02-08', submittedAt: '2026-02-01T12:00:00.000Z' }),
+      dispute({ id: 'same-week-later', tripNumber: 'SAMEWEEK', payPeriod: '2026-02-08', submittedAt: '2026-02-03T12:00:00.000Z' }),
+    ])
+    render(<DisputesPage />)
+
+    await screen.findByText('Pay period')
+    const trips = screen.getAllByRole('row').slice(1).map((r) => r.cells[1].textContent)
+    expect(trips).toEqual(['SAMEWEEK', 'NEWWEEK', 'OLDWEEK', 'LEGACY'])
+    expect(screen.getAllByRole('row')[1].cells[3].textContent).toBe('Feb 8 – Feb 14, 2026')
+  })
+})
+
 describe('DisputesPage status update', () => {
   it('records status, Amazon reply and screenshot in one write, keeping driver evidence', async () => {
     render(<DisputesPage />)

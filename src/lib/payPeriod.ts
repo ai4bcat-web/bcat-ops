@@ -33,3 +33,16 @@ export function formatPayPeriod(value: string): string {
   const start = new Date(`${value}T00:00:00`)
   return Number.isNaN(start.getTime()) ? value : formatWeekLabel(start)
 }
+
+/**
+ * Newest-period-first ordering for dispute lists. ISO Sundays compare by date;
+ * legacy free text has no reliable year, so it sorts after every ISO period,
+ * and a missing period sorts last. Ties fall through to the caller.
+ */
+export function comparePayPeriodDesc(a: string | null | undefined, b: string | null | undefined): number {
+  const rank = (v: string | null | undefined) => (!v ? 0 : ISO_DATE.test(v) ? 2 : 1)
+  const ra = rank(a)
+  const rb = rank(b)
+  if (ra !== rb) return rb - ra
+  return ra === 2 ? b!.localeCompare(a!) : 0
+}

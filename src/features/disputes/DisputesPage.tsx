@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { formatPayPeriod } from '@/lib/payPeriod'
+import { formatPayPeriod, comparePayPeriodDesc } from '@/lib/payPeriod'
 import { uuid } from '@/lib/disputePortalClient'
 import { fileContentType } from '@/lib/disputeFiles'
 import {
@@ -642,7 +642,10 @@ export function DisputesPage() {
           (d.payPeriod ?? '').toLowerCase().includes(q)
         )
       })
-      .sort((a, b) => (b.submittedAt ?? b.createdAt).localeCompare(a.submittedAt ?? a.createdAt))
+      // Always by pay period, newest week first; filing time breaks ties.
+      .sort((a, b) =>
+        comparePayPeriodDesc(a.payPeriod, b.payPeriod) ||
+        (b.submittedAt ?? b.createdAt).localeCompare(a.submittedAt ?? a.createdAt))
   }, [amazonDisputes, statusF, search])
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -772,15 +775,16 @@ export function DisputesPage() {
           ) : (
             <>
               <div style={{ maxHeight: 'calc(100vh - 340px)', overflow: 'auto' }}>
-                {/* Eleven columns that fit a 1440 window with the sidebar open: the filing
-                    date rides under the source pill and the shipment date sits above its
-                    7-day period, so Status and the row actions stay on screen. Every
-                    fixed cell clips with an ellipsis and carries a title. */}
-                <table style={{ width: '100%', minWidth: 1200, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
+                {/* Twelve columns that fit a 1440 window with the sidebar open: the filing
+                    date rides under the source pill and the 7-day pay period has its own
+                    column beside the shipment date, so Status and the row actions stay on
+                    screen. Every fixed cell clips with an ellipsis and carries a title. */}
+                <table style={{ width: '100%', minWidth: 1280, tableLayout: 'fixed', borderCollapse: 'collapse' }}>
                   <colgroup>
                     <col style={{ width: 116 }} />
                     <col style={{ width: 100 }} />
-                    <col style={{ width: 150 }} />
+                    <col style={{ width: 96 }} />
+                    <col style={{ width: 156 }} />
                     <col style={{ width: 120 }} />
                     <col />
                     <col style={{ width: 84 }} />
@@ -792,8 +796,8 @@ export function DisputesPage() {
                   </colgroup>
                   <thead>
                     <tr>
-                      {['Source', 'Trip #', 'Shipment', 'Driver', 'Description', 'Paid', 'Requested', 'Recovered', 'Proof', 'Status', ''].map((h, i) => (
-                        <th key={i} style={{ ...thBase, textAlign: i >= 5 && i <= 7 ? 'right' : 'left' }}>{h}</th>
+                      {['Source', 'Trip #', 'Shipment', 'Pay period', 'Driver', 'Description', 'Paid', 'Requested', 'Recovered', 'Proof', 'Status', ''].map((h, i) => (
+                        <th key={i} style={{ ...thBase, textAlign: i >= 6 && i <= 8 ? 'right' : 'left' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -812,11 +816,9 @@ export function DisputesPage() {
                             </div>
                           </td>
                           <td title={d.tripNumber ?? undefined} style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.tripNumber || '—'}</td>
-                          <td style={{ ...tdBase, verticalAlign: 'top', overflow: 'hidden' }}>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</div>
-                            <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                              {d.payPeriod ? formatPayPeriod(d.payPeriod) : '—'}
-                            </div>
+                          <td style={{ ...tdBase, verticalAlign: 'top', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>{d.shipmentDate || '—'}</td>
+                          <td title={d.payPeriod ? formatPayPeriod(d.payPeriod) : undefined} style={{ ...tdBase, verticalAlign: 'top', fontSize: 12, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {d.payPeriod ? formatPayPeriod(d.payPeriod) : '—'}
                           </td>
                           <td title={d.driverName} style={{ ...tdBase, verticalAlign: 'top', fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.driverName}</td>
                           {/* Clamped to two lines so one wordy dispute can't stretch the

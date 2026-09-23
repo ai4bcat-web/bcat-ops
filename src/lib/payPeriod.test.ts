@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatPayPeriod, formatWeekLabel, toLocalDateString, addDays } from './payPeriod'
+import { formatPayPeriod, formatWeekLabel, toLocalDateString, addDays, comparePayPeriodDesc } from './payPeriod'
 
 describe('pay period labels', () => {
   it('labels a Sunday–Saturday week with the year once', () => {
@@ -20,5 +20,19 @@ describe('pay period labels', () => {
     expect(toLocalDateString(sunday)).toBe('2026-09-06')
     expect(formatWeekLabel(sunday)).toBe(formatPayPeriod('2026-09-06'))
     expect(toLocalDateString(addDays(sunday, 6))).toBe('2026-09-12')
+  })
+})
+
+describe('comparePayPeriodDesc', () => {
+  it('orders newest ISO week first, legacy text after every ISO week, blanks last', () => {
+    const rows = ['4/19 - 4/25', '2026-09-06', '', '2026-09-13', '2025-12-28']
+    expect([...rows].sort(comparePayPeriodDesc)).toEqual(['2026-09-13', '2026-09-06', '2025-12-28', '4/19 - 4/25', ''])
+    expect(comparePayPeriodDesc(undefined, '')).toBe(0)
+    expect(comparePayPeriodDesc(undefined, '4/19 - 4/25')).toBeGreaterThan(0)
+  })
+
+  it('treats equal periods as ties so the caller decides', () => {
+    expect(comparePayPeriodDesc('2026-09-06', '2026-09-06')).toBe(0)
+    expect(comparePayPeriodDesc('4/19 - 4/25', '5/3 - 5/9')).toBe(0)
   })
 })
