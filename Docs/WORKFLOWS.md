@@ -6,7 +6,7 @@
 - Auth state flows from `AuthProvider` -> hooks -> pages.
 
 ## Page access
-- Only the owner (`ryne@bcatcorp.com`) bypasses page permissions. Every other account, including admins, needs an explicit `page-<key>` Cognito group for each page; no grants means no page access. Admin feature privileges do not grant pages.
+- The owner (`ryne@bcatcorp.com`) and members of the Cognito `ADMIN` group (the Users page "Make admin" toggle) bypass page permissions and see every page. Every other account needs an explicit `page-<key>` Cognito group for each page; no grants means no page access. The legacy admin email allowlist grants feature privileges only, not pages.
 - The sidebar, global shortcuts, cross-page links, and direct-route guards use the same `hasPageAccess` check. Denied URLs redirect to an allowed landing page, or show No page access when none is granted.
 - Users page toggles save the explicit allowlist. Permission edits are disabled while a save is pending. Sessions refresh Cognito grants at startup, when the tab regains focus/visibility, and every minute while visible.
 - These checks govern web pages and navigation; they are not a substitute for AppSync or S3 resource authorization.

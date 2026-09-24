@@ -27,10 +27,10 @@ export interface NavSection {
  *  - becomes a `page-<key>` Cognito group, created on demand by the userManagement
  *    Lambda (which accepts any `page-*` key — no hardcoded list to keep in sync).
  *
- * Access model: every non-owner user must be explicitly granted each page via a
- * `page-<key>` Cognito group. Zero page-groups means no page access. The owner
- * (ryne@bcatcorp.com) bypasses this allowlist. ADMIN status is managed separately
- * and no longer grants automatic page access.
+ * Access model: every user must be explicitly granted each page via a
+ * `page-<key>` Cognito group, except the owner (ryne@bcatcorp.com) and members of
+ * the Cognito `ADMIN` group, who see every page. Zero page-groups otherwise means
+ * no page access.
  */
 export const NAV_GROUPS: NavSection[] = [
   {

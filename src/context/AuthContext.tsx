@@ -126,10 +126,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       isAdmin,
       isOwner,
-      // Only the owner bypasses page grants. ADMIN controls feature privileges,
-      // not page access; an empty allowlist grants nothing.
+      // The owner and the Cognito ADMIN group (the Users page "Make admin" toggle)
+      // bypass page grants. The legacy email allowlist behind `isAdmin` does not:
+      // those accounts still need explicit `page-*` grants.
       hasPageAccess: (pageKey: string) =>
-        isOwner || (user?.groups.includes(`page-${pageKey}`) ?? false),
+        isOwner || (user?.groups.includes('ADMIN') ?? false) || (user?.groups.includes(`page-${pageKey}`) ?? false),
     }}>
       {children}
     </AuthContext.Provider>

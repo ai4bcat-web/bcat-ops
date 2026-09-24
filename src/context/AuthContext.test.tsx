@@ -54,13 +54,12 @@ describe('explicit staff page grants', () => {
     expect(screen.queryByText('Protected settings content')).toBeNull()
   })
 
-  it('denies all pages when no grants remain, even for an ADMIN role', async () => {
+  it('lets the Cognito ADMIN group open every page without grants', async () => {
     auth.email = 'staff@bcatcorp.com'
     auth.groups = auth.cachedGroups = ['ADMIN']
     openSettings()
-    await screen.findByText('No page access')
-    expect(screen.queryAllByRole('link')).toHaveLength(0)
-    expect(screen.queryByText('Protected settings content')).toBeNull()
+    await screen.findByText('Protected settings content')
+    expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Loads', 'Settings'])
   })
 
   it('keeps the owner able to administer the site without page grants', async () => {

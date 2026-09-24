@@ -86,7 +86,7 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
   const color = avatarColor(user.email ?? user.username ?? '')
   const count = pageGroupCount(user)
   const isOwner = user.email?.toLowerCase().trim() === OWNER_EMAIL
-  const access = isOwner ? 'Full access' : count === 0 ? 'No pages' : `${count}/${TOTAL_PAGES} pages`
+  const access = isOwner || admin ? 'Full access' : count === 0 ? 'No pages' : `${count}/${TOTAL_PAGES} pages`
   const isResetting = resettingId === user.username
   const isToggling = togglingId === user.username
   const isAdminBusy = busyAdminId === user.username
@@ -169,10 +169,12 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
             )}
           </div>
 
-          {isOwner ? (
+          {isOwner || admin ? (
             <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-4 py-3">
               <ShieldCheck className="size-4 text-violet-600 shrink-0" />
-              <span className="text-sm font-medium text-violet-700">Owner — full access to all pages</span>
+              <span className="text-sm font-medium text-violet-700">
+                {isOwner ? 'Owner — full access to all pages' : 'Admin — full access to all pages'}
+              </span>
             </div>
           ) : (
             <>
