@@ -437,7 +437,10 @@ const schema = a.schema({
       receivedAt: a.datetime().required(),
       messageId:  a.string().required(),
     })
-    .authorization((allow) => [allow.authenticated()]),
+    .authorization((allow) => [
+      allow.authenticated().to(['create', 'read', 'update']),
+      allow.groups(['ADMIN']).to(['delete']),
+    ]),
 
   AuditLog: a
     .model({

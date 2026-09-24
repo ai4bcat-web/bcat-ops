@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { listFactoringItems, updateFactoringItem } from '@/lib/apiClient'
+import { listFactoringItems, updateFactoringItem, deleteFactoringItem } from '@/lib/apiClient'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 
 const POLL_MS = 30_000
@@ -11,6 +11,7 @@ export interface UseFactoringItemsResult {
   pendingIds: Set<string>
   refresh: () => void
   updateStatus: (id: string, status: FactoringItemStatus) => Promise<FactoringItem>
+  removeItem: (id: string) => Promise<void>
 }
 
 export function useFactoringItems(): UseFactoringItemsResult {
@@ -20,6 +21,7 @@ export function useFactoringItems(): UseFactoringItemsResult {
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const pendingIdsRef = useRef<Set<string>>(new Set())
   const snapshotRef = useRef<Map<string, FactoringItem>>(new Map())
+  const deletedAtRef = useRef<Map<string, string>>(new Map())
 
   const syncPending = useCallback((next: Set<string>) => {
     pendingIdsRef.current = next
@@ -32,6 +34,7 @@ export function useFactoringItems(): UseFactoringItemsResult {
       const next = await listFactoringItems()
       setItems((prev) => {
         const pending = pendingIdsRef.current
+        const deleted = deletedAtRef.current
         const prevMap = new Map(prev.map((i) => [i.id, i]))
         const nextMap = new Map(next.map((i) => [i.id, i]))
         const merged: FactoringItem[] = []
@@ -42,6 +45,10 @@ export function useFactoringItems(): UseFactoringItemsResult {
         //    confirmed new status (its updatedAt is older).
         // 3. Brand-new rows arriving via direct Dynamo inserts are preserved.
         // 4. Older overlapping list responses lose to newer ones.
+        // 5. A poll that started before a successful delete cannot resurrect the
+        //    deleted row, while a genuinely new later forward with the same PRO
+        //    (and therefore possibly the same id) is allowed because its
+        //    updatedAt is newer than the deletion timestamp.
         for (const id of new Set([...prevMap.keys(), ...nextMap.keys()])) {
           if (pending.has(id)) {
             merged.push(prevMap.get(id)!)
@@ -50,6 +57,11 @@ export function useFactoringItems(): UseFactoringItemsResult {
           const incoming = nextMap.get(id)
           const current = prevMap.get(id)
           if (!incoming) continue
+          const deletedAt = deleted.get(id)
+          if (deletedAt && incoming.updatedAt <= deletedAt) {
+            // Stale poll returning a successfully deleted row.
+            continue
+          }
           if (!current || incoming.updatedAt > current.updatedAt) {
             merged.push(incoming)
           } else {
@@ -112,5 +124,30 @@ export function useFactoringItems(): UseFactoringItemsResult {
     }
   }, [items, syncPending])
 
-  return { items, loading, error, pendingIds, refresh: load, updateStatus }
+  const removeItem = useCallback(async (id: string) => {
+    const target = items.find((i) => i.id === id)
+    if (!target) throw new Error('Item not found')
+
+    syncPending(new Set(pendingIdsRef.current).add(id))
+
+    try {
+      await deleteFactoringItem(id)
+      setItems((all) => all.filter((i) => i.id !== id))
+      deletedAtRef.current.set(id, target.updatedAt)
+      syncPending((() => {
+        const next = new Set(pendingIdsRef.current)
+        next.delete(id)
+        return next
+      })())
+    } catch (err) {
+      syncPending((() => {
+        const next = new Set(pendingIdsRef.current)
+        next.delete(id)
+        return next
+      })())
+      throw err
+    }
+  }, [items, syncPending])
+
+  return { items, loading, error, pendingIds, refresh: load, updateStatus, removeItem }
 }

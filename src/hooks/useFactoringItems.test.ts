@@ -2,13 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
-import { listFactoringItems, updateFactoringItem } from '@/lib/apiClient'
+import { listFactoringItems, updateFactoringItem, deleteFactoringItem } from '@/lib/apiClient'
 import { useFactoringItems } from './useFactoringItems'
 import type { FactoringItem } from '@/types'
 
 vi.mock('@/lib/apiClient', () => ({
   listFactoringItems: vi.fn(),
   updateFactoringItem: vi.fn(),
+  deleteFactoringItem: vi.fn(),
 }))
 
 const item = (overrides: Partial<FactoringItem> = {}): FactoringItem => ({
@@ -189,5 +190,59 @@ describe('useFactoringItems', () => {
     expect(result.current.error).toBeTruthy()
 
     expect(result.current.items).toHaveLength(1)
+  })
+
+  it('leaves the row visible when delete fails', async () => {
+    const initial = item()
+    vi.mocked(listFactoringItems).mockResolvedValue([initial])
+    vi.mocked(deleteFactoringItem).mockRejectedValue(new Error('AppSync denied'))
+
+    const { result } = renderHook(() => useFactoringItems())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.items).toHaveLength(1)
+
+    await expect(
+      act(async () => result.current.removeItem(initial.id)),
+    ).rejects.toThrow('AppSync denied')
+
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.items[0].id).toBe(initial.id)
+    expect(result.current.pendingIds.has(initial.id)).toBe(false)
+  })
+
+  it('does not resurrect a deleted row from a stale poll, but allows a later forward with the same PRO', async () => {
+    const initial = item({ updatedAt: '2026-09-23T10:00:00Z' })
+    vi.mocked(listFactoringItems).mockResolvedValue([initial])
+    vi.mocked(deleteFactoringItem).mockResolvedValue(undefined)
+
+    const { result } = renderHook(() => useFactoringItems())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.items).toHaveLength(1)
+
+    await act(async () => {
+      await result.current.removeItem(initial.id)
+    })
+
+    expect(result.current.items).toHaveLength(0)
+    expect(result.current.pendingIds.has(initial.id)).toBe(false)
+
+    // A poll that started before the delete returns the old row.
+    vi.mocked(listFactoringItems).mockResolvedValue([initial])
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.items).toHaveLength(0)
+
+    // A genuinely new forward arrives with the same PRO but a newer updatedAt.
+    const recreated = item({
+      updatedAt: '2026-09-23T12:00:00Z',
+      subject: 'Re-forwarded invoice for PRO #PRO-001',
+    })
+    vi.mocked(listFactoringItems).mockResolvedValue([recreated])
+    await act(async () => {
+      await result.current.refresh()
+    })
+    expect(result.current.items).toHaveLength(1)
+    expect(result.current.items[0].subject).toBe('Re-forwarded invoice for PRO #PRO-001')
   })
 })

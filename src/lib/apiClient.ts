@@ -630,7 +630,7 @@ export async function listFactoringItems(): Promise<FactoringItem[]> {
   return items
 }
 
-/** Only status mutation is exposed in the UI; creation/deletion are system-owned. */
+/** Staff may update status; email intake owns creation. */
 export async function updateFactoringItem(
   id: string,
   patch: { status: FactoringItemStatus },
@@ -640,6 +640,14 @@ export async function updateFactoringItem(
     variables: { input: { id, ...patch } },
   }) as { data: { updateFactoringItem: FactoringItem } }
   return result.data.updateFactoringItem
+}
+
+/** The model authorizes deletion only for the Cognito ADMIN group. */
+export async function deleteFactoringItem(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteFactoringItem($input: DeleteFactoringItemInput!) { deleteFactoringItem(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
 }
 
 // ── Team members / helpers ───────────────────────────────────────────────────━

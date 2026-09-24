@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from 'react'
 import {
-  RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle,
+  RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
+import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
@@ -95,9 +96,12 @@ function StatusSelect({
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export function FactoringPage() {
-  const { items, loading, error, pendingIds, refresh, updateStatus } = useFactoringItems()
+  const { items, loading, error, pendingIds, refresh, updateStatus, removeItem } = useFactoringItems()
+  const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FactoringItemStatus | 'ALL'>('ALL')
+
+  const canDelete = user?.groups.includes('ADMIN') ?? false
 
   const counts = useMemo(() => ({
     ALL: items.length,
@@ -121,6 +125,20 @@ export function FactoringPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to update status')
     }
   }, [updateStatus])
+
+  const handleDelete = useCallback(async (item: FactoringItem) => {
+    if (!window.confirm(
+      `Delete the queue row for PRO ${item.proNumber}?\n\n` +
+      'This permanently removes the factoring queue entry. The original email remains in the inbox; forwarding it again will recreate the row.'
+    )) return
+
+    try {
+      await removeItem(item.id)
+      toast.success(`PRO ${item.proNumber} deleted from queue`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete queue row')
+    }
+  }, [removeItem])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--ds-bg)' }}>
@@ -227,11 +245,11 @@ export function FactoringPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'Subject', 'From', 'Received', 'Status'].map((col) => (
+                    {['PRO #', 'Subject', 'From', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
                       <th
                         key={col}
                         style={{
-                          padding: '10px 16px', textAlign: col === 'PRO #' ? 'left' : 'left',
+                          padding: '10px 16px', textAlign: 'left',
                           fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)',
                           textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap',
                         }}
@@ -283,6 +301,21 @@ export function FactoringPage() {
                           )}
                         </div>
                       </td>
+                      {canDelete && (
+                        <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 text-muted-foreground hover:text-red-600"
+                            aria-label={`Delete queue row for PRO ${item.proNumber}`}
+                            title="Delete queue row"
+                            disabled={pendingIds.has(item.id)}
+                            onClick={() => handleDelete(item)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
