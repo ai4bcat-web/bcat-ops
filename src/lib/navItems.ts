@@ -46,6 +46,7 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff' },
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
+      { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
       // The directory: reusable customers + locations behind the Load form.
       { to: '/customers', label: 'Customers', icon: Building2,       pageKey: 'customers' },
       { to: '/locations', label: 'Locations', icon: MapPin,          pageKey: 'locations' },
@@ -85,7 +86,6 @@ export const NAV_GROUPS: NavSection[] = [
     items: [
       { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances' },
       { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn' },
-      { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
       { to: '/insurance', label: 'Insurance', icon: Umbrella,  pageKey: 'insurance' },
     ],
   },

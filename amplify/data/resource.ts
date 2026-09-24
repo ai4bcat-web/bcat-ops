@@ -423,7 +423,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [allow.authenticated()]),
 
-  // ── Factoring queue (Finance page) ─────────────────────────────────────────
+  // ── Factoring queue (Operations page) ──────────────────────────────────────
   // Emails sent to ivanfactoring@bcatcorp.com become rows here. The id is the literal
   // PRO number string so duplicate PROs safely collide instead of creating
   // multiple rows. Status is advanced by the finance team in the UI; the intake
