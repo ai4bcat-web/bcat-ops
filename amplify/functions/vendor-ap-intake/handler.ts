@@ -1,7 +1,7 @@
 /**
  * vendor-ap-intake Lambda
  *
- * Secret-authenticated Function URL endpoint for the vendorap@bcatcorp.com Gmail
+ * Secret-authenticated Function URL endpoint for the vendorpayments@bcatcorp.com Gmail
  * bridge. Because the Lambda Function URL has a 6 MiB sync payload ceiling, original
  * attachment bytes never travel through it. The bridge uses a two-phase protocol:
  *

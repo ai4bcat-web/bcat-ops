@@ -1,13 +1,13 @@
 // ── Vendor AP Email Bridge ──────────────────────────────────────────────────
 // Standalone additive Apps Script for the existing BCAT Intake Bridge project.
-// Polls Gmail every 5 min for messages delivered to vendorap@bcatcorp.com and
+// Polls Gmail every 5 min for messages delivered to vendorpayments@bcatcorp.com and
 // forwards original invoice attachments to the vendor-ap-intake Lambda via a
 // two-phase protocol (prepare -> presigned S3 PUT -> commit).
 //
 // Phase separation keeps Gmail attachment bytes out of the Lambda Function URL
 // request body, avoiding the 6 MiB sync invoke limit.
 
-const VENDOR_AP_RECIPIENT = 'vendorap@bcatcorp.com';
+const VENDOR_AP_RECIPIENT = 'vendorpayments@bcatcorp.com';
 const VENDOR_AP_NEEDS_REVIEW_LABEL = 'vendor-ap-needs-review';
 const VENDOR_AP_PROCESS_FN = 'processVendorApEmails';
 const VENDOR_AP_PROP_NS = 'vendorap:msg:';

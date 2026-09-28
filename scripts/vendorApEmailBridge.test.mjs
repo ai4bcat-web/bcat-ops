@@ -203,7 +203,7 @@ function makeMessage(overrides = {}) {
   return {
     id: overrides.id ?? `msg-${Math.random().toString(36).slice(2)}`,
     threadId: overrides.threadId,
-    to: overrides.to ?? 'vendorap@bcatcorp.com',
+    to: overrides.to ?? 'vendorpayments@bcatcorp.com',
     cc: overrides.cc ?? '',
     headers,
     subject: overrides.subject ?? 'Invoice #12345',
@@ -383,7 +383,7 @@ describe('vendorApEmailBridge.gs', () => {
     const m = makeMessage({
       id: 'fwd1',
       to: 'ai4bcat@gmail.com',
-      xOriginalTo: 'vendorap@bcatcorp.com',
+      xOriginalTo: 'vendorpayments@bcatcorp.com',
     });
     const { ctx, state } = makeBridge({ messages: [m] });
 
@@ -398,7 +398,7 @@ describe('vendorApEmailBridge.gs', () => {
     const m = makeMessage({
       id: 'list1',
       to: 'ai4bcat@gmail.com',
-      listId: '<vendorap.bcatcorp.com>',
+      listId: '<vendorpayments.bcatcorp.com>',
     });
     const { ctx, state } = makeBridge({ messages: [m] });
 
@@ -446,11 +446,11 @@ describe('vendorApEmailBridge.gs', () => {
     ctx.processVendorApEmails();
 
     const query = state.searchCalls[0].query;
-    expect(query).toContain('to:vendorap@bcatcorp.com');
-    expect(query).toContain('cc:vendorap@bcatcorp.com');
-    expect(query).toContain('deliveredto:vendorap@bcatcorp.com');
-    expect(query).toContain('list:vendorap.bcatcorp.com');
-    expect(query).toContain('"vendorap@bcatcorp.com"');
+    expect(query).toContain('to:vendorpayments@bcatcorp.com');
+    expect(query).toContain('cc:vendorpayments@bcatcorp.com');
+    expect(query).toContain('deliveredto:vendorpayments@bcatcorp.com');
+    expect(query).toContain('list:vendorpayments.bcatcorp.com');
+    expect(query).toContain('"vendorpayments@bcatcorp.com"');
     expect(query).toContain('-in:trash -in:spam');
     expect(query).not.toContain('is:unread');
   });

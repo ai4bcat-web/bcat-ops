@@ -844,7 +844,7 @@ export function VendorApPage() {
       <div>
         <h1 style={{ fontSize: 20, fontWeight: 600, color: 'var(--ds-t1)', letterSpacing: '-0.01em', margin: 0 }}>Vendor AP Queue</h1>
         <p style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-          Email invoices to vendorap@bcatcorp.com. Maintenance invoices are linked from the Invoices page.
+          Email invoices to vendorpayments@bcatcorp.com. Maintenance invoices are linked from the Invoices page.
         </p>
       </div>
       <Button variant="outline" size="sm" className="h-8 gap-1.5" onClick={async () => { await refresh(); reloadDetails() }} disabled={loading}>
