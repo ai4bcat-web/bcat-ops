@@ -213,20 +213,23 @@ function AttachmentList({
   attachments: VendorApAttachment[]
   getAttachmentUrl: (key: string) => Promise<string>
 }) {
-  const [urls, setUrls] = useState<Record<string, string>>({})
   const [loadingKey, setLoadingKey] = useState<string | null>(null)
 
+  // Open the tab synchronously inside the click (popup blockers reject a window.open
+  // that follows an await), then sign a fresh URL each time so an expired cached
+  // link never lands the user on an S3 403.
   const open = async (att: VendorApAttachment) => {
-    if (urls[att.key]) {
-      window.open(urls[att.key], '_blank', 'noopener,noreferrer')
-      return
-    }
+    // No `noopener` in the feature string: it makes window.open return null. Sever
+    // the opener by hand so the signed S3 page still can't reach this window.
+    const tab = window.open('', '_blank')
+    if (tab) tab.opener = null
     setLoadingKey(att.key)
     try {
       const url = await getAttachmentUrl(att.key)
-      setUrls((prev) => ({ ...prev, [att.key]: url }))
-      window.open(url, '_blank', 'noopener,noreferrer')
+      if (tab) tab.location.href = url
+      else window.location.assign(url)
     } catch (err) {
+      tab?.close()
       toast.error(err instanceof Error ? err.message : 'Failed to load attachment')
     } finally {
       setLoadingKey(null)

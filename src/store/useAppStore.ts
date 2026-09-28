@@ -397,6 +397,9 @@ interface AppState {
   addMaintenanceInvoice: (i: Omit<MaintenanceInvoice, 'id' | 'createdAt' | 'updatedAt'>) => void
   updateMaintenanceInvoice: (id: string, patch: Partial<Omit<MaintenanceInvoice, 'id' | 'createdAt'>>) => void
   deleteMaintenanceInvoice: (id: string) => void
+  // Re-pull invoices so payments recorded elsewhere (Vendor AP, another tab) show up
+  // without a reload. Same updatedAt merge as refreshAmazonDisputes.
+  refreshMaintenanceInvoices: () => Promise<void>
 
   // ── Amazon dispute actions (confirmed persistence + poll refresh) ──────────
   addAmazonDispute: (d: Omit<AmazonDispute, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
@@ -795,6 +798,26 @@ export const useAppStore = create<AppState>()(
           })
         } catch (err) {
           console.warn('[store] refreshAmazonDisputes failed', err)
+        }
+      },
+      refreshMaintenanceInvoices: async () => {
+        try {
+          const remote = await api.listMaintenanceInvoices()
+          const recent = new Date(Date.now() - 15_000).toISOString()
+          set((s) => {
+            const local: Record<string, MaintenanceInvoice> = {}
+            for (const i of s.maintenanceInvoices) local[i.id] = i
+            const merged: MaintenanceInvoice[] = []
+            for (const r of remote) {
+              const l = local[r.id]
+              merged.push(l && (l.updatedAt ?? '') > (r.updatedAt ?? '') ? l : r)
+              delete local[r.id]
+            }
+            for (const l of Object.values(local)) if ((l.updatedAt ?? '') > recent) merged.push(l)
+            return { maintenanceInvoices: merged }
+          })
+        } catch (err) {
+          console.warn('[store] refreshMaintenanceInvoices failed', err)
         }
       },
 

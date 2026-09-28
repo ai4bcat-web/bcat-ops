@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -256,6 +256,9 @@ export function InvoicesPage() {
   const addMaintenanceInvoice    = useAppStore((s) => s.addMaintenanceInvoice)
   const updateMaintenanceInvoice = useAppStore((s) => s.updateMaintenanceInvoice)
   const deleteMaintenanceInvoice = useAppStore((s) => s.deleteMaintenanceInvoice)
+  const refreshMaintenanceInvoices = useAppStore((s) => s.refreshMaintenanceInvoices)
+  // Payments recorded in Vendor AP land on the source row server-side; pull them in.
+  useEffect(() => { void refreshMaintenanceInvoices() }, [refreshMaintenanceInvoices])
 
   const [searchParams]                = useSearchParams()
   const paramTab                      = searchParams.get('tab') as Tab | null

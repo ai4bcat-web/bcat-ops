@@ -698,24 +698,32 @@ describe('COMPLETE', () => {
     expect(result.item.paymentDate).toBe('2026-05-17')
   })
 
-  it('exposes stale source amount as actionable conflict', async () => {
+  it('refreshes a changed source snapshot into the AP row while completing', async () => {
     send
       .mockResolvedValueOnce({ Item: existingAp() })
-      .mockResolvedValueOnce({ Item: marshall({ ...source, amount: 99999 }) })
+      .mockResolvedValueOnce({ Item: marshall({ ...source, amount: 99999, vendor: 'Kriete Truck Center', updatedAt: '2026-05-15T00:00:00Z' }) })
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ Item: existingAp({ status: 'DONE', amount: 99999, vendor: 'Kriete Truck Center', paymentMethod: 'Check', paymentDate: '2026-05-16' }) })
 
-    await expect(
-      handler(
-        event({
-          action: 'COMPLETE',
-          id: 'maintenance:m-1',
-          input: {
-            expectedUpdatedAt: '2026-05-15T00:00:00.000Z',
-            paymentMethod: 'Check',
-            paymentDate: '2026-05-16',
-          },
-        }),
-      ),
-    ).rejects.toThrow('Linked maintenance invoice changed (amount) after the AP row was last refreshed')
+    const result = await handler(
+      event({
+        action: 'COMPLETE',
+        id: 'maintenance:m-1',
+        input: {
+          expectedUpdatedAt: '2026-05-15T00:00:00.000Z',
+          paymentMethod: 'Check',
+          paymentDate: '2026-05-16',
+        },
+      }),
+    )
+
+    expect(result.item.status).toBe('DONE')
+    const transact = send.mock.calls.map(asCommand).find(isTransact)
+    const [apUpdate, sourceUpdate] = transact!.input.TransactItems!
+    expect(apUpdate.Update!.UpdateExpression).toContain('#amount = :amount')
+    expect(apUpdate.Update!.ExpressionAttributeValues![':amount']).toEqual({ N: '99999' })
+    expect(apUpdate.Update!.ExpressionAttributeValues![':vendor']).toEqual({ S: 'Kriete Truck Center' })
+    expect(sourceUpdate.Update!.ExpressionAttributeValues![':sourceUpdatedAt']).toEqual({ S: '2026-05-15T00:00:00Z' })
   })
 
   it('treats source with default paymentMethod but no paymentDate as unpaid', async () => {
@@ -788,7 +796,7 @@ describe('COMPLETE', () => {
           },
         }),
       ),
-    ).rejects.toThrow('Conflict: linked invoice already paid by someone else')
+    ).rejects.toThrow('Conflict: the linked maintenance invoice was paid or edited by someone else')
   })
 })
 

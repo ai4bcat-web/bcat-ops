@@ -259,25 +259,6 @@ async function getMaintenanceInvoice(id: string): Promise<Record<string, unknown
   return unmarshall(result.Item)
 }
 
-function sourcePaymentMatchesAp(
-  source: Record<string, unknown>,
-  ap: VendorPayable,
-): { ok: true } | { ok: false; reason: string } {
-  const snapshot = buildSnapshotFromSource(source)
-  const mismatches: string[] = []
-  if (snapshot.amount !== ap.amount) mismatches.push('amount')
-  if (snapshot.vendor !== ap.vendor) mismatches.push('vendor')
-  if (snapshot.invoiceNumber !== ap.invoiceNumber) mismatches.push('invoiceNumber')
-  if (snapshot.invoiceDate !== ap.invoiceDate) mismatches.push('invoiceDate')
-  if (snapshot.description !== ap.description) mismatches.push('description')
-  if (mismatches.length > 0) {
-    return {
-      ok: false,
-      reason: `Linked maintenance invoice changed (${mismatches.join(', ')}) after the AP row was last refreshed. Re-send from maintenance to refresh before completing.`,
-    }
-  }
-  return { ok: true }
-}
 
 // ── Actions ────────────────────────────────────────────────────────────────
 
@@ -490,35 +471,30 @@ async function completeAction(
   // AP update: optimistic on expectedUpdatedAt; allow completion from NEED_TO_PAY
   // or correction of a DONE row (source payment is verified separately against the
   // existing AP payment, not the new input).
-  transactItems.push({
-    Update: {
-      TableName: TABLE_NAME,
-      Key: marshall({ id }),
-      ConditionExpression: '#updatedAt = :expectedUpdatedAt AND (#status = :needToPay OR #status = :done)',
-      UpdateExpression:
-        'SET #status = :done, #updatedAt = :updatedAt, #paymentMethod = :method, #paymentDate = :date, #paymentReference = :reference, #paidBy = :paidBy, #paidAt = :paidAt',
-      ExpressionAttributeNames: {
-        '#status': 'status',
-        '#updatedAt': 'updatedAt',
-        '#paymentMethod': 'paymentMethod',
-        '#paymentDate': 'paymentDate',
-        '#paymentReference': 'paymentReference',
-        '#paidBy': 'paidBy',
-        '#paidAt': 'paidAt',
-      },
-      ExpressionAttributeValues: {
-        ':expectedUpdatedAt': { S: expectedUpdatedAt },
-        ':needToPay': { S: 'NEED_TO_PAY' },
-        ':done': { S: 'DONE' as VendorPayableStatus },
-        ':updatedAt': { S: now },
-        ':method': { S: paymentMethod },
-        ':date': { S: paymentDate },
-        ':reference': paymentReference != null ? { S: paymentReference } : { NULL: true },
-        ':paidBy': { S: caller.email },
-        ':paidAt': { S: now },
-      },
-    },
-  })
+  const apNames: Record<string, string> = {
+    '#status': 'status',
+    '#updatedAt': 'updatedAt',
+    '#paymentMethod': 'paymentMethod',
+    '#paymentDate': 'paymentDate',
+    '#paymentReference': 'paymentReference',
+    '#paidBy': 'paidBy',
+    '#paidAt': 'paidAt',
+  }
+  const apValues: Record<string, AttributeValue> = {
+    ':expectedUpdatedAt': { S: expectedUpdatedAt },
+    ':needToPay': { S: 'NEED_TO_PAY' },
+    ':done': { S: 'DONE' as VendorPayableStatus },
+    ':updatedAt': { S: now },
+    ':method': { S: paymentMethod },
+    ':date': { S: paymentDate },
+    ':reference': paymentReference != null ? { S: paymentReference } : { NULL: true },
+    ':paidBy': { S: caller.email },
+    ':paidAt': { S: now },
+  }
+  const apSetParts = [
+    '#status = :done', '#updatedAt = :updatedAt', '#paymentMethod = :method', '#paymentDate = :date',
+    '#paymentReference = :reference', '#paidBy = :paidBy', '#paidAt = :paidAt',
+  ]
 
   if (sourceInvoiceId) {
     const source = await getMaintenanceInvoice(sourceInvoiceId)
@@ -526,10 +502,26 @@ async function completeAction(
       throw new Error(`Linked maintenance invoice not found: ${sourceInvoiceId}.`)
     }
 
-    const match = sourcePaymentMatchesAp(source, existing)
-    if (!match.ok) {
-      throw new Error(match.reason)
-    }
+    // The source may have been edited (vendor typo, amount fix) since it was sent.
+    // The source `updatedAt` guard below makes this read consistent with the write, so
+    // fold the current snapshot into the AP row instead of refusing the payment.
+    const snapshot = buildSnapshotFromSource(source)
+    Object.assign(apNames, {
+      '#vendor': 'vendor', '#invoiceNumber': 'invoiceNumber', '#amount': 'amount',
+      '#invoiceDate': 'invoiceDate', '#description': 'description', '#subject': 'subject',
+    })
+    Object.assign(apValues, {
+      ':vendor': snapshot.vendor != null ? { S: snapshot.vendor } : { NULL: true },
+      ':invoiceNumber': snapshot.invoiceNumber != null ? { S: snapshot.invoiceNumber } : { NULL: true },
+      ':amount': snapshot.amount != null ? { N: String(snapshot.amount) } : { NULL: true },
+      ':invoiceDate': snapshot.invoiceDate != null ? { S: snapshot.invoiceDate } : { NULL: true },
+      ':description': snapshot.description != null ? { S: snapshot.description } : { NULL: true },
+      ':subject': { S: snapshot.subject },
+    })
+    apSetParts.push(
+      '#vendor = :vendor', '#invoiceNumber = :invoiceNumber', '#amount = :amount',
+      '#invoiceDate = :invoiceDate', '#description = :description', '#subject = :subject',
+    )
 
     const existingApMethod = existing.paymentMethod ?? ''
     const existingApDate = existing.paymentDate ?? ''
@@ -595,12 +587,24 @@ async function completeAction(
     })
   }
 
+  // AP item leads the transaction (tests and the conflict message read it as [0]).
+  transactItems.unshift({
+    Update: {
+      TableName: TABLE_NAME,
+      Key: marshall({ id }),
+      ConditionExpression: '#updatedAt = :expectedUpdatedAt AND (#status = :needToPay OR #status = :done)',
+      UpdateExpression: `SET ${apSetParts.join(', ')}`,
+      ExpressionAttributeNames: apNames,
+      ExpressionAttributeValues: apValues,
+    },
+  })
+
   try {
     await dynamo.send(new TransactWriteItemsCommand({ TransactItems: transactItems }))
   } catch (err: unknown) {
     if (errorName(err) === 'TransactionCanceledException') {
       throw conflictError(
-        'Conflict: linked invoice already paid by someone else, the source invoice changed, or the AP row was modified. Re-send from maintenance to refresh.',
+        'Conflict: the linked maintenance invoice was paid or edited by someone else, or this AP row changed. Refresh the queue and try again.',
         err,
       )
     }
