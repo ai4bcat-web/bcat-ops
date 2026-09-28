@@ -11,6 +11,8 @@ import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
 import { factoringIntake } from './functions/factoring-intake/resource'
+import { vendorApActions } from './functions/vendor-ap-actions/resource'
+import { vendorApIntake } from './functions/vendor-ap-intake/resource'
 import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
@@ -46,6 +48,8 @@ const backend = defineBackend({
   slackIntakeWebhook,
   gmailTaskIntake,
   factoringIntake,
+  vendorApActions,
+  vendorApIntake,
   apptNeedNotifier,
   slackStatusNotifier,
   fuelImport,
@@ -241,6 +245,34 @@ const factoringIntakeUrl = new FunctionUrl(factoringIntakeFn.stack, 'FactoringIn
 new CfnOutput(factoringIntakeFn.stack, 'FactoringIntakeFunctionUrl', {
   value:       factoringIntakeUrl.url,
   description: 'POST factor@ emails here from the Gmail bridge (JSON with the shared secret)',
+})
+
+// Vendor AP: authenticated payment actions plus secret-authenticated Gmail intake.
+const vendorApTable = backend.data.resources.tables['VendorPayable']
+const vendorApActionsFn = backend.vendorApActions.resources.lambda as LambdaFunction
+const vendorApMaintenanceTable = backend.data.resources.tables['MaintenanceInvoice']
+vendorApActionsFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
+vendorApActionsFn.addEnvironment('MAINTENANCE_TABLE_NAME', vendorApMaintenanceTable.tableName)
+vendorApActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+  resources: [vendorApTable.tableArn, vendorApMaintenanceTable.tableArn],
+}))
+const vendorApIntakeFn = backend.vendorApIntake.resources.lambda as LambdaFunction
+vendorApIntakeFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
+vendorApIntakeFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+vendorApIntakeFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:GetItem', 'dynamodb:PutItem'],
+  resources: [vendorApTable.tableArn],
+}))
+backend.storage.resources.bucket.grantPut(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
+backend.storage.resources.bucket.grantRead(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
+const vendorApIntakeUrl = new FunctionUrl(vendorApIntakeFn.stack, 'VendorApIntakeUrl', {
+  function: vendorApIntakeFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+new CfnOutput(vendorApIntakeFn.stack, 'VendorApIntakeFunctionUrl', {
+  value: vendorApIntakeUrl.url,
+  description: 'Vendor AP Gmail bridge webhook; requires the shared intake secret',
 })
 
 // ── amazonDisputeIntake Lambda (Google Form → AmazonDispute) ────────────────

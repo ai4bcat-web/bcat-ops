@@ -10,6 +10,7 @@ import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource
 import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
 import { carrierBlastApi } from '../functions/carrier-blast-api/resource'
+import { vendorApActions } from '../functions/vendor-ap-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -441,6 +442,47 @@ const schema = a.schema({
       allow.authenticated().to(['create', 'read', 'update']),
       allow.groups(['ADMIN']).to(['delete']),
     ]),
+
+  // Writes go through the action Lambda so payment details and linked maintenance
+  // invoices are validated and committed together. Direct deletes are admin-only.
+  VendorPayable: a
+    .model({
+      status: a.enum(['NEED_TO_PAY', 'DONE']),
+      source: a.enum(['MAINTENANCE', 'EMAIL']),
+      sourceInvoiceId: a.string(),
+      sourceMessageId: a.string(),
+      subject: a.string().required(),
+      vendor: a.string(),
+      invoiceNumber: a.string(),
+      amount: a.integer(), // cents; absent until an email invoice is reviewed
+      invoiceDate: a.date(),
+      description: a.string(),
+      fromEmail: a.string(),
+      emailBody: a.string(),
+      attachments: a.json(),
+      receivedAt: a.datetime().required(),
+      paymentMethod: a.string(),
+      paymentDate: a.date(),
+      paymentReference: a.string(),
+      paidBy: a.string(),
+      paidAt: a.datetime(),
+    })
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+      allow.groups(['ADMIN']).to(['delete']),
+    ]),
+
+  manageVendorPayable: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      id: a.id(),
+      maintenanceInvoiceId: a.id(),
+      input: a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(vendorApActions)),
 
   AuditLog: a
     .model({

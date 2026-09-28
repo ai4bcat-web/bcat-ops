@@ -6,6 +6,7 @@ import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
 import type { FixedExpenseInput } from './driverPay'
 import type { CarrierLane, CarrierContact, CarrierCampaign, CarrierReply } from '@/types'
+import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
@@ -649,6 +650,105 @@ export async function deleteFactoringItem(id: string): Promise<void> {
     variables: { input: { id } },
   })
 }
+
+// ── Vendor accounts payable ──────────────────────────────────────────────────
+
+const VENDOR_PAYABLE_FIELDS = `
+  id status source sourceInvoiceId sourceMessageId subject vendor invoiceNumber
+  amount invoiceDate description fromEmail attachments receivedAt
+  paymentMethod paymentDate paymentReference paidBy paidAt createdAt updatedAt
+`
+type VendorPayableRecord = Omit<VendorPayable, 'attachments'> & {
+  attachments?: VendorApAttachment[] | string | null
+}
+
+function vendorPayableFromRecord(record: VendorPayableRecord): VendorPayable {
+  const attachments = typeof record.attachments === 'string'
+    ? JSON.parse(record.attachments) as VendorApAttachment[]
+    : record.attachments ?? []
+  return { ...record, attachments }
+}
+
+export async function listVendorPayables(): Promise<VendorPayable[]> {
+  const items: VendorPayable[] = []
+  let nextToken: string | null = null
+  do {
+    const result = await client.graphql({
+      query: `query ListVendorPayables($nextToken: String) { listVendorPayables(limit: 1000, nextToken: $nextToken) { items { ${VENDOR_PAYABLE_FIELDS} } nextToken } }`,
+      variables: { nextToken },
+    }) as { data: { listVendorPayables: { items: (VendorPayableRecord | null)[]; nextToken?: string | null } } }
+    const page = result.data.listVendorPayables
+    for (const item of page.items) if (item) items.push(vendorPayableFromRecord(item))
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return items
+}
+
+export async function getVendorPayable(id: string): Promise<VendorPayable> {
+  const result = await client.graphql({
+    query: `query GetVendorPayable($id: ID!) { getVendorPayable(id: $id) { ${VENDOR_PAYABLE_FIELDS} emailBody } }`,
+    variables: { id },
+  }) as { data: { getVendorPayable: VendorPayableRecord | null } }
+  if (!result.data.getVendorPayable) throw new Error('This invoice is no longer in Vendor AP. Refresh the queue.')
+  return vendorPayableFromRecord(result.data.getVendorPayable)
+}
+
+async function vendorPayableAction(
+  action: 'SEND_MAINTENANCE' | 'UPDATE_DETAILS' | 'COMPLETE' | 'REOPEN',
+  args: { id?: string; maintenanceInvoiceId?: string; input?: object },
+): Promise<{ item: VendorPayable; duplicate: boolean }> {
+  try {
+    const result = await client.graphql({
+      query: `mutation ManageVendorPayable($action: String!, $id: ID, $maintenanceInvoiceId: ID, $input: AWSJSON) {
+        manageVendorPayable(action: $action, id: $id, maintenanceInvoiceId: $maintenanceInvoiceId, input: $input)
+      }`,
+      variables: { ...args, action, input: args.input ? JSON.stringify(args.input) : undefined },
+    }) as { data: { manageVendorPayable: string | { item: VendorPayableRecord; duplicate?: boolean } } }
+    const raw = result.data.manageVendorPayable
+    const value = typeof raw === 'string' ? JSON.parse(raw) as { item: VendorPayableRecord; duplicate?: boolean } : raw
+    if (!value?.item) throw new Error('Vendor AP did not return the saved invoice. Refresh and try again.')
+    return { item: vendorPayableFromRecord(value.item), duplicate: value.duplicate === true }
+  } catch (err) {
+    throw new Error(vendorApErrorMessage(err), { cause: err })
+  }
+}
+
+/** Vendor AP mutations surface the Lambda's own message; nothing here is a screenshot import. */
+function vendorApErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message
+  const errors = (err as { errors?: { message?: string }[] } | null)?.errors
+  const joined = Array.isArray(errors) ? errors.map((e) => e?.message).filter(Boolean).join('; ') : ''
+  return joined || 'Vendor AP request failed. Refresh the queue and try again.'
+}
+
+export async function sendMaintenanceInvoiceToVendorAp(maintenanceInvoiceId: string): Promise<{ item: VendorPayable; duplicate: boolean }> {
+  return vendorPayableAction('SEND_MAINTENANCE', { maintenanceInvoiceId })
+}
+
+export async function updateVendorPayable(id: string, patch: VendorPayableDetails, expectedUpdatedAt: string): Promise<VendorPayable> {
+  return (await vendorPayableAction('UPDATE_DETAILS', { id, input: { ...patch, expectedUpdatedAt } })).item
+}
+
+export async function completeVendorPayable(id: string, payment: VendorPayment, expectedUpdatedAt: string): Promise<VendorPayable> {
+  return (await vendorPayableAction('COMPLETE', { id, input: { ...payment, expectedUpdatedAt } })).item
+}
+
+export async function reopenVendorPayable(id: string, expectedUpdatedAt: string): Promise<VendorPayable> {
+  return (await vendorPayableAction('REOPEN', { id, input: { expectedUpdatedAt } })).item
+}
+
+export async function deleteVendorPayable(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteVendorPayable($input: DeleteVendorPayableInput!) { deleteVendorPayable(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}
+
+export async function getVendorApAttachmentUrl(key: string): Promise<string> {
+  if (!key.startsWith('intake-pdfs/vendor-ap/')) throw new Error('Invalid Vendor AP attachment')
+  return getIntakePdfUrl(key)
+}
+
 
 // ── Team members / helpers ───────────────────────────────────────────────────━
 

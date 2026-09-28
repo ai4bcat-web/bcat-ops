@@ -1,12 +1,13 @@
 import { useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAppStore } from '@/store/useAppStore'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown, ArrowUp, ArrowDown, Inbox, Archive, ArchiveRestore, Check } from 'lucide-react'
+import { Receipt, History, FileText, Trash2, Pencil, Plus, Search, ChevronDown, ArrowUp, ArrowDown, Inbox, Archive, ArchiveRestore, Check, Send, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Equipment, MaintenanceInvoice } from '@/types/equipment'
 import { useAuth } from '@/hooks/useAuth'
 import { isPosted, isQueued, isArchived } from '@/lib/invoiceStatus'
+import { sendMaintenanceInvoiceToVendorAp } from '@/lib/apiClient'
 import {
   formatCents, thBase, tdBase, equipChipStyle, iconBtnStyle,
   Pill, inputStyle, btnGhost, btnPrimary, btnDanger, Field, FormSection, Modal,
@@ -245,7 +246,9 @@ type InvSortKey = 'date' | 'equipment' | 'source' | 'vendor' | 'invoiceNumber' |
 export function InvoicesPage() {
   const isMobile = useIsMobile()
   const padX = isMobile ? 14 : 32
-  const { user } = useAuth()
+  const { user, hasPageAccess } = useAuth()
+  const navigate = useNavigate()
+  const [sendingToAp, setSendingToAp] = useState<Set<string>>(new Set())
   const reviewer = user?.email ?? 'dispatch'
   const equipment                = useAppStore((s) => s.equipment)
   const maintenanceInvoices      = useAppStore((s) => s.maintenanceInvoices)
@@ -309,6 +312,22 @@ export function InvoicesPage() {
   function restoreInvoice(inv: MaintenanceInvoice) {
     updateMaintenanceInvoice(inv.id, { status: 'POSTED', reviewedBy: reviewer })
     toast.success('Invoice restored')
+  }
+
+  async function sendToVendorAp(inv: MaintenanceInvoice) {
+    if (sendingToAp.has(inv.id)) return
+    if (!window.confirm(`Send ${inv.vendor || 'vendor'} invoice ${inv.invoiceNumber || inv.id} (${formatCents(inv.amount)}) to Vendor AP for payment?\n\nThis sends this invoice row's amount and keeps the original maintenance expense.`)) return
+    setSendingToAp((ids) => new Set(ids).add(inv.id))
+    try {
+      const result = await sendMaintenanceInvoiceToVendorAp(inv.id)
+      toast.success(result.duplicate ? 'This invoice is already in Vendor AP' : 'Invoice sent to Vendor AP', {
+        action: hasPageAccess('vendorAp') ? { label: 'Open queue', onClick: () => navigate('/vendor-ap') } : undefined,
+      })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not send invoice to Vendor AP')
+    } finally {
+      setSendingToAp((ids) => { const next = new Set(ids); next.delete(inv.id); return next })
+    }
   }
 
   // The active invoice tab (posted / queue / archived) selects which status is shown.
@@ -518,7 +537,7 @@ export function InvoicesPage() {
                   <col style={{ width: 104 }} />
                   <col style={{ width: 128 }} />
                   <col style={{ width: 112 }} />
-                  <col style={{ width: 70 }} />
+                  <col style={{ width: 150 }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -559,6 +578,17 @@ export function InvoicesPage() {
                       <td style={{ ...tdBase, textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, whiteSpace: 'nowrap' }}>{formatCents(inv.amount)}</td>
                       <td style={{ ...tdBase, textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end' }}>
+                          {tab !== 'archived' && !inv.paymentDate && (
+                            <button
+                              aria-label={`Send invoice ${inv.invoiceNumber || inv.id} to Vendor AP`}
+                              title="Send this invoice row to Vendor AP for payment"
+                              disabled={sendingToAp.has(inv.id)}
+                              onClick={() => void sendToVendorAp(inv)}
+                              style={{ ...iconBtnStyle, color: 'var(--ds-blue)', opacity: sendingToAp.has(inv.id) ? 0.5 : 1 }}
+                            >
+                              {sendingToAp.has(inv.id) ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                            </button>
+                          )}
                           {tab === 'queue' && (
                             <button aria-label="Post invoice" title="Add to the list" onClick={() => postInvoice(inv)} style={{ ...iconBtnStyle, color: 'var(--ds-green)' }}><Check size={14} /></button>
                           )}

@@ -478,6 +478,19 @@ Mail is selected by recipient/List-ID, not unread state. Archived and read messa
 
 The queue does not submit invoices to OTR or import attachment contents. Its three statuses are **Need to factor**, **Pending with OTR**, and **Factored**. Confirm actual forwarded-email delivery before calling the Google integration active.
 
+## Section 11 — Vendor AP Queue (vendorap@ → one row per emailed invoice)
+
+The backend and `/vendor-ap` page deploy through the normal Amplify pipeline. Maintenance invoices need no Google setup: the send icon on an unpaid Invoices row creates the AP row immediately. Gmail activation for forwarded vendor invoices is a separate one-time step:
+
+1. In Google Workspace, create `vendorap@bcatcorp.com` and ensure it delivers **each email** to the existing automation mailbox `ai4bcat@gmail.com`. Do not change the domain MX or remove other distribution-list members.
+2. Signed in as `ai4bcat@gmail.com`, open the existing **BCAT Intake Bridge** Apps Script project. Add `scripts/vendorApEmailBridge.gs` as a new script file; leave all existing bridge functions/triggers intact.
+3. Under **Project Settings → Script properties**, set `VENDOR_AP_WEBHOOK_URL` to the **VendorApIntakeFunctionUrl** CloudFormation output of the `data` stack. Set `VENDOR_AP_WEBHOOK_SECRET` to the existing Amplify `INTAKE_WEBHOOK_SECRET`, or reuse the project's existing `WEBHOOK_SECRET` constant. Never put secret values in logs or a committed script.
+4. Run `setupVendorApEmailBridge()` once and authorize Gmail/external-request access. It adds the `vendor-ap-needs-review` label and one `processVendorApEmails` five-minute trigger without modifying other jobs.
+5. In BCAT Ops **Users**, grant **Vendor AP Queue** to the staff who should work it. The owner and the Cognito ADMIN group have access automatically.
+6. Forward a vendor invoice with its PDF to `vendorap@bcatcorp.com`. Run `processVendorApEmails()` manually for an immediate check, or allow five minutes for the trigger and 30 seconds for the page poll. Open the row: the original email text and its attachments must be there. Fill in vendor / invoice # / amount, then **Mark done** with the payment method and date.
+
+Attachments are copied to S3 under `intake-pdfs/vendor-ap/` before the row is created (presigned PUT, then a commit that verifies every object), so a queue row never exists without its files. Malformed messages get the `vendor-ap-needs-review` label instead of being dropped; network/auth/server failures remain retriable and fail the trigger visibly.
+
 
 ## Troubleshooting
 
