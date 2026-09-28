@@ -10,6 +10,20 @@ const send = vi.hoisted(() => {
   return vi.fn()
 })
 
+const cognitoSend = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-cognito-identity-provider', () => {
+  class CognitoIdentityProviderClient {
+    send = cognitoSend
+  }
+  class AdminGetUserCommand {
+    input: unknown
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  return { CognitoIdentityProviderClient, AdminGetUserCommand }
+})
+
 vi.mock('@aws-sdk/client-dynamodb', () => {
   class DynamoDBClient {
     send = send
@@ -140,6 +154,8 @@ function event(args: TestEventArgs, id?: TestIdentity): TestAppSyncEvent {
 
 beforeEach(() => {
   send.mockReset()
+  cognitoSend.mockReset()
+  cognitoSend.mockRejectedValue(new Error('UserNotFoundException'))
 })
 
 describe('authorization', () => {
@@ -149,13 +165,27 @@ describe('authorization', () => {
     )
   })
 
-  it('rejects unresolved email', async () => {
+  it('rejects unresolved email when the pool lookup also fails', async () => {
     await expect(
       handler({
         arguments: { action: 'SEND_MAINTENANCE', maintenanceInvoiceId: 'm-1' },
         identity: { sub: 'sub', username: 'nope', claims: {} },
       }),
     ).rejects.toThrow('Unauthorized: could not resolve caller email')
+  })
+
+  it('resolves a UUID username through Cognito (access tokens carry no email)', async () => {
+    // Real production shape: access token, UUID username, groups present, no email claim.
+    cognitoSend.mockResolvedValue({ UserAttributes: [{ Name: 'email', Value: 'Jenny@bcatcorp.com' }] })
+    send.mockResolvedValue({})
+    await expect(
+      handler({
+        arguments: { action: 'SEND_MAINTENANCE', maintenanceInvoiceId: 'm-1' },
+        identity: { sub: '74a8d498-7011-702e', username: '74a8d498-7011-702e', claims: { 'cognito:groups': ['ADMIN'] } },
+      }),
+    ).rejects.toThrow('Source maintenance invoice not found')
+    expect(cognitoSend).toHaveBeenCalledTimes(1)
+    expect((cognitoSend.mock.calls[0][0] as { input: { Username: string } }).input.Username).toBe('74a8d498-7011-702e')
   })
 
   it('allows SEND_MAINTENANCE with page-invoices', async () => {

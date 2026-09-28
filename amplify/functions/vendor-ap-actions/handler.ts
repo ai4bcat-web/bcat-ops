@@ -8,11 +8,15 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
+import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import type { VendorPayable, VendorPayableStatus } from '../../../src/types/vendorAp'
 
 const dynamo = new DynamoDBClient({})
 const TABLE_NAME = process.env.TABLE_NAME!
 const MAINTENANCE_TABLE_NAME = process.env.MAINTENANCE_TABLE_NAME!
+// `||` so an empty string also falls back (same as userManagement).
+const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
+const cognito = new CognitoIdentityProviderClient({})
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -71,12 +75,26 @@ export function parseInput(input: string | Record<string, unknown> | null | unde
   return input
 }
 
-function getCallerEmail(identity?: AppSyncIdentity | null): string {
-  if (!identity) return ''
+/**
+ * Amplify sends the Cognito ACCESS token, which has no `email` claim, and usernames
+ * here are UUIDs — so after the cheap claim checks fall back to AdminGetUser, exactly
+ * like userManagement does. Groups are always in the token, so authorization never
+ * depends on this lookup; only the owner check and `paidBy` do.
+ */
+async function getCallerEmail(identity: AppSyncIdentity): Promise<string> {
   const claims = identity.claims ?? {}
   const candidates = [claims.email, identity.username, claims['cognito:username']]
   const found = candidates.find((v): v is string => typeof v === 'string' && v.includes('@'))
-  return found ? found.toLowerCase().trim() : ''
+  if (found) return found.toLowerCase().trim()
+  const lookup = identity.username ?? identity.sub
+  if (!lookup) return ''
+  try {
+    const me = await cognito.send(new AdminGetUserCommand({ UserPoolId: USER_POOL_ID, Username: String(lookup) }))
+    return (me.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? '').toLowerCase().trim()
+  } catch (err) {
+    console.warn('[vendor-ap-actions] could not resolve caller email:', String(err))
+    return ''
+  }
 }
 
 function getGroups(identity?: AppSyncIdentity | null): string[] {
@@ -101,9 +119,9 @@ function errorName(err: unknown): string | undefined {
   return undefined
 }
 
-function authorize(action: Action, identity?: AppSyncIdentity | null): { email: string; sub: string } {
+async function authorize(action: Action, identity?: AppSyncIdentity | null): Promise<{ email: string; sub: string }> {
   if (!identity) throw new Error('Unauthorized: missing identity')
-  const email = getCallerEmail(identity)
+  const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)
   const isOwner = email === OWNER_EMAIL
@@ -739,7 +757,7 @@ async function reopenAction(
 
 export const handler = async (event: AppSyncEvent): Promise<ActionResult> => {
   const action = event.arguments.action as Action
-  const caller = authorize(action, event.identity)
+  const caller = await authorize(action, event.identity)
   const input = parseInput(event.arguments.input)
 
   switch (action) {

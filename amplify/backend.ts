@@ -257,6 +257,13 @@ vendorApActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
   resources: [vendorApTable.tableArn, vendorApMaintenanceTable.tableArn],
 }))
+// Access tokens carry no email; the Lambda resolves the caller via AdminGetUser
+// (same as userManagement) for the owner check and the `paidBy` audit field.
+vendorApActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+vendorApActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
 const vendorApIntakeFn = backend.vendorApIntake.resources.lambda as LambdaFunction
 vendorApIntakeFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
 vendorApIntakeFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
