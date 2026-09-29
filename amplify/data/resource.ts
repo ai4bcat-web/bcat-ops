@@ -671,6 +671,8 @@ const schema = a.schema({
       enhancedKey:       a.string(),
       processingStatus:  a.string().required(),   // PENDING | READY | ORIGINAL_ONLY | FAILED
       processingError:   a.string(),
+      processingVersion: a.integer(),             // scanner version that produced enhancedKey
+      scanReviewReason:  a.string(),               // JSON array of review flags or summary
       sourceUrl:         a.string().required(),   // backend-only; omitted from responses
       loadId:            a.string(),
       assignedBy:        a.string(),

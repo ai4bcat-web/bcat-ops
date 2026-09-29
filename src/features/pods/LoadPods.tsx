@@ -6,7 +6,7 @@ import type { PodDocument } from '@/types/pods'
 import { useState } from 'react'
 
 export function LoadPods({ loadId }: { loadId: string }) {
-  const { status, statusLoading, statusError, docs, loading, error, refresh } = usePodDocuments({ loadId, autoSync: false })
+  const { status, statusLoading, statusError, docs, loading, error, refresh } = usePodDocuments({ loadId })
   const [previewDoc, setPreviewDoc] = useState<PodDocument | null>(null)
 
   if (statusLoading && !status) {

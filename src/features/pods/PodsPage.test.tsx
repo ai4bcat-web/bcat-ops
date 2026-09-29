@@ -16,7 +16,7 @@ const podsClientMocks = vi.hoisted(() => ({
   getPodConnectionStatus: vi.fn(),
   configurePods: vi.fn(),
   listPods: vi.fn(),
-  syncPods: vi.fn(),
+  backfillPods: vi.fn(),
   getPodAssets: vi.fn(),
   assignPod: vi.fn(),
   retryPod: vi.fn(),
@@ -81,7 +81,7 @@ const baseDoc: PodDocument = {
 
 function resetMocks() {
   podsClientMocks.getPodConnectionStatus.mockResolvedValue({ configured: true, clientId: 'c1', companyName: 'Metz' })
-  podsClientMocks.syncPods.mockResolvedValue({ imported: 0, nextToken: null })
+  podsClientMocks.backfillPods.mockResolvedValue({ queued: true })
   podsClientMocks.listPods.mockResolvedValue({ items: [baseDoc], nextToken: null })
   podsClientMocks.getPodAssets.mockResolvedValue({ item: baseDoc, originalUrl: 'https://test/orig.jpg', enhancedUrl: 'https://test/enh.jpg' })
   podsClientMocks.assignPod.mockResolvedValue({ item: { ...baseDoc, loadId: 'l1', version: 2 } })
@@ -104,6 +104,21 @@ describe('PodsPage', () => {
     await waitFor(() => expect(screen.getByText('Metz Logistics')).toBeTruthy())
     expect(screen.getByText('Ivan Sender')).toBeTruthy()
     expect(screen.getByText('REF-1')).toBeTruthy()
+  })
+
+  it('queues a seven-day scan that does not depend on keeping the page open', async () => {
+    render(<PodsPage />)
+    const button = await screen.findByRole('button', { name: 'Scan past 7 days' })
+    fireEvent.click(button)
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Processing continues when you close this page'))
+  })
+
+  it('does not claim a scan was queued when the server rejects it', async () => {
+    podsClientMocks.backfillPods.mockRejectedValue(new Error('Queue unavailable'))
+    render(<PodsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Scan past 7 days' }))
+    await screen.findByText(/Queue unavailable/)
+    expect(screen.queryByText(/Seven-day scan queued/)).toBeNull()
   })
 
   it('gates the connection form by role', async () => {

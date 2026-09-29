@@ -1,6 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { graphqlErrorText } from '@/lib/apiClient'
-import type { PodConnectionStatus, PodDocument, PodPage, PodSyncResult, PodAssets } from '@/types/pods'
+import type { PodConnectionStatus, PodDocument, PodPage, PodAssets } from '@/types/pods'
 
 const client = generateClient()
 
@@ -45,8 +45,8 @@ export async function listPods(input?: { loadId?: string; nextToken?: string | n
   return podAction<PodPage>('list', { ...(input ?? {}) })
 }
 
-export async function syncPods(nextToken?: string | null): Promise<PodSyncResult> {
-  return podAction<PodSyncResult>('sync', { nextToken: nextToken ?? null })
+export async function backfillPods(): Promise<{ queued: true }> {
+  return podAction<{ queued: true }>('backfill', {})
 }
 
 export async function getPodAssets(id: string): Promise<PodAssets> {

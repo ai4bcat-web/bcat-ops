@@ -57,14 +57,12 @@ export function PodsPage() {
     loading,
     error,
     syncing,
-    syncImported,
-    syncSkipped,
+    syncQueued,
     syncError,
     refresh,
     refreshStatus,
     loadMore,
-    syncAll,
-    cancelSync,
+    startBackfill,
     patchDoc,
   } = usePodDocuments()
 
@@ -139,9 +137,9 @@ export function PodsPage() {
             <div style={{ flex: 1 }} />
             {configured && (
               <button
-                onClick={() => syncAll()}
+                onClick={() => startBackfill()}
                 disabled={syncing}
-                title="Sync the full JobsDone feed now"
+                title="Import and scan every image from the past seven days in the background"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -159,7 +157,7 @@ export function PodsPage() {
                 }}
               >
                 {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                {syncing ? `Syncing… ${syncImported}` : 'Sync JobsDone'}
+                {syncing ? 'Starting…' : 'Scan past 7 days'}
               </button>
             )}
             {canConfigure && (
@@ -307,18 +305,14 @@ export function PodsPage() {
 
         {configured && (
           <>
-            {syncing && (
-              <div className="mb-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Loader2 size={14} className="animate-spin" />
-                  Syncing JobsDone feed… {syncImported > 0 ? `${syncImported} imported` : ''}
-                </span>
-                <button onClick={cancelSync} className="font-semibold hover:underline">Cancel</button>
-              </div>
-            )}
-            {!syncing && syncSkipped > 0 && (
-              <div className="mb-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-                {syncSkipped} JobsDone {syncSkipped === 1 ? 'row was' : 'rows were'} skipped because {syncSkipped === 1 ? 'it' : 'they'} could not be read or belonged to another account. Nothing from {syncSkipped === 1 ? 'it' : 'them'} was imported.
+            <p className="mb-3 text-sm text-muted-foreground">
+              {activeStatus?.backgroundSyncEnabled
+                ? 'New images are imported and scanned automatically, even when this page is closed.'
+                : 'Scheduled imports are disabled in this environment. Use Scan past 7 days to run a background scan.'}
+            </p>
+            {syncQueued && (
+              <div role="status" className="mb-3 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                Seven-day scan queued. Processing continues when you close this page; results appear here as each image finishes.
               </div>
             )}
             {syncError && (
@@ -349,7 +343,7 @@ export function PodsPage() {
                   color: 'var(--ds-t3)',
                 }}
               >
-                {docs.length === 0 ? 'No PODs yet. Run Sync JobsDone to import the feed.' : 'No PODs match the current filters.'}
+                {docs.length === 0 ? 'No PODs yet. Use Scan past 7 days to import recent images.' : 'No PODs match the current filters.'}
               </div>
             ) : (
               <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">

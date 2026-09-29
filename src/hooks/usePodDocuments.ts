@@ -3,7 +3,7 @@ import { graphqlErrorText } from '@/lib/apiClient'
 import {
   getPodConnectionStatus,
   listPods,
-  syncPods,
+  backfillPods,
 } from '@/lib/podsClient'
 import type { PodConnectionStatus, PodDocument } from '@/types/pods'
 
@@ -18,20 +18,17 @@ export interface UsePodDocumentsReturn {
   loading: boolean
   error: string | null
   syncing: boolean
-  syncImported: number
-  syncSkipped: number
+  syncQueued: boolean
   syncError: string | null
   refresh: () => Promise<void>
   loadMore: () => Promise<void>
-  syncFirstPage: () => Promise<void>
-  syncAll: () => Promise<void>
-  cancelSync: () => void
+  startBackfill: () => Promise<void>
   patchDoc: (id: string, updater: (d: PodDocument) => PodDocument) => void
   refreshStatus: () => Promise<void>
 }
 
-export function usePodDocuments(options?: { loadId?: string | null; autoSync?: boolean }): UsePodDocumentsReturn {
-  const { loadId, autoSync = true } = options ?? {}
+export function usePodDocuments(options?: { loadId?: string | null }): UsePodDocumentsReturn {
+  const { loadId } = options ?? {}
 
   const [status, setStatus] = useState<PodConnectionStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
@@ -43,10 +40,8 @@ export function usePodDocuments(options?: { loadId?: string | null; autoSync?: b
   const [error, setError] = useState<string | null>(null)
 
   const [syncing, setSyncing] = useState(false)
-  const [syncImported, setSyncImported] = useState(0)
-  const [syncSkipped, setSyncSkipped] = useState(0)
+  const [syncQueued, setSyncQueued] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
-  const cancelRef = useRef(false)
   const configuredRef = useRef(false)
   // Mirrors `docs` for use inside async callbacks without re-creating them.
   const docsRef = useRef<PodDocument[]>([])
@@ -102,83 +97,41 @@ export function usePodDocuments(options?: { loadId?: string | null; autoSync?: b
     await fetchList({ nextToken })
   }, [nextToken, loading, fetchList])
 
-  const syncFirstPage = useCallback(async () => {
-    if (!configuredRef.current) return
-    setSyncError(null)
-    try {
-      const r = await syncPods(null)
-      setSyncImported(r.imported)
-      setSyncSkipped(r.skipped)
-    } catch (err) {
-      setSyncError(graphqlErrorText(err) || 'Could not sync JobsDone feed')
-    }
-  }, [])
-
-  const syncAll = useCallback(async () => {
+  const startBackfill = useCallback(async () => {
     if (!configuredRef.current || syncing) return
     setSyncing(true)
+    setSyncQueued(false)
     setSyncError(null)
-    setSyncImported(0)
-    setSyncSkipped(0)
-    cancelRef.current = false
-    let imported = 0
-    let skipped = 0
-    let token: string | null = null
-
     try {
-      do {
-        const r = await syncPods(token)
-        if (cancelRef.current) break
-        imported += r.imported
-        skipped += r.skipped
-        setSyncImported(imported)
-        setSyncSkipped(skipped)
-        token = r.nextToken
-      } while (token && !cancelRef.current)
+      await backfillPods()
+      setSyncQueued(true)
     } catch (err) {
-      setSyncError(graphqlErrorText(err) || 'Sync failed')
+      setSyncError(graphqlErrorText(err) || "Could not start the seven-day scan")
     } finally {
       setSyncing(false)
     }
-
-    // Always refresh the visible list after a sync attempt; keep existing docs if it failed.
-    await refresh()
-  }, [syncing, refresh])
-
-  const cancelSync = useCallback(() => {
-    cancelRef.current = true
-    setSyncing(false)
-  }, [])
+  }, [syncing])
 
   const patchDoc = useCallback((id: string, updater: (d: PodDocument) => PodDocument) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? updater(d) : d)))
   }, [])
 
-  // On mount (and when the scoped load changes): status → optional first-page sync → list.
-  // `status` is read through configuredRef so a fresh status object cannot restart this.
+  // Browser sessions only read stored documents; upstream ingestion runs on AWS.
   useEffect(() => {
     let alive = true
     ;(async () => {
-      const s = await loadStatus()
+      await loadStatus()
       if (!alive) return
-      if (s?.configured && autoSync) {
-        await syncFirstPage()
-        if (!alive) return
-      }
       await fetchList({ mode: 'replace' })
     })()
     return () => { alive = false }
-  }, [loadStatus, syncFirstPage, fetchList, autoSync])
+  }, [loadStatus, fetchList])
 
-  // Pull new JobsDone messages while the PODs page is open: on return to the tab
-  // and every 30 seconds. Embedded viewers (autoSync: false, e.g. the load drawer)
-  // only re-read their own list so they never call the privileged sync action.
+  // Refresh the gallery without triggering another upstream sync per open tab.
   const configured = status?.configured ?? false
   useEffect(() => {
     if (!isBrowser || !configured) return
-    const pull = autoSync
-      ? () => { void syncFirstPage().then(() => refresh()) }
-      : () => { void refresh() }
+    const pull = () => { void refresh() }
     const onVisible = () => { if (!document.hidden) pull() }
     document.addEventListener('visibilitychange', onVisible)
     const id = setInterval(pull, 30_000)
@@ -186,7 +139,7 @@ export function usePodDocuments(options?: { loadId?: string | null; autoSync?: b
       document.removeEventListener('visibilitychange', onVisible)
       clearInterval(id)
     }
-  }, [configured, autoSync, syncFirstPage, refresh])
+  }, [configured, refresh])
 
   // Bounded fast refresh while any document is still being enhanced on the server.
   // Keyed on the boolean so each refreshed page does not restart the 3-minute budget.
@@ -214,18 +167,14 @@ export function usePodDocuments(options?: { loadId?: string | null; autoSync?: b
     loading,
     error,
     syncing,
-    syncImported,
-    syncSkipped,
+    syncQueued,
     syncError,
     refresh,
     loadMore,
-    syncFirstPage,
-    syncAll,
-    cancelSync,
+    startBackfill,
     patchDoc,
     refreshStatus: async () => {
-      const s = await loadStatus()
-      if (s?.configured && autoSync) await syncFirstPage()
+      await loadStatus()
       await refresh()
     },
   }

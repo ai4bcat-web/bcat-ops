@@ -97,6 +97,11 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
               <FileText size={14} /> {originalOnlyNote}
             </div>
           )}
+          {doc.scanReviewReason && (
+            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+              Review scan: {doc.scanReviewReason} The original is retained for comparison.
+            </div>
+          )}
 
           {doc.processingStatus === 'PENDING' && (
             <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 flex items-center gap-2">

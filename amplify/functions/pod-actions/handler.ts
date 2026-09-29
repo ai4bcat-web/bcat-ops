@@ -35,6 +35,7 @@ import type {
   PodAssets,
 } from '../../../src/types/pods'
 import { enhancePodImage } from './scan'
+import { POD_SCAN_VERSION } from './scan-version.js'
 
 // ── AWS clients ────────────────────────────────────────────────────────────
 
@@ -64,8 +65,14 @@ const DOWNLOAD_TIMEOUT_MS = 20_000
 const WS_OPEN_TIMEOUT_MS = 10_000
 const WS_MESSAGE_TIMEOUT_MS = 25_000
 const WS_MAX_BYTES = 40 * 1024 * 1024
-const SYNC_LIMIT = 20
+// JobsDone answers each page in ONE API Gateway WebSocket frame, which is capped at
+// 128 KB; rows measure ~600 B, so 250 rows produced a 413 on their side and an
+// unaddressed error frame on ours. 50 rows is ~30 KB; the backfill still walks every
+// page, so page size only affects the number of round trips, never coverage.
+const SYNC_LIMIT = 50
 const PAGE_LIMIT = 50
+const BACKFILL_WINDOW_DAYS = 7
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 const PRESIGN_EXPIRY_SECONDS = 15 * 60
 const LEASE_MS = 5 * 60 * 1000
 
@@ -89,10 +96,22 @@ interface AppSyncEvent {
   identity?: AppSyncIdentity | null
 }
 
-interface SelfInvokeEvent {
+interface ProcessPodInvokeEvent {
   action: 'processPodId'
   processPodId: string
 }
+
+interface BackfillScheduleEvent {
+  action: 'backfillSchedule'
+}
+
+interface BackfillPageEvent {
+  action: 'backfillPage'
+  cutoffIso: string
+  startKey?: Record<string, unknown> | null
+}
+
+type SelfInvokeEvent = ProcessPodInvokeEvent | BackfillScheduleEvent | BackfillPageEvent
 
 type LambdaEvent = AppSyncEvent | SelfInvokeEvent
 
@@ -105,6 +124,7 @@ type ManageAction =
   | 'assign'
   | 'retry'
   | 'process'
+  | 'backfill'
 
 interface Caller {
   email: string
@@ -139,6 +159,7 @@ interface JobsDoneMessage {
 // Internal full row includes fields not exposed to clients
 interface StoredPodDocument extends PodDocument {
   sourceUrl: string
+  processingLeaseUntil?: string | null
 }
 
 // ── Helper: input parsing ──────────────────────────────────────────────────
@@ -210,7 +231,7 @@ export async function authorize(
     if (!isOwner && !isAdmin) {
       throw new Error('Forbidden: configure requires owner or ADMIN')
     }
-  } else if (action === 'sync' || action === 'assign' || action === 'retry') {
+  } else if (action === 'sync' || action === 'assign' || action === 'retry' || action === 'backfill') {
     if (!isOwner && !isAdmin && !isPagePods) {
       throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${PAGE_PODS_GROUP}`)
     }
@@ -385,7 +406,10 @@ export async function fetchClientDetails(
   if (record.clientId !== clientId) {
     throw new Error('JobsDone client details returned a different clientId')
   }
-  const companyName = typeof record.companyName === 'string' ? record.companyName : null
+  const companyName =
+    typeof record.companyName === 'string' ? record.companyName :
+    typeof record.clientName === 'string' ? record.clientName :
+    null
   return { clientId, companyName }
 }
 
@@ -407,8 +431,9 @@ export function validateConfigInput(input: Record<string, unknown>): {
 
 export async function statusAction(): Promise<PodConnectionStatus> {
   const config = await getConnectionConfig()
-  if (!config) return { configured: false }
-  return { configured: true, clientId: config.clientId, companyName: config.companyName ?? undefined }
+  const backgroundSyncEnabled = process.env.POD_BACKGROUND_SYNC_ENABLED === 'true'
+  if (!config) return { configured: false, backgroundSyncEnabled }
+  return { configured: true, backgroundSyncEnabled, clientId: config.clientId, companyName: config.companyName ?? undefined }
 }
 
 export async function configureAction(
@@ -427,6 +452,9 @@ export async function configureAction(
     clientId,
     companyName: details.companyName ?? current?.companyName ?? null,
   })
+  // A successful configuration starts an async scan of the last-7-days window so the
+  // user does not have to press the manual backfill button.
+  await queueBackfillSchedule()
   return { configured: true, clientId, companyName: details.companyName ?? undefined }
 }
 
@@ -555,17 +583,268 @@ export function stableDocumentId(
 }
 
 export async function queueProcessPod(processPodId: string): Promise<void> {
-  try {
+  await lambda.send(
+    new InvokeCommand({
+      FunctionName: POD_FUNCTION_NAME,
+      InvocationType: 'Event',
+      Payload: Buffer.from(JSON.stringify({ action: 'processPodId', processPodId })),
+    }),
+  )
+}
+
+export async function queueBackfillSchedule(): Promise<void> {
+  await lambda.send(
+    new InvokeCommand({
+      FunctionName: POD_FUNCTION_NAME,
+      InvocationType: 'Event',
+      Payload: Buffer.from(JSON.stringify({ action: 'backfillSchedule' })),
+    }),
+  )
+}
+
+function windowCutoffIso(days: number): string {
+  return new Date(Date.now() - days * MS_PER_DAY).toISOString()
+}
+
+function isExpiredLease(item: StoredPodDocument): boolean {
+  return item.processingLeaseUntil != null && item.processingLeaseUntil < nowIso()
+}
+
+function hasActiveLease(item: StoredPodDocument): boolean {
+  return item.processingLeaseUntil != null && item.processingLeaseUntil >= nowIso()
+}
+
+function isStalePending(item: StoredPodDocument): boolean {
+  if (item.processingStatus !== 'PENDING' || hasActiveLease(item)) return false
+  const staleThreshold = new Date(Date.now() - LEASE_MS).toISOString()
+  return item.updatedAt < staleThreshold
+}
+
+function needsProcessingRefresh(existing: StoredPodDocument | null): boolean {
+  if (!existing) return false
+  if (existing.processingStatus === 'ORIGINAL_ONLY') return false
+  if (existing.processingStatus === 'FAILED') return existing.originalKey != null
+  if (isStalePending(existing)) return true
+  if (existing.processingStatus === 'READY' && existing.enhancedKey == null) return true
+  const isImage = /^image\/(jpeg|png)(;|$)/i.test(existing.contentType ?? '')
+  if (!isImage) return false
+  return (existing.processingVersion ?? 0) < POD_SCAN_VERSION
+}
+
+async function upsertPodDocument(
+  message: JobsDoneMessage,
+  mediaUrl: string,
+  index: number,
+): Promise<{ stored: StoredPodDocument; shouldQueue: boolean }> {
+  const fresh = messageToDocument(message, mediaUrl, index)
+  const existing = await getPodDocument(fresh.id)
+
+  if (!existing) {
+    try {
+      validateMediaUrl(mediaUrl)
+    } catch (err) {
+      fresh.processingStatus = 'FAILED'
+      fresh.processingError = `Attachment not imported: ${err instanceof Error ? err.message : String(err)}`
+    }
+    try {
+      await dynamo.send(
+        new PutItemCommand({
+          TableName: POD_DOCUMENT_TABLE_NAME,
+          Item: marshall(fresh, { removeUndefinedValues: true }),
+          ConditionExpression: 'attribute_not_exists(id)',
+        }),
+      )
+    } catch (err) {
+      if (errorName(err) === 'ConditionalCheckFailedException') {
+        return upsertPodDocument(message, mediaUrl, index)
+      }
+      throw err
+    }
+    return { stored: fresh, shouldQueue: fresh.processingStatus === 'PENDING' }
+  }
+
+  // Preserve manual assignments, archived originals, and any current scan output.
+  // Use a metadata-only update when the row is quiescent; never clear an active lease
+  // or bump updatedAt when a worker already owns the row.
+  const now = nowIso()
+  const shouldQueue = needsProcessingRefresh(existing)
+  const activePending = existing.processingStatus === 'PENDING' && !isExpiredLease(existing)
+
+  if (!shouldQueue && activePending) {
+    return { stored: existing, shouldQueue: false }
+  }
+
+  const metadataFields = [
+    'clientId',
+    'sourceMessageId',
+    'mediaIndex',
+    'companyName',
+    'senderName',
+    'senderContact',
+    'receivedAt',
+    'referenceNumber',
+    'notes',
+    'isAllowed',
+    'fileName',
+    'sourceUrl',
+  ] as const
+  const baseNames: Record<string, string> = { '#updatedAt': 'updatedAt' }
+  const baseValues: Record<string, AttributeValue> = { ':updatedAt': { S: now } }
+  const baseSet = [`#updatedAt = :updatedAt`]
+  for (const field of metadataFields) {
+    const value = fresh[field as keyof StoredPodDocument]
+    baseNames[`#${field}`] = field
+    baseValues[`:${field}`] = marshall({ [field]: value })[field]
+    baseSet.push(`#${field} = :${field}`)
+  }
+
+  if (shouldQueue) {
+    // CAS: only flip to PENDING if the lease is absent or already expired.
+    // This prevents a scheduled refresh from stealing an in-flight worker's row.
+    const queueCondition =
+      'attribute_not_exists(#processingLeaseUntil) OR #processingLeaseUntil < :now'
+    try {
+      await dynamo.send(
+        new UpdateItemCommand({
+          TableName: POD_DOCUMENT_TABLE_NAME,
+          Key: marshall({ id: existing.id }),
+          UpdateExpression:
+            `SET ${baseSet.join(', ')}, #processingStatus = :pending, #processingError = :emptyError, #processingVersion = :emptyVersion REMOVE #processingLeaseUntil`,
+          ExpressionAttributeNames: {
+            ...baseNames,
+            '#processingStatus': 'processingStatus',
+            '#processingError': 'processingError',
+            '#processingVersion': 'processingVersion',
+            '#processingLeaseUntil': 'processingLeaseUntil',
+          },
+          ExpressionAttributeValues: {
+            ...baseValues,
+            ':now': { S: now },
+            ':pending': { S: 'PENDING' },
+            ':emptyError': { NULL: true },
+            ':emptyVersion': { NULL: true },
+          },
+          ConditionExpression: queueCondition,
+        }),
+      )
+    } catch (err) {
+      if (errorName(err) === 'ConditionalCheckFailedException') {
+        console.warn('[pod-actions] upsert race lost for', existing.id)
+        return { stored: existing, shouldQueue: false }
+      }
+      throw err
+    }
+
+    const stored: StoredPodDocument = {
+      ...existing,
+      ...fresh,
+      loadId: existing.loadId,
+      assignedBy: existing.assignedBy,
+      assignedAt: existing.assignedAt,
+      version: existing.version,
+      originalKey: existing.originalKey,
+      enhancedKey: existing.enhancedKey,
+      contentType: existing.contentType ?? fresh.contentType,
+      processingStatus: 'PENDING',
+      processingError: null,
+      processingVersion: null,
+      processingLeaseUntil: undefined,
+      updatedAt: now,
+    }
+    return { stored, shouldQueue: true }
+  }
+
+  // Quiescent metadata refresh: do not touch lease or processing state.
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: POD_DOCUMENT_TABLE_NAME,
+      Key: marshall({ id: existing.id }),
+      UpdateExpression: `SET ${baseSet.join(', ')}`,
+      ExpressionAttributeNames: baseNames,
+      ExpressionAttributeValues: baseValues,
+      ConditionExpression: 'attribute_exists(id)',
+    }),
+  )
+
+  const stored: StoredPodDocument = {
+    ...existing,
+    ...fresh,
+    loadId: existing.loadId,
+    assignedBy: existing.assignedBy,
+    assignedAt: existing.assignedAt,
+    version: existing.version,
+    originalKey: existing.originalKey,
+    enhancedKey: existing.enhancedKey,
+    contentType: existing.contentType ?? fresh.contentType,
+  }
+  return { stored, shouldQueue: false }
+}
+
+// One invocation walks as many pages as its time budget allows (a page is ~0.5 s,
+// so a week of feed normally completes in one call); a continuation hop is only
+// used when the budget runs out. The earlier design - one async self-invoke per
+// page - lost the rest of the walk whenever Lambda dropped a single queued event.
+const BACKFILL_TIME_BUDGET_MS = 120_000
+
+export async function backfillPageAction(
+  input: BackfillPageEvent,
+  deadlineMs: number = Date.now() + BACKFILL_TIME_BUDGET_MS,
+): Promise<void> {
+  const config = await requireConfig()
+  const cutoffIso = input.cutoffIso
+  let startKey: Record<string, unknown> | null | undefined = input.startKey
+  let pages = 0
+  let queued = 0
+  let inWindow = 0
+  let skippedRows = 0
+
+  do {
+    const { messages, lastEvaluatedKey, skipped } = await fetchJobsDoneMessages(config, startKey)
+    pages++
+    skippedRows += skipped
+    for (const message of messages) {
+      // Order across pages is arbitrary; never stop on an old row. Skip it and keep walking.
+      if (message.createdAt < cutoffIso) continue
+      inWindow++
+      for (let i = 0; i < message.mediaUrl.length; i++) {
+        const { stored, shouldQueue } = await upsertPodDocument(message, message.mediaUrl[i], i)
+        if (shouldQueue || stored.processingStatus === 'PENDING') {
+          await queueProcessPod(stored.id)
+          queued++
+        }
+      }
+    }
+    startKey = lastEvaluatedKey ?? null
+  } while (startKey && Date.now() < deadlineMs)
+
+  console.log('[pod-actions] backfill walked:', {
+    pages,
+    inWindow,
+    queued,
+    skippedRows,
+    cutoff: cutoffIso,
+    continued: !!startKey,
+  })
+
+  if (startKey) {
     await lambda.send(
       new InvokeCommand({
         FunctionName: POD_FUNCTION_NAME,
         InvocationType: 'Event',
-        Payload: Buffer.from(JSON.stringify({ action: 'processPodId', processPodId })),
+        Payload: Buffer.from(JSON.stringify({ action: 'backfillPage', cutoffIso, startKey })),
       }),
     )
-  } catch (err) {
-    console.error('[pod-actions] failed to queue processPodId', processPodId, err)
   }
+}
+
+export async function backfillScheduleAction(): Promise<void> {
+  const cutoffIso = windowCutoffIso(BACKFILL_WINDOW_DAYS)
+  await backfillPageAction({ action: 'backfillPage', cutoffIso })
+}
+
+export async function backfillAction(): Promise<{ queued: true }> {
+  await queueBackfillSchedule()
+  return { queued: true }
 }
 
 export async function acquireProcessingLease(id: string): Promise<boolean> {
@@ -697,18 +976,44 @@ export async function processPodDocument(processPodId: string): Promise<void> {
       processingError: null,
       originalKey: item.originalKey,
       contentType: item.contentType,
+      processingVersion: POD_SCAN_VERSION,
+      scanReviewReason: null,
+    })
+    return
+  }
+
+  // If we already have a current-generation enhanced image, keep it and release.
+  const alreadyCurrentImage =
+    /^image\/(jpeg|png)(;|$)/i.test(item.contentType ?? '') &&
+    (item.processingVersion ?? 0) >= POD_SCAN_VERSION &&
+    item.enhancedKey != null &&
+    item.processingStatus === 'READY'
+  if (alreadyCurrentImage) {
+    await releaseProcessingLease(processPodId, {
+      processingStatus: 'READY',
+      processingError: null,
+      originalKey: item.originalKey,
+      enhancedKey: item.enhancedKey,
+      contentType: item.contentType,
+      processingVersion: POD_SCAN_VERSION,
+      scanReviewReason: item.scanReviewReason ?? null,
     })
     return
   }
 
   try {
-    const enhanced = await enhancePodImage(sourceBytes, sourceContentType ?? item.contentType ?? 'image/jpeg')
+    const enhanced = await enhancePodImage(
+      sourceBytes,
+      sourceContentType ?? item.contentType ?? 'image/jpeg',
+    )
     if (!enhanced) {
       await releaseProcessingLease(processPodId, {
         processingStatus: 'ORIGINAL_ONLY',
         processingError: null,
         originalKey: item.originalKey,
         contentType: item.contentType,
+        processingVersion: POD_SCAN_VERSION,
+        scanReviewReason: null,
       })
       return
     }
@@ -719,6 +1024,8 @@ export async function processPodDocument(processPodId: string): Promise<void> {
       originalKey: item.originalKey,
       enhancedKey: enhancedKey(processPodId),
       contentType: item.contentType,
+      processingVersion: enhanced.scanVersion ?? POD_SCAN_VERSION,
+      scanReviewReason: enhanced.scanReviewReason ?? null,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -747,11 +1054,14 @@ export async function fetchJobsDoneMessages(
   return new Promise((resolve, reject) => {
     let settled = false
     let bytesRead = 0
+    let frames = 0
+    const ignored: string[] = []
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true
         cleanup?.()
-        reject(new Error('JobsDone WebSocket timed out waiting for messages'))
+        // Never log payloads: rows carry phone numbers. Counts and reasons only.
+        reject(new Error(`JobsDone WebSocket timed out waiting for messages (frames=${frames}, ignored=${JSON.stringify(ignored.slice(0, 5))})`))
       }
     }, WS_MESSAGE_TIMEOUT_MS)
 
@@ -786,17 +1096,29 @@ export async function fetchJobsDoneMessages(
         }
         return
       }
+      frames++
       let parsed: unknown
       try {
         parsed = JSON.parse(typeof data === 'string' ? data : data.toString('utf-8'))
       } catch {
+        ignored.push('unparseable')
         return
       }
-      if (!parsed || typeof parsed !== 'object') return
+      if (!parsed || typeof parsed !== 'object') { ignored.push('non-object'); return }
       const envelope = parsed as Record<string, unknown>
       const meta = envelope.meta && typeof envelope.meta === 'object' ? (envelope.meta as Record<string, unknown>) : null
-      if (meta?.requestId !== requestId) return
-      if (envelope.action !== 'getMessages') return
+      // JobsDone's catch-all reply is `{action:'error', message}` with no meta; it is
+      // the answer to our request, so fail now rather than waiting for a timeout.
+      if (envelope.action === 'error' && meta == null) {
+        if (!settled) {
+          settled = true
+          cleanup?.()
+          reject(new Error(`JobsDone rejected the feed request: ${String(envelope.message ?? 'unknown error').slice(0, 200)}`))
+        }
+        return
+      }
+      if (meta?.requestId !== requestId) { ignored.push(`requestId:${String(envelope.action)}`); return }
+      if (envelope.action !== 'getMessages') { ignored.push(`action:${String(envelope.action)}`); return }
 
       if (envelope.error != null) {
         if (!settled) {
@@ -820,16 +1142,18 @@ export async function fetchJobsDoneMessages(
         if (!raw || typeof raw !== 'object') { skipped++; continue }
         const msg = raw as Record<string, unknown>
         const createdAt = typeof msg.createdAt === 'string' ? msg.createdAt : null
-        if (typeof msg.id !== 'string' || msg.clientId !== config.clientId || !Array.isArray(msg.mediaUrl) || !createdAt) {
+        if (typeof msg.id !== 'string' || msg.clientId !== config.clientId || !createdAt) {
           skipped++
           console.warn('[pod-actions] skipping malformed or foreign JobsDone row', JSON.stringify({ id: msg.id, clientId: msg.clientId }))
           continue
         }
+        // A text-only SMS has no mediaUrl at all: a message with no attachments, not a bad row.
+        const mediaUrl = Array.isArray(msg.mediaUrl) ? msg.mediaUrl : []
         const toString = (v: unknown): string | null => (typeof v === 'string' ? v : null)
         messages.push({
           id: msg.id,
           clientId: msg.clientId,
-          mediaUrl: msg.mediaUrl.filter((u: unknown): u is string => typeof u === 'string' && u.length > 0),
+          mediaUrl: mediaUrl.filter((u: unknown): u is string => typeof u === 'string' && u.length > 0),
           companyName: toString(msg.companyName),
           senderName: toString(msg.senderName),
           cusNumber: toString(msg.cusNumber),
@@ -852,6 +1176,22 @@ export async function fetchJobsDoneMessages(
         settled = true
         cleanup?.()
         reject(new Error(`JobsDone WebSocket error: ${err.message}`))
+      }
+    })
+
+    ws.on('close', (code: number, reason: Buffer) => {
+      if (!settled) {
+        settled = true
+        cleanup?.()
+        reject(new Error(`JobsDone WebSocket closed before replying (code=${code}, reason=${reason.toString().slice(0, 80)}, frames=${frames})`))
+      }
+    })
+
+    ws.on('unexpected-response', (_req: unknown, res: { statusCode?: number }) => {
+      if (!settled) {
+        settled = true
+        cleanup?.()
+        reject(new Error(`JobsDone WebSocket handshake rejected (HTTP ${res.statusCode})`))
       }
     })
 
@@ -1175,15 +1515,32 @@ export async function retryAction(
 // ── Entry point ────────────────────────────────────────────────────────────
 
 function isSelfInvoke(event: LambdaEvent): event is SelfInvokeEvent {
-  return 'action' in event && event.action === 'processPodId' && 'processPodId' in event
+  return (
+    'action' in event &&
+    (event.action === 'processPodId' || event.action === 'backfillSchedule' || event.action === 'backfillPage')
+  )
 }
 
 export const handler = async (event: LambdaEvent): Promise<unknown> => {
-  console.log('[pod-actions] event:', JSON.stringify({ action: isSelfInvoke(event) ? 'processPodId' : (event as AppSyncEvent).arguments?.action }))
+  const eventAction = isSelfInvoke(event)
+    ? event.action
+    : (event as AppSyncEvent).arguments?.action
+  console.log('[pod-actions] event:', JSON.stringify({ action: eventAction }))
 
   if (isSelfInvoke(event)) {
-    await processPodDocument(event.processPodId)
-    return { ok: true }
+    if (event.action === 'processPodId') {
+      await processPodDocument(event.processPodId)
+      return { ok: true }
+    }
+    if (event.action === 'backfillSchedule') {
+      await backfillScheduleAction()
+      return { ok: true }
+    }
+    if (event.action === 'backfillPage') {
+      await backfillPageAction(event)
+      return { ok: true }
+    }
+    return { ok: false }
   }
 
   const appSyncEvent = event as AppSyncEvent
@@ -1202,6 +1559,9 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
     case 'sync':
       await authorize(action, appSyncEvent.identity)
       return syncAction(input)
+    case 'backfill':
+      await authorize(action, appSyncEvent.identity)
+      return backfillAction()
     case 'assets':
       return assetsAction(input, await authorize(action, appSyncEvent.identity))
     case 'assign':

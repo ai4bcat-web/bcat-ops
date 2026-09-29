@@ -19,6 +19,8 @@ export interface PodDocument {
   enhancedKey?: string | null
   processingStatus: PodProcessingStatus
   processingError?: string | null
+  processingVersion?: number | null
+  scanReviewReason?: string | null
   loadId?: string | null
   assignedBy?: string | null
   assignedAt?: string | null
@@ -31,6 +33,7 @@ export interface PodConnectionStatus {
   configured: boolean
   clientId?: string
   companyName?: string
+  backgroundSyncEnabled?: boolean
 }
 
 export interface PodPage {

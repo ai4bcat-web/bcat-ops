@@ -23,6 +23,8 @@ vi.mock('./scan', () => ({
   enhancePodImage: vi.fn().mockResolvedValue({
     bytes: Buffer.from('enhanced-image'),
     contentType: 'image/jpeg' as const,
+    scanVersion: 1,
+    scanReviewReason: null,
   }),
 }))
 
@@ -66,6 +68,7 @@ let assignAction: HandlerModule['assignAction']
 let assetsAction: HandlerModule['assetsAction']
 let stableDocumentId: HandlerModule['stableDocumentId']
 let processPodDocument: HandlerModule['processPodDocument']
+let backfillPageAction: HandlerModule['backfillPageAction']
 let resetConnectionConfigCache: HandlerModule['resetConnectionConfigCache']
 
 const mockFetch = vi.fn()
@@ -110,6 +113,11 @@ class MemoryStore {
       if (cmp === 'attribute_not_exists(id)') return item == null
       if (cmp === 'attribute_not_exists(processingLeaseUntil)') return item == null || item.processingLeaseUntil == null
       if (cmp === 'attribute_not_exists(contentType)') return item == null || item.contentType == null
+      if (cmp.startsWith('attribute_not_exists(#')) {
+        const placeholder = cmp.slice('attribute_not_exists('.length, -1)
+        const name = names[placeholder] ?? placeholder
+        return item == null || item[name] == null
+      }
       const m = cmp.match(/^(#\w+|\S+)\s*(=|<|>)\s*(:\w+|#\w+|\S+)$/)
       if (!m) continue
       const [_, leftExpr, op, rightExpr] = m
@@ -332,6 +340,7 @@ beforeAll(async () => {
   process.env.POD_CONNECTION_PARAM_NAME = '/bcat/pods/pool/connection'
   process.env.POD_FUNCTION_NAME = 'pod-actions-test'
   process.env.USER_POOL_ID = 'us-east-1_testpool'
+  process.env.POD_BACKGROUND_SYNC_ENABLED = 'true'
 
   const mod = await import('./handler')
   handler = mod.handler
@@ -345,6 +354,7 @@ beforeAll(async () => {
   assetsAction = mod.assetsAction
   stableDocumentId = mod.stableDocumentId
   processPodDocument = mod.processPodDocument
+  backfillPageAction = mod.backfillPageAction
   resetConnectionConfigCache = mod.resetConnectionConfigCache
 
   dynamoSpy = vi.spyOn(DynamoDBClient.prototype, 'send').mockImplementation((cmd: unknown) => {
@@ -462,12 +472,13 @@ describe('configureAction + statusAction', () => {
     setSsmConfig(null)
     const result = await statusAction()
     expect(result.configured).toBe(false)
+    expect(result.backgroundSyncEnabled).toBe(true)
   })
 
   it('status returns tenant info without exposing the API key', async () => {
     setSsmConfig({ apiKey: 'secret-api-key', clientId: 'tenant-1', companyName: 'Best Care' })
     const result = await statusAction()
-    expect(result).toEqual({ configured: true, clientId: 'tenant-1', companyName: 'Best Care' })
+    expect(result).toEqual({ configured: true, clientId: 'tenant-1', companyName: 'Best Care', backgroundSyncEnabled: true })
   })
 
   it('validates JobsDone before storing config', async () => {
@@ -502,7 +513,7 @@ describe('configureAction + statusAction', () => {
 
 // ── sync / dedupe / pagination ─────────────────────────────────────────────
 describe('syncAction', () => {
-  function makeWsInstance(opts: { messages?: unknown[]; lastEvaluatedKey?: unknown; error?: Error }) {
+  function makeWsInstance(opts: { messages?: unknown[]; lastEvaluatedKey?: unknown; error?: Error; serverError?: string }) {
     let openCb: (() => void) | null = null
     let messageCb: ((data: string | Buffer) => void) | null = null
     let errorCb: ((err: Error) => void) | null = null
@@ -522,6 +533,11 @@ describe('syncAction', () => {
               return
             }
             if (!messageCb) return
+            if (opts.serverError) {
+              // JobsDone's catch-all reply carries no meta and no requestId.
+              messageCb(JSON.stringify({ action: 'error', message: opts.serverError }))
+              return
+            }
             // unrelated event should be ignored
             messageCb(JSON.stringify({ action: 'newMessage', data: { id: 'ignored' } }))
             messageCb(JSON.stringify({ action: 'getMessages', data: opts.messages ?? [], lastEvaluatedKey: opts.lastEvaluatedKey ?? null, meta: { requestId } }))
@@ -539,6 +555,23 @@ describe('syncAction', () => {
   beforeEach(() => {
     setSsmConfig({ apiKey: 'valid-key', clientId: 'tenant-1' })
     mockFetch.mockImplementation(async () => new Response(JSON.stringify({ clientId: 'tenant-1' }), { status: 200 }))
+  })
+
+  it('surfaces a JobsDone-side error frame immediately instead of waiting for the timeout', async () => {
+    makeWsInstance({ serverError: '413' })
+    const started = Date.now()
+    await expect(syncAction({})).rejects.toThrow(/JobsDone rejected the feed request: 413/)
+    expect(Date.now() - started).toBeLessThan(5_000)
+  })
+
+  it('requests pages small enough for a single API Gateway WebSocket frame', async () => {
+    let sent: { limit?: number } = {}
+    makeWsInstance({ messages: [] })
+    const inner = wsHandlers.send
+    wsHandlers.send = (data) => { sent = JSON.parse(data); inner(data) }
+    await syncAction({})
+    // ~600 B/row against the 128 KB frame cap; 250 rows produced HTTP 413 upstream.
+    expect(sent.limit).toBeLessThanOrEqual(100)
   })
 
   it('imports attachments and enqueues async processing', async () => {
@@ -595,8 +628,9 @@ describe('syncAction', () => {
   it('skips malformed and foreign rows but still imports the good ones on the same page', async () => {
     makeWsInstance({
       messages: [
-        { id: 'msg-bad', clientId: 'tenant-1', mediaUrl: 'not-an-array' },
+        { id: 'msg-bad', clientId: 'tenant-1', mediaUrl: ['https://media.jobsdone.io/no-date.jpg'] }, // no createdAt
         { id: 'msg-foreign', clientId: 'tenant-2', mediaUrl: ['https://media.jobsdone.io/foreign.jpg'], createdAt: '2026-09-28T12:00:00Z' },
+        { id: 'msg-text-only', clientId: 'tenant-1', messageBody: 'on my way', createdAt: '2026-09-28T12:00:00Z' }, // ordinary SMS, nothing to import
         { id: 'msg-good', clientId: 'tenant-1', mediaUrl: ['https://media.jobsdone.io/good.jpg'], createdAt: '2026-09-28T12:00:00Z' },
       ],
     })
@@ -750,6 +784,7 @@ describe('processPodDocument', () => {
     const pod = memory.pods.get(id)!
     expect(pod.processingStatus).toBe('READY')
     expect(pod.processingError).toBeUndefined()
+    expect(pod.processingVersion).toBe(1)
     expect(pod.originalKey).toBe(`pods/${id}/original`)
     expect(pod.enhancedKey).toBe(`pods/${id}/enhanced.jpg`)
   })
@@ -770,5 +805,293 @@ describe('processPodDocument', () => {
 
     await processPodDocument(id)
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('skips reprocessing an image already at the current scanner version', async () => {
+    const id = 'pod-current'
+    memory.pods.set(id, {
+      id,
+      clientId: 'tenant-1',
+      processingStatus: 'READY',
+      processingVersion: 1,
+      originalKey: `pods/${id}/original`,
+      enhancedKey: `pods/${id}/enhanced.jpg`,
+      contentType: 'image/jpeg',
+      sourceUrl: 'https://media.jobsdone.io/file1.jpg',
+      version: 2,
+    })
+    memory.pods.get(id)!.originalBytes = Buffer.from('image-bytes')
+
+    await processPodDocument(id)
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(memory.pods.get(id)!.processingStatus).toBe('READY')
+  })
+})
+
+// ── backfill: schedule, manual trigger, cutoff, dedupe, replay ─────────────────
+
+describe('backfillAction + backfillPageAction', () => {
+  type WsPage = { messages: unknown[]; lastEvaluatedKey?: unknown }
+  /** Serves one page per WebSocket connection, in order, like JobsDone's cursor chain. */
+  function wsBackfill(first: WsPage, ...rest: WsPage[]) {
+    const pages = [first, ...rest]
+    let served = 0
+    wsHandlers = {
+      on(event, cb) {
+        if (event === 'message') {
+          const page = pages[Math.min(served, pages.length - 1)]
+          served++
+          const messageCb = cb as (data: string | Buffer) => void
+          Promise.resolve().then(() => {
+            messageCb(JSON.stringify({
+              action: 'getMessages',
+              data: page.messages,
+              lastEvaluatedKey: page.lastEvaluatedKey ?? null,
+              meta: { requestId },
+            }))
+          })
+        }
+        if (event === 'open') Promise.resolve().then(() => (cb as () => void)())
+      },
+      send(data) {
+        const parsed = JSON.parse(data as string) as { meta?: { requestId?: string } }
+        requestId = parsed.meta?.requestId ?? ''
+      },
+      close() {},
+    }
+    let requestId = ''
+    return { get connections() { return served } }
+  }
+  const backfillInvokes = (): Record<string, unknown>[] => lambdaSpy.mock.calls
+    .map((c: unknown[]) => JSON.parse(((c[0] as { input: { Payload: Buffer } }).input.Payload).toString()) as Record<string, unknown>)
+    .filter((p: Record<string, unknown>) => p.action === 'backfillPage')
+
+  beforeEach(() => {
+    setSsmConfig({ apiKey: 'valid-key', clientId: 'tenant-1' })
+    mockFetch.mockImplementation(async () => new Response(JSON.stringify({ clientId: 'tenant-1' }), { status: 200 }))
+  })
+
+  it('rejects an unauthorized dispatcher for the backfill action', async () => {
+    await expect(handler(event('backfill', {}, DISPATCHER_IDENTITY))).rejects.toThrow(/page-pods/)
+    const lambdaInvoke = findLambdaCommand(InvokeCommand)
+    expect(lambdaInvoke).toBeUndefined()
+  })
+
+  it('manually queued backfill returns {queued:true} and fires a schedule event', async () => {
+    vi.clearAllMocks()
+    const result = await handler(event('backfill', {}, PAGE_PODS_IDENTITY))
+    expect(result).toEqual({ queued: true })
+    const invoke = findLambdaCommand(InvokeCommand)
+    expect(invoke).toBeDefined()
+    expect(JSON.parse((invoke as unknown as { input: { Payload: Buffer } }).input.Payload.toString())).toEqual({ action: 'backfillSchedule' })
+  })
+
+  it('imports an in-window message and queues processing', async () => {
+    wsBackfill({
+      messages: [{
+        id: 'msg-in',
+        clientId: 'tenant-1',
+        mediaUrl: ['https://media.jobsdone.io/in.jpg'],
+        createdAt: '2026-09-25T12:00:00.000Z',
+        isAllowed: true,
+      }],
+    })
+
+    await backfillPageAction({ action: 'backfillPage', cutoffIso: '2026-09-23T00:00:00.000Z' })
+
+    const rows = Array.from(memory.pods.values())
+    expect(rows).toHaveLength(1)
+    expect(rows[0].processingStatus).toBe('PENDING')
+    const invoke = findLambdaCommand(InvokeCommand)
+    expect(invoke).toBeDefined()
+    expect(JSON.parse((invoke as unknown as { input: { Payload: Buffer } }).input.Payload.toString())).toEqual({
+      action: 'processPodId',
+      processPodId: rows[0].id,
+    })
+  })
+
+  it('walks the entire cursor chain in one invocation even when the first page is old', async () => {
+    // Regression: the underlying clientId-index has no sort key, so page order is
+    // arbitrary. We must not stop at the first old row; we must follow every cursor.
+    const feed = wsBackfill(
+      { messages: [{ id: 'msg-old-first', clientId: 'tenant-1', mediaUrl: ['https://media.jobsdone.io/old-first.jpg'], createdAt: '2026-09-20T12:00:00.000Z' }], lastEvaluatedKey: { clientId: 'tenant-1', sk: 'page1' } },
+      { messages: [], lastEvaluatedKey: { clientId: 'tenant-1', sk: 'page2' } },
+      { messages: [{ id: 'msg-newer', clientId: 'tenant-1', mediaUrl: ['https://media.jobsdone.io/newer.jpg'], createdAt: '2026-09-23T12:00:00.000Z' }] },
+    )
+
+    await backfillPageAction({ action: 'backfillPage', cutoffIso: '2026-09-22T00:00:00.000Z' })
+
+    expect(feed.connections).toBe(3)
+    const urls = Array.from(memory.pods.values()).map((p: Record<string, unknown>) => p.sourceUrl)
+    expect(urls).not.toContain('https://media.jobsdone.io/old-first.jpg')
+    expect(urls).toContain('https://media.jobsdone.io/newer.jpg')
+    // The whole chain fit in the budget: no async hop was needed.
+    expect(backfillInvokes()).toEqual([])
+  })
+
+  it('hands the remaining cursor to a continuation only when the time budget is spent', async () => {
+    const page1Key = { clientId: 'tenant-1', sk: 'page1' }
+    const feed = wsBackfill(
+      { messages: [{ id: 'msg-1', clientId: 'tenant-1', mediaUrl: ['https://media.jobsdone.io/1.jpg'], createdAt: '2026-09-25T12:00:00.000Z' }], lastEvaluatedKey: page1Key },
+      { messages: [] },
+    )
+
+    // Deadline already passed: exactly one page is read, then the walk is handed off.
+    await backfillPageAction({ action: 'backfillPage', cutoffIso: '2026-09-22T00:00:00.000Z' }, Date.now() - 1)
+
+    expect(feed.connections).toBe(1)
+    expect(backfillInvokes()).toEqual([{ action: 'backfillPage', cutoffIso: '2026-09-22T00:00:00.000Z', startKey: page1Key }])
+    expect(Array.from(memory.pods.values())).toHaveLength(1)
+  })
+
+  it('does not clear an active worker lease during scheduled metadata refresh', async () => {
+    const existingId = stableDocumentId('tenant-1', 'msg-active', 'https://media.jobsdone.io/active.jpg', 0)
+    const leaseUntil = new Date(Date.now() + 4 * 60 * 1000).toISOString() // active lease
+    memory.pods.set(existingId, {
+      id: existingId,
+      clientId: 'tenant-1',
+      sourceMessageId: 'msg-active',
+      mediaIndex: 0,
+      companyName: 'Old',
+      senderName: 'Old',
+      senderContact: 'Old',
+      referenceNumber: 'Old',
+      notes: 'Old',
+      fileName: 'active.jpg',
+      isAllowed: true,
+      receivedAt: '2026-09-25T12:00:00.000Z',
+      sourceUrl: 'https://media.jobsdone.io/active.jpg',
+      processingStatus: 'PENDING',
+      processingLeaseUntil: leaseUntil,
+      version: 1,
+      createdAt: '2026-09-25T12:00:00.000Z',
+      updatedAt: '2026-09-25T12:00:00.000Z',
+    })
+
+    wsBackfill({
+      messages: [{
+        id: 'msg-active',
+        clientId: 'tenant-1',
+        mediaUrl: ['https://media.jobsdone.io/active.jpg'],
+        createdAt: '2026-09-25T12:00:00.000Z',
+        companyName: 'Best Care',
+      }],
+    })
+
+    await backfillPageAction({ action: 'backfillPage', cutoffIso: '2026-09-22T00:00:00.000Z' })
+
+    const pod = memory.pods.get(existingId)!
+    expect(pod.processingStatus).toBe('PENDING')
+    expect(pod.processingLeaseUntil).toBe(leaseUntil)
+    expect(pod.updatedAt).toBe('2026-09-25T12:00:00.000Z')
+    expect(pod.companyName).toBe('Old') // metadata refresh skipped to protect active worker
+  })
+
+  it('recovers a stale PENDING document with no active lease', async () => {
+    const existingId = stableDocumentId('tenant-1', 'msg-stale', 'https://media.jobsdone.io/stale.jpg', 0)
+    memory.pods.set(existingId, {
+      id: existingId,
+      clientId: 'tenant-1',
+      sourceMessageId: 'msg-stale',
+      mediaIndex: 0,
+      companyName: 'Old',
+      senderName: 'Old',
+      senderContact: 'Old',
+      referenceNumber: 'Old',
+      notes: 'Old',
+      fileName: 'stale.jpg',
+      isAllowed: true,
+      receivedAt: '2026-09-25T12:00:00.000Z',
+      sourceUrl: 'https://media.jobsdone.io/stale.jpg',
+      processingStatus: 'PENDING',
+      originalKey: `pods/${existingId}/original`,
+      contentType: 'image/jpeg',
+      version: 1,
+      createdAt: '2026-09-25T12:00:00.000Z',
+      updatedAt: '2026-09-20T12:00:00.000Z', // older than lease threshold
+    })
+    memory.pods.get(existingId)!.originalBytes = Buffer.from('archived')
+
+    wsBackfill({
+      messages: [{
+        id: 'msg-stale',
+        clientId: 'tenant-1',
+        mediaUrl: ['https://media.jobsdone.io/stale.jpg'],
+        createdAt: '2026-09-25T12:00:00.000Z',
+        companyName: 'Best Care',
+      }],
+    })
+
+    await backfillPageAction({ action: 'backfillPage', cutoffIso: '2026-09-22T00:00:00.000Z' })
+
+    const pod = memory.pods.get(existingId)!
+    expect(pod.processingStatus).toBe('PENDING')
+    expect(pod.processingVersion).toBeNull()
+    expect(pod.companyName).toBe('Best Care')
+
+    const invokes = lambdaSpy.mock.calls.map((c: unknown[]) => JSON.parse(((c[0] as { input: { Payload: Buffer } }).input.Payload).toString()))
+    expect(invokes.some((p: unknown) => {
+      const payload = p as { action?: string; processPodId?: string }
+      return payload.action === 'processPodId' && payload.processPodId === existingId
+    })).toBe(true)
+  })
+
+  it('replays an existing document at a lower scanner version without losing manual assignments', async () => {
+    const existingId = stableDocumentId('tenant-1', 'msg-replay', 'https://media.jobsdone.io/replay.jpg', 0)
+    memory.pods.set(existingId, {
+      id: existingId,
+      clientId: 'tenant-1',
+      sourceMessageId: 'msg-replay',
+      mediaIndex: 0,
+      companyName: 'Old',
+      senderName: 'Old',
+      senderContact: 'Old',
+      referenceNumber: 'Old',
+      notes: 'Old',
+      fileName: 'replay.jpg',
+      isAllowed: true,
+      receivedAt: '2026-09-25T12:00:00.000Z',
+      sourceUrl: 'https://media.jobsdone.io/replay.jpg',
+      processingStatus: 'READY',
+      processingVersion: 0,
+      originalKey: `pods/${existingId}/original`,
+      enhancedKey: `pods/${existingId}/enhanced.jpg`,
+      contentType: 'image/jpeg',
+      loadId: 'load-kept',
+      assignedBy: 'dispatcher@bcatcorp.com',
+      assignedAt: '2026-09-25T13:00:00.000Z',
+      version: 3,
+      createdAt: '2026-09-25T12:00:00.000Z',
+      updatedAt: '2026-09-25T12:00:00.000Z',
+    })
+    memory.pods.get(existingId)!.originalBytes = Buffer.from('archived-bytes')
+
+    wsBackfill({
+      messages: [{
+        id: 'msg-replay',
+        clientId: 'tenant-1',
+        mediaUrl: ['https://media.jobsdone.io/replay.jpg'],
+        createdAt: '2026-09-25T12:00:00.000Z',
+        companyName: 'Best Care',
+        senderName: 'Driver',
+        isAllowed: true,
+      }],
+    })
+
+    await backfillPageAction({ action: 'backfillPage', cutoffIso: '2026-09-22T00:00:00.000Z' })
+
+    const pod = memory.pods.get(existingId)!
+    expect(pod.loadId).toBe('load-kept')
+    expect(pod.assignedBy).toBe('dispatcher@bcatcorp.com')
+    expect(pod.version).toBe(3)
+    expect(pod.processingStatus).toBe('PENDING')
+    expect(pod.processingVersion).toBeNull()
+    expect(pod.companyName).toBe('Best Care')
+
+    const invokes = lambdaSpy.mock.calls.map((c: unknown[]) => JSON.parse(((c[0] as { input: { Payload: Buffer } }).input.Payload).toString()))
+    expect(invokes.some((p: unknown) => {
+      const payload = p as { action?: string; processPodId?: string }
+      return payload.action === 'processPodId' && payload.processPodId === existingId
+    })).toBe(true)
   })
 })

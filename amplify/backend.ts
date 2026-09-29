@@ -43,6 +43,7 @@ import { carrierBlastWebhook } from './functions/carrier-blast-webhook/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
+import { configurePodScanner } from './podScanner.js'
 
 const backend = defineBackend({
   auth,
@@ -1057,6 +1058,21 @@ podActionsFn.addToRolePolicy(
   }),
 )
 
+// Scanner layer/env wiring and memory/timeout for document enhancement.
+configurePodScanner(podActionsFn)
+
+// Background sync schedule: every 5 minutes, newest-first last-7-days ingestion.
+// The handler reads POD_BACKGROUND_SYNC_ENABLED to report whether the schedule is active.
+const podBackgroundSyncRule = new Rule(podActionsFn.stack, 'PodBackgroundSyncRule', {
+  schedule:    Schedule.rate(Duration.minutes(5)),
+  description: 'JobsDone PODs: backfill last-7-days every 5 minutes',
+})
+podBackgroundSyncRule.addTarget(new EventsLambdaTarget(podActionsFn, {
+  event: RuleTargetInput.fromObject({ action: 'backfillSchedule' }),
+}))
+
+podActionsFn.addEnvironment('POD_BACKGROUND_SYNC_ENABLED', process.env.BCAT_ISOLATED_PREVIEW !== 'true' ? 'true' : 'false')
+
 // ── Isolated preview guard ──────────────────────────────────────────────────
 // A sandbox or feature-branch stack deployed with BCAT_ISOLATED_PREVIEW=true must never
 // reach the outside world: every schedule is disabled, the Load-stream consumer is created disabled,
@@ -1071,6 +1087,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
   for (const rule of [
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
     faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule, carrierBlastRule,
+    podBackgroundSyncRule,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }

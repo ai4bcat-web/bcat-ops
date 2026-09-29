@@ -33,7 +33,9 @@ function usePodAssets(doc: PodDocument) {
 function statusBadge(doc: PodDocument) {
   switch (doc.processingStatus) {
     case 'READY':
-      return { label: 'Enhanced', color: '#15803d', bg: '#f0fdf4', icon: CheckCircle2 }
+      return doc.scanReviewReason
+        ? { label: 'Review scan', color: '#b45309', bg: '#fffbeb', icon: AlertCircle }
+        : { label: 'Enhanced', color: '#15803d', bg: '#f0fdf4', icon: CheckCircle2 }
     case 'ORIGINAL_ONLY':
       return { label: 'Original only', color: '#0369a1', bg: '#f0f9ff', icon: ImageIcon }
     case 'PENDING':
@@ -245,6 +247,11 @@ export function PodCard({
           </div>
         )}
 
+        {doc.scanReviewReason && (
+          <div className="text-xs text-amber-800 bg-amber-50 rounded-md px-2 py-1.5">
+            Review scan: {doc.scanReviewReason}
+          </div>
+        )}
         {/* Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 6 }}>
           <PodActionBtn onClick={() => onPreview(doc)} icon={<Eye size={13} />} label="View" />
