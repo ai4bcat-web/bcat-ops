@@ -65,6 +65,6 @@ export async function getPodSenderMappings(): Promise<{ items: PodSenderMapping[
   return podAction<{ items: PodSenderMapping[] }>('senderMappings', {})
 }
 
-export async function setPodSenderMapping(input: { phone: string; senderName: string; driverId: string | null }): Promise<{ item?: PodSenderMapping; deleted?: boolean }> {
-  return podAction<{ item?: PodSenderMapping; deleted?: boolean }>('setSenderMapping', input)
+export async function setPodSenderMapping(input: { phone: string; senderName: string; driverId: string | null }): Promise<{ item?: PodSenderMapping; deleted?: boolean; senderKey?: string }> {
+  return podAction<{ item?: PodSenderMapping; deleted?: boolean; senderKey?: string }>('setSenderMapping', input)
 }

@@ -1516,14 +1516,6 @@ export async function retryAction(
   return { item: serializeStoredPodDocument(updated) }
 }
 
-function phoneDigits(s: string | null | undefined): string {
-  return (s ?? '').replace(/\D/g, '').slice(-10)
-}
-
-function alphaTokens(s: string | null | undefined): string[] {
-  return (s ?? '').toLowerCase().match(/[a-z]+/g) ?? []
-}
-
 export interface PodSenderMapping {
   clientId: string
   senderKey: string
@@ -1531,6 +1523,22 @@ export interface PodSenderMapping {
   driverId: string
   updatedBy: string
   updatedAt: string
+}
+
+function _phoneDigits(s: string | null | undefined): string {
+  return (s ?? '').replace(/\D/g, '').slice(-10)
+}
+
+function _nameKey(s: string | null | undefined): string {
+  return ((s ?? '').toLowerCase().match(/[a-z]+/g) ?? []).join('')
+}
+
+function senderKey(doc: { senderName: string; senderContact: string }): string {
+  const phone = _phoneDigits(doc.senderContact)
+  if (phone.length === 10) return `phone:${phone}`
+  const name = _nameKey(doc.senderName)
+  if (name.length >= 2) return `name:${name}`
+  return `name:${(doc.senderName ?? 'unknown').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-') || 'unknown'}`
 }
 
 function serializeMapping(item: Record<string, AttributeValue>): PodSenderMapping {
@@ -1559,17 +1567,15 @@ export async function senderMappingsAction(): Promise<{ items: PodSenderMapping[
 export async function setSenderMappingAction(
   input: Record<string, unknown>,
   caller: Caller,
-): Promise<{ item?: PodSenderMapping; deleted?: boolean }> {
+): Promise<{ item?: PodSenderMapping; deleted?: boolean; senderKey?: string }> {
   assertGlobalAccess(caller)
   const config = await requireConfig()
-  const phone = phoneDigits(assertString(input.phone, 'phone'))
-  const name = alphaTokens(assertString(input.senderName, 'senderName', 200)).join('')
-  // Prefer phone key when present; otherwise fall back to normalized name.
-  const key = phone.length === 10 ? `phone:${phone}` : `name:${name || (input.senderName as string).toLowerCase().trim().replace(/\s+/g, '-')}`
-  if (key === 'name:') {
-    throw new Error('Mapping requires a phone number with at least 10 digits or a sender name')
-  }
   const senderName = assertString(input.senderName, 'senderName', 200)
+  const senderContact = typeof input.phone === 'string' ? input.phone : ''
+  const key = senderKey({ senderName, senderContact })
+  if (key === 'name:unknown' || key === 'name:' || key === 'name:-') {
+    throw new Error('Mapping requires a sender name or phone number')
+  }
   const driverId = input.driverId != null ? assertString(input.driverId, 'driverId') : null
   const now = nowIso()
 
@@ -1578,7 +1584,7 @@ export async function setSenderMappingAction(
       TableName: POD_SENDER_MAPPING_TABLE_NAME,
       Key: marshall({ clientId: config.clientId, senderKey: key }),
     }))
-    return { deleted: true }
+    return { deleted: true, senderKey: key }
   }
 
   const mapping: PodSenderMapping = {
@@ -1593,7 +1599,7 @@ export async function setSenderMappingAction(
     TableName: POD_SENDER_MAPPING_TABLE_NAME,
     Item: marshall(mapping),
   }))
-  return { item: mapping }
+  return { item: mapping, senderKey: key }
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────

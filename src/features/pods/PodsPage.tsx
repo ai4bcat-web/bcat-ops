@@ -503,14 +503,16 @@ export function PodsPage() {
         />
       )}
 
-      <PodSenderMappingDialog
-        open={showMapDialog}
-        onClose={() => setShowMapDialog(false)}
-        docs={docs}
-        drivers={drivers}
-        mappings={senderMappings}
-        onSave={saveSenderMapping}
-      />
+      {showMapDialog && (
+        <PodSenderMappingDialog
+          open
+          onClose={() => setShowMapDialog(false)}
+          docs={docs}
+          drivers={drivers}
+          mappings={senderMappings}
+          onSave={saveSenderMapping}
+        />
+      )}
       <LoadDrawer />
     </div>
   )

@@ -137,16 +137,7 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
   }, [])
 
   const saveSenderMapping = useCallback(async (input: { phone: string; senderName: string; driverId: string | null }) => {
-    const result = await setPodSenderMapping(input)
-    if (result.item) {
-      setSenderMappings((prev) => {
-        const filtered = prev.filter((m) => m.senderKey !== result.item!.senderKey)
-        return [...filtered, result.item!]
-      })
-    } else if (result.deleted) {
-      const key = input.phone ? `phone:${(input.phone ?? '').replace(/\D/g, '').slice(-10)}` : `name:${(input.senderName ?? '').toLowerCase().replace(/[^a-z]+/g, '')}`
-      setSenderMappings((prev) => prev.filter((m) => m.senderKey !== key))
-    }
+    await setPodSenderMapping(input)
     await refreshSenderMappings()
   }, [refreshSenderMappings])
 

@@ -26,6 +26,12 @@ describe('matchPodDriver', () => {
     // Backend says Lalo's phone -> Jason Smith (d2), even though phone would not match anyone.
     expect(matchPodDriver({ senderName: 'Lalo Cortez', senderContact: '+12247136044' }, [jason, chuck], [mapping])).toBe(jason)
   })
+  it('maps email-only senders by normalized name', () => {
+    const mapping: PodSenderMapping = {
+      clientId: 'c1', senderKey: 'name:lalocortez', senderName: 'Lalo Cortez', driverId: 'd2', updatedBy: '', updatedAt: '',
+    }
+    expect(matchPodDriver({ senderName: 'Lalo Cortez', senderContact: 'lalo@jobsdone.app' }, [jason, chuck], [mapping])).toBe(jason)
+  })
   it('falls back to roster phone when a stale mapping points to a missing driver', () => {
     const stale: PodSenderMapping = {
       clientId: 'c1', senderKey: 'phone:7735550101', senderName: 'Chuck', driverId: 'gone', updatedBy: '', updatedAt: '',

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest'
 import {
   DynamoDBClient,
+  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
@@ -69,6 +70,8 @@ let assetsAction: HandlerModule['assetsAction']
 let stableDocumentId: HandlerModule['stableDocumentId']
 let processPodDocument: HandlerModule['processPodDocument']
 let backfillPageAction: HandlerModule['backfillPageAction']
+let senderMappingsAction: HandlerModule['senderMappingsAction']
+let setSenderMappingAction: HandlerModule['setSenderMappingAction']
 let resetConnectionConfigCache: HandlerModule['resetConnectionConfigCache']
 
 const mockFetch = vi.fn()
@@ -84,6 +87,29 @@ let ssmSpy: ReturnType<typeof vi.spyOn>
 class MemoryStore {
   pods = new Map<string, Record<string, unknown>>()
   loads = new Map<string, Record<string, unknown>>()
+  mappings = new Map<string, Record<string, unknown>>()
+
+  private mappingKey(clientId: string, senderKey: string): string {
+    return `${clientId}#${senderKey}`
+  }
+
+  getMapping(clientId: string, senderKey: string): Record<string, unknown> | undefined {
+    return this.mappings.get(this.mappingKey(clientId, senderKey))
+  }
+
+  putMapping(item: Record<string, unknown>) {
+    const clientId = item.clientId as string
+    const senderKey = item.senderKey as string
+    this.mappings.set(this.mappingKey(clientId, senderKey), item)
+  }
+
+  deleteMapping(clientId: string, senderKey: string) {
+    this.mappings.delete(this.mappingKey(clientId, senderKey))
+  }
+
+  queryMappings(clientId: string): Record<string, unknown>[] {
+    return Array.from(this.mappings.values()).filter((m) => m.clientId === clientId)
+  }
   private tableFor(cmd: { input: { TableName?: string } }) {
     return cmd.input.TableName as string
   }
@@ -179,20 +205,33 @@ class MemoryStore {
     }
   }
   getItem(cmd: InstanceType<typeof GetItemCommand>) {
-    const key = this.keyFor({ input: cmd.input })
-    if (this.tableFor({ input: cmd.input }) === process.env.LOAD_TABLE_NAME) {
+    const table = this.tableFor({ input: cmd.input })
+    if (table === process.env.LOAD_TABLE_NAME) {
+      const key = unmarshall(cmd.input.Key as Record<string, AttributeValue>).id as string
       return { Item: this.loads.has(key) ? marshall(this.loads.get(key)!) : undefined }
     }
+    if (table === process.env.POD_SENDER_MAPPING_TABLE_NAME) {
+      const key = unmarshall(cmd.input.Key as Record<string, AttributeValue>)
+      const item = this.getMapping(key.clientId as string, key.senderKey as string)
+      return { Item: item ? marshall(item) : undefined }
+    }
+    const key = this.keyFor({ input: cmd.input })
     return { Item: this.pods.has(key) ? marshall(this.pods.get(key)!) : undefined }
   }
   putItem(cmd: InstanceType<typeof PutItemCommand>) {
-    const key = unmarshall(cmd.input.Item as Record<string, AttributeValue>).id as string
+    const table = this.tableFor({ input: cmd.input })
+    const item = unmarshall(cmd.input.Item as Record<string, AttributeValue>)
+    if (table === process.env.POD_SENDER_MAPPING_TABLE_NAME) {
+      this.putMapping(item)
+      return {}
+    }
+    const key = item.id as string
     if (cmd.input.ConditionExpression === 'attribute_not_exists(id)' && this.pods.has(key)) {
       const err = new Error('conditional')
       ;(err as unknown as Record<string, string>).name = 'ConditionalCheckFailedException'
       throw err
     }
-    this.pods.set(key, unmarshall(cmd.input.Item as Record<string, AttributeValue>))
+    this.pods.set(key, item)
     return {}
   }
   updateItem(cmd: InstanceType<typeof UpdateItemCommand>) {
@@ -209,13 +248,18 @@ class MemoryStore {
     return {}
   }
   query(cmd: InstanceType<typeof QueryCommand>) {
-    const index = cmd.input.IndexName
+    const table = this.tableFor({ input: cmd.input })
     const exprValues = Object.fromEntries(
       Object.entries(cmd.input.ExpressionAttributeValues ?? {} as Record<string, AttributeValue>).map(([k, v]) => [
         k,
         unmarshall({ __v: v }).__v,
       ]),
     ) as Record<string, unknown>
+    if (table === process.env.POD_SENDER_MAPPING_TABLE_NAME) {
+      const all = this.queryMappings(exprValues[':clientId'] as string)
+      return { Items: all.map((item) => marshall(item)) }
+    }
+    const index = cmd.input.IndexName
     const all = Array.from(this.pods.values()).filter((p) => {
       if (index === 'podDocumentsByClientIdAndReceivedAt') return p.clientId === exprValues[':clientId']
       if (index === 'podDocumentsByLoadIdAndReceivedAt') return p.loadId === exprValues[':loadId']
@@ -229,6 +273,12 @@ class MemoryStore {
     const start = 0
     const page = filtered.slice(start, start + limit)
     return { Items: page.map((item) => marshall(item)) }
+  }
+
+  deleteItem(cmd: InstanceType<typeof DeleteItemCommand>) {
+    const item = unmarshall(cmd.input.Key as Record<string, AttributeValue>)
+    this.deleteMapping(item.clientId as string, item.senderKey as string)
+    return {}
   }
   transactWriteItems(cmd: InstanceType<typeof TransactWriteItemsCommand>) {
     const updates: { key: string; item: Record<string, unknown> }[] = []
@@ -335,6 +385,7 @@ function findLambdaCommand<T>(cls: abstract new (...args: never[]) => T): T | un
 
 beforeAll(async () => {
   process.env.POD_DOCUMENT_TABLE_NAME = 'PodDocument-test'
+  process.env.POD_SENDER_MAPPING_TABLE_NAME = 'PodSenderMapping-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
   process.env.BUCKET_NAME = 'bcat-test'
   process.env.POD_CONNECTION_PARAM_NAME = '/bcat/pods/pool/connection'
@@ -355,6 +406,8 @@ beforeAll(async () => {
   stableDocumentId = mod.stableDocumentId
   processPodDocument = mod.processPodDocument
   backfillPageAction = mod.backfillPageAction
+  senderMappingsAction = mod.senderMappingsAction
+  setSenderMappingAction = mod.setSenderMappingAction
   resetConnectionConfigCache = mod.resetConnectionConfigCache
 
   dynamoSpy = vi.spyOn(DynamoDBClient.prototype, 'send').mockImplementation((cmd: unknown) => {
@@ -362,6 +415,7 @@ beforeAll(async () => {
     if (cmd instanceof PutItemCommand) return Promise.resolve(memory.putItem(cmd))
     if (cmd instanceof QueryCommand) return Promise.resolve(memory.query(cmd))
     if (cmd instanceof UpdateItemCommand) return Promise.resolve(memory.updateItem(cmd))
+    if (cmd instanceof DeleteItemCommand) return Promise.resolve(memory.deleteItem(cmd))
     if (cmd instanceof TransactWriteItemsCommand) return Promise.resolve(memory.transactWriteItems(cmd))
     return Promise.resolve({})
   })
@@ -390,6 +444,7 @@ beforeAll(async () => {
 beforeEach(() => {
   memory.pods.clear()
   memory.loads.clear()
+  memory.mappings.clear()
   resetConnectionConfigCache()
   vi.clearAllMocks()
   vi.stubGlobal('fetch', mockFetch)
@@ -448,10 +503,12 @@ describe('authorize', () => {
     await expect(authorize('configure', PAGE_PODS_IDENTITY)).rejects.toThrow(/configure requires owner or ADMIN/)
   })
 
-  it('requires global role for sync, assign, and retry', async () => {
+  it('requires global role for sync, assign, retry, and setSenderMapping', async () => {
     await expect(authorize('sync', DISPATCHER_IDENTITY)).rejects.toThrow(/page-pods/)
     await expect(authorize('assign', DISPATCHER_IDENTITY)).rejects.toThrow(/page-pods/)
     await expect(authorize('retry', DISPATCHER_IDENTITY)).rejects.toThrow(/page-pods/)
+    await expect(authorize('setSenderMapping', DISPATCHER_IDENTITY)).rejects.toThrow(/page-pods/)
+    await expect(authorize('senderMappings', DISPATCHER_IDENTITY)).resolves.toMatchObject({ email: 'other@bcatcorp.com' })
   })
 
   it('allows any authenticated dispatcher to list by loadId', async () => {
@@ -1093,5 +1150,68 @@ describe('backfillAction + backfillPageAction', () => {
       const payload = p as { action?: string; processPodId?: string }
       return payload.action === 'processPodId' && payload.processPodId === existingId
     })).toBe(true)
+  })
+})
+
+// ── sender mappings ─────────────────────────────────────────────────────────
+describe('senderMappingsAction + setSenderMappingAction', () => {
+  beforeEach(() => {
+    setSsmConfig({ apiKey: 'valid-key', clientId: 'tenant-1' })
+  })
+
+  it('creates a phone-keyed mapping', async () => {
+    const result = await setSenderMappingAction(
+      { phone: '(773) 555-0101', senderName: 'Chuck Best', driverId: 'driver-1' },
+      await authorize('setSenderMapping', OWNER_IDENTITY),
+    )
+    expect(result.item).toMatchObject({
+      clientId: 'tenant-1',
+      senderKey: 'phone:7735550101',
+      senderName: 'Chuck Best',
+      driverId: 'driver-1',
+    })
+  })
+
+  it('creates a name-keyed mapping when no phone is supplied', async () => {
+    const result = await setSenderMappingAction(
+      { phone: undefined as unknown as string, senderName: 'Ivan Sender', driverId: 'driver-2' },
+      await authorize('setSenderMapping', OWNER_IDENTITY),
+    )
+    expect(result.item).toMatchObject({
+      clientId: 'tenant-1',
+      senderKey: 'name:ivansender',
+      senderName: 'Ivan Sender',
+      driverId: 'driver-2',
+    })
+  })
+
+  it('lists mappings scoped by clientId', async () => {
+    await setSenderMappingAction(
+      { phone: '+12247136044', senderName: 'Lalo Cortez', driverId: 'driver-3' },
+      await authorize('setSenderMapping', OWNER_IDENTITY),
+    )
+    const result = await senderMappingsAction()
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toMatchObject({ clientId: 'tenant-1', senderKey: 'phone:2247136044', driverId: 'driver-3' })
+  })
+
+  it('deletes a mapping when driverId is null', async () => {
+    await setSenderMappingAction(
+      { phone: '+12247136044', senderName: 'Lalo Cortez', driverId: 'driver-3' },
+      await authorize('setSenderMapping', OWNER_IDENTITY),
+    )
+    const deleted = await setSenderMappingAction(
+      { phone: '+12247136044', senderName: 'Lalo Cortez', driverId: null },
+      await authorize('setSenderMapping', OWNER_IDENTITY),
+    )
+    expect(deleted.deleted).toBe(true)
+    expect((await senderMappingsAction()).items).toHaveLength(0)
+  })
+
+  it('rejects a mapping with neither phone nor usable name', async () => {
+    await expect(setSenderMappingAction(
+      { phone: undefined as unknown as string, senderName: '!!', driverId: 'driver-1' },
+      await authorize('setSenderMapping', OWNER_IDENTITY),
+    )).rejects.toThrow(/requires a sender name or phone number/)
   })
 })

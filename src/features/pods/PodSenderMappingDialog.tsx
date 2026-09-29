@@ -3,13 +3,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { matchPodDriver, digits } from '@/lib/podDriver'
+import { matchPodDriver, senderKey, digits } from '@/lib/podDriver'
 import type { Driver } from '@/types'
 import type { PodDocument, PodSenderMapping } from '@/types/pods'
 
 interface SenderRow {
-  phoneDigits: string
+  senderKey: string
   senderName: string
+  senderContact: string
+  label: string
   currentDriverId: string | null
 }
 
@@ -30,37 +32,33 @@ export function PodSenderMappingDialog({
 }) {
   const rows = useMemo<SenderRow[]>(() => {
     const seen = new Map<string, SenderRow>()
-    for (const doc of [...docs].sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))) {
-      const phoneDigits = digits(doc.senderContact)
-      if (phoneDigits.length !== 10) continue
-      const existing = mappings.find((m) => m.senderKey === `phone:${phoneDigits}`)
+    // Walk oldest first so a more recent doc's name overwrites stale ones.
+    for (const doc of [...docs].sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt))) {
+      const key = senderKey(doc)
+      const existing = mappings.find((m) => m.senderKey === key)
       const auto = matchPodDriver(doc, drivers, mappings)
-      seen.set(phoneDigits, {
-        phoneDigits,
+      const phone = digits(doc.senderContact)
+      const label = phone.length === 10
+        ? `phone:${phone}`
+        : `name:${nameKey(doc.senderName)}`
+      seen.set(key, {
+        senderKey: key,
         senderName: doc.senderName,
+        senderContact: doc.senderContact,
+        label,
         currentDriverId: existing?.driverId ?? auto?.id ?? null,
       })
     }
     return Array.from(seen.values()).sort((a, b) =>
-      (a.senderName || a.phoneDigits).localeCompare(b.senderName || b.phoneDigits)
+      (a.senderName || a.senderKey).localeCompare(b.senderName || b.senderKey)
     )
   }, [docs, drivers, mappings])
 
-  const initialSelections = useMemo<Record<string, string>>(() => {
-    return Object.fromEntries(
-      rows.map((row) => [row.phoneDigits, row.currentDriverId ?? ''])
-    )
-  }, [rows])
-
-  const [selections, setSelections] = useState<Record<string, string>>(initialSelections)
-  if (Object.keys(selections).length === 0 && rows.length > 0 && Object.keys(initialSelections).length > 0) {
-    setSelections(initialSelections)
-  }
-
+  const [selections, setSelections] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
 
   const handleClose = () => {
-    setSelections(initialSelections)
+    setSelections({})
     onClose()
   }
 
@@ -68,12 +66,14 @@ export function PodSenderMappingDialog({
     setSaving(true)
     try {
       for (const row of rows) {
-        const selected = selections[row.phoneDigits]
+        const selected = selections[row.senderKey]
         if (selected === undefined) continue
+        const current = row.currentDriverId ?? ''
+        if (selected === current) continue
         const driverId = selected === '' ? null : selected
-        await onSave({ phone: row.phoneDigits, senderName: row.senderName, driverId })
+        await onSave({ phone: row.senderContact, senderName: row.senderName, driverId })
       }
-      setSelections(initialSelections)
+      setSelections({})
       onClose()
     } finally {
       setSaving(false)
@@ -81,12 +81,12 @@ export function PodSenderMappingDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Map senders to drivers</DialogTitle>
           <DialogDescription>
-            Choose which driver each sender name + phone should be matched to. Setting to “(auto / unmapped)” removes the override.
+            Choose which driver each sender should be matched to. Setting to “(auto / unmapped)” removes the override.
           </DialogDescription>
         </DialogHeader>
 
@@ -94,23 +94,23 @@ export function PodSenderMappingDialog({
           <thead>
             <tr>
               <th style={{ textAlign: 'left', padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>Sender</th>
-              <th style={{ textAlign: 'left', padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>Phone</th>
+              <th style={{ textAlign: 'left', padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>Key</th>
               <th style={{ textAlign: 'left', padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>Driver</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.phoneDigits}>
+              <tr key={row.senderKey}>
                 <td style={{ padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>
                   {row.senderName || <span style={{ color: 'var(--ds-t3)' }}>Unknown sender</span>}
                 </td>
                 <td style={{ padding: '8px 4px', borderBottom: '1px solid var(--ds-border)', fontFamily: 'monospace' }}>
-                  {row.phoneDigits}
+                  {row.label}
                 </td>
                 <td style={{ padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>
                   <select
-                    value={selections[row.phoneDigits] ?? row.currentDriverId ?? ''}
-                    onChange={(e) => setSelections((prev) => ({ ...prev, [row.phoneDigits]: e.target.value }))}
+                    value={selections[row.senderKey] ?? row.currentDriverId ?? ''}
+                    onChange={(e) => setSelections((prev) => ({ ...prev, [row.senderKey]: e.target.value }))}
                     style={{
                       width: '100%',
                       height: 32,
@@ -142,4 +142,8 @@ export function PodSenderMappingDialog({
       </DialogContent>
     </Dialog>
   )
+}
+
+function nameKey(s: string): string {
+  return (s ?? '').toLowerCase().match(/[a-z]+/g)?.join('') ?? ''
 }
