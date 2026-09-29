@@ -1,7 +1,7 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
-import { Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
-import { Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
+import { Effect, Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
+import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
 import { CfnOutput, Duration, Stack } from 'aws-cdk-lib'
 import { auth } from './auth/resource'
@@ -39,6 +39,8 @@ import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { carrierBlastApi } from './functions/carrier-blast-api/resource'
 import { carrierBlastWebhook } from './functions/carrier-blast-webhook/resource'
+import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
+import { tmsGeocode } from './functions/tms-geocode/resource'
 
 const backend = defineBackend({
   auth,
@@ -75,6 +77,8 @@ const backend = defineBackend({
   tripScreenshotParser,
   carrierBlastApi,
   carrierBlastWebhook,
+  tmsDirectoryActions,
+  tmsGeocode,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -165,10 +169,15 @@ gmailTaskFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHA
 // ── apptReport (daily 3 PM Chicago digest of unconfirmed appts → #bcat-global) ──
 const apptReportFn = backend.apptReport.resources.lambda as LambdaFunction
 const loadTableForReport = backend.data.resources.tables['Load']
+const customerTableForReport = backend.data.resources.tables['Customer']
 backend.apptReport.resources.lambda.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [loadTableForReport.tableArn] })
 )
+backend.apptReport.resources.lambda.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:Scan'], resources: [customerTableForReport.tableArn] })
+)
 apptReportFn.addEnvironment('LOAD_TABLE_NAME', loadTableForReport.tableName)
+apptReportFn.addEnvironment('CUSTOMER_TABLE_NAME', customerTableForReport.tableName)
 apptReportFn.addEnvironment('SLACK_GLOBAL_CHANNEL_ID', process.env.SLACK_GLOBAL_CHANNEL_ID ?? '')
 // 20:00 & 21:00 UTC Mon–Fri — whichever lands on 15:00 America/Chicago posts (DST-proof).
 const apptReportRule = new Rule(apptReportFn.stack, 'ApptReportDailyRule', {
@@ -859,6 +868,49 @@ carrierBlastRule.addTarget(new EventsLambdaTarget(carrierBlastApiFn, {
   event: RuleTargetInput.fromObject({ action: 'cron' }),
 }))
 
+// ── tmsDirectoryActions Lambda ──────────────────────────────────────────────
+// Directory, config, and merge writes. Customer/Location/Division/Settings/MergeJob
+// tables are written via raw DynamoDB SDK; Load repoints during merge use the
+// generated AppSync mutation (allow.resource(tmsDirectoryActions) on Load).
+const directoryActionsFn = backend.tmsDirectoryActions.resources.lambda as LambdaFunction
+const directoryCustomerTable = backend.data.resources.tables['Customer']
+const directoryLocationTable = backend.data.resources.tables['Location']
+const directoryDivisionTable = backend.data.resources.tables['Division']
+const directorySettingsTable = backend.data.resources.tables['TmsSettings']
+const directoryMergeJobTable = backend.data.resources.tables['DirectoryMergeJob']
+const directoryLoadTable = backend.data.resources.tables['Load']
+
+const directoryTableArns = [
+  directoryCustomerTable.tableArn,
+  directoryLocationTable.tableArn,
+  directoryDivisionTable.tableArn,
+  directorySettingsTable.tableArn,
+  directoryMergeJobTable.tableArn,
+  directoryLoadTable.tableArn,
+]
+
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
+    resources: directoryTableArns,
+  }),
+)
+
+directoryActionsFn.addEnvironment('TABLE_NAME',                    '')
+directoryActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',           directoryCustomerTable.tableName)
+directoryActionsFn.addEnvironment('LOCATION_TABLE_NAME',           directoryLocationTable.tableName)
+directoryActionsFn.addEnvironment('DIVISION_TABLE_NAME',           directoryDivisionTable.tableName)
+directoryActionsFn.addEnvironment('SETTINGS_TABLE_NAME',           directorySettingsTable.tableName)
+directoryActionsFn.addEnvironment('MERGE_JOB_TABLE_NAME',          directoryMergeJobTable.tableName)
+directoryActionsFn.addEnvironment('LOAD_TABLE_NAME',               directoryLoadTable.tableName)
+directoryActionsFn.addEnvironment('USER_POOL_ID',                  backend.auth.resources.userPool.userPoolId)
+directoryActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+)
+
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
 // IntakeItem task for Arcie and posts to the BCAT global Slack channel.
@@ -908,4 +960,33 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   startingPosition:  StartingPosition.LATEST,
   batchSize:         10,
   retryAttempts:     2,
+  enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true',   // see the guard below
 })
+
+// ── Isolated preview guard ──────────────────────────────────────────────────
+// A sandbox or feature-branch stack deployed with BCAT_ISOLATED_PREVIEW=true must never
+// reach the outside world: every schedule is disabled, the Load-stream consumer is created disabled,
+// and every Lambda that emails, posts to Slack, or calls Motive / Blue Ink / Instantly /
+// Paychex / Anthropic — or serves a public Function URL — is pinned to zero concurrency
+// and explicitly denied SES. Only the pure-database directory/user/vendor-AP resolvers
+// and the geocode proxy stay callable. The flag is refused on the production branch.
+if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
+  if (process.env.AWS_BRANCH === 'main') {
+    throw new Error('BCAT_ISOLATED_PREVIEW must never be set on the main branch')
+  }
+  for (const rule of [
+    apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
+    faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule, carrierBlastRule,
+  ]) {
+    (rule.node.defaultChild as CfnRule).state = 'DISABLED'
+  }
+
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsGeocode'])
+  for (const [name, construct] of Object.entries(backend)) {
+    if (previewCallable.has(name)) continue
+    const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
+    if (!lambda) continue
+    ;(lambda.node.defaultChild as CfnFunction).reservedConcurrentExecutions = 0
+    lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: ['ses:*'], resources: ['*'] }))
+  }
+}

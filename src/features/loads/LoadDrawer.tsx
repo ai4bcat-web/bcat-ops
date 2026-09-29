@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
-import { useForm, Controller, useFieldArray, type Control } from 'react-hook-form'
+import { useForm, Controller, useFieldArray, useWatch, type Control } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw, Plus, Truck, Package } from 'lucide-react'
 import { SidePanel } from '@/features/files/SidePanel'
 import { panelBtn } from '@/lib/ui/panel-btn'
+import { DirectoryPicker } from '@/components/directory-picker/DirectoryPicker'
+import { DirectoryCreateDialog } from '@/components/directory-picker/DirectoryCreateDialog'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,7 +20,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
 import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
 import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
-import { apptTypeAfterEdit } from '@/lib/apptQueue'
+import { apptTypeAfterEdit, requiresApptProofs } from '@/lib/apptQueue'
+import { locationAddress } from '@/lib/tmsDirectory'
 import { apptNotices } from '@/lib/apptNotify'
 import { sendApptNotices } from '@/lib/sendApptNotices'
 import { useDirectory } from '@/hooks/useDirectory'
@@ -28,6 +31,7 @@ import {
 } from '@/lib/date'
 import { toast } from 'sonner'
 import type { ApptType, Load, Stop } from '@/types'
+import type { CustomerRecord, LocationRecord } from '@/types/tms'
 
 // ── Stop ↔ form conversion ───────────────────────────────────────────────────
 // Form stores appt as a datetime-local / date string; the stored Stop uses ISO UTC.
@@ -44,6 +48,10 @@ function stopToForm(stop: Stop): StopFormValue {
     type: stop.type,
     name: stop.name ?? '',
     city: stop.city ?? '',
+    locationId: stop.locationId ?? null,
+    address: stop.address ?? null,
+    arrivedAt: stop.arrivedAt ?? null,
+    departedAt: stop.departedAt ?? null,
     appt: stop.appt ? (isDateOnly ? formatDateInput(stop.appt) : formatDateTimeInput(stop.appt)) : '',
     apptType: stop.apptType ?? 'exact',
     apptEnd: stop.apptEnd ? formatDateTimeInput(stop.apptEnd) : '',
@@ -90,17 +98,21 @@ function stopFormToStop(
   const dateOnly =
     s.apptType === 'fcfs' || ((s.apptType === 'tbd' || s.apptType === 'exact') && s.appt.length <= 10)
   return {
-    // Carry through everything the form doesn't edit — Slack thread ts, color override,
-    // booking-proof screenshots, move-request state. Building the stop from ONLY the
-    // form fields silently wiped these on every drawer save.
+    // Carry through everything the form doesn't edit — linked facility + booked snapshot,
+    // actual arrival/departure, booking-proof screenshots, Batory ladder state, etc.
     ...(was ? {
       colorKey: was.colorKey, apptThreadTs: was.apptThreadTs, apptProofs: was.apptProofs,
       apptMoveRequested: was.apptMoveRequested, apptMoveTaskId: was.apptMoveTaskId,
+      apptStatus: was.apptStatus, apptChangeTo: was.apptChangeTo,
+      apptRequestedFor: was.apptRequestedFor, apptCleared: was.apptCleared,
+      arrivedAt: was.arrivedAt, departedAt: was.departedAt,
     } : {}),
     id: s.id,
     type: s.type,
     name: s.name?.trim() || undefined,
     city: s.city?.trim() || undefined,
+    locationId: s.locationId?.trim() || (was?.locationId ?? null),
+    address: s.address ?? (was?.address ?? null),
     appt: dateOnly ? fromDateInput(s.appt.slice(0, 10)) : fromDateTimeInput(s.appt),
     // Same rule as the calendar and the Appts queue: the status saved is the status
     // picked — a NEED stop with a time stays NEED until someone chooses Exact.
@@ -449,9 +461,22 @@ function DriverPicker({
 
 // ── Stop card (one pickup or delivery in the stops editor) ────────────────────
 
+/**
+ * Booked snapshot: what the facility's address was when this stop was booked. A later
+ * directory edit does not rewrite history on the load. Coordinates ride along only while
+ * Google's result is still fresh; an expired pin is not frozen into the stop.
+ */
+function bookedAddressSnapshot(loc: LocationRecord): NonNullable<Stop['address']> {
+  const fresh = !!loc.geocodeExpiresAt && Date.parse(loc.geocodeExpiresAt) > Date.now()
+  return {
+    ...locationAddress(loc),
+    ...(fresh ? { lat: loc.lat ?? null, lng: loc.lng ?? null, timezone: loc.timezone ?? null, geocodeExpiresAt: loc.geocodeExpiresAt ?? null } : {}),
+  }
+}
+
 function StopCard({
   index, control, register, errors, drivers, onRemove, canRemove, onCityBlur,
-  stopType, split, onPickupDriverChange, locations, onAutoFillCity,
+  stopType, split, onPickupDriverChange, locations, onAutoFillCity, setValue, onCreateLocation,
 }: {
   index: number
   control: Control<LoadFormValues>
@@ -465,11 +490,23 @@ function StopCard({
   split: boolean
   // Called after a pickup stop's driver changes so deliveries can mirror it (non-split).
   onPickupDriverChange: (value: string | null) => void
-  /** Directory suggestions for the facility field (typed once, reselected forever). */
-  locations: { name: string; city?: string | null }[]
+  /** Directory locations for the linked-location picker. */
+  locations: LocationRecord[]
+  setValue: ReturnType<typeof useForm<LoadFormValues>>['setValue']
   onAutoFillCity: (city: string) => void
+  /** Inline "+": open the location create dialog prefilled for this stop. */
+  onCreateLocation: (initial: { name?: string; city?: string }) => void
 }) {
   const stopErr = errors.stops?.[index]
+  const stopName = useWatch({ control, name: `stops.${index}.name` })
+  const stopCity = useWatch({ control, name: `stops.${index}.city` })
+  // Link a directory location to this stop: id + booked snapshot, and fill blank name/city.
+  const linkStop = (loc: LocationRecord | null) => {
+    setValue(`stops.${index}.locationId`, loc?.id ?? null, { shouldDirty: true })
+    setValue(`stops.${index}.address`, loc ? bookedAddressSnapshot(loc) : null, { shouldDirty: true })
+    if (loc && !stopName) setValue(`stops.${index}.name`, loc.name, { shouldDirty: true })
+    if (loc && !stopCity && loc.city) setValue(`stops.${index}.city`, [loc.city, loc.state].filter(Boolean).join(', '), { shouldDirty: true })
+  }
   return (
     <div style={{ border: '1px solid var(--ds-border)', borderRadius: 10, padding: 14, marginBottom: 12, background: 'var(--ds-surface)' }}>
       {/* Header: type toggle + remove */}
@@ -492,10 +529,9 @@ function StopCard({
       {/* Name + city */}
       <div className="grid grid-cols-2 gap-3" style={{ marginBottom: 12 }}>
         <Field label="Facility / Name">
-          <Input {...register(`stops.${index}.name`)} list="dir-location-names" placeholder="Shipper / Consignee" className="h-9"
+          <Input {...register(`stops.${index}.name`)} placeholder="Shipper / Consignee" className="h-9"
             onBlur={(e) => {
               register(`stops.${index}.name`).onBlur(e)
-              // Exact directory match → fill the city too (typed once, reselected forever).
               const hit = locations.find((l) => l.name.toLowerCase() === e.target.value.trim().toLowerCase())
               if (hit?.city) onAutoFillCity(hit.city)
             }} />
@@ -508,6 +544,27 @@ function StopCard({
             onBlur={(e) => { register(`stops.${index}.city`).onBlur(e); onCityBlur() }}
           />
         </Field>
+      </div>
+
+      {/* Directory-linked location */}
+      <div style={{ marginBottom: 12 }}>
+        <Controller
+          name={`stops.${index}.locationId`}
+          control={control}
+          render={({ field }) => (
+            <Field label="Directory location">
+              <DirectoryPicker
+                type="location"
+                value={field.value}
+                customers={[]}
+                locations={locations}
+                placeholder="Link to directory location…"
+                onChange={(id, record) => linkStop(record && 'name' in record && id ? (record as LocationRecord) : null)}
+                onCreateNew={(initial) => onCreateLocation({ name: initial.name || stopName || undefined, city: stopCity || undefined })}
+              />
+            </Field>
+          )}
+        />
       </div>
 
       {/* Appointment */}
@@ -591,6 +648,7 @@ function NewLoadDialog({
   // The reusable address book: customer + facility names suggest as you type.
   const directory = useDirectory()
   const [milesLoading, setMilesLoading] = useState(false)
+  const [createDirectory, setCreateDirectory] = useState<{ type: 'customer' | 'location'; initial?: { name?: string; city?: string }; stopIndex?: number } | null>(null)
 
   const { fields: stopFields, append, remove } = useFieldArray({ control, name: 'stops' })
 
@@ -600,21 +658,25 @@ function NewLoadDialog({
   // back to "Unassigned" for separate assignment.
   const [split, setSplit] = useState(false)
 
-  // Initialise the split toggle from the loaded form values whenever the dialog opens.
-  useEffect(() => {
-    if (!isOpen) return
-    setSplit(deriveSplitFromStops(watch('stops') ?? []))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen])
+  // Initialise the split toggle from the loaded form values whenever the dialog opens
+  // (state adjusted during render on the open transition — no effect needed).
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen)
+    if (isOpen) setSplit(deriveSplitFromStops(watch('stops') ?? []))
+  }
 
-  // Batory defaults: when the customer field is set to Batory on a new load, the
-  // pickup defaults to NEED with 12:00 PM and the delivery defaults to NEED.
-  // Only applies in create mode and only when the stops are still at their vanilla
-  // defaults (no names, no times) — never overwrites deliberate edits.
+  // Batory defaults: when a new load's customer runs the Batory ladder (the linked
+  // customer's apptWorkflow, else the name), the pickup defaults to NEED with 12:00 PM
+  // and the delivery defaults to NEED. Only applies in create mode and only when the
+  // stops are still at their vanilla defaults (no names, no times) — never overwrites
+  // deliberate edits.
+  const watchedCustomerId = watch('customerId')
+  const linkedCustomer = directory.customers.find((c) => c.id === watchedCustomerId) ?? null
   useEffect(() => {
     if (mode !== 'create') return
     const customer = watch('customer')
-    if (!customer || !/batory/i.test(customer)) return
+    if (!requiresApptProofs({ customer, customerApptWorkflow: linkedCustomer?.apptWorkflow ?? null })) return
 
     const stops = watch('stops') ?? []
     if (stops.length === 0) return
@@ -640,7 +702,7 @@ function NewLoadDialog({
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watch('customer')])
+  }, [watch('customer'), linkedCustomer?.apptWorkflow])
 
   // Mirror a chosen pickup driver onto every delivery stop (non-split loads).
   const syncDeliveriesToDriver = (value: string | null) => {
@@ -725,15 +787,31 @@ function NewLoadDialog({
                   <Input {...register('pickupNumber')} placeholder="PU-8812" className="h-9" />
                 </Field>
               </div>
-              <Field label="Customer / Broker">
-                <Input {...register('customer')} list="dir-customer-names" placeholder="Arrive Logistics, Echo Global…" className="h-9" />
-                <datalist id="dir-customer-names">
-                  {directory.customers.map((c) => <option key={c.id} value={c.name} />)}
-                </datalist>
-                <datalist id="dir-location-names">
-                  {directory.locations.map((l) => <option key={l.id} value={l.name}>{l.city ?? ''}</option>)}
-                </datalist>
-              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Controller
+                  name="customerId"
+                  control={control}
+                  render={({ field }) => (
+                    <Field label="Customer">
+                      <DirectoryPicker
+                        type="customer"
+                        value={field.value}
+                        customers={directory.customers}
+                        locations={directory.locations}
+                        placeholder="Select customer…"
+                        onChange={(id, record) => {
+                          field.onChange(id ?? '')
+                          setValue('customer', record?.name ?? '', { shouldDirty: true })
+                        }}
+                        onCreateNew={(initial) => setCreateDirectory({ type: 'customer', initial })}
+                      />
+                    </Field>
+                  )}
+                />
+                <Field label="Customer / Broker text" hint="Editable display name">
+                  <Input {...register('customer')} placeholder="Arrive Logistics, Echo Global…" className="h-9" />
+                </Field>
+              </div>
             </div>
 
             {/* ── Section 2: Stops (multi-pickup / multi-delivery) ───── */}
@@ -760,6 +838,7 @@ function NewLoadDialog({
                 <StopCard
                   locations={directory.locations}
                   onAutoFillCity={(city) => setValue(`stops.${i}.city`, city, { shouldDirty: true })}
+                  onCreateLocation={(initial) => setCreateDirectory({ type: 'location', initial, stopIndex: i })}
                   key={f.id}
                   index={i}
                   control={control}
@@ -772,6 +851,7 @@ function NewLoadDialog({
                   stopType={(watch(`stops.${i}.type`) ?? 'pickup') as 'pickup' | 'delivery'}
                   split={split}
                   onPickupDriverChange={syncDeliveriesToDriver}
+                  setValue={setValue}
                 />
               ))}
 
@@ -997,6 +1077,35 @@ function NewLoadDialog({
           </div>
         </div>
       </DialogContent>
+
+      {createDirectory && (
+        <DirectoryCreateDialog
+          type={createDirectory.type}
+          open
+          initial={createDirectory.initial}
+          customers={directory.customers}
+          divisions={[]} // load form does not need division defaults
+          onClose={() => setCreateDirectory(null)}
+          onSave={async (record, geocodeToken) => {
+            if ('mcNumber' in record) {
+              const c = await directory.addCustomer(record as Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>)
+              setValue('customerId', c.id, { shouldDirty: true })
+              setValue('customer', c.name, { shouldDirty: true })
+            } else {
+              const { id: _id, createdAt: _c, updatedAt: _u, ...input } = record as LocationRecord
+              const loc = await directory.addLocation({ ...input, ...(geocodeToken ? { geocodeToken } : {}) })
+              const i = createDirectory.stopIndex
+              if (i != null) {
+                // Link the new facility to the stop the "+" was pressed on.
+                setValue(`stops.${i}.locationId`, loc.id, { shouldDirty: true })
+                setValue(`stops.${i}.address`, bookedAddressSnapshot(loc), { shouldDirty: true })
+                if (!watch(`stops.${i}.name`)) setValue(`stops.${i}.name`, loc.name, { shouldDirty: true })
+                if (!watch(`stops.${i}.city`) && loc.city) setValue(`stops.${i}.city`, [loc.city, loc.state].filter(Boolean).join(', '), { shouldDirty: true })
+              }
+            }
+          }}
+        />
+      )}
     </Dialog>
   )
 }
@@ -1029,7 +1138,7 @@ export function LoadDrawer() {
     defaultValues: {
       aljexId: '', tmsId: '', pickupNumber: '',
       stops: emptyStopForms(), readyToInvoice: false,
-      customer: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
+      customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
     },
   })
 
@@ -1043,6 +1152,7 @@ export function LoadDrawer() {
         stops: loadToStopForms(load),
         readyToInvoice:   load.readyToInvoice,
         customer: load.customer ?? '',
+        customerId: load.customerId ?? '',
         miles: load.miles ?? null,
         rate: load.rate != null ? load.rate / 100 : null,
         notes: load.notes ?? '',
@@ -1055,7 +1165,7 @@ export function LoadDrawer() {
         aljexId: '', tmsId: '', pickupNumber: '',
         stops: emptyStopForms(preDate, createPreFill?.driverId ?? null),
         readyToInvoice: false,
-        customer: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
+        customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1129,6 +1239,7 @@ export function LoadDrawer() {
       rate: values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined,
       miles: values.miles ?? undefined,
       customer: values.customer || undefined,
+      customerId: values.customerId?.trim() || undefined,
       notes: values.notes || undefined,
       hot: values.hot,
       unscheduled: values.unscheduled,

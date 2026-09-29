@@ -11,6 +11,8 @@ import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
 import { carrierBlastApi } from '../functions/carrier-blast-api/resource'
 import { vendorApActions } from '../functions/vendor-ap-actions/resource'
+import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource'
+import { tmsGeocode } from '../functions/tms-geocode/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -45,6 +47,9 @@ const schema = a.schema({
       notes:           a.string(),   // short free-text notes
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       unscheduled:     a.boolean(),  // true = orphan (no firm date) → parked in the calendar's Unscheduled lane
+      // Phase 1: link loads to the directory Customer. The `customer` string remains the
+      // booked-name snapshot; customerId is the authoritative link. Backfill sets both.
+      customerId:      a.string(),
       // Canonical multi-stop array: Stop[] (see src/lib/stops.ts). The legacy pickup*/
       // delivery*/origin*/destination*/*DriverId fields above are dual-written mirrors
       // derived from stops (first pickup → pickup*, last delivery → delivery*).
@@ -52,7 +57,11 @@ const schema = a.schema({
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
-    .authorization((allow) => [allow.authenticated()]),
+    .secondaryIndexes((index) => [index('customerId')])
+    .authorization((allow) => [
+      // Phase 1: Load remains userPool-editable; merge repoints use schema-level IAM auth.
+      allow.authenticated(),
+    ]),
 
   Driver: a
     .model({
@@ -88,6 +97,9 @@ const schema = a.schema({
       // legacy/Ivan/Local drivers read null and keep the flat (non-phased) checklist behavior.
       onboardingTemplateId: a.string(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Fleet (trucks & trailers) ──────────────────────────────────────────────
@@ -134,6 +146,9 @@ const schema = a.schema({
       lastPmMileage:           a.integer(),  // odometer at the last PM
       notes:                   a.string(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Driver pay periods (biweekly) ──────────────────────────────────────────
@@ -152,6 +167,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('driverId').sortKeys(['periodStart']),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Amazon driver pay ──────────────────────────────────────────────────────
@@ -178,6 +196,9 @@ const schema = a.schema({
       sortOrder:     a.float(),              // manual drag order within a driver's week
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Amazon driver disputes ─────────────────────────────────────────────────
@@ -220,6 +241,9 @@ const schema = a.schema({
       settlementDriverId:    a.string(),  // Driver.id whose check carries it
     })
     .secondaryIndexes((index) => [index('externalId')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Archive of uploaded master CSVs (the raw file lives in S3 at s3Key). One row per
@@ -238,6 +262,9 @@ const schema = a.schema({
       notes:       a.string(),
     })
     .secondaryIndexes((index) => [index('periodStart')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Box-truck driver pay (Ivan Cartage) ─────────────────────────────────────
@@ -263,6 +290,9 @@ const schema = a.schema({
       sortOrder:    a.float(),               // drag order within a driver's period
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   DriverPaySetting: a
@@ -285,6 +315,9 @@ const schema = a.schema({
       notes:                 a.string(),
     })
     .secondaryIndexes((index) => [index('driverId')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   DriverPayDeduction: a
@@ -296,6 +329,9 @@ const schema = a.schema({
       date:        a.string(),              // YYYY-MM-DD when incurred (display only)
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Extra pay added to a settlement check that didn't come from a shipment's gross
@@ -324,6 +360,9 @@ const schema = a.schema({
       notes:       a.string(),
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   MaintenanceTask: a
@@ -339,6 +378,9 @@ const schema = a.schema({
       assignee:     a.string(),
     })
     .secondaryIndexes((index) => [index('equipmentId')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   MaintenanceInvoice: a
@@ -365,6 +407,9 @@ const schema = a.schema({
       externalId:    a.string(),
     })
     .secondaryIndexes((index) => [index('equipmentId'), index('externalId')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Intake queue ──────────────────────────────────────────────────────────
@@ -372,6 +417,7 @@ const schema = a.schema({
   // ── Directory: customers & locations ───────────────────────────────────────
   // The reusable address book behind the Load form. A Customer carries ITS contact;
   // a Location carries the APPOINTMENT contact used to request/book appt times.
+  // Writes are routed through tmsDirectoryActions so links and archives stay valid.
   Customer: a
     .model({
       name:         a.string().required(),   // e.g. "BATORY FOODS" — matched against Load.customer
@@ -379,20 +425,130 @@ const schema = a.schema({
       contactEmail: a.string(),
       contactPhone: a.string(),
       notes:        a.string(),
+      // Phase 1: full customer record + credit / billing / workflow controls
+      mcNumber:     a.string(),
+      dotNumber:    a.string(),
+      billingEmail:      a.string(),
+      billingContactName: a.string(),
+      billingPhone:      a.string(),
+      billingAddress:    a.json(),              // { street, city, state, zip, country }
+      paymentTermsDays:  a.integer(),
+      creditLimitCents:  a.integer(),          // non-negative integer cents
+      creditHoldFlag:    a.boolean(),
+      requiredDocsForInvoice: a.string().array(), // ['POD','BOL','LUMPER_RECEIPT']
+      defaultDivisionKey:  a.string(),
+      defaultSalesRepId:   a.string(),           // Cognito username
+      aliases:        a.string().array(),        // ratecon names that resolve here
+      normalizedName: a.string(),                // dedupe key (lower, strip punctuation)
+      active:         a.boolean(),
+      apptWorkflow:   a.enum(['NONE', 'BATORY']), // replaces /batory/i regex
+      mergedIntoId:   a.string(),                // soft-merge pointer (customer merge future)
     })
-    .authorization((allow) => [allow.authenticated()]),
+    .secondaryIndexes((index) => [index('normalizedName')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   Location: a
     .model({
       name:             a.string().required(),  // facility, e.g. "BATORY'S OAKLEY CHICAGO"
       city:             a.string(),             // "CHICAGO, IL"
-      customerName:     a.string(),             // which customer's network it belongs to
+      customerName:     a.string(),             // legacy mirror of first linked customer
       apptContactName:  a.string(),
       apptContactEmail: a.string(),             // where appointment requests are emailed
       apptContactPhone: a.string(),
       notes:            a.string(),
+      // Phase 1: full address + geocode proof + facility metadata
+      street:    a.string(),
+      state:     a.string(),
+      zip:       a.string(),
+      country:   a.string().default('US'),
+      lat:       a.float(),
+      lng:       a.float(),
+      timezone:  a.string(),
+      geohash6:  a.string(),
+      placeId:   a.string(),
+      geocodedAt: a.datetime(),
+      geocodeExpiresAt: a.datetime(),
+      facilityType: a.enum(['SHIPPER', 'RECEIVER', 'BOTH', 'YARD', 'TRUCK_STOP', 'OTHER']),
+      hours:     a.string(),
+      apptRule:  a.enum(['FCFS', 'APPT', 'EITHER']),
+      apptLeadTimeHours: a.integer(),
+      dockNotes: a.string(),
+      lumperNotes: a.string(),
+      detentionNotes: a.string(),
+      contacts:    a.json(),          // LocationContact[]
+      customerIds: a.string().array(), // linked customers (many-to-many)
+      aliases:     a.string().array(),
+      normalizedName:    a.string(),   // dedupe by cleaned facility name
+      normalizedAddress: a.string(),   // dedupe by cleaned address
+      mergedIntoId: a.string(),        // reads follow the pointer
+      mergeJobId:   a.string(),         // last merge that touched this row
+      active:       a.boolean(),
     })
-    .authorization((allow) => [allow.authenticated()]),
+    .secondaryIndexes((index) => [
+      index('normalizedName'),
+      index('normalizedAddress'),
+      index('mergedIntoId'),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Phase 1: revenue divisions replace hard-coded profit centers. Key (not id) is the PK
+  // so Load.divisionKey and Customer.defaultDivisionKey reference a stable string.
+  Division: a
+    .model({
+      id:        a.id(),
+      key:       a.string().required(), // 'BCAT_LOGISTICS' | 'IVAN_CARTAGE' | 'AMAZON_DSP'
+      name:      a.string().required(),
+      legalName: a.string(),
+      mcNumber:  a.string(),
+      dotNumber: a.string(),
+      scac:      a.string(),
+      remitToName:    a.string(),
+      remitToAddress: a.json(), // Address
+      remitToEmail:   a.string(),
+      invoicePrefix:  a.string(),
+      fleetGroup:     a.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']),
+      active:         a.boolean().required(),
+    })
+    .identifier(['key'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Singleton TMS configuration. id='default'. Admin write via tmsDirectoryActions.
+  TmsSettings: a
+    .model({
+      marginFloorBps:        a.integer(),
+      defaultPaymentTermsDays: a.integer(),
+      accessorialCodes:      a.json(),          // accessorial code objects
+      loadStatusRules:       a.json(),
+      invoiceNumberFormat:   a.string(),
+    })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Long-running (but synchronous in pieces) location merge job. Lambdas move it through.
+  DirectoryMergeJob: a
+    .model({
+      sourceId:       a.string().required(),
+      targetId:       a.string().required(),
+      status:         a.enum(['RUNNING', 'COMPLETED', 'FAILED', 'PENDING']),
+      processedCount: a.integer().default(0),
+      remainingCount: a.integer(),
+      error:          a.string(),
+    })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
 
   IntakeItem: a
     .model({
@@ -422,6 +578,9 @@ const schema = a.schema({
       index('externalId'),
       index('gmailMessageId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Factoring queue (Operations page) ──────────────────────────────────────
@@ -438,6 +597,9 @@ const schema = a.schema({
       receivedAt: a.datetime().required(),
       messageId:  a.string().required(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [
       allow.authenticated().to(['create', 'read', 'update']),
       allow.groups(['ADMIN']).to(['delete']),
@@ -467,6 +629,9 @@ const schema = a.schema({
       paidBy: a.string(),
       paidAt: a.datetime(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [
       allow.authenticated().to(['read']),
       allow.groups(['ADMIN']).to(['delete']),
@@ -492,6 +657,9 @@ const schema = a.schema({
       user:       a.string().required(),
       changes:    a.json().required(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [
       allow.authenticated().to(['create', 'read']),
     ]),
@@ -526,6 +694,9 @@ const schema = a.schema({
       index('cardNumber').sortKeys(['transactionDate']),
       index('transactionDate'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Per-truck expense tracking ─────────────────────────────────────────────
@@ -541,6 +712,9 @@ const schema = a.schema({
       active:             a.boolean().required(),
       notes:              a.string(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Defines which trucks share a cost and how it splits
@@ -558,6 +732,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('expenseTypeId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Actual cost record for a time period
@@ -579,6 +756,9 @@ const schema = a.schema({
       index('periodMonth'),
       index('directTruckId').sortKeys(['transactionDate']),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Template for FIXED costs that repeat monthly.
@@ -597,6 +777,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('expenseTypeId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Truck ownership + Motive vehicle mapping ──────────────────────────────
@@ -623,6 +806,9 @@ const schema = a.schema({
       inServiceDate:          a.date(),
     })
     .identifier(['truckId'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Per-truck mileage from Motive ELD ─────────────────────────────────────
@@ -643,6 +829,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('truckId').sortKeys(['periodStart']),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Current truck location from Motive ELD ────────────────────────────────
@@ -666,6 +855,9 @@ const schema = a.schema({
       syncedAt:    a.datetime().required(),
     })
     .identifier(['truckId'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Truck location breadcrumb history ─────────────────────────────────────
@@ -688,6 +880,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('truckId').sortKeys(['locatedAt']),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Open engine fault codes (DTCs) from Motive ────────────────────────────
@@ -715,6 +910,9 @@ const schema = a.schema({
       syncedAt:        a.datetime().required(),
     })
     .identifier(['truckId', 'faultId'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Driver availability (dispatch-entered, calendar display only) ─────────────
@@ -760,6 +958,9 @@ const schema = a.schema({
       index('driverId'),
       index('token'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // A "send for signature" request for a Driver Documents form (e.g. the WI Independent
@@ -786,6 +987,9 @@ const schema = a.schema({
       index('driverId'),
       index('token'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // The 49 CFR 391.21 employment application, filled by the driver in the portal.
@@ -827,6 +1031,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('driverId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // One generic document model for both drivers and trucks.
@@ -851,6 +1058,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('entityId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // A single checklist item generated from the requirement catalog per classification.
@@ -884,6 +1094,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('entityId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Created by the Phase 2 compliance-scanner. Model defined now.
@@ -909,6 +1122,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('entityId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Phase 4: expiration escalation rules. Admin-editable via /compliance settings.
@@ -920,6 +1136,9 @@ const schema = a.schema({
       templateKey:          a.string().required(),
       active:               a.boolean().required(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Phase 4: one record per escalation email sent. Powers per-(alert, rule) dedup in
@@ -938,6 +1157,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('alertId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Phase 3/4: single-row settings records (e.g. id 'GLOBAL') for kill switches and
@@ -959,6 +1181,9 @@ const schema = a.schema({
     .secondaryIndexes((index) => [
       index('settingsKey'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Editable onboarding template (phased flows). One row per templateId (e.g.
@@ -972,6 +1197,9 @@ const schema = a.schema({
       updatedBy:  a.string(),
     })
     .identifier(['templateId'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Fleet insurance ─────────────────────────────────────────────────────────
@@ -987,6 +1215,9 @@ const schema = a.schema({
       isCurrent: a.boolean(),             // the period used for the "current insurance cost" card
       notes:     a.string(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   InsuranceLineItem: a
@@ -999,6 +1230,9 @@ const schema = a.schema({
       notes:       a.string(),
     })
     .secondaryIndexes((index) => [index('periodId')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Carrier Blast (Instantly.ai email outreach) ────────────────────────────
@@ -1018,6 +1252,9 @@ const schema = a.schema({
       notes:      a.string(),
     })
     .secondaryIndexes((index) => [index('lane'), index('email')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   CarrierCampaign: a
@@ -1044,6 +1281,9 @@ const schema = a.schema({
       completedAt:         a.datetime(),
     })
     .secondaryIndexes((index) => [index('lane'), index('instantlyCampaignId')])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   CarrierReply: a
@@ -1076,6 +1316,9 @@ const schema = a.schema({
       index('fromEmail'),
       index('instantlyEmailId'),
     ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   CarrierCapacitySnapshot: a
@@ -1086,6 +1329,9 @@ const schema = a.schema({
       data:       a.string().required(), // JSON-serialized capacity payload
     })
     .identifier(['snapshotId'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // Notify Slack when an IntakeItem status changes.
@@ -1240,6 +1486,9 @@ const schema = a.schema({
       minCashThresholdCents:   a.integer(),
       notes:                   a.string(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // One appended row per week — the history log behind the trend chart. Snapshots the
@@ -1259,6 +1508,9 @@ const schema = a.schema({
       runwayMonths:         a.integer(),
       notes:                a.string(),
     })
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
   // ── Weekly Cash Check-in ───────────────────────────────────────────────────
@@ -1347,7 +1599,36 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(googleReviews)),
-})
+
+  // Phase 1: all directory, config, and load writes route through this Lambda.
+  // Actions: UPSERT_CUSTOMER, UPSERT_LOCATION, ARCHIVE_CUSTOMER, ARCHIVE_LOCATION,
+  // SAVE_DIVISION, SAVE_SETTINGS, PREVIEW_MERGE_LOCATIONS, MERGE_LOCATIONS, RESUME_MERGE.
+  // Loads stay on the generated mutations; the merge repoint is the only Load write here.
+  tmsDirectoryActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsDirectoryActions)),
+
+  // Phase 1: server-side geocoding, Places autocomplete, and place details.
+  tmsGeocode: a
+    .query()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsGeocode)),
+}).authorization((allow) => [
+  // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
+  // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).
+  allow.resource(tmsDirectoryActions).to(['query', 'mutate']),
+])
 
 export type Schema = ClientSchema<typeof schema>
 

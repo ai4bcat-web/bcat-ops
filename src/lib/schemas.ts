@@ -39,6 +39,20 @@ export const stopSchema = z.object({
   type: z.enum(['pickup', 'delivery']),
   name: z.string().optional(),
   city: z.string().optional(),
+  locationId: z.string().nullable().optional(),
+  address: z.object({
+    street: z.string().nullable().optional(),
+    city: z.string().nullable().optional(),
+    state: z.string().nullable().optional(),
+    zip: z.string().nullable().optional(),
+    country: z.string().nullable().optional(),
+    lat: z.number().nullable().optional(),
+    lng: z.number().nullable().optional(),
+    timezone: z.string().nullable().optional(),
+    geocodeExpiresAt: z.string().nullable().optional(),
+  }).nullable().optional(),
+  arrivedAt: z.string().nullable().optional(),
+  departedAt: z.string().nullable().optional(),
   appt: z.string().min(1, 'Appointment is required'),
   apptType: apptTypeEnum,
   apptEnd: z.string().optional(),
@@ -71,6 +85,7 @@ export const loadSchema = z.object({
 
   // Extended fields (optional)
   customer: z.string().optional().nullable(),
+  customerId: z.string().optional().nullable(),
   miles: z.number().min(0).optional().nullable(),
   rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
   notes: z.string().optional().nullable(),

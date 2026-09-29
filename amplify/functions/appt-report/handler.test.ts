@@ -11,6 +11,7 @@ const { send } = vi.hoisted(() => {
   process.env.SLACK_BOT_TOKEN = 'xoxb-test'
   process.env.SLACK_GLOBAL_CHANNEL_ID = 'C_GLOBAL'
   process.env.LOAD_TABLE_NAME = 'Load-test'
+  process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
   return { send: vi.fn() }
 })
 
@@ -25,7 +26,7 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   },
 }))
 
-const fetchMock = vi.fn(async (_url: unknown, _init?: { body?: string }) => ({
+const fetchMock = vi.fn(async (..._args: [unknown, { body?: string }?]) => ({
   json: async () => ({ ok: true }),
 }))
 vi.stubGlobal('fetch', fetchMock)
@@ -60,9 +61,13 @@ describe('appt-report digest', () => {
     vi.useRealTimers()
   })
 
-  const scanReturns = (...items: Record<string, unknown>[]) => {
+  const scanReturns = (...items: Record<string, unknown>[]) => tablesReturn(items, [])
+  const tablesReturn = (loads: Record<string, unknown>[], customers: Record<string, unknown>[]) => {
     send.mockReset()
-    send.mockResolvedValue({ Items: items, LastEvaluatedKey: undefined })
+    send.mockImplementation(async (cmd: { input: { TableName: string } }) => ({
+      Items: cmd.input.TableName === 'Customer-test' ? customers : loads,
+      LastEvaluatedKey: undefined,
+    }))
     fetchMock.mockClear()
   }
 
@@ -107,5 +112,27 @@ describe('appt-report digest', () => {
     const res = await handler({ force: true })
 
     expect(res).toMatchObject({ ok: true, count: 0 })
+  })
+
+  it('follows the linked customer workflow over the customer name', async () => {
+    tablesReturn(
+      [
+        // Name says Batory, but the linked customer is configured as a plain account:
+        // only the missing ratecon matters, and that is not in the digest.
+        load({ id: 'l1', customerId: 'c-plain', stops: [{ type: 'pickup', appt: apptSoon(), apptStatus: 'need_request' }] }),
+        // Name says nothing, linked customer runs the Batory ladder.
+        load({ id: 'l2', aljexId: '14342', customer: 'ACME INGREDIENTS', customerId: 'c-ladder', stops: [{ type: 'delivery', appt: apptSoon(), apptStatus: 'need_book' }] }),
+        // Linked customer without a configured workflow still falls back to the name.
+        load({ id: 'l3', aljexId: '14343', customerId: 'c-unset', stops: [{ type: 'pickup', appt: apptSoon(), apptStatus: 'requested' }] }),
+      ],
+      [{ id: 'c-plain', apptWorkflow: 'NONE' }, { id: 'c-ladder', apptWorkflow: 'BATORY' }, { id: 'c-unset' }],
+    )
+
+    const res = await handler({ force: true })
+
+    expect(res).toMatchObject({ ok: true, count: 2 })
+    expect(postedText()).not.toContain('14340')
+    expect(postedText()).toContain('14342')
+    expect(postedText()).toContain('14343')
   })
 })

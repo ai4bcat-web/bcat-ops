@@ -135,7 +135,7 @@ export function ApptEditPopover({ load, stop, apptField, typeField, onClose, cla
       apptPatch.apptEnd = endIso
 
       const statusPatch: Partial<Stop> = {}
-      const needsProofs = requiresApptProofs(load.customer)
+      const needsProofs = requiresApptProofs(load)
 
       const reopen = isHandoff || (needsProofs && effectiveType === 'tbd' && needSelected)
       if (reopen) {

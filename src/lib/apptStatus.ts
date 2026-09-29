@@ -57,8 +57,8 @@ export function defaultRequestedFor(stop: Pick<Stop, 'type' | 'appt' | 'apptChan
  * booked + confirmation screenshots → confirmed; booked without → requested (the
  * request clearly happened — the time is in); unbooked → the phase's entry status.
  */
-export function apptWorkflowStatus(stop: Stop, load: Pick<Load, 'customer' | 'rateConfirmKey' | 'rateConfirmUrl'>): EffectiveApptStatus {
-  if (!requiresApptProofs(load.customer)) {
+export function apptWorkflowStatus(stop: Stop, load: Pick<Load, 'customer' | 'customerApptWorkflow' | 'rateConfirmKey' | 'rateConfirmUrl'>): EffectiveApptStatus {
+  if (!requiresApptProofs(load)) {
     return (load.rateConfirmKey || load.rateConfirmUrl) ? 'confirmed' : 'ratecon_needed'
   }
   if (stop.apptStatus) return stop.apptStatus

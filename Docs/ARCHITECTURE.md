@@ -31,6 +31,7 @@
 ## Data shape
 - Core types: `src/types/*` (truck, expense, load, equipment).
 - Zod validation: `src/lib/schemas.ts`.
+- TMS directory types: `src/types/tms.ts`; matching / money helpers: `src/lib/tmsDirectory.ts`; directory + config writes go through the `tmsDirectoryActions` Lambda (`amplify/functions/tms-directory-actions`), Google lookups through `tmsGeocode` (`amplify/functions/tms-geocode`). See `Docs/WORKFLOWS.md` → TMS Phase 1.
 - Date parsing: `src/lib/fuelDateUtils.ts` plus `date-fns`.
 
 ## Deployment

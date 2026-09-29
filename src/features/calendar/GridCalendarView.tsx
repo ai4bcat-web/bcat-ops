@@ -108,7 +108,7 @@ function StatusHandoffGrid({ load, stop, kind, status }: {
 
   const tone = STATUS_TONE_COLORS[STATUS_META[status].tone]
   const label = statusLabel(status, kind)
-  const canAct = canSetChangeNeeded(actor) && requiresApptProofs(load.customer)
+  const canAct = canSetChangeNeeded(actor) && requiresApptProofs(load)
   const isNeedBook = status === 'need_book'
   const isTimedHandoff = kind === 'delivery' && (status === 'requested' || status === 'confirmed' || status === 'change_needed')
   const clickable = canAct && (isNeedBook || isTimedHandoff)
@@ -792,10 +792,8 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   const dragEntry          = useRef<DayEntry | null>(null)  // the dragged card's entry (load/role/stop)
   const dropTargetDayRef   = useRef<string | null>(null)  // hover highlight tracking
   const dropCommittedDay   = useRef<string | null>(null)  // set by onDrop — survives dragLeave
-  const loadsRef = useRef(loads)
-  loadsRef.current = loads
-
-  const entryByKeyRef = useRef<Map<string, DayEntry>>(new Map())
+  const entriesByDayRef    = useRef<Map<string, DayEntry[]>>(new Map())
+  const entryByKeyRef      = useRef<Map<string, DayEntry>>(new Map())
 
   const handleDragStart = useCallback((dayStr: string, key: string) => {
     dragKey.current = key
@@ -849,7 +847,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     const entry = dragEntry.current
     if (targetDay && entry && dragDay.current && dragDay.current !== targetDay) {
       // Re-read the load from the live list (entry.load may be a stale snapshot).
-      const load = loadsRef.current.find((l) => l.id === entry.load.id)
+      const load = loads.find((l) => l.id === entry.load.id)
       if (load) {
         const loadId = load.id
         // Moving to a different day/lane → clear the old day's drag position so the load
@@ -880,7 +878,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
           if (id && !seen.has(id)) { seen.add(id); loadIds.push(id) }
         }
         if (loadIds.length > 0) {
-          const orderOf = (id: string) => loadsRef.current.find((l) => l.id === id)?.sortOrder
+          const orderOf = (id: string) => loads.find((l) => l.id === id)?.sortOrder
           persistDragOrder(loadIds, orderOf, (id, patch) => updateLoad(id, patch))
         }
         setDayOrder(new Map())
@@ -893,7 +891,7 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     dropCommittedDay.current = null
     setDragOverKey(null)
     setDropTargetDay(null)
-  }, [updateLoad, dayOrder])
+  }, [loads, updateLoad, dayOrder])
 
   const todayStr = useMemo(() => chicagoDateStr(new Date().toISOString()) ?? '', [])
 
@@ -926,8 +924,6 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     return map
   }, [availabilities, drivers])
 
-  const entriesByDayRef = useRef<Map<string, DayEntry[]>>(new Map())
-
   const entriesByDay = useMemo(() => {
     const map = new Map<string, DayEntry[]>()
     const add = (key: string, e: DayEntry) => { if (!map.has(key)) map.set(key, []); map.get(key)!.push(e) }
@@ -952,7 +948,6 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
     for (const arr of map.values()) {
       arr.sort(cmp)
     }
-    entriesByDayRef.current = map
     return map
   }, [loads])
 
@@ -973,13 +968,18 @@ export function GridCalendarView({ loads, drivers, startDate, viewMode, availabi
   }, [loads])
 
   // Combined key→entry map so drag handlers can resolve the dragged card without parsing keys.
-  useMemo(() => {
+  const entryByKey = useMemo(() => {
     const m = new Map<string, DayEntry>()
     for (const arr of entriesByDay.values()) for (const e of arr) m.set(e.key, e)
     for (const e of unscheduledEntries) m.set(e.key, e)
-    entryByKeyRef.current = m
     return m
   }, [entriesByDay, unscheduledEntries])
+
+  // Keep stable ref mirrors for event handlers that run between renders.
+  useEffect(() => {
+    entriesByDayRef.current = entriesByDay
+    entryByKeyRef.current = entryByKey
+  }, [entriesByDay, entryByKey])
 
   return (
     <div style={{ height: '100%', overflow: 'auto' }}>

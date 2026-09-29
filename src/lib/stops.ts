@@ -106,6 +106,7 @@ export function makeStop(partial: Partial<Stop> & { type: StopType }, sequence: 
       ? crypto.randomUUID()
       : `stop-${sequence}-${stopCounter++}`
   return {
+    ...partial,
     id,
     type: partial.type,
     name: partial.name,
