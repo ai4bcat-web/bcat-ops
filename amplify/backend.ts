@@ -1061,17 +1061,20 @@ podActionsFn.addToRolePolicy(
 // Scanner layer/env wiring and memory/timeout for document enhancement.
 configurePodScanner(podActionsFn)
 
-// Background sync schedule: every 5 minutes, newest-first last-7-days ingestion.
-// The handler reads POD_BACKGROUND_SYNC_ENABLED to report whether the schedule is active.
+// Background ingestion: every 15 minutes walk the last 7 days of the JobsDone feed
+// (each tick walks every page because JobsDone's cursor is not time-ordered). This
+// rule is deliberately NOT disabled under BCAT_ISOLATED_PREVIEW: it only reads
+// JobsDone and writes this stack's own tables, the same reasoning that keeps
+// podActions callable there, and "new images keep arriving" cannot be verified
+// on a preview stack otherwise.
 const podBackgroundSyncRule = new Rule(podActionsFn.stack, 'PodBackgroundSyncRule', {
-  schedule:    Schedule.rate(Duration.minutes(5)),
-  description: 'JobsDone PODs: backfill last-7-days every 5 minutes',
+  schedule:    Schedule.rate(Duration.minutes(15)),
+  description: 'JobsDone PODs: import and scan the last 7 days every 15 minutes',
 })
 podBackgroundSyncRule.addTarget(new EventsLambdaTarget(podActionsFn, {
   event: RuleTargetInput.fromObject({ action: 'backfillSchedule' }),
 }))
-
-podActionsFn.addEnvironment('POD_BACKGROUND_SYNC_ENABLED', process.env.BCAT_ISOLATED_PREVIEW !== 'true' ? 'true' : 'false')
+podActionsFn.addEnvironment('POD_BACKGROUND_SYNC_ENABLED', 'true')
 
 // ── Isolated preview guard ──────────────────────────────────────────────────
 // A sandbox or feature-branch stack deployed with BCAT_ISOLATED_PREVIEW=true must never
@@ -1087,7 +1090,6 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
   for (const rule of [
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
     faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule, carrierBlastRule,
-    podBackgroundSyncRule,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }

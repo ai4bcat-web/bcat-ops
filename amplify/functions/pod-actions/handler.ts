@@ -1136,8 +1136,8 @@ export async function fetchJobsDoneMessages(
           ? (envelope.lastEvaluatedKey as Record<string, unknown>)
           : null
 
-      // The feed is newest-first, so aborting the page on one bad row would block
-      // every later sync behind it. Skip and count instead; the count is returned.
+      // Page order is arbitrary (the upstream clientId-index has no sort key), so a
+      // bad row must never abort the page: skip and count it, the count is returned.
       for (const raw of dataField) {
         if (!raw || typeof raw !== 'object') { skipped++; continue }
         const msg = raw as Record<string, unknown>

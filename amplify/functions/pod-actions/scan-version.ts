@@ -5,5 +5,6 @@
  *
  * 2: OCR-vote orientation, evidence-gated cropping, luminance (not red channel).
  * 3: review reason is a plain-language sentence, only for conditions worth a look.
+ * 4: crop quad padded 2% outward so edge characters survive.
  */
-export const POD_SCAN_VERSION = 3
+export const POD_SCAN_VERSION = 4

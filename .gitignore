@@ -35,3 +35,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# tesseract.js language cache written by local scanner test runs
+*.traineddata

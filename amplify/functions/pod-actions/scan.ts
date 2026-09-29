@@ -299,7 +299,24 @@ function detectBoundary(image: JimpImage): {
   return findDocumentBoundary(gray, w, h, scale)
 }
 
-async function applyPerspectiveCorrection(image: JimpImage, quad: Quad): Promise<JimpImage> {
+/** Detected edges land on the page border; a thin margin of background beats losing the outer characters. */
+const CROP_PAD_SHARE = 0.02
+
+function padQuad(quad: Quad, w: number, h: number): Quad {
+  const pts = [quad.topLeft, quad.topRight, quad.bottomRight, quad.bottomLeft]
+  const cx = pts.reduce((s, p) => s + p.x, 0) / 4
+  const cy = pts.reduce((s, p) => s + p.y, 0) / 4
+  const pad = (p: Point): Point => ({
+    x: Math.min(w - 1, Math.max(0, cx + (p.x - cx) * (1 + CROP_PAD_SHARE))),
+    y: Math.min(h - 1, Math.max(0, cy + (p.y - cy) * (1 + CROP_PAD_SHARE))),
+  })
+  return { topLeft: pad(quad.topLeft), topRight: pad(quad.topRight), bottomRight: pad(quad.bottomRight), bottomLeft: pad(quad.bottomLeft) }
+}
+
+async function applyPerspectiveCorrection(image: JimpImage, detected: Quad): Promise<JimpImage> {
+  const fullW = image.bitmap.width
+  const fullH = image.bitmap.height
+  const quad = padQuad(detected, fullW, fullH)
   const { topLeft, topRight, bottomRight, bottomLeft } = quad
   const topW = Math.hypot(topLeft.x - topRight.x, topLeft.y - topRight.y)
   const bottomW = Math.hypot(bottomLeft.x - bottomRight.x, bottomLeft.y - bottomRight.y)
@@ -308,8 +325,6 @@ async function applyPerspectiveCorrection(image: JimpImage, quad: Quad): Promise
   const dstW = Math.max(1, Math.round(Math.max(topW, bottomW)))
   const dstH = Math.max(1, Math.round(Math.max(leftH, rightH)))
 
-  const fullW = image.bitmap.width
-  const fullH = image.bitmap.height
   const fullGray = jimpToGray(image)
   const warped = warpPerspective(fullGray, fullW, fullH, quad, dstW, dstH)
   return jimpFromGray(warped, dstW, dstH)
