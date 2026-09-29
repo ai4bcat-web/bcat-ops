@@ -35,6 +35,7 @@ import type {
   PodSyncResult,
   PodAssets,
 } from '../../../src/types/pods'
+import { senderKey } from '../../../src/lib/podSenderKey'
 import { enhancePodImage } from './scan'
 import { POD_SCAN_VERSION } from './scan-version.js'
 
@@ -1515,8 +1516,6 @@ export async function retryAction(
   if (!updated) throw new Error('POD disappeared after retry')
   return { item: serializeStoredPodDocument(updated) }
 }
-
-import { senderKey } from '../../../src/lib/podSenderKey'
 
 export interface PodSenderMapping {
   clientId: string
