@@ -8,13 +8,16 @@ import {
   Settings2, X, CheckCircle2,
 } from 'lucide-react'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { PodCard } from './PodCard'
+import { PodTable } from './PodTable'
 import { PodPreviewDialog } from './PodPreviewDialog'
 import { AssignLoadDialog } from './AssignLoadDialog'
 import { PodsConnectionForm } from './PodsConnectionForm'
 import { assignPod, retryPod } from '@/lib/podsClient'
 import { graphqlErrorText } from '@/lib/apiClient'
 import type { PodDocument, PodConnectionStatus } from '@/types/pods'
+import type { Driver } from '@/types'
+
+import { matchPodDriver } from '@/lib/podDriver'
 
 const FILTER_LABELS: Record<string, string> = {
   ALL: 'All',
@@ -22,14 +25,19 @@ const FILTER_LABELS: Record<string, string> = {
   UNASSIGNED: 'Unassigned',
 }
 
+type SortKey = 'receivedDesc' | 'receivedAsc' | 'senderAsc' | 'driverAsc'
+
 function useFilteredDocs(
   docs: PodDocument[],
   query: string,
   filter: 'ALL' | 'ASSIGNED' | 'UNASSIGNED',
+  drivers: Driver[],
+  driverFilter: 'ALL' | 'ROSTER' | 'UNKNOWN' | string,
+  sort: SortKey,
 ) {
   return useMemo(() => {
     const q = query.trim().toLowerCase()
-    return docs.filter((d) => {
+    let rows = docs.filter((d) => {
       const matchesQuery = !q || [
         d.companyName,
         d.senderName,
@@ -38,14 +46,40 @@ function useFilteredDocs(
       ].some((v) => (v ?? '').toLowerCase().includes(q))
       const matchesFilter =
         filter === 'ALL' ? true : filter === 'ASSIGNED' ? !!d.loadId : !d.loadId
-      return matchesQuery && matchesFilter
+      const matchedDriver = matchPodDriver(d, drivers)
+      const matchesDriver =
+        driverFilter === 'ALL' ? true :
+        driverFilter === 'ROSTER' ? matchedDriver != null :
+        driverFilter === 'UNKNOWN' ? matchedDriver == null :
+        matchedDriver?.id === driverFilter
+      return matchesQuery && matchesFilter && matchesDriver
     })
-  }, [docs, query, filter])
+
+    rows = [...rows].sort((a, b) => {
+      switch (sort) {
+        case 'receivedAsc':
+          return Date.parse(a.receivedAt) - Date.parse(b.receivedAt)
+        case 'senderAsc':
+          return (a.senderName || a.senderContact || '').localeCompare(b.senderName || b.senderContact || '')
+        case 'driverAsc': {
+          const da = matchPodDriver(a, drivers)?.name || ''
+          const db = matchPodDriver(b, drivers)?.name || ''
+          return da.localeCompare(db)
+        }
+        case 'receivedDesc':
+        default:
+          return Date.parse(b.receivedAt) - Date.parse(a.receivedAt)
+      }
+    })
+
+    return rows
+  }, [docs, query, filter, drivers, driverFilter, sort])
 }
 
 export function PodsPage() {
   const { isAdmin, isOwner } = useAuth()
   const loads = useAppStore((s) => s.loads)
+  const drivers = useAppStore((s) => s.drivers)
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
   const {
@@ -68,6 +102,8 @@ export function PodsPage() {
 
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL')
+  const [driverFilter, setDriverFilter] = useState<'ALL' | 'ROSTER' | 'UNKNOWN' | string>('ALL')
+  const [sort, setSort] = useState<SortKey>('receivedDesc')
   const [previewDoc, setPreviewDoc] = useState<PodDocument | null>(null)
   const [assignDoc, setAssignDoc] = useState<PodDocument | null>(null)
   const [showConfig, setShowConfig] = useState(false)
@@ -75,7 +111,7 @@ export function PodsPage() {
 
   const activeStatus = configuredOverride ?? status
 
-  const filteredDocs = useFilteredDocs(docs, query, filter)
+  const filteredDocs = useFilteredDocs(docs, query, filter, drivers, driverFilter, sort)
 
   const handleAssign = async (doc: PodDocument, loadId: string | null) => {
     try {
@@ -229,7 +265,7 @@ export function PodsPage() {
                     height: 30,
                     padding: '0 12px',
                     borderRadius: 8,
-                    border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`,
+                    border: active ? '1px solid var(--ds-blue)' : '1px solid var(--ds-border)',
                     background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
                     color: active ? 'var(--ds-blue)' : 'var(--ds-t2)',
                     fontSize: 12.5,
@@ -243,6 +279,50 @@ export function PodsPage() {
                 </button>
               )
             })}
+            <select
+              value={driverFilter}
+              onChange={(e) => setDriverFilter(e.target.value)}
+              style={{
+                height: 30,
+                borderRadius: 8,
+                border: '1px solid var(--ds-border)',
+                padding: '0 8px',
+                fontSize: 12.5,
+                background: 'var(--ds-surface)',
+                color: 'var(--ds-t2)',
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="ALL">All senders</option>
+              <option value="ROSTER">On driver roster</option>
+              <option value="UNKNOWN">Not on roster</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              style={{
+                height: 30,
+                borderRadius: 8,
+                border: '1px solid var(--ds-border)',
+                padding: '0 8px',
+                fontSize: 12.5,
+                background: 'var(--ds-surface)',
+                color: 'var(--ds-t2)',
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="receivedDesc">Newest first</option>
+              <option value="receivedAsc">Oldest first</option>
+              <option value="senderAsc">Sender A-Z</option>
+              <option value="driverAsc">Driver A-Z</option>
+            </select>
           </div>
         </div>
       </div>
@@ -346,23 +426,20 @@ export function PodsPage() {
                 {docs.length === 0 ? 'No PODs yet. Use Scan past 7 days to import recent images.' : 'No PODs match the current filters.'}
               </div>
             ) : (
-              <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
-                {filteredDocs.map((doc) => (
-                  <PodCard
-                    key={doc.id}
-                    doc={doc}
-                    onPreview={setPreviewDoc}
-                    onAssign={setAssignDoc}
-                    onUnassign={(d) => {
-                      if (confirm('Unassign this POD from its load?')) {
-                        handleAssign(d, null)
-                      }
-                    }}
-                    onRetry={handleRetry}
-                    onViewLoad={openLoad}
-                  />
-                ))}
-              </div>
+              <PodTable
+                docs={filteredDocs}
+                loads={loads}
+                drivers={drivers}
+                onPreview={setPreviewDoc}
+                onAssign={setAssignDoc}
+                onUnassign={(d) => {
+                  if (confirm('Unassign this POD from its load?')) {
+                    handleAssign(d, null)
+                  }
+                }}
+                onRetry={handleRetry}
+                onViewLoad={openLoad}
+              />
             )}
 
             {nextToken && (
@@ -392,6 +469,7 @@ export function PodsPage() {
         <AssignLoadDialog
           doc={assignDoc}
           loads={loads}
+          drivers={drivers}
           onAssign={(d, loadId) => handleAssign(d, loadId)}
           onUnassign={(d) => handleAssign(d, null)}
           onClose={() => setAssignDoc(null)}

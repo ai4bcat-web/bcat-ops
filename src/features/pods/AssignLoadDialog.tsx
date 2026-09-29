@@ -5,8 +5,30 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { formatDateShort } from '@/lib/date'
-import type { Load } from '@/types'
+import { matchPodDriver, recentLoadsForDriver } from '@/lib/podDriver'
+import type { Driver, Load } from '@/types'
 import type { PodDocument } from '@/types/pods'
+
+function LoadRow({
+  load,
+  selected,
+  onSelect,
+}: {
+  load: Load
+  selected: boolean
+  onSelect: (loadId: string) => void
+}) {
+  return (
+    <button
+      onClick={() => onSelect(load.id)}
+      className={`w-full text-left px-4 py-3 border-b last:border-b-0 text-sm hover:bg-muted transition-colors ${
+        selected ? 'bg-muted' : ''
+      }`}
+    >
+      <div className="font-medium">{loadSummary(load)}</div>
+    </button>
+  )
+}
 
 function loadSummary(load: Load): string {
   const route = [load.originCity, load.destinationCity].filter(Boolean).join(' → ')
@@ -23,12 +45,14 @@ function loadSummary(load: Load): string {
 export function AssignLoadDialog({
   doc,
   loads,
+  drivers,
   onAssign,
   onUnassign,
   onClose,
 }: {
   doc: PodDocument
   loads: Load[]
+  drivers: Driver[]
   onAssign: (doc: PodDocument, loadId: string) => void
   onUnassign: (doc: PodDocument) => void
   onClose: () => void
@@ -38,17 +62,26 @@ export function AssignLoadDialog({
 
   const current = useMemo(() => loads.find((l) => l.id === doc.loadId), [loads, doc.loadId])
 
+  // The driver who texted this POD almost always delivered the load it belongs to,
+  // so their recent deliveries come first; the full list stays one search away.
+  const driver = useMemo(() => matchPodDriver(doc, drivers), [doc, drivers])
+  const recent = useMemo(() => (driver ? recentLoadsForDriver(loads, driver.id) : []), [loads, driver])
+  const recentIds = useMemo(() => new Set(recent.map((l) => l.id)), [recent])
+
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return loads
-    return loads.filter((l) => {
+    const rest = loads.filter((l) => !recentIds.has(l.id))
+    if (!q) return rest
+    return rest.filter((l) => {
       const hay = [
         l.aljexId, l.tmsId, l.pickupNumber, l.customer,
         l.originName, l.originCity, l.destinationName, l.destinationCity,
       ].filter(Boolean).join(' ').toLowerCase()
       return hay.includes(q)
     })
-  }, [loads, query])
+  }, [loads, query, recentIds])
+
+  const selectLoad = (loadId: string) => setSelected(loadId)
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
@@ -78,33 +111,42 @@ export function AssignLoadDialog({
           </div>
         )}
 
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search Pro #, TMS/PO, customer, city…"
-            className="pl-9"
-          />
-        </div>
+        <div className="max-h-96 overflow-y-auto border rounded-lg">
+          {driver ? (
+            <>
+              <div className="px-4 py-2 text-xs font-semibold text-muted-foreground bg-muted/50 border-b">
+                Recent deliveries by {driver.name}
+              </div>
+              {recent.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-muted-foreground border-b">No loads on record for {driver.name}.</div>
+              ) : (
+                recent.map((l) => <LoadRow key={l.id} load={l} selected={selected === l.id} onSelect={selectLoad} />)
+              )}
+            </>
+          ) : (
+            <div className="px-4 py-2 text-xs text-muted-foreground bg-muted/50 border-b">
+              Sender {doc.senderName || doc.senderContact || 'unknown'} is not on the driver roster, so all loads are shown.
+            </div>
+          )}
 
-        <div className="max-h-72 overflow-y-auto border rounded-lg">
+          <div className="px-4 py-2 text-xs font-semibold text-muted-foreground bg-muted/50 border-b border-t">
+            {driver ? 'All other loads' : 'All loads'}
+          </div>
+          <div className="relative p-2 border-b">
+            <Search size={14} className="absolute left-5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search Pro #, TMS/PO, customer, city…"
+              className="pl-9"
+            />
+          </div>
           {matches.length === 0 ? (
             <div className="p-6 text-center text-sm text-muted-foreground">
               No loads match "{query}".
             </div>
           ) : (
-            matches.map((l) => (
-              <button
-                key={l.id}
-                onClick={() => setSelected(l.id)}
-                className={`w-full text-left px-4 py-3 border-b last:border-b-0 text-sm hover:bg-muted transition-colors ${
-                  selected === l.id ? 'bg-muted' : ''
-                }`}
-              >
-                <div className="font-medium">{loadSummary(l)}</div>
-              </button>
-            ))
+            matches.map((l) => <LoadRow key={l.id} load={l} selected={selected === l.id} onSelect={selectLoad} />)
           )}
         </div>
 
@@ -118,7 +160,7 @@ export function AssignLoadDialog({
           <button
             onClick={() => {
               if (selected) {
-                const chosen = matches.find((l) => l.id === selected)
+                const chosen = loads.find((l) => l.id === selected)
                 if (chosen && confirm(`Assign this POD to ${chosen.aljexId ? `Pro #${chosen.aljexId}` : chosen.id.slice(-6)}?`)) {
                   onAssign(doc, selected)
                   onClose()

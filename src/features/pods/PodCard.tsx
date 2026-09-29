@@ -1,51 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
 import {
-  Eye, Download, Link2, Unlink, RotateCcw, FileText, ImageIcon,
-  AlertCircle, Loader2, CheckCircle2,
+  Eye, Link2, Unlink, RotateCcw, FileText, Loader2,
 } from 'lucide-react'
-import { getPodAssets } from '@/lib/podsClient'
-import { graphqlErrorText } from '@/lib/apiClient'
-import { downloadFromUrl } from '@/lib/download'
 import { formatDateTime } from '@/lib/date'
-import type { PodAssets, PodDocument } from '@/types/pods'
-
-function usePodAssets(doc: PodDocument) {
-  const [assets, setAssets] = useState<PodAssets | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const fetchedRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    const sig = `${doc.id}:${doc.version}:${doc.processingStatus}`
-    if (fetchedRef.current === sig) return
-    fetchedRef.current = sig
-    let alive = true
-    getPodAssets(doc.id)
-      .then((a) => { if (alive) { setAssets(a); setError(null) } })
-      .catch((err) => { if (alive) setError(graphqlErrorText(err) || 'Could not load image') })
-      .finally(() => { if (alive) setLoading(false) })
-    return () => { alive = false }
-  }, [doc.id, doc.version, doc.processingStatus])
-
-  return { assets, loading, error }
-}
-
-function statusBadge(doc: PodDocument) {
-  switch (doc.processingStatus) {
-    case 'READY':
-      return doc.scanReviewReason
-        ? { label: 'Review scan', color: '#b45309', bg: '#fffbeb', icon: AlertCircle }
-        : { label: 'Enhanced', color: '#15803d', bg: '#f0fdf4', icon: CheckCircle2 }
-    case 'ORIGINAL_ONLY':
-      return { label: 'Original only', color: '#0369a1', bg: '#f0f9ff', icon: ImageIcon }
-    case 'PENDING':
-      return { label: 'Processing…', color: '#b45309', bg: '#fffbeb', icon: Loader2 }
-    case 'FAILED':
-      return { label: 'Failed', color: '#b91c1c', bg: '#fef2f2', icon: AlertCircle }
-    default:
-      return { label: doc.processingStatus, color: 'var(--ds-t3)', bg: 'var(--ds-bg)', icon: AlertCircle }
-  }
-}
+import type { PodDocument } from '@/types/pods'
+import { statusBadge, usePodAssets, useStalePending, senderLabel } from './podUtils'
+import { PodActionBtn, PodDownloadBtn } from './PodShared'
 
 export function PodCard({
   doc,
@@ -74,20 +33,7 @@ export function PodCard({
   const originalIsImage = /^image\/(jpeg|png|webp|gif)/i.test(doc.contentType ?? '')
   const imageUrl = hasEnhanced ? assets?.enhancedUrl : originalIsImage ? assets?.originalUrl : undefined
   const canOpen = Boolean(assets?.originalUrl)
-  // Processing is normally done within seconds; a document still PENDING after the
-  // backend's 5-minute lease window was never finished (e.g. an async invoke that
-  // died) and needs a manual retry, which the backend accepts once the lease expired.
-  // The clock is state (render stays pure) and only ticks while the card is pending.
-  const [now, setNow] = useState<number | null>(null)
-  const pending = doc.processingStatus === 'PENDING'
-  useEffect(() => {
-    if (!pending) return
-    const tick = () => setNow(Date.now())
-    const id = setInterval(tick, 30_000)
-    const first = setTimeout(tick, 0)
-    return () => { clearInterval(id); clearTimeout(first) }
-  }, [pending])
-  const isStalePending = pending && now != null && now > Date.parse(doc.updatedAt) + 5 * 60_000
+  const isStalePending = useStalePending(doc)
 
   return (
     <div
@@ -172,11 +118,8 @@ export function PodCard({
                   }}
                   title={doc.isAllowed ? 'Active sender' : 'Inactive sender'}
                 />
-                {doc.senderName || doc.senderContact || 'Unknown sender'}
+                {senderLabel(doc)}
               </span>
-              {!doc.senderName && doc.senderContact && (
-                <span style={{ color: 'var(--ds-t3)' }}>({doc.senderContact})</span>
-              )}
             </div>
           </div>
           <span
@@ -278,77 +221,3 @@ export function PodCard({
     </div>
   )
 }
-
-function PodActionBtn({
-  onClick,
-  icon,
-  label,
-  danger = false,
-}: {
-  onClick: () => void
-  icon: React.ReactNode
-  label: string
-  danger?: boolean
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        height: 28,
-        padding: '0 10px',
-        borderRadius: 7,
-        border: '1px solid var(--ds-border)',
-        background: 'var(--ds-surface)',
-        color: danger ? '#dc2626' : 'var(--ds-t2)',
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-      }}
-    >
-      {icon} {label}
-    </button>
-  )
-}
-
-function PodDownloadBtn({ url, filename, label }: { url: string; filename: string; label: string }) {
-  const [busy, setBusy] = useState(false)
-  return (
-    <button
-      onClick={async () => {
-        setBusy(true)
-        try {
-          await downloadFromUrl(url, filename)
-        } catch {
-          // download.ts already surfaces a toast; avoid duplicate noise
-        } finally {
-          setBusy(false)
-        }
-      }}
-      disabled={busy}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 5,
-        height: 28,
-        padding: '0 10px',
-        borderRadius: 7,
-        border: '1px solid var(--ds-border)',
-        background: 'var(--ds-surface)',
-        color: 'var(--ds-blue)',
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: busy ? 'wait' : 'pointer',
-        fontFamily: 'inherit',
-      }}
-    >
-      {busy ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-      {label}
-    </button>
-  )
-}
-
-

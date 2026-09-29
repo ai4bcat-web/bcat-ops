@@ -36,6 +36,7 @@ const loadsFixture: Load[] = [
 const setSelectedLoad = vi.fn()
 const appStoreState = {
   loads: loadsFixture,
+  drivers: [{ id: 'd1', name: 'Ivan Sender', phone: '+17735550101', active: true }],
   setSelectedLoad,
 }
 vi.mock('@/store/useAppStore', () => ({
@@ -102,7 +103,7 @@ describe('PodsPage', () => {
   it('renders the gallery and lists a POD after sync/list', async () => {
     render(<PodsPage />)
     await waitFor(() => expect(screen.getByText('Metz Logistics')).toBeTruthy())
-    expect(screen.getByText('Ivan Sender')).toBeTruthy()
+    expect(screen.getAllByText(/Ivan Sender/).length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('REF-1')).toBeTruthy()
   })
 
@@ -163,7 +164,7 @@ describe('PodsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Assign$/ }))
 
     await waitFor(() => expect(podsClientMocks.assignPod).toHaveBeenCalledWith({ id: 'p1', loadId: 'l1', expectedVersion: 1 }))
-    await waitFor(() => expect(screen.getByText(/Assigned to load/)).toBeTruthy())
+    await waitFor(() => expect(screen.getAllByText('Unassign').length).toBeGreaterThanOrEqual(1))
 
     fireEvent.click(screen.getByText('Unassign'))
     await waitFor(() => expect(podsClientMocks.assignPod).toHaveBeenLastCalledWith({ id: 'p1', loadId: null, expectedVersion: 2 }))
