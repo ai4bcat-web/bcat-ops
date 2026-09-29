@@ -3,7 +3,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { matchPodDriver } from '@/lib/podDriver'
+import { matchPodDriver, digits } from '@/lib/podDriver'
 import type { Driver } from '@/types'
 import type { PodDocument, PodSenderMapping } from '@/types/pods'
 
@@ -30,27 +30,39 @@ export function PodSenderMappingDialog({
 }) {
   const rows = useMemo<SenderRow[]>(() => {
     const seen = new Map<string, SenderRow>()
-    for (const doc of docs) {
-      const digits = (doc.senderContact ?? '').replace(/\D/g, '').slice(-10)
-      if (digits.length !== 10) continue
-      const key = `${digits}|${doc.senderName}`
-      if (!seen.has(key)) {
-        const existing = mappings.find((m) => m.phoneDigits === digits)
-        const auto = matchPodDriver(doc, drivers, mappings)
-        seen.set(key, {
-          phoneDigits: digits,
-          senderName: doc.senderName,
-          currentDriverId: existing?.driverId ?? auto?.id ?? null,
-        })
-      }
+    for (const doc of [...docs].sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))) {
+      const phoneDigits = digits(doc.senderContact)
+      if (phoneDigits.length !== 10) continue
+      const existing = mappings.find((m) => m.senderKey === `phone:${phoneDigits}`)
+      const auto = matchPodDriver(doc, drivers, mappings)
+      seen.set(phoneDigits, {
+        phoneDigits,
+        senderName: doc.senderName,
+        currentDriverId: existing?.driverId ?? auto?.id ?? null,
+      })
     }
     return Array.from(seen.values()).sort((a, b) =>
       (a.senderName || a.phoneDigits).localeCompare(b.senderName || b.phoneDigits)
     )
   }, [docs, drivers, mappings])
 
-  const [selections, setSelections] = useState<Record<string, string>>({})
+  const initialSelections = useMemo<Record<string, string>>(() => {
+    return Object.fromEntries(
+      rows.map((row) => [row.phoneDigits, row.currentDriverId ?? ''])
+    )
+  }, [rows])
+
+  const [selections, setSelections] = useState<Record<string, string>>(initialSelections)
+  if (Object.keys(selections).length === 0 && rows.length > 0 && Object.keys(initialSelections).length > 0) {
+    setSelections(initialSelections)
+  }
+
   const [saving, setSaving] = useState(false)
+
+  const handleClose = () => {
+    setSelections(initialSelections)
+    onClose()
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -61,6 +73,7 @@ export function PodSenderMappingDialog({
         const driverId = selected === '' ? null : selected
         await onSave({ phone: row.phoneDigits, senderName: row.senderName, driverId })
       }
+      setSelections(initialSelections)
       onClose()
     } finally {
       setSaving(false)
@@ -121,7 +134,7 @@ export function PodSenderMappingDialog({
         </table>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button variant="outline" onClick={handleClose} disabled={saving}>Cancel</Button>
           <Button onClick={handleSave} disabled={saving || rows.length === 0}>
             {saving ? 'Saving…' : 'Save mappings'}
           </Button>

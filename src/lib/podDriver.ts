@@ -11,27 +11,37 @@ const nameKey = (s: string | null | undefined): string => alphaTokens(s).join(''
 
 /**
  * The driver who texted this POD.
- * 1. Backend mapping by normalized phone (highest priority: user override).
+ * 1. Backend mapping by normalized phone or name (highest priority: user override).
  * 2. Roster phone match.
  * 3. Automatic full-name match (requires first + last to avoid bare-first-name collisions).
  */
 export function matchPodDriver(
   doc: Pick<PodDocument, 'senderName' | 'senderContact'>,
   drivers: Driver[],
-  mappings?: PodSenderMapping[],
+  mappings: PodSenderMapping[],
 ): Driver | null {
   const phone = digits(doc.senderContact)
+  const name = nameKey(doc.senderName)
+
+  // Backend overrides: phone key first, then name key.
+  const phoneKey = `phone:${phone}`
+  const mappedPhone = phone.length === 10
+    ? mappings.find((m) => m.senderKey === phoneKey)
+    : undefined
+  const mappedName = name.length >= 2
+    ? mappings.find((m) => m.senderKey === `name:${name}`)
+    : undefined
+  const mapped = mappedPhone ?? mappedName
+  if (mapped) {
+    const driver = drivers.find((d) => d.id === mapped.driverId)
+    if (driver) return driver
+  }
+
   if (phone.length === 10) {
-    const mapped = mappings?.find((m) => m.phoneDigits === phone)
-    if (mapped) {
-      const driver = drivers.find((d) => d.id === mapped.driverId)
-      if (driver) return driver
-    }
     const byPhone = drivers.find((d) => digits(d.phone) === phone)
     if (byPhone) return byPhone
   }
   if (alphaTokens(doc.senderName).length < 2) return null
-  const name = nameKey(doc.senderName)
   if (!name) return null
   return drivers.find((d) => nameKey(d.name) === name) ?? null
 }

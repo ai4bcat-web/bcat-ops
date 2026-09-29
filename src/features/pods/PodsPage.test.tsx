@@ -20,6 +20,8 @@ const podsClientMocks = vi.hoisted(() => ({
   getPodAssets: vi.fn(),
   assignPod: vi.fn(),
   retryPod: vi.fn(),
+  getPodSenderMappings: vi.fn(),
+  setPodSenderMapping: vi.fn(),
 }))
 vi.mock('@/lib/podsClient', () => podsClientMocks)
 
@@ -88,6 +90,8 @@ function resetMocks() {
   podsClientMocks.assignPod.mockResolvedValue({ item: { ...baseDoc, loadId: 'l1', version: 2 } })
   podsClientMocks.retryPod.mockResolvedValue({ item: { ...baseDoc, processingStatus: 'PENDING', version: 2 } })
   podsClientMocks.configurePods.mockResolvedValue({ configured: true, clientId: 'c1', companyName: 'Metz' })
+  podsClientMocks.getPodSenderMappings.mockResolvedValue({ items: [] })
+  podsClientMocks.setPodSenderMapping.mockResolvedValue({ item: null, deleted: false })
   authState.isAdmin = true
   authState.isOwner = true
   appStoreState.loads = loadsFixture

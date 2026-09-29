@@ -1001,10 +1001,10 @@ podActionsFn.addEnvironment('POD_FUNCTION_NAME', podFunctionName)
 podActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 
 const podDocumentTableArns = [podDocumentTable.tableArn, `${podDocumentTable.tableArn}/index/*`]
-const podSenderMappingTableArns = [podSenderMappingTable.tableArn, `${podSenderMappingTable.tableArn}/index/*`]
+const podSenderMappingTableArns = [podSenderMappingTable.tableArn]
 podActionsFn.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:DeleteItem'],
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:DeleteItem'],
     resources: podSenderMappingTableArns,
   }),
 )

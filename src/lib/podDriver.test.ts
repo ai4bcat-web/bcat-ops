@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { matchPodDriver, recentLoadsForDriver } from './podDriver'
 import type { Driver, Load } from '@/types'
+import type { PodSenderMapping } from '@/types/pods'
 
 import type { Stop } from '@/types'
 
@@ -16,31 +17,32 @@ const jason = driver('d2', 'Jason Smith', '+17735550102')
 
 describe('matchPodDriver', () => {
   it('matches on the phone the POD was texted from, however it is formatted', () => {
-    expect(matchPodDriver({ senderName: 'chuck', senderContact: '(773) 555-0101' }, [jason, chuck])).toBe(chuck)
+    expect(matchPodDriver({ senderName: 'chuck', senderContact: '(773) 555-0101' }, [jason, chuck], [])).toBe(chuck)
   })
   it('prefers a backend mapping over roster phone/name lookup', () => {
     const mapping: PodSenderMapping = {
-      clientId: 'c1', phoneDigits: '2247136044', senderName: 'Lalo', driverId: 'd2', updatedBy: '', updatedAt: '',
+      clientId: 'c1', senderKey: 'phone:2247136044', senderName: 'Lalo', driverId: 'd2', updatedBy: '', updatedAt: '',
     }
     // Backend says Lalo's phone -> Jason Smith (d2), even though phone would not match anyone.
     expect(matchPodDriver({ senderName: 'Lalo Cortez', senderContact: '+12247136044' }, [jason, chuck], [mapping])).toBe(jason)
   })
+  it('falls back to roster phone when a stale mapping points to a missing driver', () => {
+    const stale: PodSenderMapping = {
+      clientId: 'c1', senderKey: 'phone:7735550101', senderName: 'Chuck', driverId: 'gone', updatedBy: '', updatedAt: '',
+    }
+    // Stale override is ignored; roster phone lookup still finds chuck.
+    expect(matchPodDriver({ senderName: 'Chuck Best', senderContact: '(773) 555-0101' }, [jason, chuck], [stale])).toBe(chuck)
+  })
   it('falls back to the registered name when the phone is unknown', () => {
-    expect(matchPodDriver({ senderName: 'JASON  SMITH', senderContact: '+15555550199' }, [jason, chuck])).toBe(jason)
+    expect(matchPodDriver({ senderName: 'JASON  SMITH', senderContact: '+15555550199' }, [jason, chuck], [])).toBe(jason)
   })
   it('refuses a name-only match on a single token (e.g. a bare first name)', () => {
-    expect(matchPodDriver({ senderName: 'Jason', senderContact: '+15555550199' }, [jason, chuck])).toBeNull()
-    expect(matchPodDriver({ senderName: 'Jason - pics', senderContact: '+15555550199' }, [jason, chuck])).toBeNull()
+    expect(matchPodDriver({ senderName: 'Jason', senderContact: '+15555550199' }, [jason, chuck], [])).toBeNull()
+    expect(matchPodDriver({ senderName: 'Jason - pics', senderContact: '+15555550199' }, [jason, chuck], [])).toBeNull()
   })
   it('never guesses when neither phone nor name matches', () => {
-    expect(matchPodDriver({ senderName: 'Someone Else', senderContact: '+15555550199' }, [jason, chuck])).toBeNull()
-    expect(matchPodDriver({ senderName: '', senderContact: '' }, [jason, chuck])).toBeNull()
-  })
-  it('treats a mapping with a missing/wrong driver as an unmapped sender', () => {
-    const mapping: PodSenderMapping = {
-      clientId: 'c1', phoneDigits: '2247136044', senderName: 'Lalo', driverId: 'gone', updatedBy: '', updatedAt: '',
-    }
-    expect(matchPodDriver({ senderName: 'Lalo Cortez', senderContact: '+12247136044' }, [jason, chuck], [mapping])).toBeNull()
+    expect(matchPodDriver({ senderName: 'Someone Else', senderContact: '+15555550199' }, [jason, chuck], [])).toBeNull()
+    expect(matchPodDriver({ senderName: '', senderContact: '' }, [jason, chuck], [])).toBeNull()
   })
 })
 

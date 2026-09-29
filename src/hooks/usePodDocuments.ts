@@ -137,7 +137,16 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
   }, [])
 
   const saveSenderMapping = useCallback(async (input: { phone: string; senderName: string; driverId: string | null }) => {
-    await setPodSenderMapping(input)
+    const result = await setPodSenderMapping(input)
+    if (result.item) {
+      setSenderMappings((prev) => {
+        const filtered = prev.filter((m) => m.senderKey !== result.item!.senderKey)
+        return [...filtered, result.item!]
+      })
+    } else if (result.deleted) {
+      const key = input.phone ? `phone:${(input.phone ?? '').replace(/\D/g, '').slice(-10)}` : `name:${(input.senderName ?? '').toLowerCase().replace(/[^a-z]+/g, '')}`
+      setSenderMappings((prev) => prev.filter((m) => m.senderKey !== key))
+    }
     await refreshSenderMappings()
   }, [refreshSenderMappings])
 
@@ -148,10 +157,17 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
       await loadStatus()
       if (!alive) return
       await fetchList({ mode: 'replace' })
-      await refreshSenderMappings()
     })()
     return () => { alive = false }
-  }, [loadStatus, fetchList, refreshSenderMappings])
+  }, [loadStatus, fetchList])
+
+  // Load sender mappings once when the connection is known and this is the full PODs page.
+  useEffect(() => {
+    if (!isBrowser || !status?.configured || loadId) return
+    ;(async () => {
+      await refreshSenderMappings()
+    })()
+  }, [status?.configured, loadId, refreshSenderMappings])
 
   // Refresh the gallery without triggering another upstream sync per open tab.
   const configured = status?.configured ?? false

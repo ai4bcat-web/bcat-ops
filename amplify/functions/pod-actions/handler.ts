@@ -5,7 +5,6 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
-  ScanCommand,
   UpdateItemCommand,
   TransactWriteItemsCommand,
   type AttributeValue,
@@ -1521,9 +1520,13 @@ function phoneDigits(s: string | null | undefined): string {
   return (s ?? '').replace(/\D/g, '').slice(-10)
 }
 
+function alphaTokens(s: string | null | undefined): string[] {
+  return (s ?? '').toLowerCase().match(/[a-z]+/g) ?? []
+}
+
 export interface PodSenderMapping {
   clientId: string
-  phoneDigits: string
+  senderKey: string
   senderName: string
   driverId: string
   updatedBy: string
@@ -1540,15 +1543,15 @@ export async function senderMappingsAction(): Promise<{ items: PodSenderMapping[
   const items: PodSenderMapping[] = []
   let last: Record<string, AttributeValue> | undefined
   do {
-    const scan = await dynamo.send(new ScanCommand({
+    const query = await dynamo.send(new QueryCommand({
       TableName: POD_SENDER_MAPPING_TABLE_NAME,
-      FilterExpression: 'clientId = :clientId',
+      KeyConditionExpression: 'clientId = :clientId',
       ExpressionAttributeValues: { ':clientId': { S: config.clientId } },
-      ProjectionExpression: 'clientId,phoneDigits,senderName,driverId,updatedBy,updatedAt',
+      ProjectionExpression: 'clientId,senderKey,senderName,driverId,updatedBy,updatedAt',
       ExclusiveStartKey: last,
     }))
-    for (const item of scan.Items ?? []) items.push(serializeMapping(item))
-    last = scan.LastEvaluatedKey
+    for (const item of query.Items ?? []) items.push(serializeMapping(item))
+    last = query.LastEvaluatedKey
   } while (last)
   return { items }
 }
@@ -1559,9 +1562,12 @@ export async function setSenderMappingAction(
 ): Promise<{ item?: PodSenderMapping; deleted?: boolean }> {
   assertGlobalAccess(caller)
   const config = await requireConfig()
-  const phoneDigitsKey = phoneDigits(assertString(input.phone, 'phone'))
-  if (phoneDigitsKey.length !== 10) {
-    throw new Error('Mapping requires a phone number with at least 10 digits')
+  const phone = phoneDigits(assertString(input.phone, 'phone'))
+  const name = alphaTokens(assertString(input.senderName, 'senderName', 200)).join('')
+  // Prefer phone key when present; otherwise fall back to normalized name.
+  const key = phone.length === 10 ? `phone:${phone}` : `name:${name || (input.senderName as string).toLowerCase().trim().replace(/\s+/g, '-')}`
+  if (key === 'name:') {
+    throw new Error('Mapping requires a phone number with at least 10 digits or a sender name')
   }
   const senderName = assertString(input.senderName, 'senderName', 200)
   const driverId = input.driverId != null ? assertString(input.driverId, 'driverId') : null
@@ -1570,14 +1576,14 @@ export async function setSenderMappingAction(
   if (driverId == null) {
     await dynamo.send(new DeleteItemCommand({
       TableName: POD_SENDER_MAPPING_TABLE_NAME,
-      Key: marshall({ clientId: config.clientId, phoneDigits: phoneDigitsKey }),
+      Key: marshall({ clientId: config.clientId, senderKey: key }),
     }))
     return { deleted: true }
   }
 
   const mapping: PodSenderMapping = {
     clientId: config.clientId,
-    phoneDigits: phoneDigitsKey,
+    senderKey: key,
     senderName,
     driverId,
     updatedBy: caller.email,

@@ -56,7 +56,7 @@ export interface PodAssets {
 
 export interface PodSenderMapping {
   clientId: string
-  phoneDigits: string
+  senderKey: string // phone:<10 digits> or name:<normalized tokens>
   senderName: string
   driverId: string
   updatedBy: string
