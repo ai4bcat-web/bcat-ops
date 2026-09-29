@@ -16,7 +16,6 @@ import {
   PutCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
-import { randomUUID } from 'crypto'
 import {
   listAccounts,
   createCampaign,
@@ -615,7 +614,7 @@ export async function loadCampaignMapByInstantlyId(): Promise<Record<string, { i
   return map
 }
 
-export async function loadContactMapByLaneEmail(emails: Array<{ lane: Lane; email: string }>): Promise<Record<string, string>> {
+export async function loadContactMapByLaneEmail(): Promise<Record<string, string>> {
   const contacts = await scanAll<CarrierContact>(getContactTable())
   const map: Record<string, string> = {}
   for (const c of contacts) {
@@ -1275,16 +1274,7 @@ async function syncRepliesAction(payload: { campaignId?: string; sinceISO?: stri
     sinceISO,
   })
 
-  const needed = emails
-    .map((e) => {
-      const icid = e.campaign_id ?? undefined
-      const lane = icid ? campaignMap[icid]?.lane : undefined
-      const email = (e.from_address_email ?? e.lead ?? '').toLowerCase().trim()
-      return lane ? { lane, email } : null
-    })
-    .filter(Boolean) as Array<{ lane: Lane; email: string }>
-
-  const contactMap = await loadContactMapByLaneEmail(needed)
+  const contactMap = await loadContactMapByLaneEmail()
 
   let upserted = 0
   let contactsUpdated = 0

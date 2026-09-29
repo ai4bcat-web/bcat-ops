@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { Percent, DollarSign, Calculator, Save, RotateCcw, TrendingUp } from 'lucide-react'
 
@@ -63,25 +63,26 @@ export function PricingMarginPage() {
     try { return !!localStorage.getItem('bcat_wp_app_password') }
     catch { return false }
   })
-  void wpPassLoaded; void setWpPassLoaded // referenced so tsc -b (noUnusedLocals) does not fail the Amplify build
   const [exampleQuote, setExampleQuote] = useState<ExampleQuote | null>(null)
 
   // Fetch current config from the PHP bridge (returns clean JSON, no HTML entities)
-  const fetchConfig = useCallback(async () => {
-    try {
-      // Read from the bridge endpoint — always public, always clean JSON
-      const res = await fetch('https://bestcareautotransport.com/wp-json/bcat-pricing/v1/margin')
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      setConfig({ ...DEFAULT_CONFIG, ...data, updatedAt: data.updatedAt || new Date().toISOString() })
-    } catch (err) {
-      console.warn('Could not fetch margin config:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])  // no deps — runs once on mount
-
-  useEffect(() => { fetchConfig() }, [fetchConfig])
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        // Read from the bridge endpoint — always public, always clean JSON
+        const res = await fetch('https://bestcareautotransport.com/wp-json/bcat-pricing/v1/margin')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        if (!cancelled) setConfig({ ...DEFAULT_CONFIG, ...data, updatedAt: data.updatedAt || new Date().toISOString() })
+      } catch (err) {
+        if (!cancelled) console.warn('Could not fetch margin config:', err)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Persist config via the PHP bridge (handles both option + page sync)
   const saveConfig = async () => {
@@ -110,12 +111,20 @@ export function PricingMarginPage() {
       })
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as any).error || `HTTP ${res.status}`)
+        const errBody = await res.json().catch(() => ({})) as { error?: string }
+        throw new Error(errBody.error || `HTTP ${res.status}`)
       }
 
       toast.success('Margin config saved to Best Care website')
-      await fetchConfig()
+      try {
+        const refresh = await fetch('https://bestcareautotransport.com/wp-json/bcat-pricing/v1/margin')
+        if (refresh.ok) {
+          const data = await refresh.json()
+          setConfig({ ...DEFAULT_CONFIG, ...data, updatedAt: data.updatedAt || new Date().toISOString() })
+        }
+      } catch (err) {
+        console.warn('Refresh after save failed:', err)
+      }
     } catch (err) {
       toast.error(`Save failed: ${err instanceof Error ? err.message : 'unknown error'}`)
     } finally {
@@ -135,10 +144,10 @@ export function PricingMarginPage() {
     }
     const customerPrice = Math.round(baseRate + margin)
 
-    let marginDesc = ''
-    if (config.mode === 'percent') marginDesc = `${config.percent}% ($${Math.round(margin)})`
-    else if (config.mode === 'flat') marginDesc = `$${config.flatAmount} flat`
-    else marginDesc = `${config.percent}% + $${config.flatAmount} flat ($${Math.round(margin)})`
+    const marginDesc =
+      config.mode === 'percent' ? `${config.percent}% ($${Math.round(margin)})` :
+      config.mode === 'flat' ? `$${config.flatAmount} flat` :
+      `${config.percent}% + $${config.flatAmount} flat ($${Math.round(margin)})`
 
     setExampleQuote({
       route: 'Chicago, IL → Miami, FL',
@@ -239,7 +248,7 @@ export function PricingMarginPage() {
                     setWpPassLoaded(false)
                     try {
                       localStorage.setItem('bcat_wp_app_password', e.target.value)
-                    } catch {}
+                    } catch { /* no-op — storage may be unavailable */ }
                   }}
                   onFocus={() => {
                     // If the field is empty but localStorage still has a value,
@@ -248,7 +257,7 @@ export function PricingMarginPage() {
                       try {
                         const stored = localStorage.getItem('bcat_wp_app_password')
                         if (stored) { setWpPass(stored); setWpPassLoaded(true) }
-                      } catch {}
+                      } catch { /* no-op — storage may be unavailable */ }
                     }
                   }}
                 />

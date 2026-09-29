@@ -1,29 +1,24 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import {
   signIn, signOut, getCurrentUser, fetchAuthSession,
-  confirmSignIn, type SignInOutput,
+  confirmSignIn,
 } from 'aws-amplify/auth'
 import { isAdminEmail, isOwnerEmail } from '@/lib/auth/admin'
 
-export interface AuthUser {
-  userId: string
-  email: string
-  groups: string[]
-}
+import { AuthContext, type AuthUser } from '@/hooks/useAuth'
 
-interface AuthContextValue {
-  user: AuthUser | null
-  loading: boolean
-  needsNewPassword: boolean
-  login: (email: string, password: string) => Promise<SignInOutput>
-  completeNewPassword: (newPassword: string) => Promise<void>
-  logout: () => Promise<void>
-  isAdmin: boolean
-  isOwner: boolean
-  hasPageAccess: (pageKey: string) => boolean
+async function readAuthUser(): Promise<AuthUser | null> {
+  const cognitoUser = await getCurrentUser()
+  // Group changes must not wait for an old access token to expire.
+  const session = await fetchAuthSession({ forceRefresh: true })
+  const accessToken = session.tokens?.accessToken
+  if (!accessToken) return null
+  return {
+    userId: cognitoUser.userId,
+    email: cognitoUser.signInDetails?.loginId ?? cognitoUser.username,
+    groups: (accessToken.payload['cognito:groups'] as string[]) ?? [],
+  }
 }
-
-const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
@@ -36,30 +31,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * polled refreshes: a transient network/Cognito failure there must not sign a working
    * user out, while a revoked session (no tokens back from a forced refresh) must.
    */
-  const loadUser = useCallback(async (background = false) => {
+  const loadUser = useCallback((background = false) => {
     const version = ++requestVersion.current
-    try {
-      const cognitoUser = await getCurrentUser()
-      // Group changes must not wait for an old access token to expire.
-      const session = await fetchAuthSession({ forceRefresh: true })
-      if (version !== requestVersion.current) return
-      const accessToken = session.tokens?.accessToken
-      if (!accessToken) {
-        // Refresh token revoked or expired — sign out rather than show an
-        // account with zero page grants as if it were a permissions problem.
-        setUser(null)
-        return
-      }
-      setUser({
-        userId: cognitoUser.userId,
-        email: cognitoUser.signInDetails?.loginId ?? cognitoUser.username,
-        groups: (accessToken.payload['cognito:groups'] as string[]) ?? [],
-      })
-    } catch {
+    return readAuthUser().then((nextUser) => {
+      if (version === requestVersion.current) setUser(nextUser)
+    }).catch(() => {
       if (version === requestVersion.current && !background) setUser(null)
-    } finally {
+    }).finally(() => {
       if (version === requestVersion.current) setLoading(false)
-    }
+    })
   }, [])
 
   useEffect(() => {
@@ -135,10 +115,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext)
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
-  return ctx
 }

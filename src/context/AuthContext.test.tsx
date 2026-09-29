@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { AuthProvider, useAuth } from './AuthContext'
+import { AuthProvider } from './AuthContext'
+import { useAuth } from '@/hooks/useAuth'
 import { RequirePage } from '@/components/RequirePage'
 
 const auth = vi.hoisted(() => ({
@@ -84,12 +85,12 @@ describe('explicit staff page grants', () => {
     openSettings()
     await screen.findByText('Protected settings content')
     auth.groups = ['page-loads']
-    fireEvent.focus(window)
+    await act(async () => { fireEvent.focus(window) })
     await waitFor(() => expect(screen.queryByText('Protected settings content')).toBeNull())
     expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull()
     expect(await screen.findByText('Allowed loads content')).toBeTruthy()
     auth.groups = []
-    fireEvent.focus(window)
+    await act(async () => { fireEvent.focus(window) })
     await screen.findByText('No page access')
     expect(screen.queryAllByRole('link')).toHaveLength(0)
   })
@@ -100,7 +101,7 @@ describe('explicit staff page grants', () => {
     openSettings()
     await screen.findByText('Protected settings content')
     auth.groups = null                      // disabled account: refresh returns no tokens
-    fireEvent.focus(window)
+    await act(async () => { fireEvent.focus(window) })
     await screen.findByText('Signed out')
     expect(screen.queryByText('No page access')).toBeNull()
   })
@@ -111,7 +112,7 @@ describe('explicit staff page grants', () => {
     openSettings()
     await screen.findByText('Protected settings content')
     auth.refreshError = new Error('network down')
-    fireEvent.focus(window)
+    await act(async () => { fireEvent.focus(window) })
     await waitFor(() => expect(screen.getByText('Protected settings content')).toBeTruthy())
     expect(screen.queryByText('Signed out')).toBeNull()
   })

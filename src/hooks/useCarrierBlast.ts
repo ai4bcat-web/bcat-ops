@@ -20,27 +20,28 @@ const POLL_MS = 30_000
 
 export function useCarrierContacts(lane: CarrierLane) {
   const [items, setItems] = useState<CarrierContact[]>([])
-  const [loading, setLoading] = useState(true)
+  // Derived: true until a fetch for the CURRENT lane has settled.
+  const [loadedLane, setLoadedLane] = useState<CarrierLane | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const next = await listCarrierContacts(lane)
-      setItems(next)
-    } catch (err) {
-      console.error('[useCarrierContacts] fetch error', err)
-      toast.error(`Couldn't load ${lane} contacts`)
-    } finally {
-      setLoading(false)
-    }
-  }, [lane])
+  const load = useCallback(() =>
+    listCarrierContacts(lane)
+      .then((next) => { setItems(next) })
+      .catch((err: unknown) => {
+        console.error('[useCarrierContacts] fetch error', err)
+        toast.error(`Couldn't load ${lane} contacts`)
+      })
+      .finally(() => setLoadedLane(lane)),
+  [lane])
+  const refresh = useCallback(() => { setLoadedLane(null); return load() }, [load])
 
   useEffect(() => {
-    load()
+    void load()
     const id = setInterval(load, POLL_MS)
     return () => clearInterval(id)
   }, [load])
+
+  const loading = loadedLane !== lane
 
   const importContacts = useCallback(async (
     contacts: Omit<CarrierContact, 'id' | 'createdAt' | 'updatedAt'>[]
@@ -77,7 +78,7 @@ export function useCarrierContacts(lane: CarrierLane) {
     removed: items.filter((c) => c.status === 'removed').length,
   }), [items])
 
-  return { items, counts, loading, saving, refresh: load, importContacts, setStatus }
+  return { items, counts, loading, saving, refresh, importContacts, setStatus }
 }
 
 // ── Campaigns ─────────────────────────────────────────────────────────────────
@@ -86,21 +87,19 @@ export function useCarrierCampaigns() {
   const [items, setItems] = useState<CarrierCampaign[]>([])
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const next = await listCarrierCampaigns()
-      setItems(next)
-    } catch (err) {
-      console.error('[useCarrierCampaigns] fetch error', err)
-      toast.error("Couldn't load campaigns")
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() =>
+    listCarrierCampaigns()
+      .then((next) => { setItems(next) })
+      .catch((err: unknown) => {
+        console.error('[useCarrierCampaigns] fetch error', err)
+        toast.error("Couldn't load campaigns")
+      })
+      .finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
 
   useEffect(() => {
-    load()
+    void load()
     const id = setInterval(load, POLL_MS)
     return () => clearInterval(id)
   }, [load])
@@ -140,7 +139,7 @@ export function useCarrierCampaigns() {
     return res
   }, [load])
 
-  return { items, loading, refresh: load, addCampaign, patchCampaign, runAction }
+  return { items, loading, refresh, addCampaign, patchCampaign, runAction }
 }
 
 // ── Replies ───────────────────────────────────────────────────────────────────
@@ -152,27 +151,30 @@ export interface CarrierReplyFilter {
 }
 
 export function useCarrierReplies(filter?: CarrierReplyFilter) {
+  const { status, campaignId, lane } = filter ?? {}
+  const key = `${status ?? ''}|${campaignId ?? ''}|${lane ?? ''}`
   const [items, setItems] = useState<CarrierReply[]>([])
-  const [loading, setLoading] = useState(true)
+  // Derived: true until a fetch for the CURRENT filter has settled.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const next = await listCarrierReplies(filter)
-      setItems(next)
-    } catch (err) {
-      console.error('[useCarrierReplies] fetch error', err)
-      toast.error("Couldn't load replies")
-    } finally {
-      setLoading(false)
-    }
-  }, [filter?.status, filter?.campaignId, filter?.lane])
+  const load = useCallback(() =>
+    listCarrierReplies({ status, campaignId, lane })
+      .then((next) => { setItems(next) })
+      .catch((err: unknown) => {
+        console.error('[useCarrierReplies] fetch error', err)
+        toast.error("Couldn't load replies")
+      })
+      .finally(() => setLoadedKey(key)),
+  [status, campaignId, lane, key])
+  const refresh = useCallback(() => { setLoadedKey(null); return load() }, [load])
 
   useEffect(() => {
-    load()
+    void load()
     const id = setInterval(load, POLL_MS)
     return () => clearInterval(id)
   }, [load])
+
+  const loading = loadedKey !== key
 
   const setStatus = useCallback(async (id: string, status: CarrierReply['status'], handledBy?: string) => {
     const patch: Partial<CarrierReply> = { status }
@@ -210,7 +212,7 @@ export function useCarrierReplies(filter?: CarrierReplyFilter) {
     return res
   }, [])
 
-  return { items, loading, refresh: load, setStatus, setAssignedTo, sendReply }
+  return { items, loading, refresh, setStatus, setAssignedTo, sendReply }
 }
 
 // ── Live capacity ─────────────────────────────────────────────────────────────
@@ -227,28 +229,27 @@ export interface UseCarrierCapacityResult {
 
 export function useCarrierCapacity(): UseCarrierCapacityResult {
   const [capacity, setCapacity] = useState<CarrierCapacity | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
   const [intervalMs, setIntervalMs] = useState(CAPACITY_NORMAL_MS)
 
-  const load = useCallback(async (force?: boolean) => {
-    setLoading(true)
-    try {
-      const res = await carrierBlast('capacity', force ? { refresh: true } : undefined)
-      if (!res.ok) throw new Error(res.error ?? 'capacity failed')
-      setCapacity(res as unknown as CarrierCapacity)
-      setError(null)
-      setIntervalMs(CAPACITY_NORMAL_MS)
-    } catch (err) {
-      setError(err instanceof Error ? err : new Error(String(err)))
-      setIntervalMs(CAPACITY_ERROR_MS)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback((force?: boolean) =>
+    carrierBlast('capacity', force ? { refresh: true } : undefined)
+      .then((res) => {
+        if (!res.ok) throw new Error(res.error ?? 'capacity failed')
+        setCapacity(res as unknown as CarrierCapacity)
+        setError(null)
+        setIntervalMs(CAPACITY_NORMAL_MS)
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err : new Error(String(err)))
+        setIntervalMs(CAPACITY_ERROR_MS)
+      })
+      .finally(() => setLoading(false)),
+  [])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
   useEffect(() => {
@@ -258,7 +259,8 @@ export function useCarrierCapacity(): UseCarrierCapacityResult {
 
   const refresh = useCallback((force?: boolean) => {
     setIntervalMs(CAPACITY_NORMAL_MS)
-    load(force)
+    setLoading(true)
+    void load(force)
   }, [load])
 
   return { capacity, loading, error, refresh }

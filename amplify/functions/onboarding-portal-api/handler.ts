@@ -61,7 +61,7 @@ interface InviteRow {
 // CORS is owned by the Lambda Function URL's own CORS config (see backend.ts) — it
 // echoes the matching Origin and handles preflight. We must NOT also set
 // Access-Control-* here, or the browser sees a duplicated header and blocks the call.
-function reply(status: number, body: unknown, _origin?: string) {
+function reply(status: number, body: unknown) {
   return { statusCode: status, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
 }
 
@@ -110,7 +110,7 @@ async function touchInvite(invite: InviteRow, patch: Record<string, unknown>) {
   const sets = ['lastActivityAt = :now', 'requestCount = if_not_exists(requestCount, :zero) + :one', 'updatedAt = :now']
   const values: Record<string, unknown> = { ':now': now, ':zero': 0, ':one': 1 }
   let i = 0
-  for (const [k, v] of Object.entries(patch)) { sets.push(`#k${i} = :v${i}`); values[`:v${i}`] = v; i++ }
+  for (const [, v] of Object.entries(patch)) { sets.push(`#k${i} = :v${i}`); values[`:v${i}`] = v; i++ }
   const names: Record<string, string> = {}
   Object.keys(patch).forEach((k, idx) => { names[`#k${idx}`] = k })
   await ddb.send(new UpdateCommand({
@@ -153,9 +153,8 @@ async function getApplication(driverId: string) {
 }
 
 export const handler = async (event: FnUrlEvent) => {
-  const origin = event.headers?.origin ?? event.headers?.Origin
   const method = event.requestContext?.http?.method ?? 'POST'
-  if (method === 'OPTIONS') return reply(200, { ok: true }, origin)
+  if (method === 'OPTIONS') return reply(200, { ok: true })
 
   const sourceIp = event.requestContext?.http?.sourceIp ?? 'unknown'
   let req: { token?: string; action?: string; payload?: Record<string, unknown> }
@@ -163,18 +162,18 @@ export const handler = async (event: FnUrlEvent) => {
     const raw = event.isBase64Encoded ? Buffer.from(event.body ?? '', 'base64').toString('utf-8') : (event.body ?? '{}')
     req = JSON.parse(raw)
   } catch {
-    return reply(400, { error: 'Bad JSON' }, origin)
+    return reply(400, { error: 'Bad JSON' })
   }
 
   // Document-signing actions use their OWN token (DocumentSignatureRequest), not an
   // onboarding invite — handle them before invite validation.
   if (req.action === 'signGet' || req.action === 'signSubmit') {
     try {
-      return await handleSigning(req.action, req.token ?? '', req.payload ?? {}, sourceIp, origin)
+      return await handleSigning(req.action, req.token ?? '', req.payload ?? {}, sourceIp)
     } catch (err) {
-      if (err instanceof PortalError) return reply(err.status, { error: err.message }, origin)
+      if (err instanceof PortalError) return reply(err.status, { error: err.message })
       console.error('[portal-api] signing error', err)
-      return reply(500, { error: 'Internal error' }, origin)
+      return reply(500, { error: 'Internal error' })
     }
   }
 
@@ -263,7 +262,7 @@ export const handler = async (event: FnUrlEvent) => {
           templateId: (tasks.find((t) => t.templateId)?.templateId as string | undefined) ?? null,
           application: app ? { status: app.status, draft: parseAppJson(app) } : { status: 'DRAFT', draft: null },
           checklist,
-        }, origin)
+        })
       }
 
       case 'saveApplicationDraft': {
@@ -276,7 +275,7 @@ export const handler = async (event: FnUrlEvent) => {
         } else {
           await ddb.send(new PutCommand({ TableName: APP_TABLE, Item: { id: randomUUID(), __typename: 'DriverApplication', ...draft, createdAt: now, updatedAt: now } }))
         }
-        return reply(200, { ok: true }, origin)
+        return reply(200, { ok: true })
       }
 
       case 'submitApplication': {
@@ -301,7 +300,7 @@ export const handler = async (event: FnUrlEvent) => {
         if (appTask) await ddb.send(UpdateCommandFromObject(TASK_TABLE, { id: appTask.id }, { status: 'PENDING_REVIEW', updatedAt: now }))
         await touchInvite(invite, { status: 'SUBMITTED' })
         await audit(driverId, 'application_submitted', { applicationId: appId })
-        return reply(200, { ok: true }, origin)
+        return reply(200, { ok: true })
       }
 
       case 'getUploadUrl': {
@@ -314,10 +313,10 @@ export const handler = async (event: FnUrlEvent) => {
         if (!task || !task.driverActionable) throw new PortalError(403, 'Not allowed for this item')
         if (!ACCEPTED_CONTENT_TYPES.includes(contentType)) throw new PortalError(415, 'Unsupported file type')
         if (size > MAX_UPLOAD_BYTES) throw new PortalError(413, 'File too large (max 15MB)')
-        const safe = fileName.replace(/[^\w.\-]+/g, '_')
+        const safe = fileName.replace(/[^\w.-]+/g, '_')
         const s3Key = `compliance/DRIVER/${driverId}/${requirementKey}/${Date.now()}-${safe}`
         const url = await getSignedUrl(s3, new PutObjectCommand({ Bucket: BUCKET, Key: s3Key, ContentType: contentType }), { expiresIn: 300 })
-        return reply(200, { uploadUrl: url, s3Key }, origin)
+        return reply(200, { uploadUrl: url, s3Key })
       }
 
       case 'confirmUpload': {
@@ -341,7 +340,7 @@ export const handler = async (event: FnUrlEvent) => {
         await ddb.send(UpdateCommandFromObject(TASK_TABLE, { id: task.id }, { status: 'PENDING_REVIEW', complianceDocumentId: docId, updatedAt: now }))
         await touchInvite(invite, {})
         await audit(driverId, 'document_uploaded', { documentType: requirementKey, source: 'DRIVER_PORTAL' })
-        return reply(200, { ok: true }, origin)
+        return reply(200, { ok: true })
       }
 
       case 'eSign': {
@@ -371,16 +370,16 @@ export const handler = async (event: FnUrlEvent) => {
         await ddb.send(UpdateCommandFromObject(TASK_TABLE, { id: task.id }, { status: 'PENDING_REVIEW', complianceDocumentId: docId, updatedAt: now }))
         await touchInvite(invite, {})
         await audit(driverId, 'document_uploaded', { eSign: requirementKey, completedDate, source: 'DRIVER_PORTAL' })
-        return reply(200, { ok: true }, origin)
+        return reply(200, { ok: true })
       }
 
       default:
-        return reply(400, { error: `Unknown action: ${action}` }, origin)
+        return reply(400, { error: `Unknown action: ${action}` })
     }
   } catch (err) {
-    if (err instanceof PortalError) return reply(err.status, { error: err.message }, origin)
+    if (err instanceof PortalError) return reply(err.status, { error: err.message })
     console.error('[onboarding-portal-api] error', err)
-    return reply(500, { error: 'Internal error' }, origin)
+    return reply(500, { error: 'Internal error' })
   }
 }
 
@@ -395,7 +394,6 @@ async function handleSigning(
   token: string,
   payload: Record<string, unknown>,
   sourceIp: string,
-  origin?: string,
 ) {
   if (!token) throw new PortalError(400, 'Missing token')
   const rows = await scan(SIGN_REQ_TABLE, '#t = :tok', { '#t': 'token' }, { ':tok': token })
@@ -415,7 +413,7 @@ async function handleSigning(
       documentType: reqRow.documentType,
       documentTitle: reqRow.documentTitle ?? '',
       valuesJson: reqRow.valuesJson ?? null,
-    }, origin)
+    })
   }
 
   // signSubmit
@@ -444,7 +442,7 @@ async function handleSigning(
     signedAt: now, signerIp: sourceIp, updatedAt: now,
   }))
   await audit(driverId, 'document_signed', { documentType, source: 'DRIVER_PORTAL' })
-  return reply(200, { ok: true, status: 'SIGNED' }, origin)
+  return reply(200, { ok: true, status: 'SIGNED' })
 }
 
 function UpdateCommandFromObject(table: string, key: Record<string, unknown>, attrs: Record<string, unknown>) {

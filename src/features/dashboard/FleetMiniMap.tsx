@@ -26,6 +26,7 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
   const [projection, setProjection] = useState<GeoProjection | null>(null)
   // View transform on the map group: screen = translate(x,y) · scale(k).
   const [t, setT] = useState({ k: 1, x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
   const drag = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
@@ -93,6 +94,7 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
   const onPointerDown = (e: React.PointerEvent) => {
     if (t.k <= 1) return
     drag.current = { x: e.clientX, y: e.clientY }
+    setDragging(true)
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -103,7 +105,10 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
     drag.current = { x: e.clientX, y: e.clientY }
     setT((prev) => ({ ...prev, x: prev.x + dx, y: prev.y + dy }))
   }
-  const endDrag = () => { drag.current = null }
+  const endDrag = () => {
+    drag.current = null
+    setDragging(false)
+  }
 
   const zoomBtn = (factor: number) => zoomAt(factor, W / 2, H / 2)
   const reset = () => setT({ k: 1, x: 0, y: 0 })
@@ -123,7 +128,7 @@ export function FleetMiniMap({ locations }: { locations: TruckLocation[] }) {
           viewBox={`0 0 ${W} ${H}`} width="100%"
           onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={endDrag} onPointerLeave={endDrag}
           style={{ display: 'block', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
-            cursor: k > 1 ? (drag.current ? 'grabbing' : 'grab') : 'default', touchAction: 'none' }}
+            cursor: k > 1 ? (dragging ? 'grabbing' : 'grab') : 'default', touchAction: 'none' }}
           role="img" aria-label="Fleet map"
         >
           {statePaths.length === 0 ? (

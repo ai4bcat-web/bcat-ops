@@ -37,15 +37,16 @@ export function useInsurance() {
   const [items, setItems] = useState<InsuranceLineItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async () => {
-    const [p, i] = await Promise.all([listInsurancePeriods(), listInsuranceLineItems()])
-    setPeriods(p.sort((a, b) => (a.label < b.label ? 1 : -1)))  // newest label first
-    setItems(i)
-  }, [])
+  const refresh = useCallback(() =>
+    Promise.all([listInsurancePeriods(), listInsuranceLineItems()])
+      .then(([p, i]) => {
+        setPeriods(p.sort((a, b) => (a.label < b.label ? 1 : -1)))  // newest label first
+        setItems(i)
+      }),
+  [])
 
   useEffect(() => {
     let active = true
-    setLoading(true)
     refresh()
       .catch((e) => console.error('[insurance] load', e))
       .finally(() => { if (active) setLoading(false) })

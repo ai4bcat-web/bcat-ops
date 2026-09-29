@@ -280,30 +280,39 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
   onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
   const { driver, setting, statement, oneOffs } = row
+  const { trips: rowTrips } = row
   const dragId = useRef<string | null>(null)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOrder, setDragOrder] = useState<string[] | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const trips = useMemo(() => {
-    if (!dragOrder) return row.trips
-    const byId = new Map(row.trips.map((t) => [t.id, t]))
-    return dragOrder.map((id) => byId.get(id)).filter(Boolean) as typeof row.trips
-  }, [row.trips, dragOrder])
+    if (!dragOrder) return rowTrips
+    const byId = new Map(rowTrips.map((t) => [t.id, t]))
+    return dragOrder.map((id) => byId.get(id)).filter(Boolean) as typeof rowTrips
+  }, [rowTrips, dragOrder])
 
-  const onTripDragStart = (id: string) => { dragId.current = id; setDragOrder(row.trips.map((t) => t.id)) }
+  const onTripDragStart = (id: string) => {
+    dragId.current = id
+    setDraggingId(id)
+    setDragOrder(rowTrips.map((t) => t.id))
+  }
   const onTripDragEnter = (targetId: string) => {
     const d = dragId.current
     if (!d || d === targetId) return
     setOverId(targetId)
     setDragOrder((prev) => {
-      const ids = prev ?? row.trips.map((t) => t.id)
+      const ids = prev ?? rowTrips.map((t) => t.id)
       const from = ids.indexOf(d), to = ids.indexOf(targetId)
       if (from < 0 || to < 0 || from === to) return ids
       const next = [...ids]; next.splice(from, 1); next.splice(to, 0, d); return next
     })
   }
   const onTripDragEnd = () => {
-    if (dragOrder) persistDragOrder(dragOrder, (id) => row.trips.find((t) => t.id === id)?.sortOrder, onUpdateTrip)
-    dragId.current = null; setOverId(null); setDragOrder(null)
+    if (dragOrder) persistDragOrder(dragOrder, (id) => rowTrips.find((t) => t.id === id)?.sortOrder, onUpdateTrip)
+    dragId.current = null
+    setDraggingId(null)
+    setOverId(null)
+    setDragOrder(null)
   }
 
   const color = getColor(driver.colorKey)
@@ -367,7 +376,7 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
               const fromCal = !!t.loadId
               return (
                 <tr key={t.id} onDragEnter={() => onTripDragEnter(t.id)} onDragOver={(e) => e.preventDefault()}
-                  style={{ borderBottom: '1px solid var(--ds-border)', background: overId === t.id ? 'var(--ds-blue-bg, #eff6ff)' : undefined, opacity: dragId.current === t.id && dragOrder ? 0.5 : 1 }}>
+                  style={{ borderBottom: '1px solid var(--ds-border)', background: overId === t.id ? 'var(--ds-blue-bg, #eff6ff)' : undefined, opacity: draggingId === t.id && dragOrder ? 0.5 : 1 }}>
                   <td onClick={() => onEditTrip(t)} style={{ ...TD, textAlign: 'left', cursor: 'pointer' }}>
                     {fromCal && <CalendarDays size={11} style={{ color: 'var(--ds-blue)', verticalAlign: '-1px', marginRight: 4 }} aria-label="From calendar" />}
                     {fmtShort(t.date ?? '')}

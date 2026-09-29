@@ -17,17 +17,18 @@ export function useCurrentInsurance() {
   const [periodLabel, setPeriodLabel] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const refresh = useCallback(async () => {
-    const [periods, all, settings] = await Promise.all([listInsurancePeriods(), listInsuranceLineItems(), listDriverPaySettings()])
-    const cur = periods.find((p) => p.isCurrent) ?? periods[0] ?? null
-    setPeriodLabel(cur?.label ?? null)
-    setItems(cur ? all.filter((i) => i.periodId === cur.id) : [])
-    setPaySettings(settings)
-  }, [])
+  const refresh = useCallback(() =>
+    Promise.all([listInsurancePeriods(), listInsuranceLineItems(), listDriverPaySettings()])
+      .then(([periods, all, settings]) => {
+        const cur = periods.find((p) => p.isCurrent) ?? periods[0] ?? null
+        setPeriodLabel(cur?.label ?? null)
+        setItems(cur ? all.filter((i) => i.periodId === cur.id) : [])
+        setPaySettings(settings)
+      }),
+  [])
 
   useEffect(() => {
     let active = true
-    setLoading(true)
     refresh().catch((e) => console.error('[current-insurance]', e)).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [refresh])

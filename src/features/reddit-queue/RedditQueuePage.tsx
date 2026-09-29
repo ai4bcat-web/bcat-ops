@@ -24,34 +24,31 @@ const BUSINESS_LABELS: Record<string, string> = {
 
 export function RedditQueuePage() {
   const [drafts, setDrafts] = useState<RedditDraft[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Derived: true until a fetch for the CURRENT tab has settled.
+  const [loadedTab, setLoadedTab] = useState<Tab | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("pending");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const statusFilter = tab === "pending" ? "pending" : undefined;
-      const url = statusFilter
-        ? `${CC_URL}/api/reddit-queue?status=${statusFilter}`
-        : `${CC_URL}/api/reddit-queue`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`API ${res.status}`);
-      const data: RedditDraft[] = await res.json();
-      setDrafts(data.filter((d) => (tab === "pending" ? true : d.status === tab)));
-      setError(null);
-    } catch (e: any) {
-      setError(e.message || "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    load();
+    const statusFilter = tab === "pending" ? "pending" : undefined;
+    const url = statusFilter
+      ? `${CC_URL}/api/reddit-queue?status=${statusFilter}`
+      : `${CC_URL}/api/reddit-queue`;
+    fetch(url)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const data: RedditDraft[] = await res.json();
+        setDrafts(data.filter((d) => (tab === "pending" ? true : d.status === tab)));
+        setError(null);
+      })
+      .catch((e: unknown) => {
+        setError(e instanceof Error && e.message ? e.message : "Failed to load");
+      })
+      .finally(() => setLoadedTab(tab));
   }, [tab]);
+  const loading = loadedTab !== tab;
 
   const markStatus = async (id: string, status: "posted" | "skipped") => {
     setPendingIds((prev) => new Set(prev).add(id));
@@ -62,8 +59,8 @@ export function RedditQueuePage() {
         body: JSON.stringify({ status }),
       });
       setDrafts((prev) => prev.filter((d) => d.id !== id));
-    } catch (e: any) {
-      setError(e.message || "Failed to update");
+    } catch (e: unknown) {
+      setError(e instanceof Error && e.message ? e.message : "Failed to update");
     } finally {
       setPendingIds((prev) => {
         const next = new Set(prev);

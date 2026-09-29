@@ -12,22 +12,19 @@ export type { TruckMileage }
  */
 export function useTruckMileage(periodType: string = 'DAY') {
   const [rows, setRows] = useState<TruckMileage[]>([])
-  const [loading, setLoading] = useState(true)
+  // Derived: true until a fetch for the CURRENT period type has settled.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      setRows(await listTruckMileages(undefined, periodType))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [periodType])
+  const load = useCallback(() =>
+    listTruckMileages(undefined, periodType)
+      .then((next) => { setRows(next); setError(null) })
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => setLoadedFor(periodType)),
+  [periodType])
+  const refresh = useCallback(() => { setLoadedFor(null); setError(null); return load() }, [load])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
-  return { rows, loading, error, refresh: load }
+  return { rows, loading: loadedFor !== periodType, error, refresh }
 }

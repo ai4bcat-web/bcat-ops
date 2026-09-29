@@ -52,28 +52,21 @@ export function useExpenseData(): ExpenseDataState {
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [types, allocs, recs, recur] = await Promise.all([
-        listExpenseTypes(),
-        listAllocations(),
-        listExpenseRecords(),
-        listRecurringExpenses(),
-      ])
-      setExpenseTypes(types)
-      setAllocations(allocs)
-      setRecords(recs)
-      setRecurring(recur)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() =>
+    Promise.all([listExpenseTypes(), listAllocations(), listExpenseRecords(), listRecurringExpenses()])
+      .then(([types, allocs, recs, recur]) => {
+        setExpenseTypes(types)
+        setAllocations(allocs)
+        setRecords(recs)
+        setRecurring(recur)
+        setError(null)
+      })
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   // ── ExpenseType ──────────────────────────────────────────────────────────────
 
@@ -153,7 +146,7 @@ export function useExpenseData(): ExpenseDataState {
 
   return {
     expenseTypes, allocations, records, recurring,
-    loading, error, refresh: load,
+    loading, error, refresh,
     createType, updateType, deleteType,
     createAlloc, updateAlloc, deleteAlloc,
     createRecord, updateRecord, deleteRecord,

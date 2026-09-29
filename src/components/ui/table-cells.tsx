@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { fmtUSD, fmtCents } from '@/lib/ui/table-formatters'
 import { cn } from '@/lib/utils'
 
 /**
@@ -7,22 +8,6 @@ import { cn } from '@/lib/utils'
  * consistent: colored tile + semibold primary + muted subtitle, pills for sparse
  * columns, right-aligned mono money with "—" for empty.
  */
-
-const usd0 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
-const usd2 = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-/** Money from dollars → "$1,234" (or "—" when null/0-and-dashable). */
-export function fmtUSD(dollars: number | null | undefined, opts?: { cents?: boolean; dashZero?: boolean }): string {
-  if (dollars == null) return '—'
-  if (opts?.dashZero && dollars === 0) return '—'
-  return usd0.format(dollars)
-}
-/** Money from integer cents → "$1,234.56" (or "—"). */
-export function fmtCents(cents: number | null | undefined, dashZero = false): string {
-  if (cents == null) return '—'
-  if (dashZero && cents === 0) return '—'
-  return usd2.format(cents / 100)
-}
 
 /** Right-aligned mono money cell content; empty → muted "—". */
 export function MoneyCell({ value, cents, className }: { value: number | null | undefined; cents?: boolean; className?: string }) {

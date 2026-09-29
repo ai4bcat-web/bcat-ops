@@ -17,13 +17,18 @@ export function EscalationRulesCard() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
 
+  useEffect(() => {
+    listEscalationRules()
+      .then((data) => setRules(data.sort((a, b) => b.daysBeforeExpiration - a.daysBeforeExpiration)))
+      .catch((e) => console.error(e))
+      .finally(() => setLoading(false))
+  }, [])
+
   async function load() {
     try { setRules((await listEscalationRules()).sort((a, b) => b.daysBeforeExpiration - a.daysBeforeExpiration)) }
     catch (e) { console.error(e) }
     finally { setLoading(false) }
   }
-
-  useEffect(() => { load() }, [])
 
   async function seed() {
     setBusy(true)

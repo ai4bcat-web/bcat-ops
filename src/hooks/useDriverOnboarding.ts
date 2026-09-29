@@ -9,6 +9,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { useAppStore } from '@/store/useAppStore'
 import type { Driver, OnboardingTask } from '@/types'
 
+const NO_TASKS: OnboardingTask[] = []
+
 /**
  * A driver's onboarding, as the driver file sees it.
  *
@@ -18,25 +20,26 @@ import type { Driver, OnboardingTask } from '@/types'
 export function useDriverOnboarding(driver: Driver | null) {
   const { user } = useAuth()
   const updateDriverRecord = useAppStore((st) => st.updateDriver)
-  const [tasks, setTasks] = useState<OnboardingTask[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loaded, setTasks] = useState<OnboardingTask[]>([])
+  // Derived: true until a fetch for the CURRENT driver has settled.
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const driverId = driver?.id ?? null
 
-  const load = useCallback(async () => {
-    if (!driverId) { setTasks([]); setLoading(false); return }
-    setLoading(true)
-    try {
-      setTasks(await listOnboardingTasks('DRIVER', driverId))
-    } catch (err) {
-      console.error('[useDriverOnboarding] load', err)
-    } finally {
-      setLoading(false)
-    }
+  const load = useCallback(() => {
+    if (!driverId) return Promise.resolve()
+    return listOnboardingTasks('DRIVER', driverId)
+      .then((next) => { setTasks(next) })
+      .catch((err: unknown) => { console.error('[useDriverOnboarding] load', err) })
+      .finally(() => setLoadedFor(driverId))
   }, [driverId])
+  const refresh = useCallback(() => { setLoadedFor(null); return load() }, [load])
 
   useEffect(() => { void load() }, [load])
+
+  const tasks = driverId ? loaded : NO_TASKS
+  const loading = driverId != null && loadedFor !== driverId
 
   const progress = useMemo(() => onboardingProgress(tasks), [tasks])
   const grouped = useMemo(() => tasksByCategory(tasks), [tasks])
@@ -60,9 +63,9 @@ export function useDriverOnboarding(driver: Driver | null) {
       // Record that onboarding was STARTED. Status is derived from this, so without it
       // the driver would keep reading Active with a checklist nobody is tracking.
       await updateDriverRecord(driver.id, { onboardingStatus: 'IN_PROGRESS' })
-      await load()
+      await refresh()
     } finally { setBusy(false) }
-  }, [driver, load, updateDriverRecord])
+  }, [driver, refresh, updateDriverRecord])
 
   /**
    * Invite the driver to apply. The invite carries the fleet so the portal can render
@@ -99,5 +102,5 @@ export function useDriverOnboarding(driver: Driver | null) {
     setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)))
   }, [user])
 
-  return { tasks, grouped, progress, loading, busy, start, sendApplication, toggleTask, refresh: load }
+  return { tasks, grouped, progress, loading, busy, start, sendApplication, toggleTask, refresh }
 }

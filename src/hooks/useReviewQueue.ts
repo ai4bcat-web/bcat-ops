@@ -48,24 +48,15 @@ export function useReviewQueue() {
     [drivers],
   )
 
-  const load = useCallback(async () => {
-    try {
-      const [docs, apps] = await Promise.all([
-        listComplianceDocumentsByStatus('PENDING_REVIEW'),
-        listApplicationsByStatus('SUBMITTED'),
-      ])
-      setDocuments(docs)
-      setApplications(apps)
-    } catch (err) {
-      console.error('[useReviewQueue] fetch error', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() =>
+    Promise.all([listComplianceDocumentsByStatus('PENDING_REVIEW'), listApplicationsByStatus('SUBMITTED')])
+      .then(([docs, apps]) => { setDocuments(docs); setApplications(apps) })
+      .catch((err: unknown) => { console.error('[useReviewQueue] fetch error', err) })
+      .finally(() => setLoading(false)),
+  [])
 
   useEffect(() => {
-    setLoading(true)
-    load()
+    void load()
     const id = setInterval(load, POLL_MS)
     return () => clearInterval(id)
   }, [load])
@@ -171,7 +162,7 @@ export function useReviewQueue() {
       setApplications((prev) => prev.filter((a) => a.id !== app.id))
       await maybeCompleteOnboarding(app.driverId)
     },
-    [maybeCompleteOnboarding, user?.email],
+    [maybeCompleteOnboarding, updateDriverInStore, user?.email],
   )
 
   const rejectApplication = useCallback(

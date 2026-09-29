@@ -19,14 +19,12 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
 export function CarriersPage() {
   const location = useLocation()
   const isMobile = useIsMobile()
-  const [tab, setTab] = useState<TabKey>('lists')
+  const [tab, setTab] = useState<TabKey>(() => {
+    const stateTab = (location.state as { tab?: TabKey } | null)?.tab
+    return stateTab && ['lists', 'campaigns', 'replies'].includes(stateTab) ? stateTab : 'lists'
+  })
   const preselectedCampaignId = (location.state as { campaignId?: string } | null)?.campaignId
   const { capacity, loading, error, refresh } = useCarrierCapacity()
-
-  useEffect(() => {
-    const stateTab = (location.state as { tab?: TabKey } | null)?.tab
-    if (stateTab) setTab(stateTab)
-  }, [location.state])
 
   return (
     <div className="h-full overflow-y-auto">

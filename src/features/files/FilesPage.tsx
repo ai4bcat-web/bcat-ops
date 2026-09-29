@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { FolderOpen, Search, Users, Truck as TruckIcon, Container, FileStack, UserPlus, EyeOff } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
@@ -158,7 +158,7 @@ export function FilesPage() {
     return () => { alive = false }
   }, [])
 
-  const emailOf = (d: Driver) => resolveDriverEmail(d, payEmails.get(d.id))
+  const emailOf = useCallback((d: Driver) => resolveDriverEmail(d, payEmails.get(d.id)), [payEmails])
 
   const tasksByDriver = useMemo(() => {
     const map = new Map<string, OnboardingTask[]>()
@@ -169,10 +169,10 @@ export function FilesPage() {
     return map
   }, [tasks])
 
-  const statusOf = (d: Driver): { status: DriverStatus; percent: number } => {
+  const statusOf = useCallback((d: Driver): { status: DriverStatus; percent: number } => {
     const progress = onboardingProgress(tasksByDriver.get(d.id) ?? [])
     return { status: driverStatus(d, progress), percent: progress.percent }
-  }
+  }, [tasksByDriver])
 
   const trucks = useMemo(
     () => equipment.filter((e) => e.type === 'truck' && e.active !== false)
@@ -212,8 +212,7 @@ export function FilesPage() {
   const q = query.trim().toLowerCase()
   const byStatus = useMemo(
     () => statusFilter === 'ALL' ? activeDrivers : activeDrivers.filter((d) => statusOf(d).status === statusFilter),
-    // statusOf reads tasksByDriver, so the filter must recompute when tasks arrive.
-    [activeDrivers, statusFilter, tasksByDriver],
+    [activeDrivers, statusFilter, statusOf],
   )
 
   const shownDrivers = useMemo(() => {
@@ -224,7 +223,7 @@ export function FilesPage() {
       const fleet = d.fleetGroup ? FLEET_GROUP_LABELS[d.fleetGroup] : ''
       return [d.name, d.phone, emailOf(d), d.cdl, truck?.unitNumber, fleet].some((v) => (v ?? '').toLowerCase().includes(q))
     })
-  }, [byStatus, trucks, q])
+  }, [byStatus, trucks, q, emailOf])
 
   const assetsForTab = tab === 'TRAILER' ? activeTrailers : trucks
 
@@ -254,8 +253,7 @@ export function FilesPage() {
     const counts = { ALL: activeDrivers.length, ACTIVE: 0, ONBOARDING: 0, INACTIVE: 0 }
     for (const d of activeDrivers) counts[statusOf(d).status]++
     return counts
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeDrivers, tasksByDriver])
+  }, [activeDrivers, statusOf])
 
   const openEntity: FileEntity | null = useMemo(() => {
     if (!openId) return null

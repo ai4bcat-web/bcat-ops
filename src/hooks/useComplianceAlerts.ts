@@ -11,19 +11,15 @@ export function useComplianceAlerts() {
   const [alerts, setAlerts] = useState<ComplianceAlert[]>([])
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    try {
-      setAlerts(await listComplianceAlerts())
-    } catch (err) {
-      console.error('[useComplianceAlerts] fetch error', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() =>
+    listComplianceAlerts()
+      .then((next) => { setAlerts(next) })
+      .catch((err: unknown) => { console.error('[useComplianceAlerts] fetch error', err) })
+      .finally(() => setLoading(false)),
+  [])
 
   useEffect(() => {
-    setLoading(true)
-    load()
+    void load()
     const id = setInterval(load, POLL_MS)
     return () => clearInterval(id)
   }, [load])

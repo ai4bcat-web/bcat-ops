@@ -12,11 +12,11 @@ export function useAmazonPayMasters() {
   const [masters, setMasters] = useState<AmazonPayMaster[]>([])
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try { setMasters(await listAmazonPayMasters()) } finally { setLoading(false) }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const load = useCallback(() =>
+    listAmazonPayMasters().then((next) => { setMasters(next) }).finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const archive = useCallback(async (m: {
     fileName: string; periodStart: string; text: string
@@ -50,5 +50,5 @@ export function useAmazonPayMasters() {
     window.open(url, '_blank', 'noopener')
   }, [])
 
-  return { masters, loading, refresh: load, archive, remove, download }
+  return { masters, loading, refresh, archive, remove, download }
 }

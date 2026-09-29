@@ -100,13 +100,19 @@ vi.mock('@/store/useAppStore', () => {
   return { useAppStore }
 })
 
+// Dynamic, not static: the useAppStore mock factory above closes over the fixtures
+// declared in this file, so FilesPage must not load until those bindings exist — a
+// top-level `import` is hoisted ahead of them and throws. Imported ONCE here rather
+// than inside each test, which made every test re-resolve the module graph and pushed
+// the first one past its timeout under the full suite.
+const { FilesPage } = await import('./FilesPage')
+
 const renderIn = (ui: React.ReactElement) => render(<MemoryRouter>{ui}</MemoryRouter>)
 
 beforeEach(() => { vi.clearAllMocks() })
 
 describe('Files hub renders', () => {
   it('mounts without throwing and shows both tabs', async () => {
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     expect(screen.getByText('Files')).toBeTruthy()
     expect(screen.getByText('Trucks')).toBeTruthy()
@@ -117,7 +123,6 @@ describe('Files hub renders', () => {
     // The driver editor is always mounted and gated on its `open` prop. When that gate
     // was lost, the "Add driver" panel rendered permanently over the Files page and
     // every other assertion here still passed, because the list was underneath it.
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     expect(screen.queryByText('Add driver')).toBeNull()
     expect(screen.queryByText('New driver')).toBeNull()
@@ -125,7 +130,6 @@ describe('Files hub renders', () => {
   })
 
   it('lists the truck with its VIN uppercased', async () => {
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     // Stored lowercase in the fixture — proves formatVin is applied at the display site.
     expect(screen.getByText('1FUJGLD55LLAA3391')).toBeTruthy()
@@ -133,7 +137,6 @@ describe('Files hub renders', () => {
 
   it('shows each driver\'s email in the list', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     // Phone and email share a Contact column now — ten columns were being clipped.
@@ -143,7 +146,6 @@ describe('Files hub renders', () => {
 
   it('finds a driver by their email', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     fireEvent.change(screen.getByPlaceholderText(/Search name/), { target: { value: 'zak@bcat' } })
@@ -152,7 +154,6 @@ describe('Files hub renders', () => {
 
   it('filters drivers by status from the tabs below the list', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
 
@@ -171,7 +172,6 @@ describe('Files hub renders', () => {
 
   it('shows each driver\'s hire date', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     expect(screen.getByText('Hired')).toBeTruthy()
@@ -180,7 +180,6 @@ describe('Files hub renders', () => {
 
   it('shows a dash when there is no hire date, rather than a blank cell', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     fireEvent.click(screen.getByText('Inactive'))
@@ -190,7 +189,6 @@ describe('Files hub renders', () => {
 
   it('uses the settlement email when the driver record has none', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     // Armando has no email on his driver record, but does on his pay setting. Asking
@@ -199,7 +197,6 @@ describe('Files hub renders', () => {
   })
 
   it('shows the admin-only Private docs control', async () => {
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     expect(screen.getByText('Private docs')).toBeTruthy()
   })
@@ -273,7 +270,6 @@ describe('driver file panel renders', () => {
 describe('editing a driver opens ONE drawer', () => {
   it('closes the file panel when the editor opens, then returns to it', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
 
     // Open the driver's file.
@@ -300,7 +296,6 @@ describe('editing a driver opens ONE drawer', () => {
     })
     expect(getSnapshot().docs).toHaveLength(1)
 
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     fireEvent.click(screen.getByText('Zak Pace'))
@@ -321,7 +316,6 @@ describe('editing a driver opens ONE drawer', () => {
       expirationDate: '2027-03-14', createdAt: '2026-08-01', updatedAt: '2026-08-01',
     })
 
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     fireEvent.click(screen.getByText('Zak Pace'))
@@ -333,7 +327,6 @@ describe('editing a driver opens ONE drawer', () => {
 
   it('uses the same panel shell as the driver file', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
     fireEvent.click(screen.getByText('Zak Pace'))
@@ -349,7 +342,6 @@ describe('editing a driver opens ONE drawer', () => {
 describe('inactive drivers stay reachable', () => {
   it('shows a deactivated driver under All and Inactive', async () => {
     const { fireEvent } = await import('@testing-library/react')
-    const { FilesPage } = await import('./FilesPage')
     renderIn(<FilesPage />)
     fireEvent.click(screen.getByText('Drivers'))
 

@@ -25,12 +25,14 @@ export function DocumentPreviewModal({
 
   useEffect(() => {
     let alive = true
-    if (!doc.s3Key) { setError('This item has no file attached.'); return }
+    if (!doc.s3Key) return
     getUrl(doc.s3Key)
-      .then((u) => { if (alive) setUrl(u) })
+      .then((u) => { if (alive) { setUrl(u); setError(null) } })
       .catch((err) => { if (alive) setError(err instanceof Error ? err.message : String(err)) })
     return () => { alive = false }
   }, [doc.s3Key, getUrl])
+
+  const fetchError = !doc.s3Key ? 'This item has no file attached.' : error
 
   const key = doc.s3Key ?? ''
   const filename = key.split('/').pop() ?? doc.title
@@ -88,8 +90,8 @@ export function DocumentPreviewModal({
         </div>
 
         <div style={{ flex: 1, background: 'var(--ds-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'auto' }}>
-          {error ? (
-            <div style={{ fontSize: 13, color: '#b91c1c', padding: 24, textAlign: 'center' }}>Couldn't open this document: {error}</div>
+          {fetchError ? (
+            <div style={{ fontSize: 13, color: '#b91c1c', padding: 24, textAlign: 'center' }}>Couldn't open this document: {fetchError}</div>
           ) : !url ? (
             <div style={{ fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
           ) : isUnembeddableKey(key) ? (

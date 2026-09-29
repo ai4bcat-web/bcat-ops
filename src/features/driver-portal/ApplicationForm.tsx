@@ -119,7 +119,7 @@ export function ApplicationForm({ driverId, initial, onSaveDraft, onSubmit, onEx
     setData((d) => ({ ...d, [key]: value }))
   }
 
-  const employment = data.employmentHistory ?? []
+  const employment = useMemo(() => data.employmentHistory ?? [], [data.employmentHistory])
   const addresses = data.addressHistory ?? []
   const endorsements = data.endorsements ?? []
   const requiredYears = data.cdlNumber || data.cdlIssuedAfterFeb2022 ? 10 : 3

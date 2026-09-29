@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { Mail, Pause, Play } from 'lucide-react'
 import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
@@ -11,10 +11,9 @@ import { Card } from './components'
 export function EmailSettingsCard() {
   const { settings, loading, patch } = useComplianceSettings()
   const [managerEmails, setManagerEmails] = useState('')
-
-  useEffect(() => {
-    if (settings?.managerEmails) setManagerEmails(settings.managerEmails.join(', '))
-  }, [settings?.managerEmails])
+  const [dirty, setDirty] = useState(false)
+  const defaultEmails = useMemo(() => settings?.managerEmails?.join(', ') ?? '', [settings?.managerEmails])
+  const displayed = dirty ? managerEmails : defaultEmails
 
   async function toggle(key: 'portalEmailsPaused' | 'escalationEmailsPaused', paused: boolean) {
     await patch({ [key]: paused })
@@ -22,8 +21,9 @@ export function EmailSettingsCard() {
   }
 
   async function saveManagers() {
-    const emails = managerEmails.split(',').map((s) => s.trim()).filter(Boolean)
+    const emails = displayed.split(',').map((s) => s.trim()).filter(Boolean)
     await patch({ managerEmails: emails })
+    setDirty(false)
     toast.success('Manager recipients saved')
   }
 
@@ -50,7 +50,7 @@ export function EmailSettingsCard() {
           <div style={{ borderTop: '1px solid var(--ds-border)', paddingTop: 12 }}>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 6 }}>Manager recipients (escalation, comma-separated)</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Input value={managerEmails} onChange={(e) => setManagerEmails(e.target.value)} placeholder="ops@bcatcorp.com, safety@bcatcorp.com" className="h-9" />
+              <Input value={displayed} onChange={(e) => { setDirty(true); setManagerEmails(e.target.value) }} placeholder="ops@bcatcorp.com, safety@bcatcorp.com" className="h-9" />
               <Button size="sm" variant="outline" style={{ paddingInline: 18 }} onClick={saveManagers}>Save</Button>
             </div>
           </div>

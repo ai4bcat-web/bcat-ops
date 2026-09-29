@@ -6,30 +6,26 @@ import {
 } from '@/lib/complianceClient'
 import type { ComplianceDocument, ComplianceEntityType } from '@/types'
 
+const NO_DOCUMENTS: ComplianceDocument[] = []
+
 /** ComplianceDocuments for a single driver or truck. */
 export function useComplianceDocuments(entityType: ComplianceEntityType, entityId: string | null) {
+  const key = `${entityType}|${entityId ?? ''}`
   const [documents, setDocuments] = useState<ComplianceDocument[]>([])
-  const [loading, setLoading] = useState(true)
+  // Derived: true until a fetch for the CURRENT entity has settled.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    if (!entityId) {
-      setDocuments([])
-      setLoading(false)
-      return
-    }
-    try {
-      setDocuments(await listComplianceDocuments(entityType, entityId))
-    } catch (err) {
-      console.error('[useComplianceDocuments] fetch error', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [entityType, entityId])
+  const load = useCallback(() => {
+    if (!entityId) return Promise.resolve()
+    return listComplianceDocuments(entityType, entityId)
+      .then((next) => { setDocuments(next) })
+      .catch((err: unknown) => { console.error('[useComplianceDocuments] fetch error', err) })
+      .finally(() => setLoadedKey(key))
+  }, [entityType, entityId, key])
 
-  useEffect(() => {
-    setLoading(true)
-    load()
-  }, [load])
+  useEffect(() => { void load() }, [load])
+
+  const loading = entityId != null && loadedKey !== key
 
   const addDocument = useCallback(
     async (input: Omit<ComplianceDocument, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -49,5 +45,5 @@ export function useComplianceDocuments(entityType: ComplianceEntityType, entityI
     [],
   )
 
-  return { documents, loading, refresh: load, addDocument, patchDocument }
+  return { documents: entityId ? documents : NO_DOCUMENTS, loading, refresh: load, addDocument, patchDocument }
 }

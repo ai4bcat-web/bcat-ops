@@ -20,28 +20,12 @@ import type { Load, Stop } from '@/types'
  * proof travels with the appointment — same trick as apptThreadTs).
  */
 
-// Batory's ladder needs three screenshots per stop: the REQUEST email (→ REQUESTED),
-// then the CONFIRMED email + E2Open update (→ CONFIRMED). Non-Batory loads don't use
-// screenshots at all — their confirmation is the RATECON on the load.
+// Batory's ladder needs three screenshots per stop (see src/lib/apptProofs.ts).
 const BATORY_SLOTS: { slot: ApptProofSlot; label: string }[] = [
   { slot: 'request', label: 'Request email' },
   { slot: 'e2open',  label: 'E2Open update' },
   { slot: 'email',   label: 'Email confirmation' },
 ]
-export const slotsFor = (_customer: string | null | undefined) => BATORY_SLOTS
-
-export function stopProofCount(s: Stop, _customer?: string | null): number {
-  return (s.apptProofs?.request ? 1 : 0) + (s.apptProofs?.e2open ? 1 : 0) + (s.apptProofs?.email ? 1 : 0)
-}
-
-/** "n/6" completeness across a Batory shipment's pickup + delivery. */
-export function loadProofCount(load: Load): { have: number; want: number } {
-  const stops = getStops(load)
-  const pu = stops.find((s) => s.type === 'pickup')
-  const de = [...stops].reverse().find((s) => s.type === 'delivery')
-  const ends = [pu, de].filter(Boolean) as Stop[]
-  return { have: ends.reduce((n, s) => n + stopProofCount(s), 0), want: ends.length * 3 }
-}
 
 function ProofSlot({ label, s3Key, onUpload, onRemove }: {
   label: string
@@ -49,14 +33,17 @@ function ProofSlot({ label, s3Key, onUpload, onRemove }: {
   onUpload: (file: Blob) => Promise<void>
   onRemove: () => Promise<void>
 }) {
-  const [url, setUrl] = useState<string | null>(null)
+  // The presigned URL is keyed to the stored object: track which key it was fetched for
+  // so a slot whose key changed shows nothing (not the old image) until the new URL lands.
+  const [preview, setPreview] = useState<{ key: string; url: string } | null>(null)
+  const url = preview && preview.key === s3Key ? preview.url : null
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    if (!s3Key) return
     let alive = true
-    setUrl(null)
-    if (s3Key) getApptProofUrl(s3Key).then((u) => { if (alive) setUrl(u) }).catch(() => {})
+    getApptProofUrl(s3Key).then((u) => { if (alive) setPreview({ key: s3Key, url: u }) }).catch(() => {})
     return () => { alive = false }
   }, [s3Key])
 
@@ -124,7 +111,6 @@ export function ApptProofPanel({ load, updateLoad }: {
   const stops = getStops(load)
   const pu = stops.find((s) => s.type === 'pickup')
   const de = [...stops].reverse().find((s) => s.type === 'delivery')
-  const SLOTS = slotsFor(load.customer)
 
   const save = async (stop: Stop, slot: ApptProofSlot, key: string | null) => {
     const proofs = { ...(stop.apptProofs ?? {}), [slot]: key }
@@ -160,7 +146,7 @@ export function ApptProofPanel({ load, updateLoad }: {
     } catch (e) { toast.error(`Couldn't update the status: ${e instanceof Error ? e.message : 'unknown error'}`) }
   }
 
-  const End = ({ title, stop }: { title: string; stop?: Stop }) => {
+  const renderEnd = (title: string, stop?: Stop) => {
     if (!stop) return (
       <div style={{ flex: 1, minWidth: 240 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t2)', marginBottom: 6 }}>{title}</div>
@@ -181,7 +167,7 @@ export function ApptProofPanel({ load, updateLoad }: {
           )}
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {SLOTS.map(({ slot, label }) => (
+          {BATORY_SLOTS.map(({ slot, label }) => (
             <ProofSlot key={slot} label={label} s3Key={stop.apptProofs?.[slot]}
               onUpload={upload(stop, slot)} onRemove={removeProof(stop, slot)} />
           ))}
@@ -226,8 +212,8 @@ export function ApptProofPanel({ load, updateLoad }: {
 
   return (
     <div data-testid="appt-proofs" style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-      <End title="Pickup" stop={pu} />
-      <End title="Delivery" stop={de} />
+      {renderEnd('Pickup', pu)}
+      {renderEnd('Delivery', de)}
       {emailFor && (
         <ApptRequestEmailModal
           load={load} stop={emailFor} locations={locations}

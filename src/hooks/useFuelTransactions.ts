@@ -9,35 +9,33 @@ export function useFuelTransactions() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await listFuelTransactions()
-      setTransactions(data)
+  const load = useCallback(() =>
+    listFuelTransactions()
+      .then((data) => {
+        setTransactions(data)
+        setError(null)
 
-      // Duplicate detection — visible in browser console
-      const seen = new Map<string, string[]>()
-      for (const t of data) {
-        const k = `${t.transactionDate}|${t.cardNumber}|${t.invoiceNumber ?? ''}|${t.fuelType}`
-        if (!seen.has(k)) seen.set(k, [])
-        seen.get(k)!.push(t.id)
-      }
-      const dupes = [...seen.entries()].filter(([, ids]) => ids.length > 1)
-      if (dupes.length > 0) {
-        console.warn('[fuel] DUPLICATE TRANSACTIONS FOUND:', dupes.length, 'keys affected')
-        for (const [k, ids] of dupes) console.warn(' dup key:', k, '→ ids:', ids)
-      } else {
-        console.log(`[fuel] loaded ${data.length} transactions — no duplicates`)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+        // Duplicate detection — visible in browser console
+        const seen = new Map<string, string[]>()
+        for (const t of data) {
+          const k = `${t.transactionDate}|${t.cardNumber}|${t.invoiceNumber ?? ''}|${t.fuelType}`
+          if (!seen.has(k)) seen.set(k, [])
+          seen.get(k)!.push(t.id)
+        }
+        const dupes = [...seen.entries()].filter(([, ids]) => ids.length > 1)
+        if (dupes.length > 0) {
+          console.warn('[fuel] DUPLICATE TRANSACTIONS FOUND:', dupes.length, 'keys affected')
+          for (const [k, ids] of dupes) console.warn(' dup key:', k, '→ ids:', ids)
+        } else {
+          console.log(`[fuel] loaded ${data.length} transactions — no duplicates`)
+        }
+      })
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const addTransactions = useCallback((added: FuelTransaction[]) => {
     setTransactions((prev) => [...prev, ...added])
@@ -49,5 +47,5 @@ export function useFuelTransactions() {
     return updated
   }, [])
 
-  return { transactions, loading, error, refresh: load, addTransactions, patchTransaction }
+  return { transactions, loading, error, refresh, addTransactions, patchTransaction }
 }

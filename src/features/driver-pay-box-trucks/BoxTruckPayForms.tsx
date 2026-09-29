@@ -179,7 +179,7 @@ export function CreditModal({ driverId, driverName, periodStart, periodLabel, in
   )
 }
 
-export function rowToTrip(r: RawBoxTruckRow, driverId: string, periodStart: string): TripInput {
+function rowToTrip(r: RawBoxTruckRow, driverId: string, periodStart: string): TripInput {
   return {
     driverId, periodStart,
     loadId: null, date: null, aljexPro: null,

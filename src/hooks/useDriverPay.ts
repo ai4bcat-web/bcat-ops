@@ -24,19 +24,15 @@ export function useDriverPay(): DriverPayState {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      setPayPeriods(await listDriverPayPeriods())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() =>
+    listDriverPayPeriods()
+      .then((next) => { setPayPeriods(next); setError(null) })
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const createPay = useCallback(async (input: Omit<DriverPayPeriod, 'id' | 'createdAt' | 'updatedAt'>) => {
     const created = await createDriverPayPeriod(input)
@@ -55,5 +51,5 @@ export function useDriverPay(): DriverPayState {
     setPayPeriods((prev) => prev.filter((p) => p.id !== id))
   }, [])
 
-  return { payPeriods, loading, error, refresh: load, createPay, updatePay, deletePay }
+  return { payPeriods, loading, error, refresh, createPay, updatePay, deletePay }
 }
