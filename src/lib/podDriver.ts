@@ -1,27 +1,7 @@
 import { getStops } from './stops'
 import type { Driver, Load } from '@/types'
 import type { PodDocument, PodSenderMapping } from '@/types/pods'
-
-export function digits(s: string | null | undefined): string {
-  return (s ?? '').replace(/\D/g, '').slice(-10)
-}
-
-const alphaTokens = (s: string | null | undefined): string[] =>
-  (s ?? '').toLowerCase().match(/[a-z]+/g) ?? []
-
-const nameKey = (s: string | null | undefined): string => alphaTokens(s).join('')
-
-/**
- * Stable backend key for a sender. Phone-first (last 10 digits); otherwise a
- * normalized name key so email-only senders can also be mapped.
- */
-export function senderKey(doc: Pick<PodDocument, 'senderName' | 'senderContact'>): string {
-  const phone = digits(doc.senderContact)
-  if (phone.length === 10) return `phone:${phone}`
-  const name = nameKey(doc.senderName)
-  if (name.length >= 2) return `name:${name}`
-  return `name:${(doc.senderName ?? 'unknown').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-') || 'unknown'}`
-}
+import { digits, nameKey, senderKey } from './podSenderKey'
 
 /**
  * The driver who texted this POD.
@@ -35,10 +15,13 @@ export function matchPodDriver(
   mappings: PodSenderMapping[],
 ): Driver | null {
   // Backend override by shared senderKey.
-  const mapped = mappings.find((m) => m.senderKey === senderKey(doc))
-  if (mapped) {
-    const driver = drivers.find((d) => d.id === mapped.driverId)
-    if (driver) return driver
+  const key = senderKey(doc)
+  if (key) {
+    const mapped = mappings.find((m) => m.senderKey === key)
+    if (mapped) {
+      const driver = drivers.find((d) => d.id === mapped.driverId)
+      if (driver) return driver
+    }
   }
 
   const phone = digits(doc.senderContact)
@@ -47,10 +30,11 @@ export function matchPodDriver(
     if (byPhone) return byPhone
   }
   const name = nameKey(doc.senderName)
-  if (alphaTokens(doc.senderName).length < 2) return null
-  if (!name) return null
+  if (name.length < 2) return null
   return drivers.find((d) => nameKey(d.name) === name) ?? null
 }
+
+export { digits, nameKey, senderKey } from './podSenderKey'
 
 function latestDriverAppt(load: Load, driverId: string): string | null {
   const stops = getStops(load)

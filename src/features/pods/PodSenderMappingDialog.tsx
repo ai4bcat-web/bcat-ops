@@ -3,7 +3,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { matchPodDriver, senderKey, digits } from '@/lib/podDriver'
+import { matchPodDriver } from '@/lib/podDriver'
+import { senderKey } from '@/lib/podSenderKey'
 import type { Driver } from '@/types'
 import type { PodDocument, PodSenderMapping } from '@/types/pods'
 
@@ -11,7 +12,6 @@ interface SenderRow {
   senderKey: string
   senderName: string
   senderContact: string
-  label: string
   currentDriverId: string | null
 }
 
@@ -35,17 +35,13 @@ export function PodSenderMappingDialog({
     // Walk oldest first so a more recent doc's name overwrites stale ones.
     for (const doc of [...docs].sort((a, b) => Date.parse(a.receivedAt) - Date.parse(b.receivedAt))) {
       const key = senderKey(doc)
+      if (!key) continue
       const existing = mappings.find((m) => m.senderKey === key)
       const auto = matchPodDriver(doc, drivers, mappings)
-      const phone = digits(doc.senderContact)
-      const label = phone.length === 10
-        ? `phone:${phone}`
-        : `name:${nameKey(doc.senderName)}`
       seen.set(key, {
         senderKey: key,
         senderName: doc.senderName,
         senderContact: doc.senderContact,
-        label,
         currentDriverId: existing?.driverId ?? auto?.id ?? null,
       })
     }
@@ -105,7 +101,7 @@ export function PodSenderMappingDialog({
                   {row.senderName || <span style={{ color: 'var(--ds-t3)' }}>Unknown sender</span>}
                 </td>
                 <td style={{ padding: '8px 4px', borderBottom: '1px solid var(--ds-border)', fontFamily: 'monospace' }}>
-                  {row.label}
+                  {row.senderKey}
                 </td>
                 <td style={{ padding: '8px 4px', borderBottom: '1px solid var(--ds-border)' }}>
                   <select
@@ -142,8 +138,4 @@ export function PodSenderMappingDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-function nameKey(s: string): string {
-  return (s ?? '').toLowerCase().match(/[a-z]+/g)?.join('') ?? ''
 }

@@ -1516,6 +1516,8 @@ export async function retryAction(
   return { item: serializeStoredPodDocument(updated) }
 }
 
+import { senderKey } from '../../../src/lib/podSenderKey'
+
 export interface PodSenderMapping {
   clientId: string
   senderKey: string
@@ -1523,22 +1525,6 @@ export interface PodSenderMapping {
   driverId: string
   updatedBy: string
   updatedAt: string
-}
-
-function _phoneDigits(s: string | null | undefined): string {
-  return (s ?? '').replace(/\D/g, '').slice(-10)
-}
-
-function _nameKey(s: string | null | undefined): string {
-  return ((s ?? '').toLowerCase().match(/[a-z]+/g) ?? []).join('')
-}
-
-function senderKey(doc: { senderName: string; senderContact: string }): string {
-  const phone = _phoneDigits(doc.senderContact)
-  if (phone.length === 10) return `phone:${phone}`
-  const name = _nameKey(doc.senderName)
-  if (name.length >= 2) return `name:${name}`
-  return `name:${(doc.senderName ?? 'unknown').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-') || 'unknown'}`
 }
 
 function serializeMapping(item: Record<string, AttributeValue>): PodSenderMapping {
@@ -1573,7 +1559,7 @@ export async function setSenderMappingAction(
   const senderName = assertString(input.senderName, 'senderName', 200)
   const senderContact = typeof input.phone === 'string' ? input.phone : ''
   const key = senderKey({ senderName, senderContact })
-  if (key === 'name:unknown' || key === 'name:' || key === 'name:-') {
+  if (!key) {
     throw new Error('Mapping requires a sender name or phone number')
   }
   const driverId = input.driverId != null ? assertString(input.driverId, 'driverId') : null
