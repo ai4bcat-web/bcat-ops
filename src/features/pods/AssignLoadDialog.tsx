@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { formatDateShort } from '@/lib/date'
 import { matchPodDriver, recentLoadsForDriver } from '@/lib/podDriver'
 import type { Driver, Load } from '@/types'
-import type { PodDocument } from '@/types/pods'
+import type { PodDocument, PodSenderMapping } from '@/types/pods'
 
 function LoadRow({
   load,
@@ -46,6 +46,7 @@ export function AssignLoadDialog({
   doc,
   loads,
   drivers,
+  mappings,
   onAssign,
   onUnassign,
   onClose,
@@ -53,6 +54,7 @@ export function AssignLoadDialog({
   doc: PodDocument
   loads: Load[]
   drivers: Driver[]
+  mappings: PodSenderMapping[]
   onAssign: (doc: PodDocument, loadId: string) => void
   onUnassign: (doc: PodDocument) => void
   onClose: () => void
@@ -64,7 +66,7 @@ export function AssignLoadDialog({
 
   // The driver who texted this POD almost always delivered the load it belongs to,
   // so their recent deliveries come first; the full list stays one search away.
-  const driver = useMemo(() => matchPodDriver(doc, drivers), [doc, drivers])
+  const driver = useMemo(() => matchPodDriver(doc, drivers, mappings), [doc, drivers, mappings])
   const recent = useMemo(() => (driver ? recentLoadsForDriver(loads, driver.id) : []), [loads, driver])
   const recentIds = useMemo(() => new Set(recent.map((l) => l.id)), [recent])
 

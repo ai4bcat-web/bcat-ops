@@ -1,21 +1,32 @@
 import { getStops } from './stops'
 import type { Driver, Load } from '@/types'
-import type { PodDocument } from '@/types/pods'
+import type { PodDocument, PodSenderMapping } from '@/types/pods'
 
-const digits = (s: string | null | undefined): string => (s ?? '').replace(/\D/g, '').slice(-10)
+export function digits(s: string | null | undefined): string {
+  return (s ?? '').replace(/\D/g, '').slice(-10)
+}
 const alphaTokens = (s: string | null | undefined): string[] =>
   (s ?? '').toLowerCase().match(/[a-z]+/g) ?? []
 const nameKey = (s: string | null | undefined): string => alphaTokens(s).join('')
 
 /**
- * The driver who texted this POD. JobsDone gives us the sender's phone and the name
- * they registered with; the roster stores E.164 phones. Phone is the reliable key;
- * name is only used as a fallback when the sender provides at least a first and last
- * name, to avoid matching a bare first name to the wrong driver.
+ * The driver who texted this POD.
+ * 1. Backend mapping by normalized phone (highest priority: user override).
+ * 2. Roster phone match.
+ * 3. Automatic full-name match (requires first + last to avoid bare-first-name collisions).
  */
-export function matchPodDriver(doc: Pick<PodDocument, 'senderName' | 'senderContact'>, drivers: Driver[]): Driver | null {
+export function matchPodDriver(
+  doc: Pick<PodDocument, 'senderName' | 'senderContact'>,
+  drivers: Driver[],
+  mappings?: PodSenderMapping[],
+): Driver | null {
   const phone = digits(doc.senderContact)
   if (phone.length === 10) {
+    const mapped = mappings?.find((m) => m.phoneDigits === phone)
+    if (mapped) {
+      const driver = drivers.find((d) => d.id === mapped.driverId)
+      if (driver) return driver
+    }
     const byPhone = drivers.find((d) => digits(d.phone) === phone)
     if (byPhone) return byPhone
   }

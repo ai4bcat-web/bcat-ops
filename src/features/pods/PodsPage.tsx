@@ -11,10 +11,11 @@ import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PodTable } from './PodTable'
 import { PodPreviewDialog } from './PodPreviewDialog'
 import { AssignLoadDialog } from './AssignLoadDialog'
+import { PodSenderMappingDialog } from './PodSenderMappingDialog'
 import { PodsConnectionForm } from './PodsConnectionForm'
 import { assignPod, retryPod } from '@/lib/podsClient'
 import { graphqlErrorText } from '@/lib/apiClient'
-import type { PodDocument, PodConnectionStatus } from '@/types/pods'
+import type { PodDocument, PodConnectionStatus, PodSenderMapping } from '@/types/pods'
 import type { Driver } from '@/types'
 
 import { matchPodDriver } from '@/lib/podDriver'
@@ -32,6 +33,7 @@ function useFilteredDocs(
   query: string,
   filter: 'ALL' | 'ASSIGNED' | 'UNASSIGNED',
   drivers: Driver[],
+  mappings: PodSenderMapping[],
   driverFilter: 'ALL' | 'ROSTER' | 'UNKNOWN' | string,
   sort: SortKey,
 ) {
@@ -46,7 +48,7 @@ function useFilteredDocs(
       ].some((v) => (v ?? '').toLowerCase().includes(q))
       const matchesFilter =
         filter === 'ALL' ? true : filter === 'ASSIGNED' ? !!d.loadId : !d.loadId
-      const matchedDriver = matchPodDriver(d, drivers)
+      const matchedDriver = matchPodDriver(d, drivers, mappings)
       const matchesDriver =
         driverFilter === 'ALL' ? true :
         driverFilter === 'ROSTER' ? matchedDriver != null :
@@ -62,8 +64,8 @@ function useFilteredDocs(
         case 'senderAsc':
           return (a.senderName || a.senderContact || '').localeCompare(b.senderName || b.senderContact || '')
         case 'driverAsc': {
-          const da = matchPodDriver(a, drivers)?.name || ''
-          const db = matchPodDriver(b, drivers)?.name || ''
+          const da = matchPodDriver(a, drivers, mappings)?.name || ''
+          const db = matchPodDriver(b, drivers, mappings)?.name || ''
           return da.localeCompare(db)
         }
         case 'receivedDesc':
@@ -73,7 +75,7 @@ function useFilteredDocs(
     })
 
     return rows
-  }, [docs, query, filter, drivers, driverFilter, sort])
+  }, [docs, query, filter, drivers, mappings, driverFilter, sort])
 }
 
 export function PodsPage() {
@@ -98,6 +100,8 @@ export function PodsPage() {
     loadMore,
     startBackfill,
     patchDoc,
+    senderMappings,
+    saveSenderMapping,
   } = usePodDocuments()
 
   const [query, setQuery] = useState('')
@@ -106,12 +110,13 @@ export function PodsPage() {
   const [sort, setSort] = useState<SortKey>('receivedDesc')
   const [previewDoc, setPreviewDoc] = useState<PodDocument | null>(null)
   const [assignDoc, setAssignDoc] = useState<PodDocument | null>(null)
+  const [showMapDialog, setShowMapDialog] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
   const [configuredOverride, setConfiguredOverride] = useState<PodConnectionStatus | null>(null)
 
   const activeStatus = configuredOverride ?? status
 
-  const filteredDocs = useFilteredDocs(docs, query, filter, drivers, driverFilter, sort)
+  const filteredDocs = useFilteredDocs(docs, query, filter, drivers, senderMappings, driverFilter, sort)
 
   const handleAssign = async (doc: PodDocument, loadId: string | null) => {
     try {
@@ -218,6 +223,26 @@ export function PodsPage() {
                 <Settings2 size={14} /> {showConfig ? 'Close' : 'Configure'}
               </button>
             )}
+            <button
+              onClick={() => setShowMapDialog(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 32,
+                padding: '0 12px',
+                borderRadius: 8,
+                border: '1px solid var(--ds-border)',
+                background: 'var(--ds-surface)',
+                color: 'var(--ds-t2)',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Map senders
+            </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
@@ -430,6 +455,7 @@ export function PodsPage() {
                 docs={filteredDocs}
                 loads={loads}
                 drivers={drivers}
+                mappings={senderMappings}
                 onPreview={setPreviewDoc}
                 onAssign={setAssignDoc}
                 onUnassign={(d) => {
@@ -470,11 +496,21 @@ export function PodsPage() {
           doc={assignDoc}
           loads={loads}
           drivers={drivers}
+          mappings={senderMappings}
           onAssign={(d, loadId) => handleAssign(d, loadId)}
           onUnassign={(d) => handleAssign(d, null)}
           onClose={() => setAssignDoc(null)}
         />
       )}
+
+      <PodSenderMappingDialog
+        open={showMapDialog}
+        onClose={() => setShowMapDialog(false)}
+        docs={docs}
+        drivers={drivers}
+        mappings={senderMappings}
+        onSave={saveSenderMapping}
+      />
       <LoadDrawer />
     </div>
   )

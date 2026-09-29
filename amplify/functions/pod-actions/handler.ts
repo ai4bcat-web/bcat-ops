@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'crypto'
 import {
   DynamoDBClient,
+  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  ScanCommand,
   UpdateItemCommand,
   TransactWriteItemsCommand,
   type AttributeValue,
@@ -46,6 +48,7 @@ const ssm = new SSMClient({})
 const cognito = new CognitoIdentityProviderClient({})
 
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME!
+const POD_SENDER_MAPPING_TABLE_NAME = process.env.POD_SENDER_MAPPING_TABLE_NAME!
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
 const BUCKET_NAME = process.env.BUCKET_NAME!
 const POD_CONNECTION_PARAM_NAME = process.env.POD_CONNECTION_PARAM_NAME!
@@ -125,6 +128,8 @@ type ManageAction =
   | 'retry'
   | 'process'
   | 'backfill'
+  | 'senderMappings'
+  | 'setSenderMapping'
 
 interface Caller {
   email: string
@@ -231,11 +236,11 @@ export async function authorize(
     if (!isOwner && !isAdmin) {
       throw new Error('Forbidden: configure requires owner or ADMIN')
     }
-  } else if (action === 'sync' || action === 'assign' || action === 'retry' || action === 'backfill') {
+  } else if (action === 'sync' || action === 'assign' || action === 'retry' || action === 'backfill' || action === 'setSenderMapping') {
     if (!isOwner && !isAdmin && !isPagePods) {
       throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${PAGE_PODS_GROUP}`)
     }
-  } else if (action === 'list' || action === 'assets' || action === 'status' || action === 'process') {
+  } else if (action === 'list' || action === 'assets' || action === 'status' || action === 'process' || action === 'senderMappings') {
     // assets checks document-level visibility separately; status/process just needs auth
   }
 
@@ -1512,6 +1517,79 @@ export async function retryAction(
   return { item: serializeStoredPodDocument(updated) }
 }
 
+function phoneDigits(s: string | null | undefined): string {
+  return (s ?? '').replace(/\D/g, '').slice(-10)
+}
+
+export interface PodSenderMapping {
+  clientId: string
+  phoneDigits: string
+  senderName: string
+  driverId: string
+  updatedBy: string
+  updatedAt: string
+}
+
+function serializeMapping(item: Record<string, AttributeValue>): PodSenderMapping {
+  const m = unmarshall(item) as PodSenderMapping
+  return m
+}
+
+export async function senderMappingsAction(): Promise<{ items: PodSenderMapping[] }> {
+  const config = await requireConfig()
+  const items: PodSenderMapping[] = []
+  let last: Record<string, AttributeValue> | undefined
+  do {
+    const scan = await dynamo.send(new ScanCommand({
+      TableName: POD_SENDER_MAPPING_TABLE_NAME,
+      FilterExpression: 'clientId = :clientId',
+      ExpressionAttributeValues: { ':clientId': { S: config.clientId } },
+      ProjectionExpression: 'clientId,phoneDigits,senderName,driverId,updatedBy,updatedAt',
+      ExclusiveStartKey: last,
+    }))
+    for (const item of scan.Items ?? []) items.push(serializeMapping(item))
+    last = scan.LastEvaluatedKey
+  } while (last)
+  return { items }
+}
+
+export async function setSenderMappingAction(
+  input: Record<string, unknown>,
+  caller: Caller,
+): Promise<{ item?: PodSenderMapping; deleted?: boolean }> {
+  assertGlobalAccess(caller)
+  const config = await requireConfig()
+  const phoneDigitsKey = phoneDigits(assertString(input.phone, 'phone'))
+  if (phoneDigitsKey.length !== 10) {
+    throw new Error('Mapping requires a phone number with at least 10 digits')
+  }
+  const senderName = assertString(input.senderName, 'senderName', 200)
+  const driverId = input.driverId != null ? assertString(input.driverId, 'driverId') : null
+  const now = nowIso()
+
+  if (driverId == null) {
+    await dynamo.send(new DeleteItemCommand({
+      TableName: POD_SENDER_MAPPING_TABLE_NAME,
+      Key: marshall({ clientId: config.clientId, phoneDigits: phoneDigitsKey }),
+    }))
+    return { deleted: true }
+  }
+
+  const mapping: PodSenderMapping = {
+    clientId: config.clientId,
+    phoneDigits: phoneDigitsKey,
+    senderName,
+    driverId,
+    updatedBy: caller.email,
+    updatedAt: now,
+  }
+  await dynamo.send(new PutItemCommand({
+    TableName: POD_SENDER_MAPPING_TABLE_NAME,
+    Item: marshall(mapping),
+  }))
+  return { item: mapping }
+}
+
 // ── Entry point ────────────────────────────────────────────────────────────
 
 function isSelfInvoke(event: LambdaEvent): event is SelfInvokeEvent {
@@ -1568,6 +1646,11 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
       return assignAction(input, await authorize(action, appSyncEvent.identity))
     case 'retry':
       return retryAction(input, await authorize(action, appSyncEvent.identity))
+    case 'senderMappings':
+      await authorize(action, appSyncEvent.identity)
+      return senderMappingsAction()
+    case 'setSenderMapping':
+      return setSenderMappingAction(input, await authorize(action, appSyncEvent.identity))
     default:
       throw new Error(`Unknown action: ${action}`)
   }

@@ -2,7 +2,7 @@ import { Eye, Link2, Unlink, RotateCcw, FileText, Loader2 } from 'lucide-react'
 import { formatDateTime } from '@/lib/date'
 import { matchPodDriver } from '@/lib/podDriver'
 import type { Driver, Load } from '@/types'
-import type { PodDocument } from '@/types/pods'
+import type { PodDocument, PodSenderMapping } from '@/types/pods'
 import { statusBadge, usePodAssets, useStalePending, senderLabel } from './podUtils'
 import { PodActionBtn, PodDownloadBtn } from './PodShared'
 
@@ -22,6 +22,7 @@ export function PodTable({
   docs,
   loads,
   drivers,
+  mappings,
   onPreview,
   onAssign,
   onUnassign,
@@ -31,6 +32,7 @@ export function PodTable({
   docs: PodDocument[]
   loads: Load[]
   drivers: Driver[]
+  mappings: PodSenderMapping[]
   onPreview: (d: PodDocument) => void
   onAssign: (d: PodDocument) => void
   onUnassign: (d: PodDocument) => void
@@ -54,7 +56,7 @@ export function PodTable({
         </thead>
         <tbody>
           {docs.map((doc) => (
-            <PodRow key={doc.id} doc={doc} loads={loads} drivers={drivers} onPreview={onPreview} onAssign={onAssign} onUnassign={onUnassign} onRetry={onRetry} onViewLoad={onViewLoad} />
+            <PodRow key={doc.id} doc={doc} loads={loads} drivers={drivers} mappings={mappings} onPreview={onPreview} onAssign={onAssign} onUnassign={onUnassign} onRetry={onRetry} onViewLoad={onViewLoad} />
           ))}
         </tbody>
       </table>
@@ -63,11 +65,12 @@ export function PodTable({
 }
 
 function PodRow({
-  doc, loads, drivers, onPreview, onAssign, onUnassign, onRetry, onViewLoad,
+  doc, loads, drivers, mappings, onPreview, onAssign, onUnassign, onRetry, onViewLoad,
 }: {
   doc: PodDocument
   loads: Load[]
   drivers: Driver[]
+  mappings: PodSenderMapping[]
   onPreview: (d: PodDocument) => void
   onAssign: (d: PodDocument) => void
   onUnassign: (d: PodDocument) => void
@@ -77,7 +80,7 @@ function PodRow({
   const { assets, loading } = usePodAssets(doc)
   const badge = statusBadge(doc)
   const BadgeIcon = badge.icon
-  const driver = matchPodDriver(doc, drivers)
+  const driver = matchPodDriver(doc, drivers, mappings)
   const hasEnhanced = Boolean(assets?.enhancedUrl) && doc.processingStatus === 'READY'
   const originalIsImage = /^image\/(jpeg|png|webp|gif)/i.test(doc.contentType ?? '')
   const thumbUrl = hasEnhanced ? assets?.enhancedUrl : originalIsImage ? assets?.originalUrl : undefined

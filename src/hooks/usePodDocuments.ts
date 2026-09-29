@@ -4,8 +4,10 @@ import {
   getPodConnectionStatus,
   listPods,
   backfillPods,
+  getPodSenderMappings,
+  setPodSenderMapping,
 } from '@/lib/podsClient'
-import type { PodConnectionStatus, PodDocument } from '@/types/pods'
+import type { PodConnectionStatus, PodDocument, PodSenderMapping } from '@/types/pods'
 
 const isBrowser = typeof window !== 'undefined'
 
@@ -25,6 +27,10 @@ export interface UsePodDocumentsReturn {
   startBackfill: () => Promise<void>
   patchDoc: (id: string, updater: (d: PodDocument) => PodDocument) => void
   refreshStatus: () => Promise<void>
+  senderMappings: PodSenderMapping[]
+  senderMappingsLoading: boolean
+  refreshSenderMappings: () => Promise<void>
+  saveSenderMapping: (input: { phone: string; senderName: string; driverId: string | null }) => Promise<void>
 }
 
 export function usePodDocuments(options?: { loadId?: string | null }): UsePodDocumentsReturn {
@@ -42,6 +48,8 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
   const [syncing, setSyncing] = useState(false)
   const [syncQueued, setSyncQueued] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [senderMappings, setSenderMappings] = useState<PodSenderMapping[]>([])
+  const [senderMappingsLoading, setSenderMappingsLoading] = useState(false)
   const configuredRef = useRef(false)
   // Mirrors `docs` for use inside async callbacks without re-creating them.
   const docsRef = useRef<PodDocument[]>([])
@@ -116,6 +124,23 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
     setDocs((prev) => prev.map((d) => (d.id === id ? updater(d) : d)))
   }, [])
 
+  const refreshSenderMappings = useCallback(async () => {
+    setSenderMappingsLoading(true)
+    try {
+      const { items } = await getPodSenderMappings()
+      setSenderMappings(items)
+    } catch (err) {
+      console.error('Could not load sender mappings:', graphqlErrorText(err))
+    } finally {
+      setSenderMappingsLoading(false)
+    }
+  }, [])
+
+  const saveSenderMapping = useCallback(async (input: { phone: string; senderName: string; driverId: string | null }) => {
+    await setPodSenderMapping(input)
+    await refreshSenderMappings()
+  }, [refreshSenderMappings])
+
   // Browser sessions only read stored documents; upstream ingestion runs on AWS.
   useEffect(() => {
     let alive = true
@@ -123,9 +148,10 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
       await loadStatus()
       if (!alive) return
       await fetchList({ mode: 'replace' })
+      await refreshSenderMappings()
     })()
     return () => { alive = false }
-  }, [loadStatus, fetchList])
+  }, [loadStatus, fetchList, refreshSenderMappings])
 
   // Refresh the gallery without triggering another upstream sync per open tab.
   const configured = status?.configured ?? false
@@ -177,5 +203,9 @@ export function usePodDocuments(options?: { loadId?: string | null }): UsePodDoc
       await loadStatus()
       await refresh()
     },
+    senderMappings,
+    senderMappingsLoading,
+    refreshSenderMappings,
+    saveSenderMapping,
   }
 }

@@ -1,6 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { graphqlErrorText } from '@/lib/apiClient'
-import type { PodConnectionStatus, PodDocument, PodPage, PodAssets } from '@/types/pods'
+import type { PodConnectionStatus, PodDocument, PodPage, PodAssets, PodSenderMapping } from '@/types/pods'
 
 const client = generateClient()
 
@@ -59,4 +59,12 @@ export async function assignPod(args: { id: string; loadId: string | null; expec
 
 export async function retryPod(args: { id: string }): Promise<{ item: PodDocument }> {
   return podAction<{ item: PodDocument }>('retry', args)
+}
+
+export async function getPodSenderMappings(): Promise<{ items: PodSenderMapping[] }> {
+  return podAction<{ items: PodSenderMapping[] }>('senderMappings', {})
+}
+
+export async function setPodSenderMapping(input: { phone: string; senderName: string; driverId: string | null }): Promise<{ item?: PodSenderMapping; deleted?: boolean }> {
+  return podAction<{ item?: PodSenderMapping; deleted?: boolean }>('setSenderMapping', input)
 }

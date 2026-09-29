@@ -691,6 +691,24 @@ const schema = a.schema({
       allow.authenticated().to([]),
     ]),
 
+  // User-managed mapping from JobsDone sender identifiers to local Driver.id.
+  // Primary lookup is by normalized phone digits; senderName is stored for display.
+  PodSenderMapping: a
+    .model({
+      clientId:    a.string().required(),   // JobsDone tenant/client id
+      phoneDigits: a.string().required(),  // last 10 digits of senderContact
+      senderName:  a.string().required(),  // current display name from JobsDone
+      driverId:    a.string().required(),  // local Driver.id
+      updatedBy:   a.string().required(),
+      updatedAt:   a.datetime().required(),
+    })
+    .identifier(['clientId', 'phoneDigits'])
+    .secondaryIndexes((index) => [index('clientId').sortKeys(['updatedAt'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [
+      allow.authenticated().to(['read']),
+    ]),
+
   AuditLog: a
     .model({
       entityType: a.string().required(),

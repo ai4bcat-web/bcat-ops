@@ -53,3 +53,12 @@ export interface PodAssets {
   originalUrl?: string
   enhancedUrl?: string
 }
+
+export interface PodSenderMapping {
+  clientId: string
+  phoneDigits: string
+  senderName: string
+  driverId: string
+  updatedBy: string
+  updatedAt: string
+}

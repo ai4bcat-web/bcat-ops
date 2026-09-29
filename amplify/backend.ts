@@ -988,7 +988,10 @@ const podFunctionArn = podStack.formatArn({ service: 'lambda', resource: 'functi
 
 const podConnectionParamName = `/bcat/pods/${backend.auth.resources.userPool.userPoolId}/connection`
 
+const podSenderMappingTable = backend.data.resources.tables['PodSenderMapping']
+
 podActionsFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', podDocumentTable.tableName)
+podActionsFn.addEnvironment('POD_SENDER_MAPPING_TABLE_NAME', podSenderMappingTable.tableName)
 podActionsFn.addEnvironment('LOAD_TABLE_NAME', loadTable.tableName)
 podActionsFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
 podActionsFn.addEnvironment('POD_CONNECTION_PARAM_NAME', podConnectionParamName)
@@ -998,6 +1001,13 @@ podActionsFn.addEnvironment('POD_FUNCTION_NAME', podFunctionName)
 podActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 
 const podDocumentTableArns = [podDocumentTable.tableArn, `${podDocumentTable.tableArn}/index/*`]
+const podSenderMappingTableArns = [podSenderMappingTable.tableArn, `${podSenderMappingTable.tableArn}/index/*`]
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan', 'dynamodb:DeleteItem'],
+    resources: podSenderMappingTableArns,
+  }),
+)
 podActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
