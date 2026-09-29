@@ -17,6 +17,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
+import { LoadPods } from '@/features/pods/LoadPods'
 import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
 import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
 import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
@@ -1456,6 +1457,13 @@ export function LoadDrawer() {
                   </button>
                 )}
               </div>
+
+              {/* PODs linked to this shipment */}
+              {load && (
+                <div className="pt-4 border-t border-border mt-4">
+                  <LoadPods loadId={load.id} />
+                </div>
+              )}
             </div>
           ) : null}
       </>

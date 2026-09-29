@@ -3,7 +3,8 @@ import { Effect, Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
-import { CfnOutput, Duration, Stack } from 'aws-cdk-lib'
+import { ArnFormat, CfnOutput, Duration, Stack } from 'aws-cdk-lib'
+import { createHash } from 'node:crypto'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
 import { storage } from './storage/resource'
@@ -41,6 +42,7 @@ import { carrierBlastApi } from './functions/carrier-blast-api/resource'
 import { carrierBlastWebhook } from './functions/carrier-blast-webhook/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
+import { podActions } from './functions/pod-actions/resource'
 
 const backend = defineBackend({
   auth,
@@ -79,6 +81,7 @@ const backend = defineBackend({
   carrierBlastWebhook,
   tmsDirectoryActions,
   tmsGeocode,
+  podActions,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -963,6 +966,97 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true',   // see the guard below
 })
 
+// ── podActions Lambda (JobsDone PODs) ──────────────────────────────────────
+// Custom AppSync router for JobsDone POD imports. All access is enforced here;
+// the PodDocument model only allows this Lambda. Configuration is stored in a
+// stack-specific SSM SecureString parameter under /bcat/pods/<userPoolId>/connection.
+
+const podActionsFn = backend.podActions.resources.lambda as LambdaFunction
+const podDocumentTable = backend.data.resources.tables['PodDocument']
+const podStack = Stack.of(podActionsFn)
+// Pin the Lambda name from the root stack name (unique per app/branch/sandbox and a
+// plain string at synth time) so the async self-invoke can be granted by ARN string;
+// granting through the construct produced a CloudFormation cycle
+// (Lambda -> self-invoke policy -> data function-directive stack -> Lambda).
+let podRootStack: Stack = podStack
+while (podRootStack.nestedStackParent) podRootStack = podRootStack.nestedStackParent
+const podRootStackName = podRootStack.stackName
+const podFunctionName = `pod-actions-${createHash('sha256').update(podRootStackName).digest('hex').slice(0, 16)}`
+;(podActionsFn.node.defaultChild as CfnFunction).functionName = podFunctionName
+const podFunctionArn = podStack.formatArn({ service: 'lambda', resource: 'function', resourceName: podFunctionName, arnFormat: ArnFormat.COLON_RESOURCE_NAME })
+
+const podConnectionParamName = `/bcat/pods/${backend.auth.resources.userPool.userPoolId}/connection`
+
+podActionsFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', podDocumentTable.tableName)
+podActionsFn.addEnvironment('LOAD_TABLE_NAME', loadTable.tableName)
+podActionsFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+podActionsFn.addEnvironment('POD_CONNECTION_PARAM_NAME', podConnectionParamName)
+// Derived name (not `podActionsFn.functionName`) so the environment value is a plain
+// string rather than a reference to the Lambda resource.
+podActionsFn.addEnvironment('POD_FUNCTION_NAME', podFunctionName)
+podActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+
+const podDocumentTableArns = [podDocumentTable.tableArn, `${podDocumentTable.tableArn}/index/*`]
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: podDocumentTableArns,
+  }),
+)
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    // ConditionCheckItem: the assign transaction verifies the Load exists.
+    actions:   ['dynamodb:GetItem', 'dynamodb:ConditionCheckItem'],
+    resources: [loadTable.tableArn],
+  }),
+)
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+)
+
+backend.storage.resources.bucket.grantPut(podActionsFn, 'pods/*')
+backend.storage.resources.bucket.grantRead(podActionsFn, 'pods/*')
+
+// The frontend downloads presigned POD originals/enhanced images with fetch(),
+// so the bucket must answer CORS GETs from the app origins.
+storageBucket.addCorsRule({
+  allowedOrigins: PORTAL_ORIGINS,
+  allowedMethods: [HttpMethods.GET],
+  allowedHeaders: ['*'],
+  maxAge:         300,
+})
+
+const podConnParamArn = Stack.of(podActionsFn).formatArn({
+  service: 'ssm',
+  resource: 'parameter',
+  // For hierarchical SSM parameter ARNs the leading slash is part of the resource id.
+  resourceName: podConnectionParamName.replace(/^\//, ''),
+})
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['ssm:GetParameter'],
+    resources: [podConnParamArn],
+  }),
+)
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['ssm:PutParameter'],
+    resources: [podConnParamArn],
+  }),
+)
+
+// Self-invoke permission for async processing (Lambda → Event → same Lambda),
+// expressed by name/ARN string rather than the construct to avoid a policy cycle.
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [podFunctionArn],
+  }),
+)
+
 // ── Isolated preview guard ──────────────────────────────────────────────────
 // A sandbox or feature-branch stack deployed with BCAT_ISOLATED_PREVIEW=true must never
 // reach the outside world: every schedule is disabled, the Load-stream consumer is created disabled,
@@ -981,7 +1075,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
 
-  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsGeocode'])
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsGeocode', 'podActions'])
   for (const [name, construct] of Object.entries(backend)) {
     if (previewCallable.has(name)) continue
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda

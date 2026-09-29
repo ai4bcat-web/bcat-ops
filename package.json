@@ -15,6 +15,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "@aws-sdk/client-lambda": "^3.1045.0",
+    "@aws-sdk/client-s3": "^3.1142.0",
+    "@aws-sdk/client-ssm": "^3.1142.0",
     "@fullcalendar/core": "^6.1.20",
     "@fullcalendar/interaction": "^6.1.20",
     "@fullcalendar/react": "^6.1.20",
@@ -41,6 +43,8 @@
     "clsx": "^2.1.1",
     "d3-geo": "^3.1.1",
     "date-fns": "^4.1.0",
+    "image-size": "^2.0.4",
+    "jimp": "^1.6.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
     "lucide-react": "^1.14.0",
@@ -56,6 +60,7 @@
     "tailwind-merge": "^3.5.0",
     "topojson-client": "^3.1.0",
     "us-atlas": "^3.0.1",
+    "ws": "^8.22.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.13"
   },
@@ -85,6 +90,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@types/topojson-client": "^3.1.5",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
     "@vitejs/plugin-react": "^6.0.1",

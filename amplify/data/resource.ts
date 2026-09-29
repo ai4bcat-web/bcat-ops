@@ -13,6 +13,7 @@ import { carrierBlastApi } from '../functions/carrier-blast-api/resource'
 import { vendorApActions } from '../functions/vendor-ap-actions/resource'
 import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource'
 import { tmsGeocode } from '../functions/tms-geocode/resource'
+import { podActions } from '../functions/pod-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -648,6 +649,45 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(vendorApActions)),
+
+  // ── JobsDone POD documents ─────────────────────────────────────────────────
+  // All access is routed through the managePods custom action below. Clients never
+  // write directly; original image keys and source URLs stay backend-only.
+  PodDocument: a
+    .model({
+      clientId:          a.string().required(),
+      sourceMessageId:   a.string().required(),
+      mediaIndex:        a.integer().required(),
+      companyName:       a.string().required(),
+      senderName:        a.string().required(),
+      senderContact:     a.string().required(),
+      receivedAt:        a.string().required(),   // ISO8601 from JobsDone createdAt
+      referenceNumber:   a.string().required(),
+      notes:             a.string().required(),
+      isAllowed:         a.boolean().required(),
+      fileName:          a.string().required(),
+      contentType:       a.string(),
+      originalKey:       a.string(),
+      enhancedKey:       a.string(),
+      processingStatus:  a.string().required(),   // PENDING | READY | ORIGINAL_ONLY | FAILED
+      processingError:   a.string(),
+      sourceUrl:         a.string().required(),   // backend-only; omitted from responses
+      loadId:            a.string(),
+      assignedBy:        a.string(),
+      assignedAt:        a.string(),
+      version:           a.integer().required().default(1),
+      createdAt:         a.datetime().required(),
+      updatedAt:         a.datetime().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('clientId').sortKeys(['receivedAt']),
+      index('loadId').sortKeys(['receivedAt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [
+      // No direct client operations; all access is routed through managePods.
+      allow.authenticated().to([]),
+    ]),
 
   AuditLog: a
     .model({
@@ -1624,6 +1664,18 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsGeocode)),
+
+  // JobsDone POD custom action router. All access goes through this mutation so
+  // the backend controls tenant isolation, S3 presigned URLs, and conditional writes.
+  managePods: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(podActions)),
 }).authorization((allow) => [
   // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
   // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).

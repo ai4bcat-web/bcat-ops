@@ -32,6 +32,10 @@ vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'ryne@bcatcorp.com' }, isAdmin: true, isOwner: true }),
 }))
 
+vi.mock('@/features/pods/LoadPods', () => ({
+  LoadPods: () => null,
+}))
+
 const { LoadDrawer } = await import('./LoadDrawer')
 
 const baseState = (drawerMode: string | null) => ({
