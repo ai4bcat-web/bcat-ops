@@ -61,6 +61,7 @@ vi.mock('ws', () => ({
 let handler: HandlerModule['handler']
 let parseInput: HandlerModule['parseInput']
 let authorize: HandlerModule['authorize']
+let validateMediaUrl: HandlerModule['validateMediaUrl']
 let configureAction: HandlerModule['configureAction']
 let statusAction: HandlerModule['statusAction']
 let listAction: HandlerModule['listAction']
@@ -397,6 +398,7 @@ beforeAll(async () => {
   handler = mod.handler
   parseInput = mod.parseInput
   authorize = mod.authorize
+  validateMediaUrl = mod.validateMediaUrl
   configureAction = mod.configureAction
   statusAction = mod.statusAction
   listAction = mod.listAction
@@ -473,6 +475,30 @@ describe('parseInput', () => {
   it('rejects arrays and primitives', () => {
     expect(() => parseInput('[]')).toThrow(/must be a JSON object/)
     expect(() => parseInput(42 as unknown as string)).toThrow(/must be an object/)
+  })
+})
+
+// ── media url validation ───────────────────────────────────────────────────
+describe('validateMediaUrl', () => {
+  it('accepts both JobsDone media hosts', () => {
+    expect(validateMediaUrl('https://media.jobsdone.io/abc.jpg').hostname).toBe('media.jobsdone.io')
+    // Messages predating the CDN migration link straight at the origin bucket;
+    // rejecting them silently dropped real PODs.
+    expect(validateMediaUrl('https://jobsdone-media-assets.s3.amazonaws.com/abc').hostname)
+      .toBe('jobsdone-media-assets.s3.amazonaws.com')
+  })
+
+  it('keeps a presign query string intact', () => {
+    const url = validateMediaUrl('https://jobsdone-media-assets.s3.amazonaws.com/a?X-Amz-Signature=sig')
+    expect(url.searchParams.get('X-Amz-Signature')).toBe('sig')
+  })
+
+  it('rejects a third-party host, plain HTTP, credentials and custom ports', () => {
+    expect(() => validateMediaUrl('https://evil.example.com/a.jpg')).toThrow(/must be on/)
+    expect(() => validateMediaUrl('https://media.jobsdone.io.evil.com/a.jpg')).toThrow(/must be on/)
+    expect(() => validateMediaUrl('http://media.jobsdone.io/a.jpg')).toThrow(/must use HTTPS/)
+    expect(() => validateMediaUrl('https://u:p@media.jobsdone.io/a.jpg')).toThrow(/credentials/)
+    expect(() => validateMediaUrl('https://media.jobsdone.io:8443/a.jpg')).toThrow(/standard HTTPS port/)
   })
 })
 

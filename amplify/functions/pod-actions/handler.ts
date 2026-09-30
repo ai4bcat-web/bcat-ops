@@ -59,7 +59,10 @@ const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 
 const JOBSDONE_REST_BASE = 'https://api.jobsdone.io/dev'
 const JOBSDONE_WS_BASE = 'wss://websocket.jobsdone.io/dev-ws/'
-const MEDIA_HOST = 'media.jobsdone.io'
+// JobsDone serves attachments from its CDN host today, but messages predating that
+// migration still point straight at its origin bucket. Both are JobsDone-owned; any
+// other host stays rejected so a spoofed media URL can't turn this into an SSRF probe.
+const MEDIA_HOSTS = ['media.jobsdone.io', 'jobsdone-media-assets.s3.amazonaws.com'] as const
 
 const MAX_CONFIG_API_KEY_LEN = 512
 const MAX_CONFIG_CLIENT_ID_LEN = 128
@@ -529,13 +532,12 @@ export function validateMediaUrl(urlString: string): URL {
     throw new Error('Invalid media URL')
   }
   if (url.protocol !== 'https:') throw new Error('Media URL must use HTTPS')
-  if (url.hostname !== MEDIA_HOST) throw new Error(`Media URL must be on ${MEDIA_HOST}`)
+  if (!(MEDIA_HOSTS as readonly string[]).includes(url.hostname)) {
+    throw new Error(`Media URL must be on ${MEDIA_HOSTS.join(' or ')}`)
+  }
   if (url.username || url.password) throw new Error('Media URL must not contain credentials')
   if (url.port) throw new Error('Media URL must use the standard HTTPS port')
-  if (url.searchParams.toString()) {
-    // Presigned media URLs may need query params; leave validation lenient enough
-    // for real URLs but reject custom ports/credentials above.
-  }
+  // Query strings are allowed on purpose: origin-bucket links can carry presign params.
   return url
 }
 
