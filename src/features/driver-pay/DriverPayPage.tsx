@@ -506,14 +506,14 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
         {iconBtn(onAddTrip, Plus, 'Add trip')}
         {iconBtn(onImport, Upload, 'Import')}
         {carriesCharges && iconBtn(onAddDeduction, Plus, 'Add expense')}
-        <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
+        {carriesCharges && <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
           style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
           <PlusCircle size={13} /> Add credit
-        </button>
-        <button onClick={onAddDebit} title="Take money off this check after the net (cash advance, damage, escrow…)"
+        </button>}
+        {carriesCharges && <button onClick={onAddDebit} title="Take money off this check after the net (cash advance, damage, escrow…)"
           style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #fca5a5', background: 'var(--ds-surface)', color: '#dc2626', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
           <PlusCircle size={13} /> Add debit
-        </button>
+        </button>}
         {iconBtn(onExport, Download, 'CSV')}
         {iconBtn(onPdf, FileText, 'PDF')}
         {iconBtn(onEmail, Mail, 'Email')}

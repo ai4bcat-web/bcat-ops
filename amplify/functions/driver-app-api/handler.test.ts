@@ -385,6 +385,18 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
         miles: 180,
         sortOrder: 1,
       },
+      'amz-a-2': {
+        id: 'amz-a-2',
+        driverId: DRIVER_A_ID,
+        periodStart: '2026-09-27',
+        shipmentDate: '2026-09-28',
+        freightAmount: 500,
+        loadId: 'AMZ-2',
+        origin: 'Joliet, IL',
+        destination: 'Columbus, OH',
+        miles: 120,
+        sortOrder: 1,
+      },
     },
     'Load-test': {
       'load-c-1': {
@@ -836,15 +848,14 @@ describe('driver-app-api handler', () => {
       expect(body.grossPay).toBe(1000)
     })
 
-    it('settles an Amazon driver off brokerage loads once the changeover week arrives', async () => {
-      // Staff settle every Amazon driver from brokerage deliveries starting 2026-09-27
-      // while the driver keeps payGroup AMAZON, so keying the app off the pay group alone
-      // showed the driver an empty check for work the office had already paid.
+    it('pays an Amazon driver both Relay trips and brokerage loads after the changeover', async () => {
+      // Staff split the week across two statements from 2026-09-27 while the driver keeps
+      // payGroup AMAZON; picking one source hid half the week from the driver.
       const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
       expect(res.statusCode).toBe(200)
       const body = JSON.parse(res.body)
-      expect(body.trips.map((t: { loadId?: string }) => t.loadId)).toEqual(['TMS-A-OO'])
-      expect(body.grossPay).toBe(200)
+      expect(body.trips.map((t: { loadId?: string }) => t.loadId).sort()).toEqual(['AMZ-2', 'TMS-A-OO'])
+      expect(body.grossPay).toBe(700)
     })
 
     it('lists both the Amazon history and the brokerage weeks for an Amazon driver', async () => {

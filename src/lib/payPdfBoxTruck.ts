@@ -10,20 +10,11 @@ import { creditLineLabel } from '@/lib/payCredits'
 import { periodLabelLong } from '@/lib/biweekly'
 import { COMPANY_NAME } from '@/lib/branding'
 import ivanLogo from '@/assets/ivan-cartage-logo.png'
+import { loadImage } from '@/lib/payPdf'
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const pct = (n: number) => `${Math.round(n * 100)}%`
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
-    img.onerror = reject
-    img.src = src
-  })
-}
 
 export function boxTruckPdfFilename(row: BoxTruckPayRow, periodStart: string): string {
   return `pay-${row.driver.name.replace(/\s+/g, '-')}-${periodStart}.pdf`

@@ -1137,9 +1137,10 @@ export const handler = async (event: FnUrlEvent) => {
         scan<RawCredit & { periodStart: string }>(PAY_CREDIT_TABLE, 'driverId = :did', {}, { ':did': driverId }),
         scan<RawFuelTransaction>(FUEL_TX_TABLE),
       ])
-      // Amazon history stays on its original source; the new workflow uses brokerage
-      // deliveries from Sep 27 for AMAZON and OWNER_OPERATOR drivers alike.
-      const trips = [...amazonTrips.filter((t) => !ownerOpCarriesWeeklyCharges(t.periodStart)), ...brokerageTrips]
+      // One week can carry both Relay trips and brokerage deliveries from Sep 27, and the
+      // driver is owed every line of it — the office splits them across two statements
+      // whose sum is this one check, because the weekly charges are counted once.
+      const trips = [...amazonTrips, ...brokerageTrips]
       const weeks = listWeekStarts(trips, new Date(), ownerOnly || trips.length === 0 ? OWNER_OP_FIRST_PERIOD : undefined)
       const out: { weekStart: string; gross: number; net: number; tripCount: number }[] = []
       for (const start of weeks) {
@@ -1168,14 +1169,18 @@ export const handler = async (event: FnUrlEvent) => {
       if (setting.payGroup === 'OWNER_OPERATOR' && !ownerOp) {
         return reply(400, { error: 'week before owner-operator start' })
       }
-      const trips = ownerOp
-        ? await loadOwnerOperatorTripsForWeek(driverId, weekStart)
-        : await scan<RawAmazonTrip>(
-            AMAZON_TRIP_TABLE,
-            'driverId = :did AND periodStart = :week',
-            {},
-            { ':did': driverId, ':week': weekStart },
-          )
+      const [amazonWeekTrips, brokerageWeekTrips] = await Promise.all([
+        setting.payGroup === 'OWNER_OPERATOR'
+          ? Promise.resolve([] as RawAmazonTrip[])
+          : scan<RawAmazonTrip>(
+              AMAZON_TRIP_TABLE,
+              'driverId = :did AND periodStart = :week',
+              {},
+              { ':did': driverId, ':week': weekStart },
+            ),
+        ownerOp ? loadOwnerOperatorTripsForWeek(driverId, weekStart) : Promise.resolve([] as RawAmazonTrip[]),
+      ])
+      const trips = [...amazonWeekTrips, ...brokerageWeekTrips]
       return reply(200, await buildSettlementForDriver(driverId, weekStart, trips, setting))
     }
 
