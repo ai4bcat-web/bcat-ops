@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
+import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/context/AuthContext'
 import { AuthGuard } from '@/components/AuthGuard'
@@ -21,6 +22,7 @@ import { SchedulePage } from '@/features/schedule/SchedulePage'
 import { TimeOffPage } from '@/features/time-off/TimeOffPage'
 import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
 import { BoxTruckPayPage } from '@/features/driver-pay-box-trucks/BoxTruckPayPage'
+import { OwnerOperatorPayPage } from '@/features/owner-operator-pay/OwnerOperatorPayPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { InvoicesPage } from '@/features/invoices/InvoicesPage'
 import { UsersPage } from '@/features/users/UsersPage'
@@ -40,6 +42,45 @@ import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { PodsPage } from '@/features/pods/PodsPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
+import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
+import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
+import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, AccountPage } from '@/features/driver-app/DriverApp'
+import DriverLoginPage from '@/features/driver-app/DriverLoginPage'
+import DriverSignupPage from '@/features/driver-app/DriverSignupPage'
+
+function DriverLoading() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-[#0b1220] text-white">
+      <Loader2 className="h-8 w-8 animate-spin text-[#1ea8f3]" />
+    </div>
+  )
+}
+
+function DriverRoutes() {
+  const { loading, isAuthenticated } = useDriverAuth()
+
+  if (loading) {
+    return <DriverLoading />
+  }
+
+  return (
+    <Routes>
+      <Route path="login" element={<DriverLoginPage />} />
+      <Route path="signup" element={<DriverSignupPage />} />
+      {isAuthenticated ? (
+        <Route element={<DriverApp />}>
+          <Route index element={<Navigate to="/driver/scan" replace />} />
+          <Route path="scan" element={<ScanPage />} />
+          <Route path="loads" element={<SubmissionsPage />} />
+          <Route path="settlement" element={<SettlementPage />} />
+          <Route path="account" element={<AccountPage />} />
+        </Route>
+      ) : (
+        <Route path="*" element={<Navigate to="/driver/login" replace />} />
+      )}
+    </Routes>
+  )
+}
 
 export default function App() {
   return (
@@ -50,6 +91,15 @@ export default function App() {
           {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
           <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
+          {/* Driver PWA — separate Cognito pool, separate layout, outside staff AuthGuard */}
+          <Route
+            path="/driver/*"
+            element={
+              <DriverAuthProvider>
+                <DriverRoutes />
+              </DriverAuthProvider>
+            }
+          />
           <Route path="/*" element={
             <AuthGuard>
               <Routes>
@@ -79,6 +129,7 @@ export default function App() {
               <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
               <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
               <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
+              <Route path="/owner-operator-pay" element={<RequirePage page="ownerOperatorPay"><OwnerOperatorPayPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
               <Route path="/settings" element={<RequirePage page="settings"><SettingsPage /></RequirePage>} />

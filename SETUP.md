@@ -17,9 +17,19 @@ This guide walks through configuring Gmail, Google Apps Script, and Amplify so t
 
 Before deploying, the webhook secret must be stored as an Amplify secret (it is never committed to git).
 
-**Generated secret (copy this value):**
-```
-855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89
+> **This file used to contain the live production secret in plaintext, in four places (removed
+> 2026-09-30).** Anyone with repo history still has that value, and it guards the intake endpoints.
+>
+> **`INTAKE_WEBHOOK_SECRET` is shared by every intake Lambda** — gmail-task, vendor-ap, factoring,
+> fuel-import, amazon-dispute, and driver-app-api (loads) each alias it under their own env var
+> name. Rotating it re-keys all of them at once: each one 401s on every poll until the
+> `WEBHOOK_SECRET` constant is updated inside its Apps Script project (reachable only from the
+> Google account that owns it — see Troubleshooting, "Apps Script shows 401"). Set the new value in
+> Amplify, then update every Apps Script in the same sitting. Never paste it back into this file.
+
+**To generate a replacement:**
+```bash
+openssl rand -hex 32
 ```
 
 **To set in Amplify Console (production):**
@@ -107,14 +117,29 @@ Send a test email to `ai4bcat@gmail.com` with the subject containing "TEST", the
 
 After the Amplify backend deploys:
 
-1. Open [AWS CloudFormation](https://console.aws.amazon.com/cloudformation/)
-2. Find the stack for this Amplify app (name starts with `amplify-`)
-3. Open the stack → **Outputs** tab
-4. Copy the value of **IntakeWebhookFunctionUrl**
+No function named `intake-webhook-*` exists, and no stack exports `IntakeWebhookFunctionUrl` — those
+names are from an earlier design. The live intake Lambdas are named after their feature:
+`*-gmailtaskintakelambda*`, `*-factoringintakelambda*`, `*-vendorapintakelambda*`,
+`*-amazondisputeintakelambda*`, `*-slackintakewebhooklambda*`, `*-driverappapilambda*`. List them
+with their URLs:
 
-OR go directly to Lambda Console → `intake-webhook-*` function → **Configuration** → **Function URL**.
+```bash
+for f in $(aws lambda list-functions --region us-east-1 \
+    --query 'Functions[].FunctionName' --output text | tr '\t' '\n'); do
+  u=$(aws lambda get-function-url-config --function-name "$f" \
+       --region us-east-1 --query FunctionUrl --output text 2>/dev/null)
+  [ -n "$u" ] && echo "$f -> $u"
+done
+```
 
-Paste the URL into the Apps Script `WEBHOOK_URL` constant below.
+Each Amplify environment has its own copy: `amplify-bcatops-tmsp1-san-*` is the sandbox,
+`amplify-d3dejqzs77khq6-ma-*` is `main`. Paste the URL for the environment you are wiring into the
+Apps Script `WEBHOOK_URL` constant.
+
+> **The URL hardcoded in Sections 6 and 7 below is dead.** `odpxmuebxwqrc2kwxtarvf5btu0evziw`
+> does not exist in account 273354631837 (verified 2026-09-30 by enumerating every live Function
+> URL). Whatever is running today points somewhere else, so treat the literal URL in those code
+> blocks as a placeholder and always re-copy it from the console.
 
 ---
 
@@ -129,7 +154,7 @@ Paste the URL into the Apps Script `WEBHOOK_URL` constant below.
 // email that arrived in an already-processed thread (reply, forward chain).
 
 const WEBHOOK_URL    = 'https://odpxmuebxwqrc2kwxtarvf5btu0evziw.lambda-url.us-east-1.on.aws/';
-const WEBHOOK_SECRET = '855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89';
+const WEBHOOK_SECRET = '<INTAKE_WEBHOOK_SECRET — copy from Amplify Console → Secrets, never from this file>';
 const LABELS         = ['ivan-intake', 'bcat-intake'];
 
 function processIntakeEmails() {
@@ -208,7 +233,7 @@ After deploy, verify the webhook works without Apps Script:
 curl -X POST https://odpxmuebxwqrc2kwxtarvf5btu0evziw.lambda-url.us-east-1.on.aws/ \
   -H "Content-Type: application/json" \
   -d '{
-    "secret": "855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89",
+    "secret": "<INTAKE_WEBHOOK_SECRET — copy from Amplify Console → Secrets, never from this file>",
     "gmailMessageId": "test-msg-001",
     "label": "ivan-intake",
     "from": "test@example.com",
@@ -377,7 +402,7 @@ function setupEfs() {
 curl -X POST https://xutbpfi7se725wneassdl7dqfm0kkqmm.lambda-url.us-east-1.on.aws/ \
   -H "Content-Type: application/json" \
   -d '{
-    "secret": "855c91098ce19220095b1ddd3f605dafdf1719416f93f6dbe9a3c14aae5edd89",
+    "secret": "<INTAKE_WEBHOOK_SECRET — copy from Amplify Console → Secrets, never from this file>",
     "gmailMessageId": "test-fuel-001",
     "subject": "EFS Transaction Report",
     "bodyText": "Your report is ready: https://PASTE_REAL_EFS_REPORT_URL_HERE",
@@ -502,6 +527,199 @@ The `/pods` page and the `pod-actions` backend deploy through the normal Amplify
 5. On a row, **Assign** first lists that sender's recent loads (matched by texting phone or full name) and keeps the full load list searchable underneath. Assignment is explicit — nothing is guessed — and the POD then appears in that load's drawer. Unassign/reassign asks for confirmation; two people editing the same document get a "changed, please review" error instead of a silent overwrite.
 
 Deletion is intentionally absent: a mismatched POD is reassigned, and the JobsDone source is never written to.
+
+
+## Section 13 — Loads Rate Cons (ivanloads@ → DriverSubmission + #intake-ivan)
+
+A rate confirmation **forwarded by email** takes the same path as one a driver uploads from the
+PWA: the attachments land in S3 under the driver's own prefix, `DriverSubmission` +
+`DriverSubmissionDoc` rows are written, and the load is posted to Slack and emailed to
+`ivanloads@bcatcorp.com`. The email path adds no OCR, no AI extraction, and no load creation —
+it is the same `completeSubmission` the PWA calls, not a copy.
+
+Unlike every other section here, this bridge uploads bytes **directly to S3**, so a 20 MB rate con
+is not a problem: Lambda Function URLs cap a request body at 6 MiB, and base64 inflates by a third.
+It is a two-phase protocol, the same one `vendorpayments@` uses.
+
+### Endpoint
+
+This runs on the existing **driver-app-api** Lambda, not a new one. Get its URL from Lambda Console
+→ `*-driverappapilambda*` → **Configuration** → **Function URL**, or:
+
+```bash
+aws lambda get-function-url-config --region us-east-1 \
+  --function-name $(aws lambda list-functions --region us-east-1 \
+    --query "Functions[?contains(FunctionName,'driverappapilambda')].FunctionName" --output text) \
+  --query FunctionUrl --output text
+```
+
+The Lambda env var is `LOADS_INTAKE_SECRET`, but it is **not** a secret of that name: it is
+`secret('INTAKE_WEBHOOK_SECRET')` (see `amplify/functions/driver-app-api/resource.ts`), the same
+shared value every intake Lambda uses — gmail-task, vendor-ap, factoring, fuel-import, and
+amazon-dispute all alias it under their own env var name. `ampx sandbox secret set
+LOADS_INTAKE_SECRET` sets nothing; the name to set is `INTAKE_WEBHOOK_SECRET`.
+
+Consequence for rotation: changing that one value re-keys **every** bridge at once, loads included,
+so all of the Apps Script projects must be updated in the same sitting (Section 1).
+
+The handler **fails closed**: if the secret is missing or empty on the Lambda, every request is
+rejected.
+
+### Gmail setup
+
+1. In the `ivanloads@bcatcorp.com` mailbox (or whichever account receives the forwards), create the
+   label **`loads-intake`**.
+2. Create a filter that applies it. Forwarding usually destroys the original `To:` header, so match
+   on the forwarder instead — e.g. `from:(ivan@bcatcorp.com) has:attachment`.
+3. **The driver's name must appear in the email body.** The PWA resolves the driver from a verified
+   Cognito token; email has no token, so the typed name is the only signal. The matcher is
+   whole-word and normalized (case, accents, punctuation), and it requires **exactly one** active
+   driver to match. Zero or multiple matches are flagged `DRIVER NOT MATCHED` in the Slack post and
+   email rather than silently guessed — a misspelled name never quietly swallows a rate con.
+
+### Apps Script
+
+```javascript
+// BCAT Loads Bridge — forwarded rate cons → DriverSubmission
+// Two-phase: prepare (metadata) → presigned PUT per attachment → commit (verify + notify).
+// Processed state is tracked per MESSAGE id, never per thread: a forward landing in an
+// already-processed thread must not be dropped.
+
+const LOADS_API_URL = 'https://REPLACE-ME.lambda-url.us-east-1.on.aws';
+const LOADS_SECRET  = 'REPLACE-ME';          // Amplify secret INTAKE_WEBHOOK_SECRET
+const LOADS_LABEL   = 'loads-intake';
+const MAX_ATTACH    = 50;
+
+function processLoadEmails() {
+  const props = PropertiesService.getScriptProperties();
+  const label = GmailApp.getUserLabelByName(LOADS_LABEL);
+  if (!label) { console.error('Missing Gmail label: ' + LOADS_LABEL); return; }
+
+  label.getThreads(0, 20).forEach(thread => {
+    thread.getMessages().forEach(message => {
+      const msgId = message.getId();
+      if (props.getProperty(msgId)) return;   // already processed this exact message
+
+      // Read each attachment's bytes ONCE. getBytes() materializes the whole blob every call, so
+      // re-reading it per phase turns a 20 MB rate con into 80 MB and hits Apps Script's memory
+      // and 6-minute execution limits well before the endpoint's own 50 MB ceiling.
+      const files = message.getAttachments()
+        .filter(a => ['application/pdf', 'image/jpeg', 'image/png'].indexOf(a.getContentType()) !== -1)
+        .slice(0, MAX_ATTACH)
+        .map(a => ({ name: a.getName(), type: a.getContentType(), bytes: a.getBytes() }));
+      if (files.length === 0) { props.setProperty(msgId, 'no-attachments'); return; }
+
+      try {
+        // Phase 1 — prepare: creates the submission, resolves the driver, returns presigned PUTs.
+        const prep = post('/email-intake/prepare', {
+          secret:         LOADS_SECRET,
+          gmailMessageId: msgId,
+          from:           message.getFrom(),
+          subject:        message.getSubject(),
+          body:           message.getPlainBody(),
+          attachments:    files.map(f => ({
+            fileName:    f.name,
+            contentType: f.type,
+            byteSize:    f.bytes.length,
+          })),
+        });
+        if (prep.code !== 200) { console.error('prepare failed', prep.code, prep.text); return; }
+
+        if (prep.json.skipped) {
+          // Two very different meanings share this flag, and only one retires the message:
+          //   'duplicate' / auto-skip — finished or deliberately ignored: never look again.
+          //   'in-flight'             — another call owns this message RIGHT NOW. If it dies
+          //                             before commit, the next poll must still find this message,
+          //                             so do NOT mark it; prepare will resume it then.
+          if (prep.json.reason === 'in-flight') {
+            console.log('In flight elsewhere, retrying next run:', message.getSubject());
+            return;
+          }
+          props.setProperty(msgId, 'skipped:' + prep.json.reason);
+          console.log('Skipped:', message.getSubject(), '→', prep.json.reason);
+          return;
+        }
+        if (prep.json.resumed) {
+          console.log('Resuming interrupted submission', prep.json.submissionId);
+        }
+
+        // Phase 2 — upload each attachment straight to S3. Bytes never pass through Lambda.
+        // Pair by the `pageNumber` prepare returns, not by array position: if the two ever
+        // diverge, positional pairing silently uploads the wrong bytes under the wrong key.
+        // The presigned URL is signed with that attachment's ContentType, so the PUT must send
+        // the exact value posted to prepare or S3 answers 403.
+        const targets = prep.json.targets || [];
+        const fileFor = (t) => files[t.pageNumber - 1];
+        targets.forEach(t => {
+          const f = fileFor(t);
+          if (!f) throw new Error('no attachment for pageNumber ' + t.pageNumber);
+          const res = UrlFetchApp.fetch(t.url, {
+            method:             'put',
+            contentType:        f.type,
+            payload:            f.bytes,
+            muteHttpExceptions: true,
+          });
+          if (res.getResponseCode() !== 200) {
+            throw new Error('S3 PUT ' + res.getResponseCode() + ' for ' + f.name);
+          }
+        });
+
+        // Phase 3 — commit: HEADs every key, persists the docs, posts Slack + email once.
+        const done = post('/email-intake/commit', {
+          secret:         LOADS_SECRET,
+          gmailMessageId: msgId,
+          submissionId:   prep.json.submissionId,
+          attachments:    targets.map(t => ({
+            fileName:    fileFor(t).name,
+            contentType: fileFor(t).type,
+            byteSize:    fileFor(t).bytes.length,
+            s3Key:       t.s3Key,
+          })),
+        });
+        if (done.code !== 200) { console.error('commit failed', done.code, done.text); return; }
+
+        props.setProperty(msgId, new Date().toISOString());
+        console.log('Loaded:', message.getSubject(), '→', done.text);
+      } catch (e) {
+        // Leave the message unmarked so the next run retries it. The retry is safe: prepare
+        // returns `resumed:true` with fresh presigned targets for the SAME submission whenever
+        // the previous attempt never committed, so a retry finishes the original submission
+        // rather than creating a second one or stranding it at NEW.
+        console.error('Error on "' + message.getSubject() + '":', e);
+      }
+    });
+  });
+}
+
+function post(path, payload) {
+  const res = UrlFetchApp.fetch(LOADS_API_URL + path, {
+    method:             'post',
+    contentType:        'application/json',
+    payload:            JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+  const text = res.getContentText();
+  let json = {};
+  try { json = JSON.parse(text); } catch (e) { /* non-JSON error page */ }
+  return { code: res.getResponseCode(), text: text, json: json };
+}
+
+function setupLoads() {
+  GmailApp.getUserLabelByName(LOADS_LABEL);
+  console.log('Gmail access authorized for ' + LOADS_LABEL);
+}
+```
+
+Add a time-driven trigger on `processLoadEmails` (every 5 minutes) once the constants are filled in.
+
+### Why the loop guard matters
+
+Commit emails the load **to `ivanloads@bcatcorp.com`** — the same mailbox being polled. Three
+independent guards stop that from becoming an infinite loop that spams Slack and burns SES:
+the sender is matched against `onboarding@bcatcorp.com`, the subject is matched against our own
+`New load from …` prefix (a constant shared with `notify.ts` so the two cannot drift), and the
+deterministic submission id `email:{gmailMessageId}` plus a conditional write makes a re-delivery a
+no-op. A skipped message returns `200 {skipped:true}`, which the script records as done.
 
 
 ## Troubleshooting

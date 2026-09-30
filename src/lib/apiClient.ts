@@ -2452,7 +2452,7 @@ export type FixedExpense = FixedExpenseInput
 export interface DriverPaySetting {
   id:                    string
   driverId:              string
-  payGroup?:             'AMAZON' | 'LOCAL' | 'BOX_TRUCK' | null
+  payGroup?:             'AMAZON' | 'LOCAL' | 'BOX_TRUCK' | 'OWNER_OPERATOR' | null
   payPercent:            number
   expensesBeforePercent: boolean
   email?:                string | null

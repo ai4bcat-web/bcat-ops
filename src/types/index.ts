@@ -370,6 +370,19 @@ export interface IntakeItem {
 
 export type FactoringItemStatus = 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED'
 
+/** OTR's own invoice statuses, mirrored onto the row so the queue shows their board. */
+export type OtrInvoiceStatus =
+  | 'Pending'
+  | 'Advance Pending'
+  | 'Advance Paid'
+  | 'Approved'
+  | 'Client Request'
+  | 'Duplicate'
+  | 'OTR Follow-Up'
+  | 'Paid'
+
+export type BrokerCheckResult = 'APPROVED' | 'CALL_OFFICE' | 'NOT_APPROVED' | 'UNKNOWN'
+
 export interface FactoringItem {
   /** Stable identifier — the literal PRO number, preserving leading zeroes. */
   id: string
@@ -381,6 +394,29 @@ export interface FactoringItem {
   messageId: string
   createdAt: string
   updatedAt: string
+
+  // ── OTR Solutions factoring ───────────────────────────────────────────────
+  /** Load this PRO resolves to (Load.aljexId === proNumber, trimmed). */
+  loadId?: string | null
+  /** Human-entered field overrides; Partial<Record<OtrRequiredField, string>>. */
+  otrManualFields?: Record<string, string> | null
+  /** Cached readiness from assembleOtrInvoice — what's filled and what's missing. */
+  otrReadiness?: unknown | null
+  brokerMcChecked?: string | null
+  brokerCheckResult?: BrokerCheckResult | null
+  brokerCheckedAt?: string | null
+  /** OTR's invoice identifier; required for document upload and status reads. */
+  otrInvoiceId?: string | null
+  otrSubmittedAt?: string | null
+  otrSubmittedBy?: string | null
+  /** OTR's current status for the invoice, synced from their board. */
+  otrStatus?: OtrInvoiceStatus | string | null
+  otrScheduleId?: string | null
+  /** Amount submitted, in cents. */
+  otrAmount?: number | null
+  otrStatusSyncedAt?: string | null
+  otrDocsUploaded?: { pod?: string; rateConfirmation?: string } | null
+  otrError?: string | null
 }
 
 

@@ -13,6 +13,7 @@ import { vendorApActions } from '../functions/vendor-ap-actions/resource'
 import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource'
 import { tmsGeocode } from '../functions/tms-geocode/resource'
 import { podActions } from '../functions/pod-actions/resource'
+import { otrActions } from '../functions/otr-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -298,7 +299,9 @@ const schema = a.schema({
   DriverPaySetting: a
     .model({
       driverId:              a.string().required(),
-      payGroup:              a.enum(['AMAZON', 'LOCAL', 'BOX_TRUCK']),
+      // OWNER_OPERATOR settles off brokerage loads (rate x percent), not an uploaded
+      // trip sheet — see useOwnerOperatorPay. AMAZON stays for the wound-down trip work.
+      payGroup:              a.enum(['AMAZON', 'LOCAL', 'BOX_TRUCK', 'OWNER_OPERATOR']),
       payPercent:            a.float().required(),   // 0..1 (e.g. 0.42, 0.88)
       expensesBeforePercent: a.boolean().required(), // true = % applied AFTER expenses (Chad)
       email:                 a.string(),             // where the weekly report is sent
@@ -360,6 +363,63 @@ const schema = a.schema({
       notes:       a.string(),
     })
     .secondaryIndexes((index) => [index('periodStart').sortKeys(['driverId'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Driver PWA submissions ─────────────────────────────────────────────────
+  // Rate confirmations and PODs uploaded by drivers from the mobile PWA. Drivers
+  // never touch AppSync; the driver-app-api Lambda writes these rows on their behalf.
+  //
+  // source distinguishes PWA uploads from email-forwarded rate cons; absent means PWA
+  // (historical rows). externalMessageId is the Gmail message id for email-sourced rows
+  // and is the idempotency key for the loads inbox bridge.
+  DriverSubmission: a
+    .model({
+      driverId:          a.string().required(), // resolved server-side, never client input
+      driverName:        a.string().required(), // snapshot at creation, for email/Slack text
+      status:            a.string(),            // 'NEW' | 'NOTIFIED' | 'LINKED' | 'ARCHIVED'
+      source:            a.string(),            // 'PWA' | 'EMAIL'; absent means PWA (historical rows)
+      externalMessageId: a.string(),            // Gmail message id for email-sourced rows; idempotency key
+      loadId:            a.string(),            // null until staff links the built load
+      referenceNumber:   a.string(),            // scanned or driver-entered load/VRID reference
+      note:              a.string(),            // optional free text from the driver
+      slackChannelId:    a.string(),            // captured from the parent Slack post
+      slackMessageTs:    a.string(),            // parent ts — POD replies use this as thread_ts
+      emailMessageId:    a.string(),            // RFC-822 msg id of the parent email, with angle brackets
+      emailSubject:      a.string(),            // exact parent subject; POD replies use 'Re: ' + this
+      notifiedAt:        a.string(),            // ISO timestamp when the parent notify was sent
+      createdAt:         a.string().required(),
+      updatedAt:         a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('driverId'),
+      index('status'),
+      index('externalMessageId'),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  DriverSubmissionDoc: a
+    .model({
+      submissionId:  a.string().required(),
+      driverId:      a.string().required(),
+      kind:          a.string().required(), // 'RATECON' | 'POD'
+      s3Key:         a.string().required(),
+      fileName:      a.string(),
+      contentType:   a.string(),
+      byteSize:      a.integer(),
+      pageNumber:    a.integer(), // 1-based, for multi-page scans
+      uploadedAt:    a.string().required(),
+      notifiedAt:    a.string(),  // set once its Slack reply + email reply are sent
+    })
+    .secondaryIndexes((index) => [
+      index('submissionId'),
+      index('driverId'),
+    ])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])
@@ -596,6 +656,38 @@ const schema = a.schema({
       fromEmail:  a.string().required(),
       receivedAt: a.datetime().required(),
       messageId:  a.string().required(),
+
+      // ── OTR Solutions factoring (see src/lib/otrInvoice.ts) ──────────────
+      // The Load this PRO belongs to. Resolved on intake by matching proNumber
+      // against Load.aljexId (trimmed — the live table stores trailing spaces).
+      loadId:          a.string(),
+      // Values a human typed on the queue row; highest precedence when the
+      // payload is assembled. Shape: Partial<Record<OtrRequiredField, string>>.
+      otrManualFields: a.json(),
+      // Last assembled readiness, cached so the queue renders without
+      // re-deriving: { ready, payload, sources, missingFields, missingDocuments }.
+      otrReadiness:    a.json(),
+      // Broker approval from OTR's /broker-check, checked BEFORE submit so an
+      // unapproved MC shows on the row instead of failing with a 402.
+      brokerMcChecked:   a.string(),
+      brokerCheckResult: a.enum(['APPROVED', 'CALL_OFFICE', 'NOT_APPROVED', 'UNKNOWN']),
+      brokerCheckedAt:   a.datetime(),
+      // Set once the invoice exists at OTR. otrInvoiceId is their identifier and
+      // is required by every document upload and status read.
+      otrInvoiceId:    a.string(),
+      otrSubmittedAt:  a.datetime(),
+      otrSubmittedBy:  a.string(),
+      // Mirrored from GET /invoices/{id} so the queue shows OTR's own board:
+      // Pending, Advance Pending, Advance Paid, Approved, Client Request,
+      // Duplicate, OTR Follow-Up, Paid.
+      otrStatus:       a.string(),
+      otrScheduleId:   a.string(),
+      otrAmount:       a.integer(), // cents, as submitted
+      otrStatusSyncedAt: a.datetime(),
+      // Which documents reached OTR, so a partial upload is visible.
+      otrDocsUploaded: a.json(), // { pod?: string, rateConfirmation?: string }
+      // Last failure from OTR, surfaced on the row rather than only in logs.
+      otrError:        a.string(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1584,6 +1676,19 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(podActions)),
+
+  // OTR Solutions factoring router. Actions: resolve, assemble, setMc,
+  // brokerCheck, submit, syncStatus. Submitting is human-initiated only — the
+  // handler refuses unless every required field and both documents are present.
+  manageOtr: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(otrActions)),
 }).authorization((allow) => [
   // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
   // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).

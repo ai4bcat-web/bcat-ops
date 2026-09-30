@@ -7,8 +7,14 @@
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "lib": ["ES2020"],
-    "types": ["node"]
+    "lib": ["ES2020", "DOM"],
+    "types": ["node"],
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../src/*"],
+      "@/lib/apiClient": ["./functions/driver-app-api/apiClient-stub.ts"]
+    }
   },
   "include": ["**/*.ts"]
 }

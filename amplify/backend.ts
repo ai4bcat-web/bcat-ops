@@ -4,6 +4,12 @@ import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthTy
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
 import { ArnFormat, CfnOutput, Duration, Stack } from 'aws-cdk-lib'
+import {
+  UserPool,
+  UserPoolClient,
+  UserPoolOperation,
+  VerificationEmailStyle,
+} from 'aws-cdk-lib/aws-cognito'
 import { createHash } from 'node:crypto'
 import { auth } from './auth/resource'
 import { data } from './data/resource'
@@ -41,6 +47,9 @@ import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
+import { otrActions, otrStatusSync } from './functions/otr-actions/resource'
+import { driverSignupGate } from './functions/driver-signup-gate/resource'
+import { driverAppApi } from './functions/driver-app-api/resource'
 import { configurePodScanner } from './podScanner.js'
 
 const backend = defineBackend({
@@ -79,6 +88,10 @@ const backend = defineBackend({
   tmsDirectoryActions,
   tmsGeocode,
   podActions,
+  driverSignupGate,
+  driverAppApi,
+  otrActions,
+  otrStatusSync,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -95,6 +108,59 @@ cfnUserPoolClient.tokenValidityUnits = {
   idToken:      'hours',
 }
 cfnUserPoolClient.enableTokenRevocation = true
+
+// ── Driver Cognito pool (separate from staff pool) ─────────────────────────
+// Drivers authenticate through their own user pool and never touch the staff
+// AppSync API. Self-signup is allowed, but every signup is validated against the
+// roster by the driver-signup-gate Lambda before Cognito creates the account.
+// The pool lives in the signup-gate function's own stack. Putting it in a stack of its
+// own made that stack reference the gate Lambda across a stack boundary while the root
+// stack referenced the pool id, which CloudFormation rejects as a dependency cycle.
+// Colocating keeps the trigger wiring intra-stack and leaves only the ordinary
+// root -> child output reference, the same shape disputePortalUrl already uses.
+const driverAuthScope = (backend.driverSignupGate.resources.lambda as LambdaFunction).stack
+
+const driverPool = new UserPool(driverAuthScope, 'BcatDriverPool', {
+  userPoolName: 'bcat-driver-pool',
+  selfSignUpEnabled: true,
+  signInAliases: { email: true },
+  userVerification: {
+    emailStyle: VerificationEmailStyle.CODE,
+  },
+  standardAttributes: {
+    email: { required: true, mutable: true },
+  },
+  // Email is mutable so drivers can change it, but require verification of the new
+  // address before Cognito replaces the old one. This closes a takeover path where
+  // an unverified-token holder could update the email to another driver's address.
+  keepOriginal: {
+    email: true,
+  },
+  passwordPolicy: {
+    minLength: 8,
+    requireLowercase: true,
+    requireDigits: true,
+    requireSymbols: false,
+    requireUppercase: false,
+  },
+})
+
+const driverPoolClient = new UserPoolClient(driverAuthScope, 'BcatDriverPoolClient', {
+  userPool: driverPool,
+  authFlows: {
+    userPassword: true,
+    userSrp: true,
+  },
+  generateSecret: false,
+  accessTokenValidity: Duration.hours(1),
+  idTokenValidity: Duration.hours(1),
+  refreshTokenValidity: Duration.days(60),
+})
+
+driverPool.addTrigger(
+  UserPoolOperation.PRE_SIGN_UP,
+  backend.driverSignupGate.resources.lambda,
+)
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
 
@@ -120,6 +186,139 @@ backend.userManagement.resources.lambda.addToRolePolicy(
   'USER_POOL_ID',
   backend.auth.resources.userPool.userPoolId
 )
+
+// ── driverSignupGate Lambda (driver pool PreSignUp trigger) ────────────────
+
+const signupDriverTable = backend.data.resources.tables['Driver']
+const signupDriverPaySettingTable = backend.data.resources.tables['DriverPaySetting']
+
+backend.driverSignupGate.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Scan'],
+    resources: [signupDriverTable.tableArn, signupDriverPaySettingTable.tableArn],
+  }),
+)
+
+;(backend.driverSignupGate.resources.lambda as LambdaFunction).addEnvironment(
+  'DRIVER_TABLE_NAME',
+  signupDriverTable.tableName,
+)
+;(backend.driverSignupGate.resources.lambda as LambdaFunction).addEnvironment(
+  'DRIVER_PAY_SETTING_TABLE_NAME',
+  signupDriverPaySettingTable.tableName,
+)
+
+// Allowed portal origins. The prod domain is set via the PORTAL_PROD_ORIGIN env var
+// in the Amplify Console (e.g. https://ops.bcatcorp.com); localhost is for dev.
+const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com'
+const PORTAL_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  PORTAL_PROD_ORIGIN,
+]
+
+// ── driver-app-api Lambda (driver PWA HTTP API) ────────────────────────────
+
+const driverApiFn = backend.driverAppApi.resources.lambda as LambdaFunction
+const driverSubmissionTable = backend.data.resources.tables['DriverSubmission']
+const driverSubmissionDocTable = backend.data.resources.tables['DriverSubmissionDoc']
+const driverApiAmazonTripTable = backend.data.resources.tables['AmazonTrip']
+const driverApiDeductionTable = backend.data.resources.tables['DriverPayDeduction']
+const driverApiCreditTable = backend.data.resources.tables['DriverPayCredit']
+const driverApiFuelTxTable = backend.data.resources.tables['FuelTransaction']
+const driverApiDriverTable = backend.data.resources.tables['Driver']
+const driverApiPaySettingTable = backend.data.resources.tables['DriverPaySetting']
+const driverApiLoadTable = backend.data.resources.tables['Load']
+
+// The driver API is internet-facing (Function URL, auth handled in-handler), so it gets
+// read-only access to the roster and pay tables it reports from. Only the two submission
+// tables it owns are writable — a bug here must never be able to alter anyone's pay.
+const driverApiReadOnlyArns = [
+  driverApiDriverTable.tableArn,
+  `${driverApiDriverTable.tableArn}/index/*`,
+  driverApiPaySettingTable.tableArn,
+  `${driverApiPaySettingTable.tableArn}/index/*`,
+  driverApiAmazonTripTable.tableArn,
+  `${driverApiAmazonTripTable.tableArn}/index/*`,
+  driverApiLoadTable.tableArn,
+  `${driverApiLoadTable.tableArn}/index/*`,
+  driverApiDeductionTable.tableArn,
+  `${driverApiDeductionTable.tableArn}/index/*`,
+  driverApiCreditTable.tableArn,
+  `${driverApiCreditTable.tableArn}/index/*`,
+  driverApiFuelTxTable.tableArn,
+  `${driverApiFuelTxTable.tableArn}/index/*`,
+]
+
+const driverApiWritableArns = [
+  driverSubmissionTable.tableArn,
+  `${driverSubmissionTable.tableArn}/index/*`,
+  driverSubmissionDocTable.tableArn,
+  `${driverSubmissionDocTable.tableArn}/index/*`,
+]
+
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:BatchGetItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: driverApiReadOnlyArns,
+  }),
+)
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+    ],
+    resources: driverApiWritableArns,
+  }),
+)
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] }),
+)
+
+// Drivers PUT via presigned URLs and the Lambda GETs via presigned URLs.
+backend.storage.resources.bucket.grantPut(driverApiFn, 'driver-docs/*')
+backend.storage.resources.bucket.grantRead(driverApiFn, 'driver-docs/*')
+backend.storage.resources.bucket.grantDelete(driverApiFn, 'driver-docs/*')
+
+driverApiFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable.tableName)
+driverApiFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
+driverApiFn.addEnvironment('DRIVER_TABLE_NAME', driverApiDriverTable.tableName)
+driverApiFn.addEnvironment('DRIVER_PAY_SETTING_TABLE_NAME', driverApiPaySettingTable.tableName)
+driverApiFn.addEnvironment('AMAZON_TRIP_TABLE_NAME', driverApiAmazonTripTable.tableName)
+driverApiFn.addEnvironment('LOAD_TABLE_NAME', driverApiLoadTable.tableName)
+driverApiFn.addEnvironment('DRIVER_PAY_DEDUCTION_TABLE_NAME', driverApiDeductionTable.tableName)
+driverApiFn.addEnvironment('DRIVER_PAY_CREDIT_TABLE_NAME', driverApiCreditTable.tableName)
+driverApiFn.addEnvironment('FUEL_TRANSACTION_TABLE_NAME', driverApiFuelTxTable.tableName)
+driverApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+driverApiFn.addEnvironment('DRIVER_USER_POOL_ID', driverPool.userPoolId)
+driverApiFn.addEnvironment('DRIVER_USER_POOL_CLIENT_ID', driverPoolClient.userPoolClientId)
+// Plain env vars (not secrets) so a missing value never blocks the deploy.
+driverApiFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? 'C0B4YJXLYM8')
+driverApiFn.addEnvironment('LOADS_EMAIL_TO', process.env.LOADS_EMAIL_TO ?? 'ivanloads@bcatcorp.com')
+driverApiFn.addEnvironment('SES_FROM_ADDRESS', process.env.SES_FROM_ADDRESS ?? 'onboarding@bcatcorp.com')
+
+// Function URL — drivers call this directly from the PWA; JWT verification is handled in the Lambda.
+const driverApiUrl = new FunctionUrl(driverApiFn.stack, 'DriverAppApiUrl', {
+  function: driverApiFn,
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    // Same origin allowlist the other portals use — the PWA is served from the app itself.
+    allowedOrigins: PORTAL_ORIGINS,
+    allowedMethods: [HttpMethod.GET, HttpMethod.POST],
+    allowedHeaders: ['content-type', 'authorization'],
+  },
+})
+
+new CfnOutput(driverApiFn.stack, 'DriverAppApiFunctionUrl', {
+  value:       driverApiUrl.url,
+  description: 'Driver PWA HTTP API Function URL',
+})
 
 // ── IntakeItem table (shared by webhook + notifier) ────────────────────────
 
@@ -497,6 +696,7 @@ blueinkFn.addEnvironment('EQUIPMENT_TABLE_NAME',              equipmentTable.tab
 blueinkFn.addEnvironment('TRUCK_MILEAGE_TABLE_NAME',          truckMileageTable.tableName)
 blueinkFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME',         truckLocationTable.tableName)
 blueinkFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', truckLocationHistoryTable.tableName)
+blueinkFn.addEnvironment('GOOGLE_PLACES_API_KEY',            process.env.GOOGLE_PLACES_API_KEY ?? '')
 
 // Location: every 10 minutes (default event → location sync).
 const blueinkLocationRule = new Rule(blueinkFn.stack, 'BlueInkLocationSyncRule', {
@@ -560,14 +760,6 @@ const driverApplicationTable   = backend.data.resources.tables['DriverApplicatio
 const auditLogTable            = backend.data.resources.tables['AuditLog']
 const complianceSettingsTable  = backend.data.resources.tables['ComplianceSettings']
 
-// Allowed portal origins. The prod domain is set via the PORTAL_PROD_ORIGIN env var
-// in the Amplify Console (e.g. https://ops.bcatcorp.com); localhost is for dev.
-const PORTAL_PROD_ORIGIN = process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com'
-const PORTAL_ORIGINS = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  PORTAL_PROD_ORIGIN,
-]
 
 // ── onboardingPortalApi Lambda (public, token-validated Function URL) ───────
 
@@ -671,7 +863,14 @@ new CfnOutput(disputePortalApiFn.stack, 'DisputePortalApiFunctionUrl', {
   description: 'Public driver dispute portal API URL',
 })
 
-backend.addOutput({ custom: { disputePortalUrl: disputePortalApiUrl.url } })
+backend.addOutput({
+  custom: {
+    disputePortalUrl: disputePortalApiUrl.url,
+    driverUserPoolId: driverPool.userPoolId,
+    driverUserPoolClientId: driverPoolClient.userPoolClientId,
+    driverApiUrl: driverApiUrl.url,
+  },
+})
 
 // ── onboardingEmailer Lambda (SES, custom AppSync mutation) ─────────────────
 
@@ -741,7 +940,14 @@ backend.paychexPaySync.resources.lambda.addToRolePolicy(
 paychexFn.addEnvironment('PAY_TABLE_NAME', driverPayTable.tableName)
 // Paychex company id is an account number (not a secret) — set as a plain env var.
 paychexFn.addEnvironment('PAYCHEX_COMPANY_ID', process.env.PAYCHEX_COMPANY_ID ?? '')
-emailerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
+
+// Monday at 11:00 UTC (06:00 CDT / 05:00 CST), before the weekly finance review.
+const paychexWeeklyRule = new Rule(paychexFn.stack, 'PaychexPaySyncWeeklyRule', {
+  schedule: Schedule.cron({ minute: '0', hour: '11', weekDay: 'MON' }),
+  description: 'Weekly Paychex Flex pay-period sync (Monday 11:00 UTC)',
+})
+paychexWeeklyRule.addTarget(new EventsLambdaTarget(paychexFn))
+emailerFn.addEnvironment('FROM_ADDRESS', 'onboarding@bcatcorp.com')
 
 // ── SES sending domain (bcatcorp.com) ──────────────────────────────────────
 // The bcatcorp.com SES domain identity is managed OUT OF BAND (one-time,
@@ -1009,7 +1215,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
   }
   for (const rule of [
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
-    faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule,
+    faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule, paychexWeeklyRule,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
@@ -1023,3 +1229,99 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: ['ses:*'], resources: ['*'] }))
   }
 }
+
+// ── OTR Solutions factoring ────────────────────────────────────────────────
+// otrActions is the human-initiated router (resolve/assemble/setMc/brokerCheck/
+// submit/syncStatus) behind the manageOtr mutation. otrStatusSync is a separate
+// hourly, READ-ONLY poller that mirrors OTR's invoice board onto the queue —
+// keeping it separate means a bug in polling can never create an invoice.
+//
+// OTR_BASE_URL is set here rather than hard-coded so moving to production is a
+// config change. Staging until the production credentials are swapped in.
+const OTR_BASE_URL = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
+
+const otrActionsFn = backend.otrActions.resources.lambda as LambdaFunction
+const otrSyncFn = backend.otrStatusSync.resources.lambda as LambdaFunction
+
+const otrFactoringTable = backend.data.resources.tables['FactoringItem']
+const otrLoadTable = backend.data.resources.tables['Load']
+const otrCustomerTable = backend.data.resources.tables['Customer']
+const otrLocationTable = backend.data.resources.tables['Location']
+const otrPodTable = backend.data.resources.tables['PodDocument']
+
+for (const fn of [otrActionsFn, otrSyncFn]) {
+  fn.addEnvironment('FACTORING_ITEM_TABLE_NAME', otrFactoringTable.tableName)
+  fn.addEnvironment('OTR_BASE_URL', OTR_BASE_URL)
+}
+
+otrActionsFn.addEnvironment('LOAD_TABLE_NAME', otrLoadTable.tableName)
+otrActionsFn.addEnvironment('CUSTOMER_TABLE_NAME', otrCustomerTable.tableName)
+otrActionsFn.addEnvironment('LOCATION_TABLE_NAME', otrLocationTable.tableName)
+otrActionsFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', otrPodTable.tableName)
+otrActionsFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+
+// Queue rows: the router reads and writes; the poller only updates status fields.
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: [otrFactoringTable.tableArn, `${otrFactoringTable.tableArn}/index/*`],
+  }),
+)
+otrSyncFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:UpdateItem', 'dynamodb:Scan'],
+    resources: [otrFactoringTable.tableArn],
+  }),
+)
+
+// Loads: read to resolve a PRO; update only to link a newly created Customer.
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:UpdateItem'],
+    resources: [otrLoadTable.tableArn, `${otrLoadTable.tableArn}/index/*`],
+  }),
+)
+
+// Customers: PutItem so a broker missing from the directory is created when a
+// human enters its MC (see the setMc action).
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
+    resources: [otrCustomerTable.tableArn, `${otrCustomerTable.tableArn}/index/*`],
+  }),
+)
+
+// Locations and PODs are read-only here.
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:Scan'],
+    resources: [
+      otrLocationTable.tableArn,
+      otrPodTable.tableArn,
+      `${otrPodTable.tableArn}/index/*`,
+    ],
+  }),
+)
+
+// The POD and rate confirmation are streamed from S3 to OTR at submit time.
+backend.storage.resources.bucket.grantRead(otrActionsFn)
+
+// Intake enriches each new row by invoking otrActions asynchronously. The name is
+// derived from the root stack (a plain string at synth time) rather than the
+// construct, so granting invoke by ARN string avoids the CloudFormation cycle the
+// pod-actions self-invoke hit.
+let otrRootStack: Stack = Stack.of(otrActionsFn)
+while (otrRootStack.nestedStackParent) otrRootStack = otrRootStack.nestedStackParent
+const otrFunctionName = `otr-actions-${createHash('sha256').update(otrRootStack.stackName).digest('hex').slice(0, 16)}`
+;(otrActionsFn.node.defaultChild as CfnFunction).functionName = otrFunctionName
+const otrFunctionArn = Stack.of(otrActionsFn).formatArn({
+  service: 'lambda',
+  resource: 'function',
+  resourceName: otrFunctionName,
+  arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+})
+
+factoringIntakeFn.addEnvironment('OTR_ACTIONS_FUNCTION_NAME', otrFunctionName)
+factoringIntakeFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['lambda:InvokeFunction'], resources: [otrFunctionArn] }),
+)

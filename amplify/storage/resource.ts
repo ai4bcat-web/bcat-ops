@@ -61,5 +61,10 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
-  }),
+    // Rate confirmations and PODs uploaded by drivers via the driver-app-api Lambda
+    // presigned-PUT flow. Drivers never hold S3 credentials; staff review/delete only.
+    'driver-docs/*': [
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
+  })
 })
