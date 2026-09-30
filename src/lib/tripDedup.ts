@@ -72,3 +72,35 @@ export function partitionNewTrips<T extends TripIdentityInput>(
 
   return { fresh, duplicates }
 }
+
+/** A filed trip as the duplicate check sees it: its row id and the Load ID it carries. */
+export interface WeekTrip {
+  id: string
+  loadId?: string | null
+}
+
+const normalizedLoadId = (trip: WeekTrip): string | null => {
+  const v = (trip.loadId ?? '').trim().toUpperCase()
+  return v && v !== 'N/A' ? v : null
+}
+
+/**
+ * Ids of this week's trips whose Load ID was already settled the week before — the
+ * shape a re-imported or re-entered load takes, which pays the driver for it twice.
+ * Flagging only; nothing is removed, because a genuine repeat of the same reference
+ * does happen and only a human can tell the two apart.
+ */
+export function duplicateTripIds(current: WeekTrip[], previousWeek: WeekTrip[]): Set<string> {
+  const settledLast = new Set<string>()
+  for (const trip of previousWeek) {
+    const key = normalizedLoadId(trip)
+    if (key) settledLast.add(key)
+  }
+  const out = new Set<string>()
+  if (settledLast.size === 0) return out
+  for (const trip of current) {
+    const key = normalizedLoadId(trip)
+    if (key && settledLast.has(key)) out.add(trip.id)
+  }
+  return out
+}

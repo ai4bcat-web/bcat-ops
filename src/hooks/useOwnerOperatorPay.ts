@@ -31,6 +31,7 @@ import {
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
+import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import type { Driver, Load } from '@/types'
 import { classificationForFleet } from '@/lib/fileHub'
 
@@ -50,6 +51,8 @@ export interface OwnerOperatorPayRow {
   debits: DriverPayCredit[]
   fixedDebits: PayDebitInput[]
   statement: DriverPayStatement
+  /** Ids of this week's loads whose Load ID also settled last week (likely entered twice). */
+  duplicateTripIds: Set<string>
 }
 
 export interface OwnerOperatorPayState {
@@ -85,6 +88,12 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   const [error, setError] = useState<string | null>(null)
 
   const end = periodEnd(periodStart)
+  // The week before this one — where a load entered twice would already have paid out.
+  const prevStart = useMemo(() => {
+    const d = new Date(`${periodStart}T12:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - 7)
+    return d.toISOString().slice(0, 10)
+  }, [periodStart])
 
   const load = useCallback(() =>
     Promise.all([
@@ -119,6 +128,9 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         if (!driver || driver.type === 'broker') return null
 
         const driverTrips = ownerOpTripsFor(loads, setting.driverId, periodStart)
+        // Same guard the Amazon statement uses: a reference that already paid out last
+        // week is flagged, never dropped, because only a human knows a real repeat.
+        const duplicateTripIds = dupIdsForWeek(driverTrips, ownerOpTripsFor(loads, setting.driverId, prevStart))
 
         // The weekly charges — fixed expenses, the fuel card, one-off deductions — are
         // per driver-week, not per page, so exactly ONE statement carries them. The
@@ -155,11 +167,11 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement }
+        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
       })
       .filter((r): r is OwnerOperatorPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, loads, deductions, credits, fuelTxs, periodStart, end])
+  }, [settings, drivers, loads, deductions, credits, fuelTxs, periodStart, prevStart, end])
 
   const unconfigured = useMemo(() => {
     const configured = new Set(

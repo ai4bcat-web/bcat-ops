@@ -14,6 +14,7 @@ import { useDrivers } from './useDrivers'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
+import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import { compareByOrder } from '@/lib/calendarOrder'
 import type { Driver } from '@/types'
 
@@ -153,12 +154,9 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
           .sort(compareByOrder((t) => t.sortOrder, (t) => t.createdAt))
 
         // Load IDs this driver ran last week → flag any that reappear this week.
-        const prevLoadIds = new Set(
-          trips.filter((t) => t.driverId === setting.driverId && t.periodStart === prevStart && t.loadId)
-            .map((t) => t.loadId as string),
-        )
-        const duplicateTripIds = new Set(
-          driverTrips.filter((t) => t.loadId && prevLoadIds.has(t.loadId)).map((t) => t.id),
+        const duplicateTripIds = dupIdsForWeek(
+          driverTrips,
+          trips.filter((t) => t.driverId === setting.driverId && t.periodStart === prevStart),
         )
 
         // From the first owner-operator week the weekly charges move to that statement.

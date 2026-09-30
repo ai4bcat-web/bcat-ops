@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
@@ -130,6 +130,7 @@ export function OwnerOperatorPayPage() {
                   <Avatar src={r.driver.photoUrl} initials={getInitials(r.driver.name)} size="xs" style={{ background: color.avatarBg, color: '#fff' }} />
                   <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: 'var(--ds-t1)' }}>{r.driver.name}</span>
                   <span style={{ fontSize: 12, fontWeight: 600, color: r.statement.checkAmount >= 0 ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{money(r.statement.checkAmount)}</span>
+                  {r.duplicateTripIds.size > 0 && <AlertTriangle size={12} style={{ color: '#dc2626' }} aria-label="Has possible duplicate loads" />}
                 </button>
               )
             })}
@@ -255,16 +256,22 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
           </tr></thead>
           <tbody>
             {trips.length === 0 && <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
-            {trips.map((t) => (
-              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>{t.loadId}</td>
+            {trips.map((t) => {
+              const dup = row.duplicateTripIds.has(t.id)
+              return (
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)', background: dup ? 'var(--ds-red-bg, #fef2f2)' : undefined }}>
+                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: dup ? 700 : 600, color: dup ? '#dc2626' : undefined }}
+                    title={dup ? 'Duplicate — this Load ID also settled last week' : undefined}>
+                  {dup && <AlertTriangle size={12} style={{ color: '#dc2626', verticalAlign: '-1px', marginRight: 4 }} />}
+                  {t.loadId}
+                </td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.customer || '—'}</td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>{t.origin || '—'} → {t.destination || '—'}</td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.freightAmount, setting))}</td>
               </tr>
-            ))}
+            )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
                 <td style={{ ...TD, textAlign: 'left' }} colSpan={4}>Freight total / driver share ({pct(setting.payPercent)})</td>

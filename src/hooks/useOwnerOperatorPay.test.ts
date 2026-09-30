@@ -54,4 +54,18 @@ describe('useOwnerOperatorPay', () => {
     expect(result.current.rows[0].trips).toEqual([])
     expect(result.current.rows[0].statement.checkAmount).toBe(-200)
   })
+
+  it('flags a load whose reference already settled the week before', async () => {
+    // Both fixture loads carry TMS-1 in consecutive weeks — the shape a load entered
+    // twice takes, which would pay the driver for the same run on two checks.
+    const { result } = renderHook(() => useOwnerOperatorPay('2026-10-04'))
+    await waitFor(() => expect(result.current.rows).toHaveLength(1))
+    expect([...result.current.rows[0].duplicateTripIds]).toEqual(['l2'])
+  })
+
+  it('does not flag the first week, which has no prior settlement to repeat', async () => {
+    const { result } = renderHook(() => useOwnerOperatorPay('2026-09-27'))
+    await waitFor(() => expect(result.current.rows).toHaveLength(1))
+    expect(result.current.rows[0].duplicateTripIds.size).toBe(0)
+  })
 })

@@ -85,6 +85,7 @@ function baseRow(over: Partial<OwnerOperatorPayRow> = {}): OwnerOperatorPayRow {
     debits: over.debits ?? [],
     fixedDebits: over.fixedDebits ?? [],
     statement: baseStatement(over.statement),
+    duplicateTripIds: over.duplicateTripIds ?? new Set<string>(),
   }
 }
 
