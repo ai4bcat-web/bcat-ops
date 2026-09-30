@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { partitionNewTrips } from './tripDedup'
+import { partitionNewTrips, duplicateTripIds } from './tripDedup'
 import type { AmazonTrip } from '@/lib/apiClient'
 
 const baseTrip = (overrides: Partial<AmazonTrip> = {}): AmazonTrip => ({
@@ -77,5 +77,30 @@ describe('partitionNewTrips', () => {
     expect(partitionNewTrips([first, second], []).fresh).toEqual([first, second])
     expect(partitionNewTrips([first, second], [first, second]).fresh).toEqual([])
     expect(partitionNewTrips([first, second, third], [first, second]).fresh).toEqual([third])
+  })
+})
+
+describe('duplicateTripIds', () => {
+  it('flags a reference that already settled the week before', () => {
+    const flagged = duplicateTripIds(
+      [{ id: 'a', loadId: 'TMS-1' }, { id: 'b', loadId: 'TMS-2' }],
+      [{ id: 'prev', loadId: 'tms-1' }],
+    )
+    expect([...flagged]).toEqual(['a'])
+  })
+
+  it('flags only the extra copy when one week carries the same load twice', () => {
+    const flagged = duplicateTripIds([{ id: 'a', loadId: 'TMS-1' }, { id: 'b', loadId: 'TMS-1' }], [])
+    expect([...flagged]).toEqual(['b'])
+  })
+
+  it('never collides loads that carry no usable reference', () => {
+    // 53 production loads store the literal 'N/A'; treating that as an id would flag
+    // every one of them as a duplicate of the others.
+    const flagged = duplicateTripIds(
+      [{ id: 'a', loadId: 'N/A' }, { id: 'b', loadId: '' }, { id: 'c', loadId: null }],
+      [{ id: 'prev', loadId: 'N/A' }],
+    )
+    expect(flagged.size).toBe(0)
   })
 })

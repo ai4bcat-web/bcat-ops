@@ -1121,7 +1121,9 @@ export const handler = async (event: FnUrlEvent) => {
       return reply(200, {
         driverId: driver.id,
         name: driver.name,
-        email: driver.email ?? setting.email ?? '',
+        // Roy and Lee carry '' on the Driver row and their real address on the pay
+        // setting, and '' is not nullish — a ?? chain leaves their account screen blank.
+        email: driver.email || setting.email || '',
         payGroup: setting.payGroup ?? 'AMAZON',
         active: driver.active !== false,
       })

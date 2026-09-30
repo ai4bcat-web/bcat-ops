@@ -85,22 +85,24 @@ const normalizedLoadId = (trip: WeekTrip): string | null => {
 }
 
 /**
- * Ids of this week's trips whose Load ID was already settled the week before — the
- * shape a re-imported or re-entered load takes, which pays the driver for it twice.
+ * Ids of trips that look like the same run paid twice: a Load ID already settled the
+ * week before, or repeated within this week (the shape a load entered twice takes).
+ * The first occurrence in the week is left clean so only the extra copy is called out.
  * Flagging only; nothing is removed, because a genuine repeat of the same reference
  * does happen and only a human can tell the two apart.
  */
 export function duplicateTripIds(current: WeekTrip[], previousWeek: WeekTrip[]): Set<string> {
-  const settledLast = new Set<string>()
+  const seen = new Set<string>()
   for (const trip of previousWeek) {
     const key = normalizedLoadId(trip)
-    if (key) settledLast.add(key)
+    if (key) seen.add(key)
   }
   const out = new Set<string>()
-  if (settledLast.size === 0) return out
   for (const trip of current) {
     const key = normalizedLoadId(trip)
-    if (key && settledLast.has(key)) out.add(trip.id)
+    if (!key) continue
+    if (seen.has(key)) out.add(trip.id)
+    else seen.add(key)
   }
   return out
 }
