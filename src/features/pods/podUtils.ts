@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { getPodAssets } from '@/lib/podsClient'
 import { graphqlErrorText } from '@/lib/apiClient'
+import type { Load } from '@/types'
 import type { PodAssets, PodDocument } from '@/types/pods'
 
 export function usePodAssets(doc: PodDocument) {
@@ -67,4 +68,25 @@ export function useStalePending(doc: PodDocument): boolean {
 export function senderLabel(doc: Pick<PodDocument, 'senderName' | 'senderContact'>): string {
   if (doc.senderName && doc.senderContact) return `${doc.senderName} - ${doc.senderContact}`
   return doc.senderName || doc.senderContact || 'Unknown sender'
+}
+
+/**
+ * The identifier a dispatcher recognises for a shipment, in the order they'd say it out
+ * loud. Falls back to the tail of the internal id so a linked load never renders blank.
+ */
+export function shipmentLabel(load: Load | undefined, loadId: string): string {
+  if (!load) return `#${loadId.slice(-6)}`
+  if (load.aljexId) return `Pro #${load.aljexId}`
+  if (load.tmsId) return `TMS/PO ${load.tmsId}`
+  if (load.pickupNumber) return `PU ${load.pickupNumber}`
+  return `#${loadId.slice(-6)}`
+}
+
+/** "Chicago, IL -> Indianapolis, IN", or whichever half we actually know. */
+export function shipmentRoute(load: Load | undefined): string {
+  if (!load) return ''
+  const from = load.originCity || load.originName || ''
+  const to = load.destinationCity || load.destinationName || ''
+  if (from && to) return `${from} → ${to}`
+  return from || to
 }

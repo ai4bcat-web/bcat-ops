@@ -79,6 +79,10 @@ interface RawVehicle {
   current_location?: {
     lat?: string | number; lon?: string | number; located_at?: string
     speed_mph?: string | number | null; odometer?: string | number | null
+    // BIT returns this instead of coordinates when the vehicle's plan does not include
+    // live GPS, e.g. "Vehicle requires BIT Full Service". Without surfacing it the sync
+    // just logs "fetched 0 location(s)" and the truck silently stops reporting.
+    error?: string
   } | null
 }
 
@@ -118,7 +122,13 @@ export async function fetchVehicleLocations(apiKey: string): Promise<BlueInkLoca
       const loc = v?.current_location
       const lat = num(loc?.lat)
       const lon = num(loc?.lon)
-      if (!v?.number || !loc || lat == null || lon == null) continue
+      if (!v?.number || !loc || lat == null || lon == null) {
+        // Say WHY the fix is missing. BIT answers with an `error` string for vehicles whose
+        // plan excludes live GPS, and a silent skip makes that look like an outage.
+        const reason = loc?.error ?? (loc ? 'no coordinates in response' : 'no current_location')
+        console.warn(`[blueink-location] no fix for unit ${v?.number ?? '?'} — ${reason}`)
+        continue
+      }
       out.push({
         vehicleId:   String(v.id ?? ''),
         number:      String(v.number),
@@ -127,7 +137,7 @@ export async function fetchVehicleLocations(apiKey: string): Promise<BlueInkLoca
         locatedAt:   toIsoUtc(loc.located_at),
         speed:       num(loc.speed_mph),
         bearing:     null,
-        description: null,
+        description: null, // BIT provides no place name; the sync handler reverse-geocodes if needed
       })
     }
     const p = data.pagination
@@ -143,7 +153,7 @@ interface RawRoutePoint {
 }
 
 /** Great-circle distance between two points, in miles. */
-function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
+export function haversineMiles(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 3958.7613 // mean Earth radius, miles
   const toRad = (d: number) => (d * Math.PI) / 180
   const dLat = toRad(lat2 - lat1)

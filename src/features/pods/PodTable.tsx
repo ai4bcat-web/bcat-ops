@@ -3,14 +3,8 @@ import { formatDateTime } from '@/lib/date'
 import { matchPodDriver } from '@/lib/podDriver'
 import type { Driver, Load } from '@/types'
 import type { PodDocument, PodSenderMapping } from '@/types/pods'
-import { statusBadge, usePodAssets, useStalePending, senderLabel } from './podUtils'
+import { statusBadge, usePodAssets, useStalePending, senderLabel, shipmentLabel, shipmentRoute } from './podUtils'
 import { PodActionBtn, PodDownloadBtn } from './PodShared'
-
-function loadLabel(loadId: string, loads: Load[]): string {
-  const load = loads.find((l) => l.id === loadId)
-  if (!load) return loadId.slice(-6)
-  return load.aljexId ? `Pro #${load.aljexId}` : load.tmsId ? `TMS/PO ${load.tmsId}` : loadId.slice(-6)
-}
 
 const th: React.CSSProperties = {
   textAlign: 'left', fontSize: 11, fontWeight: 700, letterSpacing: 0.3, textTransform: 'uppercase',
@@ -44,13 +38,13 @@ export function PodTable({
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
+            <th style={th}>Shipment</th>
             <th style={{ ...th, width: 72 }}>Image</th>
             <th style={th}>Sender</th>
             <th style={th}>Driver</th>
             <th style={th}>Received</th>
             <th style={th}>Reference</th>
             <th style={th}>Scan</th>
-            <th style={th}>Load</th>
             <th style={th}>Actions</th>
           </tr>
         </thead>
@@ -86,9 +80,34 @@ function PodRow({
   const thumbUrl = hasEnhanced ? assets?.enhancedUrl : originalIsImage ? assets?.originalUrl : undefined
   const canOpen = Boolean(assets?.originalUrl)
   const isStalePending = useStalePending(doc)
+  const assignedLoad = doc.loadId ? loads.find((l) => l.id === doc.loadId) : undefined
+  const route = shipmentRoute(assignedLoad)
 
   return (
     <tr>
+      <td style={{ ...td, maxWidth: 260 }}>
+        {doc.loadId ? (
+          <>
+            <button
+              onClick={() => onViewLoad(doc.loadId!)}
+              title="View shipment"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999, color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+            >
+              <Link2 size={12} /> {shipmentLabel(assignedLoad, doc.loadId)}
+            </button>
+            {assignedLoad?.customer && (
+              <div style={{ fontSize: 12, color: 'var(--ds-t2)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{assignedLoad.customer}</div>
+            )}
+            {route && (
+              <div style={{ fontSize: 12, color: 'var(--ds-t3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{route}</div>
+            )}
+          </>
+        ) : (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 999, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', whiteSpace: 'nowrap' }}>
+            <Unlink size={12} /> Unassigned
+          </span>
+        )}
+      </td>
       <td style={{ ...td, padding: 6 }}>
         <button
           onClick={() => onPreview(doc)}
@@ -123,15 +142,6 @@ function PodRow({
         </span>
         {doc.scanReviewReason && <div style={{ fontSize: 12, color: '#b45309', marginTop: 4 }}>{doc.scanReviewReason}</div>}
         {doc.processingError && <div style={{ fontSize: 12, color: '#b91c1c', marginTop: 4 }}>{doc.processingError}</div>}
-      </td>
-      <td style={{ ...td, whiteSpace: 'nowrap' }}>
-        {doc.loadId ? (
-          <button onClick={() => onViewLoad(doc.loadId!)} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--ds-blue)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', fontSize: 13 }}>
-            <Link2 size={12} /> {loadLabel(doc.loadId, loads)}
-          </button>
-        ) : (
-          <span style={{ color: 'var(--ds-t3)' }}>Unassigned</span>
-        )}
       </td>
       <td style={{ ...td, whiteSpace: 'nowrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

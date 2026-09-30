@@ -18,7 +18,8 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, ScanCommand, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb'
-import { fetchVehicles, fetchVehicleLocations, fetchMilesForVehicle } from './blueinkClient'
+import { fetchVehicles, fetchVehicleLocations, fetchMilesForVehicle, haversineMiles } from './blueinkClient'
+import { reverseGeocode } from './reverseGeocode'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
@@ -27,6 +28,7 @@ const TRUCK_MILEAGE_TABLE          = process.env.TRUCK_MILEAGE_TABLE_NAME!
 const TRUCK_LOCATION_TABLE         = process.env.TRUCK_LOCATION_TABLE_NAME!
 const TRUCK_LOCATION_HISTORY_TABLE = process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME!
 const API_KEY                      = process.env.BLUE_INK_TECH_API_KEY!
+const GEOCODE_DISTANCE_THRESHOLD_MILES = 0.5
 
 // ── Date helpers (UTC, matching motive-mileage-sync) ───────────────────────────
 
@@ -109,10 +111,35 @@ async function syncLocations(): Promise<void> {
 
     // Preserve motionSince across pings of the same state (for "moving/idle for X").
     let motionSince = loc.locatedAt
+    let description: string | null = loc.description
     try {
       const prev = await dynamo.send(new GetCommand({ TableName: TRUCK_LOCATION_TABLE, Key: { truckId } }))
-      const prevItem = prev.Item as { motion?: string; motionSince?: string } | undefined
+      const prevItem = prev.Item as {
+        motion?: string
+        motionSince?: string
+        lat?: number
+        lon?: number
+        description?: string | null
+      } | undefined
       if (prevItem?.motion === motion && prevItem.motionSince) motionSince = prevItem.motionSince
+
+      // Blue Ink does not supply place names. Only reverse-geocode when we need a
+      // fresh description: this is the first fix for the truck, or the truck has
+      // moved at least ~0.5 mi from the fix that produced the stored description.
+      // This keeps the every-10-minute sync from hammering Google for parked trucks.
+      // A failed/outage geocoding call therefore does not get retried every 10 min
+      // while the truck is parked; it retries only after the next material move.
+      const prevLat = prevItem?.lat
+      const prevLon = prevItem?.lon
+      const hasPriorFix = prevLat != null && prevLon != null
+      const moved =
+        !hasPriorFix ||
+        haversineMiles(loc.lat, loc.lon, prevLat, prevLon) >= GEOCODE_DISTANCE_THRESHOLD_MILES
+      if (moved) {
+        description = await reverseGeocode(loc.lat, loc.lon)
+      } else if (prevItem?.description != null) {
+        description = prevItem.description
+      }
     } catch (err) {
       console.warn(`[blueink-location] could not read prior state for truck=${loc.number}:`, err)
     }
@@ -123,7 +150,7 @@ async function syncLocations(): Promise<void> {
       lon:         loc.lon,
       bearing:     loc.bearing,
       speed:       loc.speed,
-      description: loc.description,
+      description,
       motion,
       motionSince,
       source:      'blueink',

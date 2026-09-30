@@ -11,13 +11,24 @@ import { FleetMiniMap } from './FleetMiniMap'
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
 /**
- * Pull "City, ST" out of Motive's location description.
+ * Pull "City, ST" out of the location description.
  * e.g. "4.5 mi NE of Tucson, AZ" → "Tucson, AZ"; "Tucson, AZ" → "Tucson, AZ".
+ *
+ * Blue Ink Tech sends coordinates with no place name, so those rows arrive with a null
+ * description and are reverse-geocoded during sync — which yields nothing when no
+ * server-side Google key is configured. Rather than show a bare dash for a truck we can
+ * actually locate, fall back to the coordinates themselves.
  */
-function cityState(desc: string | null): string {
-  if (!desc) return '—'
-  const i = desc.lastIndexOf(' of ')
-  return (i >= 0 ? desc.slice(i + 4) : desc).trim()
+function cityState(loc: Pick<TruckLocation, 'description' | 'lat' | 'lon'>): string {
+  const desc = loc.description
+  if (desc) {
+    const i = desc.lastIndexOf(' of ')
+    return (i >= 0 ? desc.slice(i + 4) : desc).trim()
+  }
+  if (Number.isFinite(loc.lat) && Number.isFinite(loc.lon)) {
+    return `${loc.lat.toFixed(3)}, ${loc.lon.toFixed(3)}`
+  }
+  return '—'
 }
 
 /**
@@ -66,10 +77,15 @@ export function TruckMapWidget() {
   const rows = useMemo(() => {
     const isOrphanKey = (id: string) => id.startsWith('motive:') || id.startsWith('blueink:')
     // A retired truck's last fix stays in the table forever — never show it.
-    const retired = new Set(equipment.filter((e) => e.type === 'truck' && e.active === false).map((e) => e.id))
+    // Match by Equipment id AND by canonical unit number so orphan `motive:`/`blueink:`
+    // rows for a retired unit (e.g. truck 299 keyed `motive:299`) are filtered too.
+    const retiredTrucks = equipment.filter((e) => e.type === 'truck' && e.active === false)
+    const retiredIds = new Set(retiredTrucks.map((e) => e.id))
+    const retiredUnits = new Set(retiredTrucks.map((e) => canonicalUnit(e.unitNumber)))
     const byUnit = new Map<string, TruckLocation>()
     for (const loc of locations) {
-      if (retired.has(loc.truckId)) continue
+      if (retiredIds.has(loc.truckId)) continue
+      if (retiredUnits.has(canonicalUnit(loc.unitNumber))) continue
       const key = canonicalUnit(loc.unitNumber)
       const prev = byUnit.get(key)
       if (!prev) { byUnit.set(key, loc); continue }
@@ -142,7 +158,7 @@ export function TruckMapWidget() {
                     {unit}
                   </div>
                   <div style={{ color: 'var(--ds-t1)' }}>
-                    {cityState(loc.description)}
+                    {cityState(loc)}
                   </div>
 
                   {/* Driver: assign dropdown if in fleet, else Add-to-fleet */}
