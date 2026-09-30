@@ -1,9 +1,10 @@
-import { useMemo, useState, useCallback } from 'react'
+import { Fragment, useMemo, useState, useCallback } from 'react'
 import {
   RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { OtrPanel } from './OtrPanel'
 import {
   Select,
   SelectContent,
@@ -261,8 +262,8 @@ export function FactoringPage() {
                 </thead>
                 <tbody>
                   {filtered.map((item) => (
+                    <Fragment key={item.id}>
                     <tr
-                      key={item.id}
                       style={{ borderBottom: '1px solid var(--ds-border)' }}
                       className="hover:bg-[var(--ds-bg)] transition-colors"
                     >
@@ -317,6 +318,13 @@ export function FactoringPage() {
                         </td>
                       )}
                     </tr>
+                      {/* OTR readiness: what is filled, what is missing, and the submit action. */}
+                      <tr>
+                        <td colSpan={canDelete ? 6 : 5} style={{ padding: '0 16px 14px' }}>
+                          <OtrPanel item={item} onChanged={refresh} />
+                        </td>
+                      </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

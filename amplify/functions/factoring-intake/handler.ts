@@ -12,11 +12,15 @@
  */
 import { createHash, timingSafeEqual } from 'crypto'
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 const dynamo = new DynamoDBClient({})
+const lambda = new LambdaClient({})
 const TABLE_NAME = process.env.TABLE_NAME!
 const SECRET = process.env.FACTORING_INTAKE_SECRET!
+/** Absent in environments where OTR factoring isn't wired; enrichment is skipped. */
+const OTR_ACTIONS_FUNCTION_NAME = process.env.OTR_ACTIONS_FUNCTION_NAME
 
 interface LambdaFunctionUrlEvent {
   body: string | null
@@ -192,5 +196,32 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   }
 
   console.log('[factoring-intake] row created', { proNumber, messageId })
+
+  // Enrich for OTR: resolve the PRO to its Load, pull everything derivable, and
+  // attach the POD and rate confirmation already on that load. Fire-and-forget
+  // (InvocationType 'Event') and deliberately non-fatal — the email must never be
+  // lost because enrichment failed. An unenriched row shows as such in the queue
+  // and can be refreshed from there.
+  if (OTR_ACTIONS_FUNCTION_NAME) {
+    try {
+      await lambda.send(
+        new InvokeCommand({
+          FunctionName: OTR_ACTIONS_FUNCTION_NAME,
+          InvocationType: 'Event',
+          Payload: Buffer.from(
+            JSON.stringify({
+              arguments: { action: 'assemble', input: JSON.stringify({ id: proNumber }) },
+            }),
+          ),
+        }),
+      )
+    } catch (err) {
+      console.error('[factoring-intake] enrichment invoke failed (row still created)', {
+        proNumber,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
   return respond(200, { ok: true, id: proNumber, proNumber, duplicate: false })
 }
