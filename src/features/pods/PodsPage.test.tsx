@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import type { Load } from '@/types'
 import type { PodDocument } from '@/types/pods'
 
@@ -35,17 +36,19 @@ const loadsFixture: Load[] = [
   },
 ]
 
+const defaultDrivers = [{ id: 'd1', name: 'Ivan Sender', phone: '+17735550101', active: true }]
+
 const setSelectedLoad = vi.fn()
 const appStoreState = {
   loads: loadsFixture,
-  drivers: [{ id: 'd1', name: 'Ivan Sender', phone: '+17735550101', active: true }],
+  drivers: defaultDrivers,
   setSelectedLoad,
 }
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: typeof appStoreState) => unknown) => sel(appStoreState),
 }))
 
-const authState = { isAdmin: true, isOwner: true }
+const authState = { isAdmin: true, isOwner: true, hasPageAccess: () => true }
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => authState,
 }))
@@ -95,6 +98,7 @@ function resetMocks() {
   authState.isAdmin = true
   authState.isOwner = true
   appStoreState.loads = loadsFixture
+  appStoreState.drivers = defaultDrivers
   confirmSpy.mockClear()
 }
 
@@ -202,5 +206,75 @@ describe('PodsPage', () => {
     podsClientMocks.listPods.mockRejectedValue(new Error('JobsDone unavailable'))
     render(<PodsPage />)
     await waitFor(() => expect(screen.getByText(/JobsDone unavailable/)).toBeTruthy())
+  })
+
+  it('lets an admin map senders to real drivers and saves only changed rows', async () => {
+    appStoreState.drivers = [
+      { id: 'd1', name: 'Alpha Driver', phone: '+17735550101', active: true },
+      { id: 'd2', name: 'Beta Driver', phone: '+17735550202', active: true },
+    ]
+    const secondDoc: PodDocument = {
+      ...baseDoc,
+      id: 'p2',
+      sourceMessageId: 'm2',
+      senderName: 'Bob Sender',
+      senderContact: 'bob@metz.com',
+      referenceNumber: 'REF-2',
+    }
+    podsClientMocks.listPods.mockResolvedValue({ items: [baseDoc, secondDoc], nextToken: null })
+
+    render(<MemoryRouter><PodsPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByText('Map senders'))
+    const dialog = await screen.findByRole('dialog')
+
+    expect(within(dialog).getAllByText('Alpha Driver').length).toBe(2)
+    expect(within(dialog).getAllByText('Beta Driver').length).toBe(2)
+
+    const ivanSelect = within(dialog).getByLabelText('Driver for Ivan Sender') as HTMLSelectElement
+    const bobSelect = within(dialog).getByLabelText('Driver for Bob Sender') as HTMLSelectElement
+    expect(ivanSelect.value).toBe('')
+    expect(bobSelect.value).toBe('')
+
+    fireEvent.change(ivanSelect, { target: { value: 'd1' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /Save mappings/i }))
+
+    await waitFor(() => expect(podsClientMocks.setPodSenderMapping).toHaveBeenCalledTimes(1))
+    expect(podsClientMocks.setPodSenderMapping).toHaveBeenCalledWith({
+      phone: baseDoc.senderContact,
+      senderName: baseDoc.senderName,
+      driverId: 'd1',
+    })
+  })
+
+  it('disables mapping and points to the driver roster when no drivers exist', async () => {
+    appStoreState.drivers = []
+    render(<MemoryRouter><PodsPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByText('Map senders'))
+    const dialog = await screen.findByRole('dialog')
+
+    expect(within(dialog).getByText(/No driver roster available/i)).toBeTruthy()
+    const link = within(dialog).getByRole('link') as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('/files')
+
+    const select = within(dialog).getByLabelText('Driver for Ivan Sender') as HTMLSelectElement
+    expect(select.disabled).toBe(true)
+    expect((within(dialog).getByRole('button', { name: /Save mappings/i }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps the mapping dialog open and shows an inline error when saving fails', async () => {
+    appStoreState.drivers = [
+      { id: 'd1', name: 'Alpha Driver', phone: '+17735550101', active: true },
+    ]
+    podsClientMocks.setPodSenderMapping.mockRejectedValue(new Error('Roster sync failed'))
+
+    render(<MemoryRouter><PodsPage /></MemoryRouter>)
+    fireEvent.click(await screen.findByText('Map senders'))
+    const dialog = await screen.findByRole('dialog')
+
+    const select = within(dialog).getByLabelText('Driver for Ivan Sender') as HTMLSelectElement
+    fireEvent.change(select, { target: { value: 'd1' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /Save mappings/i }))
+
+    await waitFor(() => expect(within(dialog).getByText(/Roster sync failed/i)).toBeTruthy())
   })
 })

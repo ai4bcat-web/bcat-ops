@@ -275,7 +275,7 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
           <SheetCloseButton />
         </SheetHeader>
 
-        <form onSubmit={handleSubmit} className="flex flex-col h-full">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
           <SheetBody>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
 
