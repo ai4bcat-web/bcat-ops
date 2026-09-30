@@ -421,6 +421,17 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
         originCity: 'Milwaukee, WI',
         destinationCity: 'Chicago, IL',
       },
+      'load-a-old': {
+        id: 'load-a-old',
+        tmsId: 'TMS-A-OLD',
+        customer: 'Broker X',
+        miles: 150,
+        rate: 99900,
+        deliveryAppt: '2026-09-22T09:00:00Z',
+        deliveryDriverId: DRIVER_A_ID,
+        originCity: 'Gary, IN',
+        destinationCity: 'Akron, OH',
+      },
       'load-a-oo': {
         id: 'load-a-oo',
         tmsId: 'TMS-A-OO',
@@ -861,9 +872,13 @@ describe('driver-app-api handler', () => {
     it('lists both the Amazon history and the brokerage weeks for an Amazon driver', async () => {
       const res = await handler(baseEvent('/settlement/weeks'))
       expect(res.statusCode).toBe(200)
-      const starts = JSON.parse(res.body).weeks.map((w: { weekStart: string }) => w.weekStart)
+      const weeks = JSON.parse(res.body).weeks as { weekStart: string; gross: number }[]
+      const starts = weeks.map((w) => w.weekStart)
       expect(starts).toContain('2026-09-20')
       expect(starts).toContain('2026-09-27')
+      // A brokerage load delivered BEFORE the changeover was never settled to the driver,
+      // so the list must report the same gross the detail view builds for that week.
+      expect(weeks.find((w) => w.weekStart === '2026-09-20')?.gross).toBe(1000)
     })
   })
 })

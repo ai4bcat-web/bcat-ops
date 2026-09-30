@@ -1139,8 +1139,9 @@ export const handler = async (event: FnUrlEvent) => {
       ])
       // One week can carry both Relay trips and brokerage deliveries from Sep 27, and the
       // driver is owed every line of it — the office splits them across two statements
-      // whose sum is this one check, because the weekly charges are counted once.
-      const trips = [...amazonTrips, ...brokerageTrips]
+      // whose sum is this one check, because the weekly charges are counted once. Before
+      // that date brokerage loads were not settled to the driver at all.
+      const trips = [...amazonTrips, ...brokerageTrips.filter((t) => ownerOpCarriesWeeklyCharges(t.periodStart))]
       const weeks = listWeekStarts(trips, new Date(), ownerOnly || trips.length === 0 ? OWNER_OP_FIRST_PERIOD : undefined)
       const out: { weekStart: string; gross: number; net: number; tripCount: number }[] = []
       for (const start of weeks) {
