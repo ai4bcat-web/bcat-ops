@@ -3,6 +3,7 @@ import { X, Upload, Image as ImageIcon } from 'lucide-react'
 import type { Driver } from '@/types'
 import type { AmazonTrip, DriverPaySetting, DriverPayDeduction } from '@/hooks/useAmazonPay'
 import { parseRows, detectMultiLoadBlocks, type RawTripRow } from '@/lib/tripCsv'
+import { partitionNewTrips } from '@/lib/tripDedup'
 import { parseTripScreenshot, graphqlErrorMessage } from '@/lib/apiClient'
 import { imageToUploadableBase64, imageFromClipboard, screenshotTripToRaw } from '@/lib/screenshotImport'
 import { weekStartOfISO, weekLabel, modeOf, shiftWeek } from './week'
@@ -153,7 +154,7 @@ function ScreenshotPick({ busy, onFile }: { busy: boolean; onFile: (f: File) => 
 }
 
 // ── Per-driver import (paste text, upload a CSV, or paste/upload a screenshot) ──
-export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onClose }: { driverId: string; periodStart: string; onImport: (rows: TripInput[]) => Promise<void>; onSetPeriod?: (week: string) => void; onClose: () => void }) {
+export function ImportModal({ driverId, periodStart, existingTrips, onImport, onSetPeriod, onClose }: { driverId: string; periodStart: string; existingTrips: AmazonTrip[]; onImport: (rows: TripInput[]) => Promise<void>; onSetPeriod?: (week: string) => void; onClose: () => void }) {
   const [text, setText] = useState('')
   const [saving, setSaving] = useState(false)
   // Trips read out of pasted/uploaded screenshots (Relay trips list). These carry
@@ -170,6 +171,7 @@ export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onCl
   ]
   const detectedWeeks = Array.from(new Set(raw.map((r) => (r.date ? weekStartOfISO(r.date) : null)).filter((w): w is string => !!w)))
   const dominantWeek = modeOf(raw.map((r) => (r.date ? weekStartOfISO(r.date) : null)).filter((w): w is string => !!w))
+  const partition = partitionNewTrips(parsed, existingTrips)
 
   const readScreenshot = async (file: Blob) => {
     setShotBusy(true); setShotError(null)
@@ -212,6 +214,11 @@ export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onCl
           )}
           {detectedWeeks.length === 1 && <span style={{ color: 'var(--ds-t3)' }}> · pay week {weekLabel(detectedWeeks[0])}</span>}
           {detectedWeeks.length > 1 && <span style={{ color: '#b45309' }}> · spans {detectedWeeks.length} weeks (filed per trip date)</span>}
+          {parsed.length > 0 && (
+            <span style={{ color: partition.duplicates.length > 0 ? '#b45309' : 'var(--ds-t3)' }}>
+              {' '}· {partition.fresh.length} new, {partition.duplicates.length} already imported (skipped)
+            </span>
+          )}
         </div>
         {shotError && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{shotError}</div>}
         <BlockWarning rows={raw} />
@@ -219,8 +226,8 @@ export function ImportModal({ driverId, periodStart, onImport, onSetPeriod, onCl
           // Nothing parsed yet → keep the modal open instead of silently importing nothing.
           if (!parsed.length) { setShotError('Nothing to import yet — paste rows, or add a screenshot with the Screenshot… button.'); return }
           setSaving(true)
-          try { await onImport(parsed); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) }
-        }} saving={saving} label={`Import ${parsed.length || ''}`.trim()} />
+          try { await onImport(partition.fresh); if (dominantWeek) onSetPeriod?.(dominantWeek) } catch { setSaving(false) }
+        }} saving={saving} disabled={!parsed.length || !partition.fresh.length} label={`Import ${partition.fresh.length || ''}`.trim()} />
       </div>
     </Modal>
   )
@@ -242,8 +249,8 @@ function matchDriver(name: string, drivers: Driver[]): string {
   return byBoth?.id ?? ''
 }
 
-export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod, onArchive, onClose }: {
-  periodStart: string; drivers: Driver[]
+export function MasterImportModal({ periodStart, drivers, existingTrips, onImport, onSetPeriod, onArchive, onClose }: {
+  periodStart: string; drivers: Driver[]; existingTrips: AmazonTrip[]
   onImport: (rows: TripInput[]) => Promise<void>
   onSetPeriod?: (week: string) => void
   onArchive?: (m: { fileName: string; text: string; periodStart: string; rowCount: number; tripCount: number; driverCount: number }) => Promise<void>
@@ -277,13 +284,15 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
   const ready = rows.filter((r) => effMap(r.driverName))
   const unmatched = names.filter((n) => !effMap(n))
 
+  const trips = rows
+    .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, targetWeek) : null })
+    .filter((t): t is TripInput => t !== null)
+  const partition = partitionNewTrips(trips, existingTrips)
+
   const doImport = async () => {
     setSaving(true)
     try {
-      const trips = rows
-        .map((r) => { const id = effMap(r.driverName); return id ? rowToTrip(r, id, targetWeek) : null })
-        .filter((t): t is TripInput => t !== null)
-      await onImport(trips)
+      await onImport(partition.fresh)
       // Archive the source file (best-effort — never block the import on it).
       try {
         await onArchive?.({
@@ -291,8 +300,8 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
           text,
           periodStart: targetWeek,
           rowCount: rows.length,
-          tripCount: trips.length,
-          driverCount: new Set(trips.map((t) => t.driverId)).size,
+          tripCount: partition.fresh.length,
+          driverCount: new Set(partition.fresh.map((t) => t.driverId)).size,
         })
       } catch { /* archive failure shouldn't fail the import */ }
       onSetPeriod?.(targetWeek) // jump to the week the trips landed in
@@ -366,8 +375,11 @@ export function MasterImportModal({ periodStart, drivers, onImport, onSetPeriod,
       <div style={{ fontSize: 12.5, marginTop: 10, color: ready.length ? '#15803d' : 'var(--ds-t3)' }}>
         {ready.length ? `${ready.length} of ${rows.length} rows ready` : 'Upload or paste a master CSV to preview'}
         {unmatched.length > 0 && <span style={{ color: '#b45309' }}> · {unmatched.length} unmatched driver{unmatched.length !== 1 ? 's' : ''} will be skipped</span>}
+        {trips.length > 0 && (
+          <span style={{ color: partition.duplicates.length > 0 ? '#b45309' : 'var(--ds-t3)' }}> · {partition.fresh.length} new, {partition.duplicates.length} already imported (skipped)</span>
+        )}
       </div>
-      <Footer onClose={onClose} onSave={doImport} saving={saving} label={`Import ${ready.length || ''}`.trim()} />
+      <Footer onClose={onClose} onSave={doImport} saving={saving} disabled={!partition.fresh.length} label={`Import ${partition.fresh.length || ''}`.trim()} />
     </Modal>
   )
 }

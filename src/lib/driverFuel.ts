@@ -12,7 +12,21 @@
  *   3. De-duplicated by the EFS identity key, so a transaction that landed twice
  *      (overlapping report uploads) is only counted once.
  */
-import type { FuelTransaction } from '@/lib/apiClient'
+/**
+ * The fields this module actually reads. Declared structurally rather than importing
+ * `FuelTransaction` from the Amplify data client, so the same matching logic can run
+ * in a Lambda (driver settlement) without dragging a browser-facing module in behind it.
+ * `FuelTransaction` satisfies this shape, and the generics below hand callers their own
+ * type straight back.
+ */
+export interface FuelTxLike {
+  transactionDate: string
+  cardNumber: string
+  fuelType: string
+  itemCategory?: string | null
+  amount: number
+  quantity: number
+}
 
 /** Card key for matching — digits only, leading zeros stripped ("00049" → "49"). */
 export function normalizeCard(card: string | null | undefined): string {
@@ -23,7 +37,7 @@ export function normalizeCard(card: string | null | undefined): string {
 const FUEL_ITEM_TYPES = new Set(['ULSD', 'FUEL', 'DEFD', 'BIO', 'B5', 'B20', 'REG', 'PREM', 'DSL'])
 
 /** Is this a fuel line? Trust an explicit category; otherwise fall back to fuelType. */
-export function isFuelTx(tx: Pick<FuelTransaction, 'itemCategory' | 'fuelType'>): boolean {
+export function isFuelTx(tx: Pick<FuelTxLike, 'itemCategory' | 'fuelType'>): boolean {
   const cat = (tx.itemCategory ?? '').trim()
   if (cat) return cat === 'FUEL'
   return FUEL_ITEM_TYPES.has((tx.fuelType ?? '').toUpperCase().trim())
@@ -41,7 +55,7 @@ export function isFuelTx(tx: Pick<FuelTransaction, 'itemCategory' | 'fuelType'>)
  * Shared by the per-driver fuel match, the import-time skip, and the duplicate
  * cleanup so they all agree on what "the same transaction" means.
  */
-export function fuelDedupKey(tx: Pick<FuelTransaction, 'transactionDate' | 'cardNumber' | 'fuelType' | 'amount' | 'quantity'>): string {
+export function fuelDedupKey(tx: Pick<FuelTxLike, 'transactionDate' | 'cardNumber' | 'fuelType' | 'amount' | 'quantity'>): string {
   return `${tx.transactionDate}|${normalizeCard(tx.cardNumber)}|${tx.fuelType}|${tx.amount}|${tx.quantity}`
 }
 
@@ -49,16 +63,16 @@ export function fuelDedupKey(tx: Pick<FuelTransaction, 'transactionDate' | 'card
  * Fuel transactions for one card within [startIso, endIso] (inclusive), filtered to
  * real fuel and de-duplicated. Newest first.
  */
-export function matchedFuelForCard(
-  fuelTxs: FuelTransaction[],
+export function matchedFuelForCard<T extends FuelTxLike>(
+  fuelTxs: T[],
   card: string | null | undefined,
   startIso: string,
   endIso: string,
-): FuelTransaction[] {
+): T[] {
   const want = normalizeCard(card)
   if (!want) return []
   const seen = new Set<string>()
-  const out: FuelTransaction[] = []
+  const out: T[] = []
   for (const tx of fuelTxs) {
     if (normalizeCard(tx.cardNumber) !== want) continue
     if (!isFuelTx(tx)) continue
@@ -71,6 +85,6 @@ export function matchedFuelForCard(
   return out.sort((a, b) => (a.transactionDate < b.transactionDate ? 1 : -1))
 }
 
-export function sumFuel(txns: Pick<FuelTransaction, 'amount'>[]): number {
+export function sumFuel(txns: Pick<FuelTxLike, 'amount'>[]): number {
   return Math.round(txns.reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
 }

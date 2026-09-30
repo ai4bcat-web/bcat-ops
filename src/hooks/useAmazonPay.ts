@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { ownerOpCarriesWeeklyCharges } from '@/lib/ownerOperatorTrips'
+import { sundayOf } from '@/features/driver-pay/week'
 import {
   listAmazonTrips, createAmazonTrip, updateAmazonTrip, deleteAmazonTrip,
   listDriverPaySettings, createDriverPaySetting, updateDriverPaySetting,
@@ -56,8 +58,18 @@ export interface AmazonPayState {
   loading:     boolean
   error:       string | null
   rows:        DriverPayRow[]
+  /** Complete loaded history, including drivers hidden from the current statement. */
+  allTrips: AmazonTrip[]
   /** Trips filed in the current pay week (across all drivers). */
   tripCount:   number
+  /**
+   * Most recent pay week that actually has trips, or null when none do. The page opens
+   * on the current calendar week, which is empty until that week's trips are imported —
+   * every driver then renders deductions-only as a negative check, which reads as "the
+   * data is gone" when 16 weeks of it are one click back.
+   */
+  /** The week actually being shown — equals the requested week, or the resolved default. */
+  periodStart: string
   /** Drivers that don't yet have a pay setting (so you can configure them). */
   unconfigured: Driver[]
   refresh:     () => void
@@ -76,7 +88,13 @@ export interface AmazonPayState {
 }
 
 /** Composes the Amazon weekly pay statements for one 7-day period. */
-export function useAmazonPay(periodStart: string): AmazonPayState {
+/**
+ * @param requestedWeek A pay-week start, or null to open on the newest week that has
+ * trips. The current calendar week is empty until its Relay export is imported, and an
+ * empty week renders every driver as a deductions-only negative check — which reads as
+ * "the settlement history is gone" while 16 weeks of it sit one click back.
+ */
+export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
   const { drivers, updateDriver: updateDriverRecord } = useDrivers()
   const { transactions: fuelTxs } = useFuelTransactions()
 
@@ -96,6 +114,19 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])
 
   useEffect(() => { void load() }, [load])
+
+  const latestWeekWithTrips = useMemo(() => {
+    let best: string | null = null
+    for (const t of trips) {
+      if (t.periodStart && (best === null || t.periodStart > best)) best = t.periodStart
+    }
+    return best
+  }, [trips])
+
+  const currentWeek = sundayOf()
+  const hasTripsThisWeek = trips.some((t) => t.periodStart === currentWeek)
+  const periodStart = requestedWeek
+    ?? (hasTripsThisWeek || !latestWeekWithTrips ? currentWeek : latestWeekWithTrips)
 
   const end = periodEnd(periodStart)
 
@@ -130,14 +161,21 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
           driverTrips.filter((t) => t.loadId && prevLoadIds.has(t.loadId)).map((t) => t.id),
         )
 
+        // From the first owner-operator week the weekly charges move to that statement.
+        // They are per driver-week: charging them here as well would deduct one driver's
+        // insurance, lease and fuel twice across the two pages.
+        const carriesCharges = !ownerOpCarriesWeeklyCharges(periodStart)
+
         // Fuel pulled live from the driver's EFS card for this 7-day window —
         // real fuel only, de-duplicated, itemized (see matchedFuelForCard).
-        const fuelTxns = matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end)
+        const fuelTxns = carriesCharges ? matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end) : []
         const fuel = sumFuel(fuelTxns)
 
-        const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
+        const oneOffs = carriesCharges
+          ? deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
+          : []
 
-        const fixed = effectiveFixedExpenses(setting.fixedExpenses, periodStart, end)
+        const fixed = carriesCharges ? effectiveFixedExpenses(setting.fixedExpenses, periodStart, end) : []
         const fixedDebits: PayDebitInput[] = fixed
           .filter((f) => f.afterPercent)
           .map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount }))
@@ -149,7 +187,7 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
         ]
 
         const mine = credits
-          .filter((c) => c.driverId === setting.driverId && c.periodStart === periodStart)
+          .filter((c) => carriesCharges && c.driverId === setting.driverId && c.periodStart === periodStart)
           .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.createdAt.localeCompare(b.createdAt))
         // null kind = CREDIT: every row written before debits existed is a credit.
         const driverCredits = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT')
@@ -240,5 +278,5 @@ export function useAmazonPay(periodStart: string): AmazonPayState {
     setCredits((p) => p.filter((c) => c.id !== id))
   }, [])
 
-  return { loading, error, rows, tripCount, unconfigured, refresh, addTrip, updateTrip, removeTrip, clearWeek, saveSetting, addDeduction, removeDeduction, addCredit, updateCredit, removeCredit }
+  return { loading, error, rows, allTrips: trips, tripCount, periodStart, unconfigured, refresh, addTrip, updateTrip, removeTrip, clearWeek, saveSetting, addDeduction, removeDeduction, addCredit, updateCredit, removeCredit }
 }

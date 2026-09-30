@@ -1,4 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from 'react'
+import { ownerOpCarriesWeeklyCharges } from '@/lib/ownerOperatorTrips'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Plus, PlusCircle, Upload, Trash2, Settings, Download, DollarSign, Pencil, FileUp, FileText, Mail, FileSpreadsheet, AlertTriangle, GripVertical } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
@@ -84,8 +85,10 @@ function download(name: string, text: string) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export function DriverPayPage() {
-  const [periodStart, setPeriodStart] = useState(sundayOf)
-  const pay = useAmazonPay(periodStart)
+  // null = follow the hook's default (newest week with trips) until staff pick a week.
+  const [pickedWeek, setPickedWeek] = useState<string | null>(null)
+  const pay = useAmazonPay(pickedWeek)
+  const periodStart = pay.periodStart
   const masters = useAmazonPayMasters()
   const { user } = useAuth()
 
@@ -187,7 +190,10 @@ export function DriverPayPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '20px 32px 12px', flexWrap: 'wrap' }}>
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--ds-t1)', margin: 0 }}>Driver Pay</h1>
-            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Amazon weekly pay — trips, expenses &amp; check amount</p>
+            <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
+              Amazon weekly pay — trips, expenses &amp; check amount
+              {ownerOpCarriesWeeklyCharges(periodStart) && ' · weekly expenses charged on Owner Operator Settlements from Sep 27'}
+            </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <button onClick={() => setMasterOpen(true)}
@@ -201,9 +207,9 @@ export function DriverPayPage() {
               </button>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button style={navBtn} onClick={() => setPeriodStart((p) => shiftWeek(p, -1))} aria-label="Previous week"><ChevronLeft size={16} /></button>
-              <button onClick={() => setPeriodStart(sundayOf())} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-bg)' : 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>This week</button>
-              <button style={{ ...navBtn, opacity: isThisWeek ? 0.4 : 1 }} onClick={() => !isThisWeek && setPeriodStart((p) => shiftWeek(p, 1))} disabled={isThisWeek} aria-label="Next week"><ChevronRight size={16} /></button>
+              <button style={navBtn} onClick={() => setPickedWeek(shiftWeek(periodStart, -1))} aria-label="Previous week"><ChevronLeft size={16} /></button>
+              <button onClick={() => setPickedWeek(sundayOf())} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-bg)' : 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>This week</button>
+              <button style={{ ...navBtn, opacity: isThisWeek ? 0.4 : 1 }} onClick={() => !isThisWeek && setPickedWeek(shiftWeek(periodStart, 1))} disabled={isThisWeek} aria-label="Next week"><ChevronRight size={16} /></button>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 180, textAlign: 'right' }}>{weekLabelLong(periodStart)}</span>
           </div>
@@ -319,19 +325,19 @@ export function DriverPayPage() {
           onClose={() => setEditTrip(null)} />
       )}
       {masterOpen && (
-        <MasterImportModal periodStart={periodStart} drivers={drivers}
+        <MasterImportModal periodStart={periodStart} drivers={drivers} existingTrips={pay.allTrips}
           onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setMasterOpen(false) }}
-          onSetPeriod={setPeriodStart}
+          onSetPeriod={setPickedWeek}
           onArchive={async (m) => {
             try { await masters.archive({ ...m, uploadedBy: user?.email ?? null }) }
-            catch (e) { toast.error(`Saved trips, but couldn't archive the file: ${e instanceof Error ? e.message : 'unknown error'}`) }
+            catch (e) { toast.error(`Couldn't archive master: ${e instanceof Error ? e.message : 'unknown error'}`) }
           }}
           onClose={() => setMasterOpen(false)} />
       )}
       {importDriver && (
-        <ImportModal driverId={importDriver} periodStart={periodStart}
+        <ImportModal driverId={importDriver} periodStart={periodStart} existingTrips={pay.allTrips}
           onImport={async (rows) => { for (const r of rows) await pay.addTrip(r); setImport(null) }}
-          onSetPeriod={setPeriodStart}
+          onSetPeriod={setPickedWeek}
           onClose={() => setImport(null)} />
       )}
       {creditFor && (
@@ -393,7 +399,7 @@ export function DriverPayPage() {
 // Used only to FLAG a possibly-understated week for review — never to auto-change pay.
 const BLOCK_LEG_RATE_CEILING = 1.5
 
-function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport, onPdf, onEmail, onUpdateTrip }: {
+function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onEditTrip, onRemoveTrip, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport, onPdf, onEmail, onUpdateTrip }: {
   row: DriverPayRow; periodStart: string
   onAddTrip: () => void; onImport: () => void; onAddDeduction: () => void; onSettings: () => void
   onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
@@ -403,6 +409,9 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
   onUpdateTrip: (id: string, patch: { sortOrder: number }) => void
 }) {
   const { driver, setting, statement, oneOffs } = row
+  // From the changeover the weekly charges belong to the owner-operator statement, so
+  // this page must not take entries it would then file out of sight.
+  const carriesCharges = !ownerOpCarriesWeeklyCharges(periodStart)
   const [showFuel, setShowFuel] = useState(false)
   const [miles, setMiles] = useState('')
   const [costPerMile, setCostPerMile] = useState('')
@@ -496,7 +505,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
         {iconBtn(onAddTrip, Plus, 'Add trip')}
         {iconBtn(onImport, Upload, 'Import')}
-        {iconBtn(onAddDeduction, Plus, 'Add expense')}
+        {carriesCharges && iconBtn(onAddDeduction, Plus, 'Add expense')}
         <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
           style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
           <PlusCircle size={13} /> Add credit
@@ -620,7 +629,7 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
         )}
 
         {/* Weekly mileage — one-off deduction for this week only */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 12.5 }}>
+        {carriesCharges && <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 12.5 }}>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <span style={{ color: 'var(--ds-t2)' }}>Weekly mileage</span>
             <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Deducted before the split, this week only</span>
@@ -651,8 +660,8 @@ function StatementCard({ row, onAddTrip, onImport, onAddDeduction, onAddCredit, 
           >
             {mileageSaving ? 'Adding…' : 'Add'}
           </button>
-        </div>
-        {mileageErr && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{mileageErr}</div>}
+        </div>}
+        {carriesCharges && mileageErr && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{mileageErr}</div>}
 
         {/* Fuel breakdown — itemized so the pulled figure is auditable */}
         {row.fuelTxns.length > 0 && (
