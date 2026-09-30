@@ -65,7 +65,7 @@ export function splitCsv(line: string): string[] {
 }
 
 export function parseRows(text: string): RawTripRow[] {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim())
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim())
   if (!lines.length) return []
   const useTab = lines[0].includes('\t')
   const split = useTab ? (l: string) => l.split('\t') : splitCsv

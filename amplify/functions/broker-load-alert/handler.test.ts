@@ -36,7 +36,8 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
 // Slack fetch — default OK; tests can override. Params are typed so tsc (the Amplify
 // backend type check runs real tsc over amplify/**, unlike vitest's esbuild) can index
 // into mock.calls[n][1] for the request init.
-const fetchMock = vi.fn(async (_url: unknown, _init?: { body?: string }) => ({ json: async () => ({ ok: true }) }))
+type FetchLike = (url: unknown, init?: { body?: string }) => Promise<{ json: () => Promise<{ ok: boolean }> }>
+const fetchMock = vi.fn<FetchLike>(async () => ({ json: async () => ({ ok: true }) }))
 vi.stubGlobal('fetch', fetchMock)
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

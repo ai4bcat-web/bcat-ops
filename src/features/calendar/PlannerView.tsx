@@ -59,7 +59,7 @@ function StatusHandoff({ load, stop, kind, status }: {
 
   const tone = STATUS_TONE_COLORS[STATUS_META[status].tone]
   const label = statusLabel(status, kind)
-  const canAct = canSetChangeNeeded(actor) && requiresApptProofs(load.customer)
+  const canAct = canSetChangeNeeded(actor) && requiresApptProofs(load)
   const isNeedBook = status === 'need_book'
   const isTimedHandoff = kind === 'delivery' && (status === 'requested' || status === 'confirmed' || status === 'change_needed')
   const clickable = canAct && (isNeedBook || isTimedHandoff)
@@ -929,14 +929,18 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
   const dragFromUnsched = useRef(false)
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
   const [dropDay, setDropDay] = useState<string | null>(null)
+  // Mirrors of the mutable drag refs that are read during render for row visuals.
+  const [draggingKey, setDraggingKey] = useState<string | null>(null)
 
   const handleDragStart = useCallback((day: string, key: string) => {
     dragKey.current = key; dragDay.current = day; dragFromUnsched.current = false
+    setDraggingKey(key)
   }, [])
 
   // Dragging a parked load out of the Unscheduled section.
   const handleUnschedDragStart = useCallback((key: string) => {
     dragKey.current = key; dragDay.current = null; dragFromUnsched.current = true
+    setDraggingKey(key)
   }, [])
 
   // Drop a load onto a day → schedule it there (unscheduled: false + shift its appt).
@@ -958,6 +962,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       updateLoad(load.id, { unscheduled: false, sortOrder: null, ...patch })
     }
     dragKey.current = null; dragDay.current = null; dragFromUnsched.current = false
+    setDraggingKey(null)
     setDragOverKey(null); setDayOrder(new Map())
   }, [keyToEntry, loads, updateLoad])
 
@@ -995,11 +1000,24 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       }
     }
     dragKey.current = null; dragDay.current = null; dragFromUnsched.current = false; setDragOverKey(null)
+    setDraggingKey(null)
     setDayOrder((prev) => {
       if (!day || !prev.has(day)) return prev
       const next = new Map(prev); next.delete(day); return next
     })
   }, [dayOrder, keyToLoadId, loads, updateLoad])
+
+  const handleDayDragOver = useCallback((dayStr: string, e: React.DragEvent<HTMLDivElement>) => {
+    if (!dragKey.current) return
+    if (!dragFromUnsched.current && dragDay.current === dayStr) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setDropDay((prev) => prev !== dayStr ? (dayStr ?? null) : prev)
+  }, [])
+
+  const handleDayDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropDay(null)
+  }, [])
 
   function orderedEntries(dayStr: string): DayEntry[] {
     const base  = entriesByDay.get(dayStr) ?? []
@@ -1110,14 +1128,8 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
               background: dropDay === dayStr ? 'rgba(34,197,94,0.08)' : undefined,
               outline: dropDay === dayStr ? '2px solid #22c55e' : undefined, outlineOffset: -2,
             }}
-            onDragOver={(e) => {
-              // Only show the schedule target for cross-day / unscheduled drags.
-              if (!dragKey.current) return
-              if (!dragFromUnsched.current && dragDay.current === dayStr) return
-              e.preventDefault(); e.dataTransfer.dropEffect = 'move'
-              if (dropDay !== dayStr) setDropDay(dayStr ?? null)
-            }}
-            onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropDay(null) }}
+            onDragOver={(e) => handleDayDragOver(dayStr ?? '', e)}
+            onDragLeave={handleDayDragLeave}
             onDrop={(e) => { e.preventDefault(); handleDayDrop(dayStr ?? '') }}
           >
             <div
@@ -1183,7 +1195,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
                   key={entry.key}
                   entry={entry}
                   drivers={drivers}
-                  dragging={dragKey.current === entry.key}
+                  dragging={draggingKey === entry.key}
                   dragOver={dragOverKey === entry.key}
                   selected={selectedLoadIds.includes(entry.load.id)}
                   selectedIds={selectedLoadIds}

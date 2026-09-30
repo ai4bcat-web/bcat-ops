@@ -56,7 +56,7 @@ export function CampaignsTab({ capacity }: { capacity?: CarrierCapacity | null }
   const { counts: ilWiCounts } = useCarrierContacts('IL_WI')
   const [creating, setCreating] = useState(false)
   const [accounts, setAccounts] = useState<InstantlyAccount[]>([])
-  const [accountsLoading, setAccountsLoading] = useState(false)
+  const [accountsLoading, setAccountsLoading] = useState(true)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [defaultPerMailbox, setDefaultPerMailbox] = useState(FALLBACK_DEFAULT_PER_MAILBOX)
   const [reservePerMailbox, setReservePerMailbox] = useState(FALLBACK_RESERVE_PER_MAILBOX)
@@ -65,7 +65,6 @@ export function CampaignsTab({ capacity }: { capacity?: CarrierCapacity | null }
   const activeCounts = { IL_IA: ilIaCounts.active, IL_WI: ilWiCounts.active }
 
   useEffect(() => {
-    setAccountsLoading(true)
     carrierBlast('listAccounts')
       .then((res) => {
         if (!res.ok) throw new Error(res.error ?? 'failed')

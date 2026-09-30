@@ -114,12 +114,16 @@ export const rowActionable = (r: ApptQueueRow): boolean =>
 
 /**
  * Which customers must have BOTH proof screenshots (E2Open update + email confirmation)
- * before a booking shows Confirmed. Batory is the account with the E2Open workflow;
- * everyone else's booking is confirmed the moment the time is in. Matched
- * case-insensitively on the word so "BATORY FOODS INC" and "Batory" both count.
+ * before a booking shows Confirmed. The linked Customer's configured `apptWorkflow`
+ * decides; the /batory/i name match only covers loads whose customer is not linked or
+ * not configured yet (pre-backfill), so "BATORY FOODS INC" and "Batory" both count there.
  */
-export const requiresApptProofs = (customer: string | null | undefined): boolean =>
-  /batory/i.test(customer ?? '')
+export type ApptPolicySource = string | null | undefined | Pick<Load, 'customer' | 'customerApptWorkflow'>
+export const requiresApptProofs = (source: ApptPolicySource): boolean => {
+  const load = typeof source === 'object' && source !== null ? source : { customer: source, customerApptWorkflow: null }
+  if (load.customerApptWorkflow) return load.customerApptWorkflow === 'BATORY'
+  return /batory/i.test(load.customer ?? '')
+}
 
 /**
  * A booked appointment counts as CONFIRMED:
@@ -128,7 +132,7 @@ export const requiresApptProofs = (customer: string | null | undefined): boolean
  *    (there is no E2Open outside Batory, so a single proof is the whole requirement).
  * Booked with nothing on file shows Pending for everyone.
  */
-export const stopConfirmed = (stop: Stop, customer?: string | null): boolean => {
+export const stopConfirmed = (stop: Stop, customer?: ApptPolicySource): boolean => {
   if (apptNeedKind(stop) !== null) return false
   if (requiresApptProofs(customer)) {
     if (stop.apptStatus) return stop.apptStatus === 'confirmed'
@@ -183,8 +187,8 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       appt: pickupStop?.appt ?? '',
       driverId: pickupStop?.driverId ?? null,
       deliveryDriverId: deliveryStop?.driverId ?? null,
-      pickupConfirmed: pickupStop ? stopConfirmed(pickupStop, load.customer) : false,
-      deliveryConfirmed: deliveryStop ? stopConfirmed(deliveryStop, load.customer) : false,
+      pickupConfirmed: pickupStop ? stopConfirmed(pickupStop, load) : false,
+      deliveryConfirmed: deliveryStop ? stopConfirmed(deliveryStop, load) : false,
       pickupStatus: pickupStop ? apptWorkflowStatus(pickupStop, load) : null,
       deliveryStatus: deliveryStop ? apptWorkflowStatus(deliveryStop, load) : null,
       pickup: refs.pickup,

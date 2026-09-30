@@ -7,6 +7,8 @@ import { fileContentType } from '@/lib/disputeFiles'
 import type { FixedExpenseInput } from './driverPay'
 import type { CarrierLane, CarrierContact, CarrierCampaign, CarrierReply } from '@/types'
 import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
+import type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
+import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 
 // Untyped client — our own types from src/types handle type safety
 const client = generateClient()
@@ -28,18 +30,21 @@ const LOAD_FIELDS = `
   createdBy updatedBy createdAt updatedAt
 `
 
-// `hot`/`unscheduled` and `stops` are newer fields added in later backend deploys. Each
-// is gated by a flag and appended only while the backend supports it; if the API predates
-// a field, listLoads detects the FieldUndefined error, clears that flag, and retries (so a
-// frontend shipping before the backend deploy keeps working). Self-heals post-deploy.
+// `hot`/`unscheduled`, `stops`, `sortOrder`, and `customerId` are newer fields added in
+// later backend deploys. Each is gated by a flag and appended only while the backend
+// supports it; if the API predates a field, listLoads detects the FieldUndefined error,
+// clears that flag, and retries (so a frontend shipping before the backend deploy keeps
+// working). Self-heals post-deploy.
 let loadsHaveHot = true
 let loadsHaveStops = true
 let loadsHaveSortOrder = true
+let loadsHaveCustomerId = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
   if (loadsHaveStops) f += ' stops'
   if (loadsHaveSortOrder) f += ' sortOrder'
+  if (loadsHaveCustomerId) f += ' customerId'
   return f
 }
 
@@ -97,14 +102,15 @@ const AUDIT_FIELDS = `
 // ── Loads ─────────────────────────────────────────────────────────────────────
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
-// corresponding flag and retry. Handles `hot`/`unscheduled` and `stops` together.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean } {
+// corresponding flag and retry.
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
     hot: /'(hot|unscheduled)'/i.test(msg),
     stops: /'stops'/i.test(msg),
     sortOrder: /'sortOrder'/i.test(msg),
+    customerId: /'customerId'/i.test(msg),
   }
 }
 
@@ -113,8 +119,10 @@ export async function listLoads(): Promise<Load[]> {
     query: `query ListLoads { listLoads(limit: 10000) { items { ${loadFields()} } } }`,
   }) as Promise<{ data: { listLoads: { items: (Load & { rateConfirmKey?: string })[] } } }>
 
+  // The customer policy map must be current before loads are stamped with it.
+  const customersReady = listCustomers({ includeArchived: true })
   let result
-  // Retry up to twice so a single query missing BOTH hot/unscheduled and stops recovers.
+  // Retry up to twice so a single query missing newer fields can recover.
   for (let attempt = 0; ; attempt++) {
     try { result = await run(); break }
     catch (err) {
@@ -133,20 +141,29 @@ export async function listLoads(): Promise<Load[]> {
         console.warn("[apiClient] backend has no 'sortOrder' field yet — querying loads without it until deploy")
         loadsHaveSortOrder = false; changed = true
       }
+      if (loadsHaveCustomerId && u.customerId) {
+        console.warn("[apiClient] backend has no 'customerId' field yet — querying loads without it until deploy")
+        loadsHaveCustomerId = false; changed = true
+      }
       if (!changed) throw err
     }
   }
+  await customersReady
   const items = result.data.listLoads.items ?? []
-  return Promise.all(items.map(resolveRateConfirmUrl))
+  return Promise.all(items.map((l) => resolveRateConfirmUrl(withCustomerPolicy(l))))
 }
 
 // `stops` is an a.json() (AWSJSON) field. Through this client it must be written as a
 // JSON STRING (same as createAuditLog's `changes`); reads undo the encoding via unwrapJson.
-// Also drop `stops` from the input if the backend doesn't have the field yet (pre-deploy).
-function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown }>(input: T): T {
+// Also drop newer fields from the input if the backend doesn't have them yet (pre-deploy).
+function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; customerId?: unknown }>(input: T): T {
   let out: T = input
   if (!loadsHaveSortOrder && 'sortOrder' in (out as object)) {
     const { sortOrder: _drop, ...rest } = out as T & { sortOrder?: unknown }
+    out = rest as T
+  }
+  if (!loadsHaveCustomerId && 'customerId' in (out as object)) {
+    const { customerId: _drop, ...rest } = out as T & { customerId?: unknown }
     out = rest as T
   }
   if (!loadsHaveStops) {
@@ -157,27 +174,28 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown }>(
   return { ...out, stops: JSON.stringify(out.stops) }
 }
 
+// `customerApptWorkflow` is resolved from the Customer at read time and never written.
 export async function createLoad(
   input: Omit<Load, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<Load> {
-  const { rateConfirmUrl: _skip, ...rest } = input as Load & { rateConfirmUrl?: string }
+  const { rateConfirmUrl: _skip, customerApptWorkflow: _policy, ...rest } = input as Load & { rateConfirmUrl?: string }
   const result = await client.graphql({
     query: `mutation CreateLoad($input: CreateLoadInput!) { createLoad(input: $input) { ${loadFields()} } }`,
     variables: { input: serializeLoadInput(rest) },
   }) as { data: { createLoad: Load } }
-  return normalizeLoadStops(result.data.createLoad)
+  return normalizeLoadStops(withCustomerPolicy(result.data.createLoad))
 }
 
 export async function updateLoad(
   id: string,
   patch: Partial<Omit<Load, 'id' | 'createdAt'>>
 ): Promise<Load> {
-  const { rateConfirmUrl: _skip, ...rest } = patch as typeof patch & { rateConfirmUrl?: string }
+  const { rateConfirmUrl: _skip, customerApptWorkflow: _policy, ...rest } = patch as typeof patch & { rateConfirmUrl?: string }
   const result = await client.graphql({
     query: `mutation UpdateLoad($input: UpdateLoadInput!) { updateLoad(input: $input) { ${loadFields()} } }`,
     variables: { input: serializeLoadInput({ id, ...rest }) },
   }) as { data: { updateLoad: Load } }
-  return resolveRateConfirmUrl(result.data.updateLoad)
+  return resolveRateConfirmUrl(withCustomerPolicy(result.data.updateLoad))
 }
 
 export async function deleteLoad(id: string): Promise<void> {
@@ -214,14 +232,14 @@ export function subscribeToLoadChanges(callbacks: {
     const cb = callbacks.onCreate
     wire<{ onCreateLoad: Load }>(
       `subscription OnCreateLoad { onCreateLoad { ${loadFields()} } }`,
-      (d) => { if (d.onCreateLoad) cb(normalizeLoadStops(d.onCreateLoad)) },
+      (d) => { if (d.onCreateLoad) cb(normalizeLoadStops(withCustomerPolicy(d.onCreateLoad))) },
     )
   }
   if (callbacks.onUpdate) {
     const cb = callbacks.onUpdate
     wire<{ onUpdateLoad: Load }>(
       `subscription OnUpdateLoad { onUpdateLoad { ${loadFields()} } }`,
-      (d) => { if (d.onUpdateLoad) cb(normalizeLoadStops(d.onUpdateLoad)) },
+      (d) => { if (d.onUpdateLoad) cb(normalizeLoadStops(withCustomerPolicy(d.onUpdateLoad))) },
     )
   }
   if (callbacks.onDelete) {
@@ -715,10 +733,7 @@ async function vendorPayableAction(
 
 /** Vendor AP mutations surface the Lambda's own message; nothing here is a screenshot import. */
 function vendorApErrorMessage(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message
-  const errors = (err as { errors?: { message?: string }[] } | null)?.errors
-  const joined = Array.isArray(errors) ? errors.map((e) => e?.message).filter(Boolean).join('; ') : ''
-  return joined || 'Vendor AP request failed. Refresh the queue and try again.'
+  return graphqlErrorText(err) || 'Vendor AP request failed. Refresh the queue and try again.'
 }
 
 export async function sendMaintenanceInvoiceToVendorAp(maintenanceInvoiceId: string): Promise<{ item: VendorPayable; duplicate: boolean }> {
@@ -830,64 +845,177 @@ export async function createApptMoveTask(args: {
   return result.data.createIntakeItem
 }
 
-// ── Directory: customers & locations ─────────────────────────────────────────
+// ── Directory: customers, locations, divisions, settings ─────────────────────
+//
+// Every write goes through the tmsDirectoryActions Lambda (server-side invariants: CAS on
+// updatedAt, no links to archived/merged records, geocode proof). Reads use the generated
+// list queries. Errors propagate — a directory that fails to load must say so, not render
+// empty.
 
-export interface CustomerRecord {
-  id: string
-  name: string
-  contactName?: string | null
-  contactEmail?: string | null
-  contactPhone?: string | null
-  notes?: string | null
-  createdAt: string
-  updatedAt: string
+export type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
+
+const CUSTOMER_FIELDS = `
+  id name contactName contactEmail contactPhone notes
+  mcNumber dotNumber billingEmail billingContactName billingPhone billingAddress
+  paymentTermsDays creditLimitCents creditHoldFlag requiredDocsForInvoice
+  defaultDivisionKey defaultSalesRepId aliases normalizedName active apptWorkflow mergedIntoId
+  createdAt updatedAt
+`
+const LOCATION_FIELDS = `
+  id name city customerName apptContactName apptContactEmail apptContactPhone notes
+  street state zip country lat lng timezone geohash6 placeId geocodedAt geocodeExpiresAt
+  facilityType hours apptRule apptLeadTimeHours dockNotes lumperNotes detentionNotes
+  contacts customerIds aliases normalizedName normalizedAddress mergedIntoId mergeJobId active
+  createdAt updatedAt
+`
+const DIVISION_FIELDS = `
+  id key name legalName mcNumber dotNumber scac remitToName remitToAddress remitToEmail
+  invoicePrefix fleetGroup active createdAt updatedAt
+`
+const TMS_SETTINGS_FIELDS = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat createdAt updatedAt`
+const MERGE_JOB_FIELDS = `id sourceId targetId status processedCount remainingCount error createdAt updatedAt`
+
+// Both custom-op wrappers rethrow AppSync's `{errors:[…]}` payload as an Error carrying
+// the Lambda's message, so every caller's toast shows the real reason, not `[object Object]`.
+async function directoryAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsDirectoryActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsDirectoryActions($action: String!, $input: AWSJSON!) { tmsDirectoryActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsDirectoryActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsDirectoryActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
 }
-export interface LocationRecord {
-  id: string
-  name: string
-  city?: string | null
-  customerName?: string | null
-  apptContactName?: string | null
-  apptContactEmail?: string | null
-  apptContactPhone?: string | null
-  notes?: string | null
-  createdAt: string
-  updatedAt: string
+
+/** AWSJSON columns arrive as strings through the generated list queries. */
+function unwrapJsonFields<T extends object>(row: T, keys: (keyof T)[]): T {
+  const out = { ...row }
+  for (const key of keys) if (out[key] != null) out[key] = unwrapJson(out[key]) as T[typeof key]
+  return out
 }
 
-const CUSTOMER_FIELDS = `id name contactName contactEmail contactPhone notes createdAt updatedAt`
-const LOCATION_FIELDS = `id name city customerName apptContactName apptContactEmail apptContactPhone notes createdAt updatedAt`
+async function listAll<T>(name: string, fields: string, limit: number): Promise<T[]> {
+  const rows: T[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query ${name}($nextToken: String) { ${name}(limit: ${limit}, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
+      variables: { nextToken },
+    }) as { data: Record<string, { items: (T | null)[]; nextToken?: string | null }> }
+    const page = r.data[name]
+    for (const item of page.items) if (item) rows.push(item)
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return rows
+}
 
-export async function listCustomers(): Promise<CustomerRecord[]> {
-  const r = await client.graphql({ query: `query L { listCustomers(limit: 1000) { items { ${CUSTOMER_FIELDS} } } }` }) as { data: { listCustomers: { items: CustomerRecord[] } } }
-  return r.data.listCustomers.items ?? []
+// Customer.apptWorkflow decides the appointment ladder for every load linked to it. The
+// policy is stamped onto loads at read time (never persisted) so the calendar, Appts
+// board and drawer read one field; this map is refreshed by every customer read/write.
+const customerPolicies: Record<string, CustomerRecord['apptWorkflow']> = {}
+function rememberCustomerPolicy(c: CustomerRecord): CustomerRecord {
+  customerPolicies[c.id] = c.apptWorkflow ?? null
+  return c
+}
+/** Stamp the linked customer's appointment policy (from the last customer read) onto a load. */
+export function withCustomerPolicy<T extends Pick<Load, 'customerId' | 'customerApptWorkflow'>>(load: T): T {
+  return { ...load, customerApptWorkflow: load.customerId ? customerPolicies[load.customerId] ?? null : null }
+}
+
+/** Active customers only unless asked; archived and merged records stay out of pickers. */
+export async function listCustomers(opts?: { includeArchived?: boolean }): Promise<CustomerRecord[]> {
+  const rows = (await listAll<CustomerRecord>('listCustomers', CUSTOMER_FIELDS, 1000))
+    .map((c) => rememberCustomerPolicy(unwrapJsonFields(c, ['billingAddress'])))
+  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
 }
 export async function createCustomer(input: Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<CustomerRecord> {
-  const r = await client.graphql({ query: `mutation C($input: CreateCustomerInput!) { createCustomer(input: $input) { ${CUSTOMER_FIELDS} } }`, variables: { input } }) as { data: { createCustomer: CustomerRecord } }
-  return r.data.createCustomer
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', input))
 }
-export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>>): Promise<CustomerRecord> {
-  const r = await client.graphql({ query: `mutation U($input: UpdateCustomerInput!) { updateCustomer(input: $input) { ${CUSTOMER_FIELDS} } }`, variables: { input: { id, ...patch } } }) as { data: { updateCustomer: CustomerRecord } }
-  return r.data.updateCustomer
+/** `expectedUpdatedAt` = the record the caller last saw; the server refuses stale writes. */
+export async function updateCustomer(id: string, patch: Partial<Omit<CustomerRecord, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt: string): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('UPSERT_CUSTOMER', { id, expectedUpdatedAt, ...patch }))
 }
-export async function deleteCustomer(id: string): Promise<void> {
-  await client.graphql({ query: `mutation D($input: DeleteCustomerInput!) { deleteCustomer(input: $input) { id } }`, variables: { input: { id } } })
+export async function archiveCustomer(id: string, expectedUpdatedAt: string): Promise<CustomerRecord> {
+  return rememberCustomerPolicy(await directoryAction<CustomerRecord>('ARCHIVE_CUSTOMER', { id, expectedUpdatedAt }))
 }
 
-export async function listLocations(): Promise<LocationRecord[]> {
-  const r = await client.graphql({ query: `query L { listLocations(limit: 2000) { items { ${LOCATION_FIELDS} } } }` }) as { data: { listLocations: { items: LocationRecord[] } } }
-  return r.data.listLocations.items ?? []
+export async function listLocations(opts?: { includeArchived?: boolean }): Promise<LocationRecord[]> {
+  const rows = (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts']))
+  return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
 }
-export async function createLocation(input: Omit<LocationRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<LocationRecord> {
-  const r = await client.graphql({ query: `mutation C($input: CreateLocationInput!) { createLocation(input: $input) { ${LOCATION_FIELDS} } }`, variables: { input } }) as { data: { createLocation: LocationRecord } }
-  return r.data.createLocation
+/**
+ * Coordinates are accepted only with the `geocodeToken` the tmsGeocode call returned for
+ * them; a plain postal address without coordinates is always fine.
+ */
+export async function createLocation(input: Omit<LocationRecord, 'id' | 'createdAt' | 'updatedAt'> & { geocodeToken?: string }): Promise<LocationRecord> {
+  return directoryAction<LocationRecord>('UPSERT_LOCATION', input)
 }
-export async function updateLocation(id: string, patch: Partial<Omit<LocationRecord, 'id' | 'createdAt' | 'updatedAt'>>): Promise<LocationRecord> {
-  const r = await client.graphql({ query: `mutation U($input: UpdateLocationInput!) { updateLocation(input: $input) { ${LOCATION_FIELDS} } }`, variables: { input: { id, ...patch } } }) as { data: { updateLocation: LocationRecord } }
-  return r.data.updateLocation
+export async function updateLocation(id: string, patch: Partial<Omit<LocationRecord, 'id' | 'createdAt' | 'updatedAt'>> & { geocodeToken?: string }, expectedUpdatedAt: string): Promise<LocationRecord> {
+  return directoryAction<LocationRecord>('UPSERT_LOCATION', { id, expectedUpdatedAt, ...patch })
 }
-export async function deleteLocation(id: string): Promise<void> {
-  await client.graphql({ query: `mutation D($input: DeleteLocationInput!) { deleteLocation(input: $input) { id } }`, variables: { input: { id } } })
+export async function archiveLocation(id: string, expectedUpdatedAt: string): Promise<LocationRecord> {
+  return directoryAction<LocationRecord>('ARCHIVE_LOCATION', { id, expectedUpdatedAt })
+}
+
+// ── Location merge — a resumable job, never a single transaction ──────────────
+export async function previewLocationMerge(sourceId: string, targetId: string): Promise<LocationMergePreview> {
+  return directoryAction<LocationMergePreview>('PREVIEW_MERGE_LOCATIONS', { sourceId, targetId })
+}
+export async function startLocationMerge(sourceId: string, targetId: string): Promise<LocationMergeJob> {
+  return directoryAction<LocationMergeJob>('MERGE_LOCATIONS', { sourceId, targetId })
+}
+export async function resumeLocationMerge(jobId: string): Promise<LocationMergeJob> {
+  return directoryAction<LocationMergeJob>('RESUME_MERGE', { jobId })
+}
+export async function listLocationMergeJobs(): Promise<LocationMergeJob[]> {
+  return listAll<LocationMergeJob>('listDirectoryMergeJobs', MERGE_JOB_FIELDS, 1000)
+}
+
+// ── Divisions & TMS settings (ADMIN writes; nothing is seeded with guessed values) ──
+export async function listDivisions(): Promise<Division[]> {
+  return (await listAll<Division>('listDivisions', DIVISION_FIELDS, 1000)).map((d) => unwrapJsonFields(d, ['remitToAddress']))
+}
+export async function saveDivision(input: Omit<Division, 'id' | 'createdAt' | 'updatedAt'> & { id?: string }, expectedUpdatedAt?: string): Promise<Division> {
+  return directoryAction<Division>('SAVE_DIVISION', { expectedUpdatedAt, ...input })
+}
+export async function getTmsSettings(): Promise<TmsSettings | null> {
+  const r = await client.graphql({
+    query: `query GetTmsSettings { getTmsSettings(id: "default") { ${TMS_SETTINGS_FIELDS} } }`,
+  }) as { data: { getTmsSettings: TmsSettings | null } }
+  return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, ['accessorialCodes', 'loadStatusRules']) : null
+}
+export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── Google geocoding proxy (tmsGeocode) — real upstream errors, no fallbacks ─────
+async function geocodeAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsGeocode: unknown } }
+  try {
+    r = await client.graphql({
+      query: `query TmsGeocode($action: String!, $input: AWSJSON!) { tmsGeocode(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsGeocode: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsGeocode)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+export async function geocodeAddress(address: string): Promise<GeocodeResult> {
+  return geocodeAction<GeocodeResult>('GEOCODE', { address })
+}
+export async function autocompleteAddress(query: string, sessionToken: string): Promise<AutocompleteSuggestion[]> {
+  return (await geocodeAction<{ suggestions: AutocompleteSuggestion[] }>('AUTOCOMPLETE', { query, sessionToken })).suggestions
+}
+export async function getPlaceDetails(placeId: string, sessionToken: string): Promise<GeocodeResult> {
+  return geocodeAction<GeocodeResult>('PLACE_DETAILS', { placeId, sessionToken })
 }
 
 export async function notifySlackStatusChange(args: {
@@ -1041,18 +1169,25 @@ export async function parseTripScreenshot(args: {
  * path has to unwrap it or the user is told nothing at all.
  */
 export function graphqlErrorMessage(err: unknown): string {
+  const core = graphqlErrorText(err)
+  if (core) return /timeout|timed out/i.test(core)
+    ? 'The screenshot took too long to read. Crop to just the trips table (or split a long list into two screenshots) and try again.'
+    : core
+  return 'Something went wrong reading the screenshot.'
+}
+
+/**
+ * Neutral core: Error.message → errors[].message joined → string → ''. No feature copy,
+ * so directory/geocode/vendor-AP callers can surface the Lambda's own words.
+ */
+export function graphqlErrorText(err: unknown): string {
   if (err instanceof Error && err.message) return err.message
   const errors = (err as { errors?: { message?: string }[] } | null)?.errors
   if (Array.isArray(errors) && errors.length > 0) {
     const joined = errors.map((e) => e?.message).filter(Boolean).join('; ')
-    if (joined) {
-      return /timeout|timed out/i.test(joined)
-        ? 'The screenshot took too long to read. Crop to just the trips table (or split a long list into two screenshots) and try again.'
-        : joined
-    }
+    if (joined) return joined
   }
-  if (typeof err === 'string' && err) return err
-  return 'Something went wrong reading the screenshot.'
+  return typeof err === 'string' ? err : ''
 }
 
 // ── Vehicle quote email (Best Care Auto Transport) ─────────────────────────────
@@ -1480,7 +1615,7 @@ export type ApptProofSlot = 'request' | 'e2open' | 'email'
 export async function uploadApptProof(loadId: string, stopId: string, slot: ApptProofSlot, file: Blob): Promise<string> {
   const ext = file.type === 'image/png' ? 'png' : 'jpg'
   // Timestamped so a re-upload never collides with a cached old proof.
-  const key = `appt-proofs/${loadId}/${stopId.replace(/[^\w.\-]+/g, '_')}/${slot}-${Date.now()}.${ext}`
+  const key = `appt-proofs/${loadId}/${stopId.replace(/[^\w.-]+/g, '_')}/${slot}-${Date.now()}.${ext}`
   await uploadData({ path: key, data: file, options: { contentType: file.type || 'image/jpeg' } }).result
   return key
 }
@@ -1506,7 +1641,7 @@ export async function deleteRateConfirm(key: string): Promise<void> {
 // ── S3 driver-pay master CSV archive ───────────────────────────────────────────
 
 export async function uploadPayMasterFile(periodStart: string, fileName: string, text: string): Promise<{ key: string; size: number }> {
-  const safe = (fileName || 'master.csv').replace(/[^\w.\-]+/g, '_')
+  const safe = (fileName || 'master.csv').replace(/[^\w.-]+/g, '_')
   const key = `driver-pay-masters/${periodStart}/${Date.now()}-${safe}`
   await uploadData({ path: key, data: text, options: { contentType: 'text/csv' } }).result
   return { key, size: new Blob([text]).size }
@@ -2381,7 +2516,7 @@ export async function updateDriverPaySetting(
   } catch (err) {
     const errors = (err as { errors?: { errorType?: string }[] })?.errors
     if (errors?.some((error) => error.errorType?.includes('ConditionalCheckFailed'))) {
-      throw new Error('These pay settings changed since you opened them. Reload before saving to preserve expense history.')
+      throw new Error('These pay settings changed since you opened them. Reload before saving to preserve expense history.', { cause: err })
     }
     throw err
   }

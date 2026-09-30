@@ -24,13 +24,6 @@ export function CombinedMonthlyProfit() {
   const combined = ivan.net + amazon.profit
   const loading = ivan.loading && amzLoading
 
-  const Part = ({ label, value }: { label: string; value: number }) => (
-    <div style={{ flex: 1, minWidth: 120 }}>
-      <div style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: netColor(value), fontVariantNumeric: 'tabular-nums' }}>{money(value)}</div>
-    </div>
-  )
-
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -64,8 +57,14 @@ export function CombinedMonthlyProfit() {
               borderLeft: isMobile ? 'none' : '1px solid var(--ds-border)', paddingLeft: isMobile ? 0 : 24,
               borderTop: isMobile ? '1px solid var(--ds-border)' : 'none', paddingTop: isMobile ? 14 : 0,
             }}>
-              <Part label="Ivan (fleet net)" value={ivan.net} />
-              <Part label="Amazon (profit)" value={amazon.profit} />
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ivan (fleet net)</div>
+                <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: netColor(ivan.net), fontVariantNumeric: 'tabular-nums' }}>{money(ivan.net)}</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 120 }}>
+                <div style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Amazon (profit)</div>
+                <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: netColor(amazon.profit), fontVariantNumeric: 'tabular-nums' }}>{money(amazon.profit)}</div>
+              </div>
             </div>
           </div>
         )}

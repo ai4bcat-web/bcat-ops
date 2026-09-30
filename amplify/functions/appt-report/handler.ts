@@ -21,12 +21,28 @@ interface Stop {
 interface LoadRow {
   id: string
   customer?: string
+  customerId?: string | null
   aljexId?: string
   stops?: unknown
   rateConfirmKey?: string
   pickupAppt?: string; pickupApptType?: string
   deliveryAppt?: string; deliveryApptType?: string
   originName?: string; destinationName?: string
+}
+interface CustomerRow {
+  id: string
+  apptWorkflow?: 'NONE' | 'BATORY' | null
+}
+
+/**
+ * Same rule as src/lib/apptQueue.ts requiresApptProofs: the linked Customer's configured
+ * workflow decides; the /batory/i name match only covers loads whose customer has no
+ * link or no configured workflow yet (pre-backfill).
+ */
+export function requiresApptProofs(load: LoadRow, customersById: Record<string, CustomerRow>): boolean {
+  const workflow = load.customerId ? customersById[load.customerId]?.apptWorkflow : null
+  if (workflow) return workflow === 'BATORY'
+  return /batory/i.test(load.customer ?? '')
 }
 
 const chicagoDate = (iso: string): string =>
@@ -65,8 +81,8 @@ const hasTime = (iso?: string): boolean => {
 }
 
 /** Mirrors src/lib/apptStatus.ts apptWorkflowStatus, trimmed to what the report needs. */
-export function statusOf(stop: Stop, load: LoadRow): string {
-  if (!/batory/i.test(load.customer ?? '')) return load.rateConfirmKey ? 'confirmed' : 'RATECON NEEDED'
+export function statusOf(stop: Stop, load: LoadRow, customersById: Record<string, CustomerRow> = {}): string {
+  if (!requiresApptProofs(load, customersById)) return load.rateConfirmKey ? 'confirmed' : 'RATECON NEEDED'
   if (stop.apptStatus) return stop.apptStatus === 'confirmed' ? 'confirmed'
     : { need_request: 'NEED DENNIS', need_book: 'NEED RUBEN', requested: 'REQUESTED', change_needed: 'CHANGE NEEDED' }[stop.apptStatus] ?? stop.apptStatus
   if (stop.apptMoveRequested) return 'CHANGE NEEDED'
@@ -88,8 +104,9 @@ export const handler = async (event?: { force?: boolean }) => {
   const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN
   const CHANNEL = process.env.SLACK_GLOBAL_CHANNEL_ID
   const LOAD_TABLE = process.env.LOAD_TABLE_NAME
-  if (!SLACK_BOT_TOKEN || !CHANNEL || !LOAD_TABLE) {
-    console.warn('[appt-report] not configured (token/channel/table) — skipping')
+  const CUSTOMER_TABLE = process.env.CUSTOMER_TABLE_NAME
+  if (!SLACK_BOT_TOKEN || !CHANNEL || !LOAD_TABLE || !CUSTOMER_TABLE) {
+    console.warn('[appt-report] not configured (token/channel/tables) — skipping')
     return { ok: false, error: 'not configured' }
   }
   // Two UTC crons cover DST; only the one landing on 3 PM Chicago posts.
@@ -98,13 +115,19 @@ export const handler = async (event?: { force?: boolean }) => {
   const days = businessDays()
   const daySet = new Set(days)
 
-  const loads: LoadRow[] = []
-  let ExclusiveStartKey: Record<string, unknown> | undefined
-  do {
-    const page = await dynamo.send(new ScanCommand({ TableName: LOAD_TABLE, ExclusiveStartKey }))
-    loads.push(...(page.Items as LoadRow[] ?? []))
-    ExclusiveStartKey = page.LastEvaluatedKey as Record<string, unknown> | undefined
-  } while (ExclusiveStartKey)
+  const scanAll = async <T>(TableName: string): Promise<T[]> => {
+    const rows: T[] = []
+    let ExclusiveStartKey: Record<string, unknown> | undefined
+    do {
+      const page = await dynamo.send(new ScanCommand({ TableName, ExclusiveStartKey }))
+      rows.push(...(page.Items as T[] ?? []))
+      ExclusiveStartKey = page.LastEvaluatedKey as Record<string, unknown> | undefined
+    } while (ExclusiveStartKey)
+    return rows
+  }
+  const loads = await scanAll<LoadRow>(LOAD_TABLE)
+  const customersById: Record<string, CustomerRow> = {}
+  for (const customer of await scanAll<CustomerRow>(CUSTOMER_TABLE)) customersById[customer.id] = customer
 
   const lines: string[] = []
   for (const load of loads) {
@@ -117,7 +140,7 @@ export const handler = async (event?: { force?: boolean }) => {
       if (!stop.appt) continue
       const day = chicagoDate(stop.appt)
       if (!daySet.has(day)) continue
-      const st = statusOf(stop, load)
+      const st = statusOf(stop, load, customersById)
       if (!REPORTED.has(st)) continue
       const kind = stop.type === 'delivery' ? 'DEL' : 'PU'
       lines.push(`• ${day} ${kind} — *${st}* — ${[load.aljexId ? `Pro# ${load.aljexId}` : null, load.customer, stop.name || stop.city].filter(Boolean).join(' · ')}`)

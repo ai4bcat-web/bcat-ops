@@ -33,7 +33,7 @@ function wrap76(b64: string): string {
 
 /** MIME encoded-word for subjects with non-ASCII characters. */
 function encodeSubject(s: string): string {
-  return /[^\x00-\x7F]/.test(s)
+  return /[\u0080-\uFFFF]/.test(s)
     ? `=?UTF-8?B?${Buffer.from(s, 'utf-8').toString('base64')}?=`
     : s
 }

@@ -11,7 +11,7 @@ export function useTruckDocAlerts() {
   const equipment = useAppStore((s) => s.equipment)
   // Shared dataset + shared "current document" rule — this used to run its own scan
   // and its own index, which could disagree with the Files hub about the same truck.
-  const { docFor, docs } = useAllComplianceDocuments()
+  const { docFor } = useAllComplianceDocuments()
 
   return useMemo(() => {
     let expired = 0, missing = 0, expiring = 0
@@ -28,5 +28,5 @@ export function useTruckDocAlerts() {
       }
     }
     return { expired, missing, expiring, outOfDateCount: expired + missing }
-  }, [docFor, docs, equipment])
+  }, [docFor, equipment])
 }

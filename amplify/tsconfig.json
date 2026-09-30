@@ -6,6 +6,7 @@
     "resolveJsonModule": true,
     "strict": true,
     "skipLibCheck": true,
+    "esModuleInterop": true,
     "lib": ["ES2020"],
     "types": ["node"]
   },

@@ -93,7 +93,10 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
       } catch (err: unknown) {
         const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
         console.error('[list] Cognito error:', msg, '| pool:', USER_POOL_ID)
-        throw new Error(`ListUsers failed (pool=${USER_POOL_ID}): ${msg}`)
+        // ES2020 lib lacks the ErrorOptions constructor; attach the cause explicitly.
+        const error = new Error(`ListUsers failed (pool=${USER_POOL_ID}): ${msg}`)
+        ;(error as Error & { cause?: unknown }).cause = err
+        throw error
       }
       const users = (result.Users ?? []).map((u) => ({
         username: u.Username,

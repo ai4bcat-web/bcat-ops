@@ -8,7 +8,7 @@ import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { useCarrierReplies } from '@/hooks/useCarrierBlast'
-import { ACTIVE_STATUSES } from '@/features/intake/IntakePage'
+import { ACTIVE_STATUSES } from '@/lib/intake'
 import { APPT_MOVE_PREFIX, APPT_TASK_PREFIX } from '@/lib/apiClient'
 import { NAV_GROUPS } from '@/lib/navItems'
 

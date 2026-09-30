@@ -8,7 +8,6 @@ import {
   taskStatusBadge,
   severityBadge,
   complianceStatusBadge,
-  daysUntil,
 } from '@/lib/complianceStatus'
 import type {
   ComplianceDocumentStatus,
@@ -35,15 +34,6 @@ export function SeverityBadge({ severity }: { severity: AlertSeverity }) {
 export function ComplianceBadge({ status }: { status?: ComplianceStatus | null }) {
   const { variant, label } = complianceStatusBadge(status)
   return <Badge variant={variant}>{label}</Badge>
-}
-
-/** "in 12 days" / "5 days ago" / "today". null date → em-dash. */
-export function daysRemainingLabel(date?: string | null): string {
-  const d = daysUntil(date)
-  if (d === null) return '—'
-  if (d === 0) return 'today'
-  if (d > 0) return `in ${d} day${d === 1 ? '' : 's'}`
-  return `${Math.abs(d)} day${d === -1 ? '' : 's'} ago`
 }
 
 /** Round initials avatar tinted with the driver's calendar color. */
@@ -95,23 +85,26 @@ export function Card({ title, sub, right, children, noPad = false }: CardProps) 
   )
 }
 
+interface PreviewState {
+  key: string
+  url: string | null
+  error: boolean
+}
+
 /** Inline document preview (PDF in iframe, images in img). Resolves the presigned URL. */
 export function DocumentPreview({ s3Key }: { s3Key: string }) {
-  const [url, setUrl] = useState<string | null>(null)
-  const [error, setError] = useState(false)
+  const [{ key, url, error }, setState] = useState<PreviewState>(() => ({ key: s3Key, url: null, error: false }))
 
   useEffect(() => {
-    let active = true
-    setUrl(null)
-    setError(false)
     getComplianceDocUrl(s3Key)
-      .then((u) => { if (active) setUrl(u) })
-      .catch(() => { if (active) setError(true) })
-    return () => { active = false }
+      .then((u) => setState((prev) => (prev.key === s3Key ? { key: s3Key, url: u, error: false } : prev)))
+      .catch(() => setState((prev) => (prev.key === s3Key ? { key: s3Key, url: null, error: true } : prev)))
   }, [s3Key])
 
-  if (error) return <div style={{ padding: 24, color: 'var(--ds-t3)', fontSize: 13 }}>Could not load preview.</div>
-  if (!url) return <div style={{ padding: 24, color: 'var(--ds-t3)', fontSize: 13 }}>Loading preview…</div>
+  if (key !== s3Key || !url) {
+    if (key === s3Key && error) return <div style={{ padding: 24, color: 'var(--ds-t3)', fontSize: 13 }}>Could not load preview.</div>
+    return <div style={{ padding: 24, color: 'var(--ds-t3)', fontSize: 13 }}>Loading preview…</div>
+  }
 
   const isPdf = /\.pdf($|\?)/i.test(s3Key)
   if (isPdf) {

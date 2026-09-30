@@ -123,7 +123,12 @@
   --radius: 0.375rem;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* Tailwind v4 puts utilities in @layer utilities; an UN-layered rule outranks every layer
+   regardless of specificity, so this reset must live in @layer base or `p-*`/`m-*`
+   utilities never apply. (Preflight already resets these; kept for the explicit box-sizing.) */
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+}
 
 body {
   background-color: var(--ds-bg);

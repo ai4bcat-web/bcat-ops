@@ -46,7 +46,7 @@ function respond(statusCode: number, body: unknown) {
 function parseAmount(raw: unknown): number | undefined {
   if (raw == null || raw === '') return undefined
   if (typeof raw === 'number') return Number.isFinite(raw) ? raw : undefined
-  const n = parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))
+  const n = parseFloat(String(raw).replace(/[^0-9.-]/g, ''))
   return Number.isFinite(n) ? n : undefined
 }
 

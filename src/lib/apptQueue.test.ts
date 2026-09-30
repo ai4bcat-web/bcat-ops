@@ -449,6 +449,13 @@ describe('stopConfirmed — screenshots gate ONLY Batory Foods', () => {
     expect(stopConfirmed(booked(), 'batory')).toBe(false)
   })
 
+  it('a linked customer workflow overrides the name match either way', () => {
+    expect(stopConfirmed(booked(), { customer: 'Batory Foods', customerApptWorkflow: 'NONE' })).toBe(true)
+    expect(stopConfirmed(booked(), { customer: 'Acme Ingredients', customerApptWorkflow: 'BATORY' })).toBe(false)
+    // Linked but not configured yet → the name still decides.
+    expect(stopConfirmed(booked(), { customer: 'Batory Foods', customerApptWorkflow: null })).toBe(false)
+  })
+
   it('any other customer: stop-level check passes when booked — the RATECON decides at load level', () => {
     // Screenshots no longer gate non-Batory stops; apptWorkflowStatus judges the load's
     // ratecon (see apptStatus.test.ts).

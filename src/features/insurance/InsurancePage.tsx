@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import {
   Umbrella, Truck, Container, HeartPulse, Plus, ArrowLeftRight, Trash2, Star, CopyPlus,
 } from 'lucide-react'
@@ -23,10 +23,8 @@ const tdStyle: CSSProperties = { padding: '9px 16px', color: 'var(--ds-t2)', fon
 
 /** Dollar input that commits cents on blur / Enter. */
 function MoneyInput({ cents, onCommit, disabled }: { cents: number; onCommit: (cents: number) => void; disabled?: boolean }) {
-  const [raw, setRaw] = useState(cents ? String(cents / 100) : '')
-  useEffect(() => { setRaw(cents ? String(cents / 100) : '') }, [cents])
-  const commit = () => {
-    const dollars = parseFloat(raw.replace(/[^0-9.]/g, ''))
+  const commit = (value: string) => {
+    const dollars = parseFloat(value.replace(/[^0-9.]/g, ''))
     const c = Number.isFinite(dollars) ? Math.round(dollars * 100) : 0
     if (c !== cents) onCommit(c)
   }
@@ -34,7 +32,9 @@ function MoneyInput({ cents, onCommit, disabled }: { cents: number; onCommit: (c
     <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       <span style={{ position: 'absolute', left: 10, color: 'var(--ds-t3)', fontSize: 13, pointerEvents: 'none' }}>$</span>
       <input
-        value={raw} onChange={(e) => setRaw(e.target.value)} onBlur={commit}
+        key={cents}
+        defaultValue={cents ? String(cents / 100) : ''}
+        onBlur={(e) => commit(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
         inputMode="decimal" placeholder="0" disabled={disabled}
         style={{ ...inputStyle, paddingLeft: 18 }}
@@ -69,19 +69,15 @@ export function InsurancePage() {
   const [cmpB, setCmpB] = useState<string | null>(null)
 
   // Default the working period to the current one once loaded.
-  useEffect(() => {
-    if (!selectedId && ins.currentPeriod) setSelectedId(ins.currentPeriod.id)
-  }, [ins.currentPeriod, selectedId])
+  const periodId = selectedId ?? ins.currentPeriod?.id ?? null
+  const period = ins.periods.find((p) => p.id === periodId) ?? ins.currentPeriod
   // Default compare to (previous vs current).
-  useEffect(() => {
-    if (ins.periods.length >= 1 && !cmpB) setCmpB(ins.currentPeriod?.id ?? ins.periods[0].id)
-    if (ins.periods.length >= 2 && !cmpA) {
-      const others = ins.periods.filter((p) => p.id !== (ins.currentPeriod?.id ?? ins.periods[0].id))
-      setCmpA(others[0]?.id ?? null)
-    }
-  }, [ins.periods, ins.currentPeriod, cmpA, cmpB])
-
-  const period = ins.periods.find((p) => p.id === selectedId) ?? ins.currentPeriod
+  const cmpBDefault = ins.periods.length >= 1 ? (ins.currentPeriod?.id ?? ins.periods[0].id) : null
+  const cmpADefault = ins.periods.length >= 2 && cmpBDefault
+    ? ins.periods.find((p) => p.id !== cmpBDefault)?.id ?? null
+    : null
+  const cmpAEffective = cmpA ?? cmpADefault
+  const cmpBEffective = cmpB ?? cmpBDefault
   const totals = useMemo(() => (period ? ins.summary(period.id) : null), [period, ins])
   const truckRows = useMemo(() => (period ? ins.unitRows(period.id, 'TRUCK') : []), [period, ins])
   const trailerRows = useMemo(() => (period ? ins.unitRows(period.id, 'TRAILER') : []), [period, ins])
@@ -187,7 +183,7 @@ export function InsurancePage() {
         )}
 
         {mode === 'compare' && (
-          <CompareView ins={ins} a={cmpA} b={cmpB} setA={setCmpA} setB={setCmpB} />
+          <CompareView ins={ins} a={cmpAEffective} b={cmpBEffective} setA={setCmpA} setB={setCmpB} />
         )}
       </div>
     </div>

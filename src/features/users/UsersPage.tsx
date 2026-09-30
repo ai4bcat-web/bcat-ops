@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import {
@@ -50,6 +50,13 @@ function formatAdded(iso?: string): string {
 
 const isUserAdmin = (u: UserWithGroups) => u.groups.includes('ADMIN')
 const pageGroupCount = (u: UserWithGroups) => u.groups.filter((g) => g.startsWith('page-')).length
+
+async function fetchUsers(): Promise<UserWithGroups[]> {
+  const list = await listCognitoUsers()
+  // Load each user's groups so the header can show admin/access without expanding.
+  const groups = await Promise.all(list.map((u) => getUserGroups(u.username).catch(() => [])))
+  return list.map((u, i) => ({ ...u, groups: groups[i] }))
+}
 
 function StatusPill({ user }: { user: CognitoUser }) {
   if (user.status === 'FORCE_CHANGE_PASSWORD') {
@@ -233,26 +240,44 @@ export function UsersPage() {
     }
   }, [authLoading, isOwner, navigate])
 
-  const loadUsers = useCallback(async () => {
+  const refreshUsers = async () => {
     setLoading(true)
     setError(null)
     try {
-      const list = await listCognitoUsers()
-      // Load each user's groups so the header can show admin/access without expanding.
-      const groups = await Promise.all(list.map((u) => getUserGroups(u.username).catch(() => [])))
-      setUsers(list.map((u, i) => ({ ...u, groups: groups[i] })))
+      setUsers(await fetchUsers())
     } catch (err: unknown) {
-      console.error('[users] fetch failed', err)
-      setError(errorMessage(err))
-      toast.error(`Failed to load users: ${errorMessage(err)}`)
+      console.error('[users] refresh failed', err)
+      const msg = errorMessage(err)
+      setError(msg)
+      toast.error(`Failed to load users: ${msg}`)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }
 
   useEffect(() => {
-    if (isOwner) loadUsers()
-  }, [isOwner, loadUsers])
+    if (!isOwner) return
+    let canceled = false
+    fetchUsers()
+      .then((list) => {
+        if (canceled) return
+        setUsers(list)
+        setError(null)
+      })
+      .catch((err: unknown) => {
+        if (canceled) return
+        console.error('[users] fetch failed', err)
+        const msg = errorMessage(err)
+        setError(msg)
+        toast.error(`Failed to load users: ${msg}`)
+      })
+      .finally(() => {
+        if (!canceled) setLoading(false)
+      })
+    return () => {
+      canceled = true
+    }
+  }, [isOwner])
 
   const toggleInvitePage = (key: string) =>
     setInvitePages((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))
@@ -274,7 +299,7 @@ export function UsersPage() {
       setNewEmail('')
       setInvitePages([])
       setInviteAdmin(false)
-      await loadUsers()
+      await refreshUsers()
     } catch (err: unknown) {
       toast.error(errorMessage(err))
     } finally {
@@ -344,7 +369,7 @@ export function UsersPage() {
         await enableCognitoUser(u.username)
         toast.success(`${u.email} enabled`)
       }
-      await loadUsers()
+      await refreshUsers()
     } catch (err: unknown) {
       toast.error(errorMessage(err))
     } finally {
@@ -376,7 +401,7 @@ export function UsersPage() {
             <h1 className="text-2xl font-semibold text-foreground tracking-tight">User Management</h1>
             <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>Workspace members · roles · access</p>
           </div>
-          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={loadUsers} disabled={loading}>
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={refreshUsers} disabled={loading}>
             <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />Refresh
           </Button>
         </div>
@@ -476,7 +501,7 @@ export function UsersPage() {
                   <p className="text-sm text-destructive font-medium">Failed to load users</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{error}</p>
                 </div>
-                <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={loadUsers}>Retry</Button>
+                <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" onClick={refreshUsers}>Retry</Button>
               </div>
             )}
 

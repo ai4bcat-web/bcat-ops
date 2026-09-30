@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import { Rocket, CircleCheck, Circle } from 'lucide-react'
-import { listOnboardingTasks, generateChecklist, setTaskStatus } from '@/lib/complianceClient'
+import { generateChecklist } from '@/lib/complianceClient'
 import { onboardingProgress, tasksByCategory } from '@/lib/driverOnboarding'
+import { useOnboardingTasks } from '@/hooks/useOnboardingTasks'
 import { useAuth } from '@/hooks/useAuth'
 import type { OnboardingTask } from '@/types'
 import type { Equipment } from '@/types/equipment'
@@ -16,20 +17,8 @@ import type { Equipment } from '@/types/equipment'
  */
 export function TruckOnboardingSection({ asset }: { asset: Equipment }) {
   const { user } = useAuth()
-  const [tasks, setTasks] = useState<OnboardingTask[]>([])
-  const [loading, setLoading] = useState(true)
+  const { tasks, loading, refresh, changeStatus } = useOnboardingTasks('TRUCK', asset.id)
   const [busy, setBusy] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      setTasks(await listOnboardingTasks('TRUCK', asset.id))
-    } catch (err) {
-      console.error('[truck onboarding] load', err)
-    } finally { setLoading(false) }
-  }, [asset.id])
-
-  useEffect(() => { void load() }, [load])
 
   const progress = useMemo(() => onboardingProgress(tasks), [tasks])
   const grouped = useMemo(() => tasksByCategory(tasks), [tasks])
@@ -46,7 +35,7 @@ export function TruckOnboardingSection({ asset }: { asset: Equipment }) {
     setBusy(true)
     try {
       await generateChecklist({ entityType: 'TRUCK', entityId: asset.id, classification })
-      await load()
+      await refresh()
       toast.success(`Checklist ready for #${asset.unitNumber}`)
     } catch (err) {
       toast.error(`Couldn't start: ${err instanceof Error ? err.message : 'unknown error'}`)
@@ -56,8 +45,7 @@ export function TruckOnboardingSection({ asset }: { asset: Equipment }) {
   const toggle = async (task: OnboardingTask) => {
     const next = task.status === 'COMPLETE' ? 'PENDING' : 'COMPLETE'
     try {
-      const updated = await setTaskStatus(task.id, next, { completedBy: user?.email ?? 'unknown' })
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? updated : t)))
+      await changeStatus(task.id, next, { completedBy: user?.email ?? 'unknown' })
     } catch (err) {
       toast.error(`Couldn't update: ${err instanceof Error ? err.message : 'unknown error'}`)
     }

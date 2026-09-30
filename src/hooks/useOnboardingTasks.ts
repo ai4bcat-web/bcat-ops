@@ -2,30 +2,27 @@ import { useState, useEffect, useCallback } from 'react'
 import { listOnboardingTasks, updateOnboardingTask, setTaskStatus } from '@/lib/complianceClient'
 import type { OnboardingTask, OnboardingTaskStatus, ComplianceEntityType } from '@/types'
 
+const NO_TASKS: OnboardingTask[] = []
+
 /** OnboardingTask checklist for a single driver or truck. */
 export function useOnboardingTasks(entityType: ComplianceEntityType, entityId: string | null) {
-  const [tasks, setTasks] = useState<OnboardingTask[]>([])
-  const [loading, setLoading] = useState(true)
+  const key = `${entityType}|${entityId ?? ''}`
+  const [loaded, setTasks] = useState<OnboardingTask[]>([])
+  // Derived: true until a fetch for the CURRENT entity has settled.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    if (!entityId) {
-      setTasks([])
-      setLoading(false)
-      return
-    }
-    try {
-      setTasks(await listOnboardingTasks(entityType, entityId))
-    } catch (err) {
-      console.error('[useOnboardingTasks] fetch error', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [entityType, entityId])
+  const load = useCallback(() => {
+    if (!entityId) return Promise.resolve()
+    return listOnboardingTasks(entityType, entityId)
+      .then((next) => { setTasks(next) })
+      .catch((err: unknown) => { console.error('[useOnboardingTasks] fetch error', err) })
+      .finally(() => setLoadedKey(key))
+  }, [entityType, entityId, key])
 
-  useEffect(() => {
-    setLoading(true)
-    load()
-  }, [load])
+  useEffect(() => { void load() }, [load])
+
+  const tasks = entityId ? loaded : NO_TASKS
+  const loading = entityId != null && loadedKey !== key
 
   const patchTask = useCallback(
     async (id: string, patch: Partial<Omit<OnboardingTask, 'id' | 'createdAt' | 'updatedAt'>>) => {

@@ -165,7 +165,7 @@ export function SchedulerView({
         }}
       />
     )
-  }, [drivers, conflictIds, selectedIds, loadOrderMap])
+  }, [drivers, conflictIds, selectedIds, loadOrderMap, setSelectedLoad])
 
   // ── Resource label renderer ───────────────────────────────────────────────
 
@@ -396,8 +396,12 @@ export function SchedulerView({
 
   const ctxDuplicate = () => {
     if (!ctxLoad) return
-    const { id: _id, createdAt: _ca, updatedAt: _ua, ...rest } = ctxLoad
-    addLoad({ ...rest, aljexId: `${rest.aljexId}-copy` })
+    // id/createdAt/updatedAt are server-managed: the copy must arrive without them.
+    const duplicate: Partial<Load> = { ...ctxLoad, aljexId: `${ctxLoad.aljexId}-copy` }
+    delete duplicate.id
+    delete duplicate.createdAt
+    delete duplicate.updatedAt
+    addLoad(duplicate as Omit<Load, 'id' | 'createdAt' | 'updatedAt'>)
     toast(`Duplicated ${ctxLoad.aljexId}`)
     setContextMenu(null)
   }

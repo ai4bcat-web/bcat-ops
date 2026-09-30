@@ -34,6 +34,7 @@ const FALLBACK_CARD_TO_TRUCK = {
   '00031': 'eq-mnevuhxgs5jf',  // Unit 530
   '00007': 'eq-mnevvq8q6tcx',  // Unit 685
   '00023': 'eq-mnevwst30vwt',  // Unit 780
+  '00072': 'eq-mnmpmycmsojj',  // Unit 310 — Roy Workman
 };
 
 async function buildCardMap(idToken) {

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import {
-  CENTERS,
   DEFAULT_CASH_SETTINGS,
   type CashCheckIn,
   type CashSettingsValues,

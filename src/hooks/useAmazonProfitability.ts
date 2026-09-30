@@ -119,16 +119,14 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
-    try {
-      const [t, s, d, c] = await Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
-      setTrips(t); setSettings(s); setDeductions(d); setCredits(c)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally { setLoading(false) }
-  }, [])
-  useEffect(() => { load() }, [load])
+  const load = useCallback(() =>
+    Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
+      .then(([t, s, d, c]) => { setTrips(t); setSettings(s); setDeductions(d); setCredits(c); setError(null) })
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const { weeks, rows } = useMemo(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
@@ -193,5 +191,5 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
     return { weeks, rows }
   }, [trips, settings, deductions, credits, fuelTxs, drivers])
 
-  return { loading, error, weeks, rows, refresh: load }
+  return { loading, error, weeks, rows, refresh }
 }

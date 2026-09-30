@@ -491,6 +491,18 @@ The backend and `/vendor-ap` page deploy through the normal Amplify pipeline. Ma
 
 Attachments are copied to S3 under `intake-pdfs/vendor-ap/` before the row is created (presigned PUT, then a commit that verifies every object), so a queue row never exists without its files. Malformed messages get the `vendor-ap-needs-review` label instead of being dropped; network/auth/server failures remain retriable and fail the trigger visibly.
 
+## Section 12 — PODs (JobsDone proof-of-delivery images → shipments)
+
+The `/pods` page and the `pod-actions` backend deploy through the normal Amplify pipeline. No Google setup is involved; the only one-time step is connecting the JobsDone account, and no secret is ever committed or entered outside the app:
+
+1. Ask the JobsDone team (Lopie Dev) for a **third-party API key** and confirm BCAT's **JobsDone client ID** (the tenant whose text-message photos should appear). The key grants full access to every JobsDone customer, so it is only ever stored server-side.
+2. In BCAT Ops, open **PODs → Configure** (owner or Cognito `ADMIN` only), paste the client ID and API key, and save. The backend verifies the pair against JobsDone before storing it as a SecureString SSM parameter named `/bcat/pods/<user pool id>/connection` (one per stack — production and each sandbox connect separately). Rotating the key is the same step; changing to a different client ID is refused so a tenant cannot be swapped silently.
+3. In **Users**, grant **PODs** to the staff who match documents to shipments. The owner and `ADMIN` group have access automatically; every signed-in user can still see the PODs already linked to a load in the load drawer.
+4. Saving the connection queues an import of the **last 7 days** of the feed immediately, and from then on a 15-minute schedule walks the feed on AWS — nothing depends on anyone having the page open. **Scan past 7 days** on the PODs page queues the same walk on demand (the page confirms it was queued; results appear as each image finishes). Each image is archived unchanged under S3 `pods/<id>/original`, then a scanned copy (`pods/<id>/enhanced.jpg`) is produced automatically for JPEG/PNG photos: the page is cropped and perspective-squared when the crop is proven not to lose any readable text, turned upright by reading it at all four rotations, and shadows/background are removed. A copy the scanner could not vouch for (no readable text, no clean page boundary, ambiguous orientation) is still produced but the card shows an amber **Review scan** reason — check it against the original. PDFs and other formats stay original-only and say so. The schedule runs in isolated preview stacks (`BCAT_ISOLATED_PREVIEW`) too, so imports continue automatically while previewing.
+5. On a row, **Assign** first lists that sender's recent loads (matched by texting phone or full name) and keeps the full load list searchable underneath. Assignment is explicit — nothing is guessed — and the POD then appears in that load's drawer. Unassign/reassign asks for confirmation; two people editing the same document get a "changed, please review" error instead of a silent overwrite.
+
+Deletion is intentionally absent: a mismatched POD is reassigned, and the JobsDone source is never written to.
+
 
 ## Troubleshooting
 

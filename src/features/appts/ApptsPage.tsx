@@ -15,7 +15,8 @@ import {
 import { apptHistory, type ApptHistoryEvent } from '@/lib/apptHistory'
 import { statusLabel, defaultRequestedFor, STATUS_META, canSetChangeNeeded, canMarkRequested, changeNeededPatch, type EffectiveApptStatus, type ApptWorkflowStatus } from '@/lib/apptStatus'
 import { requiresApptProofs } from '@/lib/apptQueue'
-import { ApptProofPanel, loadProofCount } from '@/components/ApptProofPanel'
+import { ApptProofPanel } from '@/components/ApptProofPanel'
+import { loadProofCount } from '@/lib/apptProofs'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
@@ -321,7 +322,7 @@ function ApptTimeCell({ load, refr, apptField, typeField, kind, status, updateLo
       ? `${label} · req ${fmtChi(stamped)}`
       : label
 
-  const choices = statusChoices(stop, actor, status, requiresApptProofs(load.customer))
+  const choices = statusChoices(stop, actor, status, requiresApptProofs(load))
   const isToggleable = choices.length > 0
 
   const applyStatus = async (target: ApptWorkflowStatus) => {
@@ -766,7 +767,7 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                 const showProofs = openProofs.has(r.loadId)
                 const loadRec = loadsById.get(r.loadId)
                 const proofs = loadRec ? loadProofCount(loadRec) : { have: 0, want: 6 }
-                const batory = !!loadRec && requiresApptProofs(loadRec.customer)
+                const batory = !!loadRec && requiresApptProofs(loadRec)
                 return (
                 <Fragment key={r.loadId}>
                 <tr

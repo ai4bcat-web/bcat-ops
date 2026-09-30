@@ -147,3 +147,75 @@ deploy main ─► get CFN outputs (0)
 classify drivers (6a) ─► run backfill (6b)
 scanner dry-run (5) ─► trust daily cron
 ```
+
+---
+
+# Post-deploy runbook — TMS Phase 1 (Customers & Locations)
+
+Nothing here runs against production until the feature branch is merged; exercise it on
+the isolated branch backend first (its outputs live outside the repo, e.g.
+`/tmp/bcat-tms-phase1-outputs/amplify_outputs.json` — never overwrite the repo-root file).
+
+## P1-1. Secrets (Amplify Console → Hosting → Secrets, per branch)
+
+- `GOOGLE_MAPS_API_KEY` — a **server** key with Geocoding API, Places API (New) and Time Zone
+  API enabled and an IP/none restriction. The existing browser key (`VITE_GOOGLE_MAPS_API_KEY`,
+  referrer-restricted) is rejected by these APIs with `REQUEST_DENIED`; do not loosen it —
+  create a second key. Until it exists, address search / geocode in the Location form fails
+  with the real Google error and locations can still be saved as plain postal addresses.
+- `GEOCODE_TOKEN_SECRET` — any long random string (`openssl rand -hex 32`), shared by
+  `tms-geocode` (signs results) and `tms-directory-actions` (verifies them). Rotating it
+  invalidates unsaved geocode results only (tokens are short-lived); stored pins are unaffected.
+
+## P1-2. Frontend env (Hosting → Environment variables, then redeploy)
+
+- `VITE_GOOGLE_MAPS_API_KEY` (existing browser key) and `VITE_GOOGLE_MAPS_MAP_ID` (a Map ID
+  from Google Cloud → Maps → Map management) for the location detail map. Without both the
+  detail panel shows the coordinates and says the map is not configured.
+
+## P1-3. What the deploy changes for existing users
+
+- Customer / Location rows are unchanged; new columns are empty until edited. Existing
+  loads keep working: `customerId` and `stop.locationId` are optional, the Batory name
+  match still applies to unlinked loads, and the calendar / Appts board read nothing new.
+- Signed-in users can no longer call `createCustomer`/`updateCustomer`/`deleteCustomer`
+  (and the Location equivalents) directly — only through `tmsDirectoryActions`. Any browser
+  tab still running the previous build must be reloaded before editing the directory.
+- The `appt-report` digest now also scans the Customer table (env `CUSTOMER_TABLE_NAME`);
+  it refuses to run and logs "not configured" if that env is missing.
+
+## P1-4. Backfills (isolated backend first; each is a dry-run unless `--apply`)
+
+```
+export BCAT_EMAIL=… BCAT_PASSWORD=…          # an ADMIN account on the target backend
+O=/tmp/bcat-tms-phase1-outputs/amplify_outputs.json
+node scripts/backfillCustomers.mjs --outputs $O --plan plans/customers.json          # review plan + reviewables
+node scripts/backfillCustomers.mjs --outputs $O --plan plans/customers.json --apply --env sandbox
+node scripts/backfillLocations.mjs --outputs $O --plan plans/locations.json          # unresolved rows → review report
+node scripts/backfillLocations.mjs --outputs $O --plan plans/locations.json --apply --env sandbox
+node scripts/seedDivisions.mjs --input divisions.reviewed.json --outputs $O --plan plans/divisions.json [--apply --env sandbox]
+```
+
+- Apply refuses when the source data changed since the plan (fingerprint), when the outputs
+  endpoint differs from the plan, when the outputs path is the repo-root production file, or
+  when `--env` is `prod`/`production`. A production run needs a separate explicit approval
+  and an environment name added to the allow-list on purpose.
+- Batory: the customer plan lists Batory-named customers under reviewables
+  (`BATORY_WORKFLOW_REVIEW`); set `apptWorkflow = BATORY` on the Customer page yourself —
+  the script never sets it. Until then the name match keeps the ladder working.
+- Locations: the backfill never geocodes or invents an address; link what matches exactly,
+  then fix the review report by hand in `/locations` (search the address → geocode → save)
+  and re-run the dry-run.
+
+## P1-5. Smoke checks after deploy
+
+1. `/customers` → Add → save with a credit limit like `1500.50` → the row shows `1500.50`
+   (stored as 150050 cents). Edit and save again; open the same customer in a second tab,
+   save there first → the first tab gets "changed by someone else — reload".
+2. `/locations` → Add → type an address → pick a suggestion → save → chevron shows the pin
+   (or the "not configured" note) and an empty load history.
+3. Load form → pick that customer and link a stop to that location → save → reopen: the
+   stop keeps its address snapshot; edit the location's street in `/locations` → the load's
+   snapshot is unchanged.
+4. ADMIN: merge two test locations with a linked load → job `COMPLETED`, the load's stop now
+   points at the target, `address.mergedFromLocationId` set, proofs untouched.

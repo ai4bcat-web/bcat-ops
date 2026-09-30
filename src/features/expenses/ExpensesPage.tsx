@@ -776,7 +776,6 @@ function EfficiencyTab({
   const [dataLoading,  setDataLoading]  = useState(true)
 
   useEffect(() => {
-    setDataLoading(true)
     Promise.all([listTruckConfigs(), listTruckMileages(), listLoads()])
       .then(([configs, miles, ls]) => {
         setTruckConfigs(configs)

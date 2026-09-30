@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { isTrailerFieldUndefined } from './apiClient'
 
 /**
@@ -54,7 +55,6 @@ describe('a saved value must come back in the response', () => {
     // The write succeeding is only half of it: if the response selection omits
     // fleetGroup, the returned driver overwrites local state without it and a value
     // that WAS saved instantly reads as unsaved. That is what "it's not saving" was.
-    const { readFileSync } = require('node:fs') as typeof import('node:fs')
     const src = readFileSync('src/lib/apiClient.ts', 'utf8')
     const updateDriver = src.slice(src.indexOf('export async function updateDriver'))
     const run = updateDriver.slice(0, updateDriver.indexOf('export async function', 10))

@@ -77,17 +77,15 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
   const [loading, setLoading]       = useState(true)
   const [error, setError]           = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null)
-    try {
-      const [t, s, d, c] = await Promise.all([listBoxTruckTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
-      setTrips(t); setSettings(s); setDeductions(d); setCredits(c)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally { setLoading(false) }
-  }, [])
+  const load = useCallback(() =>
+    Promise.all([listBoxTruckTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
+      .then(([t, s, d, c]) => { setTrips(t); setSettings(s); setDeductions(d); setCredits(c); setError(null) })
+      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .finally(() => setLoading(false)),
+  [])
+  const refresh = useCallback(() => { setLoading(true); return load() }, [load])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const end = periodEnd(periodStart)
 
@@ -280,7 +278,7 @@ export function useBoxTruckPay(periodStart: string): BoxTruckPayState {
   }, [trips])
 
   return {
-    loading, error, rows, tripCount, unconfigured, refresh: load, pullFromCalendar,
+    loading, error, rows, tripCount, unconfigured, refresh, pullFromCalendar,
     addTrip, updateTrip, removeTrip, pushTripToNextPeriod, clearPeriod, saveSetting,
     addDeduction, removeDeduction, addCredit, updateCredit, removeCredit,
   }

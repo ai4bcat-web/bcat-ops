@@ -7,6 +7,7 @@ import type { AmazonDispute } from '@/types/dispute'
 import { getMondayOf } from '@/lib/date'
 import * as api from '@/lib/apiClient'
 import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
+import { requiresApptProofs } from '@/lib/apptQueue'
 import { errorMessage } from '@/lib/utils/errorMessage'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
@@ -624,7 +625,8 @@ export const useAppStore = create<AppState>()(
         // New BATORY loads enter the appointment ladder immediately: pickup NEED TO
         // DENNIS (standing 12pm rule) and delivery NEED RUBEN (Ruben picks
         // the time). Statuses ride the stops; the two tasks are created after the save.
-        const isBatory = /batory/i.test(l.customer ?? '')
+        l = api.withCustomerPolicy(l)
+        const isBatory = requiresApptProofs(l)
         if (isBatory && Array.isArray(l.stops)) {
           l = { ...l, stops: l.stops.map((s) => ({
             ...s,

@@ -29,7 +29,7 @@ function num(s: string): number | null {
 const HEADER_RE = /shipment_pro|gross[_ ]?profit|customer name|shipment_equipment/i
 
 export function parseBoxTruckRows(text: string): RawBoxTruckRow[] {
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim())
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.trim())
   if (!lines.length) return []
 
   // Find the header row, skipping any banner/summary rows above it (e.g. "Trips:" / "Percentage: 50%").

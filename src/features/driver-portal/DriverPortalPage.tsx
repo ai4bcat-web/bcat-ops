@@ -55,18 +55,35 @@ export function DriverPortalPage() {
   const { token = '' } = useParams()
   const [state, setState] = useState<OnboardingState | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'checklist' | 'application'>('checklist')
 
-  const load = useCallback(async () => {
+  const fetchState = useCallback(async () => {
+    return portal<OnboardingState>(token, 'getOnboardingState')
+  }, [token])
+
+  const refresh = useCallback(async () => {
     try {
-      setState(await portal<OnboardingState>(token, 'getOnboardingState'))
+      setState(await fetchState())
       setLoadError(null)
     } catch (err) {
       setLoadError(err instanceof PortalError ? err.message : 'Could not load your onboarding')
     }
-  }, [token])
+  }, [fetchState])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    fetchState()
+      .then((newState) => {
+        setState(newState)
+        setLoadError(null)
+      })
+      .catch((err) => {
+        setLoadError(err instanceof PortalError ? err.message : 'Could not load your onboarding')
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+  }, [fetchState])
 
   // The SPA's index.html title is "BCAT OPS" (internal app) — override for drivers.
   useEffect(() => {
@@ -90,7 +107,7 @@ export function DriverPortalPage() {
     )
   }
 
-  if (!state) {
+  if (loading || !state) {
     return <Shell><div className="px-4 py-16 text-center" style={{ color: 'var(--ds-t3)' }}>Loading…</div></Shell>
   }
 
@@ -103,10 +120,10 @@ export function DriverPortalPage() {
           onSaveDraft={(draft) => portal(token, 'saveApplicationDraft', { draft }).then(() => undefined)}
           onSubmit={async (application) => {
             await portal(token, 'submitApplication', { application })
-            await load()
+            await refresh()
             setView('checklist')
           }}
-          onExit={() => { load(); setView('checklist') }}
+          onExit={() => { refresh(); setView('checklist') }}
         />
       </Shell>
     )
@@ -190,7 +207,7 @@ export function DriverPortalPage() {
                 <div className="space-y-2.5">
                   {g.items.map((item) => (
                     <ChecklistRow key={item.requirementKey} item={item} token={token} appStatus={state.application.status}
-                      locked={locked} onOpenApplication={() => setView('application')} onChanged={load} />
+                      locked={locked} onOpenApplication={() => setView('application')} onChanged={refresh} />
                   ))}
                 </div>
               </div>

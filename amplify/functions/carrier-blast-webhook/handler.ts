@@ -6,10 +6,7 @@
  * lead_unsubscribed / campaign_completed. Unknown events and parsing errors always
  * return 200 so Instantly stops retrying.
  */
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb'
 import {
-  makeReplyId,
   emailToReply,
   loadCampaignMapByInstantlyId,
   loadContactMapByLaneEmail,
@@ -17,12 +14,8 @@ import {
   applyReplyToContact,
   updateCampaign,
   updateContactStatus,
-  type CarrierReply,
-  type Lane,
 } from '../carrier-blast-api/handler'
 import { type InstantlyEmail } from '../carrier-blast-api/instantly'
-
-const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
 const getSecret = () => process.env.INSTANTLY_WEBHOOK_SECRET!
 
@@ -118,9 +111,7 @@ export const handler = async (event: FunctionUrlEvent) => {
 
         const lane = campaignMap[campaignId].lane
         const fromEmail = (payload.lead_email ?? '').toLowerCase().trim()
-        const contactMap = fromEmail
-          ? await loadContactMapByLaneEmail([{ lane, email: fromEmail }])
-          : {}
+        const contactMap = fromEmail ? await loadContactMapByLaneEmail() : {}
 
         const reply = emailToReply(email, campaignMap, contactMap)
         if (payload.unibox_url) reply.uniboxUrl = payload.unibox_url

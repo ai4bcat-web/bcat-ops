@@ -1,3 +1,5 @@
+import type { Address } from './tms'
+
 export type ColorKey =
   | 'driver-1' | 'driver-2' | 'driver-3' | 'driver-4' | 'driver-5' | 'driver-6'
   | 'driver-7' | 'driver-8' | 'driver-9' | 'driver-10' | 'driver-11' | 'driver-12'
@@ -229,6 +231,10 @@ export interface Stop {
   type: StopType
   name?: string              // facility / shipper / consignee
   city?: string              // e.g. "Chicago, IL"
+  locationId?: string | null // Location.id; address below is the booked snapshot, not a live view
+  address?: Address | null
+  arrivedAt?: string | null  // actual facility events only — never inferred from the appointment
+  departedAt?: string | null
   appt: string               // ISO UTC (or FCFS/TBD date at 00:00)
   apptType?: ApptType        // default 'exact'
   apptEnd?: string           // ISO UTC — end of window (range only)
@@ -299,6 +305,8 @@ export interface Load {
   rate?: number | null      // total load revenue in cents
   miles?: number | null     // load distance
   customer?: string | null  // customer/broker name
+  customerId?: string | null
+  customerApptWorkflow?: 'NONE' | 'BATORY' | null // resolved from Customer at read time; never persisted
   colorKey?: ColorKey | null  // load's own color swatch
   daySlot?: number | null     // MANUAL number badge — independent label, no effect on order
   sortOrder?: number | null   // persisted drag-reorder position within a day (hidden; drives sort)

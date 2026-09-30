@@ -6,42 +6,45 @@ import type { IntakeItem, IntakeStatus } from '@/types'
 const POLL_MS = 30_000
 
 export function useIntakeItems(filter?: { assignedTo?: string; source?: string }) {
+  const { assignedTo, source } = filter ?? {}
+  const key = `${assignedTo ?? ''}|${source ?? ''}`
   const [items, setItems] = useState<IntakeItem[]>([])
-  const [loading, setLoading] = useState(true)
+  // Loading is derived: true until a fetch for the CURRENT filter has settled, so a
+  // filter change shows the spinner again without a synchronous reset in the effect.
+  const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const prevIdsRef = useRef<Set<string>>(new Set())
   const initialLoadRef = useRef(true)
 
-  const load = useCallback(async () => {
-    try {
-      const next = await listIntakeItems(filter)
-      setItems(next)
+  const load = useCallback(() =>
+    listIntakeItems({ assignedTo, source })
+      .then((next) => {
+        setItems(next)
 
-      // Toast on new items (skip on initial load)
-      if (!initialLoadRef.current) {
-        next.forEach((item) => {
-          if (!prevIdsRef.current.has(item.id)) {
-            toast.info(`New intake: ${item.subject || item.fromEmail}`, {
-              description: item.source === 'IVAN_CARTAGE' ? 'Ivan Cartage' : 'BCAT Logistics',
-            })
-          }
-        })
-      }
-      prevIdsRef.current = new Set(next.map((i) => i.id))
-      initialLoadRef.current = false
-    } catch (err) {
-      console.error('[useIntakeItems] fetch error', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [filter?.assignedTo, filter?.source]) // eslint-disable-line react-hooks/exhaustive-deps
+        // Toast on new items (skip on initial load)
+        if (!initialLoadRef.current) {
+          next.forEach((item) => {
+            if (!prevIdsRef.current.has(item.id)) {
+              toast.info(`New intake: ${item.subject || item.fromEmail}`, {
+                description: item.source === 'IVAN_CARTAGE' ? 'Ivan Cartage' : 'BCAT Logistics',
+              })
+            }
+          })
+        }
+        prevIdsRef.current = new Set(next.map((i) => i.id))
+        initialLoadRef.current = false
+      })
+      .catch((err: unknown) => { console.error('[useIntakeItems] fetch error', err) })
+      .finally(() => setLoadedKey(key)),
+  [assignedTo, source, key])
 
   useEffect(() => {
     initialLoadRef.current = true
-    setLoading(true)
-    load()
+    void load()
     const id = setInterval(load, POLL_MS)
     return () => clearInterval(id)
   }, [load])
+
+  const loading = loadedKey !== key
 
   const updateItem = useCallback(async (
     id: string,

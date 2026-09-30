@@ -8,7 +8,7 @@ import { useCarrierReplies } from '@/hooks/useCarrierBlast'
 import { useCarrierCampaigns } from '@/hooks/useCarrierBlast'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { TEAM_MEMBERS, assigneeLabel } from '@/features/intake/IntakePage'
+import { TEAM_MEMBERS, assigneeLabel } from '@/lib/intake'
 import { formatDateShort, formatTime } from '@/lib/date'
 import { LANE_LABEL } from '@/types'
 import type { CarrierReply, CarrierLane, CarrierReplyStatus } from '@/types'
@@ -47,8 +47,8 @@ export function RepliesTab({ preselectedCampaignId }: { preselectedCampaignId?: 
     try {
       await setStatus(id, status, user?.email)
       toast.success(status === 'handled' ? 'Marked handled' : 'Reopened')
-    } catch (err) {
-      // toast handled in hook
+    } catch {
+      // error toast handled in hook
     }
   }
 
@@ -56,8 +56,8 @@ export function RepliesTab({ preselectedCampaignId }: { preselectedCampaignId?: 
     try {
       await setAssignedTo(id, assignedTo)
       toast.success(`Assigned to ${assigneeLabel(assignedTo)}`)
-    } catch (err) {
-      // toast handled in hook
+    } catch {
+      // error toast handled in hook
     }
   }
 

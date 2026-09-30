@@ -3,10 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { RefreshCw, Inbox, Loader2, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import {
-  TEAM_MEMBERS, ACTIVE_STATUSES, assigneeLabel,
-  ProNumberModal, QueueCard,
-} from '@/features/intake/IntakePage'
+import { TEAM_MEMBERS, ACTIVE_STATUSES, assigneeLabel } from '@/lib/intake'
+import { ProNumberModal, QueueCard } from '@/features/intake/IntakePage'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
@@ -59,23 +57,32 @@ export function TasksPage() {
 
   const actorEmail = user?.email ?? 'dispatch'
 
+  const fetchTasks = useCallback(() => listTasks({ business: 'bcat' }), [])
+
   const refresh = useCallback(async () => {
+    setLoading(true)
     try {
-      const next = await listTasks({ business: 'bcat' })
+      const next = await fetchTasks()
       setTasks(next)
     } catch (err) {
       console.error('[TasksPage] listTasks failed', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchTasks])
 
   useEffect(() => {
-    setLoading(true)
-    refresh()
-    const id = setInterval(refresh, POLL_MS)
-    return () => clearInterval(id)
-  }, [refresh])
+    let active = true
+    const load = () => {
+      fetchTasks()
+        .then((next) => { if (active) setTasks(next) })
+        .catch((err) => { console.error('[TasksPage] listTasks failed', err) })
+        .finally(() => { if (active) setLoading(false) })
+    }
+    load()
+    const id = setInterval(load, POLL_MS)
+    return () => { active = false; clearInterval(id) }
+  }, [fetchTasks])
 
   // Adapt to IntakeItem shape for the existing card UI
   const items = useMemo(() => tasks.map(taskToIntakeShape), [tasks])

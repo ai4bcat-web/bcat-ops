@@ -8,22 +8,20 @@ export function useComplianceSettings() {
   const [settings, setSettings] = useState<ComplianceSettings | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    try {
-      const loaded = await ensureComplianceSettings()
-      setSettings(loaded)
-      // Apply the configured private-document list app-wide. Until this resolves the
-      // defaults stand, so a slow or failed load errs toward hiding, not exposing.
-      setPrivateDocTypes(loaded.privateDocumentTypes)
-      setResponsibilityOverrides(loaded.documentResponsibility as Record<string, Responsibility> | null)
-    } catch (err) {
-      console.error('[useComplianceSettings] load error', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const load = useCallback(() =>
+    ensureComplianceSettings()
+      .then((loaded) => {
+        setSettings(loaded)
+        // Apply the configured private-document list app-wide. Until this resolves the
+        // defaults stand, so a slow or failed load errs toward hiding, not exposing.
+        setPrivateDocTypes(loaded.privateDocumentTypes)
+        setResponsibilityOverrides(loaded.documentResponsibility as Record<string, Responsibility> | null)
+      })
+      .catch((err: unknown) => { console.error('[useComplianceSettings] load error', err) })
+      .finally(() => setLoading(false)),
+  [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const patch = useCallback(
     async (changes: Partial<Pick<ComplianceSettings, 'portalEmailsPaused' | 'escalationEmailsPaused' | 'managerEmails' | 'privateDocumentTypes' | 'documentResponsibility'>>) => {
