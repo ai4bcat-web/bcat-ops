@@ -5,8 +5,57 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useDriverAuth } from './useDriverAuth'
+import { InstallHintSection } from './InstallHintSection'
 
 type Mode = 'signin' | 'forgot' | 'reset'
+
+function humanizeLoginError(raw: string): string {
+  const lower = raw.toLowerCase()
+  if (lower.includes('user does not exist') || lower.includes('not authorized')) {
+    return "We don't recognize that email or password. Use the email dispatch has on file, or tap Forgot password."
+  }
+  if (lower.includes('incorrect username or password')) {
+    return "Email or password didn't match. Try again, or tap Forgot password."
+  }
+  if (lower.includes('user is not confirmed') || lower.includes('not confirmed')) {
+    return "This email isn't verified yet. Check your inbox or sign up again."
+  }
+  if (lower.includes('limit exceeded')) {
+    return "Too many tries. Wait a few minutes and try again."
+  }
+  if (lower.includes('network') || lower.includes('fetch') || lower.includes('failed to fetch')) {
+    return "Could not connect. Check your signal and try again."
+  }
+  return "Something went wrong. Text dispatch for help."
+}
+
+function humanizeForgotError(raw: string): string {
+  const lower = raw.toLowerCase()
+  if (lower.includes('user does not exist')) {
+    return "We don't recognize that email. Use the email dispatch has on file."
+  }
+  if (lower.includes('limit exceeded')) {
+    return "Too many tries. Wait a few minutes and try again."
+  }
+  if (lower.includes('network') || lower.includes('fetch') || lower.includes('failed to fetch')) {
+    return "Could not connect. Check your signal and try again."
+  }
+  return "Could not send reset code. Text dispatch for help."
+}
+
+function humanizeResetError(raw: string): string {
+  const lower = raw.toLowerCase()
+  if (lower.includes('code mismatch') || lower.includes('invalid code')) {
+    return "That code didn't match. Check your email and try again."
+  }
+  if (lower.includes('limit exceeded')) {
+    return "Too many tries. Wait a few minutes and try again."
+  }
+  if (lower.includes('network') || lower.includes('fetch') || lower.includes('failed to fetch')) {
+    return "Could not connect. Check your signal and try again."
+  }
+  return "Could not reset password. Text dispatch for help."
+}
 
 export default function DriverLoginPage() {
   const navigate = useNavigate()
@@ -34,7 +83,7 @@ export default function DriverLoginPage() {
       await signIn(email.trim(), password)
       navigate('/driver/scan')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed.')
+      setError(humanizeLoginError(err instanceof Error ? err.message : 'Sign in failed.'))
     } finally {
       setLoading(false)
     }
@@ -54,7 +103,7 @@ export default function DriverLoginPage() {
       setMessage('A verification code was sent to your email.')
       setMode('reset')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send reset code.')
+      setError(humanizeForgotError(err instanceof Error ? err.message : 'Could not send reset code.'))
     } finally {
       setLoading(false)
     }
@@ -76,7 +125,7 @@ export default function DriverLoginPage() {
       setNewPassword('')
       setPassword('')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not reset password.')
+      setError(humanizeResetError(err instanceof Error ? err.message : 'Could not reset password.'))
     } finally {
       setLoading(false)
     }
@@ -122,6 +171,7 @@ export default function DriverLoginPage() {
               disabled={loading}
               className="h-14 rounded-xl border-slate-700 bg-slate-900/60 px-4 text-base text-white placeholder:text-slate-500 focus-visible:ring-[#1ea8f3]"
             />
+            <p className="text-xs text-slate-400">Use the same email dispatch has on file.</p>
           </div>
 
           {mode === 'signin' && (
@@ -198,6 +248,8 @@ export default function DriverLoginPage() {
             {mode === 'reset' && 'Reset password'}
           </Button>
         </form>
+
+        {mode === 'signin' && <InstallHintSection />}
 
         {mode === 'signin' && (
           <div className="mt-6 flex flex-col gap-4 text-center text-sm text-slate-400">
