@@ -1,5 +1,5 @@
 import { defineBackend } from '@aws-amplify/backend'
-import { Effect, Policy, PolicyStatement } from 'aws-cdk-lib/aws-iam'
+import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam'
 import { CfnFunction, Function as LambdaFunction, FunctionUrl, FunctionUrlAuthType, HttpMethod, EventSourceMapping, StartingPosition } from 'aws-cdk-lib/aws-lambda'
 import { CfnRule, Rule, Schedule, RuleTargetInput } from 'aws-cdk-lib/aws-events'
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets'
@@ -38,8 +38,6 @@ import { rateconParser } from './functions/ratecon-parser/resource'
 import { apptReport } from './functions/appt-report/resource'
 import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
-import { carrierBlastApi } from './functions/carrier-blast-api/resource'
-import { carrierBlastWebhook } from './functions/carrier-blast-webhook/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
@@ -78,8 +76,6 @@ const backend = defineBackend({
   amazonDisputeIntake,
   disputePortalApi,
   tripScreenshotParser,
-  carrierBlastApi,
-  carrierBlastWebhook,
   tmsDirectoryActions,
   tmsGeocode,
   podActions,
@@ -786,92 +782,6 @@ complianceScannerFn.addEnvironment('AUDIT_TABLE_NAME',    auditLogTable.tableNam
 complianceScannerFn.addEnvironment('FROM_ADDRESS',        'onboarding@bcatcorp.com')
 complianceScannerFn.addEnvironment('PORTAL_BASE_URL',     PORTAL_PROD_ORIGIN)
 
-// ── carrierBlast (Instantly.ai carrier email blast) ─────────────────────────
-
-const carrierContactTable  = backend.data.resources.tables['CarrierContact']
-const carrierCampaignTable = backend.data.resources.tables['CarrierCampaign']
-const carrierReplyTable    = backend.data.resources.tables['CarrierReply']
-const carrierCapacitySnapshotTable = backend.data.resources.tables['CarrierCapacitySnapshot']
-
-const carrierBlastApiFn     = backend.carrierBlastApi.resources.lambda as LambdaFunction
-const carrierBlastWebhookFn = backend.carrierBlastWebhook.resources.lambda as LambdaFunction
-
-const carrierBlastTableArns = [
-  carrierContactTable.tableArn,
-  carrierCampaignTable.tableArn,
-  carrierReplyTable.tableArn,
-  carrierCapacitySnapshotTable.tableArn,
-  `${carrierContactTable.tableArn}/index/*`,
-  `${carrierCampaignTable.tableArn}/index/*`,
-  `${carrierReplyTable.tableArn}/index/*`,
-]
-
-backend.carrierBlastApi.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan', 'dynamodb:Query'],
-    resources: carrierBlastTableArns,
-  })
-)
-// JobsDone OS AppSync: read the shared/dedicated client list to know whether to hold
-// the per-mailbox reserve. The ARN is a literal, so addToRolePolicy is safe here.
-carrierBlastApiFn.addToRolePolicy(
-  new PolicyStatement({
-    actions:   ['appsync:GraphQL'],
-    resources: ['arn:aws:appsync:us-east-1:273354631837:apis/ftqnqtz2jzdljhuj6t5x4wz6pa/*'],
-  })
-)
-backend.carrierBlastWebhook.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Scan', 'dynamodb:Query'],
-    resources: carrierBlastTableArns,
-  })
-)
-
-carrierBlastApiFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
-carrierBlastApiFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)
-carrierBlastApiFn.addEnvironment('REPLY_TABLE',    carrierReplyTable.tableName)
-carrierBlastApiFn.addEnvironment('CAPACITY_SNAPSHOT_TABLE', carrierCapacitySnapshotTable.tableName)
-carrierBlastApiFn.addEnvironment(
-  'JOBSDONE_GRAPHQL_URL',
-  'https://pxudbnlkffhsjivz6vsnx2per4.appsync-api.us-east-1.amazonaws.com/graphql',
-)
-
-carrierBlastWebhookFn.addEnvironment('CONTACT_TABLE',  carrierContactTable.tableName)
-carrierBlastWebhookFn.addEnvironment('CAMPAIGN_TABLE', carrierCampaignTable.tableName)
-carrierBlastWebhookFn.addEnvironment('REPLY_TABLE',    carrierReplyTable.tableName)
-
-// Function URL — Instantly posts webhook events here.
-const carrierBlastWebhookUrl = new FunctionUrl(carrierBlastWebhookFn.stack, 'CarrierBlastWebhookUrl', {
-  function: carrierBlastWebhookFn,
-  authType: FunctionUrlAuthType.NONE,
-})
-
-new CfnOutput(carrierBlastWebhookFn.stack, 'CarrierBlastWebhookFunctionUrl', {
-  value:       carrierBlastWebhookUrl.url,
-  description: 'Instantly webhook target for carrier-blast events',
-})
-
-carrierBlastApiFn.addEnvironment('WEBHOOK_URL', carrierBlastWebhookUrl.url)
-
-// Self-invoke permission for async launch (Lambda → async Event → same Lambda).
-// Standalone AWS::IAM::Policy avoids a circular dependency — the Function role's
-// DefaultPolicy would reference the Function ARN if we used addToRolePolicy or grantInvoke.
-new Policy(carrierBlastApiFn.stack, 'CarrierBlastApiSelfInvokePolicy', {
-  statements: [new PolicyStatement({
-    actions:   ['lambda:InvokeFunction'],
-    resources: [carrierBlastApiFn.functionArn],
-  })],
-}).attachToRole(carrierBlastApiFn.role!)
-
-// EventBridge cron — every 15 minutes, sync replies and refresh sending campaigns.
-const carrierBlastRule = new Rule(carrierBlastApiFn.stack, 'CarrierBlastCronRule', {
-  schedule:    Schedule.rate(Duration.minutes(15)),
-  description: 'Carrier Blast: sync replies and sending campaigns every 15 minutes',
-})
-carrierBlastRule.addTarget(new EventsLambdaTarget(carrierBlastApiFn, {
-  event: RuleTargetInput.fromObject({ action: 'cron' }),
-}))
-
 // ── tmsDirectoryActions Lambda ──────────────────────────────────────────────
 // Directory, config, and merge writes. Customer/Location/Division/Settings/MergeJob
 // tables are written via raw DynamoDB SDK; Load repoints during merge use the
@@ -1099,7 +1009,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
   }
   for (const rule of [
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
-    faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule, carrierBlastRule,
+    faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }

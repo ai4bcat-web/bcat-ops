@@ -9,7 +9,6 @@ import { apptRequestEmailer } from '../functions/appt-request-emailer/resource'
 import { vehicleQuoteEmailer } from '../functions/vehicle-quote-emailer/resource'
 import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
-import { carrierBlastApi } from '../functions/carrier-blast-api/resource'
 import { vendorApActions } from '../functions/vendor-ap-actions/resource'
 import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource'
 import { tmsGeocode } from '../functions/tms-geocode/resource'
@@ -1295,105 +1294,6 @@ const schema = a.schema({
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
-  // ── Carrier Blast (Instantly.ai email outreach) ────────────────────────────
-  CarrierContact: a
-    .model({
-      lane:       a.enum(['IL_IA', 'IL_WI']),
-      email:      a.string().required(),
-      firstName:  a.string(),
-      lastName:   a.string(),
-      company:    a.string(),
-      status:     a.enum(['active', 'bounced', 'unsubscribed', 'removed']),
-      source:     a.string(),            // file name / 'paste'
-      addedBy:    a.string(),
-      addedAt:    a.datetime().required(),
-      lastCampaignId: a.string(),
-      lastSentAt: a.datetime(),
-      notes:      a.string(),
-    })
-    .secondaryIndexes((index) => [index('lane'), index('email')])
-    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
-    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
-    .disableOperations(['subscriptions'])
-    .authorization((allow) => [allow.authenticated()]),
-
-  CarrierCampaign: a
-    .model({
-      lane:                a.enum(['IL_IA', 'IL_WI']),
-      name:                a.string().required(),
-      subject:             a.string().required(),
-      bodyHtml:            a.string().required(),
-      instantlyCampaignId: a.string(),
-      senderAccounts:      a.string().array().required(),
-      dailyLimit:          a.integer(),
-      status:              a.enum(['draft', 'pushing', 'sending', 'paused', 'completed', 'failed']),
-      leadCount:           a.integer().required(),
-      pushedCount:         a.integer().required(),
-      errorText:           a.string(),
-      sentCount:           a.integer().required(),
-      openCount:           a.integer().required(),
-      replyCount:          a.integer().required(),
-      bounceCount:         a.integer().required(),
-      unsubscribeCount:    a.integer().required(),
-      analyticsAt:         a.datetime(),
-      createdBy:           a.string(),
-      startedAt:           a.datetime(),
-      completedAt:         a.datetime(),
-    })
-    .secondaryIndexes((index) => [index('lane'), index('instantlyCampaignId')])
-    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
-    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
-    .disableOperations(['subscriptions'])
-    .authorization((allow) => [allow.authenticated()]),
-
-  CarrierReply: a
-    .model({
-      instantlyEmailId:    a.string().required(),
-      instantlyCampaignId: a.string(),
-      campaignId:          a.string(),
-      lane:                a.enum(['IL_IA', 'IL_WI']),
-      contactId:           a.string(),
-      fromEmail:           a.string().required(),
-      fromName:            a.string(),
-      toAccount:           a.string().required(),
-      subject:             a.string().required(),
-      textBody:            a.string(),
-      htmlBody:            a.string(),
-      snippet:             a.string(),
-      threadId:            a.string(),
-      receivedAt:          a.datetime().required(),
-      isAutoReply:         a.boolean().required(),
-      status:              a.enum(['open', 'handled']),
-      assignedTo:          a.string(),
-      handledBy:           a.string(),
-      handledAt:           a.datetime(),
-      uniboxUrl:           a.string(),
-      lastOutboundAt:      a.datetime(),
-    })
-    .secondaryIndexes((index) => [
-      index('status'),
-      index('campaignId'),
-      index('fromEmail'),
-      index('instantlyEmailId'),
-    ])
-    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
-    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
-    .disableOperations(['subscriptions'])
-    .authorization((allow) => [allow.authenticated()]),
-
-  CarrierCapacitySnapshot: a
-    .model({
-      snapshotId: a.string().required(),  // well-known key: 'current'
-      cachedAt:   a.datetime().required(), // when this snapshot was computed
-      stale:      a.boolean().required(), // true if this is a fallback snapshot
-      data:       a.string().required(), // JSON-serialized capacity payload
-    })
-    .identifier(['snapshotId'])
-    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
-    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
-    .disableOperations(['subscriptions'])
-    .authorization((allow) => [allow.authenticated()]),
-
   // Notify Slack when an IntakeItem status changes.
   // Called fire-and-forget from the frontend after a successful updateIntakeItem.
   notifySlackStatusChange: a
@@ -1639,18 +1539,6 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(apptNeedNotifier)),
-
-  // Instantly.ai-backed carrier email-blast dispatcher. All actions are routed
-  // through a single Lambda to keep the AppSync schema small.
-  carrierBlast: a
-    .mutation()
-    .arguments({
-      action:  a.string().required(),   // listAccounts | launchCampaign | pauseCampaign | resumeCampaign | syncCampaign | syncReplies | sendReply | ensureWebhook
-      payload: a.json(),
-    })
-    .returns(a.json())
-    .authorization((allow) => [allow.authenticated()])
-    .handler(a.handler.function(carrierBlastApi)),
 
   // Live Google rating + review count for the Best Care Auto Transport listing,
   // shown as a CTA in the quote email. Returns { configured, ok, rating, total, url }.
