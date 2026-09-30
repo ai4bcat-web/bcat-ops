@@ -9,10 +9,21 @@ import { tripPayAmount } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { periodLabelLong } from '@/lib/biweekly'
 import { COMPANY_NAME } from '@/lib/branding'
+import ivanLogo from '@/assets/ivan-cartage-logo.png'
 
 const money = (n: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const pct = (n: number) => `${Math.round(n * 100)}%`
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = src
+  })
+}
 
 export function boxTruckPdfFilename(row: BoxTruckPayRow, periodStart: string): string {
   return `pay-${row.driver.name.replace(/\s+/g, '-')}-${periodStart}.pdf`
@@ -26,14 +37,27 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   const W = doc.internal.pageSize.getWidth()
   const M = 40
 
-  // Header band
+  // Header band — keep the logo's black artwork legible on a white chip.
   doc.setFillColor(0, 0, 0)
   doc.rect(0, 0, W, 64, 'F')
+  let logoDrawn = false
+  try {
+    const img = await loadImage(ivanLogo)
+    const h = 30
+    const w = (img.width / img.height) * h
+    doc.setFillColor(255, 255, 255)
+    doc.roundedRect(M - 8, 12, w + 16, 40, 5, 5, 'F')
+    doc.addImage(img, 'PNG', M, 17, w, h)
+    logoDrawn = true
+  } catch { /* Optional logo; retain the company wordmark when unavailable. */ }
+  if (!logoDrawn) {
+    doc.setTextColor(255, 255, 255)
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(18)
+    doc.text(COMPANY_NAME, M, 38)
+  }
   doc.setTextColor(255, 255, 255)
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(18)
-  doc.text(COMPANY_NAME, M, 34)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10)
-  doc.text('Box-Truck Pay Statement', M, 50)
+  doc.text('Box-Truck Pay Statement', W - M, 38, { align: 'right' })
 
   // Driver + period
   doc.setTextColor(11, 13, 18)
