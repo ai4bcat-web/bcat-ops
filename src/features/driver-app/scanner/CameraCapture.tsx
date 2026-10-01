@@ -66,9 +66,13 @@ export function CameraCapture({ onDone, onCancel, initialPages = [] }: CameraCap
           return
         }
         streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-        }
+        /*
+         * Do NOT assign srcObject here. The <video> only renders while cameraState is
+         * 'live', so at this moment it does not exist yet and videoRef.current is null —
+         * the assignment was silently skipped and the driver got a black screen with a
+         * working camera behind it. A separate effect attaches the stream once the element
+         * is actually mounted.
+         */
         setCameraState('live')
       } catch (err) {
         if (!mounted) return
@@ -87,6 +91,22 @@ export function CameraCapture({ onDone, onCancel, initialPages = [] }: CameraCap
       stopStream()
     }
   }, [stopStream])
+
+  /**
+   * Attach the stream once the <video> exists.
+   *
+   * Runs after the commit that mounts it, which is the only point where both the element
+   * and the stream are available. Also re-attaches if React ever remounts the element.
+   */
+  useEffect(() => {
+    if (cameraState !== 'live') return
+    const video = videoRef.current
+    const stream = streamRef.current
+    if (!video || !stream) return
+    if (video.srcObject !== stream) video.srcObject = stream
+    // Safari sometimes ignores autoPlay for a stream attached after mount.
+    void video.play?.().catch(() => undefined)
+  }, [cameraState])
 
   const takePicture = useCallback(async () => {
     const video = videoRef.current
