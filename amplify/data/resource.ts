@@ -1000,10 +1000,10 @@ const schema = a.schema({
       syncedAt:       a.datetime().required(),
     })
     .identifier(['truckId', 'date'])
-    .secondaryIndexes((index) => [
-      index('truckId').sortKeys(['date']),
-      index('weekStart'),
-    ])
+    // Only the week index: identifier(['truckId','date']) already makes
+    // truckId+date the table's own key, so a truckId/date GSI would be a second
+    // copy of the table paid for in write throughput and stack resources.
+    .secondaryIndexes((index) => [index('weekStart')])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])

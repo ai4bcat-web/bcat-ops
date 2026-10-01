@@ -42,16 +42,16 @@ export async function fetchOdometerDays(weekStart: string): Promise<TruckOdomete
   // must be walked to guarantee every day of the week is seen.
   do {
     const result = await client.graphql({
-      query: `query ListTruckOdometerDays($weekStart: String!, $nextToken: String) {
-        listTruckOdometerDays(filter: { weekStart: { eq: $weekStart } }, limit: 1000, nextToken: $nextToken) {
+      query: `query ListOdometerWeek($weekStart: String!, $nextToken: String) {
+        listTruckOdometerDayByWeekStart(weekStart: $weekStart, limit: 1000, nextToken: $nextToken) {
           items { ${ODOMETER_FIELDS} }
           nextToken
         }
       }`,
       variables: { weekStart, nextToken },
-    }) as { data: { listTruckOdometerDays: { items: TruckOdometerDay[]; nextToken: string | null } } }
-    items.push(...(result.data.listTruckOdometerDays.items ?? []))
-    nextToken = result.data.listTruckOdometerDays.nextToken
+    }) as { data: { listTruckOdometerDayByWeekStart: { items: TruckOdometerDay[]; nextToken: string | null } } }
+    items.push(...(result.data.listTruckOdometerDayByWeekStart.items ?? []))
+    nextToken = result.data.listTruckOdometerDayByWeekStart.nextToken
   } while (nextToken)
   return items
 }

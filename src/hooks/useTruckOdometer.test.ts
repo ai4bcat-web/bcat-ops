@@ -43,7 +43,7 @@ beforeEach(() => { graphql.mockReset() })
 
 describe('useTruckOdometer', () => {
   it('builds per-truck weeks with miles, MPG and revenue per mile', async () => {
-    graphql.mockResolvedValue({ data: { listTruckOdometerDays: { items: [
+    graphql.mockResolvedValue({ data: { listTruckOdometerDayByWeekStart: { items: [
       row(),
       row({ date: '2026-09-28', startOdometer: 1100, endOdometer: 1250, miles: 150, fuelGallons: 15, mpg: 10 }),
     ] } } })
@@ -69,16 +69,18 @@ describe('useTruckOdometer', () => {
   })
 
   it('queries the odometer ledger for the selected week', async () => {
-    graphql.mockResolvedValue({ data: { listTruckOdometerDays: { items: [] } } })
+    graphql.mockResolvedValue({ data: { listTruckOdometerDayByWeekStart: { items: [] } } })
     const { result } = renderHook(() => useTruckOdometer(WEEK))
     await waitFor(() => expect(result.current.loading).toBe(false))
+    // The week index, not a filtered scan of every truck-day ever recorded.
     expect(graphql).toHaveBeenCalledWith(expect.objectContaining({
+      query: expect.stringContaining('listTruckOdometerDayByWeekStart'),
       variables: expect.objectContaining({ weekStart: WEEK }),
     }))
   })
 
   it('keeps a Motive-only unit visible even without an Equipment record', async () => {
-    graphql.mockResolvedValue({ data: { listTruckOdometerDays: { items: [
+    graphql.mockResolvedValue({ data: { listTruckOdometerDayByWeekStart: { items: [
       row({ truckId: 'motive:890', unitNumber: '890', startOdometer: 1000, endOdometer: 1088, miles: 88 }),
     ] } } })
     const { result } = renderHook(() => useTruckOdometer(WEEK))

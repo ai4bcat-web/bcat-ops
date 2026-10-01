@@ -222,6 +222,18 @@ async function openWeek(eventTimeIso: string): Promise<void> {
   console.log(`[odometer] openWeek ${sunday}: ${opened}/${targets.length} truck(s) opened`)
 }
 
+/**
+ * Fuel economy for one truck-day, or null when the day cannot honestly report one.
+ * Zero miles against real driving fuel is a missing odometer reading, not a truck
+ * that burned 46 gallons standing still — printing 0.0 MPG next to a day the
+ * driver knows he drove is worse than printing nothing.
+ */
+export function dayMpg(miles: number | null, fuelGallons: number | null): number | null {
+  if (miles == null || miles <= 0) return null
+  if (fuelGallons == null || fuelGallons <= 0) return null
+  return miles / fuelGallons
+}
+
 async function closeDay(eventTimeIso: string): Promise<void> {
   // Closes the previous Chicago calendar day — see the header comment.
   const targetDate = previousDate(centralDate(eventTimeIso))
@@ -254,8 +266,10 @@ async function closeDay(eventTimeIso: string): Promise<void> {
     const miles = previous != null ? Math.max(0, endOdometer - previous) : null
 
     const f = fuelByKey.byId.get(t.motiveVehicleId) ?? fuelByKey.byNumber.get(t.motiveNumber)
+    // Motive answers with "metric_units": false on every row (the request sends
+    // X-Metric-Units: false), so driving_fuel is US gallons, not litres.
     const fuelGallons = f?.drivingFuel ?? null
-    const mpg = miles != null && fuelGallons != null && fuelGallons > 0 ? miles / fuelGallons : null
+    const mpg = dayMpg(miles, fuelGallons)
 
     await putOdometerRow({
       truckId:       t.truckId,
