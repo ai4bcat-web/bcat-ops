@@ -5,13 +5,22 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useDriverAuth } from './useDriverAuth'
+import {
+  isAlreadyRegistered,
+  needsSignupConfirmInstead,
+  codeSentMessage,
+  type SignupStep,
+} from './signupOutcome'
 
 type Step = 'form' | 'confirm' | 'done'
 
 export default function DriverSignupPage() {
   const navigate = useNavigate()
   const [search] = useSearchParams()
-  const { signUp, confirmSignUp, resendConfirmationCode, signIn } = useDriverAuth()
+  const {
+    signUp, confirmSignUp, resendConfirmationCode, signIn,
+    forgotPassword, confirmForgotPassword,
+  } = useDriverAuth()
 
   // The invite email links here with ?email= already filled in. A driver typing a
   // different address than the one on their roster row would be rejected by the
@@ -22,6 +31,12 @@ export default function DriverSignupPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [code, setCode] = useState('')
   const [step, setStep] = useState<Step>('form')
+  /**
+   * Which kind of code is in the driver's inbox. A brand-new account confirms its
+   * sign-up; an address that already has an account sets its password through a reset.
+   * The driver sees the same screen either way.
+   */
+  const [codeKind, setCodeKind] = useState<SignupStep>('CONFIRM_SIGNUP')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,9 +57,43 @@ export default function DriverSignupPage() {
     try {
       // The PreSignUp trigger is the only roster gate; its rejection surfaces here.
       await signUp(cleanEmail, password)
+      setCodeKind('CONFIRM_SIGNUP')
       setStep('confirm')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign up failed.')
+      if (!isAlreadyRegistered(err)) {
+        setError(err instanceof Error ? err.message : 'Sign up failed.')
+        return
+      }
+
+      /*
+       * The address already has an account — usually an earlier attempt that got part
+       * way through. "User already exists" is a dead end for someone who was invited and
+       * has done nothing wrong, so set the password on the account they already have
+       * instead.
+       *
+       * NOT directly: knowing an email address must never be enough to take over its
+       * account. A reset code goes to that address first, which proves the person asking
+       * owns the mailbox. They are already expecting an email, and the next screen is the
+       * same one a new driver sees.
+       */
+      try {
+        await forgotPassword(cleanEmail)
+        setCodeKind('CONFIRM_RESET')
+        setStep('confirm')
+      } catch (resetErr) {
+        if (needsSignupConfirmInstead(resetErr)) {
+          // Signed up before but never confirmed: the sign-up code is what they need.
+          try {
+            await resendConfirmationCode(cleanEmail)
+            setCodeKind('CONFIRM_SIGNUP')
+            setStep('confirm')
+          } catch (resendErr) {
+            setError(resendErr instanceof Error ? resendErr.message : 'Could not send a code.')
+          }
+          return
+        }
+        setError(resetErr instanceof Error ? resetErr.message : 'Could not send a code.')
+      }
     } finally {
       setLoading(false)
     }
@@ -59,7 +108,12 @@ export default function DriverSignupPage() {
     }
     setLoading(true)
     try {
-      await confirmSignUp(email, code.trim())
+      if (codeKind === 'CONFIRM_RESET') {
+        // Same password they typed on the first screen; the code proves it is them.
+        await confirmForgotPassword(email, code.trim(), password)
+      } else {
+        await confirmSignUp(email, code.trim())
+      }
       await signIn(email, password)
       navigate('/driver/scan')
     } catch (err) {
@@ -73,7 +127,9 @@ export default function DriverSignupPage() {
     setError(null)
     setLoading(true)
     try {
-      await resendConfirmationCode(email)
+      // Resending the wrong kind of code would send one that cannot work.
+      if (codeKind === 'CONFIRM_RESET') await forgotPassword(email)
+      else await resendConfirmationCode(email)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not resend code.')
     } finally {
@@ -90,13 +146,11 @@ export default function DriverSignupPage() {
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
             {step === 'form' && 'Driver sign up'}
-            {step === 'confirm' && 'Verify your email'}
+            {step === 'confirm' && (codeKind === 'CONFIRM_RESET' ? 'Confirm it is you' : 'Verify your email')}
             {step === 'done' && 'Welcome aboard'}
           </h1>
           {step === 'confirm' && (
-            <p className="mt-2 text-sm text-slate-400">
-              We sent a code to <span className="text-slate-200">{email}</span>.
-            </p>
+            <p className="mt-2 text-sm text-slate-400">{codeSentMessage(codeKind, email)}</p>
           )}
         </div>
 
@@ -193,7 +247,7 @@ export default function DriverSignupPage() {
 
             <Button type="submit" disabled={loading} className="h-14 w-full rounded-xl text-base font-semibold">
               {loading && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-              Verify email
+              {codeKind === 'CONFIRM_RESET' ? 'Set my password' : 'Verify email'}
             </Button>
 
             <Button
@@ -208,14 +262,18 @@ export default function DriverSignupPage() {
           </form>
         )}
 
-        <div className="mt-8 text-center text-sm text-slate-400">
-          <p>
-            Already have an account?{' '}
-            <Link to="/driver/login" className="font-semibold text-[#1ea8f3] hover:underline">
-              Sign in
-            </Link>
-          </p>
-        </div>
+        {/* Only on the first screen. Once a code is in flight, "already have an account?"
+            is both answered and the wrong thing to act on. */}
+        {step === 'form' && (
+          <div className="mt-8 text-center text-sm text-slate-400">
+            <p>
+              Already have an account?{' '}
+              <Link to="/driver/login" className="font-semibold text-[#1ea8f3] hover:underline">
+                Sign in
+              </Link>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
