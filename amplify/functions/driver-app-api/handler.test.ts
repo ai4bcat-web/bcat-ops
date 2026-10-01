@@ -1115,3 +1115,28 @@ describe('driver-app-api handler', () => {
     })
   })
 })
+
+describe('a full-table scan with no filter', () => {
+  beforeEach(() => {
+    mockVerify.mockReset()
+    mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
+  })
+
+  it('does not send empty expression values, which DynamoDB rejects outright', async () => {
+    // ExpressionAttributeValues: {} with no FilterExpression is a ValidationException, and
+    // {} is truthy — so the guard that omitted it had to check the key count, not the
+    // object. /loads/recent scans the whole Load table, and it was failing every call.
+    const res = await handler(baseEvent('/loads/recent', 'GET'))
+    expect(res.statusCode).toBe(200)
+
+    const scans = mockDynamoSend.mock.calls
+      .map((c) => (c[0] as { input: Record<string, unknown> }).input)
+      .filter((i) => i.TableName === 'Load-test' && !i.Key)
+    expect(scans.length).toBeGreaterThan(0)
+    for (const input of scans) {
+      if (!input.FilterExpression) {
+        expect(input.ExpressionAttributeValues).toBeUndefined()
+      }
+    }
+  })
+})

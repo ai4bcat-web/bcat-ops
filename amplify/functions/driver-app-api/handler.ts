@@ -255,7 +255,14 @@ async function scan<T = Record<string, unknown>>(
         TableName: table,
         ...(filter ? { FilterExpression: filter } : {}),
         ...(names && Object.keys(names).length ? { ExpressionAttributeNames: names } : {}),
-        ...(values ? { ExpressionAttributeValues: values } : {}),
+        /*
+         * An EMPTY values object must be omitted, not sent. `{}` is truthy, so the old
+         * guard passed `ExpressionAttributeValues: {}` with no FilterExpression and
+         * DynamoDB rejected the whole scan: "ExpressionAttributeValues can only be
+         * specified when using expressions". A full-table scan is a legitimate call here
+         * and it was failing outright.
+         */
+        ...(values && Object.keys(values).length ? { ExpressionAttributeValues: values } : {}),
         ExclusiveStartKey: lastKey,
       }),
     )
@@ -1401,6 +1408,16 @@ export const handler = async (event: FnUrlEvent) => {
       // that date brokerage loads were not settled to the driver at all.
       const trips = [...amazonTrips, ...brokerageTrips.filter((t) => ownerOpCarriesWeeklyCharges(t.periodStart))]
       const weeks = listWeekStarts(trips, new Date(), ownerOnly || trips.length === 0 ? OWNER_OP_FIRST_PERIOD : undefined)
+      // Which weeks the picker offers, and from how many trips. A driver who says "this
+      // week is missing" is usually looking at the newest week this list returned.
+      console.log('[driver-app-api] settlement weeks', {
+        driverId,
+        payGroup: setting.payGroup ?? null,
+        amazonTrips: amazonTrips.length,
+        brokerageTrips: brokerageTrips.length,
+        newestWeek: weeks[0] ?? null,
+        weekCount: weeks.length,
+      })
       const out: { weekStart: string; gross: number; net: number; tripCount: number }[] = []
       for (const start of weeks) {
         const weekTrips = trips.filter((t) => t.periodStart === start)
@@ -1440,6 +1457,21 @@ export const handler = async (event: FnUrlEvent) => {
         ownerOp ? loadOwnerOperatorTripsForWeek(driverId, weekStart) : Promise.resolve([] as RawAmazonTrip[]),
       ])
       const trips = await attachFactoringFields([...amazonWeekTrips, ...brokerageWeekTrips], driverId)
+      /*
+       * Logged on every settlement read, not only on failure.
+       *
+       * "My week is empty" was undiagnosable: a response with no trips is a success, so
+       * nothing reached CloudWatch and there was no way to tell a driver looking at the
+       * wrong week from a query that found nothing. These four counts separate those.
+       */
+      console.log('[driver-app-api] settlement', {
+        driverId,
+        weekStart,
+        payGroup: setting.payGroup ?? null,
+        ownerOpWeek: ownerOp,
+        amazonTrips: amazonWeekTrips.length,
+        brokerageTrips: brokerageWeekTrips.length,
+      })
       return reply(200, await buildSettlementForDriver(driverId, weekStart, trips, setting))
     }
 
@@ -1561,7 +1593,7 @@ export const handler = async (event: FnUrlEvent) => {
      * a rest state in the PWA, not an error.
      */
     if (method === 'GET' && path === '/loads/current') {
-      const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME, undefined, {}, {})
+      const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME)
       const current = currentLoadForDriver(loads as unknown as Load[], driverId, Date.now())
       if (!current) return reply(200, { load: null })
 
@@ -1594,7 +1626,7 @@ export const handler = async (event: FnUrlEvent) => {
      * Friday may only get attached on Monday, so last week's loads must be findable.
      */
     if (method === 'GET' && path === '/loads/recent') {
-      const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME, undefined, {}, {})
+      const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME)
       const mine = recentLoadsForDriver(loads as unknown as Load[], driverId, Date.now())
       return reply(200, {
         loads: mine.slice(0, 50).map((l) => ({
