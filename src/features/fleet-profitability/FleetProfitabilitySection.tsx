@@ -11,6 +11,7 @@ import { biweeklyPeriodOf } from '@/lib/payPeriods'
 import { useFleetFixedCosts } from '@/hooks/useFleetFixedCosts'
 import { DriverPayForm } from './DriverPayForm'
 import { AmazonProfitPanel } from '@/features/finances/AmazonDriverProfit'
+import { OwnerOperatorProfitPanel } from '@/features/finances/OwnerOperatorProfitPanel'
 
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -29,6 +30,8 @@ function netColor(n: number): string {
   return n > 0 ? '#15803d' : n < 0 ? '#dc2626' : 'var(--ds-t2)'
 }
 
+type SectionTab = FleetGroup | 'OWNER_OPERATOR'
+
 /**
  * Weekly fleet P&L. Revenue is shown per truck (attributed to the truck of each
  * load's DELIVERY driver); expenses are aggregated fleet-wide and broken out by
@@ -40,7 +43,7 @@ function netColor(n: number): string {
  */
 export function FleetProfitabilitySection({ externalRange }: { externalRange?: DateRange } = {}) {
   const [weekOffset, setWeekOffset] = useState(0)
-  const [group, setGroup] = useState<FleetGroup>('LOCAL')
+  const [group, setGroup] = useState<SectionTab>('LOCAL')
   const [showPayForm, setShowPayForm] = useState(false)
 
   const range = externalRange ?? weekRange(weekOffset)
@@ -49,13 +52,16 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
   const payPeriod = biweeklyPeriodOf()
   const { eldInRange } = useFleetFixedCosts()
   const eld = eldInRange(range)
-  const { data, loading, refresh: refreshProfitability } = useFleetProfitability(range, group)
+  const { data, loading, refresh: refreshProfitability } = useFleetProfitability(range, group as FleetGroup)
   const { payPeriods, createPay, deletePay, refresh: refreshPay } = useDriverPay()
   const { drivers } = useDrivers()
 
   const r = data?.rollup
   const trucks = data?.trucks ?? []
   const totalExpenses = r ? r.revenue - r.net : 0
+  // AMAZON and OWNER_OPERATOR are per-driver settlement views, not truck fleets: they
+  // replace the whole truck P&L body with their own panel.
+  const isDriverPanel = group === 'AMAZON' || group === 'OWNER_OPERATOR'
 
   async function handleSavePay(input: Parameters<typeof createPay>[0]) {
     await createPay(input)
@@ -70,7 +76,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
   }
 
   const driverName = (id: string) =>
-    isCombinedPayDriverId(id) ? `All ${FLEET_GROUP_LABELS[group]} drivers (combined)` : (drivers.find((d) => d.id === id)?.name ?? id)
+    isCombinedPayDriverId(id) ? `All ${FLEET_GROUP_LABELS[group as FleetGroup]} drivers (combined)` : (drivers.find((d) => d.id === id)?.name ?? id)
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -81,7 +87,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>{externalRange ? 'Profitability' : 'Weekly Profitability'}</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
-              {group === 'AMAZON' ? 'Per driver · gross, expenses & profit to the company by week' : 'Revenue per truck · expenses by category · net for the week'}
+              {isDriverPanel ? 'Per driver · gross, expenses & profit to the company by week' : 'Revenue per truck · expenses by category · net for the week'}
             </div>
           </div>
         </div>
@@ -102,10 +108,17 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
                 </button>
               )
             })}
+            <button
+              onClick={() => setGroup('OWNER_OPERATOR')}
+              style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                background: group === 'OWNER_OPERATOR' ? 'var(--ds-surface)' : 'transparent', color: group === 'OWNER_OPERATOR' ? 'var(--ds-t1)' : 'var(--ds-t2)',
+                boxShadow: group === 'OWNER_OPERATOR' ? 'var(--sh-sm)' : 'none' }}>
+              Owner operators
+            </button>
           </div>
 
-          {/* Week navigation — LOCAL only (Amazon tab shows all weeks) */}
-          {!externalRange && group !== 'AMAZON' && (
+          {/* Week navigation — truck fleets only (driver panels step their own weeks) */}
+          {!externalRange && !isDriverPanel && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn} aria-label="Previous week"><ChevronLeft size={15} /></button>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', minWidth: 150, textAlign: 'center' }}>
@@ -115,7 +128,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
             </div>
           )}
 
-          {group !== 'AMAZON' && (
+          {!isDriverPanel && (
             <button onClick={() => setShowPayForm(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 12px', background: 'var(--ds-blue)', border: 'none', borderRadius: 8, fontSize: 12.5, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
               <Plus size={13} /> Driver pay
             </button>
@@ -124,8 +137,9 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
       </div>
 
       {group === 'AMAZON' && <AmazonProfitPanel />}
+      {group === 'OWNER_OPERATOR' && <OwnerOperatorProfitPanel />}
 
-      {group !== 'AMAZON' && (<>
+      {!isDriverPanel && (<>
       {/* Roll-up strip */}
       {r && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1, background: 'var(--ds-border)', borderBottom: '1px solid var(--ds-border)' }}>
@@ -245,7 +259,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
           onClose={() => setShowPayForm(false)}
           defaultStart={payPeriod.start}
           defaultEnd={payPeriod.end}
-          fleetGroup={group}
+          fleetGroup={group as FleetGroup}
         />
       )}
     </div>

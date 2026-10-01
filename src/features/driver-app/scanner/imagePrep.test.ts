@@ -97,4 +97,14 @@ describe('preparePage', () => {
       'no usable dimensions',
     )
   })
+
+  it('passes a PDF file through without canvas encoding', async () => {
+    const pdf = new File(['pdf-bytes'], 'delivery.pdf', { type: 'application/pdf' })
+    const page = await preparePage(pdf, 'fallback-name.pdf')
+
+    expect(page.contentType).toBe('application/pdf')
+    expect(page.byteSize).toBe(pdf.size)
+    expect(page.fileName).toBe('delivery.pdf')
+    expect(page.blob).toBe(pdf)
+  })
 })

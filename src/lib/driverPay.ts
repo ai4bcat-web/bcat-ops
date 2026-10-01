@@ -26,6 +26,14 @@ export interface PayTripInput {
   status?: string | null
 }
 
+/**
+ * Factoring fee — every statement pays it, so the company's factor advances the driver's
+ * settlement. Charged on the statement GROSS (not on the driver's share) and shown as its
+ * own deduction line. The one definition: everyone imports these.
+ */
+export const FACTORING_FEE_PCT = 0.02
+export const FACTORING_FEE_LABEL = 'Factoring fee (2%)'
+
 export interface DriverPaySettingInput {
   /** Driver's keep fraction, 0..1 (e.g. 0.42, 0.88). */
   payPercent: number
@@ -257,7 +265,10 @@ export interface DriverPayStatement {
   expensesBeforePercent: boolean
   /** Σ of per-trip driver "Amount" (mode-false: pct×gross; mode-true: gross). */
   driverAmount:          number
+  /** Σ deductions, INCLUDING the factoring fee line below. */
   totalDeductions:       number
+  /** The 2% factoring fee charged on gross — already included in totalDeductions. */
+  factoringFee:          number
   /** mode-true: gross − deductions (the pre-% subtotal); mode-false: pay after deductions. */
   subtotal:              number
   totalCredits:          number   // Σ credits — added to the check at 100%
@@ -283,7 +294,13 @@ export function calcDriverPay(
   debits: PayDebitInput[] = [],
 ): DriverPayStatement {
   const gross = round2(trips.reduce((s, t) => s + (t.freightAmount || 0), 0))
-  const totalDeductions = round2(deductions.reduce((s, d) => s + (d.amount || 0), 0))
+  // Every statement carries the factoring fee, computed on its own gross so it flows to
+  // Amazon, owner-operator, box-truck and the driver PWA identically. Callers list it first
+  // so the printed lines sum to totalDeductions.
+  const factoringFee = round2(gross * FACTORING_FEE_PCT)
+  const totalDeductions = round2(
+    factoringFee + deductions.reduce((s, d) => s + (d.amount || 0), 0),
+  )
   const totalCredits = round2(credits.reduce((s, c) => s + (c.amount || 0), 0))
   const totalDebits = round2(debits.reduce((s, d) => s + (d.amount || 0), 0))
   const pct = setting.payPercent
@@ -308,6 +325,7 @@ export function calcDriverPay(
     expensesBeforePercent: setting.expensesBeforePercent,
     driverAmount,
     totalDeductions,
+    factoringFee,
     subtotal,
     totalCredits,
     totalDebits,

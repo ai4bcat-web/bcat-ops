@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   listLoads,
+  listCustomers,
+  listLocations,
   listDriverPaySettings,
   listDriverPayDeductions,
   listDriverPayCredits,
@@ -16,7 +18,10 @@ import {
   type DriverPayCredit,
   type DriverPayCreditInput,
   type FuelTransaction,
+  type CustomerRecord,
+  type LocationRecord,
 } from '@/lib/apiClient'
+import { listPods } from '@/lib/podsClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import {
@@ -31,6 +36,7 @@ import {
 import { creditLineLabel } from '@/lib/payCredits'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
+import { otrSettlementReadiness } from '@/lib/otrSettlementFields'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import type { Driver, Load } from '@/types'
 import { classificationForFleet } from '@/lib/fileHub'
@@ -75,12 +81,53 @@ function periodEnd(periodStart: string): string {
   return d.toISOString().slice(0, 10)
 }
 
+async function loadPodLoadIds(): Promise<Set<string>> {
+  const ids = new Set<string>()
+  // JobsDone is an optional integration: an unconfigured or failing import must not
+  // blank the settlement, it just means we can't confirm a POD is on file.
+  try {
+    let nextToken: string | null = null
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const page = await listPods({ nextToken: nextToken ?? undefined })
+      for (const doc of page.items) {
+        if (doc.loadId) ids.add(doc.loadId)
+      }
+      nextToken = page.nextToken ?? null
+      if (!nextToken) break
+    }
+  } catch (err) {
+    console.warn('[owner-operator-pay] could not load POD documents — factoring readiness will show PODs as missing', err)
+  }
+  return ids
+}
+
+/**
+ * Customers (for Broker MC) and Locations (for city/state/ZIP). Ancillary to the
+ * settlement dollars, so a directory outage degrades readiness to "blocked" rather
+ * than blanking a page that would otherwise pay drivers correctly.
+ */
+async function loadFactoringDirectory(): Promise<{ customers: CustomerRecord[]; locations: LocationRecord[] }> {
+  try {
+    const [customers, locations] = await Promise.all([
+      listCustomers({ includeArchived: true }),
+      listLocations({ includeArchived: true }),
+    ])
+    return { customers, locations }
+  } catch (err) {
+    console.warn('[owner-operator-pay] could not load customers/locations — factoring readiness will show those fields as missing', err)
+    return { customers: [], locations: [] }
+  }
+}
+
 export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPayState {
   const periodStart = useMemo(() => ownerOpWeekAtOrAfterFirst(rawPeriodStart), [rawPeriodStart])
   const { drivers, updateDriver } = useDrivers()
   const { transactions: fuelTxs } = useFuelTransactions()
 
   const [loads, setLoads] = useState<Load[]>([])
+  const [customers, setCustomers] = useState<CustomerRecord[]>([])
+  const [locations, setLocations] = useState<LocationRecord[]>([])
+  const [podLoadIds, setPodLoadIds] = useState<Set<string>>(new Set())
   const [settings, setSettings] = useState<DriverPaySetting[]>([])
   const [deductions, setDeductions] = useState<DriverPayDeduction[]>([])
   const [credits, setCredits] = useState<DriverPayCredit[]>([])
@@ -98,15 +145,20 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   const load = useCallback(() =>
     Promise.all([
       listLoads(),
+      loadFactoringDirectory(),
       listDriverPaySettings(),
       listDriverPayDeductions(),
       listDriverPayCredits(),
+      loadPodLoadIds(),
     ])
-      .then(([l, s, d, c]) => {
+      .then(([l, dir, s, d, creds, pods]) => {
         setLoads(l)
+        setCustomers(dir.customers)
+        setLocations(dir.locations)
         setSettings(s)
         setDeductions(d)
-        setCredits(c)
+        setCredits(creds)
+        setPodLoadIds(pods)
         setError(null)
       })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
@@ -118,6 +170,9 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
 
   const rows = useMemo<OwnerOperatorPayRow[]>(() => {
     const driverById = new Map(drivers.map((d) => [d.id, d]))
+    const customersById = new Map(customers.map((c) => [c.id, c]))
+    const locationsById = new Map(locations.map((l) => [l.id, l]))
+    const loadsById = new Map(loads.map((l) => [l.id, l]))
     return settings
       .filter((s) => isOwnerOperatorGroup(s.payGroup) && s.active !== false)
       .map((baseSetting): OwnerOperatorPayRow | null => {
@@ -128,9 +183,22 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         if (!driver || driver.type === 'broker') return null
 
         const driverTrips = ownerOpTripsFor(loads, setting.driverId, periodStart)
+        const tripsWithReadiness = driverTrips.map((trip) => {
+          const load = loadsById.get(trip.id)
+          if (!load) return trip
+          return {
+            ...trip,
+            readiness: otrSettlementReadiness({
+              load,
+              customersById,
+              locationsById,
+              loadIdsWithPod: podLoadIds,
+            }),
+          }
+        })
         // Same guard the Amazon statement uses: a reference that already paid out last
         // week is flagged, never dropped, because only a human knows a real repeat.
-        const duplicateTripIds = dupIdsForWeek(driverTrips, ownerOpTripsFor(loads, setting.driverId, prevStart))
+        const duplicateTripIds = dupIdsForWeek(tripsWithReadiness, ownerOpTripsFor(loads, setting.driverId, prevStart))
 
         // The weekly charges — fixed expenses, the fuel card, one-off deductions — are
         // per driver-week, not per page, so exactly ONE statement carries them. The
@@ -160,18 +228,18 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         const driverDebits = mine.filter((c) => c.kind === 'DEBIT')
 
         const statement = calcDriverPay(
-          driverTrips.map((t) => ({ freightAmount: t.freightAmount })),
+          tripsWithReadiness.map((t) => ({ freightAmount: t.freightAmount })),
           setting,
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, baseSetting, trips: driverTrips, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: tripsWithReadiness, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
       })
       .filter((r): r is OwnerOperatorPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, loads, deductions, credits, fuelTxs, periodStart, prevStart, end])
+  }, [settings, drivers, loads, customers, locations, podLoadIds, deductions, credits, fuelTxs, periodStart, prevStart, end])
 
   const unconfigured = useMemo(() => {
     const configured = new Set(

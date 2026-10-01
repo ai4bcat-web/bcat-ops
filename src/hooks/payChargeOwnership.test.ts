@@ -51,7 +51,7 @@ describe('weekly charge ownership', () => {
     const { result } = renderHook(() => useAmazonPay(BEFORE))
     await waitFor(() => expect(result.current.rows).toHaveLength(1))
     expect(labels(result.current.rows[0].deductions)).toContain('INSURANCE')
-    expect(result.current.rows[0].statement.checkAmount).toBe(350)
+    expect(result.current.rows[0].statement.checkAmount).toBe(340)
   })
 
   it('does not charge the first owner-operator week on the Amazon statement', async () => {
@@ -59,13 +59,13 @@ describe('weekly charge ownership', () => {
     await waitFor(() => expect(result.current.rows).toHaveLength(1))
     // The Amazon trips still pay out; only the per-week charges have moved.
     expect(labels(result.current.rows[0].deductions)).not.toContain('INSURANCE')
-    expect(result.current.rows[0].statement.checkAmount).toBeCloseTo(500, 2)
+    expect(result.current.rows[0].statement.checkAmount).toBeCloseTo(490, 2)
   })
 
   it('charges that same week on the owner-operator statement instead', async () => {
     const { result } = renderHook(() => useOwnerOperatorPay(FIRST))
     await waitFor(() => expect(result.current.rows).toHaveLength(1))
     expect(labels(result.current.rows[0].deductions)).toContain('INSURANCE')
-    expect(result.current.rows[0].statement.checkAmount).toBe(350)
+    expect(result.current.rows[0].statement.checkAmount).toBe(340)
   })
 })

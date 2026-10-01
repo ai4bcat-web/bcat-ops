@@ -114,6 +114,9 @@ vi.hoisted(() => {
   process.env.FUEL_TRANSACTION_TABLE_NAME = 'FuelTransaction-test'
   process.env.BUCKET_NAME = 'bcat-docs-test'
   process.env.LOAD_TABLE_NAME = 'Load-test'
+  process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
+  process.env.LOCATION_TABLE_NAME = 'Location-test'
+  process.env.POD_DOCUMENT_TABLE_NAME = 'PodDocument-test'
   process.env.DRIVER_USER_POOL_ID = 'us-east-1_testpool'
   process.env.DRIVER_USER_POOL_CLIENT_ID = 'test-client-id'
   process.env.SLACK_BOT_TOKEN = 'xoxb-test-token'
@@ -402,13 +405,21 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
       'load-c-1': {
         id: 'load-c-1',
         tmsId: 'TMS-450',
+        aljexId: '14452',
+        pickupNumber: 'PO-450',
         customer: 'Broker X',
+        customerId: 'cust-1',
+        rateConfirmKey: 'rate-confirms/load-c-1/rate-confirm.pdf',
         miles: 300,
         rate: 45000,
         deliveryAppt: '2026-09-29T14:00:00Z',
         deliveryDriverId: DRIVER_C_ID,
         originCity: 'Chicago, IL',
         destinationCity: 'Detroit, MI',
+        stops: [
+          { type: 'pickup', city: 'Chicago, IL', locationId: 'loc-1', address: { city: 'Chicago', state: 'IL', zip: '60601' } },
+          { type: 'delivery', city: 'Detroit, MI', locationId: 'loc-2', address: { city: 'Detroit', state: 'MI', zip: '48201' } },
+        ],
       },
       'load-c-old': {
         id: 'load-c-old',
@@ -449,14 +460,31 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
         id: 'load-c-saturday',
         tmsId: 'N/A',
         aljexId: '14452  ',
+        pickupNumber: 'PO-SAT',
         customer: 'Broker Sat',
+        customerId: 'cust-1',
+        rateConfirmKey: 'rate-confirms/load-c-saturday/rate-confirm.pdf',
         miles: 500,
         rate: 250000,
         deliveryAppt: '2026-10-03T05:00:00.000Z',
         deliveryDriverId: DRIVER_C_ID,
         originCity: 'Peoria, IL',
         destinationCity: 'Akron, OH',
+        stops: [
+          { type: 'pickup', city: 'Peoria, IL', locationId: 'loc-3', address: { city: 'Peoria', state: 'IL', zip: '61602' } },
+          { type: 'delivery', city: 'Akron, OH', locationId: 'loc-4', address: { city: 'Akron', state: 'OH', zip: '44301' } },
+        ],
       },
+    },
+    'Customer-test': {
+      'cust-1': { id: 'cust-1', name: 'Broker X', mcNumber: '123456' },
+    },
+    'Location-test': {
+      'loc-1': { id: 'loc-1', city: 'CHICAGO', state: 'IL', zip: '60601' },
+      'loc-2': { id: 'loc-2', city: 'DETROIT', state: 'MI', zip: '48201' },
+    },
+    'PodDocument-test': {
+      'pod-sat': { id: 'pod-sat', loadId: 'load-c-saturday', processingStatus: 'READY' },
     },
     'DriverPayDeduction-test': {},
     'DriverPayCredit-test': {},
@@ -526,6 +554,7 @@ beforeEach(() => {
       FilterExpression?: string
       ConditionExpression?: string
       UpdateExpression?: string
+      IndexName?: string
       ExpressionAttributeNames?: Record<string, string>
       ExpressionAttributeValues?: Record<string, unknown>
     }
@@ -571,6 +600,13 @@ beforeEach(() => {
     }
 
     if (cmd instanceof QueryCommand) {
+      if (
+        table === 'PodDocument-test' &&
+        input.IndexName === 'podDocumentsByLoadIdAndReceivedAt'
+      ) {
+        const loadId = input.ExpressionAttributeValues?.[':loadId']
+        return { Items: Object.values(tableRecords ?? {}).filter((p) => p.loadId === loadId) }
+      }
       return { Items: [] }
     }
 
@@ -688,6 +724,40 @@ describe('driver-app-api handler', () => {
       expect(item.status).toBe('NEW')
       expect(item.referenceNumber).toBe('VRID-NEW')
       expect(item.note).toBe('Dock 7')
+    })
+
+    it('creates a standalone POD submission when kind is POD', async () => {
+      const res = await handler(
+        baseEvent('/submissions', 'POST', {
+          body: {
+            kind: 'POD',
+            referenceNumber: 'VRID-POD',
+            pages: [{ fileName: 'pod.jpg', contentType: 'image/jpeg', byteSize: 1000 }],
+          },
+        }),
+      )
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body)
+      expect(body.uploads[0].s3Key).toContain('/POD/')
+
+      const putCalls = mockDynamoSend.mock.calls.filter((c) => c[0] instanceof PutCommand)
+      const submissionPut = putCalls.find(
+        (c) => (c[0].input as MockDynamoPutInput).TableName === 'DriverSubmission-test',
+      )
+      const item = (submissionPut![0].input as MockDynamoPutInput).Item!
+      expect(item.pendingUploads).toHaveProperty('POD')
+      expect(item.pendingUploads).not.toHaveProperty('RATECON')
+    })
+
+    it('re-signs a submission’s saved RATECON pages so a retry can re-PUT them', async () => {
+      const res = await handler(
+        baseEvent(`/submissions/${SUBMISSION_A}/uploads`, 'GET', { query: { kind: 'RATECON' } }),
+      )
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body)
+      expect(body.uploads).toHaveLength(1)
+      expect(body.uploads[0].url).toBe('https://s3.test/presigned-url')
+      expect(body.uploads[0].s3Key).toContain('/RATECON/')
     })
   })
 
@@ -823,6 +893,33 @@ describe('driver-app-api handler', () => {
       expect(saturday.destination).toBe('Akron, OH')
       // gross = 450 + 2500, proving the Saturday load reaches the money math.
       expect(body.grossPay).toBe(2950)
+    })
+
+    it('attaches the per-trip factoring readiness resolved from Load/Customer/Location/POD rows', async () => {
+      const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+      const body = JSON.parse(res.body)
+
+      const wed = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450')
+      expect(wed.factoring).toMatchObject({
+        invoiceNo: '14452',
+        poNumber: 'PO-450',
+        brokerMc: '123456',
+        invoiceAmount: 450,
+        invoiceDate: '2026-09-29',
+        fromCity: 'Chicago',
+        fromState: 'IL',
+        fromZip: '60601',
+        toCity: 'Detroit',
+        toState: 'MI',
+        toZip: '48201',
+        podPresent: false,
+        rateconPresent: true,
+        blocked: true,
+      })
+
+      const saturday = body.trips.find((t: { loadId?: string }) => t.loadId === '14452')
+      expect(saturday.factoring.podPresent).toBe(true)
+      expect(saturday.factoring.blocked).toBe(false)
     })
 
     it('never includes another driver’s delivered loads', async () => {

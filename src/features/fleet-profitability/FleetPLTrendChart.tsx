@@ -2,16 +2,18 @@ import { useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
-import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
+import { useAmazonProfitability, aggregateAmazon, AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS } from '@/hooks/useAmazonProfitability'
+import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import { weekRange } from './weekRange'
 
-type TrendTab = 'LOCAL' | 'AMAZON' | 'COMBINED'
+type TrendTab = 'LOCAL' | 'AMAZON' | 'OWNER_OPERATOR' | 'COMBINED'
 const TABS: { key: TrendTab; label: string }[] = [
-  { key: 'LOCAL',    label: FLEET_GROUP_LABELS.LOCAL },
-  { key: 'AMAZON',   label: FLEET_GROUP_LABELS.AMAZON },
-  { key: 'COMBINED', label: 'Combined' },
+  { key: 'LOCAL',          label: FLEET_GROUP_LABELS.LOCAL },
+  { key: 'AMAZON',         label: FLEET_GROUP_LABELS.AMAZON },
+  { key: 'OWNER_OPERATOR', label: 'Owner operators' },
+  { key: 'COMBINED',       label: 'Combined' },
 ]
 
 const WEEKS = 8
@@ -32,6 +34,7 @@ export function FleetPLTrendChart() {
   const [tab, setTab] = useState<TrendTab>('LOCAL')
   const { computeForRange } = useFleetProfitability(weekRange(0), 'LOCAL')
   const { rows: amzRows } = useAmazonProfitability()
+  const { rows: ownerOpRows } = useOwnerOperatorProfitability()
 
   const series = useMemo(() => {
     const rows: { label: string; revenue: number; expenses: number; profit: number }[] = []
@@ -40,15 +43,21 @@ export function FleetPLTrendChart() {
       const r = computeForRange(range).rollup
       const local = { revenue: r.revenue, expenses: r.revenue - r.net, profit: r.net }
 
-      const ws = shiftWeek(sundayOf(), -i)         // Amazon Sunday pay week
+      const ws = shiftWeek(sundayOf(), -i)         // Sunday pay week
       const a = aggregateAmazon(amzRows, ws, ws)
       const amazon = { revenue: a.revenue, expenses: a.driverPay + a.expenses, profit: a.profit }
 
-      const pick = tab === 'LOCAL' ? local : tab === 'AMAZON' ? amazon : {
-        revenue: local.revenue + amazon.revenue,
-        expenses: local.expenses + amazon.expenses,
-        profit: local.profit + amazon.profit,
-      }
+      const oo = aggregateOwnerOperator(ownerOpRows, ws, ws)
+      const ownerOp = { revenue: oo.revenue, expenses: oo.driverPay + oo.expenses, profit: oo.profit }
+
+      const pick = tab === 'LOCAL' ? local
+        : tab === 'AMAZON' ? amazon
+        : tab === 'OWNER_OPERATOR' ? ownerOp
+        : {
+            revenue: local.revenue + ownerOp.revenue + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.revenue : 0),
+            expenses: local.expenses + ownerOp.expenses + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.expenses : 0),
+            profit:   local.profit   + ownerOp.profit   + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.profit : 0),
+          }
       rows.push({
         label: weekTickLabel(range.start),
         revenue: Math.round(pick.revenue),
@@ -57,7 +66,7 @@ export function FleetPLTrendChart() {
       })
     }
     return rows
-  }, [computeForRange, tab, amzRows])
+  }, [computeForRange, tab, amzRows, ownerOpRows])
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>

@@ -270,26 +270,37 @@ export async function notifyPodAdded(n: SubmissionNotice, refs: Partial<ThreadRe
   const bodyText = emailBodyText(n, 'pod')
   const slackText = buildSlackText(n.driverName, n.referenceNumber, n.note, 'pod')
 
-  // Threading is the primary goal, but if the parent leg failed we still want the POD visible.
-  // Without a parent emailMessageId the reply cannot be threaded, so we skip the email leg.
-  // Without a parent slackMessageTs we fallback to a top-level Slack post so dispatch doesn't miss it.
+  // A POD with a parent thread replies into both channels. A standalone POD (PWA upload
+  // with no rate con to reply to) opens fresh top-level Slack and email threads so it
+  // still reaches dispatch and ivanloads@.
+  const hasParentThread = !!(refs.emailMessageId || refs.slackMessageTs)
+  const channel = refs.slackChannelId ?? process.env.INTAKE_IVAN_CHANNEL_ID ?? 'C0B4YJXLYM8'
+
   const slackPromise: Promise<{ ok: true; ts: string } | { ok: false; error: string }> =
-    refs.slackChannelId ? postSlack(refs.slackChannelId, slackText, refs.slackMessageTs) : Promise.resolve({ ok: false, error: 'no slack channel' })
+    hasParentThread
+      ? (refs.slackChannelId
+          ? postSlack(refs.slackChannelId, slackText, refs.slackMessageTs)
+          : Promise.resolve({ ok: false, error: 'no slack channel' }))
+      : postSlack(channel, slackText)
 
   const emailPromise: Promise<{ ok: true; messageId: string } | { ok: false; error: string }> =
-    refs.emailMessageId ? sendEmail(to, from, subject, bodyText, n.attachments, {
-      inReplyTo: refs.emailMessageId,
-      references: refs.emailMessageId,
-    }) : Promise.resolve({ ok: false, error: 'no parent email thread' })
+    hasParentThread
+      ? (refs.emailMessageId
+          ? sendEmail(to, from, subject, bodyText, n.attachments, {
+              inReplyTo: refs.emailMessageId,
+              references: refs.emailMessageId,
+            })
+          : Promise.resolve({ ok: false, error: 'no parent email thread' }))
+      : sendEmail(to, from, subject, bodyText, n.attachments)
 
   const [slackResult, emailResult] = await Promise.allSettled([slackPromise, emailPromise])
   const { slackMessageTs, emailMessageId, errors } = collectResults(slackResult, emailResult)
 
   const outRefs: Partial<ThreadRefs> = {
-    slackChannelId: refs.slackChannelId,
+    slackChannelId: refs.slackChannelId ?? (hasParentThread ? undefined : channel),
     slackMessageTs: slackMessageTs || refs.slackMessageTs,
     emailMessageId: emailMessageId || refs.emailMessageId,
-    emailSubject: refs.emailSubject,
+    emailSubject: refs.emailSubject ?? (hasParentThread ? undefined : subject),
   }
 
   return {

@@ -5,6 +5,7 @@ import {
   effectivePayRate,
   effectiveFixedExpenses,
   fixedExpenseLineLabel,
+  FACTORING_FEE_LABEL,
   type FixedExpenseInput,
   type PayRateOverride,
 } from '../../../src/lib/driverPay'
@@ -19,6 +20,7 @@ import {
   type RawDeduction,
   type RawDriverPaySetting,
   type RawFuelTransaction,
+  type FactoringFields,
 } from './settlement'
 
 function periodEnd(periodStart: string): string {
@@ -168,6 +170,14 @@ describe('buildSettlement', () => {
       ]),
     )
 
+    // Gross 1500 × 2% = 30, listed exactly once and included in the total.
+    expect(settlement.deductions.filter((d) => d.label === FACTORING_FEE_LABEL)).toHaveLength(1)
+    expect(settlement.deductions.find((d) => d.label === FACTORING_FEE_LABEL)?.amount).toBe(30)
+    expect(settlement.deductions.reduce((s, d) => s + d.amount, 0)).toBeCloseTo(
+      statement.totalDeductions,
+      2,
+    )
+
     expect(settlement.trips).toHaveLength(2)
     expect(settlement.trips[0].amount).toBe(tripPayAmount(trips[0].freightAmount, rate))
     expect(settlement.trips[1].amount).toBe(tripPayAmount(trips[1].freightAmount, rate))
@@ -225,6 +235,35 @@ describe('buildSettlement', () => {
     const settlement = buildSettlement(periodStart, trips, setting, [], [], [], fuelTxs)
     const fuelLine = settlement.deductions.find((d) => d.label.startsWith('Fuel'))
     expect(fuelLine).toBeUndefined()
+  })
+
+  it('carries the per-trip factoring readiness through to the driver statement', () => {
+    const factoring: FactoringFields = {
+      invoiceNo: '14452',
+      poNumber: 'PO-1',
+      brokerMc: '123456',
+      invoiceAmount: 450,
+      invoiceDate: '2026-09-22',
+      fromCity: 'Chicago',
+      fromState: 'IL',
+      fromZip: '60601',
+      toCity: 'Detroit',
+      toState: 'MI',
+      toZip: '48201',
+      podPresent: true,
+      rateconPresent: true,
+      blocked: false,
+    }
+    const settlement = buildSettlement(
+      periodStart,
+      [{ ...trips[0], factoring }],
+      makeSetting(),
+      [],
+      [],
+      [],
+      [],
+    )
+    expect(settlement.trips[0].factoring).toEqual(factoring)
   })
 })
 

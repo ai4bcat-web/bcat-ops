@@ -123,6 +123,41 @@ describe('SettlementPage', () => {
     expect(screen.getByText('Total deductions')).toBeTruthy()
   })
 
+  it('shows the factoring fee line and per-trip factoring readiness', async () => {
+    driverApiMocks.fetchSettlement.mockResolvedValue({
+      ...baseSettlement,
+      deductions: [{ label: 'Factoring fee (2%)', amount: 25.2 }, ...baseSettlement.deductions],
+      trips: [
+        {
+          ...baseSettlement.trips[0],
+          factoring: {
+            invoiceNo: '14452',
+            poNumber: 'PO-1',
+            brokerMc: '123456',
+            invoiceAmount: 1260,
+            invoiceDate: '2026-09-28',
+            fromCity: 'Chicago',
+            fromState: 'IL',
+            fromZip: '60601',
+            toCity: 'Indianapolis',
+            toState: 'IN',
+            toZip: '46201',
+            podPresent: false,
+            rateconPresent: true,
+            blocked: true,
+          },
+        },
+      ],
+    })
+    render(<SettlementPage />)
+
+    await waitFor(() => expect(screen.getByText('Factoring fee (2%)')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText('Blocked')).toBeTruthy()
+    expect(screen.getByText('14452')).toBeTruthy()
+    expect(screen.getByText('missing')).toBeTruthy() // POD not on file
+    expect(screen.getByText('on file')).toBeTruthy() // rate con present
+  })
+
   it('renders a retryable error when the weeks call fails', async () => {
     driverApiMocks.fetchSettlementWeeks.mockRejectedValueOnce(new Error('Network down'))
     render(<SettlementPage />)

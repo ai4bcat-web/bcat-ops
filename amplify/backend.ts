@@ -25,6 +25,7 @@ import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
 import { generateRecurringExpenses } from './functions/generate-recurring-expenses/resource'
 import { motiveMileageSync } from './functions/motive-mileage-sync/resource'
+import { motiveOdometerSync } from './functions/motive-odometer-sync/resource'
 import { motiveLocationSync } from './functions/motive-location-sync/resource'
 import { motiveFaultSync } from './functions/motive-fault-sync/resource'
 import { blueinkSync } from './functions/blueink-sync/resource'
@@ -67,6 +68,7 @@ const backend = defineBackend({
   fuelImport,
   generateRecurringExpenses,
   motiveMileageSync,
+  motiveOdometerSync,
   blueinkSync,
   motiveLocationSync,
   motiveFaultSync,
@@ -229,6 +231,9 @@ const driverApiFuelTxTable = backend.data.resources.tables['FuelTransaction']
 const driverApiDriverTable = backend.data.resources.tables['Driver']
 const driverApiPaySettingTable = backend.data.resources.tables['DriverPaySetting']
 const driverApiLoadTable = backend.data.resources.tables['Load']
+const driverApiCustomerTable = backend.data.resources.tables['Customer']
+const driverApiLocationTable = backend.data.resources.tables['Location']
+const driverApiPodDocumentTable = backend.data.resources.tables['PodDocument']
 
 // The driver API is internet-facing (Function URL, auth handled in-handler), so it gets
 // read-only access to the roster and pay tables it reports from. Only the two submission
@@ -248,6 +253,12 @@ const driverApiReadOnlyArns = [
   `${driverApiCreditTable.tableArn}/index/*`,
   driverApiFuelTxTable.tableArn,
   `${driverApiFuelTxTable.tableArn}/index/*`,
+  driverApiCustomerTable.tableArn,
+  `${driverApiCustomerTable.tableArn}/index/*`,
+  driverApiLocationTable.tableArn,
+  `${driverApiLocationTable.tableArn}/index/*`,
+  driverApiPodDocumentTable.tableArn,
+  `${driverApiPodDocumentTable.tableArn}/index/*`,
 ]
 
 const driverApiWritableArns = [
@@ -292,6 +303,9 @@ driverApiFn.addEnvironment('DRIVER_TABLE_NAME', driverApiDriverTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_SETTING_TABLE_NAME', driverApiPaySettingTable.tableName)
 driverApiFn.addEnvironment('AMAZON_TRIP_TABLE_NAME', driverApiAmazonTripTable.tableName)
 driverApiFn.addEnvironment('LOAD_TABLE_NAME', driverApiLoadTable.tableName)
+driverApiFn.addEnvironment('CUSTOMER_TABLE_NAME', driverApiCustomerTable.tableName)
+driverApiFn.addEnvironment('LOCATION_TABLE_NAME', driverApiLocationTable.tableName)
+driverApiFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', driverApiPodDocumentTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_DEDUCTION_TABLE_NAME', driverApiDeductionTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_CREDIT_TABLE_NAME', driverApiCreditTable.tableName)
 driverApiFn.addEnvironment('FUEL_TRANSACTION_TABLE_NAME', driverApiFuelTxTable.tableName)
@@ -671,6 +685,48 @@ const faultSyncRule = new Rule(motiveFaultFn.stack, 'MotiveFaultSyncRule', {
   description: 'Sync open Motive fault codes (DTCs) for every Motive vehicle hourly',
 })
 faultSyncRule.addTarget(new EventsLambdaTarget(motiveFaultFn))
+
+// ── motiveOdometerSync Lambda ──────────────────────────────────────────────
+// Weekly odometer ledger: Sunday opens the week (start odometer), and a daily run
+// closes the previous Chicago calendar day (end odometer + miles + Motive fuel).
+
+const motiveOdometerFn = backend.motiveOdometerSync.resources.lambda as LambdaFunction
+
+const truckOdometerDayTable = backend.data.resources.tables['TruckOdometerDay']
+
+backend.motiveOdometerSync.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    // GetItem: read the prior day's row to diff odometer readings.
+    actions:   ['dynamodb:Scan', 'dynamodb:GetItem', 'dynamodb:PutItem'],
+    resources: [equipmentTable.tableArn, truckOdometerDayTable.tableArn],
+  })
+)
+
+motiveOdometerFn.addEnvironment('EQUIPMENT_TABLE_NAME',           equipmentTable.tableName)
+motiveOdometerFn.addEnvironment('TRUCK_ODOMETER_DAY_TABLE_NAME', truckOdometerDayTable.tableName)
+
+// Open the week — Sunday 06:00 UTC. EventBridge cron is UTC and ignores DST; 06:00
+// UTC is 00:00 CST (winter) / 01:00 CDT (summer), i.e. Sunday in Chicago either
+// way, so the opening read lands on the week's Sunday.
+const odometerOpenWeekRule = new Rule(motiveOdometerFn.stack, 'MotiveOdometerOpenWeekRule', {
+  schedule:    Schedule.cron({ minute: '0', hour: '6', month: '*', weekDay: '1' }),
+  description: 'Open the odometer week: record every Motive truck\'s Sunday starting odometer',
+})
+odometerOpenWeekRule.addTarget(new EventsLambdaTarget(motiveOdometerFn, {
+  event: RuleTargetInput.fromObject({ mode: 'openWeek' }),
+}))
+
+// Close the day — every day 06:00 UTC. Same reasoning: 06:00 UTC is after midnight
+// Chicago in both CST and CDT, so the handler closes the PREVIOUS Chicago day
+// (Saturday is closed by Sunday's run, etc.). DST shifts the wall-clock close by
+// an hour but never the day boundary.
+const odometerCloseDayRule = new Rule(motiveOdometerFn.stack, 'MotiveOdometerCloseDayRule', {
+  schedule:    Schedule.cron({ minute: '0', hour: '6', day: '*', month: '*' }),
+  description: 'Close yesterday: record end odometer, daily miles and Motive fuel for every Motive truck',
+})
+odometerCloseDayRule.addTarget(new EventsLambdaTarget(motiveOdometerFn, {
+  event: RuleTargetInput.fromObject({ mode: 'closeDay' }),
+}))
 
 // ── blueinkSync Lambda (Blue Ink Tech ELD) ─────────────────────────────────
 // One Lambda, two cadences via the event payload: frequent location sync (default
@@ -1215,7 +1271,8 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
   }
   for (const rule of [
     apptReportRule, cashReminderRule, monthlyRule, dailyMileageRule, locationSyncRule,
-    faultSyncRule, blueinkLocationRule, blueinkMileageRule, complianceScanRule, paychexWeeklyRule,
+    faultSyncRule, odometerOpenWeekRule, odometerCloseDayRule,
+    blueinkLocationRule, blueinkMileageRule, complianceScanRule, paychexWeeklyRule,
   ]) {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
 import { isPosted } from '@/lib/invoiceStatus'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
-import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
+import { useAmazonProfitability, aggregateAmazon, AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS } from '@/hooks/useAmazonProfitability'
+import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
 import { useTrucks } from '@/hooks/useTrucks'
 import { useAppStore } from '@/store/useAppStore'
@@ -85,16 +86,22 @@ function EditableCostRow({ label, amount, onCommit }: { label: string; amount: n
  * monthly amounts editable in place; Loan-Trucks comes from each truck's own loan;
  * Maintenance is logged invoices for Ivan trucks + all trailers. Net includes them all.
  */
+type ProfitTab = FleetGroup | 'OWNER_OPERATOR'
+
 export function MonthlyFleetPL() {
   const [monthOffset, setMonthOffset] = useState(0)
-  const [group, setGroup] = useState<FleetGroup>('LOCAL')
+  const [group, setGroup] = useState<ProfitTab>('LOCAL')
 
   const range = monthRange(monthOffset)
-  const { data, members, loading, refresh } = useFleetProfitability(range, group)
+  const { data, members, loading, refresh } = useFleetProfitability(range, group as FleetGroup)
   const { rows: amzRows, loading: amzLoading } = useAmazonProfitability()
+  const { rows: ownerOpRows, loading: ownerOpLoading } = useOwnerOperatorProfitability()
   const amzAgg = useMemo(() => aggregateAmazon(amzRows, range.start, range.end, { prorate: true }), [amzRows, range.start, range.end])
+  const ownerOpAgg = useMemo(() => aggregateOwnerOperator(ownerOpRows, range.start, range.end, { prorate: true }), [ownerOpRows, range.start, range.end])
   const amzDrivers = useMemo(() => new Set(amzAgg.rows.map((r) => r.driverId)).size, [amzAgg])
+  const ownerOpDrivers = useMemo(() => new Set(ownerOpAgg.rows.map((r) => r.driverId)).size, [ownerOpAgg])
   const isAmazon = group === 'AMAZON'
+  const isOwnerOperator = group === 'OWNER_OPERATOR'
   const { monthlyAmounts, contributionInRange, eldInRange, setMonthlyAmount } = useFleetFixedCosts()
   const { equipment } = useTrucks()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
@@ -134,7 +141,7 @@ export function MonthlyFleetPL() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly Profit &amp; Loss</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'}` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
+              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'} · Amazon ${AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? '(profit)' : '(not counted)'}` : isOwnerOperator ? `${ownerOpDrivers} driver${ownerOpDrivers === 1 ? '' : 's'} · Owner operators` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
             </div>
           </div>
         </div>
@@ -152,6 +159,12 @@ export function MonthlyFleetPL() {
                 </button>
               )
             })}
+            <button onClick={() => setGroup('OWNER_OPERATOR')}
+              style={{ padding: '5px 12px', borderRadius: 6, border: 'none', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                background: isOwnerOperator ? 'var(--ds-surface)' : 'transparent', color: isOwnerOperator ? 'var(--ds-t1)' : 'var(--ds-t2)',
+                boxShadow: isOwnerOperator ? 'var(--sh-sm)' : 'none' }}>
+              Owner operators
+            </button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -169,7 +182,33 @@ export function MonthlyFleetPL() {
 
       {/* P&L body */}
       <div style={{ padding: '16px 20px' }}>
-        {isAmazon ? (
+        {isOwnerOperator ? (
+          ownerOpLoading && ownerOpAgg.rows.length === 0 ? (
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
+          ) : ownerOpAgg.rows.length === 0 ? (
+            <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>No owner-operator pay this month.</div>
+          ) : (
+            <div style={{ maxWidth: 520 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0 12px' }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)' }}>(gross billed)</span></span>
+                <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(ownerOpAgg.revenue)}</span>
+              </div>
+              <CostRow label="Driver pay" value={ownerOpAgg.driverPay} />
+              <CostRow label="Operating expenses" value={ownerOpAgg.expenses} hint="fuel + fixed" />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 9, borderTop: '1px solid var(--ds-border)' }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)' }}>Total expenses</span>
+                <span style={{ fontSize: 13, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>− {money(ownerOpAgg.driverPay + ownerOpAgg.expenses)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 11, borderTop: '2px solid var(--ds-border)' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>
+                  Profit to company
+                  {ownerOpAgg.revenue > 0 && <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--ds-t3)', marginLeft: 8 }}>{((ownerOpAgg.profit / ownerOpAgg.revenue) * 100).toFixed(0)}% margin</span>}
+                </span>
+                <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: netColor(ownerOpAgg.profit) }}>{money(ownerOpAgg.profit)}</span>
+              </div>
+            </div>
+          )
+        ) : isAmazon ? (
           amzLoading && amzAgg.rows.length === 0 ? (
             <div style={{ padding: '28px 0', textAlign: 'center', fontSize: 13, color: 'var(--ds-t3)' }}>Loading…</div>
           ) : amzAgg.rows.length === 0 ? (
@@ -206,7 +245,7 @@ export function MonthlyFleetPL() {
               <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue</span>
               <span style={{ fontSize: 15, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t1)' }}>{money(r.revenue)}</span>
             </div>
-            <RevenueAuditPanel range={range} group={group} expectedRevenue={r.revenue} />
+            <RevenueAuditPanel range={range} group={group as FleetGroup} expectedRevenue={r.revenue} />
             <div style={{ height: 12 }} />
 
             {/* Costs */}

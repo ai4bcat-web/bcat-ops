@@ -5,7 +5,7 @@ import { usePodDocuments } from '@/hooks/usePodDocuments'
 import { toast } from 'sonner'
 import {
   PackageCheck, Search, RefreshCw, Loader2, AlertCircle,
-  Settings2, X, CheckCircle2,
+  Settings2, X, CheckCircle2, Upload,
 } from 'lucide-react'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PodTable } from './PodTable'
@@ -19,6 +19,7 @@ import type { PodDocument, PodConnectionStatus, PodSenderMapping } from '@/types
 import type { Driver } from '@/types'
 
 import { matchPodDriver } from '@/lib/podDriver'
+import { DriverDocUploadDialog } from '@/features/driver-docs'
 
 const FILTER_LABELS: Record<string, string> = {
   ALL: 'All',
@@ -79,7 +80,7 @@ function useFilteredDocs(
 }
 
 export function PodsPage() {
-  const { isAdmin, isOwner } = useAuth()
+  const { isAdmin, isOwner, user } = useAuth()
   const loads = useAppStore((s) => s.loads)
   const drivers = useAppStore((s) => s.drivers)
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
@@ -113,6 +114,7 @@ export function PodsPage() {
   const [showMapDialog, setShowMapDialog] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
   const [configuredOverride, setConfiguredOverride] = useState<PodConnectionStatus | null>(null)
+  const [showUploadPod, setShowUploadPod] = useState(false)
 
   const activeStatus = configuredOverride ?? status
 
@@ -223,6 +225,26 @@ export function PodsPage() {
                 <Settings2 size={14} /> {showConfig ? 'Close' : 'Configure'}
               </button>
             )}
+            <button
+              onClick={() => setShowUploadPod(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                height: 32,
+                padding: '0 12px',
+                borderRadius: 8,
+                border: '1px solid var(--ds-border)',
+                background: 'var(--ds-surface)',
+                color: 'var(--ds-t2)',
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              <Upload size={14} /> Upload POD
+            </button>
             <button
               onClick={() => setShowMapDialog(true)}
               style={{
@@ -502,7 +524,6 @@ export function PodsPage() {
           onClose={() => setAssignDoc(null)}
         />
       )}
-
       {showMapDialog && (
         <PodSenderMappingDialog
           open
@@ -513,6 +534,16 @@ export function PodsPage() {
           onSave={saveSenderMapping}
         />
       )}
+      <DriverDocUploadDialog
+        open={showUploadPod}
+        onClose={() => setShowUploadPod(false)}
+        drivers={drivers}
+        preselectedKind="POD"
+        staffEmail={user?.email ?? ''}
+        onSubmitted={() => {
+          toast.success('POD uploaded on driver\'s behalf')
+        }}
+      />
       <LoadDrawer />
     </div>
   )

@@ -9,7 +9,7 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { DriverPayRow } from '@/hooks/useAmazonPay'
-import { tripPayAmount } from '@/lib/driverPay'
+import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { weekLabelLong } from '@/features/driver-pay/week'
 import ivanLogo from '@/assets/ivan-cartage-logo.png'
@@ -157,11 +157,18 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   y += 14
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  if (deductions.length === 0) {
+  if (deductions.length === 0 && statement.factoringFee === 0) {
     doc.setTextColor(107, 114, 128)
     doc.text('No deductions.', M, y)
     y += 14
   } else {
+    if (statement.factoringFee > 0) {
+      doc.setTextColor(55, 65, 81)
+      doc.text(FACTORING_FEE_LABEL, M, y)
+      doc.setTextColor(220, 38, 38)
+      doc.text(`(${money(statement.factoringFee)})`, W - M, y, { align: 'right' })
+      y += 15
+    }
     for (const d of deductions) {
       doc.setTextColor(55, 65, 81)
       doc.text(d.label, M, y)

@@ -27,12 +27,33 @@ export const DRIVER_USER_POOL_CLIENT_ID: string =
     ? rawOutputs.custom.driverUserPoolClientId
     : ''
 
+export const MAX_SCAN_PAGES = 12
+export const SCAN_ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+export const SCAN_ACCEPTED_TYPES_STRING = SCAN_ACCEPTED_TYPES.join(',')
+
 export class DriverApiError extends Error {
   status: number
   constructor(status: number, message: string) {
     super(message)
     this.status = status
     this.name = 'DriverApiError'
+  }
+}
+
+/**
+ * Thrown when a submission was created on the server but a later step (page upload or
+ * complete) failed. The caller can retry with `resumeFromId` to avoid creating a duplicate
+ * submission for the same scan.
+ */
+export class ResumableDriverApiError extends DriverApiError {
+  submissionId: string
+  kind: SubmissionKind
+
+  constructor(status: number, message: string, submissionId: string, kind: SubmissionKind) {
+    super(status, message)
+    this.submissionId = submissionId
+    this.kind = kind
+    this.name = 'ResumableDriverApiError'
   }
 }
 
@@ -49,6 +70,28 @@ export interface DriverProfile {
   active: boolean
 }
 
+/**
+ * Per-trip factoring readiness the server computes from the Load and its linked Customer /
+ * Location rows. Mirrors FactoringFields in amplify/functions/driver-app-api/settlement.ts.
+ */
+export interface FactoringFields {
+  invoiceNo: string | null
+  poNumber: string | null
+  brokerMc: string | null
+  invoiceAmount: number | null
+  invoiceDate: string | null
+  fromCity: string | null
+  fromState: string | null
+  fromZip: string | null
+  toCity: string | null
+  toState: string | null
+  toZip: string | null
+  podPresent: boolean
+  rateconPresent: boolean
+  /** True when any required field or document is missing. */
+  blocked: boolean
+}
+
 export interface SettlementTrip {
   id: string
   date: string
@@ -58,6 +101,7 @@ export interface SettlementTrip {
   miles?: number | null
   rate?: number | null
   amount: number
+  factoring?: FactoringFields | null
 }
 
 export interface SettlementLine {
@@ -117,6 +161,15 @@ interface UploadTarget {
   s3Key: string
 }
 
+interface CreateSubmissionResponse {
+  submissionId: string
+  uploads: UploadTarget[]
+}
+
+interface UploadListResponse {
+  uploads: UploadTarget[]
+}
+
 // ── Session plumbing ─────────────────────────────────────────────────────────
 
 /**
@@ -157,7 +210,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const message =
       body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string'
         ? (body as { error: string }).error
-        : `Request failed (${res.status})`
+        : 'Something went wrong on our side. Please try again in a minute.'
     throw new DriverApiError(res.status, message)
   }
   return body as T
@@ -197,47 +250,145 @@ async function putPage(target: UploadTarget, page: PendingPage): Promise<void> {
     headers: { 'content-type': page.contentType },
     body: page.blob,
   })
-  if (!res.ok) throw new DriverApiError(res.status, `Upload failed for ${page.fileName}`)
+  // Drivers see this text verbatim, so it names the page they can see on screen — never the
+  // generated file name or the HTTP status.
+  if (!res.ok) {
+    throw new DriverApiError(
+      res.status,
+      `Page ${target.pageNumber} did not finish sending. Check your signal and try again.`,
+    )
+  }
 }
 
 function pageMeta(pages: PendingPage[]) {
   return pages.map((p) => ({ fileName: p.fileName, contentType: p.contentType, byteSize: p.byteSize }))
 }
 
+function completeSubmission(submissionId: string, kind: SubmissionKind): Promise<unknown> {
+  return request(`/submissions/${encodeURIComponent(submissionId)}/complete`, {
+    method: 'POST',
+    body: JSON.stringify({ kind }),
+  })
+}
+
+function wrapWithResume(
+  err: unknown,
+  submissionId: string,
+  kind: SubmissionKind,
+): ResumableDriverApiError | DriverApiError {
+  if (err instanceof ResumableDriverApiError) return err
+  if (err instanceof DriverApiError) {
+    return new ResumableDriverApiError(err.status, err.message, submissionId, kind)
+  }
+  // A raw network/DOM error message ("Failed to fetch", "Load failed") means nothing to a
+  // driver, so it never reaches the screen.
+  return new ResumableDriverApiError(
+    0,
+    'Your phone lost the connection before we finished. Try again when you have signal.',
+    submissionId,
+    kind,
+  )
+}
+
 /**
- * Creates a submission from a scanned rate confirmation: reserve → upload every page → complete.
- * `complete` is what fires the email and the Slack post, so it runs only after S3 has the bytes.
+ * Reserves a new submission (or re-opens an existing one for resume) and returns fresh
+ * presigned upload targets. This is the lower-level primitive used by submitRatecon and
+ * submitStandalonePod.
  */
-export async function submitRatecon(input: {
+export async function createSubmission(input: {
+  kind: SubmissionKind
   pages: PendingPage[]
   referenceNumber?: string
   note?: string
-}): Promise<string> {
-  const created = await request<{ submissionId: string; uploads: UploadTarget[] }>('/submissions', {
+  resumeFromId?: string
+}): Promise<CreateSubmissionResponse> {
+  if (input.resumeFromId) {
+    const out = await request<UploadListResponse>(
+      `/submissions/${encodeURIComponent(input.resumeFromId)}/uploads?kind=${encodeURIComponent(input.kind)}`,
+    )
+    return { submissionId: input.resumeFromId, uploads: out.uploads }
+  }
+
+  const out = await request<CreateSubmissionResponse>('/submissions', {
     method: 'POST',
     body: JSON.stringify({
+      kind: input.kind,
       referenceNumber: input.referenceNumber,
       note: input.note,
       pages: pageMeta(input.pages),
     }),
   })
-  await Promise.all(created.uploads.map((t, i) => putPage(t, input.pages[i])))
-  await request(`/submissions/${encodeURIComponent(created.submissionId)}/complete`, {
-    method: 'POST',
-    body: JSON.stringify({ kind: 'RATECON' }),
-  })
-  return created.submissionId
+  return out
+}
+
+/**
+ * Creates a submission from a scanned rate confirmation: reserve → upload every page → complete.
+ * `complete` is what fires the email and the Slack post, so it runs only after S3 has the bytes.
+ *
+ * If a page upload fails, the error carries the created `submissionId` so the caller can retry
+ * with `resumeFromId` instead of creating a second submission for the same scan.
+ */
+export async function submitRatecon(input: {
+  pages: PendingPage[]
+  referenceNumber?: string
+  note?: string
+  resumeFromId?: string
+}): Promise<string> {
+  const { submissionId, uploads } = await createSubmission({ kind: 'RATECON', ...input })
+  try {
+    await Promise.all(uploads.map((t, i) => putPage(t, input.pages[i])))
+    await completeSubmission(submissionId, 'RATECON')
+  } catch (err) {
+    throw wrapWithResume(err, submissionId, 'RATECON')
+  }
+  return submissionId
+}
+
+/**
+ * Creates a brand-new POD submission for a load the driver could not find in their list.
+ * The submission is identified by a reference/load number the driver enters.
+ */
+export async function submitStandalonePod(input: {
+  pages: PendingPage[]
+  referenceNumber?: string
+  note?: string
+  resumeFromId?: string
+}): Promise<string> {
+  const { submissionId, uploads } = await createSubmission({ kind: 'POD', ...input })
+  try {
+    await Promise.all(uploads.map((t, i) => putPage(t, input.pages[i])))
+    await completeSubmission(submissionId, 'POD')
+  } catch (err) {
+    throw wrapWithResume(err, submissionId, 'POD')
+  }
+  return submissionId
 }
 
 /** Adds POD pages to an existing submission; the server replies into the same email + Slack thread. */
-export async function submitPod(submissionId: string, pages: PendingPage[]): Promise<void> {
-  const created = await request<{ uploads: UploadTarget[] }>(
-    `/submissions/${encodeURIComponent(submissionId)}/pod`,
-    { method: 'POST', body: JSON.stringify({ pages: pageMeta(pages) }) },
-  )
-  await Promise.all(created.uploads.map((t, i) => putPage(t, pages[i])))
-  await request(`/submissions/${encodeURIComponent(submissionId)}/complete`, {
-    method: 'POST',
-    body: JSON.stringify({ kind: 'POD' }),
-  })
+export async function submitPod(
+  submissionId: string,
+  pages: PendingPage[],
+  { resume = false }: { resume?: boolean } = {},
+): Promise<void> {
+  let uploads: UploadTarget[]
+
+  if (resume) {
+    const out = await request<UploadListResponse>(
+      `/submissions/${encodeURIComponent(submissionId)}/uploads?kind=POD`,
+    )
+    uploads = out.uploads
+  } else {
+    const out = await request<UploadListResponse>(
+      `/submissions/${encodeURIComponent(submissionId)}/pod`,
+      { method: 'POST', body: JSON.stringify({ pages: pageMeta(pages) }) },
+    )
+    uploads = out.uploads
+  }
+
+  try {
+    await Promise.all(uploads.map((t, i) => putPage(t, pages[i])))
+    await completeSubmission(submissionId, 'POD')
+  } catch (err) {
+    throw wrapWithResume(err, submissionId, 'POD')
+  }
 }

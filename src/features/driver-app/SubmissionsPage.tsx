@@ -168,9 +168,14 @@ export default function SubmissionsPage() {
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-background/95 px-4 py-4 backdrop-blur">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold">My submissions</h1>
-          <Button size="sm" onClick={() => navigate('/driver/scan?kind=ratecon')}>
-            Scan rate con
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => navigate('/driver/scan?kind=pod')}>
+              Scan POD
+            </Button>
+            <Button size="sm" onClick={() => navigate('/driver/scan?kind=ratecon')}>
+              Scan rate con
+            </Button>
+          </div>
         </div>
       </header>
 

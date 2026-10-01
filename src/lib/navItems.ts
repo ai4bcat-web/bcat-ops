@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Repeat, Building2, MapPin, TrendingUp, Banknote, PackageCheck, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Repeat, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Route, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -47,6 +47,7 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
       { to: '/pods',      label: 'PODs',      icon: PackageCheck,    pageKey: 'pods' },
+      { to: '/driver-docs', label: 'Driver Docs', icon: FileText,    pageKey: 'driverDocs' },
       { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
       { to: '/vendor-ap', label: 'Vendor AP Queue', icon: Receipt, pageKey: 'vendorAp' },
       // The directory: reusable customers + locations behind the Load form.
@@ -75,6 +76,7 @@ export const NAV_GROUPS: NavSection[] = [
     title: 'Fleet',
     items: [
       { to: '/fleet-dashboard', label: 'Fleet Manager Dashboard', icon: Gauge, pageKey: 'fleetManagerDashboard' },
+      { to: '/fleet-miles', label: 'Fleet Miles', icon: Route, pageKey: 'fleetMiles' },
       { to: '/maintenance', label: 'Maintenance',     icon: Wrench,   pageKey: 'maintenance', badgeKey: 'maintenance' },
       { to: '/invoices',    label: 'Invoices',        icon: Receipt,  pageKey: 'invoices' },
       { to: '/truck-docs',  label: 'Asset Documents', icon: FileText, pageKey: 'truckDocs',   badgeKey: 'truckDocs' },

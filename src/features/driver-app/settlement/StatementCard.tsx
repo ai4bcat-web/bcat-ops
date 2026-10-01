@@ -1,7 +1,9 @@
 import * as React from 'react'
 import { FileText } from 'lucide-react'
-import type { Settlement, SettlementLine } from '../driverApi'
+import type { FactoringFields, Settlement, SettlementLine, SettlementTrip } from '../driverApi'
 import { weekLabel } from '@/features/driver-pay/week'
+
+type TripWithFactoring = SettlementTrip & { factoring?: FactoringFields | null }
 
 // Matches the formatter used by the staff DriverPayPage surface so drivers see
 // identical numbers. See src/features/driver-pay/DriverPayPage.tsx.
@@ -69,6 +71,7 @@ export function StatementCard({ settlement }: StatementCardProps) {
           <div className="flex flex-col gap-3">
             {settlement.trips.map((trip) => {
               const route = [trip.origin, trip.destination].filter(Boolean).join(' → ') || undefined
+              const factoring = (trip as TripWithFactoring).factoring ?? null
               return (
                 <div
                   key={trip.id}
@@ -98,6 +101,7 @@ export function StatementCard({ settlement }: StatementCardProps) {
                       {money(trip.amount)}
                     </span>
                   </div>
+                  <FactoringBlock factoring={factoring} />
                 </div>
               )
             })}
@@ -213,6 +217,59 @@ export function StatementCard({ settlement }: StatementCardProps) {
           {money(settlement.checkAmount)}
         </span>
       </div>
+    </div>
+  )
+}
+
+function FactoringBlock({ factoring }: { factoring: FactoringFields | null }) {
+  if (!factoring) {
+    return (
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        No load linked — factoring details unavailable.
+      </p>
+    )
+  }
+  const place = (city: string | null, state: string | null, zip: string | null) =>
+    [city, state, zip].filter(Boolean).join(', ') || null
+  const rows: Array<[string, string | null]> = [
+    ['PRO', factoring.invoiceNo],
+    ['PO', factoring.poNumber],
+    ['Broker MC', factoring.brokerMc],
+    ['Amount', factoring.invoiceAmount != null ? money(factoring.invoiceAmount) : null],
+    ['Invoice date', factoring.invoiceDate],
+    ['From', place(factoring.fromCity, factoring.fromState, factoring.fromZip)],
+    ['To', place(factoring.toCity, factoring.toState, factoring.toZip)],
+    ['POD', factoring.podPresent ? 'on file' : null],
+    ['Rate con', factoring.rateconPresent ? 'on file' : null],
+  ]
+  return (
+    <div className="mt-2 rounded-md border border-dashed border-border/80 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Factoring
+        </span>
+        <span
+          className={`text-[10px] font-bold ${
+            factoring.blocked ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'
+          }`}
+        >
+          {factoring.blocked ? 'Blocked' : 'Ready'}
+        </span>
+      </div>
+      <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex min-w-0 items-baseline justify-between gap-2">
+            <dt className="shrink-0 text-[10px] text-muted-foreground">{label}</dt>
+            <dd
+              className={`truncate text-right text-[11px] font-medium ${
+                value ? 'text-card-foreground' : 'text-[var(--ds-red)]'
+              }`}
+            >
+              {value ?? 'missing'}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   )
 }

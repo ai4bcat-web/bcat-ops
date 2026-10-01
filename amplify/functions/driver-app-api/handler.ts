@@ -32,8 +32,10 @@ import {
   type RawDeduction,
   type RawDriverPaySetting,
   type RawFuelTransaction,
+  type FactoringFields,
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
+import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
 import { isEligiblePayGroup } from './scope'
 import {
   OWNER_OP_FIRST_PERIOD,
@@ -53,6 +55,9 @@ const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const DRIVER_PAY_SETTING_TABLE = process.env.DRIVER_PAY_SETTING_TABLE_NAME!
 const AMAZON_TRIP_TABLE = process.env.AMAZON_TRIP_TABLE_NAME!
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
+const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
+const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
+const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
 const PAY_CREDIT_TABLE = process.env.DRIVER_PAY_CREDIT_TABLE_NAME!
 const FUEL_TX_TABLE = process.env.FUEL_TRANSACTION_TABLE_NAME!
@@ -329,6 +334,7 @@ function ownerOpTripToRaw(trip: OwnerOpTrip, periodStart: string): RawAmazonTrip
     freightAmount: trip.freightAmount,
     status: null,
     sortOrder: null,
+    loadRowId: trip.id,
   }
 }
 
@@ -373,6 +379,175 @@ async function loadOwnerOperatorRawTrips(driverId: string): Promise<RawAmazonTri
   return out
 }
 
+interface LoadFactoringRow {
+  id: string
+  aljexId?: string | null
+  pickupNumber?: string | null
+  rate?: number | null
+  deliveryAppt?: string | null
+  originCity?: string | null
+  destinationCity?: string | null
+  customerId?: string | null
+  rateConfirmKey?: string | null
+  stops?: StopFactoringRow[] | null
+}
+
+interface StopFactoringRow {
+  type?: string | null
+  city?: string | null
+  locationId?: string | null
+  address?: { city?: string | null; state?: string | null; zip?: string | null } | null
+}
+
+interface CustomerFactoringRow {
+  id: string
+  mcNumber?: string | null
+}
+
+interface LocationFactoringRow {
+  id: string
+  city?: string | null
+  state?: string | null
+  zip?: string | null
+}
+
+function cleanFactoringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function isFactoringBlocked(fields: Omit<FactoringFields, 'blocked'>): boolean {
+  return (
+    !fields.invoiceNo ||
+    !fields.poNumber ||
+    !fields.brokerMc ||
+    fields.invoiceAmount == null ||
+    !fields.invoiceDate ||
+    !fields.fromCity ||
+    !fields.fromState ||
+    !fields.fromZip ||
+    !fields.toCity ||
+    !fields.toState ||
+    !fields.toZip ||
+    !fields.podPresent ||
+    !fields.rateconPresent
+  )
+}
+
+/** City/state/ZIP for a stop, preferring the booked snapshot on the stop, then Location. */
+function placeFor(
+  cityHint: string | null | undefined,
+  stop: StopFactoringRow | undefined,
+  locations: Map<string, LocationFactoringRow>,
+): { city: string | null; state: string | null; zip: string | null } {
+  const address = stop?.address ?? null
+  const location = stop?.locationId ? locations.get(stop.locationId) : undefined
+  const rawCity = cleanFactoringValue(address?.city) ?? cleanFactoringValue(stop?.city) ?? cleanFactoringValue(cityHint)
+  const split = splitCityState(rawCity)
+  return {
+    city: cleanFactoringValue(address?.city) ?? cleanFactoringValue(split.city) ?? cleanFactoringValue(location?.city),
+    state: cleanFactoringValue(address?.state) ?? cleanFactoringValue(split.state) ?? cleanFactoringValue(location?.state),
+    zip: normalizeZip(cleanFactoringValue(address?.zip) ?? cleanFactoringValue(location?.zip)) ?? null,
+  }
+}
+
+function factoringFieldsFor(
+  load: LoadFactoringRow,
+  customers: Map<string, CustomerFactoringRow>,
+  locations: Map<string, LocationFactoringRow>,
+  podPresent: boolean,
+): FactoringFields {
+  const stops = load.stops ?? []
+  const origin = placeFor(load.originCity, stops.find((s) => s.type === 'pickup'), locations)
+  const destination = placeFor(load.destinationCity, stops.find((s) => s.type === 'delivery'), locations)
+  const customer = load.customerId ? customers.get(load.customerId) : undefined
+  const fields: Omit<FactoringFields, 'blocked'> = {
+    invoiceNo: cleanFactoringValue(load.aljexId),
+    poNumber: cleanFactoringValue(load.pickupNumber),
+    brokerMc: cleanFactoringValue(customer?.mcNumber),
+    // Load.rate is CENTS; the OTR invoice amount is DOLLARS.
+    invoiceAmount: load.rate != null && Number.isFinite(load.rate) ? Math.round(load.rate) / 100 : null,
+    invoiceDate: load.deliveryAppt ? load.deliveryAppt.slice(0, 10) : null,
+    fromCity: origin.city,
+    fromState: origin.state,
+    fromZip: origin.zip,
+    toCity: destination.city,
+    toState: destination.state,
+    toZip: destination.zip,
+    podPresent,
+    rateconPresent: !!load.rateConfirmKey,
+  }
+  return { ...fields, blocked: isFactoringBlocked(fields) }
+}
+
+/**
+ * Resolve the OTR factoring view for a set of loads. Reads the Load row plus the Customer
+ * and Location rows it links to and the load's PodDocument rows, so the driver sees which
+ * required fields/documents are missing before the office can factor the load.
+ */
+async function resolveFactoringFields(loadIds: string[]): Promise<Map<string, FactoringFields>> {
+  const out = new Map<string, FactoringFields>()
+  const unique = [...new Set(loadIds.filter(Boolean))]
+  if (unique.length === 0) return out
+
+  const customerIds = new Set<string>()
+  const locationIds = new Set<string>()
+  const loads = new Map<string, LoadFactoringRow>()
+  for (const id of unique) {
+    const load = await getItem<LoadFactoringRow>(LOAD_TABLE_NAME, { id })
+    if (!load) continue
+    loads.set(id, load)
+    if (load.customerId) customerIds.add(load.customerId)
+    for (const stop of load.stops ?? []) if (stop.locationId) locationIds.add(stop.locationId)
+  }
+
+  const customers = new Map<string, CustomerFactoringRow>()
+  if (CUSTOMER_TABLE_NAME) {
+    for (const id of customerIds) {
+      const row = await getItem<CustomerFactoringRow>(CUSTOMER_TABLE_NAME, { id })
+      if (row) customers.set(id, row)
+    }
+  }
+
+  const locations = new Map<string, LocationFactoringRow>()
+  if (LOCATION_TABLE_NAME) {
+    for (const id of locationIds) {
+      const row = await getItem<LocationFactoringRow>(LOCATION_TABLE_NAME, { id })
+      if (row) locations.set(id, row)
+    }
+  }
+
+  const podsByLoad = new Set<string>()
+  if (POD_DOCUMENT_TABLE_NAME) {
+    for (const id of unique) {
+      const res = await ddb.send(
+        new QueryCommand({
+          TableName: POD_DOCUMENT_TABLE_NAME,
+          IndexName: 'podDocumentsByLoadIdAndReceivedAt',
+          KeyConditionExpression: 'loadId = :loadId',
+          ExpressionAttributeValues: { ':loadId': id },
+        }),
+      )
+      if ((res.Items ?? []).length > 0) podsByLoad.add(id)
+    }
+  }
+
+  for (const [id, load] of loads) {
+    out.set(id, factoringFieldsFor(load, customers, locations, podsByLoad.has(id)))
+  }
+  return out
+}
+
+/** Attach the factoring view to every trip the driver PWA returns. */
+async function attachFactoringFields(trips: RawAmazonTrip[]): Promise<RawAmazonTrip[]> {
+  const resolved = await resolveFactoringFields(
+    trips.map((t) => t.loadRowId ?? t.loadId).filter((id): id is string => !!id),
+  )
+  return trips.map((t) => {
+    const key = t.loadRowId ?? t.loadId
+    return { ...t, factoring: key ? resolved.get(key) ?? null : null }
+  })
+}
+
 function isDriverOwner(submission: DriverSubmissionRow, driverId: string): boolean {
   return submission.driverId === driverId
 }
@@ -384,6 +559,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'email-intake' && segments[1] === 'commit') {
     return { path: '/email-intake/commit' }
+  }
+  if (segments[0] === 'submissions' && segments[2] === 'uploads') {
+    return { path: '/submissions/:id/uploads', id: segments[1] }
   }
   if (segments[0] === 'submissions' && segments[2] === 'complete') {
     return { path: '/submissions/:id/complete', id: segments[1] }
@@ -652,6 +830,21 @@ async function presignedPutTargets(
   return { targets, pagesWithKeys }
 }
 
+/** Re-sign PUT URLs for pages already saved on a submission so a retry can re-PUT them. */
+async function resignPendingUploads(pages: PendingPage[]): Promise<UploadTarget[]> {
+  const targets: UploadTarget[] = []
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i]
+    const url = await getSignedUrl(
+      s3,
+      new PutObjectCommand({ Bucket: BUCKET, Key: page.s3Key, ContentType: page.contentType }),
+      { expiresIn: PRESIGN_EXPIRY },
+    )
+    targets.push({ pageNumber: i + 1, url, s3Key: page.s3Key })
+  }
+  return targets
+}
+
 async function getOwnedSubmission(
   submissionId: string,
   driverId: string,
@@ -780,9 +973,6 @@ async function notifyForKind(
       slackMessageTs: submission.slackMessageTs ?? undefined,
       emailMessageId: submission.emailMessageId ?? undefined,
       emailSubject: submission.emailSubject ?? undefined,
-    }
-    if (!parentRefs.slackMessageTs && !parentRefs.emailMessageId) {
-      return { refs: {}, errors: ['Missing parent thread refs for POD reply'] }
     }
     const result = await notifyPodAdded(notice, parentRefs)
     return { refs: result.refs, errors: result.error ? [result.error] : [] }
@@ -1183,7 +1373,7 @@ export const handler = async (event: FnUrlEvent) => {
             ),
         ownerOp ? loadOwnerOperatorTripsForWeek(driverId, weekStart) : Promise.resolve([] as RawAmazonTrip[]),
       ])
-      const trips = [...amazonWeekTrips, ...brokerageWeekTrips]
+      const trips = await attachFactoringFields([...amazonWeekTrips, ...brokerageWeekTrips])
       return reply(200, await buildSettlementForDriver(driverId, weekStart, trips, setting))
     }
 
@@ -1224,14 +1414,28 @@ export const handler = async (event: FnUrlEvent) => {
       return reply(200, { submissions: summaries })
     }
 
+    if (method === 'GET' && path === '/submissions/:id/uploads' && id) {
+      const kind = event.queryStringParameters?.kind ?? ''
+      if (kind !== 'RATECON' && kind !== 'POD') {
+        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      }
+      const submission = await getOwnedSubmission(id, driverId)
+      const pages = submission.pendingUploads?.[kind] ?? []
+      return reply(200, { uploads: await resignPendingUploads(pages) })
+    }
+
     if (method === 'POST' && path === '/submissions') {
       const body = parseBody(event)
+      const kind = getString(body, 'kind') ?? 'RATECON'
+      if (kind !== 'RATECON' && kind !== 'POD') {
+        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      }
       const validation = validatePages(assertArrayField(body, 'pages'))
       if (!validation.ok) return reply(400, { error: validation.error })
       const pages = validation.pages
       const now = nowIso()
       const submissionId = randomUUID()
-      const { targets, pagesWithKeys } = await presignedPutTargets(driverId, submissionId, 'RATECON', pages)
+      const { targets, pagesWithKeys } = await presignedPutTargets(driverId, submissionId, kind, pages)
 
       await ddb.send(
         new PutCommand({
@@ -1246,7 +1450,7 @@ export const handler = async (event: FnUrlEvent) => {
             note: getStringOrNull(body, 'note'),
             createdAt: now,
             updatedAt: now,
-            pendingUploads: { RATECON: pagesWithKeys } satisfies PendingUploads,
+            pendingUploads: { [kind]: pagesWithKeys } satisfies PendingUploads,
           },
           ConditionExpression: 'attribute_not_exists(id)',
         }),

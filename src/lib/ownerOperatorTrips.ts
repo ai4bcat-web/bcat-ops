@@ -1,3 +1,5 @@
+import type { OtrReadiness } from '@/lib/otrInvoice'
+
 /**
  * First owner-operator pay week: Sep 27 – Oct 3, 2026.
  *
@@ -59,6 +61,8 @@ export interface OwnerOpTrip {
   miles: number | null
   freightAmount: number // dollars = rate / 100
   deliveredAt: string
+  /** Factoring readiness, computed after trips are built by the hook. */
+  readiness?: OtrReadiness
 }
 
 /** If the requested period is before the first owner-operator week, clamp to it. */

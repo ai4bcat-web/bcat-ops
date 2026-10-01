@@ -5,7 +5,7 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import type { BoxTruckPayRow } from '@/hooks/useBoxTruckPay'
-import { tripPayAmount } from '@/lib/driverPay'
+import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { periodLabelLong } from '@/lib/biweekly'
 import { COMPANY_NAME } from '@/lib/branding'
@@ -81,6 +81,7 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   autoTable(doc, {
     startY: y,
     body: [
+      ...(statement.factoringFee > 0 ? [[FACTORING_FEE_LABEL, `(${money(statement.factoringFee)})`]] : []),
       ...deductions.map((d) => [d.label, `(${money(d.amount)})`]),
       ['Total deductions', `(${money(statement.totalDeductions)})`],
     ],

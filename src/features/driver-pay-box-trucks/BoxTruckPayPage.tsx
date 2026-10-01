@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, Plus, Upload, Trash2, Settings, Download, Pe
 import { Avatar } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/useAuth'
 import { useBoxTruckPay, type BoxTruckPayRow, type BoxTruckTrip, type DriverPayCredit } from '@/hooks/useBoxTruckPay'
-import { tripPayAmount } from '@/lib/driverPay'
+import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { persistDragOrder } from '@/lib/calendarOrder'
 import { buildBoxTruckPayStatementPdf, boxTruckPdfFilename, pdfToBase64 } from '@/lib/payPdfBoxTruck'
@@ -35,6 +35,7 @@ function statementCsv(row: BoxTruckPayRow, periodStart: string): string {
   }
   L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), q(row.statement.driverAmount)].join(','))
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
+  if (row.statement.factoringFee) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
@@ -409,10 +410,17 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Deductions</div>
-        {row.deductions.length === 0 ? (
+        {row.deductions.length === 0 && statement.factoringFee === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No deductions. Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {statement.factoringFee > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+                <span style={{ width: 16 }} />
+              </div>
+            )}
             {row.deductions.map((d, i) => {
               const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
               const refund = d.amount < 0

@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, CheckCircle2, Copy } from 'lucide-react'
+import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
+import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
 import { Avatar } from '@/components/ui/avatar'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
 import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
-import { tripPayAmount } from '@/lib/driverPay'
+import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
+import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { payCreditsDeployed, type DriverPayCredit } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
@@ -22,24 +25,115 @@ const fmtShort = (iso: string) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00Z
 const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
 const TH: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
 const TD: React.CSSProperties = { fontSize: 12.5, color: 'var(--ds-t1)', padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+// Missing factoring data is a blocked dollar, so it is rendered in the same amber the
+// page already uses for warnings rather than hidden behind an empty cell.
+const MISSING: React.CSSProperties = { color: '#b45309', fontWeight: 600 }
+
+/** The address a driver signs into the PWA with: Driver.email wins, else the pay setting's. */
+function driverSignInEmail(row: OwnerOperatorPayRow): string {
+  // An empty string is not a value — '' must fall through to the other source.
+  return row.driver.email?.trim() || row.setting.email?.trim() || ''
+}
+
+/** One OTR field for a trip: the resolved value, or the field label in warning style. */
+function OtrCell({ trip, field }: { trip: OwnerOpTrip; field: OtrRequiredField }) {
+  const value = trip.readiness?.payload[field]
+  if (value === undefined) return <span style={MISSING} title={`Missing: ${OTR_FIELD_LABEL[field]}`}>{OTR_FIELD_LABEL[field]}</span>
+  return <>{field === 'InvoiceAmount' ? money(Number(value)) : String(value)}</>
+}
+
+/** POD / rate confirmation presence, called out when it blocks factoring. */
+function OtrDoc({ trip, kind }: { trip: OwnerOpTrip; kind: 'POD' | 'Rate confirmation' }) {
+  if (trip.readiness?.missingDocuments.includes(kind)) return <span style={MISSING}>{kind}</span>
+  return <CheckCircle2 size={13} style={{ color: '#15803d', verticalAlign: '-2px' }} aria-label={`${kind} present`} />
+}
+
+/** How many of the week's loads can be invoiced at OTR, and how many are blocked. */
+function FactoringSummary({ trips }: { trips: OwnerOpTrip[] }) {
+  const ready = trips.filter((t) => t.readiness?.ready).length
+  const blocked = trips.length - ready
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+      <span style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>Factoring readiness</span>
+      <span style={{ color: ready > 0 ? '#15803d' : 'var(--ds-t3)' }}>{ready} of {trips.length} ready</span>
+      {blocked > 0 && <span style={MISSING}>{blocked} blocked</span>}
+    </div>
+  )
+}
+
+/** Where the driver PWA lives and the exact address each driver signs in with. */
+function DriverPortalPanel({ rows }: { rows: OwnerOperatorPayRow[] }) {
+  const copyUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(DRIVER_PORTAL_URL)
+      toast.success('Driver app URL copied')
+    } catch {
+      toast.error('Could not copy the URL')
+    }
+  }
+  return (
+    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', padding: '14px 16px', background: 'var(--ds-surface)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Driver app</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>Drivers sign in at</span>
+        <code style={{ fontSize: 12.5, color: 'var(--ds-t1)', background: 'var(--ds-bg)', padding: '2px 6px', borderRadius: 6 }}>{DRIVER_PORTAL_URL}</code>
+        <button onClick={() => { void copyUrl() }} title="Copy the driver app URL"
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 26, padding: '0 9px', borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit' }}>
+          <Copy size={12} /> Copy
+        </button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {rows.map((r) => (
+          <div key={r.driver.id} style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>
+            {r.driver.name}: <b style={{ color: 'var(--ds-t1)' }}>{driverSignInEmail(r) || 'no email on file'}</b>
+          </div>
+        ))}
+      </div>
+      <p style={{ fontSize: 12, color: 'var(--ds-t3)', margin: 0 }}>
+        Each driver sets their own password at <code>/driver/signup</code> and can reset it from the login screen. Office staff never see or issue passwords.
+      </p>
+    </div>
+  )
+}
 
 function initialPeriodStart(): string {
   const current = sundayOf()
   return current < OWNER_OP_FIRST_PERIOD ? OWNER_OP_FIRST_PERIOD : current
 }
 
+function csvField(trip: OwnerOpTrip, field: OtrRequiredField) {
+  return String(trip.readiness?.payload[field] ?? '')
+}
+
+function csvDoc(trip: OwnerOpTrip, kind: 'POD' | 'Rate confirmation') {
+  return trip.readiness?.missingDocuments.includes(kind) ? 'Missing' : 'Yes'
+}
+
 function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
   const L: string[] = []
   L.push(q(`${row.driver.name} — owner operator pay period ${weekLabelLong(periodStart)}`)); L.push('')
-  L.push(['Load ID', 'Customer', 'Route', 'Miles', 'Freight', 'Driver Amount'].map(q).join(','))
+  L.push([
+    'Load ID', 'Customer', 'PRO #', 'PO #', 'Broker MC', 'Invoice amount', 'Invoice date',
+    'Origin city', 'Origin state', 'Origin ZIP', 'Dest city', 'Dest state', 'Dest ZIP',
+    'POD', 'Rate confirmation', 'Miles', 'Freight', 'Driver Amount',
+  ].map(q).join(','))
   for (const t of row.trips) {
-    L.push([t.loadId, t.customer, `${t.origin} → ${t.destination}`, t.miles ?? '', t.freightAmount, tripPayAmount(t.freightAmount, row.setting)].map(q).join(','))
+    L.push([
+      t.loadId, t.customer,
+      csvField(t, 'InvoiceNo'), csvField(t, 'PoNumber'), csvField(t, 'BrokerMC'),
+      csvField(t, 'InvoiceAmount'), csvField(t, 'InvoiceDate'),
+      csvField(t, 'FromCity'), csvField(t, 'FromState'), csvField(t, 'FromZip'),
+      csvField(t, 'ToCity'), csvField(t, 'ToState'), csvField(t, 'ToZip'),
+      csvDoc(t, 'POD'), csvDoc(t, 'Rate confirmation'),
+      t.miles ?? '', t.freightAmount, tripPayAmount(t.freightAmount, row.setting),
+    ].map(q).join(','))
   }
-  L.push(['', '', '', '', q('Freight total'), q(row.statement.gross)].join(','))
-  L.push(['', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
+  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Freight total'), q(row.statement.gross)].join(','))
+  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
+  if (row.statement.factoringFee > 0) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
     L.push(''); L.push([q('Credits'), q('Amount')].join(','))
@@ -137,6 +231,14 @@ export function OwnerOperatorPayPage() {
           </div>
         )}
 
+        {pay.rows.length > 0 && (
+          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', padding: '12px 16px', background: 'var(--ds-surface)' }}>
+            <FactoringSummary trips={pay.rows.flatMap((r) => r.trips)} />
+          </div>
+        )}
+
+        {pay.rows.length > 0 && <DriverPortalPanel rows={pay.rows} />}
+
         {selectedRow && (
           <StatementCard
             key={selectedRow.driver.id}
@@ -221,7 +323,7 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
         <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{driver.name}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel}{setting.email ? ` · ${setting.email}` : ''}</div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel}{driverSignInEmail(row) ? ` · ${driverSignInEmail(row)}` : ''}</div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Check amount</div>
@@ -244,18 +346,35 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
         {iconBtn(onSettings, Settings, 'Settings')}
       </div>
 
+      <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--ds-border)' }}>
+        <FactoringSummary trips={trips} />
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
             <th style={{ ...TH, textAlign: 'left' }}>Load ID</th>
             <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
             <th style={{ ...TH, textAlign: 'left' }}>Route</th>
+            <th style={TH}>PRO #</th>
+            <th style={TH}>PO #</th>
+            <th style={TH}>Broker MC</th>
+            <th style={TH}>Invoice amount</th>
+            <th style={TH}>Invoice date</th>
+            <th style={TH}>Origin city</th>
+            <th style={TH}>Origin state</th>
+            <th style={TH}>Origin ZIP</th>
+            <th style={TH}>Dest city</th>
+            <th style={TH}>Dest state</th>
+            <th style={TH}>Dest ZIP</th>
+            <th style={TH}>POD</th>
+            <th style={TH}>Rate con</th>
             <th style={TH}>Miles</th>
             <th style={TH}>Freight</th>
             <th style={TH}>Driver Amount</th>
           </tr></thead>
           <tbody>
-            {trips.length === 0 && <tr><td colSpan={6} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
+            {trips.length === 0 && <tr><td colSpan={19} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
             {trips.map((t) => {
               const dup = row.duplicateTripIds.has(t.id)
               return (
@@ -267,6 +386,19 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
                 </td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.customer || '—'}</td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>{t.origin || '—'} → {t.destination || '—'}</td>
+                <td style={TD}><OtrCell trip={t} field="InvoiceNo" /></td>
+                <td style={TD}><OtrCell trip={t} field="PoNumber" /></td>
+                <td style={TD}><OtrCell trip={t} field="BrokerMC" /></td>
+                <td style={TD}><OtrCell trip={t} field="InvoiceAmount" /></td>
+                <td style={TD}><OtrCell trip={t} field="InvoiceDate" /></td>
+                <td style={{ ...TD, textAlign: 'left' }}><OtrCell trip={t} field="FromCity" /></td>
+                <td style={TD}><OtrCell trip={t} field="FromState" /></td>
+                <td style={TD}><OtrCell trip={t} field="FromZip" /></td>
+                <td style={{ ...TD, textAlign: 'left' }}><OtrCell trip={t} field="ToCity" /></td>
+                <td style={TD}><OtrCell trip={t} field="ToState" /></td>
+                <td style={TD}><OtrCell trip={t} field="ToZip" /></td>
+                <td style={TD}><OtrDoc trip={t} kind="POD" /></td>
+                <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" /></td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.freightAmount, setting))}</td>
@@ -274,7 +406,7 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
             )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={4}>Freight total / driver share ({pct(setting.payPercent)})</td>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={17}>Freight total / driver share ({pct(setting.payPercent)})</td>
                 <td style={TD}>{money(statement.gross)}</td>
                 <td style={TD}>{money(statement.driverAmount)}</td>
               </tr>
@@ -285,7 +417,7 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Deductions</div>
-        {row.deductions.length === 0 ? (
+        {row.deductions.length === 0 && statement.factoringFee === 0 ? (
           <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No deductions. Fixed expenses come from Settings.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -307,6 +439,15 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
                 </div>
               )
             })}
+            {statement.factoringFee > 0 && (
+              // Added inside calcDriverPay, not part of row.deductions — listed here so the
+              // lines visibly add up to the total below.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+                <span style={{ width: 16 }} />
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
               <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total deductions</span>
               <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.totalDeductions)})</span>

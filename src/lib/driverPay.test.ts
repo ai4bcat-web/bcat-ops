@@ -12,12 +12,13 @@ const addDays = (iso: string, days: number): string => {
 const tripsTotaling = (gross: number): PayTripInput[] => [{ freightAmount: gross }]
 const ded = (total: number): PayDeductionInput[] => [{ label: 'expenses', amount: total }]
 
-describe('calcDriverPay — verified against production pay sheets', () => {
+describe('calcDriverPay — verified against production pay sheets (plus the 2% factoring fee)', () => {
   it('Chad: 42% AFTER expenses', () => {
-    // gross 10,262.06 − deductions 2,561.68 = 7,700.38 subtotal; check = 42% × subtotal
+    // gross 10,262.06 − (deductions 2,561.68 + fee 205.24) = 7,495.14 subtotal; check = 42%
     const r = calcDriverPay(tripsTotaling(10_262.06), { payPercent: 0.42, expensesBeforePercent: true }, ded(2_561.68))
-    expect(r.subtotal).toBeCloseTo(7_700.38, 2)
-    expect(r.checkAmount).toBeCloseTo(3_234.16, 2)
+    expect(r.factoringFee).toBeCloseTo(205.24, 2)
+    expect(r.subtotal).toBeCloseTo(7_495.14, 2)
+    expect(r.checkAmount).toBeCloseTo(3_147.96, 2)
     // each load shows full freight in the Amount column
     expect(tripPayAmount(765.78, { payPercent: 0.42, expensesBeforePercent: true })).toBeCloseTo(765.78, 2)
   })
@@ -25,7 +26,8 @@ describe('calcDriverPay — verified against production pay sheets', () => {
   it('Lee: 88% of gross, THEN minus expenses', () => {
     const r = calcDriverPay(tripsTotaling(11_044.23), { payPercent: 0.88, expensesBeforePercent: false }, ded(1_798.22))
     expect(r.driverAmount).toBeCloseTo(9_718.92, 2)
-    expect(r.checkAmount).toBeCloseTo(7_920.70, 2)
+    expect(r.factoringFee).toBeCloseTo(220.88, 2)
+    expect(r.checkAmount).toBeCloseTo(7_699.82, 2)
     // per-load amount = 88% of freight
     expect(tripPayAmount(300, { payPercent: 0.88, expensesBeforePercent: false })).toBeCloseTo(264, 2)
   })
@@ -33,13 +35,13 @@ describe('calcDriverPay — verified against production pay sheets', () => {
   it('Mike: 85% of gross, THEN minus expenses', () => {
     const r = calcDriverPay(tripsTotaling(5_457.24), { payPercent: 0.85, expensesBeforePercent: false }, ded(1_081.11))
     expect(r.driverAmount).toBeCloseTo(4_638.65, 2)
-    expect(r.checkAmount).toBeCloseTo(3_557.54, 2)
+    expect(r.checkAmount).toBeCloseTo(3_448.40, 2)
   })
 
   it('Roy: 88% of gross, THEN minus expenses', () => {
     const r = calcDriverPay(tripsTotaling(5_906.03), { payPercent: 0.88, expensesBeforePercent: false }, ded(500))
     expect(r.driverAmount).toBeCloseTo(5_197.31, 2)
-    expect(r.checkAmount).toBeCloseTo(4_697.31, 2)
+    expect(r.checkAmount).toBeCloseTo(4_579.19, 2)
   })
 
   it('sums freight across many trips, including cancelled', () => {
@@ -50,7 +52,7 @@ describe('calcDriverPay — verified against production pay sheets', () => {
     ]
     const r = calcDriverPay(trips, { payPercent: 0.88, expensesBeforePercent: false }, [])
     expect(r.gross).toBeCloseTo(938.33, 2)
-    expect(r.checkAmount).toBeCloseTo(0.88 * 938.33, 2)
+    expect(r.checkAmount).toBeCloseTo(0.88 * 938.33 - 18.77, 2)
   })
 
   it('no trips / no deductions → zero', () => {
@@ -61,6 +63,32 @@ describe('calcDriverPay — verified against production pay sheets', () => {
   })
 })
 
+describe('factoring fee — every statement pays 2% of gross', () => {
+  it('charges exactly 2% of gross as its own deduction line', () => {
+    const r = calcDriverPay(tripsTotaling(1_234.56), { payPercent: 0.88, expensesBeforePercent: false }, [])
+    expect(r.factoringFee).toBeCloseTo(24.69, 2)
+    expect(r.checkAmount).toBeCloseTo(0.88 * 1_234.56 - 24.69, 2)
+  })
+
+  it('appears once when the statement also has fixed expenses and credits', () => {
+    const r = calcDriverPay(
+      tripsTotaling(2_000),
+      { payPercent: 0.5, expensesBeforePercent: true },
+      ded(200),
+      [{ label: 'Detention', amount: 50 }],
+    )
+    // totalDeductions = 200 expenses + 40 fee; check = 50% × (2000 − 240) + 50
+    expect(r.factoringFee).toBeCloseTo(40, 2)
+    expect(r.totalDeductions).toBeCloseTo(240, 2)
+    expect(r.checkAmount).toBeCloseTo(0.5 * (2_000 - 240) + 50, 2)
+  })
+
+  it('is zero when the statement has no gross', () => {
+    const r = calcDriverPay([], { payPercent: 0.88, expensesBeforePercent: false }, [])
+    expect(r.factoringFee).toBe(0)
+  })
+})
+
 describe('credits — extra pay added to the check', () => {
   const credit = (amount: number, reasonCode = 'DETENTION'): PayCreditInput[] => [{ label: 'detention', amount, reasonCode }]
 
@@ -68,19 +96,19 @@ describe('credits — extra pay added to the check', () => {
     const setting = { payPercent: 0.5, expensesBeforePercent: true }
     const base = calcDriverPay(tripsTotaling(4_000), setting, ded(1_000))
     const withCredit = calcDriverPay(tripsTotaling(4_000), setting, ded(1_000), credit(150))
-    // 50% × (4000 − 1000) = 1500, + 150 credit = 1650 — NOT 50% of the credit
-    expect(base.checkAmount).toBeCloseTo(1_500, 2)
-    expect(withCredit.payBeforeCredits).toBeCloseTo(1_500, 2)
+    // 50% × (4000 − 1000 − 80 fee) = 1460, + 150 credit = 1610 — NOT 50% of the credit
+    expect(base.checkAmount).toBeCloseTo(1_460, 2)
+    expect(withCredit.payBeforeCredits).toBeCloseTo(1_460, 2)
     expect(withCredit.totalCredits).toBeCloseTo(150, 2)
-    expect(withCredit.checkAmount).toBeCloseTo(1_650, 2)
+    expect(withCredit.checkAmount).toBeCloseTo(1_610, 2)
   })
 
   it('88%-of-gross model: the credit is also paid in full', () => {
     const setting = { payPercent: 0.88, expensesBeforePercent: false }
     const r = calcDriverPay(tripsTotaling(1_000), setting, ded(100), credit(75))
-    // 0.88 × 1000 = 880 − 100 = 780, + 75 = 855
-    expect(r.payBeforeCredits).toBeCloseTo(780, 2)
-    expect(r.checkAmount).toBeCloseTo(855, 2)
+    // 0.88 × 1000 = 880 − (100 + 20 fee) = 760, + 75 = 835
+    expect(r.payBeforeCredits).toBeCloseTo(760, 2)
+    expect(r.checkAmount).toBeCloseTo(835, 2)
   })
 
   it('sums several credits and leaves gross/deductions untouched', () => {
@@ -90,15 +118,15 @@ describe('credits — extra pay added to the check', () => {
       { label: 'Safety bonus', amount: 79.5, reasonCode: 'BONUS' },
     ])
     expect(r.gross).toBeCloseTo(2_000, 2)
-    expect(r.totalDeductions).toBeCloseTo(200, 2)
+    expect(r.totalDeductions).toBeCloseTo(240, 2) // 200 expenses + 40 fee
     expect(r.totalCredits).toBeCloseTo(400, 2)
-    expect(r.checkAmount).toBeCloseTo(900 + 400, 2)
+    expect(r.checkAmount).toBeCloseTo(0.5 * (2_000 - 240) + 400, 2)
   })
 
   it('credits can lift a negative check back into the black', () => {
     const r = calcDriverPay(tripsTotaling(500), { payPercent: 0.5, expensesBeforePercent: true }, ded(900), credit(300))
-    expect(r.payBeforeCredits).toBeCloseTo(-200, 2)   // 50% × (500 − 900)
-    expect(r.checkAmount).toBeCloseTo(100, 2)
+    expect(r.payBeforeCredits).toBeCloseTo(-205, 2)   // 50% × (500 − 900 − 10 fee)
+    expect(r.checkAmount).toBeCloseTo(95, 2)
   })
 
   it('no credits → check is unchanged from the pre-credit pay', () => {
@@ -112,7 +140,7 @@ describe('credits — extra pay added to the check', () => {
       { label: 'a', amount: 33.333 }, { label: 'b', amount: 0.007 },
     ])
     expect(r.totalCredits).toBeCloseTo(33.34, 2)
-    expect(r.checkAmount).toBeCloseTo(533.35, 2)
+    expect(r.checkAmount).toBeCloseTo(523.35, 2)
   })
 })
 
@@ -156,29 +184,29 @@ describe('debits — money off the check at 100%, AFTER the net', () => {
 
   it('after-expenses driver bears the FULL debit, not their pay % of it', () => {
     const setting = { payPercent: 0.5, expensesBeforePercent: true }
-    // 50% × (4000 − 1000) = 1500; a $200 debit costs the whole $200, not $100
+    // 50% × (4000 − 1000 − 80 fee) = 1460; a $200 debit costs the whole $200, not $100
     const r = calcDriverPay(tripsTotaling(4_000), setting, ded(1_000), [], debit(200))
-    expect(r.payBeforeCredits).toBeCloseTo(1_500, 2)
+    expect(r.payBeforeCredits).toBeCloseTo(1_460, 2)
     expect(r.totalDebits).toBeCloseTo(200, 2)
-    expect(r.checkAmount).toBeCloseTo(1_300, 2)
+    expect(r.checkAmount).toBeCloseTo(1_260, 2)
   })
 
   it('88%-of-gross model: subtracted in full after the net', () => {
     const setting = { payPercent: 0.88, expensesBeforePercent: false }
     const r = calcDriverPay(tripsTotaling(1_000), setting, ded(100), [], debit(75))
-    expect(r.checkAmount).toBeCloseTo(0.88 * 1_000 - 100 - 75, 2)
+    expect(r.checkAmount).toBeCloseTo(0.88 * 1_000 - 100 - 20 - 75, 2)
   })
 
   it('credits and debits compose: check = net + credits − debits', () => {
     const setting = { payPercent: 0.5, expensesBeforePercent: true }
     const r = calcDriverPay(tripsTotaling(2_000), setting, [], [{ label: 'bonus', amount: 100 }], debit(40))
-    expect(r.checkAmount).toBeCloseTo(1_000 + 100 - 40, 2)
+    expect(r.checkAmount).toBeCloseTo(0.5 * (2_000 - 40) + 100 - 40, 2)
   })
 
   it('no debits — statements are unchanged', () => {
     const r = calcDriverPay(tripsTotaling(1_000), { payPercent: 0.88, expensesBeforePercent: false }, [])
     expect(r.totalDebits).toBe(0)
-    expect(r.checkAmount).toBeCloseTo(880, 2)
+    expect(r.checkAmount).toBeCloseTo(860, 2) // 880 − 20 fee
   })
 })
 
@@ -296,9 +324,9 @@ describe('effectiveFixedExpenses — daily-prorated fixed charges', () => {
     // the full charge, which is correct whichever side of the % the expenses land on.
     const dedWaived = [{ label: 'INSURANCE', amount: 300 }, { label: 'Waived — INSURANCE', amount: -300 }]
     const after = calcDriverPay(tripsTotaling(2_000), { payPercent: 0.5, expensesBeforePercent: true }, dedWaived)
-    expect(after.checkAmount).toBeCloseTo(1_000, 2)
+    expect(after.checkAmount).toBeCloseTo(980, 2) // 50% × (2000 − 40 fee)
     const gross = calcDriverPay(tripsTotaling(2_000), { payPercent: 0.88, expensesBeforePercent: false }, dedWaived)
-    expect(gross.checkAmount).toBeCloseTo(1_760, 2)
+    expect(gross.checkAmount).toBeCloseTo(1_720, 2) // 1760 − 40 fee
   })
 })
 
@@ -322,9 +350,9 @@ describe('afterPercent fixed charges — driver bears the full line after the % 
       [],
       fixedDebits,
     )
-    expect(r.totalDeductions).toBeCloseTo(20, 2)
+    expect(r.totalDeductions).toBeCloseTo(100, 2) // 20 ELD + 80 fee
     expect(r.totalDebits).toBeCloseTo(496, 2)
-    expect(r.checkAmount).toBeCloseTo(0.5 * (4_000 - 20) - 496, 2) // 1494
+    expect(r.checkAmount).toBeCloseTo(0.5 * (4_000 - 100) - 496, 2) // 1454
   })
 })
 

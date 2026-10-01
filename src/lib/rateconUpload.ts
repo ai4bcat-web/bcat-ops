@@ -2,6 +2,7 @@ import { toast } from 'sonner'
 import { uploadRateConfirm, parseRateConfirm } from './apiClient'
 import { getStops, updateStop } from './stops'
 import { fromDateInput, fromDateTimeInput } from './date'
+import { staffUploadDriverDoc, type StaffDriverInfo } from './driverSubmissionsClient'
 import type { Load, Stop } from '@/types'
 
 /**
@@ -11,11 +12,19 @@ import type { Load, Stop } from '@/types'
  * non-Batory confirmation IS the ratecon — the appts show CONFIRMED.
  *
  * Shared by the Loads drawer and the Appts page chip so both do byte-identical work.
+ *
+ * When a driver + staff email are provided, the rate confirmation is also mirrored
+ * into a DriverSubmission so the driver sees it in the PWA alongside their own scans.
  */
 export async function uploadRateconAndApply(
   load: Load,
   file: File | Blob,
   updateLoad: (id: string, patch: Partial<Load>) => Promise<unknown>,
+  opts?: {
+    driver?: StaffDriverInfo
+    staffEmail?: string
+    referenceNumber?: string
+  },
 ): Promise<boolean> {
   let key: string
   try {
@@ -25,6 +34,25 @@ export async function uploadRateconAndApply(
   } catch {
     toast.error('Upload failed')
     return false
+  }
+
+  if (opts?.driver && opts?.staffEmail) {
+    try {
+      const rateconFile = file instanceof File ? file : new File([file], 'rate-confirmation.pdf', { type: file.type || 'application/pdf' })
+      await staffUploadDriverDoc({
+        driver: opts.driver,
+        kind: 'RATECON',
+        files: [rateconFile],
+        submittedByEmail: opts.staffEmail,
+        referenceNumber: opts.referenceNumber,
+        loadId: load.id,
+      })
+    } catch (err) {
+      // The load already has the rate confirmation; don't block the drawer on the
+      // driver-submission mirror. The staff can always re-upload from Driver Docs.
+      console.error('[uploadRateconAndApply] driver submission mirror failed', err)
+      toast.error('Rate confirmation saved, but driver PWA copy failed')
+    }
   }
   try {
     const b64 = await new Promise<string>((resolve, reject) => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 
 const load = (deliveryAppt: string) => ({
@@ -18,17 +18,29 @@ const settings = [{
 }]
 const drivers = [{ id: 'drv-1', name: 'Amazon Driver', type: 'driver', active: true }]
 
+const podState = vi.hoisted(() => ({ items: [] as { loadId?: string | null }[] }))
+
 vi.mock('@/lib/apiClient', async (orig) => ({
   ...(await orig() as object),
   listLoads: () => Promise.resolve(loads),
+  listCustomers: () => Promise.resolve([]),
+  listLocations: () => Promise.resolve([]),
   listDriverPaySettings: () => Promise.resolve(settings),
   listDriverPayDeductions: () => Promise.resolve([]),
   listDriverPayCredits: () => Promise.resolve([]),
 }))
+vi.mock('@/lib/podsClient', () => ({
+  listPods: () => Promise.resolve({ items: podState.items, nextToken: null }),
+}))
 vi.mock('@/hooks/useDrivers', () => ({ useDrivers: () => ({ drivers, updateDriver: vi.fn() }) }))
 vi.mock('@/hooks/useFuelTransactions', () => ({ useFuelTransactions: () => ({ transactions: [] }) }))
 
+// Dynamic import: the vi.mock factories reference `loads`/`settings`/`drivers`, so the
+// hook must load AFTER those consts initialize. A static import is hoisted above them
+// and would hit the temporal dead zone.
 const { useOwnerOperatorPay } = await import('./useOwnerOperatorPay')
+
+beforeEach(() => { podState.items = [] })
 
 describe('useOwnerOperatorPay', () => {
   it('includes an Amazon driver without requiring a pay-group change', async () => {
@@ -42,9 +54,12 @@ describe('useOwnerOperatorPay', () => {
     // Amazon statement — one driver-week's insurance must never hit both pages.
     const { result } = renderHook(() => useOwnerOperatorPay('2026-09-27'))
     await waitFor(() => expect(result.current.rows).toHaveLength(1))
-    expect(result.current.rows[0].deductions.map((d) => d.label)).toContain('INSURANCE')
-    // ($1,000 − $400) × 50%.
-    expect(result.current.rows[0].statement.checkAmount).toBeCloseTo(300, 2)
+    const row = result.current.rows[0]
+    expect(row.deductions.map((d) => d.label)).toContain('INSURANCE')
+    // Every statement also carries the 2% factoring fee on gross ($20 here).
+    expect(row.statement.factoringFee).toBeCloseTo(20, 2)
+    // ($1,000 − $400 insurance − $20 factoring fee) × 50%.
+    expect(row.statement.checkAmount).toBeCloseTo(290, 2)
   })
 
   it('keeps an Amazon driver and weekly expenses visible without brokerage loads', async () => {
@@ -67,5 +82,22 @@ describe('useOwnerOperatorPay', () => {
     const { result } = renderHook(() => useOwnerOperatorPay('2026-09-27'))
     await waitFor(() => expect(result.current.rows).toHaveLength(1))
     expect(result.current.rows[0].duplicateTripIds.size).toBe(0)
+  })
+
+  it('attaches factoring readiness to every trip', async () => {
+    const { result } = renderHook(() => useOwnerOperatorPay('2026-09-27'))
+    await waitFor(() => expect(result.current.rows).toHaveLength(1))
+    const trip = result.current.rows[0].trips[0]
+    // The fixture load has no linked Customer, Location, POD or rate con.
+    expect(trip.readiness?.ready).toBe(false)
+    expect(trip.readiness?.missingFields).toContain('BrokerMC')
+    expect(trip.readiness?.missingDocuments).toContain('POD')
+  })
+
+  it('counts a POD assigned to the load as present', async () => {
+    podState.items = [{ loadId: 'l1' }]
+    const { result } = renderHook(() => useOwnerOperatorPay('2026-09-27'))
+    await waitFor(() => expect(result.current.rows).toHaveLength(1))
+    expect(result.current.rows[0].trips[0].readiness?.missingDocuments).not.toContain('POD')
   })
 })

@@ -143,8 +143,10 @@ describe('useAmazonProfitability', () => {
     expect(result.current.rows).toHaveLength(1)
     const r = result.current.rows[0]
     expect(r.gross).toBe(4_000)
-    expect(r.driverPay).toBeCloseTo(1_494, 2)
-    expect(r.expenses).toBe(20 + 496 + 496)
-    expect(r.profit).toBeCloseTo(4_000 - 1_494 - 1_012, 2)
+    // Deductions = $80 factoring fee + $20 ELD; 0.5 × (4000 − 100) = 1950, less the
+    // $496 lease debit. Expenses add the company's own $496 share of that lease.
+    expect(r.driverPay).toBe(1_454)
+    expect(r.expenses).toBe(100 + 496 + 496)
+    expect(r.profit).toBe(4_000 - 1_454 - 1_092)
   })
 })

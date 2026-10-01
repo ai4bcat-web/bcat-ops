@@ -380,7 +380,8 @@ const schema = a.schema({
       driverId:          a.string().required(), // resolved server-side, never client input
       driverName:        a.string().required(), // snapshot at creation, for email/Slack text
       status:            a.string(),            // 'NEW' | 'NOTIFIED' | 'LINKED' | 'ARCHIVED'
-      source:            a.string(),            // 'PWA' | 'EMAIL'; absent means PWA (historical rows)
+      source:            a.string(),            // 'PWA' | 'EMAIL' | 'STAFF'; absent means PWA (historical rows)
+      submittedByEmail:  a.string(),            // staff member who uploaded on the driver's behalf, when source is STAFF
       externalMessageId: a.string(),            // Gmail message id for email-sourced rows; idempotency key
       loadId:            a.string(),            // null until staff links the built load
       referenceNumber:   a.string(),            // scanned or driver-entered load/VRID reference
@@ -957,6 +958,36 @@ const schema = a.schema({
       inServiceDate:          a.date(),
     })
     .identifier(['truckId'])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  // ── Per-truck odometer day from Motive ELD ────────────────────────────────
+  // One row per truck per calendar day. The Sunday 00:00 reading opens the week
+  // and every later day closes against the one before it, so a week's miles are
+  // the sum of its day rows and never double-count a reading. Idempotent:
+  // re-syncing a day overwrites it. Lambda writes via DynamoDB SDK; the fleet
+  // pages read via AppSync.
+  TruckOdometerDay: a
+    .model({
+      truckId:        a.string().required(),  // Equipment.id
+      date:           a.string().required(),  // YYYY-MM-DD, the day being measured
+      unitNumber:     a.string().required(),  // denormalised for display
+      weekStart:      a.string().required(),  // YYYY-MM-DD Sunday that opened this week
+      startOdometer:  a.float(),              // miles at 00:00 local; absent when Motive reported nothing
+      endOdometer:    a.float(),              // miles at 23:59 local
+      miles:          a.float(),              // endOdometer - startOdometer, never negative
+      fuelGallons:    a.float(),              // gallons burned that day, from Motive
+      mpg:            a.float(),              // Motive's fuel economy for the day
+      source:         a.string().required(),  // 'motive'
+      syncedAt:       a.datetime().required(),
+    })
+    .identifier(['truckId', 'date'])
+    .secondaryIndexes((index) => [
+      index('truckId').sortKeys(['date']),
+      index('weekStart'),
+    ])
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])

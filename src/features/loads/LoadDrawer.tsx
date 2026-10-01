@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller, useFieldArray, useWatch, type Control } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -18,7 +18,10 @@ import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadPods } from '@/features/pods/LoadPods'
-import { updateIntakeItem, notifySlackStatusChange } from '@/lib/apiClient'
+import { DriverDocUploadDialog } from '@/features/driver-docs'
+import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm } from '@/lib/apiClient'
+import { uploadRateconAndApply } from '@/lib/rateconUpload'
+import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
 import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
 import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
 import { apptTypeAfterEdit, requiresApptProofs } from '@/lib/apptQueue'
@@ -1173,21 +1176,50 @@ export function LoadDrawer() {
   }, [isOpen, load?.id, isCreate, drawerMode])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [showUploadPod, setShowUploadPod] = useState(false)
+
+  const deliveryDriverId = useMemo(() => {
+    if (!load) return null
+    const stops = getStops(load)
+    return [...stops].reverse().find((s) => s.type === 'delivery')?.driverId ?? stops.find((s) => s.type === 'pickup')?.driverId ?? null
+  }, [load])
+
+  const deliveryDriver = deliveryDriverId ? drivers.find((d) => d.id === deliveryDriverId) ?? null : null
 
   const handleRateConfirmUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !load) return
     e.target.value = ''
+    const driverInfo = deliveryDriver
+      ? { id: deliveryDriver.id, name: deliveryDriver.name, email: deliveryDriver.email }
+      : undefined
     if (!/batory/i.test(load.customer ?? '')) {
       // Non-Batory: shared helper — upload + AI-read the appt times + auto-confirm.
-      const { uploadRateconAndApply } = await import('@/lib/rateconUpload')
-      await uploadRateconAndApply(load, file, updateLoad)
+      await uploadRateconAndApply(load, file, updateLoad, {
+        driver: driverInfo,
+        staffEmail: user?.email,
+        referenceNumber: load.pickupNumber ?? undefined,
+      })
     } else {
       try {
-        const { uploadRateConfirm } = await import('@/lib/apiClient')
         const key = await uploadRateConfirm(load.id, file)
         await updateLoad(load.id, { rateConfirmKey: key } as never)
         toast.success('Rate confirmation uploaded')
+        if (driverInfo && user?.email) {
+          try {
+            await staffUploadDriverDoc({
+              driver: driverInfo,
+              kind: 'RATECON',
+              files: [file],
+              submittedByEmail: user.email,
+              referenceNumber: load.pickupNumber ?? undefined,
+              loadId: load.id,
+            })
+          } catch (err) {
+            console.error('[LoadDrawer] driver submission mirror failed', err)
+            toast.error('Rate confirmation saved, but driver PWA copy failed')
+          }
+        }
       } catch {
         toast.error('Upload failed')
       }
@@ -1359,24 +1391,25 @@ export function LoadDrawer() {
   )
 
   return (
-    <SidePanel
-      title={isEdit ? `Edit — ${load?.aljexId ?? ''}` : (load?.aljexId ?? 'Load Detail')}
-      subtitle={isEdit ? 'Edit load' : (load?.customer || undefined)}
-      onClose={onClose}
-      actions={!isEdit && load ? (
-        load.readyToInvoice ? (
-          <Badge variant="green" className="gap-1 text-xs">
-            <CheckCircle2 className="size-3" /> Ready to Invoice
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
-            <Circle className="size-3" /> Pending
-          </Badge>
-        )
-      ) : undefined}
-      footer={panelFooter}
-    >
-      <>
+    <>
+      <SidePanel
+        title={isEdit ? `Edit — ${load?.aljexId ?? ''}` : (load?.aljexId ?? 'Load Detail')}
+        subtitle={isEdit ? 'Edit load' : (load?.customer || undefined)}
+        onClose={onClose}
+        actions={!isEdit && load ? (
+          load.readyToInvoice ? (
+            <Badge variant="green" className="gap-1 text-xs">
+              <CheckCircle2 className="size-3" /> Ready to Invoice
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
+              <Circle className="size-3" /> Pending
+            </Badge>
+          )
+        ) : undefined}
+        footer={panelFooter}
+      >
+        <>
           {load ? (
             <div className="space-y-0">
               <ReadonlyField label="Pro #"       value={load.aljexId} />
@@ -1458,6 +1491,24 @@ export function LoadDrawer() {
                 )}
               </div>
 
+              {/* Upload POD on the delivery driver's behalf */}
+              {load && deliveryDriver && (
+                <div className="pt-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Driver POD</Label>
+                    <button
+                      className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+                      onClick={() => setShowUploadPod(true)}
+                    >
+                      <Upload className="size-3" /> Upload POD
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Upload a POD for {deliveryDriver.name} so it appears in the driver PWA.
+                  </p>
+                </div>
+              )}
+
               {/* PODs linked to this shipment */}
               {load && (
                 <div className="pt-4 border-t border-border mt-4">
@@ -1466,7 +1517,21 @@ export function LoadDrawer() {
               )}
             </div>
           ) : null}
-      </>
-    </SidePanel>
+        </>
+      </SidePanel>
+      {load && deliveryDriver && (
+        <DriverDocUploadDialog
+          open={showUploadPod}
+          onClose={() => setShowUploadPod(false)}
+          drivers={drivers}
+          preselectedDriver={deliveryDriver}
+          preselectedKind="POD"
+          staffEmail={user?.email ?? ''}
+          onSubmitted={() => {
+            toast.success(`POD uploaded for ${deliveryDriver.name}`)
+          }}
+        />
+      )}
+    </>
   )
 }

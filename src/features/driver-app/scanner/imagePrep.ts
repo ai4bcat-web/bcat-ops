@@ -1,11 +1,16 @@
 import type { PendingPage } from '../driverApi'
 
-export type PageSource = CanvasImageSource | { readonly width: number; readonly height: number }
+export type PageSource = CanvasImageSource | { readonly width: number; readonly height: number } | File
 
 const MAX_EDGE = 2000
 const JPEG_QUALITY = 0.8
 
 function readSourceSize(source: PageSource): { width: number; height: number } {
+  if (source instanceof File) {
+    // PDFs and other non-image files flow through untouched; dimensions are irrelevant.
+    return { width: 0, height: 0 }
+  }
+
   if (source instanceof HTMLVideoElement) {
     return {
       width: source.videoWidth || source.clientWidth,
@@ -48,6 +53,16 @@ export async function preparePage(
   fileName: string,
   options: PreparePageOptions = {},
 ): Promise<PendingPage> {
+  // PDFs (and any other file the driver picks on desktop) do not need canvas encoding.
+  if (source instanceof File) {
+    return {
+      fileName: source.name || fileName,
+      contentType: source.type || 'application/octet-stream',
+      byteSize: source.size,
+      blob: source,
+    }
+  }
+
   const { width: srcWidth, height: srcHeight } = readSourceSize(source)
   if (srcWidth <= 0 || srcHeight <= 0) {
     throw new Error('Image source has no usable dimensions')

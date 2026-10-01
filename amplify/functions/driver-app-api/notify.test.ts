@@ -227,4 +227,21 @@ describe('notifyPodAdded', () => {
     expect(result.refs.slackMessageTs).toBe('1699999999.000100')
     expect(result.error).toContain('Email: no parent email thread')
   })
+
+  it('opens fresh top-level Slack and email threads for a standalone POD', async () => {
+    const result = await notifyPodAdded(notice({ driverName: 'Solo', referenceNumber: 'VRID-1' }), {})
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const body = slackBody()
+    expect(body.channel).toBe('C0B4YJXLYM8')
+    expect(body.thread_ts).toBeUndefined()
+    expect(body.text).toContain('Reference: VRID-1')
+
+    const raw = sentEmailRaw()
+    expect(raw).toContain('Subject: POD for Solo')
+    expect(raw).not.toContain('In-Reply-To:')
+    expect(raw).toContain('Content-Disposition: attachment; filename="ratecon.jpg"')
+    expect(result.error).toBeUndefined()
+    expect(result.refs.emailMessageId).toBeDefined()
+  })
 })

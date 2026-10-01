@@ -8,6 +8,11 @@ import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 
+/** Switch Amazon settlements in/out of combined/company totals. Kept as a single
+ *  explicit constant so the historical Amazon panel remains visible while the
+ *  contribution can be turned back on in one place. */
+export const AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS = false
+
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
 /** Inclusive day count between two YYYY-MM-DD dates (UTC, calendar days). */

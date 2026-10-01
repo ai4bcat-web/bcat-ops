@@ -12,6 +12,7 @@ import {
   effectivePayRate,
   effectiveFixedExpenses,
   fixedExpenseLineLabel,
+  FACTORING_FEE_LABEL,
   type DriverPaySettingInput,
   type FixedExpenseInput,
   type PayRateOverride,
@@ -29,6 +30,30 @@ export interface SettlementTrip {
   miles?: number | null
   rate?: number | null
   amount: number
+  factoring?: FactoringFields | null
+}
+
+/**
+ * The eleven OTR required fields plus the two required documents, resolved per load
+ * (by driver-app-api from the Load row and its linked Customer/Location rows) so the
+ * driver can see which settlements are blocked from factoring.
+ */
+export interface FactoringFields {
+  invoiceNo: string | null
+  poNumber: string | null
+  brokerMc: string | null
+  invoiceAmount: number | null
+  invoiceDate: string | null
+  fromCity: string | null
+  fromState: string | null
+  fromZip: string | null
+  toCity: string | null
+  toState: string | null
+  toZip: string | null
+  podPresent: boolean
+  rateconPresent: boolean
+  /** True when any required field or document is missing. */
+  blocked: boolean
 }
 
 export interface SettlementLine {
@@ -67,6 +92,9 @@ export interface RawAmazonTrip {
   status?: string | null
   sortOrder?: number | null
   createdAt?: string | null
+  /** DynamoDB Load.id behind a display loadId (owner-operator trips carry it). */
+  loadRowId?: string | null
+  factoring?: FactoringFields | null
 }
 
 export interface RawDriverPaySetting {
@@ -245,9 +273,12 @@ export function buildSettlement(
         miles: t.miles ?? null,
         rate: tripRate(t),
         amount: tripPayAmount(t.freightAmount, rateModel as DriverPaySettingInput),
+        factoring: t.factoring ?? null,
       })),
     grossPay: statement.gross,
-    deductions: deductionLines,
+    deductions: statement.factoringFee > 0
+      ? [{ label: FACTORING_FEE_LABEL, amount: statement.factoringFee }, ...deductionLines]
+      : deductionLines,
     credits: myCredits,
     debits: [...fixedDebits, ...myDebits],
     checkAmount: statement.checkAmount,
