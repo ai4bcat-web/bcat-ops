@@ -4,6 +4,8 @@ import {
   isAlreadyRegistered,
   needsSignupConfirmInstead,
   codeSentMessage,
+  codeNotArrivedHint,
+  CODE_SENDER,
 } from './signupOutcome'
 
 /** How the auth context rethrows: a plain Error with the AWS error on `cause`. */
@@ -78,5 +80,14 @@ describe('codeSentMessage', () => {
     const msg = codeSentMessage('CONFIRM_SIGNUP', 'roy@example.com')
     expect(msg).toContain('finish setting up')
     expect(msg).not.toContain('already')
+  })
+})
+
+describe('codeNotArrivedHint', () => {
+  it('names the sender and the junk folder, so an empty inbox is actionable', () => {
+    // A filtered code looks exactly like one that was never sent.
+    const hint = codeNotArrivedHint()
+    expect(hint).toContain('spam')
+    expect(hint).toContain(CODE_SENDER)
   })
 })

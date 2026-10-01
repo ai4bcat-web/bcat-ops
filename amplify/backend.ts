@@ -7,6 +7,7 @@ import { ArnFormat, CfnOutput, Duration, Stack } from 'aws-cdk-lib'
 import {
   UserPool,
   UserPoolClient,
+  UserPoolEmail,
   UserPoolOperation,
   VerificationEmailStyle,
 } from 'aws-cdk-lib/aws-cognito'
@@ -128,8 +129,36 @@ const driverPool = new UserPool(driverAuthScope, 'BcatDriverPool', {
   userPoolName: 'bcat-driver-pool',
   selfSignUpEnabled: true,
   signInAliases: { email: true },
+  /*
+   * Send through SES from our own domain, not Cognito's built-in mailer.
+   *
+   * Cognito's default sends as no-reply@verificationemail.com, a shared address with a
+   * reputation we do not control, and it is capped at 50 messages a day for the whole
+   * account. A verification code that lands in a spam folder is indistinguishable from
+   * one that was never sent, and that is exactly how it presented: a driver asked for a
+   * code, Cognito reported success, and nothing arrived.
+   *
+   * bcatcorp.com is a verified SES domain, so codes now come from the company domain with
+   * its DKIM and SPF behind them, there is no daily cap, and delivery is visible in SES
+   * instead of invisible.
+   *
+   * IMPORTANT: SES is still in sandbox on this account, which only delivers to verified
+   * identities. Addresses at bcatcorp.com are covered by the domain identity, so staff and
+   * anyone on the company domain receive mail. A driver on gmail or yahoo will receive
+   * NOTHING until production access is granted — the same limit that already applies to
+   * the invite and welcome emails, which have always gone through SES. Request production
+   * access before onboarding drivers on outside addresses.
+   */
+  email: UserPoolEmail.withSES({
+    fromEmail: 'noreply@bcatcorp.com',
+    fromName: 'Ivan Cartage',
+    sesRegion: 'us-east-1',
+    sesVerifiedDomain: 'bcatcorp.com',
+  }),
   userVerification: {
     emailStyle: VerificationEmailStyle.CODE,
+    emailSubject: 'Your Ivan Cartage driver code',
+    emailBody: 'Your Ivan Cartage verification code is {####}. It expires in 24 hours.',
   },
   standardAttributes: {
     email: { required: true, mutable: true },

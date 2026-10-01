@@ -55,9 +55,23 @@ export function needsSignupConfirmInstead(err: unknown): boolean {
   return name === 'InvalidParameterException' || name === 'UserNotConfirmedException'
 }
 
+/** Who the code comes from, so a driver can search for it or find it in spam. */
+export const CODE_SENDER = 'Ivan Cartage'
+
 /** What to tell the driver once a code is on its way. */
 export function codeSentMessage(step: SignupStep, email: string): string {
   return step === 'CONFIRM_RESET'
     ? `You already have an account, so we sent a code to ${email} to confirm it is you. Enter it below and your new password is set.`
     : `We sent a code to ${email}. Enter it below to finish setting up your sign-in.`
+}
+
+/**
+ * The second line, about finding it.
+ *
+ * A code that a spam filter ate is indistinguishable from one that was never sent, and a
+ * driver staring at an empty inbox has no way to tell which happened. Naming the sender
+ * and the junk folder turns a dead end into something they can act on.
+ */
+export function codeNotArrivedHint(): string {
+  return `It can take a minute. If it does not appear, check your spam or junk folder for a message from ${CODE_SENDER}.`
 }

@@ -9,6 +9,7 @@ import {
   isAlreadyRegistered,
   needsSignupConfirmInstead,
   codeSentMessage,
+  codeNotArrivedHint,
   type SignupStep,
 } from './signupOutcome'
 
@@ -150,7 +151,10 @@ export default function DriverSignupPage() {
             {step === 'done' && 'Welcome aboard'}
           </h1>
           {step === 'confirm' && (
-            <p className="mt-2 text-sm text-slate-400">{codeSentMessage(codeKind, email)}</p>
+            <>
+              <p className="mt-2 text-sm text-slate-400">{codeSentMessage(codeKind, email)}</p>
+              <p className="mt-2 text-xs text-slate-500">{codeNotArrivedHint()}</p>
+            </>
           )}
         </div>
 
