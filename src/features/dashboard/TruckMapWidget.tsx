@@ -7,6 +7,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { driverForTruck } from '@/lib/assignments'
 import { canonicalUnit } from '@/lib/fleetGroups'
 import { FleetMiniMap } from './FleetMiniMap'
+import { currentLoadForDriver, laneLabel, fixAge, DRIVER_STATUS_LABEL } from '@/lib/driverJourney'
 
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
@@ -53,6 +54,7 @@ export function TruckMapWidget() {
   const drivers             = useAppStore((s) => s.drivers)
   const assignTruckToDriver = useAppStore((s) => s.assignTruckToDriver)
   const addEquipment        = useAppStore((s) => s.addEquipment)
+  const loads               = useAppStore((s) => s.loads)
   const activeDrivers = useMemo(() => drivers.filter((d) => d.active), [drivers])
 
   // Initial load + auto-refresh every 2 min so newly-synced trucks/positions
@@ -128,10 +130,11 @@ export function TruckMapWidget() {
           <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
             {/* Header row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 110px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 110px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               <div>Unit</div>
               <div>Location</div>
               <div>Driver</div>
+              <div>Load</div>
               <div>Status</div>
               <div style={{ textAlign: 'right' }}>Updated</div>
             </div>
@@ -144,11 +147,14 @@ export function TruckMapWidget() {
               // whether the location's truckId is an Equipment id or a `motive:<n>` fallback.
               const equip = equipment.find((e) => e.type === 'truck' && e.unitNumber === unit)
               const assigned = equip ? driverForTruck(equip.id, drivers) : undefined
+              // What this driver is hauling right now — the same selection the PWA uses.
+              const currentLoad = assigned ? currentLoadForDriver(loads, assigned.id) : null
+              const age = fixAge(loc.locatedAt, now)
               return (
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 110px auto', gap: 12,
+                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 110px auto', gap: 12,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -189,12 +195,35 @@ export function TruckMapWidget() {
                     )}
                   </div>
 
+                  {/* Current load: lane plus the driver's reported status. */}
+                  <div style={{ minWidth: 0, fontSize: 12 }}>
+                    {currentLoad ? (
+                      <>
+                        <div style={{ color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                             title={`PRO ${(currentLoad.aljexId ?? '').trim()} — ${laneLabel(currentLoad)}`}>
+                          {laneLabel(currentLoad)}
+                        </div>
+                        <div style={{ color: 'var(--ds-t3)', fontSize: 11 }}>
+                          PRO {(currentLoad.aljexId ?? '').trim() || '—'}
+                          {currentLoad.driverStatus
+                            ? ` · ${DRIVER_STATUS_LABEL[currentLoad.driverStatus]}`
+                            : ''}
+                        </div>
+                      </>
+                    ) : (
+                      <span style={{ color: 'var(--ds-t3)' }}>—</span>
+                    )}
+                  </div>
+
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, whiteSpace: 'nowrap', color: moving ? '#15803d' : 'var(--ds-t3)' }}>
                     <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: moving ? '#22c55e' : '#94a3b8' }} />
                     {motionText}
                   </div>
                   <div style={{ textAlign: 'right', color: 'var(--ds-t3)', fontSize: 12, whiteSpace: 'nowrap' }}>
-                    {formatDistanceToNow(new Date(loc.locatedAt), { addSuffix: true })}
+                    <span style={{ color: age.stale ? '#b45309' : 'inherit', fontWeight: age.stale ? 600 : 400 }}
+                          title={age.stale ? 'No fresh ELD fix — this position may be out of date' : undefined}>
+                      {age.stale ? `stale · ${age.label}` : formatDistanceToNow(new Date(loc.locatedAt), { addSuffix: true })}
+                    </span>
                   </div>
                 </div>
               )

@@ -13,6 +13,7 @@ import {
   type SubmissionSummary,
 } from './driverApi'
 import { type BadgeVariantProps } from '@/lib/ui/badge-variants'
+import { CurrentLoadCard } from './CurrentLoadCard'
 
 function statusVariant(status: SubmissionStatus): NonNullable<BadgeVariantProps['variant']> {
   switch (status) {
@@ -180,6 +181,11 @@ export default function SubmissionsPage() {
       </header>
 
       <main className="p-4">
+        {/* The job in front of the driver comes first; submissions are the history below it. */}
+        <div className="mb-4">
+          <CurrentLoadCard />
+        </div>
+
         {loading && (
           <div className="flex flex-col items-center justify-center py-16">
             <Loader2 className="h-8 w-8 animate-spin text-slate-500" aria-hidden="true" />

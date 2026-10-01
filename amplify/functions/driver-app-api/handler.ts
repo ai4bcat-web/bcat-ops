@@ -36,6 +36,17 @@ import {
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
+import {
+  DRIVER_STATUSES,
+  DRIVER_STATUS_LABEL,
+  currentLoadForDriver,
+  driverIsOnLoad,
+  laneLabel,
+  nextStatuses,
+  transitionError,
+  type DriverStatus,
+} from '../../../src/lib/driverJourney'
+import type { Load } from '../../../src/types'
 import { isEligiblePayGroup } from './scope'
 import {
   OWNER_OP_FIRST_PERIOD,
@@ -577,6 +588,12 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'settlement' && segments[1] === 'weeks') {
     return { path: '/settlement/weeks' }
+  }
+  if (segments[0] === 'loads' && segments[1] === 'current') {
+    return { path: '/loads/current' }
+  }
+  if (segments[0] === 'loads' && segments[2] === 'status') {
+    return { path: '/loads/:id/status', id: segments[1] }
   }
   return { path: `/${segments.join('/')}` }
 }
@@ -1487,6 +1504,85 @@ export const handler = async (event: FnUrlEvent) => {
         { expiresIn: DOC_GET_EXPIRY },
       )
       return reply(200, { url })
+    }
+
+    /**
+     * The load this driver is working now, with the journey status and the
+     * documents still owed. Returns `load: null` when they have nothing open —
+     * a rest state in the PWA, not an error.
+     */
+    if (method === 'GET' && path === '/loads/current') {
+      const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME, undefined, {}, {})
+      const current = currentLoadForDriver(loads as unknown as Load[], driverId)
+      if (!current) return reply(200, { load: null })
+
+      const status = (current.driverStatus ?? 'ASSIGNED') as DriverStatus
+      const pods = await scan<{ loadId?: string }>(
+        POD_DOCUMENT_TABLE_NAME,
+        'loadId = :l',
+        {},
+        { ':l': current.id },
+      )
+      return reply(200, {
+        load: {
+          id: current.id,
+          proNumber: (current.aljexId ?? '').trim(),
+          lane: laneLabel(current),
+          originCity: current.originCity ?? null,
+          destinationCity: current.destinationCity ?? null,
+          pickupAppt: current.pickupAppt ?? null,
+          deliveryAppt: current.deliveryAppt ?? null,
+          customer: current.customer ?? null,
+          status,
+          statusLabel: DRIVER_STATUS_LABEL[status],
+          statusAt: current.driverStatusAt ?? null,
+          nextStatuses: nextStatuses(status).map((s) => ({ value: s, label: DRIVER_STATUS_LABEL[s] })),
+          // What still blocks invoicing, so a driver sees why a load is held.
+          hasRateConfirmation: Boolean((current.rateConfirmKey ?? '').trim()),
+          hasPod: pods.length > 0,
+        },
+      })
+    }
+
+    /**
+     * Move the journey forward. Transitions are validated against the shared
+     * rules so the PWA and the API can never disagree, and a driver can only
+     * move a load that is actually theirs.
+     */
+    if (method === 'POST' && path === '/loads/:id/status' && id) {
+      const body = parseBody(event)
+      const to = (getString(body, 'status') ?? '') as DriverStatus
+      if (!DRIVER_STATUSES.includes(to)) {
+        return reply(400, { error: 'Unknown status' })
+      }
+
+      const row = await getItem<Record<string, unknown>>(LOAD_TABLE_NAME, { id })
+      if (!row) return reply(404, { error: 'Not found' })
+      // Another driver's load is a 404, never a 403 — no payload either way.
+      if (!driverIsOnLoad(row as unknown as Load, driverId)) {
+        return reply(404, { error: 'Not found' })
+      }
+
+      const from = (row.driverStatus ?? 'ASSIGNED') as DriverStatus
+      const refusal = transitionError(from, to)
+      if (refusal) return reply(409, { error: refusal })
+
+      const now = new Date().toISOString()
+      await ddb.send(
+        new UpdateCommand({
+          TableName: LOAD_TABLE_NAME,
+          Key: { id },
+          UpdateExpression:
+            'SET driverStatus = :s, driverStatusAt = :t, driverStatusBy = :d, updatedAt = :t',
+          ExpressionAttributeValues: { ':s': to, ':t': now, ':d': driverId },
+        }),
+      )
+      return reply(200, {
+        status: to,
+        statusLabel: DRIVER_STATUS_LABEL[to],
+        statusAt: now,
+        nextStatuses: nextStatuses(to).map((s) => ({ value: s, label: DRIVER_STATUS_LABEL[s] })),
+      })
     }
 
     return reply(404, { error: 'Not found' })

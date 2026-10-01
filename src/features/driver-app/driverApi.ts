@@ -392,3 +392,41 @@ export async function submitPod(
     throw wrapWithResume(err, submissionId, 'POD')
   }
 }
+
+// ── Current load & journey status ────────────────────────────────────────────
+
+/** What the PWA shows on the load card. Mirrors GET /loads/current. */
+export interface CurrentLoad {
+  id: string
+  proNumber: string
+  lane: string
+  originCity: string | null
+  destinationCity: string | null
+  pickupAppt: string | null
+  deliveryAppt: string | null
+  customer: string | null
+  status: 'ASSIGNED' | 'EN_ROUTE' | 'ON_SITE' | 'DELIVERED'
+  statusLabel: string
+  statusAt: string | null
+  nextStatuses: { value: CurrentLoad['status']; label: string }[]
+  /** Documents the load still owes before it can be invoiced. */
+  hasRateConfirmation: boolean
+  hasPod: boolean
+}
+
+/** The driver's open load, or null when they have nothing running. */
+export async function fetchCurrentLoad(): Promise<CurrentLoad | null> {
+  const out = await request<{ load: CurrentLoad | null }>('/loads/current')
+  return out.load
+}
+
+/** Move the journey forward. The server validates the transition. */
+export function updateLoadStatus(
+  loadId: string,
+  status: CurrentLoad['status'],
+): Promise<Pick<CurrentLoad, 'status' | 'statusLabel' | 'statusAt' | 'nextStatuses'>> {
+  return request(`/loads/${encodeURIComponent(loadId)}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+}

@@ -21,7 +21,7 @@ const INVITE_TABLE = process.env.INVITE_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME!
 
-type EmailType = 'invite' | 'rejected' | 'declined' | 'complete'
+type EmailType = 'invite' | 'rejected' | 'declined' | 'complete' | 'app_ready'
 
 interface Args {
   type: EmailType
@@ -99,6 +99,27 @@ Thank you for your interest in driving with Ivan Cartage and for taking the time
 After careful review, we're unable to move forward with your onboarding at this time. This isn't a reflection of your experience — our current needs and requirements simply aren't the right match right now.
 
 We truly appreciate you considering us, and we wish you safe travels and the very best on the road.
+
+— Ivan Cartage`,
+      }
+    case 'app_ready':
+      // Sent once a driver has set their password. The first email got them an
+      // account; this one gets the app onto their phone, which is the step that
+      // actually decides whether they use it.
+      return {
+        subject: 'Add the Ivan Cartage driver app to your phone',
+        text:
+`Hi ${ctx.firstName},
+
+Your sign-in is set up. Last step is putting the app on your phone so it opens like any other app — no app store needed.
+
+Open this link on your phone:
+${ctx.link}
+
+iPhone (Safari): tap the Share button, then "Add to Home Screen".
+Android (Chrome): tap the three dots, then "Add to Home screen".
+
+Once it's there you can scan rate confirmations and PODs, mark a load en route, on site or delivered, and see your settlements.
 
 — Ivan Cartage`,
       }

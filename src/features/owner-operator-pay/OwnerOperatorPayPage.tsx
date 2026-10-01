@@ -17,6 +17,7 @@ import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
+import { SendDriverInvite } from './SendDriverInvite'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
@@ -98,6 +99,7 @@ function DriverSignIn({ row }: { row: OwnerOperatorPayRow }) {
   return (
     <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
       Signs in as <b style={{ color: 'var(--ds-t1)' }}>{email}</b> — sets their own password at <code>/driver/signup</code> and resets it from the login screen. Office staff never see or issue passwords.
+      <SendDriverInvite driver={row.driver} email={email} />
     </div>
   )
 }
