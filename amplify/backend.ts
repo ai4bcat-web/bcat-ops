@@ -50,6 +50,7 @@ import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
 import { otrActions, otrStatusSync } from './functions/otr-actions/resource'
 import { driverSignupGate } from './functions/driver-signup-gate/resource'
+import { driverWelcome } from './functions/driver-welcome/resource'
 import { driverAppApi } from './functions/driver-app-api/resource'
 import { configurePodScanner } from './podScanner.js'
 
@@ -91,6 +92,7 @@ const backend = defineBackend({
   tmsGeocode,
   podActions,
   driverSignupGate,
+  driverWelcome,
   driverAppApi,
   otrActions,
   otrStatusSync,
@@ -162,6 +164,24 @@ const driverPoolClient = new UserPoolClient(driverAuthScope, 'BcatDriverPoolClie
 driverPool.addTrigger(
   UserPoolOperation.PRE_SIGN_UP,
   backend.driverSignupGate.resources.lambda,
+)
+
+// Welcome email once a driver sets their password. Attached here, beside the
+// PRE_SIGN_UP trigger, for the same intra-stack reason documented above.
+const driverWelcomeFn = backend.driverWelcome.resources.lambda as LambdaFunction
+driverPool.addTrigger(UserPoolOperation.POST_CONFIRMATION, driverWelcomeFn)
+
+driverWelcomeFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
+driverWelcomeFn.addEnvironment('FROM_ADDRESS', 'onboarding@bcatcorp.com')
+driverWelcomeFn.addEnvironment('PORTAL_ORIGIN', process.env.PORTAL_PROD_ORIGIN ?? 'https://ops.bcatcorp.com')
+driverWelcomeFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan'],
+    resources: [backend.data.resources.tables['Driver'].tableArn],
+  }),
+)
+driverWelcomeFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] }),
 )
 
 // ── userManagement Lambda ──────────────────────────────────────────────────
