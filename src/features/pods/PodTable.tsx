@@ -146,8 +146,19 @@ function PodRow({
       <td style={{ ...td, whiteSpace: 'nowrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <PodActionBtn onClick={() => onPreview(doc)} icon={<Eye size={13} />} label="View" />
-          {assets?.originalUrl && <PodDownloadBtn url={assets.originalUrl} filename={doc.fileName} label="Original" />}
-          {hasEnhanced && assets?.enhancedUrl && <PodDownloadBtn url={assets.enhancedUrl} filename={`${doc.fileName}.enhanced.jpg`} label="Enhanced" />}
+          {/* The enhanced scan leads: it is the copy that goes to a broker or to OTR. The
+              original is the raw photo, kept as evidence and deliberately quiet. */}
+          {hasEnhanced && assets?.enhancedUrl && (
+            <PodDownloadBtn url={assets.enhancedUrl} filename={`${doc.fileName}.enhanced.jpg`} label="Enhanced" />
+          )}
+          {assets?.originalUrl && (
+            <PodDownloadBtn
+              url={assets.originalUrl}
+              filename={doc.fileName}
+              label={hasEnhanced ? 'Raw photo' : 'Original'}
+              tone={hasEnhanced ? 'muted' : 'primary'}
+            />
+          )}
           {(doc.processingStatus === 'FAILED' || isStalePending) && (
             <PodActionBtn onClick={() => onRetry(doc)} icon={<RotateCcw size={13} />} label="Retry" />
           )}

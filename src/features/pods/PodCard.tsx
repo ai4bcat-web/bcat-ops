@@ -198,11 +198,17 @@ export function PodCard({
         {/* Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 'auto', paddingTop: 6 }}>
           <PodActionBtn onClick={() => onPreview(doc)} icon={<Eye size={13} />} label="View" />
-          {assets?.originalUrl && (
-            <PodDownloadBtn url={assets.originalUrl} filename={doc.fileName} label="Original" />
-          )}
+          {/* Enhanced first and emphasised; the raw photo stays reachable but quiet. */}
           {assets?.enhancedUrl && doc.processingStatus === 'READY' && (
             <PodDownloadBtn url={assets.enhancedUrl} filename={`${doc.fileName}.enhanced.jpg`} label="Enhanced" />
+          )}
+          {assets?.originalUrl && (
+            <PodDownloadBtn
+              url={assets.originalUrl}
+              filename={doc.fileName}
+              label={hasEnhanced ? 'Raw photo' : 'Original'}
+              tone={hasEnhanced ? 'muted' : 'primary'}
+            />
           )}
           {(doc.processingStatus === 'FAILED' || isStalePending) && onRetry && (
             <PodActionBtn onClick={() => onRetry(doc)} icon={<RotateCcw size={13} />} label="Retry" />

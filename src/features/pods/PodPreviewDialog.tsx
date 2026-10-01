@@ -21,7 +21,16 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
   const [assets, setAssets] = useState<PodAssets | null>(null)
   const [assetsLoading, setAssetsLoading] = useState(true)
   const [assetsError, setAssetsError] = useState<string | null>(null)
-  const [variant, setVariant] = useState<'original' | 'enhanced'>('original')
+  /*
+   * Opens on the enhanced scan.
+   *
+   * That is the readable document — deskewed, cleaned, always JPEG — and the copy that
+   * should reach a broker or OTR. Opening on the raw phone photo meant people worked from
+   * it and sent it on, which is the whole reason the enhancement exists. `activeUrl` falls
+   * back to the original on its own when there is no enhanced copy, so this default is safe
+   * before the assets have even loaded.
+   */
+  const [variant, setVariant] = useState<'original' | 'enhanced'>('enhanced')
   const [downloading, setDownloading] = useState(false)
 
   // State is written only inside the promise chain (react-hooks/set-state-in-effect).
@@ -61,37 +70,48 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
 
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-3">
+            {/* Enhanced leads. The raw photo is named for what it is, so nobody picks it
+                thinking it is the better copy. */}
             <div className="flex items-center gap-2">
-              <VariantBtn active={variant === 'original'} onClick={() => setVariant('original')}>
-                Original
-              </VariantBtn>
               <VariantBtn active={variant === 'enhanced'} onClick={() => setVariant('enhanced')} disabled={!canEnhance}>
                 Enhanced
+              </VariantBtn>
+              <VariantBtn active={variant === 'original'} onClick={() => setVariant('original')}>
+                {canEnhance ? 'Raw photo' : 'Original'}
               </VariantBtn>
             </div>
 
             <div className="flex items-center gap-2">
-              {assets?.originalUrl && (
-                <button
-                  onClick={() => handleDownload(assets.originalUrl!, doc.fileName)}
-                  disabled={downloading}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-semibold"
-                >
-                  <Download size={13} /> Original
-                </button>
-              )}
               {canEnhance && (
                 <button
                   onClick={() => handleDownload(assets.enhancedUrl!, `enhanced-${doc.fileName}`)}
                   disabled={downloading}
                   className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200"
                 >
-                  <Download size={13} /> Enhanced
+                  <Download size={13} /> Download enhanced
+                </button>
+              )}
+              {assets?.originalUrl && (
+                <button
+                  onClick={() => handleDownload(assets.originalUrl!, doc.fileName)}
+                  disabled={downloading}
+                  className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs ${
+                    canEnhance ? 'font-medium text-muted-foreground' : 'font-semibold'
+                  }`}
+                >
+                  <Download size={13} /> {canEnhance ? 'Raw photo' : 'Original'}
                 </button>
               )}
             </div>
           </div>
 
+          {canEnhance && variant === 'original' && (
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <FileText size={14} />
+              This is the raw phone photo, kept as a record of what arrived. Send the enhanced
+              copy instead — it is the readable one.
+            </div>
+          )}
           {originalOnlyNote && (
             <div className="text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-md px-3 py-2 flex items-center gap-2">
               <FileText size={14} /> {originalOnlyNote}

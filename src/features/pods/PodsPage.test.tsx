@@ -178,15 +178,33 @@ describe('PodsPage', () => {
     await waitFor(() => expect(podsClientMocks.assignPod).toHaveBeenLastCalledWith({ id: 'p1', loadId: null, expectedVersion: 2 }))
   })
 
-  it('offers original and enhanced variants in the preview dialog', async () => {
+  it('opens on the enhanced scan, with the raw photo named as such', async () => {
+    // Opening on the raw phone photo meant people worked from it and sent it to brokers,
+    // which is the whole reason the enhancement exists.
     render(<PodsPage />)
     await waitFor(() => expect(screen.getByText('View')).toBeTruthy())
     fireEvent.click(screen.getByText('View'))
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
     const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getAllByText('Original').length).toBeGreaterThanOrEqual(1)
+
+    expect(within(dialog).getByAltText('pod1.jpg').getAttribute('src')).toBe('https://test/enh.jpg')
     expect(within(dialog).getAllByText('Enhanced').length).toBeGreaterThanOrEqual(1)
-    expect(within(dialog).getByAltText('pod1.jpg')).toBeTruthy()
+    expect(within(dialog).getByText('Download enhanced')).toBeTruthy()
+    // Still reachable, and labelled so nobody mistakes it for the better copy.
+    expect(within(dialog).getAllByText('Raw photo').length).toBeGreaterThanOrEqual(1)
+    expect(within(dialog).queryByText('Original')).toBeNull()
+  })
+
+  it('warns when someone switches to the raw photo', async () => {
+    render(<PodsPage />)
+    await waitFor(() => expect(screen.getByText('View')).toBeTruthy())
+    fireEvent.click(screen.getByText('View'))
+    const dialog = await screen.findByRole('dialog')
+
+    fireEvent.click(within(dialog).getAllByText('Raw photo')[0])
+
+    expect(await within(dialog).findByText(/Send the enhanced copy instead/)).toBeTruthy()
+    expect(within(dialog).getByAltText('pod1.jpg').getAttribute('src')).toBe('https://test/orig.jpg')
   })
 
   it('shows retry for failed originals and preserves the original download', async () => {
@@ -195,8 +213,10 @@ describe('PodsPage', () => {
     podsClientMocks.getPodAssets.mockResolvedValue({ item: failedDoc, originalUrl: 'https://test/orig.jpg' })
     render(<PodsPage />)
     await waitFor(() => expect(screen.getByText('Retry')).toBeTruthy())
+    // With no enhanced copy there is nothing to demote, so it is just "Original".
     await waitFor(() => expect(screen.getByText('Original')).toBeTruthy())
     expect(screen.queryByText('Enhanced')).toBeNull()
+    expect(screen.queryByText('Raw photo')).toBeNull()
 
     fireEvent.click(screen.getByText('Retry'))
     await waitFor(() => expect(podsClientMocks.retryPod).toHaveBeenCalledWith({ id: 'p1' }))

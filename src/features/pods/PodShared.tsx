@@ -37,7 +37,22 @@ export function PodActionBtn({
   )
 }
 
-export function PodDownloadBtn({ url, filename, label }: { url: string; filename: string; label: string }) {
+/**
+ * `tone` separates the copy people should take from the one they should not.
+ *
+ * The enhanced scan is the readable document — deskewed, cleaned, always JPEG — and it is
+ * what goes to a broker or to OTR. The original is the raw phone photo, kept because it is
+ * the evidence of what actually arrived, but handing it to anyone is a mistake. So the
+ * enhanced copy is the primary action and the original is deliberately quiet.
+ */
+export function PodDownloadBtn({
+  url, filename, label, tone = 'primary',
+}: {
+  url: string
+  filename: string
+  label: string
+  tone?: 'primary' | 'muted'
+}) {
   const [busy, setBusy] = useState(false)
   return (
     <button
@@ -61,9 +76,9 @@ export function PodDownloadBtn({ url, filename, label }: { url: string; filename
         borderRadius: 7,
         border: '1px solid var(--ds-border)',
         background: 'var(--ds-surface)',
-        color: 'var(--ds-blue)',
+        color: tone === 'primary' ? 'var(--ds-blue)' : 'var(--ds-t3)',
         fontSize: 12,
-        fontWeight: 600,
+        fontWeight: tone === 'primary' ? 600 : 500,
         cursor: busy ? 'wait' : 'pointer',
         fontFamily: 'inherit',
       }}
