@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, CheckCircle2, Copy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy } from 'lucide-react'
 import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
 import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
 import { Avatar } from '@/components/ui/avatar'
@@ -18,6 +18,8 @@ import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
 import { SendDriverInvite } from './SendDriverInvite'
+import { SettlementDocUpload } from './SettlementDocUpload'
+import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
@@ -44,21 +46,74 @@ function OtrCell({ trip, field }: { trip: OwnerOpTrip; field: OtrRequiredField }
   return <>{field === 'InvoiceAmount' ? money(Number(value)) : String(value)}</>
 }
 
-/** POD / rate confirmation presence, called out when it blocks factoring. */
-function OtrDoc({ trip, kind }: { trip: OwnerOpTrip; kind: 'POD' | 'Rate confirmation' }) {
-  if (trip.readiness?.missingDocuments.includes(kind)) return <span style={MISSING}>{kind}</span>
-  return <CheckCircle2 size={13} style={{ color: '#15803d', verticalAlign: '-2px' }} aria-label={`${kind} present`} />
+/**
+ * POD / rate confirmation presence. A missing document is an upload button rather than
+ * a dead amber label, because this row is where someone finds out it is missing.
+ */
+function OtrDoc({
+  trip, kind, driver, staffEmail, onUploaded,
+}: {
+  trip: OwnerOpTrip
+  kind: 'POD' | 'Rate confirmation'
+  driver: Pick<Driver, 'id' | 'name' | 'email'>
+  staffEmail: string
+  onUploaded: () => void
+}) {
+  const present = !trip.readiness?.missingDocuments.includes(kind)
+  return (
+    <SettlementDocUpload
+      driver={driver}
+      loadId={trip.id}
+      proNumber={String(trip.readiness?.payload.InvoiceNo ?? '')}
+      kind={kind === 'POD' ? 'POD' : 'RATECON'}
+      staffEmail={staffEmail}
+      present={present}
+      onUploaded={onUploaded}
+    />
+  )
+}
+
+/** What a held load is waiting on, in the cell where its pay would otherwise be. */
+function HeldAmount({ reason }: { reason: PayHoldReason }) {
+  return (
+    <span style={MISSING} title="Not on this check until the POD is on file. It pays itself once the POD arrives.">
+      Held — {PAY_HOLD_LABEL[reason]}
+    </span>
+  )
 }
 
 /** How many of the week's loads can be invoiced at OTR, and how many are blocked. */
-function FactoringSummary({ trips }: { trips: OwnerOpTrip[] }) {
+function FactoringSummary({ trips, heldCount, heldFreight }: { trips: OwnerOpTrip[]; heldCount?: number; heldFreight?: number }) {
   const ready = trips.filter((t) => t.readiness?.ready).length
   const blocked = trips.length - ready
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, flexWrap: 'wrap' }}>
       <span style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>Factoring readiness</span>
       <span style={{ color: ready > 0 ? '#15803d' : 'var(--ds-t3)' }}>{ready} of {trips.length} ready</span>
       {blocked > 0 && <span style={MISSING}>{blocked} blocked</span>}
+      {/* A blocked load is not automatically an unpaid one — only a missing POD holds pay. */}
+      {heldCount ? (
+        <span style={MISSING}>
+          {heldCount} held off this check{heldFreight ? ` (${money(heldFreight)} freight)` : ''}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Shown only when a POD store could not be read. Pay is NOT held in that state, so a
+ * load with no POD may have been paid — which someone needs to be told, not shielded from.
+ */
+function PodCheckUnavailable() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, borderRadius: 10, border: '1px solid #fcd34d', background: '#fffbeb', padding: '10px 12px' }}>
+      <AlertTriangle size={15} style={{ color: '#b45309', marginTop: 1, flexShrink: 0 }} />
+      <div style={{ fontSize: 12.5, color: '#92400e' }}>
+        <b>PODs could not be checked.</b> Nothing is being held for a missing POD this
+        time, so these checks may include loads with no proof of delivery on file.
+        Reload once the PODs page is reachable again before paying anyone.
+      </div>
     </div>
   )
 }
@@ -122,23 +177,31 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   const L: string[] = []
   L.push(q(`${row.driver.name} — owner operator pay period ${weekLabelLong(periodStart)}`)); L.push('')
   L.push([
-    'Load ID', 'Customer', 'PRO #', 'PO #', 'Broker MC', 'Invoice amount', 'Invoice date',
+    'PRO #', 'PO #', 'Load ID', 'Customer', 'Broker MC', 'Invoice amount', 'Invoice date',
     'Origin city', 'Origin state', 'Origin ZIP', 'Dest city', 'Dest state', 'Dest ZIP',
-    'POD', 'Rate confirmation', 'Miles', 'Freight', 'Driver Amount',
+    'POD', 'Rate confirmation', 'Miles', 'Freight', 'Driver Amount', 'On this check',
   ].map(q).join(','))
+  const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
   for (const t of row.trips) {
     L.push([
-      t.loadId, t.customer,
-      csvField(t, 'InvoiceNo'), csvField(t, 'PoNumber'), csvField(t, 'BrokerMC'),
+      csvField(t, 'InvoiceNo'), csvField(t, 'PoNumber'),
+      t.loadId, t.customer, csvField(t, 'BrokerMC'),
       csvField(t, 'InvoiceAmount'), csvField(t, 'InvoiceDate'),
       csvField(t, 'FromCity'), csvField(t, 'FromState'), csvField(t, 'FromZip'),
       csvField(t, 'ToCity'), csvField(t, 'ToState'), csvField(t, 'ToZip'),
       csvDoc(t, 'POD'), csvDoc(t, 'Rate confirmation'),
-      t.miles ?? '', t.freightAmount, tripPayAmount(t.freightAmount, row.setting),
+      t.miles ?? '', t.freightAmount,
+      // A held load's pay is not on this check, so the column shows 0 rather than a
+      // figure someone could total up and expect to see in the driver's bank.
+      heldReasonById.has(t.id) ? 0 : tripPayAmount(t.freightAmount, row.setting),
+      heldReasonById.has(t.id) ? `Held — ${PAY_HOLD_LABEL[heldReasonById.get(t.id)!]}` : 'Yes',
     ].map(q).join(','))
   }
   L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Freight total'), q(row.statement.gross)].join(','))
   L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
+  if (row.heldFreight > 0) {
+    L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Held for POD (not paid)'), q(row.heldFreight)].join(','))
+  }
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   // Charged on every settlement, so the line is exported even when it is $0.00.
@@ -214,6 +277,7 @@ export function OwnerOperatorPayPage() {
       <div style={{ padding: '20px 32px 40px', maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {pay.loading && pay.rows.length === 0 && <div style={{ color: 'var(--ds-t3)', fontSize: 14, padding: 40, textAlign: 'center' }}>Loading…</div>}
         {pay.error && <div style={{ color: '#dc2626', fontSize: 13, padding: 12, border: '1px solid #fecaca', borderRadius: 8, background: '#fef2f2' }}>{pay.error}</div>}
+        {!pay.loading && !pay.podsKnown && <PodCheckUnavailable />}
 
         {!pay.loading && pay.rows.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '60px 0', color: 'var(--ds-t3)' }}>
@@ -243,7 +307,11 @@ export function OwnerOperatorPayPage() {
 
         {pay.rows.length > 0 && (
           <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', padding: '12px 16px', background: 'var(--ds-surface)' }}>
-            <FactoringSummary trips={pay.rows.flatMap((r) => r.trips)} />
+            <FactoringSummary
+              trips={pay.rows.flatMap((r) => r.trips)}
+              heldCount={pay.rows.reduce((n, r) => n + r.heldTrips.length, 0)}
+              heldFreight={pay.rows.reduce((n, r) => n + r.heldFreight, 0)}
+            />
           </div>
         )}
 
@@ -251,6 +319,8 @@ export function OwnerOperatorPayPage() {
           <StatementCard
             key={selectedRow.driver.id}
             row={selectedRow}
+            staffEmail={user?.email ?? ''}
+            onRefresh={pay.refresh}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
             onAddCredit={() => setCreditFor({ row: selectedRow })}
             onAddDebit={() => setCreditFor({ row: selectedRow, kind: 'DEBIT' })}
@@ -311,8 +381,12 @@ export function OwnerOperatorPayPage() {
   )
 }
 
-function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
+function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
   row: OwnerOperatorPayRow
+  /** Recorded on any document uploaded from this card. */
+  staffEmail: string
+  /** Re-reads the week so an uploaded POD moves its load from held to paid. */
+  onRefresh: () => void
   onAddDeduction: () => void
   onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onSettings: () => void
@@ -322,6 +396,8 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
 }) {
   const { driver, setting, statement, oneOffs } = row
   const trips = row.trips
+  // Held loads stay in the table, in delivery order, so the week reads as one list.
+  const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
 
   const color = getColor(driver.colorKey)
   const modeLabel = setting.expensesBeforePercent ? `${pct(setting.payPercent)} of net (after expenses)` : `${pct(setting.payPercent)} of freight − expenses`
@@ -361,17 +437,18 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
       </div>
 
       <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--ds-border)' }}>
-        <FactoringSummary trips={trips} />
+        <FactoringSummary trips={trips} heldCount={row.heldTrips.length} heldFreight={row.heldFreight} />
       </div>
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+            {/* PRO and PO lead: they are how the office and OTR both name a load. */}
+            <th style={{ ...TH, textAlign: 'left' }}>PRO #</th>
+            <th style={{ ...TH, textAlign: 'left' }}>PO #</th>
             <th style={{ ...TH, textAlign: 'left' }}>Load ID</th>
             <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
             <th style={{ ...TH, textAlign: 'left' }}>Route</th>
-            <th style={TH}>PRO #</th>
-            <th style={TH}>PO #</th>
             <th style={TH}>Broker MC</th>
             <th style={TH}>Invoice amount</th>
             <th style={TH}>Invoice date</th>
@@ -391,17 +468,22 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
             {trips.length === 0 && <tr><td colSpan={19} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
             {trips.map((t) => {
               const dup = row.duplicateTripIds.has(t.id)
+              const held = heldReasonById.get(t.id)
               return (
-              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)', background: dup ? 'var(--ds-red-bg, #fef2f2)' : undefined }}>
-                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: dup ? 700 : 600, color: dup ? '#dc2626' : undefined }}
+              <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)', background: dup ? 'var(--ds-red-bg, #fef2f2)' : held ? '#fffbeb' : undefined }}>
+                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
+                  <OtrCell trip={t} field="InvoiceNo" />
+                </td>
+                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)' }}>
+                  <OtrCell trip={t} field="PoNumber" />
+                </td>
+                <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: dup ? 700 : 400, color: dup ? '#dc2626' : 'var(--ds-t2)' }}
                     title={dup ? 'Duplicate — this Load ID also settled last week' : undefined}>
                   {dup && <AlertTriangle size={12} style={{ color: '#dc2626', verticalAlign: '-1px', marginRight: 4 }} />}
                   {t.loadId}
                 </td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.customer || '—'}</td>
                 <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>{t.origin || '—'} → {t.destination || '—'}</td>
-                <td style={TD}><OtrCell trip={t} field="InvoiceNo" /></td>
-                <td style={TD}><OtrCell trip={t} field="PoNumber" /></td>
                 <td style={TD}><OtrCell trip={t} field="BrokerMC" /></td>
                 <td style={TD}><OtrCell trip={t} field="InvoiceAmount" /></td>
                 <td style={TD}><OtrCell trip={t} field="InvoiceDate" /></td>
@@ -411,16 +493,25 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
                 <td style={{ ...TD, textAlign: 'left' }}><OtrCell trip={t} field="ToCity" /></td>
                 <td style={TD}><OtrCell trip={t} field="ToState" /></td>
                 <td style={TD}><OtrCell trip={t} field="ToZip" /></td>
-                <td style={TD}><OtrDoc trip={t} kind="POD" /></td>
-                <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" /></td>
+                <td style={TD}><OtrDoc trip={t} kind="POD" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
+                <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
-                <td style={{ ...TD, fontWeight: 600 }}>{money(tripPayAmount(t.freightAmount, setting))}</td>
+                <td style={{ ...TD, fontWeight: 600 }}>
+                  {held ? <HeldAmount reason={held} /> : money(tripPayAmount(t.freightAmount, setting))}
+                </td>
               </tr>
             )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={17}>Freight total / driver share ({pct(setting.payPercent)})</td>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={17}>
+                  Freight total / driver share ({pct(setting.payPercent)})
+                  {row.heldFreight > 0 && (
+                    <span style={{ ...MISSING, fontWeight: 600, marginLeft: 8 }}>
+                      excludes {money(row.heldFreight)} held for POD
+                    </span>
+                  )}
+                </td>
                 <td style={TD}>{money(statement.gross)}</td>
                 <td style={TD}>{money(statement.driverAmount)}</td>
               </tr>

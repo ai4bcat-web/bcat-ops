@@ -4,7 +4,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { OwnerOperatorPayPage } from './OwnerOperatorPayPage'
 import type { OwnerOperatorPayRow, OwnerOperatorPayState } from '@/hooks/useOwnerOperatorPay'
-import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
+import { OWNER_OP_FIRST_PERIOD, type OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { weekLabelLong } from '@/features/driver-pay/week'
 import type { Driver } from '@/types'
 import type { DriverPaySetting } from '@/lib/apiClient'
@@ -79,6 +79,20 @@ function readiness(over: Partial<OtrReadiness> = {}): OtrReadiness {
   return { ready: false, payload: {}, sources: {}, missingFields: [], missingDocuments: [], warnings: [], ...over }
 }
 
+function trip(over: Partial<OwnerOpTrip> = {}): OwnerOpTrip {
+  return {
+    id: 't1',
+    loadId: 'TMS-1',
+    customer: 'Acme',
+    origin: 'Chicago, IL',
+    destination: 'Detroit, MI',
+    miles: 100,
+    freightAmount: 500,
+    deliveredAt: '2026-09-29T10:00:00Z',
+    ...over,
+  }
+}
+
 function baseRow(over: Partial<OwnerOperatorPayRow> = {}): OwnerOperatorPayRow {
   return {
     driver: baseDriver(over.driver),
@@ -93,6 +107,8 @@ function baseRow(over: Partial<OwnerOperatorPayRow> = {}): OwnerOperatorPayRow {
     debits: over.debits ?? [],
     fixedDebits: over.fixedDebits ?? [],
     statement: baseStatement(over.statement),
+    heldTrips: over.heldTrips ?? [],
+    heldFreight: over.heldFreight ?? 0,
     duplicateTripIds: over.duplicateTripIds ?? new Set<string>(),
   }
 }
@@ -101,6 +117,8 @@ function basePayState(over: Partial<OwnerOperatorPayState> = {}) {
   return {
     loading: false,
     error: null,
+    // Default to a healthy POD check; the outage path has its own test.
+    podsKnown: true,
     rows: [] as OwnerOperatorPayRow[],
     unconfigured: [] as Driver[],
     refresh: vi.fn(),
@@ -367,6 +385,120 @@ describe('OwnerOperatorPayPage', () => {
       }
       expect(text).toContain('PRO9')
       expect(text).toContain('60601')
+    } finally {
+      URL.createObjectURL = originalCreate
+      URL.revokeObjectURL = originalRevoke
+    }
+  })
+  it('leads the trips table with PRO # and PO #', () => {
+    // They are how the office and OTR both name a load, so they come before the
+    // internal Load ID rather than after it.
+    const row = baseRow({
+      trips: [trip({ readiness: readiness({ payload: { InvoiceNo: '13364', PoNumber: 'PO-7' } }) })],
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    render(<OwnerOperatorPayPage />)
+
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent)
+    expect(headers.slice(0, 3)).toEqual(['PRO #', 'PO #', 'Load ID'])
+
+    const cells = screen.getByText('13364').closest('tr')!.querySelectorAll('td')
+    expect(cells[0]).toHaveTextContent('13364')
+    expect(cells[1]).toHaveTextContent('PO-7')
+    expect(cells[2]).toHaveTextContent('TMS-1')
+  })
+
+  it('leaves the PRO blank rather than standing another id in for it', () => {
+    // A load built with no PRO yet must not show the Load ID in the PRO column —
+    // someone would factor against a number OTR has never heard of.
+    const row = baseRow({ trips: [trip({ readiness: readiness({ payload: { PoNumber: 'PO-7' } }) })] })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    render(<OwnerOperatorPayPage />)
+
+    const cells = screen.getByText('PO-7').closest('tr')!.querySelectorAll('td')
+    // The field label stands in for the value, which is how every other missing
+    // factoring field reads on this page.
+    expect(cells[0]).toHaveTextContent('Invoice number (PRO)')
+    expect(cells[0]).not.toHaveTextContent('TMS-1')
+  })
+
+  it('holds a load with no POD off the check and says why', () => {
+    const held = trip({ id: 't-held', freightAmount: 900, readiness: readiness({ missingDocuments: ['POD'] }) })
+    const row = baseRow({
+      trips: [held],
+      heldTrips: [{ trip: held, reason: 'NO_POD' }],
+      heldFreight: 900,
+      statement: baseStatement({ gross: 0, driverAmount: 0 }),
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    render(<OwnerOperatorPayPage />)
+
+    expect(screen.getByText(/Held — POD required/)).toBeInTheDocument()
+    expect(screen.getByText(/excludes \$900\.00 held for POD/)).toBeInTheDocument()
+    expect(screen.getAllByText(/1 held off this check/).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('pays a load whose POD is on file, with no held notice', () => {
+    const row = baseRow({
+      trips: [trip({ freightAmount: 900, readiness: readiness({ ready: true }) })],
+      statement: baseStatement({ gross: 900, driverAmount: 378 }),
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    render(<OwnerOperatorPayPage />)
+
+    expect(screen.queryByText(/Held — POD required/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/held for POD/)).not.toBeInTheDocument()
+  })
+
+  it('offers an upload where a POD or rate confirmation is missing', () => {
+    const row = baseRow({
+      trips: [trip({
+        readiness: readiness({ missingDocuments: ['POD', 'Rate confirmation'], payload: { InvoiceNo: '13364' } }),
+      })],
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    render(<OwnerOperatorPayPage />)
+
+    // The row where someone discovers the document is missing is the row that should
+    // let them fix it.
+    expect(screen.getByRole('button', { name: 'Upload POD for 13364' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Upload Rate con for 13364' })).toBeInTheDocument()
+  })
+
+  it('warns, and holds nothing, when the PODs could not be checked', () => {
+    const row = baseRow({
+      trips: [trip({ freightAmount: 900, readiness: readiness({ missingDocuments: ['POD'] }) })],
+      heldTrips: [],
+      heldFreight: 0,
+      statement: baseStatement({ gross: 900, driverAmount: 378 }),
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row], podsKnown: false }))
+    render(<OwnerOperatorPayPage />)
+
+    expect(screen.getByText(/PODs could not be checked/)).toBeInTheDocument()
+    expect(screen.queryByText(/Held — POD required/)).not.toBeInTheDocument()
+  })
+
+  it('marks held loads in the CSV and zeroes their pay column', async () => {
+    const held = trip({ id: 't-held', freightAmount: 900, readiness: readiness({ missingDocuments: ['POD'] }) })
+    const row = baseRow({
+      trips: [held],
+      heldTrips: [{ trip: held, reason: 'NO_POD' }],
+      heldFreight: 900,
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    const blobs: Blob[] = []
+    const originalCreate = URL.createObjectURL
+    const originalRevoke = URL.revokeObjectURL
+    URL.createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:test' }
+    URL.revokeObjectURL = () => {}
+    try {
+      render(<OwnerOperatorPayPage />)
+      fireEvent.click(screen.getByRole('button', { name: /CSV/i }))
+      const text = await blobs[0].text()
+      expect(text).toContain('On this check')
+      expect(text).toContain('Held — POD required')
+      expect(text).toContain('Held for POD (not paid)')
     } finally {
       URL.createObjectURL = originalCreate
       URL.revokeObjectURL = originalRevoke

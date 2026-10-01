@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
   DriverApiError,
+  fetchCurrentLoad,
   fetchSubmissions,
   ResumableDriverApiError,
   submitPod,
@@ -54,6 +55,8 @@ export default function ScanPage() {
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(initialSubmissionId)
   const [pages, setPages] = useState<PendingPage[]>([])
   const [referenceNumber, setReferenceNumber] = useState('')
+  /** The PRO of the load this driver is on, offered as the reference. */
+  const [currentPro, setCurrentPro] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [resumeFromId, setResumeFromId] = useState<string | null>(null)
 
@@ -68,6 +71,29 @@ export default function ScanPage() {
     () => submissions?.find((s) => s.id === selectedSubmissionId),
     [submissions, selectedSubmissionId],
   )
+
+  /**
+   * Offer the PRO of the load the driver is actually on.
+   *
+   * A reference typed from memory at a dock is how a POD ends up attached to the wrong
+   * load, or to none — and a POD that matches no load holds the driver's own pay. The
+   * app already knows which load they are running, so it fills it in. It is still an
+   * ordinary editable field: a driver sending a POD for something else just types over it.
+   */
+  useEffect(() => {
+    let cancelled = false
+    void fetchCurrentLoad()
+      .then((load) => {
+        const pro = (load?.proNumber ?? '').trim()
+        if (cancelled || !pro) return
+        setCurrentPro(pro)
+        setReferenceNumber((prev) => prev || pro)
+      })
+      .catch(() => {
+        // No current load is normal, and a failure here must not block a POD.
+      })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     if (phase !== 'select' || submissions !== null || !loadingSubmissions) {
@@ -296,7 +322,9 @@ export default function ScanPage() {
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-sm font-medium text-slate-900">Do not see your load?</p>
               <p className="mt-1 text-sm text-slate-500">
-                Enter the load or reference number and send the POD anyway.
+                {currentPro
+                  ? `This is PRO ${currentPro}, the load you are on. Change it if this POD is for a different load.`
+                  : 'Enter the load or reference number and send the POD anyway.'}
               </p>
               <Input
                 className="mt-3"

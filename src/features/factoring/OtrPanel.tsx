@@ -2,9 +2,16 @@
  * OTR readiness panel for one factoring queue row.
  *
  * Shows every field OTR requires, the value we resolved, and WHERE it came from,
- * so a wrong ZIP is traceable rather than mysterious. Anything still blank is a
- * manual step; broker MC is normally the only one, and entering it saves onto
- * the customer so the next load from that broker fills it automatically.
+ * so a wrong ZIP is traceable rather than mysterious.
+ *
+ * Anything still blank can be typed in right here. A typed value is the highest
+ * precedence tier in src/lib/otrInvoice.ts, and it is also read by the owner-operator
+ * settlement, so filling a gap in this queue fills it on the settlement too — the two
+ * pages describe the same load rather than disagreeing about it.
+ *
+ * Broker MC is the one exception and keeps its own control: it saves onto the CUSTOMER,
+ * so the next load from that broker is already filled in. Storing it as a per-row
+ * override would fix one invoice and leave the next one just as blank.
  *
  * Submit is deliberately a human action and is disabled until every field and
  * both documents are present.
@@ -21,7 +28,22 @@ import {
   type OtrRequiredField,
 } from '@/lib/otrInvoice'
 import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr } from '@/lib/otrClient'
+import { setFactoringManualFields } from '@/lib/apiClient'
 import type { FactoringItem } from '@/types'
+
+/** Keyboard and format hints per field, so a phone offers the right keys. */
+const FIELD_HINT: Partial<Record<OtrRequiredField, { placeholder: string; inputMode?: 'numeric' | 'decimal' }>> = {
+  InvoiceNo:     { placeholder: '13364', inputMode: 'numeric' },
+  PoNumber:      { placeholder: 'PO number' },
+  InvoiceAmount: { placeholder: '1850.00', inputMode: 'decimal' },
+  InvoiceDate:   { placeholder: 'YYYY-MM-DD' },
+  FromCity:      { placeholder: 'Chicago' },
+  FromState:     { placeholder: 'IL' },
+  FromZip:       { placeholder: '60601', inputMode: 'numeric' },
+  ToCity:        { placeholder: 'Detroit' },
+  ToState:       { placeholder: 'MI' },
+  ToZip:         { placeholder: '48201', inputMode: 'numeric' },
+}
 
 /** Where a value came from, phrased for a human rather than a developer. */
 const SOURCE_LABEL: Record<string, string> = {
@@ -111,32 +133,41 @@ export function OtrPanel({ item, onChanged }: Props) {
 
   const missing = new Set<OtrRequiredField>(readiness.missingFields)
   const needsMc = missing.has('BrokerMC')
+  const manual = (item.otrManualFields ?? {}) as Record<string, string>
+
+  /**
+   * Save one typed field. The whole override map is rewritten, so it is merged first;
+   * an empty value removes the override and lets the load or rate con speak again.
+   * Re-assembling afterwards is what turns the typed value into a resolved field.
+   */
+  const saveField = (field: OtrRequiredField, value: string) =>
+    run(
+      `field:${field}`,
+      async () => {
+        await setFactoringManualFields(item.id, { ...manual, [field]: value })
+        await assembleInvoice(item.id)
+      },
+      value.trim() ? `${OTR_FIELD_LABEL[field]} saved` : `${OTR_FIELD_LABEL[field]} cleared`,
+    )
 
   return (
     <div className="space-y-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg)] p-3">
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
-        {OTR_REQUIRED_FIELDS.map((f) => {
-          const value = readiness.payload?.[f]
-          const source = readiness.sources?.[f]
-          return (
-            <div key={f} className="flex items-baseline justify-between gap-2">
-              <span className="text-muted-foreground">{OTR_FIELD_LABEL[f]}</span>
-              {value === undefined ? (
-                <span className="font-medium text-amber-700">needed</span>
-              ) : (
-                <span className="truncate font-medium text-foreground" title={String(value)}>
-                  {String(value)}
-                  {source && (
-                    <span className="ml-1 text-[10px] text-muted-foreground">
-                      ({SOURCE_LABEL[source] ?? source})
-                    </span>
-                  )}
-                </span>
-              )}
-            </div>
-          )
-        })}
+        {OTR_REQUIRED_FIELDS.map((f) => (
+          <FieldRow
+            key={f}
+            field={f}
+            value={readiness.payload?.[f]}
+            source={readiness.sources?.[f]}
+            pro={item.proNumber}
+            busy={busy !== null}
+            saving={busy === `field:${f}`}
+            /* Broker MC has its own control below, because it saves to the customer. */
+            editable={f !== 'BrokerMC'}
+            onSave={(v) => void saveField(f, v)}
+          />
+        ))}
       </div>
 
       {readiness.missingDocuments?.length > 0 && (
@@ -244,6 +275,89 @@ export function OtrPanel({ item, onChanged }: Props) {
           Submit to OTR
         </Button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * One required field: its resolved value and source, or an input to supply it.
+ *
+ * A value that came from the load or the rate con is left alone — the point of the
+ * precedence chain is that those are usually right. What is offered is a way to fill a
+ * blank, and a way to correct a value someone already typed, which is where mistakes
+ * actually live.
+ */
+function FieldRow({
+  field, value, source, pro, busy, saving, editable, onSave,
+}: {
+  field: OtrRequiredField
+  value: string | number | undefined
+  source: string | undefined
+  pro: string
+  busy: boolean
+  saving: boolean
+  editable: boolean
+  onSave: (value: string) => void
+}) {
+  const typed = source === 'manual'
+  const [draft, setDraft] = useState('')
+  const [open, setOpen] = useState(false)
+  const hint = FIELD_HINT[field]
+
+  // Filling a blank: the input is simply there, no extra click to reveal it.
+  const showInput = editable && (value === undefined || open)
+
+  if (showInput) {
+    return (
+      <form
+        className="flex items-center gap-1.5"
+        onSubmit={(e) => {
+          e.preventDefault()
+          onSave(draft)
+          setOpen(false)
+          setDraft('')
+        }}
+      >
+        <span className="shrink-0 text-muted-foreground">{OTR_FIELD_LABEL[field]}</span>
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={hint?.placeholder}
+          inputMode={hint?.inputMode}
+          className="h-7 min-w-0 flex-1 text-xs"
+          aria-label={`${OTR_FIELD_LABEL[field]} for PRO ${pro}`}
+        />
+        <Button type="submit" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy}>
+          {saving ? <Loader2 className="size-3 animate-spin" /> : 'Save'}
+        </Button>
+      </form>
+    )
+  }
+
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-muted-foreground">{OTR_FIELD_LABEL[field]}</span>
+      <span className="flex min-w-0 items-baseline gap-1">
+        <span className="truncate font-medium text-foreground" title={String(value)}>
+          {String(value)}
+        </span>
+        {source && (
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            ({SOURCE_LABEL[source] ?? source})
+          </span>
+        )}
+        {editable && (
+          <button
+            type="button"
+            className="shrink-0 text-[10px] font-semibold text-[var(--ds-blue,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
+            disabled={busy}
+            aria-label={`${typed ? 'Change' : 'Override'} ${OTR_FIELD_LABEL[field]} for PRO ${pro}`}
+            onClick={() => { setDraft(typed ? String(value ?? '') : ''); setOpen(true) }}
+          >
+            {typed ? 'change' : 'override'}
+          </button>
+        )}
+      </span>
     </div>
   )
 }

@@ -46,6 +46,7 @@ const apiMocks = vi.hoisted(() => {
     submitStandalonePod: vi.fn(),
     submitPod: vi.fn(),
     fetchSubmissions: vi.fn(),
+    fetchCurrentLoad: vi.fn(),
     DriverApiError,
     ResumableDriverApiError,
   }
@@ -77,6 +78,8 @@ describe('ScanPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     apiMocks.fetchSubmissions.mockResolvedValue([])
+    // No load running is the neutral default; the prefill case has its own test.
+    apiMocks.fetchCurrentLoad.mockResolvedValue(null)
   })
 
   it('submits a multi-page ratecon with one API call', async () => {
@@ -149,5 +152,42 @@ describe('ScanPage', () => {
     const second = apiMocks.submitRatecon.mock.calls[1][0]
     expect(first.resumeFromId).toBeUndefined()
     expect(second.resumeFromId).toBe('abc-123')
+  })
+
+  it('fills the POD reference with the PRO of the load the driver is on', async () => {
+    // A reference typed from memory at a dock is how a POD ends up on the wrong load,
+    // or on none — and a POD that matches no load holds the driver's own pay.
+    apiMocks.fetchSubmissions.mockResolvedValue([])
+    apiMocks.fetchCurrentLoad.mockResolvedValue({ id: 'load-1', proNumber: '13364' })
+    apiMocks.submitStandalonePod.mockResolvedValue('pod-sub')
+
+    renderAt('/driver/scan')
+
+    fireEvent.click(screen.getByRole('button', { name: /POD/i }))
+    await screen.findByText(/Choose a load for this POD/i)
+
+    const input = await screen.findByPlaceholderText(/e\.g\. VRID or load number/i) as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('13364'))
+    expect(screen.getByText(/This is PRO 13364, the load you are on/i)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Continue with reference/i }))
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    fireEvent.click(await screen.findByRole('button', { name: /Send to office/i }))
+
+    await waitFor(() => expect(apiMocks.submitStandalonePod).toHaveBeenCalledTimes(1))
+    expect(apiMocks.submitStandalonePod.mock.calls[0][0]).toMatchObject({ referenceNumber: '13364' })
+  })
+
+  it('does not overwrite a reference the driver typed themselves', async () => {
+    apiMocks.fetchSubmissions.mockResolvedValue([])
+    apiMocks.fetchCurrentLoad.mockResolvedValue({ id: 'load-1', proNumber: '13364' })
+
+    renderAt('/driver/scan')
+    fireEvent.click(screen.getByRole('button', { name: /POD/i }))
+
+    const input = await screen.findByPlaceholderText(/e\.g\. VRID or load number/i) as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('13364'))
+    fireEvent.change(input, { target: { value: 'OTHER-LOAD' } })
+    expect(input.value).toBe('OTHER-LOAD')
   })
 })

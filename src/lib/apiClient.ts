@@ -626,9 +626,40 @@ export async function createIntakeItem(input: {
 
 // ── Factoring items ───────────────────────────────────────────────────────────
 
+// Every field the UI reads. The OTR columns were missing here, which left OtrPanel
+// permanently in its "not yet prepared" branch: the Lambda caches readiness on the
+// row and the browser simply never asked for it.
 const FACTORING_ITEM_FIELDS = `
   id proNumber status subject fromEmail receivedAt messageId createdAt updatedAt
+  loadId otrManualFields otrReadiness
+  brokerMcChecked brokerCheckResult brokerCheckedAt
+  otrInvoiceId otrSubmittedAt otrSubmittedBy
+  otrStatus otrScheduleId otrAmount otrStatusSyncedAt
+  otrDocsUploaded otrError
 `
+
+/**
+ * AppSync hands an `a.json()` column back as a JSON *string*, so the three JSON columns
+ * on a FactoringItem have to be parsed before anything can read a property off them.
+ * A column that will not parse is dropped rather than thrown: one malformed cached
+ * readiness must not blank the whole factoring queue.
+ */
+const FACTORING_JSON_FIELDS = ['otrManualFields', 'otrReadiness', 'otrDocsUploaded'] as const
+
+function parseFactoringJson(item: FactoringItem): FactoringItem {
+  const out = { ...item } as unknown as Record<string, unknown>
+  for (const field of FACTORING_JSON_FIELDS) {
+    const value = out[field]
+    if (typeof value !== 'string') continue
+    try {
+      out[field] = JSON.parse(value)
+    } catch {
+      console.warn('[factoring] could not parse', field, 'on', item.id)
+      out[field] = null
+    }
+  }
+  return out as unknown as FactoringItem
+}
 
 /** Fetch every FactoringItem page so direct DynamoDB email inserts are never missed. */
 export async function listFactoringItems(): Promise<FactoringItem[]> {
@@ -641,7 +672,7 @@ export async function listFactoringItems(): Promise<FactoringItem[]> {
     }) as { data: { listFactoringItems: { items: (FactoringItem | null)[]; nextToken?: string | null } } }
     const page = result.data.listFactoringItems
     for (const item of page.items ?? []) {
-      if (item) items.push(item)
+      if (item) items.push(parseFactoringJson(item))
     }
     nextToken = page.nextToken ?? null
   } while (nextToken)
@@ -657,7 +688,34 @@ export async function updateFactoringItem(
     query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
     variables: { input: { id, ...patch } },
   }) as { data: { updateFactoringItem: FactoringItem } }
-  return result.data.updateFactoringItem
+  return parseFactoringJson(result.data.updateFactoringItem)
+}
+
+/**
+ * Write the field values a human typed on a factoring queue row.
+ *
+ * These are the top precedence tier in src/lib/otrInvoice.ts, which existed with no
+ * writer at all: the queue could show a field as missing and offer no way to supply
+ * it. Overrides replace the whole map, so the caller merges first; a value trimmed to
+ * empty is removed rather than stored blank, so clearing a bad entry falls back to
+ * whatever the load or the rate confirmation says.
+ *
+ * The column is `a.json()`, which AppSync expects as a JSON string on the way in.
+ */
+export async function setFactoringManualFields(
+  id: string,
+  fields: Record<string, string>,
+): Promise<FactoringItem> {
+  const cleaned: Record<string, string> = {}
+  for (const [key, value] of Object.entries(fields)) {
+    const v = (value ?? '').trim()
+    if (v) cleaned[key] = v
+  }
+  const result = await client.graphql({
+    query: `mutation UpdateFactoringItem($input: UpdateFactoringItemInput!) { updateFactoringItem(input: $input) { ${FACTORING_ITEM_FIELDS} } }`,
+    variables: { input: { id, otrManualFields: JSON.stringify(cleaned) } },
+  }) as { data: { updateFactoringItem: FactoringItem } }
+  return parseFactoringJson(result.data.updateFactoringItem)
 }
 
 /** The model authorizes deletion only for the Cognito ADMIN group. */
