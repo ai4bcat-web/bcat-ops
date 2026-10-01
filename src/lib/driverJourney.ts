@@ -13,8 +13,10 @@
  * Pure: no AWS, no fetch, no clock. The PWA, the driver API and the dashboard
  * all import it so they agree on which load is current.
  */
-import { getStops } from '@/lib/stops'
-import type { Load, Stop } from '@/types'
+// Relative, not '@/' — this module is bundled into the driver-app-api Lambda by
+// esbuild, which does not know the Vite path alias. See amplify.yml.
+import { getStops } from './stops'
+import type { Load, Stop } from '../types'
 
 /** True when this driver is on any stop of the load. */
 export function driverIsOnLoad(load: Load, driverId: string): boolean {

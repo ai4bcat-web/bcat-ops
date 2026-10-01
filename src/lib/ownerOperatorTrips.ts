@@ -1,4 +1,5 @@
-import type { OtrReadiness } from '@/lib/otrInvoice'
+// Relative: reached from a Lambda bundle, where the '@/' alias does not resolve.
+import type { OtrReadiness } from './otrInvoice'
 
 /**
  * First owner-operator pay week: Sep 27 – Oct 3, 2026.

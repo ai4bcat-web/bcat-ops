@@ -1,4 +1,5 @@
-import type { Load, Stop, StopType, ApptType } from '@/types'
+// Relative: reached from a Lambda bundle, where the '@/' alias does not resolve.
+import type { Load, Stop, StopType, ApptType } from '../types'
 
 // ── Multi-stop normalization layer ──────────────────────────────────────────────
 //
