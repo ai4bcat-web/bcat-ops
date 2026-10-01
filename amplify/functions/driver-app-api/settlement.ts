@@ -18,6 +18,7 @@ import {
   type PayRateOverride,
 } from '../../../src/lib/driverPay'
 import { matchedFuelForCard, sumFuel } from '../../../src/lib/driverFuel'
+import { tripHoldReason, PAY_HOLD_LABEL, type PayHoldReason } from '../../../src/lib/payHold'
 import { creditLineLabel } from '../../../src/lib/payCredits'
 import { weekStartOfISO, weekLabel } from '../../../src/features/driver-pay/week'
 
@@ -31,6 +32,13 @@ export interface SettlementTrip {
   rate?: number | null
   amount: number
   factoring?: FactoringFields | null
+  /**
+   * Set when this load is NOT on the check yet. Only a missing POD does that today.
+   * The driver sees the same held figure the office sees; a statement that quietly
+   * differs from the cheque is how a driver loses trust in the app.
+   */
+  heldReason?: PayHoldReason | null
+  heldLabel?: string | null
 }
 
 /**
@@ -52,6 +60,13 @@ export interface FactoringFields {
   toZip: string | null
   podPresent: boolean
   rateconPresent: boolean
+  /**
+   * False when the POD store could not be consulted at all — an unconfigured or failing
+   * table. "We could not check" is not "there is no POD", and only the latter may hold a
+   * driver's pay, so the distinction is carried explicitly rather than collapsed into
+   * `podPresent: false`.
+   */
+  podKnown?: boolean
   /** True when any required field or document is missing. */
   blocked: boolean
 }
@@ -184,7 +199,31 @@ export function buildSettlement(
     periodStart,
   )
 
-  const tripInputs = trips.map((t) => ({ freightAmount: t.freightAmount, status: t.status }))
+  // A load with no POD cannot be invoiced, so it is held off the check — the same rule
+  // the owner-operator settlement page applies. A trip with no factoring view at all is
+  // unknown rather than POD-less, and unknown never holds anyone's pay.
+  const heldTripIds = new Set(
+    trips
+      .filter((t) =>
+        tripHoldReason(
+          {
+            freightAmount: t.freightAmount,
+            // No factoring view, or a POD store we could not read: both are unknown,
+            // and unknown never holds pay.
+            readiness:
+              t.factoring && t.factoring.podKnown !== false
+                ? { missingDocuments: t.factoring.podPresent ? [] : ['POD'] }
+                : undefined,
+          },
+          { podsKnown: true },
+        ) !== null,
+      )
+      .map((t) => t.id),
+  )
+
+  const tripInputs = trips
+    .filter((t) => !heldTripIds.has(t.id))
+    .map((t) => ({ freightAmount: t.freightAmount, status: t.status }))
 
   const fixed = effectiveFixedExpenses(
     parseJsonArray<FixedExpenseInput>(setting.fixedExpenses),
@@ -272,8 +311,11 @@ export function buildSettlement(
         destination: t.destination ?? null,
         miles: t.miles ?? null,
         rate: tripRate(t),
-        amount: tripPayAmount(t.freightAmount, rateModel as DriverPaySettingInput),
+        // A held load shows $0 pay, not a figure the driver would expect in the bank.
+        amount: heldTripIds.has(t.id) ? 0 : tripPayAmount(t.freightAmount, rateModel as DriverPaySettingInput),
         factoring: t.factoring ?? null,
+        heldReason: heldTripIds.has(t.id) ? 'NO_POD' : null,
+        heldLabel: heldTripIds.has(t.id) ? PAY_HOLD_LABEL.NO_POD : null,
       })),
     grossPay: statement.gross,
     // Always listed, even at $0 on a week with no loads: a driver who never sees the

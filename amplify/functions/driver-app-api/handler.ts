@@ -36,6 +36,7 @@ import {
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
+import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
 import {
   DRIVER_STATUSES,
   DRIVER_STATUS_LABEL,
@@ -527,35 +528,83 @@ async function resolveFactoringFields(loadIds: string[]): Promise<Map<string, Fa
     }
   }
 
+  // podKnown stays false while the POD store has not actually answered. A missing POD
+  // now holds a driver's pay, and an unconfigured or failing table makes every load look
+  // POD-less — so "could not check" must never be mistaken for "there is no POD".
   const podsByLoad = new Set<string>()
+  let podKnown = false
   if (POD_DOCUMENT_TABLE_NAME) {
-    for (const id of unique) {
-      const res = await ddb.send(
-        new QueryCommand({
-          TableName: POD_DOCUMENT_TABLE_NAME,
-          IndexName: 'podDocumentsByLoadIdAndReceivedAt',
-          KeyConditionExpression: 'loadId = :loadId',
-          ExpressionAttributeValues: { ':loadId': id },
-        }),
-      )
-      if ((res.Items ?? []).length > 0) podsByLoad.add(id)
+    try {
+      for (const id of unique) {
+        const res = await ddb.send(
+          new QueryCommand({
+            TableName: POD_DOCUMENT_TABLE_NAME,
+            IndexName: 'podDocumentsByLoadIdAndReceivedAt',
+            KeyConditionExpression: 'loadId = :loadId',
+            ExpressionAttributeValues: { ':loadId': id },
+          }),
+        )
+        if ((res.Items ?? []).length > 0) podsByLoad.add(id)
+      }
+      podKnown = true
+    } catch (err) {
+      console.error('[driver-app-api] could not read PODs — no load will be held for a missing POD', err)
     }
   }
 
   for (const [id, load] of loads) {
-    out.set(id, factoringFieldsFor(load, customers, locations, podsByLoad.has(id)))
+    out.set(id, { ...factoringFieldsFor(load, customers, locations, podsByLoad.has(id)), podKnown })
   }
   return out
 }
 
+/**
+ * PODs this driver has sent in, from the PWA or uploaded by staff on their behalf.
+ *
+ * This lambda stores a driver's POD in DriverSubmissionDoc and then computed POD
+ * presence from the PodDocument table, so the driver's own scan never counted. Now that
+ * a POD decides whether their load is paid, that gap would have shown them a POD they
+ * had just sent and a settlement still calling it missing.
+ */
+async function driverSubmittedPodIndex(driverId: string): Promise<PodIndex> {
+  try {
+    const [submissions, docs] = await Promise.all([
+      scan<DriverSubmissionRow>(DRIVER_SUBMISSION_TABLE, 'driverId = :did', {}, { ':did': driverId }),
+      scan<DriverSubmissionDocRow>(DRIVER_SUBMISSION_DOC_TABLE, 'driverId = :did', {}, { ':did': driverId }),
+    ])
+    const kindsBySubmission = groupBy(docs, (d) => d.submissionId)
+    return buildPodIndex({
+      jobsdoneLoadIds: [],
+      submissions: submissions.map((s) => ({
+        loadId: s.loadId ?? null,
+        referenceNumber: s.referenceNumber ?? null,
+        hasPodDoc: (kindsBySubmission.get(s.id) ?? []).some((d) => d.kind === 'POD'),
+      })),
+    })
+  } catch (err) {
+    // The JobsDone side still answers; this only ever adds PODs, never removes one.
+    console.error('[driver-app-api] could not read this driver\'s own submissions', err)
+    return buildPodIndex({ jobsdoneLoadIds: [], submissions: [] })
+  }
+}
+
 /** Attach the factoring view to every trip the driver PWA returns. */
-async function attachFactoringFields(trips: RawAmazonTrip[]): Promise<RawAmazonTrip[]> {
-  const resolved = await resolveFactoringFields(
-    trips.map((t) => t.loadRowId ?? t.loadId).filter((id): id is string => !!id),
-  )
+async function attachFactoringFields(trips: RawAmazonTrip[], driverId: string): Promise<RawAmazonTrip[]> {
+  const [resolved, ownPods] = await Promise.all([
+    resolveFactoringFields(
+      trips.map((t) => t.loadRowId ?? t.loadId).filter((id): id is string => !!id),
+    ),
+    driverSubmittedPodIndex(driverId),
+  ])
   return trips.map((t) => {
     const key = t.loadRowId ?? t.loadId
-    return { ...t, factoring: key ? resolved.get(key) ?? null : null }
+    const fields = key ? resolved.get(key) ?? null : null
+    if (!fields || fields.podPresent) return { ...t, factoring: fields }
+    // A POD this driver sent counts the same as one JobsDone received.
+    if (!loadHasPod(ownPods, { id: key ?? '', aljexId: fields.invoiceNo })) return { ...t, factoring: fields }
+    // A POD this driver sent is a real answer, so it also settles podKnown.
+    const withPod = { ...fields, podPresent: true, podKnown: true }
+    return { ...t, factoring: { ...withPod, blocked: isFactoringBlocked(withPod) } }
   })
 }
 
@@ -1390,7 +1439,7 @@ export const handler = async (event: FnUrlEvent) => {
             ),
         ownerOp ? loadOwnerOperatorTripsForWeek(driverId, weekStart) : Promise.resolve([] as RawAmazonTrip[]),
       ])
-      const trips = await attachFactoringFields([...amazonWeekTrips, ...brokerageWeekTrips])
+      const trips = await attachFactoringFields([...amazonWeekTrips, ...brokerageWeekTrips], driverId)
       return reply(200, await buildSettlementForDriver(driverId, weekStart, trips, setting))
     }
 

@@ -296,3 +296,75 @@ describe('listWeekStarts', () => {
     expect(weeks).toEqual(['2026-09-27'])
   })
 })
+
+describe('a POD gates pay', () => {
+  const periodStart = '2026-09-21'
+  const setting: RawDriverPaySetting = { payPercent: 0.88, expensesBeforePercent: false }
+
+  const factoring = (over: Partial<FactoringFields>): FactoringFields => ({
+    invoiceNo: '14452', poNumber: 'PO-1', brokerMc: '123456',
+    invoiceAmount: 1000, invoiceDate: '2026-09-22',
+    fromCity: 'Chicago', fromState: 'IL', fromZip: '60601',
+    toCity: 'Detroit', toState: 'MI', toZip: '48201',
+    podPresent: true, rateconPresent: true, blocked: false,
+    ...over,
+  })
+
+  const trip = (over: Partial<RawAmazonTrip>): RawAmazonTrip => ({
+    id: 'trip-1', periodStart, shipmentDate: '2026-09-22', freightAmount: 1000, sortOrder: 1,
+    ...over,
+  })
+
+  const build = (trips: RawAmazonTrip[]) =>
+    buildSettlement(periodStart, trips, setting, [], [], [], [])
+
+  it('pays a load whose POD is on file', () => {
+    const s = build([trip({ factoring: factoring({}) })])
+    expect(s.grossPay).toBe(1000)
+    expect(s.trips[0].heldReason).toBeNull()
+    expect(s.trips[0].amount).toBe(880)
+  })
+
+  it('holds a load with no POD, and shows $0 rather than a figure that is not coming', () => {
+    const s = build([trip({ factoring: factoring({ podPresent: false, blocked: true }) })])
+    expect(s.grossPay).toBe(0)
+    expect(s.trips[0].heldReason).toBe('NO_POD')
+    expect(s.trips[0].heldLabel).toBe('POD required')
+    expect(s.trips[0].amount).toBe(0)
+  })
+
+  it('does not hold a load over a missing rate confirmation', () => {
+    // A rate con blocks invoicing at OTR, but the POD proves the work was done.
+    const s = build([trip({ factoring: factoring({ rateconPresent: false, blocked: true }) })])
+    expect(s.grossPay).toBe(1000)
+    expect(s.trips[0].heldReason).toBeNull()
+  })
+
+  it('holds nothing when the POD store could not be read', () => {
+    // An unreadable POD table makes every load look POD-less. Holding on that would
+    // stop a whole week of pay over an integration problem, so unknown always pays.
+    const s = build([trip({ factoring: factoring({ podPresent: false, podKnown: false, blocked: true }) })])
+    expect(s.grossPay).toBe(1000)
+    expect(s.trips[0].heldReason).toBeNull()
+    expect(s.trips[0].amount).toBe(880)
+  })
+
+  it('holds nothing for a trip with no factoring view at all', () => {
+    // An Amazon Relay trip carries no load row, so nothing is known about documents.
+    const s = build([trip({ factoring: null })])
+    expect(s.grossPay).toBe(1000)
+    expect(s.trips[0].heldReason).toBeNull()
+  })
+
+  it('pays the loads that can be paid and holds only the one that cannot', () => {
+    const s = build([
+      trip({ id: 'ok', factoring: factoring({}) }),
+      trip({ id: 'held', shipmentDate: '2026-09-23', freightAmount: 500, sortOrder: 2, factoring: factoring({ podPresent: false, blocked: true }) }),
+    ])
+    expect(s.grossPay).toBe(1000)
+    expect(s.trips.find((t) => t.id === 'ok')?.heldReason).toBeNull()
+    expect(s.trips.find((t) => t.id === 'held')?.heldReason).toBe('NO_POD')
+    // Both are still listed: a driver must be able to see what is waiting.
+    expect(s.trips).toHaveLength(2)
+  })
+})

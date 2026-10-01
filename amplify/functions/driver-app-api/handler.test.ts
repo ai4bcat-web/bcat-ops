@@ -483,8 +483,11 @@ function defaultTables(): Record<string, Record<string, Record<string, unknown>>
       'loc-1': { id: 'loc-1', city: 'CHICAGO', state: 'IL', zip: '60601' },
       'loc-2': { id: 'loc-2', city: 'DETROIT', state: 'MI', zip: '48201' },
     },
+    // A POD is now what lets a load be paid, so the fixtures carry one for every load
+    // whose pay these tests assert. The hold itself has its own tests below.
     'PodDocument-test': {
       'pod-sat': { id: 'pod-sat', loadId: 'load-c-saturday', processingStatus: 'READY' },
+      'pod-a-oo': { id: 'pod-a-oo', loadId: 'load-a-oo', processingStatus: 'READY' },
     },
     'DriverPayDeduction-test': {},
     'DriverPayCredit-test': {},
@@ -535,6 +538,9 @@ function matchesFilterExpression(
   return true
 }
 
+/** The in-memory DynamoDB. Module-scoped so a test can seed an extra row. */
+let tables: ReturnType<typeof defaultTables>
+
 beforeEach(() => {
   vi.clearAllMocks()
   mockVerify.mockReset()
@@ -544,7 +550,7 @@ beforeEach(() => {
   sesSendMock.mockReset()
   sesSendMock.mockResolvedValue({ MessageId: 'ses-msg-123' })
 
-  const tables = defaultTables()
+  tables = defaultTables()
 
   mockDynamoSend.mockImplementation(async (cmd: { input?: unknown }) => {
     const input = (cmd.input ?? {}) as {
@@ -869,7 +875,7 @@ describe('driver-app-api handler', () => {
       mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
     })
 
-    it('returns a settlement line with freight in dollars from Load.rate cents', async () => {
+    it('lists a brokerage load delivered in the week with its lane', async () => {
       const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
       expect(res.statusCode).toBe(200)
       const body = JSON.parse(res.body)
@@ -878,8 +884,40 @@ describe('driver-app-api handler', () => {
       expect(wed).toBeDefined()
       expect(wed.origin).toBe('Chicago, IL')
       expect(wed.destination).toBe('Detroit, MI')
-      // 45000 cents -> $450.00, never $45,000.
-      expect(wed.amount).toBeCloseTo(396, 2)
+    })
+
+    it('holds a load with no POD off the check and tells the driver why', async () => {
+      // load-c-1 has a rate confirmation but no POD. The driver did the work, so the
+      // load is listed — it just cannot be invoiced yet, so it is not on this cheque.
+      const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+      const body = JSON.parse(res.body)
+      const held = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450')
+      expect(held.heldReason).toBe('NO_POD')
+      expect(held.heldLabel).toBe('POD required')
+      // Zero, not $396 — a driver must never read a figure that is not coming.
+      expect(held.amount).toBe(0)
+      // Only the Saturday load, which has a POD, reaches the money math.
+      expect(body.grossPay).toBe(2500)
+    })
+
+    it('pays a held load as soon as the driver sends the POD themselves', async () => {
+      // The driver's own scan lands in DriverSubmissionDoc, not the JobsDone POD table.
+      // Before this, their POD was invisible to the check that gates their own pay.
+      tables['DriverSubmission-test']['sub-pod'] = {
+        id: 'sub-pod', driverId: DRIVER_C_ID, driverName: 'Driver C',
+        referenceNumber: '14452', createdAt: '2026-09-29T15:00:00Z', status: 'NEW',
+      }
+      tables['DriverSubmissionDoc-test']['doc-pod'] = {
+        id: 'doc-pod', submissionId: 'sub-pod', driverId: DRIVER_C_ID,
+        kind: 'POD', s3Key: 'driver-docs/c/sub-pod/POD/1.jpg', uploadedAt: '2026-09-29T15:00:00Z',
+      }
+
+      const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+      const body = JSON.parse(res.body)
+      const paid = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450')
+      expect(paid.heldReason).toBeNull()
+      // 45000 cents -> $450.00 freight -> $396.00 pay. Never $45,000.
+      expect(paid.amount).toBeCloseTo(396, 2)
     })
 
     it('includes a load delivered on the final Saturday of the week', async () => {
@@ -891,8 +929,9 @@ describe('driver-app-api handler', () => {
       const saturday = body.trips.find((t: { loadId?: string }) => t.loadId === '14452')
       expect(saturday).toBeDefined()
       expect(saturday.destination).toBe('Akron, OH')
-      // gross = 450 + 2500, proving the Saturday load reaches the money math.
-      expect(body.grossPay).toBe(2950)
+      // The Wednesday load is held for its missing POD, so gross is the Saturday load
+      // alone — which still proves it reaches the money math at all.
+      expect(body.grossPay).toBe(2500)
     })
 
     it('attaches the per-trip factoring readiness resolved from Load/Customer/Location/POD rows', async () => {

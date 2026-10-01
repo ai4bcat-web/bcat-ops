@@ -3,7 +3,12 @@ import { FileText } from 'lucide-react'
 import type { FactoringFields, Settlement, SettlementLine, SettlementTrip } from '../driverApi'
 import { weekLabel } from '@/features/driver-pay/week'
 
-type TripWithFactoring = SettlementTrip & { factoring?: FactoringFields | null }
+type TripWithFactoring = SettlementTrip & {
+  factoring?: FactoringFields | null
+  /** Set when this load is not on the check yet, e.g. its POD is still missing. */
+  heldReason?: string | null
+  heldLabel?: string | null
+}
 
 // Matches the formatter used by the staff DriverPayPage surface so drivers see
 // identical numbers. See src/features/driver-pay/DriverPayPage.tsx.
@@ -72,10 +77,13 @@ export function StatementCard({ settlement }: StatementCardProps) {
             {settlement.trips.map((trip) => {
               const route = [trip.origin, trip.destination].filter(Boolean).join(' → ') || undefined
               const factoring = (trip as TripWithFactoring).factoring ?? null
+              const heldLabel = (trip as TripWithFactoring).heldLabel ?? null
               return (
                 <div
                   key={trip.id}
-                  className="flex flex-col gap-1 rounded-lg border border-border/60 bg-background/50 p-3"
+                  className={`flex flex-col gap-1 rounded-lg border p-3 ${
+                    heldLabel ? 'border-amber-300 bg-amber-50/60' : 'border-border/60 bg-background/50'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-semibold text-card-foreground">
@@ -101,6 +109,13 @@ export function StatementCard({ settlement }: StatementCardProps) {
                       {money(trip.amount)}
                     </span>
                   </div>
+                  {/* Why this load is not on the check, said plainly and with the fix. */}
+                  {heldLabel && (
+                    <p className="mt-1 rounded-md bg-amber-100 px-2 py-1.5 text-xs font-medium text-amber-900">
+                      Not on this check — {heldLabel.toLowerCase()}. Send the POD from the Scan
+                      tab and it is added automatically.
+                    </p>
+                  )}
                   <FactoringBlock factoring={factoring} />
                 </div>
               )
