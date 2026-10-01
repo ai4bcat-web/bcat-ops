@@ -234,6 +234,30 @@ export function dayMpg(miles: number | null, fuelGallons: number | null): number
   return miles / fuelGallons
 }
 
+/**
+ * Miles for the day, or null when there is nothing to measure against. A reading
+ * that went backwards is a bad reading, not negative miles - an ECM swap or a
+ * unit reassignment produces one, and a negative day would silently cancel out
+ * real miles in the week total.
+ */
+export function dayMiles(previous: number | null, end: number): number | null {
+  if (previous == null) return null
+  return Math.max(0, end - previous)
+}
+
+/**
+ * Gallons the truck actually burned: driving fuel plus the fuel it idled away.
+ * Motive reports them separately and the day's driving number alone runs a few
+ * percent optimistic against the pump, which is the figure a driver checks this
+ * against. Units are US gallons - every row carries "metric_units": false,
+ * because the request sends X-Metric-Units: false.
+ */
+export function dayFuelGallons(drivingFuel: number | null, idleFuel: number | null): number | null {
+  if (drivingFuel == null && idleFuel == null) return null
+  return (drivingFuel ?? 0) + (idleFuel ?? 0)
+}
+
+
 async function closeDay(eventTimeIso: string): Promise<void> {
   // Closes the previous Chicago calendar day — see the header comment.
   const targetDate = previousDate(centralDate(eventTimeIso))
@@ -262,13 +286,10 @@ async function closeDay(eventTimeIso: string): Promise<void> {
     const prevRow    = await getOdometerRow(t.truckId, previousDate(targetDate))
     const currentRow = await getOdometerRow(t.truckId, targetDate)
     const previous   = prevRow?.endOdometer ?? currentRow?.startOdometer ?? null
-    // Never negative: a backwards odometer is a bad reading, not negative miles.
-    const miles = previous != null ? Math.max(0, endOdometer - previous) : null
+    const miles = dayMiles(previous, endOdometer)
 
     const f = fuelByKey.byId.get(t.motiveVehicleId) ?? fuelByKey.byNumber.get(t.motiveNumber)
-    // Motive answers with "metric_units": false on every row (the request sends
-    // X-Metric-Units: false), so driving_fuel is US gallons, not litres.
-    const fuelGallons = f?.drivingFuel ?? null
+    const fuelGallons = dayFuelGallons(f?.drivingFuel ?? null, f?.idleFuel ?? null)
     const mpg = dayMpg(miles, fuelGallons)
 
     await putOdometerRow({

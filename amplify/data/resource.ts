@@ -994,8 +994,8 @@ const schema = a.schema({
       startOdometer:  a.float(),              // miles at 00:00 local; absent when Motive reported nothing
       endOdometer:    a.float(),              // miles at 23:59 local
       miles:          a.float(),              // endOdometer - startOdometer, never negative
-      fuelGallons:    a.float(),              // gallons burned that day, from Motive
-      mpg:            a.float(),              // Motive's fuel economy for the day
+      fuelGallons:    a.float(),              // gallons burned that day: driving + idle, from Motive
+      mpg:            a.float(),              // miles / gallons; absent when the day cannot report one
       source:         a.string().required(),  // 'motive'
       syncedAt:       a.datetime().required(),
     })
