@@ -152,10 +152,39 @@ describe('SettlementPage', () => {
     render(<SettlementPage />)
 
     await waitFor(() => expect(screen.getByText('Factoring fee (2%)')).toBeTruthy(), { timeout: 5000 })
-    expect(screen.getByText('Blocked')).toBeTruthy()
+    // The chip reports what the DRIVER owes, which is only ever the POD. A load can be
+    // unfactorable for office-side reasons a driver cannot act on.
+    expect(screen.getByText('POD needed')).toBeTruthy()
     expect(screen.getByText('14452')).toBeTruthy()
     expect(screen.getByText('missing')).toBeTruthy() // POD not on file
     expect(screen.getByText('on file')).toBeTruthy() // rate con present
+  })
+
+  it('does not blame the driver for a rate confirmation the office collects', async () => {
+    driverApiMocks.fetchSettlement.mockResolvedValue({
+      ...baseSettlement,
+      trips: [
+        {
+          ...baseSettlement.trips[0],
+          factoring: {
+            invoiceNo: '14452', poNumber: 'PO-1', brokerMc: '123456',
+            invoiceAmount: 1260, invoiceDate: '2026-09-28',
+            fromCity: 'Chicago', fromState: 'IL', fromZip: '60601',
+            toCity: 'Indianapolis', toState: 'IN', toZip: '46201',
+            podPresent: true,
+            rateconPresent: false,
+            blocked: true,
+          },
+        },
+      ],
+    })
+    render(<SettlementPage />)
+
+    // Their POD is in, so nothing is owed by them — even though the load cannot be
+    // factored yet.
+    await waitFor(() => expect(screen.getByText('POD in')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByText('POD needed')).toBeNull()
+    expect(screen.getByText('office adds this')).toBeTruthy()
   })
 
   it('renders a retryable error when the weeks call fails', async () => {

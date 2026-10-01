@@ -504,4 +504,22 @@ describe('OwnerOperatorPayPage', () => {
       URL.revokeObjectURL = originalRevoke
     }
   })
+
+  it('shows a missing POD as blocking and a missing rate con as an ordinary to-do', () => {
+    // Only the POD holds pay. Painting both amber trains people to ignore the colour
+    // that actually means something.
+    const row = baseRow({
+      trips: [trip({
+        readiness: readiness({ missingDocuments: ['POD', 'Rate confirmation'], payload: { InvoiceNo: '13364' } }),
+      })],
+    })
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
+    render(<OwnerOperatorPayPage />)
+
+    const pod = screen.getByRole('button', { name: 'Upload POD for 13364' })
+    const rc = screen.getByRole('button', { name: 'Upload Rate con for 13364' })
+    expect(pod.title).toMatch(/not paid without it/)
+    expect(rc.title).toMatch(/optional here/)
+    expect(rc.title).toMatch(/factoring queue/)
+  })
 })

@@ -36,6 +36,13 @@ interface Props {
   staffEmail: string
   /** True once the document is on file; the cell then just shows a tick. */
   present: boolean
+  /**
+   * False when a missing document does not hold anything up. Only the POD does: it gates
+   * the driver's pay, so its absence is amber. A rate confirmation is the office's to
+   * collect at factoring, so an empty one is an ordinary to-do, not a warning — styling
+   * it the same way trains people to ignore the colour that matters.
+   */
+  blocking?: boolean
   onUploaded: () => void
 }
 
@@ -58,7 +65,7 @@ async function asOneFile(files: File[], kind: SubmissionKind): Promise<File[]> {
 }
 
 export function SettlementDocUpload({
-  driver, loadId, proNumber, kind, staffEmail, present, onUploaded,
+  driver, loadId, proNumber, kind, staffEmail, present, blocking = true, onUploaded,
 }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
@@ -114,14 +121,20 @@ export function SettlementDocUpload({
         type="button"
         onClick={() => input.current?.click()}
         disabled={busy}
-        title={`Upload the ${kind === 'POD' ? 'POD' : 'rate confirmation'} for PRO ${proNumber || 'this load'}`}
+        title={
+          kind === 'POD'
+            ? `Upload the POD for PRO ${proNumber || 'this load'} — this load is not paid without it`
+            : `Upload the rate confirmation for PRO ${proNumber || 'this load'} — optional here, usually added in the factoring queue`
+        }
         aria-label={`Upload ${LABEL[kind]} for ${proNumber || loadId}`}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 4,
           height: 22, padding: '0 7px', borderRadius: 6,
-          border: '1px solid #fcd34d', background: '#fffbeb', color: '#b45309',
           fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
           cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap',
+          ...(blocking
+            ? { border: '1px solid #fcd34d', background: '#fffbeb', color: '#b45309' }
+            : { border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)' }),
         }}
       >
         {busy ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}

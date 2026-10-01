@@ -255,7 +255,10 @@ function FactoringBlock({ factoring }: { factoring: FactoringFields | null }) {
     ['From', place(factoring.fromCity, factoring.fromState, factoring.fromZip)],
     ['To', place(factoring.toCity, factoring.toState, factoring.toZip)],
     ['POD', factoring.podPresent ? 'on file' : null],
-    ['Rate con', factoring.rateconPresent ? 'on file' : null],
+    // Not shown as "missing" in red: the rate confirmation is the office's to collect at
+    // factoring, and a driver cannot act on it. Red here read as a reproach for someone
+    // else's task and devalued the one line that is genuinely theirs.
+    ['Rate con', factoring.rateconPresent ? 'on file' : 'office adds this'],
   ]
   return (
     <div className="mt-2 rounded-md border border-dashed border-border/80 p-2">
@@ -263,12 +266,15 @@ function FactoringBlock({ factoring }: { factoring: FactoringFields | null }) {
         <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Factoring
         </span>
+        {/* What the DRIVER still owes, which is only ever the POD. A load can be
+            unfactorable for half a dozen office-side reasons, and telling a driver their
+            load is "Blocked" over a ZIP code they have never seen is noise. */}
         <span
           className={`text-[10px] font-bold ${
-            factoring.blocked ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'
+            factoring.podPresent ? 'text-[var(--ds-green)]' : 'text-[var(--ds-red)]'
           }`}
         >
-          {factoring.blocked ? 'Blocked' : 'Ready'}
+          {factoring.podPresent ? 'POD in' : 'POD needed'}
         </span>
       </div>
       <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">

@@ -89,7 +89,15 @@ export function CurrentLoadCard() {
     )
   }
 
-  const complete = load.hasRateConfirmation && load.hasPod
+  /*
+   * The POD is the only thing the driver owes.
+   *
+   * A rate confirmation is the broker's paperwork and the office collects it in the
+   * factoring queue. Listing it here asked a driver for something they often do not have
+   * and cannot get, which makes the whole notice easy to ignore — including the half that
+   * is genuinely theirs and genuinely holds their pay.
+   */
+  const podIn = load.hasPod
 
   return (
     <div className="rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-4 shadow-sm">
@@ -114,23 +122,27 @@ export function CurrentLoadCard() {
         </div>
       </dl>
 
-      {/* Why a load might be held up at billing — shown to the driver, not hidden in the office. */}
-      {complete ? (
+      {/* The one thing the driver owes, and what happens if it is missing. */}
+      {podIn ? (
         <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-700">
           <CheckCircle2 className="size-3.5" />
-          Rate confirmation and POD are both in. Nothing else needed.
+          POD is in. Nothing else needed from you.
         </p>
       ) : (
         <div className="mt-3 flex items-start gap-1.5 rounded-lg bg-amber-50 p-2.5 text-xs text-amber-800">
           <FileText className="mt-0.5 size-3.5 shrink-0" />
           <span>
-            Still needed to bill this load:{' '}
-            {[!load.hasRateConfirmation && 'rate confirmation', !load.hasPod && 'POD']
-              .filter(Boolean)
-              .join(' and ')}
-            . Use the Scan tab to send {load.hasRateConfirmation ? 'it' : 'them'} in.
+            Send the POD for this load from the Scan tab. It is not paid until the POD is in.
           </span>
         </div>
+      )}
+
+      {/* Stated, not asked for: the office adds this one when the load reaches factoring. */}
+      {!load.hasRateConfirmation && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          No rate confirmation on file yet. The office adds that one, so there is nothing
+          for you to do — send it from the Scan tab only if you have it.
+        </p>
       )}
     </div>
   )

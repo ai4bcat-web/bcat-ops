@@ -28,6 +28,7 @@ import {
   type OtrReadiness,
 } from '../../../src/lib/otrInvoice'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
+import { normalizePro } from '../../../src/lib/podPresence'
 import {
   OtrClient,
   OtrError,
@@ -46,6 +47,8 @@ const LOAD_TABLE = process.env.LOAD_TABLE_NAME!
 const CUSTOMER_TABLE = process.env.CUSTOMER_TABLE_NAME!
 const LOCATION_TABLE = process.env.LOCATION_TABLE_NAME
 const POD_TABLE = process.env.POD_DOCUMENT_TABLE_NAME
+const SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME
+const SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME
 const BUCKET = process.env.BUCKET_NAME!
 
 function otr(): OtrClient {
@@ -139,8 +142,8 @@ async function getLocation(id?: string | null): Promise<Row | null> {
   return (r.Item as Row) ?? null
 }
 
-/** Newest POD attached to this load, if any. */
-async function findPod(loadId: string): Promise<Row | null> {
+/** Newest POD from JobsDone that a human linked to this load. */
+async function findJobsdonePod(loadId: string): Promise<Row | null> {
   if (!POD_TABLE) return null
   let ExclusiveStartKey: Record<string, unknown> | undefined
   const hits: Row[] = []
@@ -161,6 +164,72 @@ async function findPod(loadId: string): Promise<Row | null> {
   hits.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))
   return hits[0]
 }
+
+/**
+ * Newest POD a driver scanned in the PWA, or staff uploaded on their behalf.
+ *
+ * These land in DriverSubmissionDoc, keyed by their submission, and are linked to a load
+ * either by the submission's `loadId` or by the PRO the driver typed. A POD that arrived
+ * this way used to be invisible to submit, so a load with a perfectly good signed POD was
+ * refused as "missing POD". Both stores count now, the same way the settlement page and
+ * the driver API already do.
+ *
+ * Shaped like a PodDocument row so the caller does not care which store it came from;
+ * `originalKey` carries the S3 key, which lives in the same bucket.
+ */
+async function findSubmittedPod(loadId: string, proNumber: string): Promise<Row | null> {
+  if (!SUBMISSION_TABLE || !SUBMISSION_DOC_TABLE) return null
+  const wantedPro = normalizePro(proNumber)
+
+  const subs = await scanAllRows(SUBMISSION_TABLE)
+  const mine = subs.filter((sub) => {
+    if (trim(sub.loadId) === loadId) return true
+    const ref = normalizePro(typeof sub.referenceNumber === 'string' ? sub.referenceNumber : null)
+    return !!wantedPro && ref === wantedPro
+  })
+  if (!mine.length) return null
+
+  const ids = new Set(mine.map((sub) => String(sub.id)))
+  const docs = (await scanAllRows(SUBMISSION_DOC_TABLE)).filter(
+    (d) => d.kind === 'POD' && ids.has(String(d.submissionId)) && trim(d.s3Key),
+  )
+  if (!docs.length) return null
+
+  // Newest page wins. A multi-page POD is already combined into one PDF on the way in.
+  docs.sort((a, b) => String(b.uploadedAt ?? '').localeCompare(String(a.uploadedAt ?? '')))
+  const doc = docs[0]
+  return {
+    id: doc.id,
+    loadId,
+    fileName: doc.fileName ?? `POD-${proNumber}.pdf`,
+    contentType: doc.contentType,
+    originalKey: doc.s3Key,
+    createdAt: doc.uploadedAt,
+  }
+}
+
+async function scanAllRows(table: string): Promise<Row[]> {
+  const out: Row[] = []
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const r = await ddb.send(new ScanCommand({ TableName: table, ExclusiveStartKey }))
+    out.push(...((r.Items ?? []) as Row[]))
+    ExclusiveStartKey = r.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return out
+}
+
+/** A POD for this load from either store. JobsDone first, since a human linked it there. */
+async function findPod(loadId: string, proNumber = ''): Promise<Row | null> {
+  return (await findJobsdonePod(loadId)) ?? (await findSubmittedPod(loadId, proNumber))
+}
+
+/**
+ * Exported for findPod.test.ts only. Which store a POD comes from decides whether an
+ * invoice can be created at all, and that is worth testing directly rather than through
+ * the whole submit action.
+ */
+export const __testFindPod = findPod
 
 /** First pickup and last delivery stop, for Location lookups. */
 function endpointStops(load: Row): { origin?: Row; destination?: Row } {
@@ -201,7 +270,7 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
     getCustomer(load.customerId as string | undefined),
     getLocation(origin?.locationId as string | undefined),
     getLocation(destination?.locationId as string | undefined),
-    findPod(String(load.id)),
+    findPod(String(load.id), String(item.proNumber ?? '')),
   ])
 
   // Fall back to a name match so a load booked before the directory existed
@@ -403,7 +472,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         const uploaded: { pod?: string; rateConfirmation?: string } = {}
         const docErrors: string[] = []
 
-        const pod = await findPod(String(load.id))
+        const pod = await findPod(String(load.id), String(item.proNumber ?? ''))
         const podKey = trim(pod?.enhancedKey) || trim(pod?.originalKey)
         if (podKey) {
           try {

@@ -1354,6 +1354,11 @@ const otrLoadTable = backend.data.resources.tables['Load']
 const otrCustomerTable = backend.data.resources.tables['Customer']
 const otrLocationTable = backend.data.resources.tables['Location']
 const otrPodTable = backend.data.resources.tables['PodDocument']
+// A POD can also arrive as a driver scan or a staff upload, which land in
+// DriverSubmissionDoc rather than PodDocument. Submit has to see both, or a POD someone
+// watched reach Slack is invisible to the thing that invoices it.
+const otrSubmissionTable = backend.data.resources.tables['DriverSubmission']
+const otrSubmissionDocTable = backend.data.resources.tables['DriverSubmissionDoc']
 
 for (const fn of [otrActionsFn, otrSyncFn]) {
   fn.addEnvironment('FACTORING_ITEM_TABLE_NAME', otrFactoringTable.tableName)
@@ -1364,6 +1369,8 @@ otrActionsFn.addEnvironment('LOAD_TABLE_NAME', otrLoadTable.tableName)
 otrActionsFn.addEnvironment('CUSTOMER_TABLE_NAME', otrCustomerTable.tableName)
 otrActionsFn.addEnvironment('LOCATION_TABLE_NAME', otrLocationTable.tableName)
 otrActionsFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', otrPodTable.tableName)
+otrActionsFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', otrSubmissionTable.tableName)
+otrActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', otrSubmissionDocTable.tableName)
 otrActionsFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
 
 // Queue rows: the router reads and writes; the poller only updates status fields.
@@ -1397,14 +1404,18 @@ otrActionsFn.addToRolePolicy(
   }),
 )
 
-// Locations and PODs are read-only here.
+// Locations, PODs and driver submissions are read-only here.
 otrActionsFn.addToRolePolicy(
   new PolicyStatement({
-    actions:   ['dynamodb:GetItem', 'dynamodb:Scan'],
+    actions:   ['dynamodb:GetItem', 'dynamodb:Scan', 'dynamodb:Query'],
     resources: [
       otrLocationTable.tableArn,
       otrPodTable.tableArn,
       `${otrPodTable.tableArn}/index/*`,
+      otrSubmissionTable.tableArn,
+      `${otrSubmissionTable.tableArn}/index/*`,
+      otrSubmissionDocTable.tableArn,
+      `${otrSubmissionDocTable.tableArn}/index/*`,
     ],
   }),
 )

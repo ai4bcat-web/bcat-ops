@@ -49,6 +49,10 @@ function OtrCell({ trip, field }: { trip: OwnerOpTrip; field: OtrRequiredField }
 /**
  * POD / rate confirmation presence. A missing document is an upload button rather than
  * a dead amber label, because this row is where someone finds out it is missing.
+ *
+ * Only the POD is amber. It is the one the driver owes and the one that holds their pay;
+ * the rate confirmation is collected by the office at factoring, so it reads as an
+ * ordinary to-do here.
  */
 function OtrDoc({
   trip, kind, driver, staffEmail, onUploaded,
@@ -68,6 +72,7 @@ function OtrDoc({
       kind={kind === 'POD' ? 'POD' : 'RATECON'}
       staffEmail={staffEmail}
       present={present}
+      blocking={kind === 'POD'}
       onUploaded={onUploaded}
     />
   )
