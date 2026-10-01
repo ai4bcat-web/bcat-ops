@@ -29,6 +29,10 @@ vi.mock('./useDriverAuth', () => ({
   }),
 }))
 
+vi.mock('./InstallHintSection', () => ({
+  InstallHintSection: () => <section aria-label="Install this app">Add to Home Screen</section>,
+}))
+
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
   return { ...actual, useNavigate: () => navigate }
@@ -88,7 +92,11 @@ describe('a brand-new driver', () => {
 
     await waitFor(() => expect(confirmSignUp).toHaveBeenCalledWith(EMAIL, '123456'))
     expect(forgotPassword).not.toHaveBeenCalled()
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/driver/scan'))
+    await waitFor(() => expect(signIn).toHaveBeenCalledWith(EMAIL, PASSWORD))
+    // Finishing here rather than navigating: the route tree only grows the authenticated
+    // routes once auth state has committed, and navigating first bounced to login.
+    expect(await screen.findByRole('heading', { name: "You're signed in" })).toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalled()
   })
 })
 
@@ -120,7 +128,7 @@ describe('a driver whose account already exists', () => {
     // Never confirmSignUp: that account is already confirmed.
     expect(confirmSignUp).not.toHaveBeenCalled()
     await waitFor(() => expect(signIn).toHaveBeenCalledWith(EMAIL, PASSWORD))
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/driver/scan'))
+    expect(await screen.findByRole('heading', { name: "You're signed in" })).toBeInTheDocument()
   })
 
   it('resends a reset code, not a sign-up code', async () => {
@@ -185,5 +193,46 @@ describe('failures that must still stop the driver', () => {
 
     expect(await screen.findByText('Passwords do not match.')).toBeInTheDocument()
     expect(signUp).not.toHaveBeenCalled()
+  })
+})
+
+describe('the last screen', () => {
+  it('shows how to add the app to the home screen, and a way in', async () => {
+    renderSignup()
+    await submitForm()
+    fireEvent.change(await screen.findByLabelText('Verification code'), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Verify email' }))
+
+    await screen.findByRole('heading', { name: "You're signed in" })
+    expect(screen.getByLabelText('Install this app')).toBeInTheDocument()
+
+    // Navigation is the driver's choice, taken after auth state has settled.
+    fireEvent.click(screen.getByRole('button', { name: 'Open the driver app' }))
+    expect(navigate).toHaveBeenCalledWith('/driver/scan')
+  })
+
+  it('says the password is set when only the sign-in fails', async () => {
+    // Rolled together, this read as "the code did not work" and sent the driver back to
+    // re-enter a code that was already spent.
+    rejectsWith(signIn, new Error('Network error'))
+    renderSignup()
+    await submitForm()
+    fireEvent.change(await screen.findByLabelText('Verification code'), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Verify email' }))
+
+    const msg = await screen.findByText(/Your password is set, but signing in failed/)
+    expect(msg).toHaveTextContent('Network error')
+    expect(msg).toHaveTextContent('login screen')
+  })
+
+  it('still blames the code when the code is what was wrong', async () => {
+    rejectsWith(confirmSignUp, awsError('CodeMismatchException', 'Invalid verification code provided'))
+    renderSignup()
+    await submitForm()
+    fireEvent.change(await screen.findByLabelText('Verification code'), { target: { value: '000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Verify email' }))
+
+    expect(await screen.findByText('Invalid verification code provided')).toBeInTheDocument()
+    expect(signIn).not.toHaveBeenCalled()
   })
 })
