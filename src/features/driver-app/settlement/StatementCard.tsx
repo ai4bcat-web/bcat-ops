@@ -1,6 +1,6 @@
 import * as React from 'react'
-import { FileText } from 'lucide-react'
 import type { FactoringFields, Settlement, SettlementLine, SettlementTrip } from '../driverApi'
+import { ShipmentRows } from './ShipmentRows'
 import { weekLabel } from '@/features/driver-pay/week'
 
 type TripWithFactoring = SettlementTrip & {
@@ -61,75 +61,12 @@ export function StatementCard({ settlement }: StatementCardProps) {
         </div>
       </div>
 
-      {/* Trips */}
-      <div className="border-b border-border p-4">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Trips · {settlement.trips.length}
+      {/* Trips, as rows a driver can act on. The document cells are the actions. */}
+      <div className="border-b border-border py-3">
+        <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Shipments · {settlement.trips.length}
         </p>
-
-        {settlement.trips.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-6 text-center text-muted-foreground">
-            <FileText className="h-8 w-8 opacity-40" aria-hidden="true" />
-            <p>No trips this week</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {settlement.trips.map((trip) => {
-              const route = [trip.origin, trip.destination].filter(Boolean).join(' → ') || undefined
-              const factoring = (trip as TripWithFactoring).factoring ?? null
-              const heldLabel = (trip as TripWithFactoring).heldLabel ?? null
-              return (
-                <div
-                  key={trip.id}
-                  className={`flex flex-col gap-1 rounded-lg border p-3 ${
-                    heldLabel ? 'border-amber-300 bg-amber-50/60' : 'border-border/60 bg-background/50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-card-foreground">
-                      {trip.loadId ?? '—'}
-                    </span>
-                    <span className="whitespace-nowrap text-xs text-muted-foreground">
-                      {new Date(`${trip.date}T12:00:00Z`).toLocaleDateString('en-US', {
-                        month: 'numeric',
-                        day: 'numeric',
-                        timeZone: 'UTC',
-                      })}
-                    </span>
-                  </div>
-                  {route && <p className="truncate text-xs text-muted-foreground">{route}</p>}
-                  <div className="mt-1 flex items-center justify-between gap-2 text-sm">
-                    <div className="flex min-w-0 gap-3 text-muted-foreground">
-                      <span>
-                        {trip.miles != null ? `${trip.miles.toLocaleString()} mi` : '—'}
-                      </span>
-                      <span>{trip.rate != null ? money(trip.rate) : '—'}</span>
-                    </div>
-                    <span className="whitespace-nowrap font-semibold tabular-nums text-card-foreground">
-                      {money(trip.amount)}
-                    </span>
-                  </div>
-                  {/* Why this load is not on the check, said plainly and with the fix. */}
-                  {heldLabel && (
-                    <p className="mt-1 rounded-md bg-amber-100 px-2 py-1.5 text-xs font-medium text-amber-900">
-                      Not on this check — {heldLabel.toLowerCase()}. Send the POD from the Scan
-                      tab and it is added automatically.
-                    </p>
-                  )}
-                  <FactoringBlock factoring={factoring} />
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Gross */}
-      <div className="flex items-center justify-between gap-4 border-b border-border p-4">
-        <span className="text-sm font-semibold text-card-foreground">Gross pay</span>
-        <span className="text-base font-bold tabular-nums text-card-foreground">
-          {money(settlement.grossPay)}
-        </span>
+        <ShipmentRows trips={settlement.trips as TripWithFactoring[]} />
       </div>
 
       {/* Deductions */}
@@ -232,65 +169,6 @@ export function StatementCard({ settlement }: StatementCardProps) {
           {money(settlement.checkAmount)}
         </span>
       </div>
-    </div>
-  )
-}
-
-function FactoringBlock({ factoring }: { factoring: FactoringFields | null }) {
-  if (!factoring) {
-    return (
-      <p className="mt-2 text-[11px] text-muted-foreground">
-        No load linked — factoring details unavailable.
-      </p>
-    )
-  }
-  const place = (city: string | null, state: string | null, zip: string | null) =>
-    [city, state, zip].filter(Boolean).join(', ') || null
-  const rows: Array<[string, string | null]> = [
-    ['PRO', factoring.invoiceNo],
-    ['PO', factoring.poNumber],
-    ['Broker MC', factoring.brokerMc],
-    ['Amount', factoring.invoiceAmount != null ? money(factoring.invoiceAmount) : null],
-    ['Invoice date', factoring.invoiceDate],
-    ['From', place(factoring.fromCity, factoring.fromState, factoring.fromZip)],
-    ['To', place(factoring.toCity, factoring.toState, factoring.toZip)],
-    ['POD', factoring.podPresent ? 'on file' : null],
-    // Not shown as "missing" in red: the rate confirmation is the office's to collect at
-    // factoring, and a driver cannot act on it. Red here read as a reproach for someone
-    // else's task and devalued the one line that is genuinely theirs.
-    ['Rate con', factoring.rateconPresent ? 'on file' : 'office adds this'],
-  ]
-  return (
-    <div className="mt-2 rounded-md border border-dashed border-border/80 p-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Factoring
-        </span>
-        {/* What the DRIVER still owes, which is only ever the POD. A load can be
-            unfactorable for half a dozen office-side reasons, and telling a driver their
-            load is "Blocked" over a ZIP code they have never seen is noise. */}
-        <span
-          className={`text-[10px] font-bold ${
-            factoring.podPresent ? 'text-[var(--ds-green)]' : 'text-[var(--ds-red)]'
-          }`}
-        >
-          {factoring.podPresent ? 'POD in' : 'POD needed'}
-        </span>
-      </div>
-      <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex min-w-0 items-baseline justify-between gap-2">
-            <dt className="shrink-0 text-[10px] text-muted-foreground">{label}</dt>
-            <dd
-              className={`truncate text-right text-[11px] font-medium ${
-                value ? 'text-card-foreground' : 'text-[var(--ds-red)]'
-              }`}
-            >
-              {value ?? 'missing'}
-            </dd>
-          </div>
-        ))}
-      </dl>
     </div>
   )
 }

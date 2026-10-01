@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import type { Settlement, SettlementWeek } from '../driverApi'
 
 class ResizeObserverStub {
@@ -22,6 +23,10 @@ if (!Element.prototype.scrollIntoView) {
 const driverApiMocks = vi.hoisted(() => ({
   fetchSettlementWeeks: vi.fn(),
   fetchSettlement: vi.fn(),
+  // The page also hosts the unattached-POD list and the send-anyway actions.
+  fetchSubmissions: vi.fn(),
+  fetchRecentLoads: vi.fn(),
+  attachSubmissionToLoad: vi.fn(),
 }))
 
 vi.mock('../driverApi', () => ({
@@ -83,6 +88,9 @@ const baseSettlement: Settlement = {
 function resetMocks() {
   driverApiMocks.fetchSettlementWeeks.mockResolvedValue(weeksFixture)
   driverApiMocks.fetchSettlement.mockResolvedValue(baseSettlement)
+  // Nothing waiting to be attached is the normal state; its own tests cover the rest.
+  driverApiMocks.fetchSubmissions.mockResolvedValue([])
+  driverApiMocks.fetchRecentLoads.mockResolvedValue([])
 }
 
 beforeEach(() => {
@@ -92,7 +100,7 @@ beforeEach(() => {
 
 describe('SettlementPage', () => {
   it('defaults to the most recent week and shows the check amount from the API', async () => {
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
     // Two sequential fetches (weeks, then the statement) must resolve before the amount
     // renders; the 1s default expires under full-suite load.
     await waitFor(() => expect(screen.getAllByText('$1,065.00')).toHaveLength(2), { timeout: 5000 })
@@ -106,14 +114,14 @@ describe('SettlementPage', () => {
       grossPay: 0,
       checkAmount: 0,
     })
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('No trips this week')).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByText('LOAD-101')).toBeNull()
-    expect(screen.getAllByText('$0.00')).toHaveLength(3)
+    expect(screen.getAllByText('$0.00')).toHaveLength(2)
   })
 
   it('renders deductions using the same sign convention as the staff page', async () => {
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
     await waitFor(() => expect(screen.getByText('Fuel')).toBeTruthy(), { timeout: 5000 })
 
     // Positive deduction is shown in red parentheses, like the staff surface.
@@ -149,15 +157,14 @@ describe('SettlementPage', () => {
         },
       ],
     })
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
 
     await waitFor(() => expect(screen.getByText('Factoring fee (2%)')).toBeTruthy(), { timeout: 5000 })
-    // The chip reports what the DRIVER owes, which is only ever the POD. A load can be
-    // unfactorable for office-side reasons a driver cannot act on.
-    expect(screen.getByText('POD needed')).toBeTruthy()
+    // The row is keyed by PRO, and the POD cell is the action that fixes it.
     expect(screen.getByText('14452')).toBeTruthy()
-    expect(screen.getByText('missing')).toBeTruthy() // POD not on file
-    expect(screen.getByText('on file')).toBeTruthy() // rate con present
+    expect(screen.getByRole('button', { name: 'Send the POD for 14452' })).toBeTruthy()
+    // The rate con is already in, so that cell is a state, not a prompt.
+    expect(screen.getByLabelText('rate confirmation on file for 14452')).toBeTruthy()
   })
 
   it('does not blame the driver for a rate confirmation the office collects', async () => {
@@ -178,18 +185,19 @@ describe('SettlementPage', () => {
         },
       ],
     })
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
 
-    // Their POD is in, so nothing is owed by them — even though the load cannot be
-    // factored yet.
-    await waitFor(() => expect(screen.getByText('POD in')).toBeTruthy(), { timeout: 5000 })
-    expect(screen.queryByText('POD needed')).toBeNull()
-    expect(screen.getByText('office adds this')).toBeTruthy()
+    // Their POD is in, so nothing is asked of them — even though the load cannot be
+    // factored yet without the rate confirmation.
+    await waitFor(() => expect(screen.getByLabelText('POD on file for 14452')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByRole('button', { name: 'Send the POD for 14452' })).toBeNull()
+    // Offered, never demanded: the office normally supplies this one at factoring.
+    expect(screen.getByRole('button', { name: 'Send the rate confirmation for 14452' })).toBeTruthy()
   })
 
   it('renders a retryable error when the weeks call fails', async () => {
     driverApiMocks.fetchSettlementWeeks.mockRejectedValueOnce(new Error('Network down'))
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
 
     await waitFor(() => expect(screen.getByText(/Network down/)).toBeTruthy(), { timeout: 5000 })
     const retry = screen.getByRole('button', { name: /Retry/i })
@@ -202,7 +210,7 @@ describe('SettlementPage', () => {
 
   it('renders a retryable error when the statement call fails', async () => {
     driverApiMocks.fetchSettlement.mockRejectedValueOnce(new Error('Statement error'))
-    render(<SettlementPage />)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
 
     await waitFor(() => expect(screen.getByText(/Statement error/)).toBeTruthy(), { timeout: 5000 })
     const retry = screen.getByRole('button', { name: /Retry/i })
@@ -210,5 +218,27 @@ describe('SettlementPage', () => {
 
     await waitFor(() => expect(screen.getAllByText('$1,065.00')).toHaveLength(2), { timeout: 5000 })
     expect(driverApiMocks.fetchSettlement).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('sending paperwork for a load that is not listed', () => {
+  it('offers both documents even with no shipments on the statement', async () => {
+    // A driver holding a signed POD for a load nobody has built yet cannot act from a row
+    // that does not exist, so the way in lives on the page itself.
+    driverApiMocks.fetchSettlement.mockResolvedValue({ ...baseSettlement, trips: [] })
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText('No trips this week')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Send a POD/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Send a rate confirmation/ })).toBeTruthy()
+    expect(screen.getByText(/Paperwork for a load that is not listed/)).toBeTruthy()
+  })
+
+  it('offers a way through when there is no settlement data at all', async () => {
+    driverApiMocks.fetchSettlementWeeks.mockResolvedValue([])
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText('No settlement data yet')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /Send a POD anyway/ })).toBeTruthy()
   })
 })

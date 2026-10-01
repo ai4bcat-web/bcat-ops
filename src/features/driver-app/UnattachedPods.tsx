@@ -10,11 +10,12 @@
  * The office can attach these too, from Driver Docs. Whoever gets there first wins;
  * attaching twice is harmless.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Loader2, Link2, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import {
+  fetchSubmissions,
   fetchRecentLoads,
   attachSubmissionToLoad,
   type SubmissionSummary,
@@ -35,24 +36,39 @@ function isUnattachedPod(s: SubmissionSummary): boolean {
 }
 
 /**
- * Submissions come from the page above rather than a fetch of our own: the Loads tab has
- * already loaded them, and a second identical request is pure cost on a truck connection.
- * The load list is fetched lazily, only once a driver actually opens a picker.
+ * `submissions` comes from the page above when that page already has them — a second
+ * identical request is pure cost on a truck connection. Omit it and this fetches its own,
+ * which is how the settlement page uses it.
+ *
+ * The load list is always fetched lazily, only once a driver actually opens a picker.
  */
 export function UnattachedPods({
   submissions,
   onAttached,
 }: {
-  submissions: SubmissionSummary[] | null
-  onAttached: (submissionId: string, loadId: string) => void
+  submissions?: SubmissionSummary[] | null
+  onAttached?: (submissionId: string, loadId: string) => void
 }) {
+  const [ownSubmissions, setOwnSubmissions] = useState<SubmissionSummary[] | null>(null)
+  const selfFetch = submissions === undefined
+
+  useEffect(() => {
+    if (!selfFetch) return
+    let cancelled = false
+    void fetchSubmissions()
+      .then((rows) => { if (!cancelled) setOwnSubmissions(rows) })
+      .catch(() => { if (!cancelled) setOwnSubmissions([]) })
+    return () => { cancelled = true }
+  }, [selfFetch])
+
   const [loads, setLoads] = useState<RecentLoad[] | null>(null)
   const [loadsError, setLoadsError] = useState<string | null>(null)
   /** Which POD is being attached, so only its own picker opens. */
   const [picking, setPicking] = useState<string | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
 
-  const pods = (submissions ?? []).filter(isUnattachedPod)
+  const source = selfFetch ? ownSubmissions : submissions
+  const pods = (source ?? []).filter(isUnattachedPod)
 
   const openPicker = useCallback(async (submissionId: string) => {
     setPicking(submissionId)
@@ -72,7 +88,11 @@ export function UnattachedPods({
         await attachSubmissionToLoad(submissionId, load.id)
         setPicking(null)
         toast.success(`POD attached to PRO ${load.proNumber || load.lane}`)
-        onAttached(submissionId, load.id)
+        // Drop it locally when we own the list; otherwise the parent patches its copy.
+        setOwnSubmissions((prev) =>
+          prev ? prev.map((s) => (s.id === submissionId ? { ...s, loadId: load.id } : s)) : prev,
+        )
+        onAttached?.(submissionId, load.id)
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Could not attach the POD')
       } finally {

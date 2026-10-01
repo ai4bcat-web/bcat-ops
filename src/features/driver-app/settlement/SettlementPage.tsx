@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, Loader2, RefreshCcw, Wallet } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { AlertCircle, Loader2, RefreshCcw, Wallet, FilePlus2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -15,9 +16,11 @@ import {
   type SettlementWeek,
 } from '../driverApi'
 import { StatementCard } from './StatementCard'
+import { UnattachedPods } from '../UnattachedPods'
 import { weekLabel } from '@/features/driver-pay/week'
 
 export function SettlementPage() {
+  const navigate = useNavigate()
   const [weeks, setWeeks] = useState<SettlementWeek[] | null>(null)
   const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(null)
   const [settlement, setSettlement] = useState<Settlement | null>(null)
@@ -113,9 +116,18 @@ export function SettlementPage() {
         <div>
           <p className="text-lg font-semibold text-foreground">No settlement data yet</p>
           <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-            When your Amazon trips are processed, your weekly statements will show up here.
+            When your trips are processed, your weekly statements will show up here.
           </p>
         </div>
+        {/* Having no statement yet is the most likely reason a driver is holding paperwork
+            for a load nobody has built. They must not be stuck here. */}
+        <Button
+          className="h-14 w-full max-w-xs gap-2 text-base font-semibold"
+          onClick={() => navigate('/driver/scan?kind=pod')}
+        >
+          <FilePlus2 className="h-5 w-5" />
+          Send a POD anyway
+        </Button>
       </div>
     )
   }
@@ -169,6 +181,40 @@ export function SettlementPage() {
       {!loadingStatement && settlement && settlement.weekStart === selected && !error && (
         <StatementCard settlement={settlement} />
       )}
+
+      {/* Paperwork with nowhere to go yet, and the way to send more of it. Both live here
+          because this is the only page a driver has: a POD for a load the office has not
+          built cannot be sent from a row that does not exist. */}
+      <div className="mt-5 flex flex-col gap-3">
+        <UnattachedPods />
+
+        <div className="rounded-xl border border-dashed border-border p-4">
+          <h2 className="text-sm font-semibold text-foreground">
+            Paperwork for a load that is not listed?
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Send it now and pick its load later, or let the office match it. Nothing waits on
+            the load being built first.
+          </p>
+          <div className="mt-3 flex flex-col gap-2">
+            <Button
+              className="h-12 w-full justify-start gap-2 text-base"
+              onClick={() => navigate('/driver/scan?kind=pod')}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              Send a POD
+            </Button>
+            <Button
+              variant="outline"
+              className="h-12 w-full justify-start gap-2 text-base"
+              onClick={() => navigate('/driver/scan?kind=ratecon')}
+            >
+              <FilePlus2 className="h-4 w-4" />
+              Send a rate confirmation
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
