@@ -27,7 +27,7 @@ import {
   type SubmissionKind,
   type SubmissionSummary,
 } from '../driverApi'
-import { CameraCapture } from './CameraCapture'
+import { PagePicker } from './PagePicker'
 
 type Phase = 'choose' | 'select' | 'capture' | 'review' | 'submitting' | 'success' | 'error'
 
@@ -43,18 +43,24 @@ export default function ScanPage() {
     return null
   }, [searchParams])
   const initialSubmissionId = searchParams.get('submissionId')
+  /**
+   * The PRO this scan belongs to, when the driver came from a specific load on their
+   * settlement. It answers the only question the picker screen was there to ask, so with
+   * it the scanner opens straight on the camera.
+   */
+  const initialPro = (searchParams.get('pro') ?? '').trim()
 
   const initialPhase: Phase = useMemo(() => {
     if (initialKind === 'RATECON') return 'capture'
-    if (initialKind === 'POD') return initialSubmissionId ? 'capture' : 'select'
+    if (initialKind === 'POD') return initialSubmissionId || initialPro ? 'capture' : 'select'
     return 'choose'
-  }, [initialKind, initialSubmissionId])
+  }, [initialKind, initialSubmissionId, initialPro])
 
   const [phase, setPhase] = useState<Phase>(initialPhase)
   const [kind, setKind] = useState<SubmissionKind | null>(initialKind)
   const [selectedSubmissionId, setSelectedSubmissionId] = useState<string | null>(initialSubmissionId)
   const [pages, setPages] = useState<PendingPage[]>([])
-  const [referenceNumber, setReferenceNumber] = useState('')
+  const [referenceNumber, setReferenceNumber] = useState(initialPro)
   /** The PRO of the load this driver is on, offered as the reference. */
   const [currentPro, setCurrentPro] = useState<string | null>(null)
   /** True when the last send carried no load number, so the success copy can say so. */
@@ -89,6 +95,7 @@ export default function ScanPage() {
         const pro = (load?.proNumber ?? '').trim()
         if (cancelled || !pro) return
         setCurrentPro(pro)
+        // A PRO in the URL came from the load the driver tapped; never override it.
         setReferenceNumber((prev) => prev || pro)
       })
       .catch(() => {
@@ -360,7 +367,7 @@ export default function ScanPage() {
 
   if (phase === 'capture' && kind) {
     return (
-      <CameraCapture
+      <PagePicker
         initialPages={pages}
         onDone={handleCaptureDone}
         onCancel={() => {

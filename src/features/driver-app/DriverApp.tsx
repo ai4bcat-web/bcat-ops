@@ -1,7 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import { Suspense, lazy } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { ClipboardList, Loader2, ScanLine, UserCircle, Wallet } from 'lucide-react'
+import { Loader2, UserCircle, Wallet } from 'lucide-react'
 
 // lucide-react does not export a named icon type; this describes the props we use.
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
@@ -70,8 +70,9 @@ export function DriverApp() {
         className="flex h-20 shrink-0 items-stretch border-t border-slate-800 bg-[#0b1220]/95 px-2 pt-1 backdrop-blur-sm"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 8px)' }}
       >
-        <TabButton to="/driver/scan" icon={ScanLine} label="Scan" />
-        <TabButton to="/driver/loads" icon={ClipboardList} label="Loads" />
+{/* Two tabs, not four. Scanning is not a destination — it is something a driver
+            does to a specific load, so it is reached from that load's row on the
+            settlement. Four tabs made them hunt for which one held their paperwork. */}
         <TabButton to="/driver/settlement" icon={Wallet} label="Settlement" />
         <TabButton to="/driver/account" icon={UserCircle} label="Account" />
       </nav>

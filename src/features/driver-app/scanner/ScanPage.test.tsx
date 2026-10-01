@@ -54,10 +54,10 @@ const apiMocks = vi.hoisted(() => {
 
 vi.mock('@/features/driver-app/driverApi', () => apiMocks)
 
-// CameraCapture is heavy (mediaDevices, canvas). Replace it with a simple control that just
+// PagePicker does real file reads and canvas work. Replace it with a simple control that just
 // fires onDone with a fixed set of pages when the driver taps "Capture".
-vi.mock('./CameraCapture', () => ({
-  CameraCapture: ({ onDone }: { onDone: (pages: PendingPage[]) => void }) => (
+vi.mock('./PagePicker', () => ({
+  PagePicker: ({ onDone }: { onDone: (pages: PendingPage[]) => void }) => (
     <button type="button" onClick={() => onDone(makePages(2))} data-testid="capture-done">
       Capture pages
     </button>
