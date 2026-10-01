@@ -81,7 +81,8 @@ export async function buildBoxTruckPayStatementPdf(row: BoxTruckPayRow, periodSt
   autoTable(doc, {
     startY: y,
     body: [
-      ...(statement.factoringFee > 0 ? [[FACTORING_FEE_LABEL, `(${money(statement.factoringFee)})`]] : []),
+      // Charged on every statement, so the row prints even when it is $0.00.
+      [FACTORING_FEE_LABEL, `(${money(statement.factoringFee)})`],
       ...deductions.map((d) => [d.label, `(${money(d.amount)})`]),
       ['Total deductions', `(${money(statement.totalDeductions)})`],
     ],

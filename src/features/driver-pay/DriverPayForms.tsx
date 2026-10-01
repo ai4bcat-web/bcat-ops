@@ -533,6 +533,74 @@ export function DeductionModal({ driverId, periodStart, onSave, onClose }: { dri
   )
 }
 
+// ── Weekly mileage — one-off deduction, before the split, for the open week ──
+// Shared by the Amazon and owner-operator statements: both enter miles × $/mile and
+// both must round and label it identically, so the math stays in mileageDeductionLine.
+// Only strictly positive numbers preview or submit — calculateMileageExpense rejects
+// zero and negatives, so an enabled Add button for them could only ever error.
+const positiveNum = (s: string): number | null => { const n = parseFloat(s.replace(/[$,\s]/g, '')); return Number.isFinite(n) && n > 0 ? n : null }
+
+export function WeeklyMileageRow({ onAdd }: { onAdd: (miles: number, costPerMile: number) => Promise<void> }) {
+  const [miles, setMiles] = useState('')
+  const [costPerMile, setCostPerMile] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const line = (() => {
+    const m = positiveNum(miles), r = positiveNum(costPerMile)
+    if (m == null || r == null) return null
+    try { return mileageDeductionLine(m, r) } catch { return null }
+  })()
+
+  const add = async () => {
+    const m = positiveNum(miles), r = positiveNum(costPerMile)
+    if (m == null || r == null) return
+    setSaving(true); setErr(null)
+    try { await onAdd(m, r); setMiles(''); setCostPerMile('') }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 12.5 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ color: 'var(--ds-t2)' }}>Weekly mileage</span>
+          <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Deducted before the split, this week only</span>
+        </div>
+        <input
+          aria-label="Mileage miles"
+          type="number"
+          value={miles}
+          onChange={(e) => setMiles(e.target.value)}
+          placeholder="Miles"
+          style={{ width: 74, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
+        />
+        <input
+          aria-label="Mileage cost per mile"
+          type="number"
+          value={costPerMile}
+          onChange={(e) => setCostPerMile(e.target.value)}
+          placeholder="$/mi"
+          style={{ width: 70, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
+        />
+        <span style={{ minWidth: 76, textAlign: 'right', color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+          {line != null ? `= ${moneyFmt(line.amount)}` : ''}
+        </span>
+        <button
+          onClick={add}
+          aria-label="Add mileage deduction"
+          disabled={saving || line == null}
+          style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: saving || line == null ? 0.6 : 1, fontFamily: 'inherit' }}
+        >
+          {saving ? 'Adding…' : 'Add'}
+        </button>
+      </div>
+      {err && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{err}</div>}
+    </>
+  )
+}
+
 // ── Per-driver pay settings ─────────────────────────────────────────────────
 export function SettingsModal({ driver, existing, onSave, onClose }: { driver: Driver; existing?: DriverPaySetting; onSave: (patch: SettingPatch, expectedUpdatedAt: string | undefined) => Promise<void>; onClose: () => void }) {
   const [percent, setPercent] = useState(existing ? String(Math.round(existing.payPercent * 100)) : '')

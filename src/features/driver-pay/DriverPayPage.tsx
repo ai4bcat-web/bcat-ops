@@ -16,7 +16,7 @@ import { mileageDeductionLine } from '@/lib/mileageDeduction'
 import { getColor } from '@/lib/driverColors'
 import type { Driver } from '@/types'
 import { sundayOf, shiftWeek, weekLabelLong } from './week'
-import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal, CreditModal } from './DriverPayForms'
+import { TripModal, ImportModal, MasterImportModal, DeductionModal, SettingsModal, EmailModal, CreditModal, WeeklyMileageRow } from './DriverPayForms'
 
 // Owner is CC'd on every pay statement that goes out to a driver.
 const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
@@ -35,7 +35,6 @@ function loadRowOrder(): string[] {
 function money(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 }
-const parseNum = (s: string): number | null => { const n = parseFloat(s.replace(/[$,\s]/g, '')); return Number.isFinite(n) && n > 0 ? n : null }
 function getInitials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 }
@@ -59,7 +58,8 @@ function statementCsv(row: DriverPayRow, periodStart: string): string {
   L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), '', q(`Driver ${pct(row.setting.payPercent)}`), q(row.statement.driverAmount)].join(','))
   L.push('')
   L.push([q('Deductions'), q('Amount')].join(','))
-  if (row.statement.factoringFee) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
+  // Charged on every statement, so the line is exported even when it is $0.00.
+  L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
@@ -414,10 +414,6 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
   // this page must not take entries it would then file out of sight.
   const carriesCharges = !ownerOpCarriesWeeklyCharges(periodStart)
   const [showFuel, setShowFuel] = useState(false)
-  const [miles, setMiles] = useState('')
-  const [costPerMile, setCostPerMile] = useState('')
-  const [mileageSaving, setMileageSaving] = useState(false)
-  const [mileageErr, setMileageErr] = useState<string | null>(null)
 
   // Heuristic audit — surface a week whose trips look like understated block legs
   // (base ~$0.65/mi) so every affected driver/week is visible without re-importing.
@@ -465,21 +461,6 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
       <Icon size={13} /> {label}
     </button>
   )
-
-  const mileageLine = (() => {
-    const m = parseNum(miles), r = parseNum(costPerMile)
-    if (m == null || r == null) return null
-    try { return mileageDeductionLine(m, r) } catch { return null }
-  })()
-  const addMileage = async () => {
-    const m = parseNum(miles), r = parseNum(costPerMile)
-    if (m == null || r == null) return
-    try { mileageDeductionLine(m, r) } catch (e) { setMileageErr(e instanceof Error ? e.message : 'Invalid mileage'); return }
-    setMileageSaving(true); setMileageErr(null)
-    try { await onAddMileage(m, r); setMiles(''); setCostPerMile('') }
-    catch (e) { setMileageErr(e instanceof Error ? e.message : String(e)) }
-    finally { setMileageSaving(false) }
-  }
 
   return (
     <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)', background: 'var(--ds-surface)' }}>
@@ -604,72 +585,40 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
       {/* Deductions */}
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Deductions</div>
-        {row.deductions.length === 0 && statement.factoringFee === 0 ? (
-          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No deductions. Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {statement.factoringFee > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
-                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
-                <span style={{ width: 16 }} />
-              </div>
-            )}
-            {row.deductions.map((d, i) => {
-              const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
-              const refund = d.amount < 0
-              const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-                  <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
-                  <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
-                    {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
-                  </span>
-                  {oneOff
-                    ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
-                    : isFixed
-                      ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS WEEK ONLY — adds an offsetting refund line; the charge stays on every other week`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
-                      : <span style={{ width: 16 }} />}
-                </div>
-              )
-            })}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {/* The 2% fee is charged on every statement, so the line is always listed —
+              including the $0.00 of a period with no loads, where leaving it out reads
+              as "they forgot it". */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+            <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+            <span style={{ width: 16 }} />
           </div>
-        )}
+          {row.deductions.length === 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No other deductions. Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
+          )}
+          {row.deductions.map((d, i) => {
+            const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
+            const refund = d.amount < 0
+            const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
+                <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+                  {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
+                </span>
+                {oneOff
+                  ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+                  : isFixed
+                    ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS WEEK ONLY — adds an offsetting refund line; the charge stays on every other week`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
+                    : <span style={{ width: 16 }} />}
+              </div>
+            )
+          })}
+        </div>
 
         {/* Weekly mileage — one-off deduction for this week only */}
-        {carriesCharges && <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 12.5 }}>
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ color: 'var(--ds-t2)' }}>Weekly mileage</span>
-            <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Deducted before the split, this week only</span>
-          </div>
-          <input
-            aria-label="Mileage miles"
-            type="number"
-            value={miles}
-            onChange={(e) => setMiles(e.target.value)}
-            placeholder="Miles"
-            style={{ width: 74, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
-          />
-          <input
-            aria-label="Mileage cost per mile"
-            type="number"
-            value={costPerMile}
-            onChange={(e) => setCostPerMile(e.target.value)}
-            placeholder="$/mi"
-            style={{ width: 70, height: 30, borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 8px', fontSize: 12.5, background: 'var(--ds-surface)', color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', boxSizing: 'border-box' }}
-          />
-          <span style={{ minWidth: 76, textAlign: 'right', color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
-            {mileageLine != null ? `= ${money(mileageLine.amount)}` : ''}
-          </span>
-          <button
-            onClick={addMileage}
-            disabled={mileageSaving || mileageLine == null}
-            style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: mileageSaving || mileageLine == null ? 0.6 : 1, fontFamily: 'inherit' }}
-          >
-            {mileageSaving ? 'Adding…' : 'Add'}
-          </button>
-        </div>}
-        {carriesCharges && mileageErr && <div style={{ fontSize: 12.5, color: '#dc2626', marginTop: 6 }}>{mileageErr}</div>}
+        {carriesCharges && <WeeklyMileageRow onAdd={onAddMileage} />}
 
         {/* Fuel breakdown — itemized so the pulled figure is auditable */}
         {row.fuelTxns.length > 0 && (

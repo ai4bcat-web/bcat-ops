@@ -38,6 +38,22 @@ const schema = a.schema({
       deliveryDriverId: a.string(),
       readyToInvoice:  a.boolean().required(),
       rateConfirmKey:  a.string(),
+
+      // ── Driver journey (owner-operator PWA) ──────────────────────────────
+      // One status per load, not per stop: drivers mark a single progression
+      // ASSIGNED -> EN_ROUTE -> ON_SITE -> DELIVERED from the PWA. Stop-level
+      // arrivedAt/departedAt inside `stops` stay the record of facility events;
+      // this is the driver's own reported state, which is why it is separate.
+      driverStatus:      a.enum(['ASSIGNED', 'EN_ROUTE', 'ON_SITE', 'DELIVERED']),
+      driverStatusAt:    a.datetime(),
+      // Driver who last moved the status, for an audit trail on a shared truck.
+      driverStatusBy:    a.string(),
+      // Position is NOT collected by the PWA — a browser cannot track in the
+      // background reliably. These mirror the ELD fix at the moment the driver
+      // tapped, so a status change has a place attached to it.
+      driverStatusLat:   a.float(),
+      driverStatusLng:   a.float(),
+      driverStatusPlace: a.string(),
       truckId:         a.string(),
       rate:            a.integer(),
       miles:           a.integer(),

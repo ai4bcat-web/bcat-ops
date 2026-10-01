@@ -184,6 +184,16 @@ describe('buildSettlement', () => {
     expect(settlement.weekLabel).toBe(weekLabel(periodStart))
   })
 
+  it('still lists the factoring fee on a week with no loads', () => {
+    // A driver opening an empty week must still see the fee exists; a missing line
+    // reads as "the app lost my deductions" rather than "nothing was factored".
+    const settlement = buildSettlement(periodStart, [], makeSetting(), [], [], [], [])
+
+    const fee = settlement.deductions.find((d) => d.label === FACTORING_FEE_LABEL)
+    expect(fee).toBeDefined()
+    expect(fee?.amount).toBe(0)
+  })
+
   it('uses a pinned historical rate when the week falls inside a rateHistory window', () => {
     const setting = makeSetting(0.85)
     setting.rateHistory = [{ from: '2026-09-14', until: '2026-09-28', payPercent: 0.42, expensesBeforePercent: true }]

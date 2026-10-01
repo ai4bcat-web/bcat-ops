@@ -276,9 +276,9 @@ export function buildSettlement(
         factoring: t.factoring ?? null,
       })),
     grossPay: statement.gross,
-    deductions: statement.factoringFee > 0
-      ? [{ label: FACTORING_FEE_LABEL, amount: statement.factoringFee }, ...deductionLines]
-      : deductionLines,
+    // Always listed, even at $0 on a week with no loads: a driver who never sees the
+    // line has no way to know the fee exists, and its absence reads as an error.
+    deductions: [{ label: FACTORING_FEE_LABEL, amount: statement.factoringFee }, ...deductionLines],
     credits: myCredits,
     debits: [...fixedDebits, ...myDebits],
     checkAmount: statement.checkAmount,

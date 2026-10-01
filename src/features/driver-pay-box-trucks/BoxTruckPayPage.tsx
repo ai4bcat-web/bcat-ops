@@ -35,7 +35,8 @@ function statementCsv(row: BoxTruckPayRow, periodStart: string): string {
   }
   L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), q(row.statement.driverAmount)].join(','))
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
-  if (row.statement.factoringFee) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
+  // Charged on every statement, so the line is exported even when it is $0.00.
+  L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
@@ -410,42 +411,42 @@ function StatementCard({ row, onPull, onAddTrip, onImport, onAddDeduction, onAdd
 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Deductions</div>
-        {row.deductions.length === 0 && statement.factoringFee === 0 ? (
-          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No deductions. Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {statement.factoringFee > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
-                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
-                <span style={{ width: 16 }} />
-              </div>
-            )}
-            {row.deductions.map((d, i) => {
-              const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
-              const refund = d.amount < 0
-              const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-                  <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
-                  <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
-                    {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
-                  </span>
-                  {oneOff
-                    ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
-                    : isFixed
-                      ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS PERIOD ONLY — adds an offsetting refund line; the charge stays on every other period`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
-                      : <span style={{ width: 16 }} />}
-                </div>
-              )
-            })}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
-              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total deductions</span>
-              <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.totalDeductions)})</span>
-              <span style={{ width: 16 }} />
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {/* The 2% fee is charged on every statement, so the line is always listed —
+              including the $0.00 of a period with no loads, where leaving it out reads
+              as "they forgot it". */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+            <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+            <span style={{ width: 16 }} />
           </div>
-        )}
+          {row.deductions.length === 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No other deductions. Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
+          )}
+          {row.deductions.map((d, i) => {
+            const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
+            const refund = d.amount < 0
+            const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
+                <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+                  {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
+                </span>
+                {oneOff
+                  ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+                  : isFixed
+                    ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS PERIOD ONLY — adds an offsetting refund line; the charge stays on every other period`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
+                    : <span style={{ width: 16 }} />}
+              </div>
+            )
+          })}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total deductions</span>
+            <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.totalDeductions)})</span>
+            <span style={{ width: 16 }} />
+          </div>
+        </div>
       </div>
 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>

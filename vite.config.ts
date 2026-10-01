@@ -50,5 +50,9 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    // The jsdom render tests drive real user events; at 132 files the default 5s
+    // starts timing out on a loaded machine while the same test passes alone.
+    testTimeout: 20000,
+    hookTimeout: 20000,
   },
 })

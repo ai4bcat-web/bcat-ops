@@ -9,13 +9,14 @@ import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerO
 import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
 import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
+import { mileageDeductionLine } from '@/lib/mileageDeduction'
 import { creditLineLabel } from '@/lib/payCredits'
 import { payCreditsDeployed, type DriverPayCredit } from '@/lib/apiClient'
 import { getColor } from '@/lib/driverColors'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
-import { DeductionModal } from '../driver-pay/DriverPayForms'
+import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
@@ -61,8 +62,8 @@ function FactoringSummary({ trips }: { trips: OwnerOpTrip[] }) {
   )
 }
 
-/** Where the driver PWA lives and the exact address each driver signs in with. */
-function DriverPortalPanel({ rows }: { rows: OwnerOperatorPayRow[] }) {
+/** The driver PWA address. Rendered once, in the page header — never per card. */
+function DriverAppLink() {
   const copyUrl = async () => {
     try {
       await navigator.clipboard.writeText(DRIVER_PORTAL_URL)
@@ -72,26 +73,31 @@ function DriverPortalPanel({ rows }: { rows: OwnerOperatorPayRow[] }) {
     }
   }
   return (
-    <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', padding: '14px 16px', background: 'var(--ds-surface)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Driver app</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>Drivers sign in at</span>
-        <code style={{ fontSize: 12.5, color: 'var(--ds-t1)', background: 'var(--ds-bg)', padding: '2px 6px', borderRadius: 6 }}>{DRIVER_PORTAL_URL}</code>
-        <button onClick={() => { void copyUrl() }} title="Copy the driver app URL"
-          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 26, padding: '0 9px', borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit' }}>
-          <Copy size={12} /> Copy
-        </button>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 6 }}>
+      <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Driver app</span>
+      <code style={{ fontSize: 12, color: 'var(--ds-t1)', background: 'var(--ds-bg)', padding: '2px 6px', borderRadius: 6 }}>{DRIVER_PORTAL_URL}</code>
+      <button onClick={() => { void copyUrl() }} title="Copy the driver app URL" aria-label="Copy the driver app URL"
+        style={{ display: 'flex', alignItems: 'center', gap: 5, height: 24, padding: '0 8px', borderRadius: 7, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit' }}>
+        <Copy size={12} /> Copy
+      </button>
+    </div>
+  )
+}
+
+/** One driver's own sign-in address, on their own card. A driver with no email on
+ *  file cannot sign in at all, so that is stated instead of left blank. */
+function DriverSignIn({ row }: { row: OwnerOperatorPayRow }) {
+  const email = driverSignInEmail(row)
+  if (!email) {
+    return (
+      <div style={{ fontSize: 12, color: '#b45309', marginTop: 2 }}>
+        No email on file — {row.driver.name} cannot sign in to the driver app. Add one under Settings.
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-        {rows.map((r) => (
-          <div key={r.driver.id} style={{ fontSize: 12.5, color: 'var(--ds-t2)' }}>
-            {r.driver.name}: <b style={{ color: 'var(--ds-t1)' }}>{driverSignInEmail(r) || 'no email on file'}</b>
-          </div>
-        ))}
-      </div>
-      <p style={{ fontSize: 12, color: 'var(--ds-t3)', margin: 0 }}>
-        Each driver sets their own password at <code>/driver/signup</code> and can reset it from the login screen. Office staff never see or issue passwords.
-      </p>
+    )
+  }
+  return (
+    <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 2 }}>
+      Signs in as <b style={{ color: 'var(--ds-t1)' }}>{email}</b> — sets their own password at <code>/driver/signup</code> and resets it from the login screen. Office staff never see or issue passwords.
     </div>
   )
 }
@@ -133,7 +139,8 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
-  if (row.statement.factoringFee > 0) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
+  // Charged on every settlement, so the line is exported even when it is $0.00.
+  L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
     L.push(''); L.push([q('Credits'), q('Amount')].join(','))
@@ -189,6 +196,7 @@ export function OwnerOperatorPayPage() {
               Weekly (Sun→Sat) — brokerage loads delivered by owner operators · % of freight
               {' · weekly expenses charged here from Sep 27'}
             </p>
+            <DriverAppLink />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -237,8 +245,6 @@ export function OwnerOperatorPayPage() {
           </div>
         )}
 
-        {pay.rows.length > 0 && <DriverPortalPanel rows={pay.rows} />}
-
         {selectedRow && (
           <StatementCard
             key={selectedRow.driver.id}
@@ -254,6 +260,10 @@ export function OwnerOperatorPayPage() {
               if (!window.confirm(`Waive ${label} (${money(amount)}) for ${weekLabelLong(periodStart)} only?\n\nAdds an offsetting refund line to this week; every other week keeps the charge.`)) return
               try { await pay.addDeduction({ driverId: selectedRow.driver.id, periodStart, label: `Waived — ${label}`, amount: -amount, date: null }); toast.success(`${label} waived for this week`) }
               catch (e) { toast.error(`Couldn't waive: ${e instanceof Error ? e.message : 'unknown error'}`) }
+            }}
+            onAddMileage={async (miles, costPerMile) => {
+              await pay.addDeduction({ driverId: selectedRow.driver.id, periodStart, ...mileageDeductionLine(miles, costPerMile), date: null })
+              toast.success('Mileage deduction added')
             }}
             onExport={() => download(`owner-operator-pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
           />
@@ -299,12 +309,13 @@ export function OwnerOperatorPayPage() {
   )
 }
 
-function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onExport }: {
+function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
   row: OwnerOperatorPayRow
   onAddDeduction: () => void
   onAddCredit: () => void; onAddDebit: () => void; onEditCredit: (c: DriverPayCredit) => void; onRemoveCredit: (c: DriverPayCredit) => void
   onSettings: () => void
   onRemoveDeduction: (id: string) => void; onWaiveDeduction: (label: string, amount: number) => Promise<void>
+  onAddMileage: (miles: number, costPerMile: number) => Promise<void>
   onExport: () => void
 }) {
   const { driver, setting, statement, oneOffs } = row
@@ -323,7 +334,8 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
         <Avatar src={driver.photoUrl} initials={getInitials(driver.name)} size="lg" style={{ background: color.avatarBg, color: '#fff' }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>{driver.name}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel}{driverSignInEmail(row) ? ` · ${driverSignInEmail(row)}` : ''}</div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginTop: 1 }}>{modeLabel}</div>
+          <DriverSignIn row={row} />
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Check amount</div>
@@ -417,44 +429,47 @@ function StatementCard({ row, onAddDeduction, onAddCredit, onAddDebit, onEditCre
 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Deductions</div>
-        {row.deductions.length === 0 && statement.factoringFee === 0 ? (
-          <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No deductions. Fixed expenses come from Settings.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            {row.deductions.map((d, i) => {
-              const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
-              const refund = d.amount < 0
-              const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-                  <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
-                  <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
-                    {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
-                  </span>
-                  {oneOff
-                    ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
-                    : isFixed
-                      ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS WEEK ONLY — adds an offsetting refund line; the charge stays on every other week`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
-                      : <span style={{ width: 16 }} />}
-                </div>
-              )
-            })}
-            {statement.factoringFee > 0 && (
-              // Added inside calcDriverPay, not part of row.deductions — listed here so the
-              // lines visibly add up to the total below.
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
-                <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
-                <span style={{ width: 16 }} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {row.deductions.length === 0 && (
+            <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No weekly expenses. Fixed expenses come from Settings.</div>
+          )}
+          {row.deductions.map((d, i) => {
+            const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)
+            const refund = d.amount < 0
+            const isFixed = !oneOff && !d.label.startsWith('Fuel (card')
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+                <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{d.label}</span>
+                <span style={{ color: refund ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>
+                  {refund ? `+${money(-d.amount)}` : `(${money(d.amount)})`}
+                </span>
+                {oneOff
+                  ? <button onClick={() => onRemoveDeduction(oneOff.id)} title="Remove" style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16 }}><Trash2 size={12} /></button>
+                  : isFixed
+                    ? <button onClick={() => onWaiveDeduction(d.label, d.amount)} title={`Waive ${d.label} for THIS WEEK ONLY — adds an offsetting refund line; the charge stays on every other week`} style={{ color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', width: 16, fontSize: 11, fontWeight: 700 }}>⃠</button>
+                    : <span style={{ width: 16 }} />}
               </div>
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
-              <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total deductions</span>
-              <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.totalDeductions)})</span>
-              <span style={{ width: 16 }} />
-            </div>
+            )
+          })}
+          {/* The 2% fee is charged on every settlement, so the line is always listed —
+              including the $0.00 of a week with no loads, where leaving it out reads as
+              "they forgot it". It comes out of calcDriverPay rather than row.deductions,
+              hence its own row above the total. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+            <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+            <span style={{ width: 16 }} />
           </div>
-        )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
+            <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total deductions</span>
+            <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.totalDeductions)})</span>
+            <span style={{ width: 16 }} />
+          </div>
+        </div>
+
+        {/* Weekly mileage — the same miles × $/mile entry the Amazon statement carries,
+            unconditional here because every week this page renders owns its charges. */}
+        <WeeklyMileageRow onAdd={onAddMileage} />
       </div>
 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
