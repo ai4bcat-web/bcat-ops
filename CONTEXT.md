@@ -165,6 +165,20 @@ Models use `allow.authenticated()`; `AuditLog` is restricted to `create`+`read`;
 ## Intake Pipeline
 Forwarded messages (Slack channel posts, plus legacy Gmail) → **slack-intake-webhook** Lambda Function URL → `IntakeItem` created with status `NEW` (source `IVAN_CARTAGE` / `BCAT_LOGISTICS`, `externalSource` `slack`|`gmail`, deduped by `externalId`) → appears in the `/intake` queue. Status changes fire `notifySlackStatusChange` → **slack-status-notifier** posts back to Slack.
 
+### Loads are built by hand — never automatically
+A tender arriving at `ivanloads@bcatcorp.com` must NEVER create a `Load`, and must
+never place anything on the calendar. The intake path's only job is to capture the
+documents and notify Slack; dispatch then builds the load manually once a human has
+seen it. The one thing that may happen automatically is the load's details reaching
+the owner-operator settlement.
+
+A backfill script (`scripts/backfillIvanloadsLoads.mjs`, removed 2026-10-01) violated
+this: it read the ivanloads mailbox and wrote `Load` rows with pickup and delivery
+appointments, which put two shipments straight onto the calendar. The two rows it
+created (`ivanloads-409670`, `ivanloads-98553`) were moved to Unscheduled rather than
+deleted, so their driver and rate still reach the settlement. Do not reintroduce a
+script of this shape — the manual step is the process, not a gap to be filled.
+
 ## DOT Compliance & Onboarding
 The standalone `/compliance` pages are retired — staff manage driver/truck compliance from the Files hub (`/files`), and the company-wide controls (escalation rules, email kill switches, private/responsibility document lists) live at `/settings`. Drivers are invited via `OnboardingInvite` (crypto-random token, ~14-day expiry) and complete the 49 CFR 391.21 application + document uploads in the public `/onboard/:token` portal (served by `onboarding-portal-api`, no Cognito). The driver requirement catalog (`src/lib/complianceRequirements.ts`) covers the DOT Driver Qualification file (49 CFR 391.51), including the annual certification of violations (391.27) and the conditional SPE / medical-variance certificate (391.49); the completed employment application is itself a retained document. Action-only items (Clearinghouse queries, National Registry check, previous-employer inquiry) stay on the checklist and off the file. The `compliance-scanner` cron tracks expirations and raises `ComplianceAlert`s; `EscalationRule`/`EscalationEmailLog`/`ComplianceSettings` govern email escalation (default PAUSED). Never store full SSNs (last 4 only) or full fuel card numbers (last 4 only).
 
