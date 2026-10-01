@@ -1,6 +1,8 @@
 import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, CircleDashed, HelpCircle, SplitSquareHorizontal, Search, AlertCircle } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
+import { DriverFilterMenu } from './DriverFilterMenu'
+import type { FilterableDriver } from '@/lib/calendarDrivers'
 import type { ViewMode } from '@/types'
 
 interface CalendarToolbarProps {
@@ -10,6 +12,10 @@ interface CalendarToolbarProps {
   onNext: () => void
   onToday: () => void
   onViewChange: (view: ViewMode) => void
+  /** Whose loads the board shows. Ivan's own drivers by default. */
+  drivers: FilterableDriver[]
+  visibleDriverIds: Set<string>
+  onVisibleDriversChange: (ids: string[]) => void
 }
 
 const VIEW_OPTIONS: { value: ViewMode; label: string }[] = [
@@ -28,6 +34,7 @@ const FILTER_CHIPS = [
 
 export function CalendarToolbar({
   currentView, dateLabel, onPrev, onNext, onToday, onViewChange,
+  drivers, visibleDriverIds, onVisibleDriversChange,
 }: CalendarToolbarProps) {
   const searchQuery      = useAppStore((s) => s.searchQuery)
   const filters          = useAppStore((s) => s.filters)
@@ -101,6 +108,13 @@ export function CalendarToolbar({
 
       {/* ── Filter chips ─────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden', minWidth: 0 }}>
+        {/* Whose loads, before which loads: this decides the board's population, and the
+            chips below only narrow what it lets through. */}
+        <DriverFilterMenu
+          drivers={drivers}
+          visibleDriverIds={visibleDriverIds}
+          onChange={onVisibleDriversChange}
+        />
         {FILTER_CHIPS.map(({ key, label, Icon, activeColor, activeBg }) => {
           const on = filters[key]
           return (

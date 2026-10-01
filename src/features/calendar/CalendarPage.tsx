@@ -11,7 +11,35 @@ import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
+import { defaultVisibleDriverIds, loadVisibleForDrivers } from '@/lib/calendarDrivers'
 import type { ViewMode, Load } from '@/types'
+
+/**
+ * Whose loads are shown is a working preference, not data: it lives in this browser so a
+ * dispatcher who hid the owner-operators does not have to hide them again after a
+ * refresh. Every access is guarded — a private window or blocked site data simply falls
+ * back to the default, which is Ivan's own drivers.
+ */
+const DRIVER_FILTER_KEY = 'bcat.calendar.visibleDrivers'
+
+function readStoredDriverIds(): string[] | null {
+  try {
+    const raw = window.localStorage.getItem(DRIVER_FILTER_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : null
+  } catch {
+    return null
+  }
+}
+
+function writeStoredDriverIds(ids: string[]): void {
+  try {
+    window.localStorage.setItem(DRIVER_FILTER_KEY, JSON.stringify(ids))
+  } catch {
+    // Nothing to do: the filter still works for this session.
+  }
+}
 
 const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
   'day':   { navDays: 1  }, // single current day
@@ -36,8 +64,33 @@ export function CalendarPage() {
 
   const [showAvailModal, setShowAvailModal] = useState(false)
 
+  /**
+   * null means "nothing chosen", which is NOT the same as "chosen nothing" — the default
+   * is derived below rather than written into state, so an empty selection can only ever
+   * be something a person asked for.
+   */
+  const [chosenDriverIds, setChosenDriverIds] = useState<string[] | null>(readStoredDriverIds)
+
   const [currentView, setCurrentView] = useState<ViewMode>('day')
   const [startDate, setStartDate]     = useState<Date>(() => new Date())
+
+  const setVisibleDrivers = useCallback((ids: string[]) => {
+    setChosenDriverIds(ids)
+    writeStoredDriverIds(ids)
+  }, [])
+
+  /** The selection in force: whatever was chosen, else Ivan's own drivers. */
+  const visibleDriverIdSet = useMemo(
+    () => new Set(chosenDriverIds ?? defaultVisibleDriverIds(drivers)),
+    [chosenDriverIds, drivers],
+  )
+
+  /**
+   * Until the roster arrives there is no way to tell an Ivan driver from an
+   * owner-operator, so nothing is filtered by driver and the board never flashes empty
+   * on the way in.
+   */
+  const rosterReady = drivers.length > 0
 
   const { navDays } = VIEW_CONFIG[currentView]
 
@@ -145,6 +198,7 @@ export function CalendarPage() {
   )
 
   const visibleLoads = loads.filter((l) => {
+    if (rosterReady && !loadVisibleForDrivers(l, visibleDriverIdSet)) return false
     if (filters.readyToInvoice && !l.readyToInvoice) return false
     if (filters.notReadyToInvoice && l.readyToInvoice) return false
     if (filters.split && l.pickupDriverId === l.deliveryDriverId) return false
@@ -199,6 +253,9 @@ export function CalendarPage() {
         onNext={onNext}
         onToday={onToday}
         onViewChange={onViewChange}
+        drivers={drivers}
+        visibleDriverIds={visibleDriverIdSet}
+        onVisibleDriversChange={setVisibleDrivers}
       />
 
       {/* ── Planner ─────────────────────────────────────────────────────────── */}
