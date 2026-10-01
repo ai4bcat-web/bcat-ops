@@ -81,7 +81,7 @@ export default function DriverLoginPage() {
     setLoading(true)
     try {
       await signIn(email.trim(), password)
-      navigate('/driver/scan')
+      navigate('/driver/settlement')
     } catch (err) {
       setError(humanizeLoginError(err instanceof Error ? err.message : 'Sign in failed.'))
     } finally {

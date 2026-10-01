@@ -269,7 +269,7 @@ export default function DriverSignupPage() {
 
             <Button
               type="button"
-              onClick={() => navigate('/driver/scan')}
+              onClick={() => navigate('/driver/settlement')}
               className="h-14 w-full rounded-xl text-base font-semibold"
             >
               Open the driver app

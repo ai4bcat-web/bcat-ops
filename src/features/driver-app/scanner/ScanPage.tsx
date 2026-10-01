@@ -252,8 +252,8 @@ export default function ScanPage() {
           POD (delivery receipt)
         </Button>
 
-        <Button variant="ghost" className="mt-4" onClick={() => navigate('/driver/loads')}>
-          Back to my loads
+        <Button variant="ghost" className="mt-4" onClick={() => navigate('/driver/settlement')}>
+          Back to my settlement
         </Button>
       </div>
     )
@@ -371,12 +371,16 @@ export default function ScanPage() {
         initialPages={pages}
         onDone={handleCaptureDone}
         onCancel={() => {
-          // Backing out of a standalone POD returns to the load picker; everything else leaves
-          // the scanner entirely.
-          if (kind === 'POD' && !selectedSubmissionId) {
+          /*
+           * A scan aimed at a particular load — opened from a row on the settlement, so it
+           * arrived with a PRO or a submission — has nothing to choose, and dropping the
+           * driver into the load picker would look like the app lost their place. They go
+           * back where they came from. A POD with no target does return to the picker.
+           */
+          if (kind === 'POD' && !selectedSubmissionId && !initialPro) {
             setPhase('select')
           } else {
-            navigate('/driver/loads')
+            navigate('/driver/settlement')
           }
         }}
       />
@@ -511,8 +515,8 @@ export default function ScanPage() {
             : 'The office has been notified. You can add POD pages later from My loads.'}
         </p>
         <div className="mt-8 flex w-full max-w-xs flex-col gap-3">
-          <Button size="lg" className="h-14 w-full" onClick={() => navigate('/driver/loads')}>
-            View my loads
+          <Button size="lg" className="h-14 w-full" onClick={() => navigate('/driver/settlement')}>
+            Back to my settlement
           </Button>
           <Button variant="outline" size="lg" className="h-14 w-full" onClick={reset}>
             Scan another

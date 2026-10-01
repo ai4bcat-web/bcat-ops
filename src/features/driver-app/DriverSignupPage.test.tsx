@@ -206,9 +206,10 @@ describe('the last screen', () => {
     await screen.findByRole('heading', { name: "You're signed in" })
     expect(screen.getByLabelText('Install this app')).toBeInTheDocument()
 
-    // Navigation is the driver's choice, taken after auth state has settled.
+    // Navigation is the driver's choice, taken after auth state has settled — and it lands
+    // on the settlement, which is the only page the app has.
     fireEvent.click(screen.getByRole('button', { name: 'Open the driver app' }))
-    expect(navigate).toHaveBeenCalledWith('/driver/scan')
+    expect(navigate).toHaveBeenCalledWith('/driver/settlement')
   })
 
   it('says the password is set when only the sign-in fails', async () => {

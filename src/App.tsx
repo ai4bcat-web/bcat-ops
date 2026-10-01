@@ -71,7 +71,9 @@ function DriverRoutes() {
       <Route path="signup" element={<DriverSignupPage />} />
       {isAuthenticated ? (
         <Route element={<DriverApp />}>
-          <Route index element={<Navigate to="/driver/scan" replace />} />
+          {/* The settlement is the driver's home: their pay and every document
+              action live there. Scanning is reached from a load, not landed on. */}
+          <Route index element={<Navigate to="/driver/settlement" replace />} />
           <Route path="scan" element={<ScanPage />} />
           <Route path="loads" element={<SubmissionsPage />} />
           <Route path="settlement" element={<SettlementPage />} />
