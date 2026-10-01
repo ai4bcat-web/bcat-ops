@@ -113,10 +113,10 @@ describe('ScanPage', () => {
     await screen.findByText(/Choose a load for this POD/i)
 
     // Use the standalone reference path instead of picking the existing load.
-    fireEvent.change(screen.getByPlaceholderText(/e\.g\. VRID or load number/i), {
+    fireEvent.change(screen.getByPlaceholderText(/Load number \(optional\)/i), {
       target: { value: 'NEW-LOAD' },
     })
-    fireEvent.click(screen.getByRole('button', { name: /Continue with reference/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue with this load number/i }))
 
     fireEvent.click(await screen.findByTestId('capture-done'))
 
@@ -166,11 +166,11 @@ describe('ScanPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /POD/i }))
     await screen.findByText(/Choose a load for this POD/i)
 
-    const input = await screen.findByPlaceholderText(/e\.g\. VRID or load number/i) as HTMLInputElement
+    const input = await screen.findByPlaceholderText(/Load number \(optional\)/i) as HTMLInputElement
     await waitFor(() => expect(input.value).toBe('13364'))
     expect(screen.getByText(/This is PRO 13364, the load you are on/i)).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /Continue with reference/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Continue with this load number/i }))
     fireEvent.click(await screen.findByTestId('capture-done'))
     fireEvent.click(await screen.findByRole('button', { name: /Send to office/i }))
 
@@ -185,7 +185,7 @@ describe('ScanPage', () => {
     renderAt('/driver/scan')
     fireEvent.click(screen.getByRole('button', { name: /POD/i }))
 
-    const input = await screen.findByPlaceholderText(/e\.g\. VRID or load number/i) as HTMLInputElement
+    const input = await screen.findByPlaceholderText(/Load number \(optional\)/i) as HTMLInputElement
     await waitFor(() => expect(input.value).toBe('13364'))
     fireEvent.change(input, { target: { value: 'OTHER-LOAD' } })
     expect(input.value).toBe('OTHER-LOAD')

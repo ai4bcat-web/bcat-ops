@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import {
-  canTransition,
-  nextStatuses,
-  transitionError,
   driverIsOnLoad,
   currentLoadForDriver,
   currentLoadByDriver,
+  recentLoadsForDriver,
+  lastApptAt,
   laneLabel,
   fixAge,
   STALE_FIX_MINUTES,
+  CURRENT_LOAD_GRACE_HOURS,
 } from './driverJourney'
 import type { Load } from '@/types'
 
@@ -35,33 +35,6 @@ function load(over: Partial<Load> = {}): Load {
   } as unknown as Load
 }
 
-describe('status transitions', () => {
-  it('walks the normal progression', () => {
-    expect(canTransition(null, 'EN_ROUTE')).toBe(true) // null defaults to ASSIGNED
-    expect(canTransition('EN_ROUTE', 'ON_SITE')).toBe(true)
-    expect(canTransition('ON_SITE', 'DELIVERED')).toBe(true)
-  })
-
-  it('allows on site back to en route for the run to the delivery', () => {
-    expect(canTransition('ON_SITE', 'EN_ROUTE')).toBe(true)
-  })
-
-  it('treats delivered as terminal', () => {
-    expect(canTransition('DELIVERED', 'EN_ROUTE')).toBe(false)
-    expect(nextStatuses('DELIVERED')).toEqual([])
-    expect(transitionError('DELIVERED', 'ON_SITE')).toBe('This load is already delivered')
-  })
-
-  it('refuses skipping a step', () => {
-    expect(canTransition('ASSIGNED', 'DELIVERED')).toBe(false)
-    expect(transitionError('ASSIGNED', 'DELIVERED')).toContain('Cannot go from not started')
-  })
-
-  it('names a repeated move rather than failing silently', () => {
-    expect(transitionError('ON_SITE', 'ON_SITE')).toBe('Already marked on site')
-  })
-})
-
 describe('whose load is it', () => {
   it('matches a driver on any stop', () => {
     expect(driverIsOnLoad(load(), DRIVER)).toBe(true)
@@ -78,30 +51,84 @@ describe('whose load is it', () => {
   })
 })
 
+/** Just after the fixture load's delivery appointment. */
+const NOW = Date.parse('2026-10-02T03:00:00.000Z')
+const hoursAfter = (iso: string, h: number) => Date.parse(iso) + h * 60 * 60 * 1000
+
 describe('current load', () => {
   it('picks the soonest appointment among open loads', () => {
     const soon = load({ id: 'ld-soon', pickupAppt: '2026-10-01T06:00:00.000Z',
       stops: [{ id: 'a', type: 'pickup', sequence: 0, driverId: DRIVER, appt: '2026-10-01T06:00:00.000Z' }] } as Partial<Load>)
     const later = load({ id: 'ld-later' })
-    expect(currentLoadForDriver([later, soon], DRIVER)?.id).toBe('ld-soon')
+    expect(currentLoadForDriver([later, soon], DRIVER, NOW)?.id).toBe('ld-soon')
   })
 
-  it('skips delivered loads', () => {
-    const done = load({ id: 'ld-done', driverStatus: 'DELIVERED' } as Partial<Load>)
-    expect(currentLoadForDriver([done], DRIVER)).toBeNull()
+  it('keeps a load through the grace window after its last appointment', () => {
+    // A delivery that ran late, or finished at midnight, is still the driver's load the
+    // next morning when they come to send the POD.
+    const at = hoursAfter('2026-10-02T02:15:00.000Z', CURRENT_LOAD_GRACE_HOURS - 1)
+    expect(currentLoadForDriver([load()], DRIVER, at)?.id).toBe('ld-1')
+  })
+
+  it('drops a load once the grace window has passed', () => {
+    // Driver-reported status used to end a load. The appointment does it now.
+    const at = hoursAfter('2026-10-02T02:15:00.000Z', CURRENT_LOAD_GRACE_HOURS + 1)
+    expect(currentLoadForDriver([load()], DRIVER, at)).toBeNull()
+  })
+
+  it('keeps a load with no appointment at all, because nothing says it is finished', () => {
+    const undated = load({ id: 'ld-undated', pickupAppt: '', deliveryAppt: '',
+      stops: [{ id: 'c', type: 'pickup', sequence: 0, driverId: DRIVER }] } as Partial<Load>)
+    expect(currentLoadForDriver([undated], DRIVER, NOW)?.id).toBe('ld-undated')
   })
 
   it('returns null when the driver has nothing open', () => {
-    expect(currentLoadForDriver([load()], OTHER)).toBeNull()
+    expect(currentLoadForDriver([load()], OTHER, NOW)).toBeNull()
   })
 
   it('maps many drivers at once for the dashboard', () => {
     const mine = load({ id: 'ld-mine' })
     const theirs = load({ id: 'ld-theirs',
       stops: [{ id: 'b', type: 'pickup', sequence: 0, driverId: OTHER, appt: '2026-10-01T09:00:00.000Z' }] } as Partial<Load>)
-    const map = currentLoadByDriver([mine, theirs], [DRIVER, OTHER])
+    const map = currentLoadByDriver([mine, theirs], [DRIVER, OTHER], NOW)
     expect(map.get(DRIVER)?.id).toBe('ld-mine')
     expect(map.get(OTHER)?.id).toBe('ld-theirs')
+  })
+})
+
+describe('recent loads, for attaching a POD', () => {
+  it('offers loads the current-load window has already dropped', () => {
+    // A POD photographed on Friday may only be attached on Monday, so the picker has to
+    // reach further back than the card does.
+    const at = hoursAfter('2026-10-02T02:15:00.000Z', CURRENT_LOAD_GRACE_HOURS + 48)
+    expect(currentLoadForDriver([load()], DRIVER, at)).toBeNull()
+    expect(recentLoadsForDriver([load()], DRIVER, at).map((l) => l.id)).toEqual(['ld-1'])
+  })
+
+  it('stops at the window, so the list never grows without bound', () => {
+    const at = hoursAfter('2026-10-02T02:15:00.000Z', 31 * 24)
+    expect(recentLoadsForDriver([load()], DRIVER, at)).toEqual([])
+  })
+
+  it('lists the newest load first', () => {
+    const older = load({ id: 'ld-older', deliveryAppt: '2026-09-20T02:15:00.000Z',
+      stops: [{ id: 'd', type: 'delivery', sequence: 0, driverId: DRIVER, appt: '2026-09-20T02:15:00.000Z' }] } as Partial<Load>)
+    expect(recentLoadsForDriver([older, load()], DRIVER, NOW).map((l) => l.id)).toEqual(['ld-1', 'ld-older'])
+  })
+
+  it("never offers another driver's load", () => {
+    expect(recentLoadsForDriver([load()], OTHER, NOW)).toEqual([])
+  })
+})
+
+describe('lastApptAt', () => {
+  it('takes the latest stop appointment', () => {
+    expect(lastApptAt(load())).toBe('2026-10-02T02:15:00.000Z')
+  })
+
+  it("falls back to the load's own delivery appointment with no stops", () => {
+    const legacy = load({ stops: undefined } as Partial<Load>)
+    expect(lastApptAt(legacy)).toBe('2026-10-02T02:15:00.000Z')
   })
 })
 

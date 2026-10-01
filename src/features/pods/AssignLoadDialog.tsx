@@ -5,9 +5,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { formatDateShort } from '@/lib/date'
-import { matchPodDriver, recentLoadsForDriver } from '@/lib/podDriver'
+import { recentLoadsForDriver } from '@/lib/podDriver'
 import type { Driver, Load } from '@/types'
-import type { PodDocument, PodSenderMapping } from '@/types/pods'
 
 function LoadRow({
   load,
@@ -42,31 +41,42 @@ function loadSummary(load: Load): string {
   ].filter(Boolean).join(' · ')
 }
 
+/**
+ * Pick the load a document belongs to.
+ *
+ * Deliberately knows nothing about where the document came from. It is used for PODs
+ * that arrived at JobsDone by text and for PODs a driver scanned in the PWA, and both
+ * only need the same three things: which load is on it now, whose driver it is, and a
+ * callback. Resolving the driver is the caller's job, because the two sources identify
+ * one in completely different ways — a sender phone number versus a known driver id.
+ */
 export function AssignLoadDialog({
-  doc,
+  assignedLoadId,
+  driver,
+  senderLabel,
   loads,
-  drivers,
-  mappings,
   onAssign,
   onUnassign,
   onClose,
 }: {
-  doc: PodDocument
+  /** The load currently on the document, if any. */
+  assignedLoadId?: string | null
+  /** Whose document it is, when that is known. Their recent loads are offered first. */
+  driver: Driver | null
+  /** Who sent it, shown only when no driver could be resolved. */
+  senderLabel?: string
   loads: Load[]
-  drivers: Driver[]
-  mappings: PodSenderMapping[]
-  onAssign: (doc: PodDocument, loadId: string) => void
-  onUnassign: (doc: PodDocument) => void
+  onAssign: (loadId: string) => void
+  onUnassign: () => void
   onClose: () => void
 }) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
 
-  const current = useMemo(() => loads.find((l) => l.id === doc.loadId), [loads, doc.loadId])
+  const current = useMemo(() => loads.find((l) => l.id === assignedLoadId), [loads, assignedLoadId])
 
-  // The driver who texted this POD almost always delivered the load it belongs to,
-  // so their recent deliveries come first; the full list stays one search away.
-  const driver = useMemo(() => matchPodDriver(doc, drivers, mappings), [doc, drivers, mappings])
+  // The driver who sent this POD almost always delivered the load it belongs to, so
+  // their recent deliveries come first; the full list stays one search away.
   const recent = useMemo(() => (driver ? recentLoadsForDriver(loads, driver.id) : []), [loads, driver])
   const recentIds = useMemo(() => new Set(recent.map((l) => l.id)), [recent])
 
@@ -102,7 +112,7 @@ export function AssignLoadDialog({
             <button
               onClick={() => {
                 if (confirm('Unassign this POD from the load?')) {
-                  onUnassign(doc)
+                  onUnassign()
                   onClose()
                 }
               }}
@@ -127,7 +137,7 @@ export function AssignLoadDialog({
             </>
           ) : (
             <div className="px-4 py-2 text-xs text-muted-foreground bg-muted/50 border-b">
-              Sender {doc.senderName || doc.senderContact || 'unknown'} is not on the driver roster, so all loads are shown.
+              {senderLabel ? `Sender ${senderLabel} is not on the driver roster, so all loads are shown.` : 'No driver resolved, so all loads are shown.'}
             </div>
           )}
 
@@ -164,7 +174,7 @@ export function AssignLoadDialog({
               if (selected) {
                 const chosen = loads.find((l) => l.id === selected)
                 if (chosen && confirm(`Assign this POD to ${chosen.aljexId ? `Pro #${chosen.aljexId}` : chosen.id.slice(-6)}?`)) {
-                  onAssign(doc, selected)
+                  onAssign(selected)
                   onClose()
                 }
               }

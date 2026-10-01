@@ -1017,4 +1017,101 @@ describe('driver-app-api handler', () => {
       expect(weeks.find((w) => w.weekStart === '2026-09-20')?.gross).toBe(1000)
     })
   })
+
+  describe('attaching a POD to a load', () => {
+    beforeEach(() => {
+      mockVerify.mockReset()
+      mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
+    })
+
+    /** A POD driver C sent with no load number. */
+    function seedUnattachedPod() {
+      tables['DriverSubmission-test']['sub-loose'] = {
+        id: 'sub-loose', driverId: DRIVER_C_ID, driverName: 'Driver C',
+        status: 'NEW', referenceNumber: null, loadId: null,
+        createdAt: '2026-09-29T15:00:00Z',
+      }
+      tables['DriverSubmissionDoc-test']['doc-loose'] = {
+        id: 'doc-loose', submissionId: 'sub-loose', driverId: DRIVER_C_ID,
+        kind: 'POD', s3Key: 'driver-docs/c/sub-loose/POD/1.jpg', uploadedAt: '2026-09-29T15:00:00Z',
+      }
+    }
+
+    it('offers the driver their own recent loads to attach to', async () => {
+      const res = await handler(baseEvent('/loads/recent', 'GET'))
+      expect(res.statusCode).toBe(200)
+      const body = JSON.parse(res.body)
+      const ids = body.loads.map((l: { id: string }) => l.id)
+      expect(ids).toContain('load-c-1')
+      // Another driver's load is never offered.
+      expect(ids).not.toContain('load-a-oo')
+    })
+
+    it('attaches the POD and marks the submission linked', async () => {
+      seedUnattachedPod()
+      const res = await handler(
+        baseEvent('/submissions/sub-loose/attach', 'POST', { body: { loadId: 'load-c-1' } }),
+      )
+
+      expect(res.statusCode).toBe(200)
+      expect(JSON.parse(res.body)).toMatchObject({ loadId: 'load-c-1', proNumber: '14452' })
+
+      const update = mockDynamoSend.mock.calls
+        .map((c) => (c[0] as { input: Record<string, unknown> }).input)
+        .find((i) => i.TableName === 'DriverSubmission-test' && i.UpdateExpression)
+      expect(update?.ExpressionAttributeValues).toMatchObject({ ':l': 'load-c-1', ':s': 'LINKED' })
+    })
+
+    it('releases the load pay once the POD is attached', async () => {
+      // This is the whole point: an unattached POD counts for nothing, so the load is
+      // held. Attaching it is what puts the load back on the cheque.
+      seedUnattachedPod()
+      const before = JSON.parse(
+        (await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))).body,
+      )
+      expect(before.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450').heldReason).toBe('NO_POD')
+
+      tables['DriverSubmission-test']['sub-loose'].loadId = 'load-c-1'
+
+      const after = JSON.parse(
+        (await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))).body,
+      )
+      expect(after.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450').heldReason).toBeNull()
+    })
+
+    it('refuses a load that is not this driver\'s, with no payload', async () => {
+      seedUnattachedPod()
+      const res = await handler(
+        baseEvent('/submissions/sub-loose/attach', 'POST', { body: { loadId: 'load-a-oo' } }),
+      )
+      expect(res.statusCode).toBe(404)
+      expect(JSON.parse(res.body)).toEqual({ error: 'Not found' })
+    })
+
+    it('refuses a submission that is not this driver\'s', async () => {
+      tables['DriverSubmission-test']['sub-other'] = {
+        id: 'sub-other', driverId: DRIVER_A_ID, driverName: 'Driver A',
+        status: 'NEW', createdAt: '2026-09-29T15:00:00Z',
+      }
+      const res = await handler(
+        baseEvent('/submissions/sub-other/attach', 'POST', { body: { loadId: 'load-c-1' } }),
+      )
+      expect(res.statusCode).toBe(404)
+    })
+
+    it('requires a loadId', async () => {
+      seedUnattachedPod()
+      const res = await handler(baseEvent('/submissions/sub-loose/attach', 'POST', { body: {} }))
+      expect(res.statusCode).toBe(400)
+      expect(JSON.parse(res.body)).toEqual({ error: 'loadId required' })
+    })
+
+    it('no longer exposes a driver status route', async () => {
+      // Driver-reported status was removed; the route must be gone, not merely unused.
+      const res = await handler(
+        baseEvent('/loads/load-c-1/status', 'POST', { body: { status: 'DELIVERED' } }),
+      )
+      expect(res.statusCode).toBe(404)
+    })
+  })
 })

@@ -515,12 +515,14 @@ export function PodsPage() {
       {previewDoc && <PodPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
       {assignDoc && (
         <AssignLoadDialog
-          doc={assignDoc}
+          assignedLoadId={assignDoc.loadId}
+          /* A JobsDone POD names its sender by phone number, so the driver has to be
+             matched off the sender mappings before the dialog can offer their loads. */
+          driver={matchPodDriver(assignDoc, drivers, senderMappings)}
+          senderLabel={assignDoc.senderName || assignDoc.senderContact || 'unknown'}
           loads={loads}
-          drivers={drivers}
-          mappings={senderMappings}
-          onAssign={(d, loadId) => handleAssign(d, loadId)}
-          onUnassign={(d) => handleAssign(d, null)}
+          onAssign={(loadId) => handleAssign(assignDoc, loadId)}
+          onUnassign={() => handleAssign(assignDoc, null)}
           onClose={() => setAssignDoc(null)}
         />
       )}

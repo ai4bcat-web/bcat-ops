@@ -231,6 +231,41 @@ async function createDriverSubmission(
   return result.createDriverSubmission
 }
 
+/**
+ * Attach a submission to a load, or detach it.
+ *
+ * `loadId` is what makes a POD count against a load — see src/lib/podPresence.ts — and
+ * therefore what releases that load's pay. Drivers often send a POD before the office has
+ * built the load, so this is the step that finishes the job afterwards.
+ *
+ * Status moves to LINKED on attach. On detach it goes back to NEW rather than staying
+ * LINKED, so the row reads honestly: nothing is linked any more.
+ */
+export async function setDriverSubmissionLoad(
+  id: string,
+  loadId: string | null,
+): Promise<DriverSubmissionRecord> {
+  const result = await gql<{ updateDriverSubmission: DriverSubmissionRecord }>(
+    `mutation UpdateDriverSubmission($input: UpdateDriverSubmissionInput!) {
+      updateDriverSubmission(input: $input) { ${SUBMISSION_FIELDS} }
+    }`,
+    {
+      input: {
+        id,
+        loadId,
+        status: loadId ? 'LINKED' : 'NEW',
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  )
+  return result.updateDriverSubmission
+}
+
+/** A POD with no load on it yet. A submission carrying only a rate con is not one. */
+export function isUnassignedPod(submission: SubmissionWithDocs): boolean {
+  return !submission.loadId && submission.docs.some((d) => d.kind === 'POD')
+}
+
 async function createDriverSubmissionDoc(
   input: Omit<DriverSubmissionDocRecord, 'id' | 'notifiedAt'>,
 ): Promise<DriverSubmissionDocRecord> {

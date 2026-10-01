@@ -38,14 +38,11 @@ import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
 import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
 import {
-  DRIVER_STATUSES,
-  DRIVER_STATUS_LABEL,
   currentLoadForDriver,
   driverIsOnLoad,
   laneLabel,
-  nextStatuses,
-  transitionError,
-  type DriverStatus,
+  lastApptAt,
+  recentLoadsForDriver,
 } from '../../../src/lib/driverJourney'
 import type { Load } from '../../../src/types'
 import { isEligiblePayGroup } from './scope'
@@ -641,8 +638,11 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'loads' && segments[1] === 'current') {
     return { path: '/loads/current' }
   }
-  if (segments[0] === 'loads' && segments[2] === 'status') {
-    return { path: '/loads/:id/status', id: segments[1] }
+  if (segments[0] === 'loads' && segments[1] === 'recent') {
+    return { path: '/loads/recent' }
+  }
+  if (segments[0] === 'submissions' && segments[2] === 'attach') {
+    return { path: '/submissions/:id/attach', id: segments[1] }
   }
   return { path: `/${segments.join('/')}` }
 }
@@ -1562,10 +1562,9 @@ export const handler = async (event: FnUrlEvent) => {
      */
     if (method === 'GET' && path === '/loads/current') {
       const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME, undefined, {}, {})
-      const current = currentLoadForDriver(loads as unknown as Load[], driverId)
+      const current = currentLoadForDriver(loads as unknown as Load[], driverId, Date.now())
       if (!current) return reply(200, { load: null })
 
-      const status = (current.driverStatus ?? 'ASSIGNED') as DriverStatus
       const pods = await scan<{ loadId?: string }>(
         POD_DOCUMENT_TABLE_NAME,
         'loadId = :l',
@@ -1582,10 +1581,6 @@ export const handler = async (event: FnUrlEvent) => {
           pickupAppt: current.pickupAppt ?? null,
           deliveryAppt: current.deliveryAppt ?? null,
           customer: current.customer ?? null,
-          status,
-          statusLabel: DRIVER_STATUS_LABEL[status],
-          statusAt: current.driverStatusAt ?? null,
-          nextStatuses: nextStatuses(status).map((s) => ({ value: s, label: DRIVER_STATUS_LABEL[s] })),
           // What still blocks invoicing, so a driver sees why a load is held.
           hasRateConfirmation: Boolean((current.rateConfirmKey ?? '').trim()),
           hasPod: pods.length > 0,
@@ -1594,43 +1589,65 @@ export const handler = async (event: FnUrlEvent) => {
     }
 
     /**
-     * Move the journey forward. Transitions are validated against the shared
-     * rules so the PWA and the API can never disagree, and a driver can only
-     * move a load that is actually theirs.
+     * The driver's recent loads, for attaching a POD that was sent without a load
+     * number. Wider than /loads/current on purpose: a POD photographed at a dock on
+     * Friday may only get attached on Monday, so last week's loads must be findable.
      */
-    if (method === 'POST' && path === '/loads/:id/status' && id) {
-      const body = parseBody(event)
-      const to = (getString(body, 'status') ?? '') as DriverStatus
-      if (!DRIVER_STATUSES.includes(to)) {
-        return reply(400, { error: 'Unknown status' })
-      }
+    if (method === 'GET' && path === '/loads/recent') {
+      const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME, undefined, {}, {})
+      const mine = recentLoadsForDriver(loads as unknown as Load[], driverId, Date.now())
+      return reply(200, {
+        loads: mine.slice(0, 50).map((l) => ({
+          id: l.id,
+          proNumber: (l.aljexId ?? '').trim(),
+          lane: laneLabel(l),
+          customer: l.customer ?? null,
+          deliveryAppt: lastApptAt(l) || null,
+        })),
+      })
+    }
 
-      const row = await getItem<Record<string, unknown>>(LOAD_TABLE_NAME, { id })
-      if (!row) return reply(404, { error: 'Not found' })
-      // Another driver's load is a 404, never a 403 — no payload either way.
-      if (!driverIsOnLoad(row as unknown as Load, driverId)) {
+    /**
+     * Attach a POD the driver already sent to one of their loads.
+     *
+     * A driver often has the signed paperwork before the office has built the load, so
+     * the POD goes in unattached and is matched afterwards. Setting `loadId` is what
+     * makes it count against the load — and therefore what releases the load's pay.
+     *
+     * Both halves are checked against this driver: their own submission, their own
+     * load. A load that is not theirs is a 404 with no payload, same as everywhere else
+     * here, so nothing about another driver's work is discoverable.
+     */
+    if (method === 'POST' && path === '/submissions/:id/attach' && id) {
+      const body = parseBody(event)
+      const loadId = (getString(body, 'loadId') ?? '').trim()
+      if (!loadId) return reply(400, { error: 'loadId required' })
+
+      const submission = await getItem<DriverSubmissionRow>(DRIVER_SUBMISSION_TABLE, { id })
+      if (!submission || !isDriverOwner(submission, driverId)) {
         return reply(404, { error: 'Not found' })
       }
 
-      const from = (row.driverStatus ?? 'ASSIGNED') as DriverStatus
-      const refusal = transitionError(from, to)
-      if (refusal) return reply(409, { error: refusal })
+      const row = await getItem<Record<string, unknown>>(LOAD_TABLE_NAME, { id: loadId })
+      if (!row || !driverIsOnLoad(row as unknown as Load, driverId)) {
+        return reply(404, { error: 'Not found' })
+      }
 
-      const now = new Date().toISOString()
+      const now = nowIso()
       await ddb.send(
         new UpdateCommand({
-          TableName: LOAD_TABLE_NAME,
+          TableName: DRIVER_SUBMISSION_TABLE,
           Key: { id },
-          UpdateExpression:
-            'SET driverStatus = :s, driverStatusAt = :t, driverStatusBy = :d, updatedAt = :t',
-          ExpressionAttributeValues: { ':s': to, ':t': now, ':d': driverId },
+          UpdateExpression: 'SET loadId = :l, #st = :s, updatedAt = :t',
+          ExpressionAttributeNames: { '#st': 'status' },
+          ExpressionAttributeValues: { ':l': loadId, ':s': 'LINKED', ':t': now },
         }),
       )
+
       return reply(200, {
-        status: to,
-        statusLabel: DRIVER_STATUS_LABEL[to],
-        statusAt: now,
-        nextStatuses: nextStatuses(to).map((s) => ({ value: s, label: DRIVER_STATUS_LABEL[s] })),
+        submissionId: id,
+        loadId,
+        proNumber: ((row.aljexId as string | undefined) ?? '').trim(),
       })
     }
 

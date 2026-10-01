@@ -68,6 +68,10 @@ function buildSlackText(
       : [
           `:page_facing_up: *POD uploaded* for ${driverName}`,
           referenceNumber ? `Reference: ${referenceNumber}` : null,
+          // A POD with no load number is the normal case when the driver has the
+          // paperwork before the load is built. Say out loud that it needs attaching,
+          // so it is picked up here rather than discovered later on a held settlement.
+          referenceNumber ? null : '_No load number — assign it to a load in Driver Docs._',
           note ? `Note: ${note}` : null,
         ]
   return lines.filter(Boolean).join('\n')

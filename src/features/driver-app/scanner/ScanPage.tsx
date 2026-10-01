@@ -57,6 +57,8 @@ export default function ScanPage() {
   const [referenceNumber, setReferenceNumber] = useState('')
   /** The PRO of the load this driver is on, offered as the reference. */
   const [currentPro, setCurrentPro] = useState<string | null>(null)
+  /** True when the last send carried no load number, so the success copy can say so. */
+  const [sentUnattached, setSentUnattached] = useState(false)
   const [note, setNote] = useState('')
   const [resumeFromId, setResumeFromId] = useState<string | null>(null)
 
@@ -136,11 +138,10 @@ export default function ScanPage() {
   const handleSubmit = useCallback(async () => {
     if (!kind) return
 
-    if (kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim()) {
-      setError('Please enter a load or reference number for this POD.')
-      setPhase('error')
-      return
-    }
+    // A POD never needs a load number. A driver at a dock often has the paperwork
+    // before the office has built the load, and the worst outcome is a signed POD that
+    // never gets sent because the app would not accept it. Unattached PODs land in a
+    // queue the office assigns once the load exists.
 
     setBusy(true)
     setError(null)
@@ -164,6 +165,7 @@ export default function ScanPage() {
           resumeFromId: resumeFromId ?? undefined,
         })
       }
+      setSentUnattached(kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim())
       setResumeFromId(null)
       setPhase('success')
     } catch (err) {
@@ -188,6 +190,7 @@ export default function ScanPage() {
     setReferenceNumber('')
     setNote('')
     setResumeFromId(null)
+    setSentUnattached(false)
     setError(null)
     setSubmissions(null)
     setPhase('choose')
@@ -289,7 +292,7 @@ export default function ScanPage() {
               <div className="py-8 text-center">
                 <p className="text-sm text-slate-500">You do not have any loads listed yet.</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  You can still send a POD using a load or reference number.
+                  Send the POD anyway — the office will attach it once the load is built.
                 </p>
               </div>
             )}
@@ -317,22 +320,23 @@ export default function ScanPage() {
               </div>
             )}
 
-            {/* Always available: a driver whose load list is empty or failed to load still has
-                to be able to send the POD they are holding. */}
+            {/* Always available, and never blocked: a driver whose load list is empty, or
+                whose load has not been built yet, still has to be able to send the POD
+                they are holding. The load number is optional. */}
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-sm font-medium text-slate-900">Do not see your load?</p>
               <p className="mt-1 text-sm text-slate-500">
                 {currentPro
                   ? `This is PRO ${currentPro}, the load you are on. Change it if this POD is for a different load.`
-                  : 'Enter the load or reference number and send the POD anyway.'}
+                  : 'Put the load number in if you have it. If you do not, send the POD anyway and the office will attach it to the right load.'}
               </p>
               <Input
                 className="mt-3"
-                placeholder="e.g. VRID or load number"
+                placeholder="Load number (optional)"
                 value={referenceNumber}
                 onChange={(e) => setReferenceNumber(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && referenceNumber.trim()) {
+                  if (e.key === 'Enter') {
                     setSelectedSubmissionId(null)
                     setPhase('capture')
                   }
@@ -340,13 +344,12 @@ export default function ScanPage() {
               />
               <Button
                 className="mt-3 w-full"
-                disabled={!referenceNumber.trim()}
                 onClick={() => {
                   setSelectedSubmissionId(null)
                   setPhase('capture')
                 }}
               >
-                Continue with reference
+                {referenceNumber.trim() ? 'Continue with this load number' : 'Send without a load number'}
               </Button>
             </div>
           </div>
@@ -496,7 +499,9 @@ export default function ScanPage() {
         <CheckCircle2 className="h-16 w-16 text-emerald-500" aria-hidden="true" />
         <h2 className="mt-4 text-2xl font-bold">Sent!</h2>
         <p className="mt-2 max-w-xs text-slate-600">
-          The office has been notified. You can add POD pages later from My loads.
+          {sentUnattached
+            ? 'The office has it and will attach it to your load. Nothing else for you to do.'
+            : 'The office has been notified. You can add POD pages later from My loads.'}
         </p>
         <div className="mt-8 flex w-full max-w-xs flex-col gap-3">
           <Button size="lg" className="h-14 w-full" onClick={() => navigate('/driver/loads')}>

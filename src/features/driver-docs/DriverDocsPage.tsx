@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Upload, RefreshCw, Loader2, FileText, User, AlertCircle, ExternalLink } from 'lucide-react'
+import { Upload, RefreshCw, Loader2, FileText, User, AlertCircle, ExternalLink, Link2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/store/useAppStore'
@@ -8,11 +8,14 @@ import { toast } from 'sonner'
 import {
   listDriverSubmissions,
   getDriverDocUrl,
+  setDriverSubmissionLoad,
+  isUnassignedPod,
   type SubmissionWithDocs,
   type DriverSubmissionDocRecord,
   type SubmissionSource,
 } from '@/lib/driverSubmissionsClient'
 import { DriverDocUploadDialog } from './DriverDocUploadDialog'
+import { AssignLoadDialog } from '@/features/pods/AssignLoadDialog'
 
 function formatDate(iso: string): string {
   try {
@@ -94,6 +97,7 @@ function DocThumbnail({ doc }: { doc: DriverSubmissionDocRecord }) {
 
 export function DriverDocsPage() {
   const drivers = useAppStore((s) => s.drivers)
+  const loads = useAppStore((s) => s.loads)
   const { user } = useAuth()
   const staffEmail = user?.email ?? ''
 
@@ -101,6 +105,15 @@ export function DriverDocsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [uploadOpen, setUploadOpen] = useState(false)
+  /**
+   * Which PODs to show. A POD a driver sent without a load number counts for nothing
+   * until someone attaches it — it is not on the load, so the load cannot be invoiced
+   * and the driver is not paid for it. The filter exists so that queue is visible
+   * rather than buried in a reverse-chronological list.
+   */
+  const [filter, setFilter] = useState<'ALL' | 'NEEDS_LOAD'>('ALL')
+  /** The submission whose assign dialog is open. */
+  const [assigning, setAssigning] = useState<SubmissionWithDocs | null>(null)
 
   // A promise chain, not an async function: the mount effect calls this directly and
   // every state write has to land after the fetch, never in the same synchronous tick.
@@ -131,6 +144,23 @@ export function DriverDocsPage() {
     setSubmissions((prev) => [submission, ...prev])
   }, [])
 
+  const needsLoad = useMemo(() => submissions.filter(isUnassignedPod), [submissions])
+  const shown = filter === 'NEEDS_LOAD' ? needsLoad : submissions
+
+  const handleAssign = useCallback(async (submission: SubmissionWithDocs, loadId: string | null) => {
+    try {
+      const updated = await setDriverSubmissionLoad(submission.id, loadId)
+      // Patch in place; the docs are unchanged and a refetch would lose scroll position.
+      setSubmissions((prev) =>
+        prev.map((s) => (s.id === submission.id ? { ...s, ...updated, docs: s.docs } : s)),
+      )
+      const pro = loadId ? (loads.find((l) => l.id === loadId)?.aljexId ?? '').trim() : ''
+      toast.success(loadId ? `POD assigned to ${pro ? `PRO ${pro}` : 'the load'}` : 'POD unassigned')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not assign the POD')
+    }
+  }, [loads])
+
   return (
     <div className="h-full overflow-y-auto bg-background">
       <div className="sticky top-0 z-10 border-b border-border bg-card px-6 py-4">
@@ -141,6 +171,23 @@ export function DriverDocsPage() {
             <span className="text-sm text-muted-foreground">Rate confirmations and PODs uploaded by drivers or on their behalf.</span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Only worth showing once something is actually waiting. */}
+            {needsLoad.length > 0 && (
+              <div className="mr-1 flex items-center gap-1 rounded-lg border border-border p-0.5">
+                {(['ALL', 'NEEDS_LOAD'] as const).map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setFilter(key)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                      filter === key ? 'bg-secondary text-secondary-foreground' : 'text-muted-foreground'
+                    }`}
+                  >
+                    {key === 'ALL' ? `All ${submissions.length}` : `Needs a load ${needsLoad.length}`}
+                  </button>
+                ))}
+              </div>
+            )}
             <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
               {loading ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
               Refresh
@@ -172,15 +219,22 @@ export function DriverDocsPage() {
           </div>
         )}
 
-        {submissions.length > 0 && (
+        {shown.length > 0 && (
           <div className="space-y-3">
-            {submissions.map((submission) => {
-              const driverName = driversById.get(submission.driverId)?.name ?? submission.driverName
+            {shown.map((submission) => {
+              const driver = driversById.get(submission.driverId) ?? null
+              const driverName = driver?.name ?? submission.driverName
               const kinds = [...new Set(submission.docs.map((d) => d.kind))].sort()
+              const unassigned = isUnassignedPod(submission)
+              const assignedLoad = submission.loadId
+                ? loads.find((l) => l.id === submission.loadId)
+                : undefined
               return (
                 <div
                   key={submission.id}
-                  className="rounded-xl border border-border bg-card p-4 shadow-sm"
+                  className={`rounded-xl border bg-card p-4 shadow-sm ${
+                    unassigned ? 'border-amber-300' : 'border-border'
+                  }`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
@@ -202,10 +256,35 @@ export function DriverDocsPage() {
                           {submission.referenceNumber && (
                             <span>Ref: {submission.referenceNumber}</span>
                           )}
-                          {submission.loadId && <span>Load: {submission.loadId}</span>}
+                          {/* A PRO is what a person recognises; the raw load UUID is not. */}
+                          {submission.loadId && (
+                            <span>
+                              Load{' '}
+                              {assignedLoad?.aljexId?.trim()
+                                ? `PRO ${assignedLoad.aljexId.trim()}`
+                                : submission.loadId.slice(-6)}
+                            </span>
+                          )}
+                          {unassigned && (
+                            <span className="font-semibold text-amber-700">Needs a load</span>
+                          )}
                         </div>
                       </div>
                     </div>
+
+                    {/* Assign is offered on any POD: an unassigned one needs a load, and an
+                        assigned one may have been put on the wrong load. */}
+                    {submission.docs.some((d) => d.kind === 'POD') && (
+                      <Button
+                        variant={unassigned ? 'default' : 'outline'}
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => setAssigning(submission)}
+                      >
+                        <Link2 className="mr-1 h-3.5 w-3.5" />
+                        {submission.loadId ? 'Change load' : 'Assign to load'}
+                      </Button>
+                    )}
                   </div>
 
                   {submission.note && (
@@ -225,6 +304,19 @@ export function DriverDocsPage() {
           </div>
         )}
       </div>
+
+      {assigning && (
+        <AssignLoadDialog
+          assignedLoadId={assigning.loadId}
+          /* The driver is known outright here — unlike a texted POD, which has to be
+             matched from a phone number. So their recent loads are offered first. */
+          driver={driversById.get(assigning.driverId) ?? null}
+          loads={loads}
+          onAssign={(loadId) => { void handleAssign(assigning, loadId) }}
+          onUnassign={() => { void handleAssign(assigning, null) }}
+          onClose={() => setAssigning(null)}
+        />
+      )}
 
       <DriverDocUploadDialog
         open={uploadOpen}

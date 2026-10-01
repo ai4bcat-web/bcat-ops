@@ -300,17 +300,6 @@ export interface Load {
   readyToInvoice: boolean
   rateConfirmUrl?: string   // presigned URL of the uploaded rate confirmation
   rateConfirmKey?: string   // S3 key of the rate confirmation (rate-confirms/{loadId}/…)
-  // ── Driver journey (owner-operator PWA) ─────────────────────────────────
-  // One status per load, reported by the driver. Separate from each stop's
-  // arrivedAt/departedAt, which stay the record of actual facility events.
-  driverStatus?: DriverStatus | null
-  driverStatusAt?: string | null
-  driverStatusBy?: string | null
-  // Mirrors of the ELD fix at the moment the driver tapped; the PWA never
-  // collects position itself.
-  driverStatusLat?: number | null
-  driverStatusLng?: number | null
-  driverStatusPlace?: string | null
   // Extended fields (nullable — populated as data becomes available)
   truckId?: string | null
   rate?: number | null      // total load revenue in cents
@@ -379,8 +368,6 @@ export interface IntakeItem {
 
 // ── Factoring queue ───────────────────────────────────────────────────────────
 
-/** Driver-reported journey state for a load (see src/lib/driverJourney.ts). */
-export type DriverStatus = 'ASSIGNED' | 'EN_ROUTE' | 'ON_SITE' | 'DELIVERED'
 
 export type FactoringItemStatus = 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED'
 

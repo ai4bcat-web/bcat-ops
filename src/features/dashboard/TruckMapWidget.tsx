@@ -7,7 +7,7 @@ import { useAppStore } from '@/store/useAppStore'
 import { driverForTruck } from '@/lib/assignments'
 import { canonicalUnit } from '@/lib/fleetGroups'
 import { FleetMiniMap } from './FleetMiniMap'
-import { currentLoadForDriver, laneLabel, fixAge, DRIVER_STATUS_LABEL } from '@/lib/driverJourney'
+import { currentLoadForDriver, laneLabel, fixAge } from '@/lib/driverJourney'
 
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
@@ -148,7 +148,7 @@ export function TruckMapWidget() {
               const equip = equipment.find((e) => e.type === 'truck' && e.unitNumber === unit)
               const assigned = equip ? driverForTruck(equip.id, drivers) : undefined
               // What this driver is hauling right now — the same selection the PWA uses.
-              const currentLoad = assigned ? currentLoadForDriver(loads, assigned.id) : null
+              const currentLoad = assigned ? currentLoadForDriver(loads, assigned.id, now) : null
               const age = fixAge(loc.locatedAt, now)
               return (
                 <div
@@ -195,7 +195,7 @@ export function TruckMapWidget() {
                     )}
                   </div>
 
-                  {/* Current load: lane plus the driver's reported status. */}
+                  {/* Current load: the lane and the PRO. */}
                   <div style={{ minWidth: 0, fontSize: 12 }}>
                     {currentLoad ? (
                       <>
@@ -205,9 +205,6 @@ export function TruckMapWidget() {
                         </div>
                         <div style={{ color: 'var(--ds-t3)', fontSize: 11 }}>
                           PRO {(currentLoad.aljexId ?? '').trim() || '—'}
-                          {currentLoad.driverStatus
-                            ? ` · ${DRIVER_STATUS_LABEL[currentLoad.driverStatus]}`
-                            : ''}
                         </div>
                       </>
                     ) : (

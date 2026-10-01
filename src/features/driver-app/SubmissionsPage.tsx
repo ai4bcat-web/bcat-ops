@@ -14,6 +14,7 @@ import {
 } from './driverApi'
 import { type BadgeVariantProps } from '@/lib/ui/badge-variants'
 import { CurrentLoadCard } from './CurrentLoadCard'
+import { UnattachedPods } from './UnattachedPods'
 
 function statusVariant(status: SubmissionStatus): NonNullable<BadgeVariantProps['variant']> {
   switch (status) {
@@ -181,8 +182,20 @@ export default function SubmissionsPage() {
       </header>
 
       <main className="p-4">
-        {/* The job in front of the driver comes first; submissions are the history below it. */}
-        <div className="mb-4">
+        {/* The job in front of the driver comes first; submissions are the history below it.
+            A POD waiting for a load jumps the queue — it is the one thing here that is
+            holding money up, and it takes one tap to clear. */}
+        <div className="mb-4 flex flex-col gap-3">
+          <UnattachedPods
+            submissions={submissions}
+            onAttached={(submissionId, loadId) =>
+              // Patch in place rather than refetching: the driver sees it resolve at once,
+              // and the row drops out of the waiting list because it now has a load.
+              setSubmissions((prev) =>
+                (prev ?? []).map((s) => (s.id === submissionId ? { ...s, loadId } : s)),
+              )
+            }
+          />
           <CurrentLoadCard />
         </div>
 

@@ -1,67 +1,20 @@
 /**
- * Driver journey: the status a driver reports from the PWA, and which load is
- * theirs right now.
+ * Which load is a driver's right now, and how fresh their position is.
  *
- * One status per load, not per stop — a driver taps a single progression rather
- * than marking every facility. Stop-level `arrivedAt`/`departedAt` remain the
- * record of actual facility events; this is the driver's own reported state, and
- * the two are deliberately separate so a tap never rewrites a facility record.
+ * Driver-reported status was removed: the office gets what it needs from the
+ * documents arriving and from the ELD, and asking a driver to tap a progression
+ * on top of that was work for no reader. Stop-level `arrivedAt`/`departedAt`
+ * remain the record of actual facility events.
  *
- * Position is NOT collected here. A browser cannot track location in the
- * background with any reliability, so the dashboard keeps using the ELD fix and
- * a status change only carries whatever position the ELD already knew.
+ * Position is NOT collected by the PWA. A browser cannot track location in the
+ * background with any reliability, so the dashboard uses the ELD fix and this
+ * module only says how old that fix is.
  *
  * Pure: no AWS, no fetch, no clock. The PWA, the driver API and the dashboard
- * all import this so a transition that is legal in one place is legal in all.
+ * all import it so they agree on which load is current.
  */
 import { getStops } from '@/lib/stops'
 import type { Load, Stop } from '@/types'
-
-export const DRIVER_STATUSES = ['ASSIGNED', 'EN_ROUTE', 'ON_SITE', 'DELIVERED'] as const
-export type DriverStatus = (typeof DRIVER_STATUSES)[number]
-
-/** What a driver sees on the button, not what the database calls it. */
-export const DRIVER_STATUS_LABEL: Record<DriverStatus, string> = {
-  ASSIGNED: 'Not started',
-  EN_ROUTE: 'En route',
-  ON_SITE: 'On site',
-  DELIVERED: 'Delivered',
-}
-
-/**
- * Legal moves. Forward progression plus one backward edge: a driver who has
- * loaded at the pickup goes back to EN_ROUTE for the run to the delivery, which
- * is the normal shape of a one-pickup-one-drop load. DELIVERED is terminal —
- * reopening it is a dispatcher action, not a driver one.
- */
-const TRANSITIONS: Record<DriverStatus, DriverStatus[]> = {
-  ASSIGNED: ['EN_ROUTE'],
-  EN_ROUTE: ['ON_SITE'],
-  ON_SITE: ['EN_ROUTE', 'DELIVERED'],
-  DELIVERED: [],
-}
-
-export function canTransition(from: DriverStatus | null | undefined, to: DriverStatus): boolean {
-  const current = from ?? 'ASSIGNED'
-  return TRANSITIONS[current]?.includes(to) ?? false
-}
-
-/** The moves a driver can make right now, for rendering buttons. */
-export function nextStatuses(from: DriverStatus | null | undefined): DriverStatus[] {
-  return TRANSITIONS[from ?? 'ASSIGNED'] ?? []
-}
-
-/** Human reason a move was refused, for the API's error text. */
-export function transitionError(
-  from: DriverStatus | null | undefined,
-  to: DriverStatus,
-): string | null {
-  if (canTransition(from, to)) return null
-  const current = from ?? 'ASSIGNED'
-  if (current === 'DELIVERED') return 'This load is already delivered'
-  if (current === to) return `Already marked ${DRIVER_STATUS_LABEL[to].toLowerCase()}`
-  return `Cannot go from ${DRIVER_STATUS_LABEL[current].toLowerCase()} to ${DRIVER_STATUS_LABEL[to].toLowerCase()}`
-}
 
 /** True when this driver is on any stop of the load. */
 export function driverIsOnLoad(load: Load, driverId: string): boolean {
@@ -79,27 +32,78 @@ export function firstApptAt(load: Load): string {
   return appts[0] ?? load.pickupAppt ?? ''
 }
 
+/** Latest appointment on the load — when the driver is finished with it. */
+export function lastApptAt(load: Load): string {
+  const stops = getStops(load)
+  const appts = stops.map((s: Stop) => s.appt).filter(Boolean).sort()
+  return appts[appts.length - 1] ?? load.deliveryAppt ?? load.pickupAppt ?? ''
+}
+
 /**
- * The one load a driver is working now: theirs, not yet delivered, soonest
- * appointment first. Returns null when they have nothing open — which the PWA
- * shows as a rest state rather than an error.
+ * How long after its last appointment a load still counts as the driver's current one.
+ *
+ * Driver-reported status used to answer this: a load left the list when the driver
+ * marked it delivered. Without that, the appointment is the only honest signal, and it
+ * needs slack — a delivery can run late, and a driver finishing at midnight should
+ * still see that load the next morning when they send the POD.
  */
-export function currentLoadForDriver(loads: Load[], driverId: string): Load | null {
-  const open = loads
-    .filter((l) => driverIsOnLoad(l, driverId))
-    .filter((l) => (l.driverStatus ?? 'ASSIGNED') !== 'DELIVERED')
+export const CURRENT_LOAD_GRACE_HOURS = 36
+
+/**
+ * The one load a driver is working now: theirs, its last appointment not long past,
+ * soonest first. Returns null when they have nothing open — which the PWA shows as a
+ * rest state rather than an error.
+ *
+ * `now` is passed in rather than read from a clock so this stays pure and testable.
+ */
+export function currentLoadForDriver(loads: Load[], driverId: string, now: number): Load | null {
+  const cutoff = now - CURRENT_LOAD_GRACE_HOURS * 60 * 60 * 1000
+  const open = loads.filter((l) => {
+    if (!driverIsOnLoad(l, driverId)) return false
+    const last = lastApptAt(l)
+    // A load with no appointment at all is still theirs; nothing says it is finished.
+    if (!last) return true
+    const at = Date.parse(last)
+    return Number.isNaN(at) ? true : at >= cutoff
+  })
   if (!open.length) return null
   return open.sort((a, b) => firstApptAt(a).localeCompare(firstApptAt(b)))[0]
 }
 
 /** Current load per driver, for the fleet dashboard. */
-export function currentLoadByDriver(loads: Load[], driverIds: string[]): Map<string, Load> {
+export function currentLoadByDriver(loads: Load[], driverIds: string[], now: number): Map<string, Load> {
   const out = new Map<string, Load>()
   for (const id of driverIds) {
-    const load = currentLoadForDriver(loads, id)
+    const load = currentLoadForDriver(loads, id, now)
     if (load) out.set(id, load)
   }
   return out
+}
+
+/**
+ * Loads a driver could reasonably be sending paperwork for: theirs, from the recent
+ * past through anything upcoming, newest first.
+ *
+ * This is what the attach picker offers. It is deliberately wider than the current
+ * load — a POD photographed at a dock on Friday may only get attached on Monday, and a
+ * driver must be able to find last week's load to put it on.
+ */
+export function recentLoadsForDriver(
+  loads: Load[],
+  driverId: string,
+  now: number,
+  withinDays = 30,
+): Load[] {
+  const cutoff = now - withinDays * 24 * 60 * 60 * 1000
+  return loads
+    .filter((l) => {
+      if (!driverIsOnLoad(l, driverId)) return false
+      const last = lastApptAt(l)
+      if (!last) return true
+      const at = Date.parse(last)
+      return Number.isNaN(at) ? true : at >= cutoff
+    })
+    .sort((a, b) => lastApptAt(b).localeCompare(lastApptAt(a)))
 }
 
 /** "Mesa, AZ → Tempe, AZ", or whichever half is known. */

@@ -427,7 +427,7 @@ export async function submitPod(
   }
 }
 
-// ── Current load & journey status ────────────────────────────────────────────
+// ── Current load, recent loads, and attaching a POD ──────────────────────────
 
 /** What the PWA shows on the load card. Mirrors GET /loads/current. */
 export interface CurrentLoad {
@@ -439,10 +439,6 @@ export interface CurrentLoad {
   pickupAppt: string | null
   deliveryAppt: string | null
   customer: string | null
-  status: 'ASSIGNED' | 'EN_ROUTE' | 'ON_SITE' | 'DELIVERED'
-  statusLabel: string
-  statusAt: string | null
-  nextStatuses: { value: CurrentLoad['status']; label: string }[]
   /** Documents the load still owes before it can be invoiced. */
   hasRateConfirmation: boolean
   hasPod: boolean
@@ -454,13 +450,36 @@ export async function fetchCurrentLoad(): Promise<CurrentLoad | null> {
   return out.load
 }
 
-/** Move the journey forward. The server validates the transition. */
-export function updateLoadStatus(
+/** One of the driver's loads, as offered in the attach picker. */
+export interface RecentLoad {
+  id: string
+  proNumber: string
+  lane: string
+  customer: string | null
+  deliveryAppt: string | null
+}
+
+/**
+ * The driver's loads from the last month, newest first. Wider than the current load on
+ * purpose: a POD sent on Friday may only be attached on Monday.
+ */
+export async function fetchRecentLoads(): Promise<RecentLoad[]> {
+  const out = await request<{ loads: RecentLoad[] }>('/loads/recent')
+  return out.loads ?? []
+}
+
+/**
+ * Attach a POD the driver already sent to one of their loads.
+ *
+ * This is what makes the POD count against that load, which is what releases the
+ * load's pay. The server checks that both the submission and the load are theirs.
+ */
+export function attachSubmissionToLoad(
+  submissionId: string,
   loadId: string,
-  status: CurrentLoad['status'],
-): Promise<Pick<CurrentLoad, 'status' | 'statusLabel' | 'statusAt' | 'nextStatuses'>> {
-  return request(`/loads/${encodeURIComponent(loadId)}/status`, {
+): Promise<{ submissionId: string; loadId: string; proNumber: string }> {
+  return request(`/submissions/${encodeURIComponent(submissionId)}/attach`, {
     method: 'POST',
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ loadId }),
   })
 }
