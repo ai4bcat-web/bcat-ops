@@ -8,7 +8,8 @@
  * duplicating its precedence logic.
  */
 
-import { assembleOtrInvoice, type LoadSlice, type OtrReadiness } from '@/lib/otrInvoice'
+import { assembleOtrInvoice, type LoadSlice, type ManualOverrides, type OtrReadiness } from '@/lib/otrInvoice'
+import { loadHasPod, loadHasRatecon, type PodIndex } from '@/lib/podPresence'
 import { getStops } from '@/lib/stops'
 import type { Load } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
@@ -17,7 +18,18 @@ export interface OtrSettlementInput {
   load: Load
   customersById: Map<string, CustomerRecord>
   locationsById: Map<string, LocationRecord>
-  loadIdsWithPod: Set<string>
+  /**
+   * Every document store, already indexed. A POD counts whether it came from JobsDone
+   * or from a driver scanning one in the PWA, and a rate confirmation counts whether
+   * it is a key on the Load row or a driver scan — see src/lib/podPresence.ts.
+   */
+  podIndex: PodIndex
+  /**
+   * Values a human typed on the factoring queue row, highest precedence. Passing them
+   * here is what makes a queue correction show up on the settlement: without it the
+   * two pages disagree about the same load.
+   */
+  manual?: ManualOverrides | null
   /** Defaults to the load's delivery date, which is the invoice date for settlement purposes. */
   submissionDate?: string | null
 }
@@ -42,7 +54,7 @@ function locationSlice(loc: LocationRecord | undefined) {
  * assembleOtrInvoice uses for city/state split from originCity/destinationCity.
  */
 export function otrSettlementReadiness(input: OtrSettlementInput): OtrReadiness {
-  const { load, customersById, locationsById, loadIdsWithPod, submissionDate } = input
+  const { load, customersById, locationsById, podIndex, manual, submissionDate } = input
   const { origin, destination } = originAndDestinationStops(load)
 
   const loadSlice: LoadSlice = {
@@ -65,8 +77,9 @@ export function otrSettlementReadiness(input: OtrSettlementInput): OtrReadiness 
     customerMcNumber: customer?.mcNumber,
     originLocation: locationSlice(originLocation),
     destinationLocation: locationSlice(destinationLocation),
+    manual,
     submissionDate: submissionDate ?? load.deliveryAppt.slice(0, 10),
-    hasPod: loadIdsWithPod.has(load.id),
-    hasRateConfirmation: Boolean(load.rateConfirmKey),
+    hasPod: loadHasPod(podIndex, load),
+    hasRateConfirmation: Boolean(load.rateConfirmKey) || loadHasRatecon(podIndex, load),
   })
 }

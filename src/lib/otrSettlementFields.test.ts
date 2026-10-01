@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { otrSettlementReadiness } from './otrSettlementFields'
+import { buildPodIndex } from './podPresence'
 import type { Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 
@@ -62,7 +63,7 @@ describe('otrSettlementReadiness', () => {
       [customer()],
       [location({ id: 'loc-pu', zip: '85212' }), location({ id: 'loc-de', zip: '85001' })],
     )
-    const r = otrSettlementReadiness({ load: l, customersById, locationsById, loadIdsWithPod: new Set(['load-1']) })
+    const r = otrSettlementReadiness({ load: l, customersById, locationsById, podIndex: buildPodIndex({ jobsdoneLoadIds: ['load-1'], submissions: [] }) })
     expect(r.payload.FromZip).toBe('85212')
     expect(r.payload.ToZip).toBe('85001')
     expect(r.sources.FromZip).toBe('location')
@@ -73,7 +74,7 @@ describe('otrSettlementReadiness', () => {
       stops: [stop({ id: 'pu', type: 'pickup', sequence: 0 }), stop({ id: 'de', type: 'delivery', sequence: 1 })],
     })
     const { customersById, locationsById } = maps([customer()], [])
-    const r = otrSettlementReadiness({ load: l, customersById, locationsById, loadIdsWithPod: new Set(['load-1']) })
+    const r = otrSettlementReadiness({ load: l, customersById, locationsById, podIndex: buildPodIndex({ jobsdoneLoadIds: ['load-1'], submissions: [] }) })
     expect(r.payload.FromCity).toBe('MESA')
     expect(r.payload.FromState).toBe('AZ')
   })
@@ -90,7 +91,7 @@ describe('otrSettlementReadiness', () => {
       [customer({ mcNumber: null })],
       [location({ id: 'loc-pu', zip: '85212' }), location({ id: 'loc-de', zip: '85001' })],
     )
-    const r = otrSettlementReadiness({ load: l, customersById, locationsById, loadIdsWithPod: new Set(['load-1']) })
+    const r = otrSettlementReadiness({ load: l, customersById, locationsById, podIndex: buildPodIndex({ jobsdoneLoadIds: ['load-1'], submissions: [] }) })
     expect(r.ready).toBe(false)
     expect(r.missingFields).toEqual(['BrokerMC'])
   })
@@ -107,7 +108,7 @@ describe('otrSettlementReadiness', () => {
       [customer()],
       [location({ id: 'loc-pu', zip: '85212' }), location({ id: 'loc-de', zip: '85001' })],
     )
-    const r = otrSettlementReadiness({ load: l, customersById, locationsById, loadIdsWithPod: new Set(['load-1']) })
+    const r = otrSettlementReadiness({ load: l, customersById, locationsById, podIndex: buildPodIndex({ jobsdoneLoadIds: ['load-1'], submissions: [] }) })
     expect(r.ready).toBe(true)
     expect(r.missingFields).toEqual([])
     expect(r.missingDocuments).toEqual([])
@@ -137,7 +138,7 @@ describe('otrSettlementReadiness', () => {
       [customer()],
       [location({ id: 'loc-pu', zip: '85212' }), location({ id: 'loc-de', zip: '85001' })],
     )
-    const r = otrSettlementReadiness({ load: l, customersById, locationsById, loadIdsWithPod: new Set() })
+    const r = otrSettlementReadiness({ load: l, customersById, locationsById, podIndex: buildPodIndex({ jobsdoneLoadIds: [], submissions: [] }) })
     expect(r.ready).toBe(false)
     expect(r.missingDocuments).toEqual(['POD', 'Rate confirmation'])
   })

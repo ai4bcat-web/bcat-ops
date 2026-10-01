@@ -18,10 +18,15 @@ import {
   type DriverPayCredit,
   type DriverPayCreditInput,
   type FuelTransaction,
+  listFactoringItems,
   type CustomerRecord,
   type LocationRecord,
 } from '@/lib/apiClient'
 import { listPods } from '@/lib/podsClient'
+import { listDriverSubmissions } from '@/lib/driverSubmissionsClient'
+import { buildPodIndex, type PodIndex, type PodSubmissionLike } from '@/lib/podPresence'
+import { splitPayableTrips, type PayHoldReason } from '@/lib/payHold'
+import type { ManualOverrides } from '@/lib/otrInvoice'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import {
@@ -57,6 +62,13 @@ export interface OwnerOperatorPayRow {
   debits: DriverPayCredit[]
   fixedDebits: PayDebitInput[]
   statement: DriverPayStatement
+  /**
+   * Loads delivered this week that are NOT in the statement, and why. Today the only
+   * reason is a missing POD. They stay visible so nobody has to guess what is held.
+   */
+  heldTrips: Array<{ trip: OwnerOpTrip; reason: PayHoldReason }>
+  /** Freight dollars sitting in `heldTrips`. */
+  heldFreight: number
   /** Ids of this week's loads whose Load ID also settled last week (likely entered twice). */
   duplicateTripIds: Set<string>
 }
@@ -64,6 +76,12 @@ export interface OwnerOperatorPayRow {
 export interface OwnerOperatorPayState {
   loading: boolean
   error: string | null
+  /**
+   * False when a POD store could not be read. Pay is then NOT held for a missing POD,
+   * because an integration outage must never cost a week of drivers their money. The
+   * page says so out loud rather than quietly paying loads it should have held.
+   */
+  podsKnown: boolean
   rows: OwnerOperatorPayRow[]
   unconfigured: Driver[]
   refresh: () => void
@@ -81,24 +99,70 @@ function periodEnd(periodStart: string): string {
   return d.toISOString().slice(0, 10)
 }
 
-async function loadPodLoadIds(): Promise<Set<string>> {
-  const ids = new Set<string>()
-  // JobsDone is an optional integration: an unconfigured or failing import must not
-  // blank the settlement, it just means we can't confirm a POD is on file.
+/**
+ * Every POD we know about, from both stores: the ones JobsDone received and a human
+ * linked to a load, and the ones a driver scanned in the PWA or staff uploaded on their
+ * behalf. See src/lib/podPresence.ts for why both have to count.
+ *
+ * `known` is false if EITHER store failed. A POD that exists in the half we could not
+ * read looks identical to no POD at all, and that distinction now decides whether a
+ * driver gets paid, so a partial read is treated as no knowledge.
+ */
+async function loadPodIndex(): Promise<{ index: PodIndex; known: boolean }> {
+  const jobsdoneLoadIds: string[] = []
+  let known = true
+
   try {
     let nextToken: string | null = null
     for (let attempt = 0; attempt < 100; attempt++) {
       const page = await listPods({ nextToken: nextToken ?? undefined })
       for (const doc of page.items) {
-        if (doc.loadId) ids.add(doc.loadId)
+        if (doc.loadId) jobsdoneLoadIds.push(doc.loadId)
       }
       nextToken = page.nextToken ?? null
       if (!nextToken) break
     }
   } catch (err) {
-    console.warn('[owner-operator-pay] could not load POD documents — factoring readiness will show PODs as missing', err)
+    console.warn('[owner-operator-pay] could not read JobsDone PODs — no load will be held for a missing POD', err)
+    known = false
   }
-  return ids
+
+  let submissions: PodSubmissionLike[] = []
+  try {
+    submissions = (await listDriverSubmissions()).map((s) => ({
+      loadId: s.loadId,
+      referenceNumber: s.referenceNumber,
+      hasPodDoc: s.docs.some((d) => d.kind === 'POD'),
+      hasRateconDoc: s.docs.some((d) => d.kind === 'RATECON'),
+    }))
+  } catch (err) {
+    console.warn('[owner-operator-pay] could not read driver submissions — no load will be held for a missing POD', err)
+    known = false
+  }
+
+  return { index: buildPodIndex({ jobsdoneLoadIds, submissions }), known }
+}
+
+/**
+ * Field values a human typed on a factoring queue row, keyed by the Load they belong
+ * to. This is what makes a correction made in the queue appear on the settlement:
+ * both pages then assemble the same load from the same inputs.
+ */
+async function loadManualOverrides(): Promise<Map<string, ManualOverrides>> {
+  const byLoadId = new Map<string, ManualOverrides>()
+  try {
+    for (const item of await listFactoringItems()) {
+      const loadId = (item.loadId ?? '').trim()
+      const fields = item.otrManualFields
+      if (!loadId || !fields || typeof fields !== 'object') continue
+      byLoadId.set(loadId, fields as ManualOverrides)
+    }
+  } catch (err) {
+    // Ancillary to the dollars: without it the settlement just shows the pre-correction
+    // values, which is what it showed before this existed.
+    console.warn('[owner-operator-pay] could not read factoring queue corrections', err)
+  }
+  return byLoadId
 }
 
 /**
@@ -127,7 +191,11 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   const [loads, setLoads] = useState<Load[]>([])
   const [customers, setCustomers] = useState<CustomerRecord[]>([])
   const [locations, setLocations] = useState<LocationRecord[]>([])
-  const [podLoadIds, setPodLoadIds] = useState<Set<string>>(new Set())
+  const [podIndex, setPodIndex] = useState<PodIndex>(() => buildPodIndex({ jobsdoneLoadIds: [], submissions: [] }))
+  // Starts false: until the PODs have actually been read we know nothing, and holding
+  // pay on no knowledge is the one outcome worth ruling out by construction.
+  const [podsKnown, setPodsKnown] = useState(false)
+  const [manualByLoadId, setManualByLoadId] = useState<Map<string, ManualOverrides>>(new Map())
   const [settings, setSettings] = useState<DriverPaySetting[]>([])
   const [deductions, setDeductions] = useState<DriverPayDeduction[]>([])
   const [credits, setCredits] = useState<DriverPayCredit[]>([])
@@ -149,16 +217,19 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
       listDriverPaySettings(),
       listDriverPayDeductions(),
       listDriverPayCredits(),
-      loadPodLoadIds(),
+      loadPodIndex(),
+      loadManualOverrides(),
     ])
-      .then(([l, dir, s, d, creds, pods]) => {
+      .then(([l, dir, s, d, creds, pods, manual]) => {
         setLoads(l)
         setCustomers(dir.customers)
         setLocations(dir.locations)
         setSettings(s)
         setDeductions(d)
         setCredits(creds)
-        setPodLoadIds(pods)
+        setPodIndex(pods.index)
+        setPodsKnown(pods.known)
+        setManualByLoadId(manual)
         setError(null)
       })
       .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
@@ -192,7 +263,8 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
               load,
               customersById,
               locationsById,
-              loadIdsWithPod: podLoadIds,
+              podIndex,
+              manual: manualByLoadId.get(load.id) ?? null,
             }),
           }
         })
@@ -227,19 +299,25 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         const driverCredits = mine.filter((c) => (c.kind ?? 'CREDIT') === 'CREDIT')
         const driverDebits = mine.filter((c) => c.kind === 'DEBIT')
 
+        // A POD is what lets a load be invoiced, so a load without one is held off this
+        // week's check rather than paid ahead of the money coming in. It stays on the
+        // page, and it pays itself the moment the POD lands, because the settlement is
+        // recomputed from current data every time it is opened.
+        const { payable, held, heldFreight } = splitPayableTrips(tripsWithReadiness, { podsKnown })
+
         const statement = calcDriverPay(
-          tripsWithReadiness.map((t) => ({ freightAmount: t.freightAmount })),
+          payable.map((t) => ({ freightAmount: t.freightAmount })),
           setting,
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],
         )
 
-        return { driver, setting, baseSetting, trips: tripsWithReadiness, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, duplicateTripIds }
+        return { driver, setting, baseSetting, trips: tripsWithReadiness, fuel, fuelTxns, deductions: ded, oneOffs, credits: driverCredits, debits: driverDebits, fixedDebits, statement, heldTrips: held, heldFreight, duplicateTripIds }
       })
       .filter((r): r is OwnerOperatorPayRow => r !== null)
       .sort((a, b) => a.driver.name.localeCompare(b.driver.name))
-  }, [settings, drivers, loads, customers, locations, podLoadIds, deductions, credits, fuelTxs, periodStart, prevStart, end])
+  }, [settings, drivers, loads, customers, locations, podIndex, podsKnown, manualByLoadId, deductions, credits, fuelTxs, periodStart, prevStart, end])
 
   const unconfigured = useMemo(() => {
     const configured = new Set(
@@ -300,7 +378,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
   }, [])
 
   return {
-    loading, error, rows, unconfigured, refresh,
+    loading, error, podsKnown, rows, unconfigured, refresh,
     saveSetting, addDeduction, removeDeduction,
     addCredit, updateCredit, removeCredit,
   }
