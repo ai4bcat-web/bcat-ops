@@ -861,7 +861,7 @@ export async function writeComplianceAudit(entry: {
  * kill switch (default PAUSED) and no-ops while paused, so callers always succeed.
  */
 export async function sendOnboardingEmail(args: {
-  type: 'invite' | 'rejected' | 'declined' | 'complete'
+  type: 'invite' | 'appInvite' | 'rejected' | 'declined' | 'complete'
   driverId?: string
   inviteId?: string
   itemLabel?: string
@@ -877,6 +877,31 @@ export async function sendOnboardingEmail(args: {
   } catch (err) {
     console.error('[sendOnboardingEmail] failed', err)
   }
+}
+
+/**
+ * Email a hired driver a link to set up their driver-app sign-in.
+ *
+ * Unlike `sendOnboardingEmail` this one THROWS. It sits behind a button a person
+ * presses and then watches, so a silent failure would leave someone certain an
+ * email went out when none did. The caller reports the error.
+ *
+ * Returns true only when SES actually accepted the message.
+ */
+export async function sendDriverAppInvite(inviteId: string): Promise<boolean> {
+  const data = await gql<{ sendOnboardingEmail: unknown }>(
+    `mutation ($type: String!, $inviteId: String, $portalBaseUrl: String) {
+      sendOnboardingEmail(type: $type, inviteId: $inviteId, portalBaseUrl: $portalBaseUrl)
+    }`,
+    {
+      type: 'appInvite',
+      inviteId,
+      portalBaseUrl: typeof window !== 'undefined' ? window.location.origin : '',
+    },
+  )
+  const res = data.sendOnboardingEmail
+  const parsed = typeof res === 'string' ? (JSON.parse(res) as { sent?: boolean }) : (res as { sent?: boolean } | null)
+  return parsed?.sent === true
 }
 
 // ── S3 document storage ─────────────────────────────────────────────────────────

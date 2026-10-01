@@ -21,7 +21,7 @@ const INVITE_TABLE = process.env.INVITE_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const SETTINGS_TABLE = process.env.SETTINGS_TABLE_NAME!
 
-type EmailType = 'invite' | 'rejected' | 'declined' | 'complete'
+type EmailType = 'invite' | 'appInvite' | 'rejected' | 'declined' | 'complete'
 
 interface Args {
   type: EmailType
@@ -32,13 +32,30 @@ interface Args {
   portalBaseUrl?: string
 }
 
+/**
+ * First row matching a filter.
+ *
+ * Pages to the end rather than reading one page. DynamoDB applies a FilterExpression
+ * AFTER reading a page, so a single page of a table with more rows than the page holds
+ * returns nothing at all and the caller sees "not found" for a row that exists. Capped
+ * so a runaway table cannot hang the Lambda.
+ */
 async function scanFirst(table: string, filter: string, names: Record<string, string>, values: Record<string, unknown>) {
-  const res = await ddb.send(new ScanCommand({
-    TableName: table, FilterExpression: filter,
-    ExpressionAttributeNames: Object.keys(names).length ? names : undefined,
-    ExpressionAttributeValues: values, Limit: 25,
-  }))
-  return (res.Items ?? [])[0] as Record<string, unknown> | undefined
+  let startKey: Record<string, unknown> | undefined
+  for (let page = 0; page < 40; page++) {
+    const res = await ddb.send(new ScanCommand({
+      TableName: table, FilterExpression: filter,
+      ExpressionAttributeNames: Object.keys(names).length ? names : undefined,
+      ExpressionAttributeValues: values,
+      ExclusiveStartKey: startKey,
+    }))
+    const hit = (res.Items ?? [])[0] as Record<string, unknown> | undefined
+    if (hit) return hit
+    if (!res.LastEvaluatedKey) return undefined
+    startKey = res.LastEvaluatedKey
+  }
+  console.warn('[onboarding-emailer] scan hit the page cap without a match', { table, filter })
+  return undefined
 }
 
 async function portalEmailsPaused(): Promise<boolean> {
@@ -63,6 +80,28 @@ ${ctx.link}
 You'll fill out your employment application and upload a few documents — most drivers finish in about 20 minutes on a phone.
 
 ${ctx.expiresAt ? `This link is valid until ${ctx.expiresAt}.` : ''}
+
+If you have any questions, just reply to this email.
+
+— Ivan Cartage`,
+      }
+    case 'appInvite':
+      // A different thing from 'invite' above: that one starts the hiring paperwork,
+      // this one gives an already-hired driver a sign-in for the driver app. The link
+      // goes to the signup page with their email prefilled; the PreSignUp roster gate
+      // is what actually decides who may create an account, so the link needs no token.
+      return {
+        subject: 'Set up your Ivan Cartage driver sign-in',
+        text:
+`Hi ${ctx.firstName},
+
+Here's your sign-in for the Ivan Cartage driver app. Set a password using the link below:
+
+${ctx.link}
+
+Use this email address as your username. Once your password is set we'll send you a second email with the link to add the app to your phone's home screen.
+
+In the app you can scan rate confirmations and PODs, mark a load en route, on site or delivered, and see your settlements.
 
 If you have any questions, just reply to this email.
 
@@ -121,7 +160,10 @@ export const handler = async (event: { arguments: Args }) => {
   const { type, driverId, inviteId, itemLabel, reason, portalBaseUrl } = event.arguments
   console.log('[onboarding-emailer]', { type, driverId, inviteId })
 
-  if (await portalEmailsPaused()) {
+  // The pause switch exists to hold back the automated hiring-portal emails while
+  // templates are verified in prod. An app sign-in invite is pressed by a person, for
+  // one driver, and is expected to send — holding it back would look like a dead button.
+  if (type !== 'appInvite' && (await portalEmailsPaused())) {
     console.log('[onboarding-emailer] portal emails are PAUSED — skipping send')
     return { sent: false, paused: true }
   }
@@ -144,7 +186,12 @@ export const handler = async (event: { arguments: Args }) => {
   // Prefer the deployed prod origin (PORTAL_BASE_URL) so links never point at a caller's
   // localhost dev server. Fall back to the caller-supplied origin only if the env is unset.
   const base = (process.env.PORTAL_BASE_URL || portalBaseUrl || '').replace(/\/+$/, '')
-  const link = invite?.token ? `${base}/onboard/${invite.token}` : base
+  const link =
+    type === 'appInvite'
+      ? `${base}/driver/signup?email=${encodeURIComponent(to)}`
+      : invite?.token
+        ? `${base}/onboard/${invite.token}`
+        : base
   const expiresAt = invite?.expiresAt ? new Date(String(invite.expiresAt)).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : undefined
 
   const { subject, text } = buildEmail(type, { firstName, link, expiresAt, itemLabel, reason })

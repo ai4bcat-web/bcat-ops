@@ -1462,12 +1462,15 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(userManagement)),
 
-  // Send a driver-facing onboarding email via SES (invite / rejected / complete).
-  // Honors the portalEmailsPaused kill switch (default PAUSED) inside the Lambda.
+  // Send a driver-facing onboarding email via SES.
+  // 'invite' starts the hiring paperwork; 'appInvite' gives an already-hired driver a
+  // link to set up their driver-app sign-in. Honors the portalEmailsPaused kill switch
+  // (default PAUSED) inside the Lambda for every type EXCEPT appInvite, which a person
+  // presses by hand for one driver and therefore must actually send.
   sendOnboardingEmail: a
     .mutation()
     .arguments({
-      type:          a.string().required(),   // 'invite' | 'rejected' | 'complete'
+      type:          a.string().required(),   // 'invite' | 'appInvite' | 'rejected' | 'declined' | 'complete'
       driverId:      a.string(),
       inviteId:      a.string(),
       itemLabel:     a.string(),

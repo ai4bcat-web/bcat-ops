@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,9 +10,13 @@ type Step = 'form' | 'confirm' | 'done'
 
 export default function DriverSignupPage() {
   const navigate = useNavigate()
+  const [search] = useSearchParams()
   const { signUp, confirmSignUp, resendConfirmationCode, signIn } = useDriverAuth()
 
-  const [email, setEmail] = useState('')
+  // The invite email links here with ?email= already filled in. A driver typing a
+  // different address than the one on their roster row would be rejected by the
+  // PreSignUp gate with no clue why, so prefill rather than ask them to remember.
+  const [email, setEmail] = useState(() => (search.get('email') ?? '').trim().toLowerCase())
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
