@@ -18,6 +18,7 @@ import { useLoads } from '@/hooks/useLoads'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadPods } from '@/features/pods/LoadPods'
+import { LoadDriverDocs } from './LoadDriverDocs'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
 import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm } from '@/lib/apiClient'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
@@ -1489,6 +1490,9 @@ export function LoadDrawer() {
                     <span className="text-xs">Click to upload rate confirmation</span>
                   </button>
                 )}
+                {/* A rate con the driver scanned does not write Load.rateConfirmKey, so
+                    without this the slot above looked empty while the document existed. */}
+                <LoadDriverDocs loadId={load.id} proNumber={load.aljexId} kind="RATECON" />
               </div>
 
               {/* Upload POD on the delivery driver's behalf */}
@@ -1509,10 +1513,13 @@ export function LoadDrawer() {
                 </div>
               )}
 
-              {/* PODs linked to this shipment */}
+              {/* PODs linked to this shipment. Two stores: the ones JobsDone received and
+                  a human linked, and the ones a driver scanned or staff uploaded. Reading
+                  only the first meant a driver's POD was invisible here. */}
               {load && (
-                <div className="pt-4 border-t border-border mt-4">
+                <div className="pt-4 border-t border-border mt-4 space-y-3">
                   <LoadPods loadId={load.id} />
+                  <LoadDriverDocs loadId={load.id} proNumber={load.aljexId} kind="POD" />
                 </div>
               )}
             </div>
