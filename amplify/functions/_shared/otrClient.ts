@@ -294,6 +294,10 @@ export class OtrClient {
   /**
    * Attach a document to an invoice. `file` is raw bytes — the caller reads them
    * from S3 so this module never learns about buckets.
+   *
+   * OTR accepts PDF, PNG and JPEG only, and documents 400, 401 and 413 as the ways this
+   * fails. A 500 is not in their list; the two we have seen are logged with whatever they
+   * said, because an undocumented failure is a conversation with them, not a guess here.
    */
   async uploadDocument(opts: {
     invoiceId: number | string
@@ -329,12 +333,22 @@ export class OtrClient {
       contentType: opts.contentType,
     })
 
+    /*
+     * Field names and order both follow OTR's own documented example exactly:
+     *   file, DocumentType, invoiceid, SendEmail, InvoiceDocTypes
+     * (https://docs.otrsolutions.com/reference/upload-file)
+     *
+     * The names were already right. The ORDER was not, and a streaming multipart parser
+     * that expects the invoice id before it starts consuming the file part is a plausible
+     * reading of two undocumented 500s — one of which was a null dereference inside their
+     * handler. Matching the documented example costs nothing and removes the question.
+     */
     const form = new FormData()
     form.append('file', blob, opts.fileName)
-    form.append('invoiceid', String(opts.invoiceId))
-    form.append('InvoiceDocTypes', String(opts.docType))
-    form.append('SendEmail', opts.sendEmail ? 'true' : 'false')
     form.append('DocumentType', 'invoice-file-upload')
+    form.append('invoiceid', String(opts.invoiceId))
+    form.append('SendEmail', opts.sendEmail ? 'true' : 'false')
+    form.append('InvoiceDocTypes', String(opts.docType))
 
     // Content-Type is deliberately unset: fetch adds the multipart boundary.
     const res = await this.request('/documents/upload', {
