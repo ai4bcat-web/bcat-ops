@@ -118,13 +118,50 @@ describe('OtrPanel', () => {
     expect(screen.getByLabelText('Destination ZIP for PRO 13364')).toHaveValue('48201')
   })
 
-  it('keeps broker MC on its own control, because it saves to the customer', () => {
-    // A per-row override would fix this invoice and leave the broker's next one blank.
+  it('takes the broker MC in the field grid, and saves it to the customer', async () => {
+    // It sits with the other fields now rather than on a control of its own — but it still
+    // saves onto the CUSTOMER. A per-row override would fix this invoice and leave the
+    // broker's next one blank.
     const r = readiness({ payload: { ...ALL_FIELDS, BrokerMC: undefined }, missingFields: ['BrokerMC'] })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: 'Save MC' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Override Broker MC/ })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Broker MC for PRO 13364'), { target: { value: '123456' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Broker MC for PRO 13364' }))
+
+    await waitFor(() => expect(setBrokerMc).toHaveBeenCalledWith('13364', '123456'))
+    expect(setFactoringManualFields).not.toHaveBeenCalled()
+  })
+
+  it('shows the customer but never offers to type one', () => {
+    /*
+     * The MC is the identifier; the name is what it resolves to. A typed name that
+     * disagrees with the MC reads as confirmed and is not, and the MC is what decides
+     * who actually gets billed.
+     */
+    const r = readiness({
+      payload: ALL_FIELDS,
+      customerName: 'AmeriFreight Systems LLC',
+      customerConfirmed: true,
+    })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+
+    expect(screen.getByText('AmeriFreight Systems LLC')).toBeInTheDocument()
+    expect(screen.getByText('(from the MC)')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/Customer for PRO/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Override Customer/ })).not.toBeInTheDocument()
+  })
+
+  it('points at the MC when there is no customer yet', () => {
+    const r = readiness({ payload: { ...ALL_FIELDS, BrokerMC: undefined }, missingFields: ['BrokerMC'] })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+    expect(screen.getByText(/enter the MC/)).toBeInTheDocument()
+  })
+
+  it('marks a name that came off the load as unconfirmed', () => {
+    // A tender often names a shipper or an agent rather than the broker being factored.
+    const r = readiness({ payload: ALL_FIELDS, customerName: 'MILWOOD', customerConfirmed: false })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+    expect(screen.getByText('(from the load, unconfirmed)')).toBeInTheDocument()
   })
 
   it('will not submit while a document is missing, and says which', () => {

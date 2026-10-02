@@ -43,6 +43,8 @@ import type { FactoringItem } from '@/types'
  */
 const FIELD_HINT: Partial<Record<OtrRequiredField, { placeholder: string; inputMode?: 'numeric' | 'decimal' }>> = {
   InvoiceNo:     { placeholder: 'PRO number', inputMode: 'numeric' },
+  // The one field that identifies the broker. Typing it is what fills in the customer.
+  BrokerMC:      { placeholder: 'Broker MC number', inputMode: 'numeric' },
   PoNumber:      { placeholder: 'PO number' },
   InvoiceAmount: { placeholder: 'Amount in dollars', inputMode: 'decimal' },
   InvoiceDate:   { placeholder: 'YYYY-MM-DD' },
@@ -77,7 +79,6 @@ interface Props {
 
 export function OtrPanel({ item, onChanged }: Props) {
   const [busy, setBusy] = useState<string | null>(null)
-  const [mc, setMc] = useState('')
 
   const readiness = (item.otrReadiness as OtrReadiness | null) ?? null
   const submitted = Boolean(item.otrInvoiceId)
@@ -205,22 +206,12 @@ export function OtrPanel({ item, onChanged }: Props) {
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
         {/*
-          * The customer leads, because it is the field a person checks first: an MC is
-          * nine digits nobody recognises, and the name is how anyone knows whether the
-          * row is the one they are looking for. It is typeable like the rest \u2014 a tender
-          * often names a shipper or an agent rather than the broker being factored.
+          * The customer leads, because it is the field a person checks first \u2014 but it is
+          * READ ONLY. Nobody should be typing a broker's name: the MC is the identifier,
+          * the name is what the MC resolves to, and a typed name that disagrees with the
+          * MC is worse than no name at all. Enter the MC beside it and this fills in.
           */}
-        <FieldRow
-          field="CustomerName"
-          label="Customer"
-          value={readiness.customerName ?? undefined}
-          source={manual.CustomerName ? 'manual' : readiness.customerConfirmed ? 'broker' : 'load'}
-          pro={item.proNumber}
-          busy={busy !== null}
-          saving={busy === 'field:CustomerName'}
-          editable
-          onSave={(v) => void saveField('CustomerName', 'Customer', v)}
-        />
+        <CustomerRow readiness={readiness} />
         {OTR_REQUIRED_FIELDS.map((f) => (
           <FieldRow
             key={f}
@@ -230,10 +221,18 @@ export function OtrPanel({ item, onChanged }: Props) {
             source={readiness.sources?.[f]}
             pro={item.proNumber}
             busy={busy !== null}
-            saving={busy === `field:${f}`}
-            /* Broker MC has its own control below, because it saves to the customer. */
-            editable={f !== 'BrokerMC'}
-            onSave={(v) => void saveField(f, OTR_FIELD_LABEL[f], v)}
+            saving={busy === (f === 'BrokerMC' ? 'mc' : `field:${f}`)}
+            editable
+            /*
+             * Broker MC saves onto the CUSTOMER, not as a row override: it is entered once
+             * per broker, not once per invoice, and saving it is what resolves the name in
+             * the row above. Everything else is a per-row override.
+             */
+            onSave={(v) =>
+              f === 'BrokerMC'
+                ? void run('mc', () => setBrokerMc(item.id, v), 'Broker MC saved \u2014 customer resolved from it')
+                : void saveField(f, OTR_FIELD_LABEL[f], v)
+            }
           />
         ))}
       </div>
@@ -265,30 +264,6 @@ export function OtrPanel({ item, onChanged }: Props) {
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {needsMc && (
-          <form
-            className="flex items-center gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const v = mc.trim()
-              if (!v) return
-              void run('mc', () => setBrokerMc(item.id, v), 'Broker MC saved to the customer')
-            }}
-          >
-            <Input
-              value={mc}
-              onChange={(e) => setMc(e.target.value)}
-              placeholder="Broker MC"
-              inputMode="numeric"
-              className="h-8 w-32 text-xs"
-              aria-label={`Broker MC for PRO ${item.proNumber}`}
-            />
-            <Button type="submit" size="sm" variant="outline" disabled={busy !== null || !mc.trim()}>
-              {busy === 'mc' ? <Loader2 className="size-3.5 animate-spin" /> : 'Save MC'}
-            </Button>
-          </form>
-        )}
-
         <Button
           size="sm"
           variant="outline"
@@ -355,6 +330,44 @@ export function OtrPanel({ item, onChanged }: Props) {
  * blank, and a way to correct a value someone already typed, which is where mistakes
  * actually live.
  */
+/**
+ * Who the invoice bills. Shown, never typed.
+ *
+ * The MC is the identifier and the name is what it resolves to — from the broker record
+ * that MC belongs to, and from OTR's own answer when their broker check supplies one. A
+ * name someone typed that disagrees with the MC is worse than no name: it reads as
+ * confirmed and is not, and the MC is what actually decides who gets billed.
+ *
+ * So the three states say exactly how much to trust what is on screen.
+ */
+function CustomerRow({ readiness }: { readiness: OtrReadiness }) {
+  const name = (readiness.customerName ?? '').trim()
+  const confirmed = !!readiness.customerConfirmed
+
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-muted-foreground">Customer</span>
+      {!name ? (
+        <span className="text-muted-foreground" title="Enter the broker MC and the customer follows">
+          — enter the MC
+        </span>
+      ) : (
+        <span className="flex min-w-0 items-baseline gap-1">
+          <span
+            className={`truncate ${confirmed ? 'font-medium text-foreground' : 'italic text-muted-foreground'}`}
+            title={name}
+          >
+            {name}
+          </span>
+          <span className="shrink-0 text-[10px] text-muted-foreground">
+            ({confirmed ? 'from the MC' : 'from the load, unconfirmed'})
+          </span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function FieldRow({
   field, label, value, source, pro, busy, saving, editable, onSave,
 }: {
