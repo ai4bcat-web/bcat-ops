@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { rememberScanIntent, forgetScanIntent } from './scanIntent'
 import {
   AlertCircle,
   ArrowLeft,
@@ -88,6 +89,23 @@ export default function ScanPage() {
    * app already knows which load they are running, so it fills it in. It is still an
    * ordinary editable field: a driver sending a POD for something else just types over it.
    */
+  /*
+   * Write down what this scan is for, so a relaunch can come back to it.
+   *
+   * iOS discards the web view while the phone's file picker is in front of it, and a
+   * home-screen app relaunches at start_url — which lands on the settlement. The driver
+   * sees their scan screen flash and vanish. The pages cannot survive that (they are
+   * Blobs), but the load and the document kind can.
+   */
+  useEffect(() => {
+    if (!initialKind) return
+    rememberScanIntent({
+      kind: initialKind === 'POD' ? 'pod' : 'ratecon',
+      pro: initialPro || undefined,
+      submissionId: initialSubmissionId || undefined,
+    })
+  }, [initialKind, initialPro, initialSubmissionId])
+
   useEffect(() => {
     let cancelled = false
     void fetchCurrentLoad()
@@ -174,6 +192,8 @@ export default function ScanPage() {
       }
       setSentUnattached(kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim())
       setResumeFromId(null)
+      // Done with it: a relaunch must not drop them back into a job they finished.
+      forgetScanIntent()
       setPhase('success')
     } catch (err) {
       if (err instanceof ResumableDriverApiError) {
@@ -201,6 +221,7 @@ export default function ScanPage() {
     setError(null)
     setSubmissions(null)
     setPhase('choose')
+    forgetScanIntent()
     navigate('/driver/scan', { replace: true })
   }, [navigate])
 
@@ -380,6 +401,8 @@ export default function ScanPage() {
           if (kind === 'POD' && !selectedSubmissionId && !initialPro) {
             setPhase('select')
           } else {
+            // Backing out on purpose is not an interruption to resume.
+            forgetScanIntent()
             navigate('/driver/settlement')
           }
         }}

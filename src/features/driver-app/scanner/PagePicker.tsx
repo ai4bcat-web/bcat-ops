@@ -100,7 +100,12 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
   )
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background p-4">
+    <div
+      className="flex min-h-dvh flex-col bg-background p-4"
+      /* The heading sat under the phone's status bar — the clock and the battery drew
+         straight over it, and Cancel shared space with them. Padded past the inset. */
+      style={{ paddingTop: 'max(env(safe-area-inset-top), 1rem)' }}
+    >
       <div className="mb-4 flex items-center justify-between gap-2">
         <h1 className="text-lg font-semibold">Add the document</h1>
         {onCancel && (

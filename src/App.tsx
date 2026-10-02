@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { readScanIntent, scanIntentPath } from '@/features/driver-app/scanner/scanIntent'
 import { Toaster } from 'sonner'
 import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -58,6 +59,22 @@ function DriverLoading() {
   )
 }
 
+/**
+ * Where the driver app lands when it is opened cold.
+ *
+ * `start_url` is `/driver`, and this used to send everyone to the settlement. That is right
+ * for an ordinary launch and wrong for the one that matters: iOS discards the web view
+ * while the phone's file picker is open, so a driver who taps Send on a load and goes to
+ * pick their POD gets relaunched here — and watched their scan screen flash and vanish.
+ *
+ * If they were part-way through sending a document, they go back to it, on the right load.
+ * Otherwise, the settlement as before.
+ */
+function DriverLanding() {
+  const intent = readScanIntent()
+  return <Navigate to={intent ? scanIntentPath(intent) : '/driver/settlement'} replace />
+}
+
 function DriverRoutes() {
   const { loading, isAuthenticated } = useDriverAuth()
 
@@ -73,7 +90,8 @@ function DriverRoutes() {
         <Route element={<DriverApp />}>
           {/* The settlement is the driver's home: their pay and every document
               action live there. Scanning is reached from a load, not landed on. */}
-          <Route index element={<Navigate to="/driver/settlement" replace />} />
+          {/* Where a relaunch lands. See DriverLanding. */}
+          <Route index element={<DriverLanding />} />
           <Route path="scan" element={<ScanPage />} />
           <Route path="loads" element={<SubmissionsPage />} />
           <Route path="settlement" element={<SettlementPage />} />
