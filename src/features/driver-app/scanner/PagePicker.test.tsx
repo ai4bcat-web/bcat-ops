@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 /**
- * There is no in-app camera any more. A live-video capture screen was tried and gave
- * drivers a black screen on real phones — the worst failure this app can have, since it
- * leaves someone at a dock unable to send a signed POD at all.
+ * Upload only. No viewfinder, and no shortcut into the phone's camera either.
  *
- * What replaces it is the phone's own camera and file picker, which is also how a scanner
- * app hands over a multi-page PDF. These tests pin that both routes exist, that a PDF is
- * taken whole, and that nothing can be sent empty.
+ * The live-video screen gave drivers a black screen on real phones. The straight-to-camera
+ * shortcut that replaced it went too: a photo taken in the moment is the worst version of
+ * a POD, since nothing crops it, straightens it or checks it is readable first. The scanner
+ * app already on the phone does all of that and produces one PDF.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -41,24 +40,25 @@ beforeEach(() => {
 })
 
 describe('PagePicker', () => {
-  it('offers the phone camera and a file, and never a live viewfinder', () => {
+  it('offers one route only: upload', () => {
     render(<PagePicker onDone={vi.fn()} onCancel={vi.fn()} />)
 
-    expect(screen.getByRole('button', { name: /Take a photo/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Choose a file or scan/ })).toBeInTheDocument()
-    // The whole point: no <video>, so there is nothing that can render black.
+    expect(screen.getByRole('button', { name: /Upload the document/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /photo/i })).toBeNull()
+    // No <video>, so there is nothing that can render black.
     expect(document.querySelector('video')).toBeNull()
   })
 
-  it('opens the phone camera directly rather than a photo library', () => {
+  it('never shortcuts straight into the camera', () => {
+    // capture="environment" opens the camera with no chance to crop or check the page.
     render(<PagePicker onDone={vi.fn()} />)
-    expect(screen.getByTestId('camera-input')).toHaveAttribute('capture', 'environment')
+    expect(screen.queryByTestId('camera-input')).toBeNull()
     expect(screen.getByTestId('library-input')).not.toHaveAttribute('capture')
   })
 
-  it('points drivers at a scanner app for multi-page documents', () => {
+  it('tells drivers to scan it first', () => {
     render(<PagePicker onDone={vi.fn()} />)
-    expect(screen.getByText(/use the scanner app on your phone/i)).toBeInTheDocument()
+    expect(screen.getByText(/Scan it first with the app on your phone/i)).toBeInTheDocument()
   })
 
   it('cannot send nothing', () => {
@@ -82,7 +82,7 @@ describe('PagePicker', () => {
   it('accepts several pages and lets one be removed', async () => {
     render(<PagePicker onDone={vi.fn()} />)
 
-    pick('camera-input', [pdf('a.pdf'), pdf('b.pdf')])
+    pick('library-input', [pdf('a.pdf'), pdf('b.pdf')])
     await waitFor(() => expect(screen.getByText('2 pages ready')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: 'Remove page 1' }))
@@ -96,7 +96,7 @@ describe('PagePicker', () => {
 
     await waitFor(() => expect(screen.getByText(`${MAX_SCAN_PAGES} pages ready`)).toBeInTheDocument())
     expect(screen.getByText(/most pages we can send at once/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Take a photo/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Upload the document/ })).toBeDisabled()
   })
 
   it('can be backed out of', () => {

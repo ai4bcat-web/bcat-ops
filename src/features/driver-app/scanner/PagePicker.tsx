@@ -1,20 +1,21 @@
 /**
  * Add the pages of a document, from the phone's own camera or its files.
  *
- * There is deliberately NO in-app camera. A live-video capture screen was tried and did
- * not work reliably on real phones — a driver at a dock got a black screen and no way to
- * send paperwork, which is the worst possible failure for this app. The phone's own camera
- * app and any scanner app a driver already uses are better at this than we will be: they
- * handle focus, lighting, cropping and multi-page PDFs, and they are the tools drivers
- * already know.
+ * Upload only. There is no camera here at all — not a live viewfinder, and not a
+ * shortcut into the phone's camera either.
  *
- * So this screen takes files. `capture="environment"` on the first input opens the phone's
- * camera directly, which covers a quick one-page photo; anything more — a multi-page POD, a
- * crooked page worth re-cropping — is better scanned in a scanner app and picked from
- * files as a single PDF.
+ * A live-video capture screen was tried and gave drivers a black screen on real phones.
+ * A straight-to-camera shortcut replaced it and was removed too: a photo taken in the
+ * moment is the worst version of a POD, because nothing crops it, straightens it or
+ * checks it is readable before it is sent. The scanner app already on the phone does all
+ * of that and produces one PDF.
+ *
+ * So a driver picks a file. Their phone still offers its camera inside its own file
+ * sheet if they want it — that is the operating system's choice, not a path this screen
+ * promotes.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { Camera, FileText, ScanLine, Trash2, Upload, X } from 'lucide-react'
+import { FileText, ScanLine, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { preparePage } from './imagePrep'
@@ -42,7 +43,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerProps) {
-  const cameraInputRef = useRef<HTMLInputElement>(null)
   const libraryInputRef = useRef<HTMLInputElement>(null)
 
   const [pages, setPages] = useState<PendingPage[]>(initialPages)
@@ -110,38 +110,24 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
         )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        <Button
-          type="button"
-          size="lg"
-          className="h-16 w-full justify-start gap-3 text-base"
-          disabled={busy || atMax}
-          onClick={() => cameraInputRef.current?.click()}
-        >
-          <Camera className="h-5 w-5" />
-          Take a photo
-        </Button>
-
-        <Button
-          type="button"
-          size="lg"
-          variant="outline"
-          className="h-16 w-full justify-start gap-3 text-base"
-          disabled={busy || atMax}
-          onClick={() => libraryInputRef.current?.click()}
-        >
-          <Upload className="h-5 w-5" />
-          Choose a file or scan
-        </Button>
-      </div>
+      <Button
+        type="button"
+        size="lg"
+        className="h-16 w-full justify-start gap-3 text-base"
+        disabled={busy || atMax}
+        onClick={() => libraryInputRef.current?.click()}
+      >
+        <Upload className="h-5 w-5" />
+        Upload the document
+      </Button>
 
       {/* Said once, where it is useful, rather than left for someone to work out. */}
       <div className="mt-4 flex items-start gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
         <ScanLine className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
-          For more than one page, or a page that needs straightening, use the scanner app on
-          your phone (Notes on iPhone, Google Drive on Android) and pick the PDF it makes.
-          It reads far better than a photo.
+          Scan it first with the app on your phone — Notes on iPhone, Google Drive on
+          Android — then pick the PDF it makes. It crops and straightens the page, handles
+          more than one page, and reads far better than a photo.
         </p>
       </div>
 
@@ -179,16 +165,6 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
         </Button>
       </div>
 
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept={SCAN_ACCEPTED_TYPES_STRING}
-        capture="environment"
-        multiple
-        className="hidden"
-        data-testid="camera-input"
-        onChange={(e) => void onPick(e)}
-      />
       <input
         ref={libraryInputRef}
         type="file"
