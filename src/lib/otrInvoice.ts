@@ -111,13 +111,22 @@ export interface AssembleInput {
   /** Broker MC from the Customer record — entered once per broker by a human. */
   customerMcNumber?: string | null
   /**
-   * The broker's name from the directory record the MC belongs to.
+   * The name on the broker's directory record.
    *
    * Never sent to OTR — they resolve the broker from the MC themselves — but the office
    * needs it on screen, because an MC is nine digits nobody recognises and "is 14538 the
    * AmeriFreight one?" is the question that actually gets asked about a factoring row.
    */
   customerName?: string | null
+  /**
+   * True only when that name came from looking the MC UP somewhere that knows the answer.
+   *
+   * Nothing in this system does that today. A directory record gets its name from whatever
+   * the load was booked under and its MC from whoever typed one, which makes the two facts
+   * independent — MC 20313 was stamped onto a record named AMERIFREIGHT SYSTEMS LLC and the
+   * row then announced the name as coming "from the MC". It had not.
+   */
+  customerNameVerified?: boolean | null
   originLocation?: LocationSlice | null
   destinationLocation?: LocationSlice | null
   /** Geocoded fallbacks, only consulted when everything above is blank. */
@@ -143,14 +152,20 @@ export interface OtrReadiness {
   /** Which source supplied each resolved field. */
   sources: Partial<Record<OtrRequiredField, OtrFieldSource>>
   /**
-   * Who the invoice bills, for the humans. Set once an MC resolves, from the directory
-   * record that MC belongs to; the load's own customer string fills in before that, and
-   * `customerConfirmed` says which of the two you are looking at. Not part of the OTR
-   * payload and never counted as a missing field.
+   * Who the invoice bills, for the humans. Not part of the OTR payload and never counted
+   * as a missing field.
    */
   customerName?: string | null
-  /** True when the name came from the broker record the MC identifies. */
-  customerConfirmed?: boolean
+  /**
+   * Where that name came from, so the screen can say how far to trust it.
+   *
+   * 'verified' — looked up from the MC somewhere that knows. Nothing does this yet.
+   * 'entered'  — a person typed it against this row.
+   * 'directory'— the broker record this load points at. Its name and its MC were entered
+   *              separately, so the two agreeing is not evidence of anything.
+   * 'load'     — whatever the load was booked under, which is often a shipper or an agent.
+   */
+  customerSource?: 'verified' | 'entered' | 'directory' | 'load' | null
   /** Required fields that resolved to nothing. */
   missingFields: OtrRequiredField[]
   /** Documents OTR expects alongside the invoice. */
@@ -408,18 +423,36 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
    * best guess we have, and it is shown as a guess: a tender can name a shipper or an
    * agent rather than the broker whose MC we will actually factor against.
    */
+  /*
+   * Where the name came from, said plainly.
+   *
+   * This used to report "confirmed" whenever a directory record carried both a name and an
+   * MC — which is every record, because setMc creates one from the load's customer string
+   * and stamps the MC on it. The row then told people the name had been resolved FROM the
+   * MC. It had not, and a wrong broker that reads as verified is worse than one that reads
+   * as a guess.
+   */
   const typedName = clean(m.CustomerName)
-  const confirmed =
-    typedName !== undefined ||
-    (clean(input.customerMcNumber) !== undefined && clean(input.customerName) !== undefined)
-  const customerName = typedName ?? clean(input.customerName) ?? clean(load.customer) ?? null
+  const directoryName = clean(input.customerName)
+  const loadName = clean(load.customer)
+  const customerName = typedName ?? directoryName ?? loadName ?? null
+  const customerSource: OtrReadiness['customerSource'] =
+    customerName === undefined || customerName === null
+      ? null
+      : typedName !== undefined
+        ? 'entered'
+        : directoryName !== undefined
+          ? input.customerNameVerified === true
+            ? 'verified'
+            : 'directory'
+          : 'load'
 
   return {
     ready: missingFields.length === 0 && missingDocuments.length === 0,
     payload,
     sources,
     customerName: customerName ?? null,
-    customerConfirmed: confirmed,
+    customerSource,
     missingFields,
     missingDocuments,
     warnings,

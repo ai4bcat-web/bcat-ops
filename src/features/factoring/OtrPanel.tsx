@@ -209,12 +209,17 @@ export function OtrPanel({ item, onChanged }: Props) {
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
         {/*
-          * The customer leads, because it is the field a person checks first \u2014 but it is
-          * READ ONLY. Nobody should be typing a broker's name: the MC is the identifier,
-          * the name is what the MC resolves to, and a typed name that disagrees with the
-          * MC is worse than no name at all. Enter the MC beside it and this fills in.
+          * The customer leads, because it is the field a person checks first. Nothing in
+          * this system looks an MC up, so a person correcting it is the only way a row
+          * ends up naming the right broker.
           */}
-        <CustomerRow readiness={readiness} />
+        <CustomerRow
+          readiness={readiness}
+          pro={item.proNumber}
+          busy={busy !== null}
+          saving={busy === 'field:CustomerName'}
+          onSave={(v) => void saveField('CustomerName', 'Customer', v)}
+        />
         {OTR_REQUIRED_FIELDS.map((f) => (
           <FieldRow
             key={f}
@@ -365,39 +370,99 @@ export function OtrPanel({ item, onChanged }: Props) {
  * actually live.
  */
 /**
- * Who the invoice bills. Shown, never typed.
+ * Who the invoice bills, and how far to trust it.
  *
- * The MC is the identifier and the name is what it resolves to — from the broker record
- * that MC belongs to, and from OTR's own answer when their broker check supplies one. A
- * name someone typed that disagrees with the MC is worse than no name: it reads as
- * confirmed and is not, and the MC is what actually decides who gets billed.
+ * This was built on a belief that turned out to be false: that entering an MC resolved the
+ * name. Nothing looks an MC up. `setMc` creates a broker record FROM THE LOAD'S customer
+ * string and stamps the typed MC on it, so the name and the MC are independent facts that
+ * have never been checked against each other — and the row was reporting the result as
+ * "from the MC". MC 20313 went onto a record called AMERIFREIGHT SYSTEMS LLC and the queue
+ * announced it as confirmed; the broker is Wayfinder Logistics.
  *
- * So the three states say exactly how much to trust what is on screen.
+ * So the label now says where the name actually came from, and typing one is back: with no
+ * lookup anywhere, a person correcting it is the only way a row gets the right broker on
+ * it. A typed name reads as entered, never as verified.
  */
-function CustomerRow({ readiness }: { readiness: OtrReadiness }) {
-  const name = (readiness.customerName ?? '').trim()
-  const confirmed = !!readiness.customerConfirmed
+const SOURCE_NOTE: Record<string, string> = {
+  verified: 'looked up from the MC',
+  entered: 'entered here',
+  directory: 'broker record on this load, not checked against the MC',
+  load: 'from the load, often a shipper rather than the broker',
+}
 
+function CustomerRow({
+  readiness, pro, busy, saving, onSave,
+}: {
+  readiness: OtrReadiness
+  pro: string
+  busy: boolean
+  saving: boolean
+  onSave: (value: string) => void
+}) {
+  const name = (readiness.customerName ?? '').trim()
+  const source = readiness.customerSource ?? null
+  const [draft, setDraft] = useState('')
+  const [open, setOpen] = useState(false)
+
+  if (!name || open) {
+    return (
+      <form
+        className={`flex items-center gap-1.5 ${name ? '' : 'rounded-md bg-red-50 px-1.5 py-1'}`}
+        onSubmit={(e) => {
+          e.preventDefault()
+          onSave(draft)
+          setOpen(false)
+          setDraft('')
+        }}
+      >
+        <span className={`shrink-0 ${name ? 'text-muted-foreground' : 'font-semibold text-red-700'}`}>
+          Customer
+        </span>
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Who the invoice bills"
+          className={`h-7 min-w-0 flex-1 text-xs ${name ? '' : 'border-red-300 bg-white'}`}
+          aria-label={`Customer for PRO ${pro}`}
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          disabled={busy}
+          aria-label={`Save Customer for PRO ${pro}`}
+        >
+          {saving ? <Loader2 className="size-3 animate-spin" /> : 'Save'}
+        </Button>
+      </form>
+    )
+  }
+
+  const verified = source === 'verified'
   return (
     <div className="flex items-baseline justify-between gap-2">
       <span className="text-muted-foreground">Customer</span>
-      {!name ? (
-        <span className="text-muted-foreground" title="Enter the broker MC and the customer follows">
-          — enter the MC
+      <span className="flex min-w-0 items-baseline gap-1">
+        <span
+          className={`truncate ${verified ? 'font-medium text-foreground' : 'italic text-muted-foreground'}`}
+          title={name}
+        >
+          {name}
         </span>
-      ) : (
-        <span className="flex min-w-0 items-baseline gap-1">
-          <span
-            className={`truncate ${confirmed ? 'font-medium text-foreground' : 'italic text-muted-foreground'}`}
-            title={name}
-          >
-            {name}
-          </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground">
-            ({confirmed ? 'from the MC' : 'from the load, unconfirmed'})
-          </span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">
+          ({source ? SOURCE_NOTE[source] : 'unknown'})
         </span>
-      )}
+        <button
+          type="button"
+          className="shrink-0 text-[10px] font-semibold text-[var(--ds-blue,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
+          disabled={busy}
+          aria-label={`Correct the customer for PRO ${pro}`}
+          onClick={() => { setDraft(name); setOpen(true) }}
+        >
+          correct
+        </button>
+      </span>
     </div>
   )
 }

@@ -222,45 +222,62 @@ describe('assembleOtrInvoice', () => {
 })
 
 /**
- * The customer name is for humans, not for OTR — they resolve the broker from the MC and
- * never read a name from us. It still has to be right, because it is the only thing on a
- * factoring row that a person recognises, and a row attributed to the wrong broker is how
- * an invoice gets factored against the wrong account.
+ * Where the customer name came from.
+ *
+ * This used to report a boolean "confirmed", set whenever a broker record carried both a
+ * name and an MC. That is every record: setMc creates one from the LOAD'S customer string
+ * and stamps the typed MC on it, so the two facts are independent and have never been
+ * checked against each other. The row then told people the name came "from the MC".
+ *
+ * MC 20313 landed on a record named AMERIFREIGHT SYSTEMS LLC and the queue showed it as
+ * confirmed. The broker is Wayfinder Logistics. A wrong name that reads as verified is
+ * worse than one that reads as a guess, which is what these pin down.
  */
-describe('customer name on a factoring row', () => {
-  it('is the broker on file once the MC resolved it', () => {
+describe('where the customer name came from', () => {
+  it('is only verified when something actually looked the MC up', () => {
     const r = assembleOtrInvoice({
       load: { customer: 'AMERIFREIGHT SYSTEMS' },
-      customerMcNumber: '123456',
-      customerName: 'AmeriFreight Systems LLC',
+      customerMcNumber: '20313',
+      customerName: 'Wayfinder Logistics',
+      customerNameVerified: true,
     })
-    expect(r.customerName).toBe('AmeriFreight Systems LLC')
-    expect(r.customerConfirmed).toBe(true)
+    expect(r.customerName).toBe('Wayfinder Logistics')
+    expect(r.customerSource).toBe('verified')
   })
 
-  it('falls back to the load, and says it is not confirmed', () => {
-    // A tender often names a shipper or an agent rather than the broker being factored,
-    // so this is a starting point for the office, not an answer.
+  it('is NOT verified merely because the broker record also carries an MC', () => {
+    // The exact shape of the bug: both present, neither checked against the other.
+    const r = assembleOtrInvoice({
+      load: { customer: 'AMERIFREIGHT SYSTEMS' },
+      customerMcNumber: '20313',
+      customerName: 'AMERIFREIGHT SYSTEMS LLC',
+    })
+    expect(r.customerSource).toBe('directory')
+  })
+
+  it('falls back to the load, and says so', () => {
     const r = assembleOtrInvoice({ load: { customer: 'MILWOOD' } })
     expect(r.customerName).toBe('MILWOOD')
-    expect(r.customerConfirmed).toBe(false)
+    expect(r.customerSource).toBe('load')
   })
 
   it('is empty rather than a guess when nothing names a customer', () => {
     const r = assembleOtrInvoice({ load: {} })
     expect(r.customerName).toBeNull()
-    expect(r.customerConfirmed).toBe(false)
+    expect(r.customerSource).toBeNull()
   })
 
-  it('lets the office type over both, and counts that as confirmed', () => {
+  it('reads a typed name as entered, never as verified', () => {
+    // With no lookup anywhere, typing is the only way to correct a wrong broker — but a
+    // person asserting a name is not the same as having checked it.
     const r = assembleOtrInvoice({
-      load: { customer: 'MILWOOD' },
-      customerName: 'AmeriFreight Systems LLC',
-      customerMcNumber: '123456',
-      manual: { CustomerName: 'Test Broker' },
+      load: { customer: 'AMERIFREIGHT SYSTEMS' },
+      customerName: 'AMERIFREIGHT SYSTEMS LLC',
+      customerMcNumber: '20313',
+      manual: { CustomerName: 'Wayfinder Logistics' },
     })
-    expect(r.customerName).toBe('Test Broker')
-    expect(r.customerConfirmed).toBe(true)
+    expect(r.customerName).toBe('Wayfinder Logistics')
+    expect(r.customerSource).toBe('entered')
   })
 
   it('never becomes a required field, so it cannot block a submission', () => {

@@ -344,9 +344,10 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
     // Populated once the rate-con parser is extended; absent is handled.
     rateCon: (item.rateConExtract as RateConExtract) ?? null,
     customerMcNumber: resolvedCustomer?.mcNumber as string | undefined,
-    // The broker behind the MC, for the queue's customer column. Falls back inside
-    // assembleOtrInvoice to the load's own customer string, marked unconfirmed.
+    // The name on the broker record, and whether anything ever checked it against the MC.
+    // Nothing does today, so this is false everywhere until a lookup exists.
     customerName: resolvedCustomer?.name as string | undefined,
+    customerNameVerified: resolvedCustomer?.mcNameVerified === true,
     originLocation: originLoc
       ? { city: originLoc.city as string, state: originLoc.state as string, zip: originLoc.zip as string }
       : null,
@@ -457,6 +458,12 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
             name,
             normalizedName: normalizeName(name),
             mcNumber: mc,
+            /*
+             * The name here came off the LOAD, not from the MC. Saying so is the whole
+             * point: this record is one person typing an MC next to a name somebody else
+             * booked, and nothing has checked that they describe the same company.
+             */
+            mcNameVerified: false,
             active: true,
             createdAt: nowIso(),
             updatedAt: nowIso(),
@@ -512,11 +519,14 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
               new UpdateCommand({
                 TableName: CUSTOMER_TABLE,
                 Key: { id: customer.id },
-                UpdateExpression: 'SET #n = :n, normalizedName = :nn, updatedAt = :u',
+                UpdateExpression:
+                  'SET #n = :n, normalizedName = :nn, mcNameVerified = :v, updatedAt = :u',
                 ExpressionAttributeNames: { '#n': 'name' },
                 ExpressionAttributeValues: {
                   ':n': brokerName,
                   ':nn': normalizeName(brokerName),
+                  // OTR answering with a name for this MC is the only lookup we have.
+                  ':v': true,
                   ':u': nowIso(),
                 },
               }),

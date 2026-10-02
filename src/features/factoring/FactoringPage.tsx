@@ -116,16 +116,22 @@ function readinessOf(item: FactoringItem): OtrReadiness | null {
 }
 
 /**
- * Who the invoice bills.
+ * Who the invoice bills, and how far to trust it.
  *
- * Follows the broker MC: once one is entered, the name is the directory record that MC
- * belongs to, and that is the name OTR will resolve on their side too. Before that it is
- * whatever the load calls the customer, shown as a guess \u2014 a tender often names a
- * shipper or an agent rather than the broker being factored.
+ * Nothing looks an MC up today, so no name here is verified against one. The best we have
+ * is the broker record this load points at — whose name came from the load and whose MC
+ * came from whoever typed one, independently — or a name someone entered against the row.
  */
-function customerOf(item: FactoringItem): { name: string; confirmed: boolean } {
+function customerOf(item: FactoringItem): { name: string; source: string | null } {
   const r = readinessOf(item)
-  return { name: (r?.customerName ?? '').trim(), confirmed: !!r?.customerConfirmed }
+  return { name: (r?.customerName ?? '').trim(), source: r?.customerSource ?? null }
+}
+
+const CUSTOMER_SOURCE_NOTE: Record<string, string> = {
+  verified: 'Looked up from the broker MC',
+  entered: 'Entered on this row',
+  directory: 'From the broker record on this load \u2014 not checked against the MC',
+  load: 'From the load \u2014 often a shipper or an agent, not the broker being factored',
 }
 
 /** The PO number OTR requires, once it has resolved. */
@@ -243,23 +249,26 @@ function StatusTotals({ items }: { items: FactoringItem[] }) {
 
 /** The customer column: the confirmed broker, an unconfirmed guess, or nothing yet. */
 function CustomerCell({ item }: { item: FactoringItem }) {
-  const { name, confirmed } = customerOf(item)
+  const { name, source } = customerOf(item)
   if (!name) {
     return (
-      <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }} title="Enter the broker MC and the customer follows">
+      <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }} title="Open the row to enter it">
         \u2014
       </span>
     )
   }
+  // Only a real lookup earns plain, confident styling. Everything else reads as a guess,
+  // because that is what it is.
+  const verified = source === 'verified'
   return (
     <span
-      title={confirmed ? `Broker on file for MC ${readinessOf(item)?.payload?.BrokerMC ?? ''}` : 'From the load \u2014 not yet confirmed against a broker MC'}
+      title={source ? CUSTOMER_SOURCE_NOTE[source] : undefined}
       style={{
         display: 'block', fontSize: 12.5, overflow: 'hidden',
         textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        color: confirmed ? 'var(--ds-t1)' : 'var(--ds-t3)',
-        fontWeight: confirmed ? 600 : 400,
-        fontStyle: confirmed ? 'normal' : 'italic',
+        color: verified ? 'var(--ds-t1)' : 'var(--ds-t3)',
+        fontWeight: verified ? 600 : 400,
+        fontStyle: verified ? 'normal' : 'italic',
       }}
     >
       {name}

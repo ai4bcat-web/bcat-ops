@@ -139,23 +139,36 @@ describe('OtrPanel', () => {
     expect(setFactoringManualFields).not.toHaveBeenCalled()
   })
 
-  it('shows the customer but never offers to type one', () => {
+  it('says where the customer name came from, rather than calling it confirmed', () => {
     /*
-     * The MC is the identifier; the name is what it resolves to. A typed name that
-     * disagrees with the MC reads as confirmed and is not, and the MC is what decides
-     * who actually gets billed.
+     * Nothing looks an MC up. A broker record's name comes from the load and its MC from
+     * whoever typed one, so the two agreeing is not evidence of anything — and this row
+     * used to report exactly that pairing as "from the MC".
      */
     const r = readiness({
       payload: ALL_FIELDS,
-      customerName: 'AmeriFreight Systems LLC',
-      customerConfirmed: true,
+      customerName: 'AMERIFREIGHT SYSTEMS LLC',
+      customerSource: 'directory',
     })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
-    expect(screen.getByText('AmeriFreight Systems LLC')).toBeInTheDocument()
-    expect(screen.getByText('(from the MC)')).toBeInTheDocument()
-    expect(screen.queryByLabelText(/Customer for PRO/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Override Customer/ })).not.toBeInTheDocument()
+    expect(screen.getByText('AMERIFREIGHT SYSTEMS LLC')).toBeInTheDocument()
+    expect(screen.getByText(/not checked against the MC/)).toBeInTheDocument()
+  })
+
+  it('lets someone correct a wrong broker, which is the only way to fix one', async () => {
+    const r = readiness({ payload: ALL_FIELDS, customerName: 'AMERIFREIGHT SYSTEMS LLC', customerSource: 'directory' })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Correct the customer for PRO 13364' }))
+    fireEvent.change(screen.getByLabelText('Customer for PRO 13364'), {
+      target: { value: 'Wayfinder Logistics' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save Customer for PRO 13364' }))
+
+    await waitFor(() =>
+      expect(setFactoringManualFields).toHaveBeenCalledWith('13364', { CustomerName: 'Wayfinder Logistics' }),
+    )
   })
 
   it('marks a missing field red, so the gaps stand out once the row is open', () => {
@@ -172,17 +185,17 @@ describe('OtrPanel', () => {
     expect(container.querySelector('.bg-red-50')).not.toBeNull()
   })
 
-  it('points at the MC when there is no customer yet', () => {
+  it('asks for the customer in red when the row has none', () => {
     const r = readiness({ payload: { ...ALL_FIELDS, BrokerMC: undefined }, missingFields: ['BrokerMC'] })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
-    expect(screen.getByText(/enter the MC/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Customer for PRO 13364')).toBeInTheDocument()
   })
 
-  it('marks a name that came off the load as unconfirmed', () => {
+  it('marks a name that came off the load as exactly that', () => {
     // A tender often names a shipper or an agent rather than the broker being factored.
-    const r = readiness({ payload: ALL_FIELDS, customerName: 'MILWOOD', customerConfirmed: false })
+    const r = readiness({ payload: ALL_FIELDS, customerName: 'MILWOOD', customerSource: 'load' })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
-    expect(screen.getByText('(from the load, unconfirmed)')).toBeInTheDocument()
+    expect(screen.getByText(/from the load, often a shipper/)).toBeInTheDocument()
   })
 
   it('will not submit while a document is missing, and says which', () => {

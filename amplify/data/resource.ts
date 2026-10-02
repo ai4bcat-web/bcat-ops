@@ -509,6 +509,14 @@ const schema = a.schema({
       notes:        a.string(),
       // Phase 1: full customer record + credit / billing / workflow controls
       mcNumber:     a.string(),
+      /*
+       * True only when this record's NAME was looked up from its MC somewhere that knows
+       * the answer. A name and an MC sitting on the same row is not that: the name comes
+       * from whatever a load was booked under and the MC from whoever typed one, and the
+       * factoring queue spent a day reporting that pairing as verified. MC 20313 landed on
+       * a record called AMERIFREIGHT SYSTEMS LLC; the broker is Wayfinder Logistics.
+       */
+      mcNameVerified: a.boolean(),
       dotNumber:    a.string(),
       billingEmail:      a.string(),
       billingContactName: a.string(),
