@@ -455,14 +455,60 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         const mc = readiness.payload.BrokerMC as string | undefined
         if (!mc) return fail('no broker MC on this row yet')
 
-        const { decision, message } = await otr().brokerCheck({ brokerMc: mc })
+        const { decision, message, brokerName, raw } = await otr().brokerCheck({ brokerMc: mc })
+        /*
+         * Logged in full, once per check.
+         *
+         * Only `message` was ever read from this reply, so what else OTR sends back was
+         * never established. The factoring queue wants the broker's NAME above all — an MC
+         * is nine digits nobody recognises — and this is the one call that has the MC and
+         * runs before an invoice exists.
+         */
+        console.log('[otr-actions] broker-check reply', { mc, raw })
+
+        /*
+         * If OTR named the broker, that name is better than anything we hold: it is the
+         * name they will bill under. It goes on the customer record so the next load from
+         * the same broker is already right, and it is never allowed to blank a name we
+         * already have.
+         */
+        if (brokerName) {
+          const { load } = await buildReadiness(item)
+          let customer = await getCustomer(load?.customerId as string | undefined)
+          if (!customer && load?.customer) customer = await findCustomerByName(String(load.customer))
+          if (customer && trim(customer.name) !== brokerName) {
+            await ddb.send(
+              new UpdateCommand({
+                TableName: CUSTOMER_TABLE,
+                Key: { id: customer.id },
+                UpdateExpression: 'SET #n = :n, normalizedName = :nn, updatedAt = :u',
+                ExpressionAttributeNames: { '#n': 'name' },
+                ExpressionAttributeValues: {
+                  ':n': brokerName,
+                  ':nn': normalizeName(brokerName),
+                  ':u': nowIso(),
+                },
+              }),
+            )
+          }
+        }
+
         await updateItem(String(item.id), {
           brokerMcChecked: mc,
           brokerCheckResult: decision.replace(' ', '_'),
           brokerCheckedAt: nowIso(),
           otrError: null,
         })
-        return ok({ decision, message, mcNumber: mc })
+
+        // Re-assemble so the queue picks up a name the check just supplied.
+        if (brokerName) {
+          const { readiness: fresh } = await buildReadiness(
+            (await getFactoringItem(String(item.id))) as Row,
+          )
+          await updateItem(String(item.id), { otrReadiness: fresh })
+        }
+
+        return ok({ decision, message, mcNumber: mc, brokerName })
       }
 
       /**

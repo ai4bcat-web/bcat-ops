@@ -215,6 +215,10 @@ export class OtrClient {
   async brokerCheck(opts: { brokerMc?: string; brokerDot?: string }): Promise<{
     decision: BrokerDecision
     message: string
+    /** The broker's name, when OTR's reply carries one. See brokerNameFrom. */
+    brokerName: string | null
+    /** The whole reply, logged by the caller so the shape stops being a guess. */
+    raw: unknown
   }> {
     if (!opts.brokerMc && !opts.brokerDot) {
       throw new Error('brokerCheck requires brokerMc or brokerDot')
@@ -232,8 +236,20 @@ export class OtrClient {
       // 402 here means the MC itself is invalid — a data problem, not a transport one.
       throw new OtrError(`Broker check failed (${res.status})`, res.status, text)
     }
-    const message = (JSON.parse(text) as { message?: string }).message ?? ''
-    return { decision: normalizeDecision(message), message }
+    let raw: unknown = null
+    try {
+      raw = JSON.parse(text)
+    } catch {
+      // A non-JSON 200 is OTR telling us something we do not model yet. The caller logs it.
+      raw = text
+    }
+    const message = (raw as { message?: string } | null)?.message ?? ''
+    return {
+      decision: normalizeDecision(message),
+      message,
+      brokerName: brokerNameFrom(raw),
+      raw,
+    }
   }
 
   /** Create the invoice. Returns OTR's invoiceId, which every document upload needs. */
@@ -352,6 +368,37 @@ export class OtrClient {
 }
 
 /** OTR returns the decision as free text; map it onto the documented set. */
+/**
+ * The broker's name out of a broker-check reply, if there is one.
+ *
+ * We only ever read `message` from this endpoint, so whether OTR also returns who the MC
+ * belongs to was never established either way — and the name is exactly what the factoring
+ * queue wants, since an MC is nine digits nobody recognises. Rather than hard-code a field
+ * we have not seen, this looks for a string field whose key names a broker or a client,
+ * and returns null when there is none. Both outcomes are correct: if OTR sends a name we
+ * use it, and if it does not, the office types one.
+ *
+ * `createInvoice` definitely returns brokerName and clientName, but only once an invoice
+ * exists — far too late to label a row that has not been submitted yet.
+ */
+export function brokerNameFrom(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null
+  const record = raw as Record<string, unknown>
+  const keys = ['brokerName', 'clientName', 'debtorName', 'customerName', 'name', 'companyName']
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  // Some replies nest the subject one level down.
+  for (const nested of Object.values(record)) {
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      const found = brokerNameFrom(nested)
+      if (found) return found
+    }
+  }
+  return null
+}
+
 export function normalizeDecision(message: string): BrokerDecision {
   const m = message.trim().toUpperCase()
   if (m.includes('NOT APPROVED')) return 'NOT APPROVED'
