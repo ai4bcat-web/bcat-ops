@@ -243,3 +243,61 @@ describe('submitting to OTR', () => {
   })
 })
 })
+
+/**
+ * The queue could say how many invoices were waiting and not what they were worth — the
+ * only figure anyone plans around. And a row whose rate never resolved had nowhere to put
+ * one, so it sat red forever.
+ */
+describe('what the queue is worth', () => {
+  const priced = (id: string, status: FactoringItem['status'], amount?: number) =>
+    item({
+      id, proNumber: id, status,
+      otrReadiness: amount == null
+        ? readiness()
+        : readiness({ payload: { InvoiceAmount: amount } }),
+    })
+
+  it('shows each invoice amount on its own row', () => {
+    setup([priced('A1', 'NEED_TO_FACTOR', 1850.5)])
+    expect(within(screen.getByRole('table')).getByText('$1,850.50')).toBeInTheDocument()
+  })
+
+  it('offers a way in when no rate came through, rather than a dead dash', () => {
+    setup([priced('A1', 'NEED_TO_FACTOR')])
+    const add = screen.getByRole('button', { name: 'Add the rate for PRO A1' })
+    fireEvent.click(add)
+    // It opens the row's editor, which is where the rate is typed.
+    expect(screen.getByTestId('otr-panel')).toBeInTheDocument()
+  })
+
+  it('totals each status separately', () => {
+    setup([
+      priced('A1', 'NEED_TO_FACTOR', 800),
+      priced('A2', 'NEED_TO_FACTOR', 1200),
+      priced('B1', 'PENDING_WITH_OTR', 2500),
+      priced('C1', 'FACTORED', 1000),
+    ])
+    const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
+    expect(totals.getByLabelText(/^Need to factor: \$2,000\.00 across 2 invoices$/)).toBeInTheDocument()
+    expect(totals.getByLabelText(/^Pending with OTR: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
+    expect(totals.getByLabelText(/^Factored: \$1,000\.00 across 1 invoices$/)).toBeInTheDocument()
+    expect(totals.getByLabelText(/^All: \$5,500\.00 across 4 invoices$/)).toBeInTheDocument()
+  })
+
+  it('says how many rows it could not price instead of folding them in as zero', () => {
+    setup([priced('A1', 'NEED_TO_FACTOR', 800), priced('A2', 'NEED_TO_FACTOR')])
+    const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
+    expect(totals.getByLabelText(/^Need to factor: \$800\.00 across 2 invoices$/)).toBeInTheDocument()
+    expect(totals.getAllByText(/1 with no rate/).length).toBeGreaterThan(0)
+  })
+
+  it('totals every status, not only the one being looked at', () => {
+    // The tabs filter the table; the figures are about the whole queue, which is the
+    // question being asked — "how much is sitting in Pending with OTR" is not answered by
+    // a number that changes when you click a tab.
+    setup([priced('B1', 'PENDING_WITH_OTR', 2500)])
+    const totals = within(screen.getByRole('group', { name: /What the queue is worth/ }))
+    expect(totals.getByLabelText(/^Pending with OTR: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
+  })
+})

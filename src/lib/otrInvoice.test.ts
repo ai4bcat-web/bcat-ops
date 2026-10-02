@@ -269,3 +269,41 @@ describe('customer name on a factoring row', () => {
     expect(Object.keys(r.payload)).not.toContain('CustomerName')
   })
 })
+
+/**
+ * The rate someone types when nothing resolved one.
+ *
+ * `Number('$1,850.00')` is NaN, so a correctly typed rate used to be thrown away and the
+ * row stayed red with nothing said about why. This is the field the office fills in by
+ * hand, so it has to take what a person types.
+ */
+describe('a manually entered invoice amount', () => {
+  const amount = (v: string) =>
+    assembleOtrInvoice({ load: {}, manual: { InvoiceAmount: v } }).payload.InvoiceAmount
+
+  it('takes a plain number', () => {
+    expect(amount('1850')).toBe(1850)
+  })
+
+  it('takes one typed as currency, with the symbol and the separators', () => {
+    expect(amount('$1,850.00')).toBe(1850)
+    expect(amount('2,400')).toBe(2400)
+  })
+
+  it('still refuses something with no number in it', () => {
+    // Not zero: a zero would go to OTR as a real invoice worth nothing.
+    expect(amount('TBD')).toBeUndefined()
+    expect(amount('')).toBeUndefined()
+  })
+
+  it('still refuses a zero or negative rate', () => {
+    expect(amount('0')).toBeUndefined()
+    expect(amount('-500')).toBeUndefined()
+  })
+
+  it('beats the rate on the load, which is the whole point of typing it', () => {
+    const r = assembleOtrInvoice({ load: { rate: 80000 }, manual: { InvoiceAmount: '925.50' } })
+    expect(r.payload.InvoiceAmount).toBe(925.5)
+    expect(r.sources.InvoiceAmount).toBe('manual')
+  })
+})

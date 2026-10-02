@@ -291,7 +291,18 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
       ['load', rateCentsToDollars(load.rate)],
     ],
     (v) => {
-      const n = Number(v)
+      /*
+       * Accept what a person actually types.
+       *
+       * This is the field the office fills in when no rate came through on the email or
+       * the load, and `Number('$1,850.00')` is NaN — so a correctly typed rate was thrown
+       * away and the row stayed red with no explanation. Currency formatting is stripped,
+       * but the sign is kept so a negative is still refused rather than turned positive,
+       * and a string with no digits in it is rejected rather than read as zero.
+       */
+      const digits = String(v).replace(/[^0-9.-]/g, '')
+      if (!/\d/.test(digits)) return undefined
+      const n = Number(digits)
       return Number.isFinite(n) && n > 0 ? n : undefined
     },
   )

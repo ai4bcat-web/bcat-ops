@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
+import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
 import { OtrInvoiceBoard } from './OtrInvoiceBoard'
 import type { OtrReadiness } from '@/lib/otrInvoice'
@@ -149,6 +150,96 @@ function matchesSearch(item: FactoringItem, query: string) {
 }
 
 // ── Status select for a row ──────────────────────────────────────────────────
+
+/**
+ * What the invoice is worth.
+ *
+ * Pulled from the same resolved payload the invoice is submitted with, so the column and
+ * the invoice can never disagree. When nothing has resolved a rate — the email carried no
+ * amount and the load has no rate on it — this is a way in rather than a dash: the rate is
+ * typed in the row's own editor, and a red cell that does nothing when clicked is how a
+ * queue ends up with rows nobody ever priced.
+ */
+function AmountCell({ item, onEdit }: { item: FactoringItem; onEdit: () => void }) {
+  const amount = invoiceAmountOf(item)
+  if (amount != null) {
+    return (
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+        {money(amount)}
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      aria-label={`Add the rate for PRO ${item.proNumber}`}
+      title="No rate came through on the email or the load \u2014 add it here"
+      style={{
+        border: '1px solid #fca5a5', background: '#fee2e2', color: '#b91c1c',
+        borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700,
+        cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+      }}
+    >
+      Add rate
+    </button>
+  )
+}
+
+/**
+ * What the queue is worth, per status.
+ *
+ * Counts were on the tabs already, and a count of invoices is not money. Rows with no rate
+ * are called out beside the figure rather than folded into it: a total that silently
+ * swallows what it could not price reads as complete and is not.
+ */
+function StatusTotals({ items }: { items: FactoringItem[] }) {
+  const totals = totalsByStatus(items)
+  const buckets = [
+    ['NEED_TO_FACTOR', 'Need to factor'],
+    ['PENDING_WITH_OTR', 'Pending with OTR'],
+    ['FACTORED', 'Factored'],
+    ['ALL', 'All'],
+  ] as const
+
+  return (
+    <div
+      role="group"
+      aria-label="What the queue is worth, by status"
+      style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 12 }}
+    >
+      {buckets.map(([key, label]) => {
+        const t = totals[key]
+        const isAll = key === 'ALL'
+        return (
+          <div
+            key={key}
+            aria-label={`${label}: ${money(t.total)} across ${t.count} invoices`}
+            style={{
+              flex: '1 1 160px', minWidth: 160,
+              border: '1px solid var(--ds-border)', borderRadius: 9,
+              padding: '8px 12px',
+              background: isAll ? 'var(--ds-bg)' : 'var(--ds-surface)',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+              {label}
+            </p>
+            <p style={{ margin: '2px 0 0', fontSize: 17, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+              {money(t.total)}
+            </p>
+            <p style={{ margin: 0, fontSize: 11, color: 'var(--ds-t3)' }}>
+              {t.count} {t.count === 1 ? 'invoice' : 'invoices'}
+              {t.missingRate > 0 && (
+                <span style={{ color: '#b91c1c', fontWeight: 600 }}> \u00b7 {t.missingRate} with no rate</span>
+              )}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 /** The customer column: the confirmed broker, an unconfirmed guess, or nothing yet. */
 function CustomerCell({ item }: { item: FactoringItem }) {
@@ -368,6 +459,8 @@ export function FactoringPage() {
             />
           </div>
         </div>
+        {/* What the queue is worth, not just how many rows are in it. */}
+        <StatusTotals items={items} />
       </div>
 
       {/* Error banner — never shown as an empty state */}
@@ -401,7 +494,7 @@ export function FactoringPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'PO #', 'Customer', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
+                    {['PRO #', 'PO #', 'Customer', 'Amount', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
                       <th
                         key={col}
                         style={{
@@ -457,6 +550,9 @@ export function FactoringPage() {
                       </td>
                       <td style={{ padding: '14px 16px', maxWidth: 190 }}>
                         <CustomerCell item={item} />
+                      </td>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', textAlign: 'right' }}>
+                        <AmountCell item={item} onEdit={() => toggleExpanded(item.id)} />
                       </td>
                       {/* How close this row is to being invoiceable, as a count then the
                           individual fields. Green means resolved, red means still missing. */}
@@ -529,7 +625,7 @@ export function FactoringPage() {
                       {/* The editor, only for a row someone opened. */}
                       {expanded.has(item.id) && (
                         <tr>
-                          <td colSpan={canDelete ? 9 : 8} style={{ padding: '0 16px 14px' }}>
+                          <td colSpan={canDelete ? 10 : 9} style={{ padding: '0 16px 14px' }}>
                             <OtrPanel item={item} onChanged={refresh} />
                           </td>
                         </tr>
