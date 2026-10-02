@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, useCallback } from 'react'
 import {
-  RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle, Trash2,
+  RefreshCw, Search, Inbox, Mail, Loader2, AlertCircle, Trash2, ChevronRight, ChevronDown,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -130,6 +130,20 @@ export function FactoringPage() {
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
   const [view, setView] = useState<'queue' | 'board'>('queue')
+  /**
+   * Which rows are open. Collapsed by default: the panel is an editor, and rendering one
+   * per row turned a list of twenty PROs into twenty stacked forms. The row itself already
+   * says what is missing, so opening one is a decision, not the only way to see anything.
+   */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const toggleExpanded = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
   // limited to the two people who run factoring rather than every admin.
@@ -323,14 +337,26 @@ export function FactoringPage() {
                       className="hover:bg-[var(--ds-bg)] transition-colors"
                     >
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          onClick={() => toggleExpanded(item.id)}
+                          aria-expanded={expanded.has(item.id)}
+                          aria-label={`${expanded.has(item.id) ? 'Hide' : 'Edit'} the OTR fields for PRO ${item.proNumber}`}
+                          title={item.subject || undefined}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8, border: 'none',
+                            background: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit',
+                          }}
+                        >
+                          {expanded.has(item.id)
+                            ? <ChevronDown className="size-4 text-muted-foreground" />
+                            : <ChevronRight className="size-4 text-muted-foreground" />}
                           <span className="inline-flex items-center justify-center size-7 rounded-md bg-slate-100 text-slate-600">
                             <Mail className="size-3.5" />
                           </span>
                           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
                             {item.proNumber}
                           </span>
-                        </div>
+                        </button>
                       </td>
                       {/* How close this row is to being invoiceable, as a count then the
                           individual fields. Green means resolved, red means still missing. */}
@@ -399,12 +425,14 @@ export function FactoringPage() {
                         </td>
                       )}
                     </tr>
-                      {/* OTR readiness: what is filled, what is missing, and the submit action. */}
-                      <tr>
-                        <td colSpan={canDelete ? 7 : 6} style={{ padding: '0 16px 14px' }}>
-                          <OtrPanel item={item} onChanged={refresh} />
-                        </td>
-                      </tr>
+                      {/* The editor, only for a row someone opened. */}
+                      {expanded.has(item.id) && (
+                        <tr>
+                          <td colSpan={canDelete ? 7 : 6} style={{ padding: '0 16px 14px' }}>
+                            <OtrPanel item={item} onChanged={refresh} />
+                          </td>
+                        </tr>
+                      )}
                     </Fragment>
                   ))}
                 </tbody>

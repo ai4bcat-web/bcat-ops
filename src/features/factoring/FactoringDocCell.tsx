@@ -15,9 +15,11 @@
  * still refused at submit, so this does not invent a third path.
  */
 import { useRef, useState } from 'react'
-import { Check, Loader2, Upload, AlertTriangle } from 'lucide-react'
+import { Check, Loader2, Upload, AlertTriangle, Eye, Download } from 'lucide-react'
 import { toast } from 'sonner'
-import { uploadRateConfirm } from '@/lib/apiClient'
+import { uploadRateConfirm, getRateConfirmUrl } from '@/lib/apiClient'
+import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
+import { downloadPodAsPdf } from '@/lib/podDownload'
 import { useAppStore } from '@/store/useAppStore'
 import {
   staffUploadDriverDoc,
@@ -64,6 +66,42 @@ export function FactoringDocCell({
   const updateLoad = useAppStore((s) => s.updateLoad)
   const load: Load | undefined = loadId ? loads.find((l) => l.id === loadId) : undefined
 
+  /*
+   * Where the document can actually be opened from.
+   *
+   * A rate confirmation uploaded in the Loads drawer lives on the load; everything else —
+   * a driver scan, a staff upload, this cell's own upload — is a submission document. Both
+   * are checked, so "present" and "openable" never disagree.
+   */
+  const { pods, ratecons } = useLoadDriverDocs(loadId, proNumber)
+  const submitted = (kind === 'POD' ? pods : ratecons)[0]
+  const loadRateConKey = kind === 'RATECON' ? (load?.rateConfirmKey ?? '') : ''
+  const viewUrl = submitted?.url ?? null
+
+  async function openIt() {
+    if (viewUrl) { window.open(viewUrl, '_blank', 'noopener'); return }
+    if (!loadRateConKey) return
+    try {
+      window.open(await getRateConfirmUrl(loadRateConKey), '_blank', 'noopener')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not open the document')
+    }
+  }
+
+  async function downloadIt() {
+    const name = `${kind === 'POD' ? 'POD' : 'RateCon'}-${proNumber || 'document'}`
+    try {
+      const url = viewUrl ?? (loadRateConKey ? await getRateConfirmUrl(loadRateConKey) : null)
+      if (!url) return
+      // Always a PDF, the same as everywhere else a POD leaves this office.
+      await downloadPodAsPdf(url, name)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download the document')
+    }
+  }
+
+  const canOpen = !!viewUrl || !!loadRateConKey
+
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? [])
     e.target.value = ''
@@ -109,7 +147,30 @@ export function FactoringDocCell({
   const noLoad = !loadId
 
   return (
-    <>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+      {/* Present means openable: preview it, or take the PDF. */}
+      {canOpen && (
+        <>
+          <button
+            type="button"
+            onClick={() => void openIt()}
+            aria-label={`Preview the ${LABEL[kind]} for PRO ${proNumber}`}
+            title={`Preview the ${LABEL[kind]}`}
+            style={iconBtn}
+          >
+            <Eye size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadIt()}
+            aria-label={`Download the ${LABEL[kind]} for PRO ${proNumber}`}
+            title={`Download the ${LABEL[kind]} as a PDF`}
+            style={iconBtn}
+          >
+            <Download size={12} />
+          </button>
+        </>
+      )}
       <button
         type="button"
         onClick={() => input.current?.click()}
@@ -151,6 +212,13 @@ export function FactoringDocCell({
         onChange={(e) => void onPick(e)}
         style={{ display: 'none' }}
       />
-    </>
+    </span>
   )
+}
+
+const iconBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 22, height: 22, borderRadius: 5, cursor: 'pointer',
+  border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
+  color: 'var(--ds-t2)', fontFamily: 'inherit',
 }

@@ -32,17 +32,25 @@ import { setFactoringManualFields } from '@/lib/apiClient'
 import type { FactoringItem } from '@/types'
 
 /** Keyboard and format hints per field, so a phone offers the right keys. */
+/*
+ * Placeholders describe the FORMAT, never an example value.
+ *
+ * These started as sample data — "60601", "Chicago", "IL" — and every row showed the same
+ * ones, so the queue read as though a real ZIP had been filled in on every shipment. A
+ * placeholder that looks like data is worse than none: nobody can tell a prefilled value
+ * from an empty field, and a wrong ZIP on a factored invoice is a real problem.
+ */
 const FIELD_HINT: Partial<Record<OtrRequiredField, { placeholder: string; inputMode?: 'numeric' | 'decimal' }>> = {
-  InvoiceNo:     { placeholder: '13364', inputMode: 'numeric' },
+  InvoiceNo:     { placeholder: 'PRO number', inputMode: 'numeric' },
   PoNumber:      { placeholder: 'PO number' },
-  InvoiceAmount: { placeholder: '1850.00', inputMode: 'decimal' },
+  InvoiceAmount: { placeholder: 'Amount in dollars', inputMode: 'decimal' },
   InvoiceDate:   { placeholder: 'YYYY-MM-DD' },
-  FromCity:      { placeholder: 'Chicago' },
-  FromState:     { placeholder: 'IL' },
-  FromZip:       { placeholder: '60601', inputMode: 'numeric' },
-  ToCity:        { placeholder: 'Detroit' },
-  ToState:       { placeholder: 'MI' },
-  ToZip:         { placeholder: '48201', inputMode: 'numeric' },
+  FromCity:      { placeholder: 'Pickup city' },
+  FromState:     { placeholder: 'Two letters' },
+  FromZip:       { placeholder: 'Pickup ZIP', inputMode: 'numeric' },
+  ToCity:        { placeholder: 'Delivery city' },
+  ToState:       { placeholder: 'Two letters' },
+  ToZip:         { placeholder: 'Delivery ZIP', inputMode: 'numeric' },
 }
 
 /** Where a value came from, phrased for a human rather than a developer. */

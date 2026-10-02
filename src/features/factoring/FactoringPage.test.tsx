@@ -23,6 +23,9 @@ vi.mock('@/store/useAppStore', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('./OtrPanel', () => ({ OtrPanel: () => <div data-testid="otr-panel" /> }))
 vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn() }))
+vi.mock('@/hooks/useLoadDriverDocs', () => ({
+  useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),
+}))
 
 function readiness(over: Partial<OtrReadiness> = {}): OtrReadiness {
   return { ready: false, payload: {}, sources: {}, missingFields: [], missingDocuments: [], warnings: [], ...over }
@@ -188,4 +191,31 @@ describe('the OTR invoice board', () => {
     expect(screen.getByRole('button', { name: /Refresh from OTR/ })).toBeEnabled()
     expect(screen.getByText(/the hourly poller keeps this current/)).toBeInTheDocument()
   })
+
+describe('the row editor', () => {
+  it('is collapsed until someone opens it', () => {
+    // Rendering one editor per row turned a list of PROs into a stack of forms.
+    setup([item()])
+    expect(screen.queryByTestId('otr-panel')).not.toBeInTheDocument()
+  })
+
+  it('opens and closes from the PRO', () => {
+    setup([item()])
+    const toggle = screen.getByRole('button', { name: 'Edit the OTR fields for PRO 14538' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(toggle)
+    expect(screen.getByTestId('otr-panel')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide the OTR fields for PRO 14538' })).toHaveAttribute('aria-expanded', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the OTR fields for PRO 14538' }))
+    expect(screen.queryByTestId('otr-panel')).not.toBeInTheDocument()
+  })
+
+  it('opens one row without opening the others', () => {
+    setup([item({ id: 'a', proNumber: 'A1' }), item({ id: 'b', proNumber: 'B2' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Edit the OTR fields for PRO A1' }))
+    expect(screen.getAllByTestId('otr-panel')).toHaveLength(1)
+  })
+})
 })
