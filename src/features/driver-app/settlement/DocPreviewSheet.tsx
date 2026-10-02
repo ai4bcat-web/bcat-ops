@@ -10,7 +10,7 @@
  * The wording says that out loud rather than asking "are you sure?" about nothing.
  */
 import { useEffect, useState } from 'react'
-import { X, Download, Upload, Trash2, Loader2, AlertTriangle } from 'lucide-react'
+import { X, Download, Upload, Trash2, Loader2, AlertTriangle, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { fetchDocUrl, removeSubmissionDocs, type SubmissionKind } from '../driverApi'
 import { downloadPodAsPdf } from '@/lib/podDownload'
@@ -108,6 +108,17 @@ export function DocPreviewSheet({
         >
           {busy === 'download' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           Save
+        </Button>
+
+        {/*
+          * Adding is not replacing. A driver who finds a second sheet in the cab wants it
+          * ON the POD they already sent, not instead of it — and the server puts further
+          * pages onto the submission this shipment already has, so the office still ends
+          * up with one document.
+          */}
+        <Button variant="outline" size="sm" disabled={busy !== null} onClick={onAddPages}>
+          <Plus className="h-3.5 w-3.5" />
+          Add pages
         </Button>
 
         {/*
