@@ -17,6 +17,7 @@ import {
   CognitoIdentityProviderClient,
   AdminGetUserCommand,
 } from '@aws-sdk/client-cognito-identity-provider'
+import { POD_SCAN_VERSION } from './scan-version'
 
 type HandlerModule = typeof import('./handler')
 
@@ -68,6 +69,7 @@ let listAction: HandlerModule['listAction']
 let syncAction: HandlerModule['syncAction']
 let assignAction: HandlerModule['assignAction']
 let assetsAction: HandlerModule['assetsAction']
+let needsProcessingRefresh: HandlerModule['needsProcessingRefresh']
 let stableDocumentId: HandlerModule['stableDocumentId']
 let processPodDocument: HandlerModule['processPodDocument']
 let backfillPageAction: HandlerModule['backfillPageAction']
@@ -405,6 +407,7 @@ beforeAll(async () => {
   syncAction = mod.syncAction
   assignAction = mod.assignAction
   assetsAction = mod.assetsAction
+  needsProcessingRefresh = mod.needsProcessingRefresh
   stableDocumentId = mod.stableDocumentId
   processPodDocument = mod.processPodDocument
   backfillPageAction = mod.backfillPageAction
@@ -1266,5 +1269,64 @@ describe('system-driven scan steps', () => {
 
   it('still refuses a call with no identity at all', async () => {
     await expect(authorize('enhanceDriverDoc', null)).rejects.toThrow('Unauthorized: missing identity')
+  })
+})
+
+/**
+ * A PDF used to be the end of the line: ORIGINAL_ONLY, never looked at again. That covers
+ * most texted PODs — a phone wraps the photograph in a PDF — so the single biggest group
+ * of documents on the PODs page was the group the cleanup never touched.
+ */
+describe('what gets looked at again', () => {
+  const base = {
+    id: 'pod-1',
+    originalKey: 'pods/pod-1/original.pdf',
+    updatedAt: '2026-10-02T12:00:00.000Z',
+  }
+
+  it('re-checks a PDF parked at ORIGINAL_ONLY once the rules have changed', () => {
+    expect(
+      needsProcessingRefresh({
+        ...base,
+        contentType: 'application/pdf',
+        processingStatus: 'ORIGINAL_ONLY',
+        processingVersion: POD_SCAN_VERSION - 1,
+      } as never),
+    ).toBe(true)
+  })
+
+  it('leaves it alone once it has been judged under the current rules', () => {
+    // Still decided once, not on every pass: only a version bump makes it eligible again.
+    expect(
+      needsProcessingRefresh({
+        ...base,
+        contentType: 'application/pdf',
+        processingStatus: 'ORIGINAL_ONLY',
+        processingVersion: POD_SCAN_VERSION,
+      } as never),
+    ).toBe(false)
+  })
+
+  it('still ignores a type nothing can clean, whatever the version says', () => {
+    expect(
+      needsProcessingRefresh({
+        ...base,
+        contentType: 'image/heic',
+        processingStatus: 'ORIGINAL_ONLY',
+        processingVersion: 0,
+      } as never),
+    ).toBe(false)
+  })
+
+  it('re-cleans an image cleaned by an older pipeline', () => {
+    expect(
+      needsProcessingRefresh({
+        ...base,
+        contentType: 'image/jpeg',
+        processingStatus: 'READY',
+        enhancedKey: 'pods/pod-1/enhanced.jpg',
+        processingVersion: POD_SCAN_VERSION - 1,
+      } as never),
+    ).toBe(true)
   })
 })

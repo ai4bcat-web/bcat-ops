@@ -666,14 +666,26 @@ function isStalePending(item: StoredPodDocument): boolean {
   return item.updatedAt < staleThreshold
 }
 
-function needsProcessingRefresh(existing: StoredPodDocument | null): boolean {
+/** A type the cleanup pipeline can do something with. PDFs now count: see pdfPhotos.ts. */
+function isCleanable(contentType: string | null | undefined): boolean {
+  return /^(image\/(jpeg|png)|application\/pdf)(;|$)/i.test(contentType ?? '')
+}
+
+export function needsProcessingRefresh(existing: StoredPodDocument | null): boolean {
   if (!existing) return false
-  if (existing.processingStatus === 'ORIGINAL_ONLY') return false
   if (existing.processingStatus === 'FAILED') return existing.originalKey != null
   if (isStalePending(existing)) return true
   if (existing.processingStatus === 'READY' && existing.enhancedKey == null) return true
-  const isImage = /^image\/(jpeg|png)(;|$)/i.test(existing.contentType ?? '')
-  if (!isImage) return false
+  if (!isCleanable(existing.contentType)) return false
+  /*
+   * ORIGINAL_ONLY is re-checked when the version moves, rather than treated as final.
+   *
+   * It used to mean "we will never be able to clean this", and PDFs were the bulk of it —
+   * which is most PODs, since a phone wraps a photo in one. Now that the pipeline can get
+   * the photograph back out, a document parked at ORIGINAL_ONLY under older rules is the
+   * single biggest group that should be looked at again. A version bump is the only thing
+   * that makes it eligible, so it is still decided once, not on every pass.
+   */
   return (existing.processingVersion ?? 0) < POD_SCAN_VERSION
 }
 
@@ -1048,10 +1060,37 @@ export async function processPodDocument(processPodId: string): Promise<void> {
   }
 
   try {
-    const enhanced = await enhancePodImage(
-      sourceBytes,
-      sourceContentType ?? item.contentType ?? 'image/jpeg',
-    )
+    const type = sourceContentType ?? item.contentType ?? 'image/jpeg'
+
+    // A PDF gets its photographs pulled out, cleaned and put back — the same treatment a
+    // driver's upload gets. Most texted PODs are a photo inside a PDF.
+    if (isPdf(sourceBytes, type)) {
+      const cleanedPdf = await enhancePdfPhotos(sourceBytes)
+      if (!cleanedPdf) {
+        await releaseProcessingLease(processPodId, {
+          processingStatus: 'ORIGINAL_ONLY',
+          processingError: null,
+          originalKey: item.originalKey,
+          contentType: item.contentType,
+          processingVersion: POD_SCAN_VERSION,
+          scanReviewReason: null,
+        })
+        return
+      }
+      await uploadBytes(enhancedKey(processPodId), cleanedPdf, 'application/pdf')
+      await releaseProcessingLease(processPodId, {
+        processingStatus: 'READY',
+        processingError: null,
+        originalKey: item.originalKey,
+        enhancedKey: enhancedKey(processPodId),
+        contentType: item.contentType,
+        processingVersion: POD_SCAN_VERSION,
+        scanReviewReason: null,
+      })
+      return
+    }
+
+    const enhanced = await enhancePodImage(sourceBytes, type)
     if (!enhanced) {
       await releaseProcessingLease(processPodId, {
         processingStatus: 'ORIGINAL_ONLY',
