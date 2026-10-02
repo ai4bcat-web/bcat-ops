@@ -5,6 +5,7 @@ import { driverPaySchema } from '@/lib/schemas'
 import { combinedPayDriverId, FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
 import type { DriverPayPeriod } from '@/hooks/useDriverPay'
+import { errorText } from '@/lib/errorText'
 
 interface Props {
   onSave: (input: Omit<DriverPayPeriod, 'id' | 'createdAt' | 'updatedAt'>) => Promise<unknown>
@@ -62,7 +63,7 @@ export function DriverPayForm({ onSave, onClose, defaultStart, defaultEnd, fleet
       })
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
       setSaving(false)
     }
   }

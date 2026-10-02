@@ -445,7 +445,7 @@ export function DashboardPage() {
             }
             noPad
           >
-            <div style={{ maxHeight: 340, overflowY: 'auto' }}>
+            <div style={{ maxHeight: 340, overflowY: 'auto', overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>

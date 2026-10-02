@@ -17,6 +17,7 @@ import { creditLineLabel } from '@/lib/payCredits'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import { compareByOrder } from '@/lib/calendarOrder'
 import type { Driver } from '@/types'
+import { errorText } from '@/lib/errorText'
 
 export type { AmazonTrip, DriverPaySetting, DriverPayDeduction, DriverPayCredit, DriverPayCreditInput, FixedExpense, FuelTransaction }
 export { normalizeCard }
@@ -109,7 +110,7 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
   const load = useCallback(() =>
     Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
       .then(([t, s, d, c]) => { setTrips(t); setSettings(s); setDeductions(d); setCredits(c); setError(null) })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoading(false)),
   [])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])

@@ -10,6 +10,7 @@ import {
   type OdometerWeekSummary,
   type TruckOdometerDay,
 } from '@/lib/odometerWeek'
+import { errorText } from '@/lib/errorText'
 
 // Untyped client — our own types carry the shape (same convention as src/lib/apiClient.ts).
 const client = generateClient()
@@ -73,7 +74,7 @@ export function useTruckOdometer(weekStart: string): TruckOdometerHookResult {
   const load = useCallback(() =>
     fetchOdometerDays(weekStart)
       .then((next) => { setRows(next); setError(null) })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err: unknown) => setError(errorText(err)))
       .finally(() => setLoadedFor(weekStart)),
   [weekStart])
 

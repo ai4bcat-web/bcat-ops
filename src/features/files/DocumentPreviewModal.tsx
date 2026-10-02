@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { isPdfKey, isImageKey, isUnembeddableKey } from '@/lib/filePacketPdf'
 import { downloadFromUrl } from '@/lib/download'
 import type { ComplianceDocument } from '@/types'
+import { errorText } from '@/lib/errorText'
 
 /**
  * Look at a document without leaving the file.
@@ -28,7 +29,7 @@ export function DocumentPreviewModal({
     if (!doc.s3Key) return
     getUrl(doc.s3Key)
       .then((u) => { if (alive) { setUrl(u); setError(null) } })
-      .catch((err) => { if (alive) setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err) => { if (alive) setError(errorText(err)) })
     return () => { alive = false }
   }, [doc.s3Key, getUrl])
 

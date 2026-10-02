@@ -10,6 +10,7 @@ import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLi
 import { creditLineLabel } from '@/lib/payCredits'
 import { ownerOpTripsFor, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
 import { aggregateOwnerOperator, type OwnerOpWeekProfit, ownerOperatorWeeksFromLoads } from '@/lib/ownerOperatorProfit'
+import { errorText } from '@/lib/errorText'
 
 export type { OwnerOpWeekProfit }
 export { aggregateOwnerOperator }
@@ -47,7 +48,7 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
   const load = useCallback(() =>
     Promise.all([listLoads(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
       .then(([l, s, d, c]) => { setLoads(l); setSettings(s); setDeductions(d); setCredits(c); setError(null) })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoading(false)),
   [])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])

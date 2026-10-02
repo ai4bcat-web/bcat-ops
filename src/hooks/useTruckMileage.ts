@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { listTruckMileages } from '@/lib/apiClient'
 import type { TruckMileage } from '@/lib/apiClient'
+import { errorText } from '@/lib/errorText'
 
 export type { TruckMileage }
 
@@ -19,7 +20,7 @@ export function useTruckMileage(periodType: string = 'DAY') {
   const load = useCallback(() =>
     listTruckMileages(undefined, periodType)
       .then((next) => { setRows(next); setError(null) })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoadedFor(periodType)),
   [periodType])
   const refresh = useCallback(() => { setLoadedFor(null); setError(null); return load() }, [load])

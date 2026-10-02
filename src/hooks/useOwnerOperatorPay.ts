@@ -45,6 +45,7 @@ import { otrSettlementReadiness } from '@/lib/otrSettlementFields'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import type { Driver, Load } from '@/types'
 import { classificationForFleet } from '@/lib/fileHub'
+import { errorText } from '@/lib/errorText'
 
 export type { DriverPaySetting, DriverPayDeduction, DriverPayCredit, DriverPayCreditInput, FuelTransaction }
 export { ownerOpWeekAtOrAfterFirst }
@@ -232,7 +233,12 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         setManualByLoadId(manual)
         setError(null)
       })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => {
+        // Logged as well as shown: the message a person can read is rarely the whole shape,
+        // and this page failing means nobody can be paid from it.
+        console.error('[owner-operator-pay] could not load the week', err)
+        setError(errorText(err, 'Could not load this week — reload, or tell Ryne what this says'))
+      })
       .finally(() => setLoading(false)),
   [])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])

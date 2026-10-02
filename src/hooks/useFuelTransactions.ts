@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { listFuelTransactions, updateFuelTransaction } from '@/lib/apiClient'
 import type { FuelTransaction } from '@/lib/apiClient'
+import { errorText } from '@/lib/errorText'
 
 export type { FuelTransaction }
 
@@ -30,7 +31,7 @@ export function useFuelTransactions() {
           console.log(`[fuel] loaded ${data.length} transactions — no duplicates`)
         }
       })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoading(false)),
   [])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])

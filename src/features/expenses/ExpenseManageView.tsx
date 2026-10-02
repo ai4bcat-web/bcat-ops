@@ -134,7 +134,7 @@ function ExpenseTypesTab({ data }: { data: ExpenseDataState }) {
         </div>
       )}
 
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -297,7 +297,7 @@ function AllocationsTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
         </div>
       )}
 
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -461,7 +461,7 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
         </div>
       )}
 
-      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+      <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
         <table className="w-full text-xs">
           <thead className="bg-slate-50">
             <tr>
@@ -609,7 +609,7 @@ function ManualEntryTab({ data, trucks }: { data: ExpenseDataState; trucks: Equi
       {data.records.filter((r) => r.source === 'manual-entry').length > 0 && (
         <div>
           <p className="text-xs text-muted-foreground font-medium mb-2">Recent manual entries</p>
-          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+          <div style={{ borderRadius: 12, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', overflow: 'auto' }}>
             <table className="w-full text-xs">
               <thead className="bg-slate-50">
                 <tr>

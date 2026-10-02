@@ -6,6 +6,7 @@ import {
   deleteDriverPayPeriod,
 } from '@/lib/apiClient'
 import type { DriverPayPeriod } from '@/lib/apiClient'
+import { errorText } from '@/lib/errorText'
 
 export type { DriverPayPeriod }
 
@@ -27,7 +28,7 @@ export function useDriverPay(): DriverPayState {
   const load = useCallback(() =>
     listDriverPayPeriods()
       .then((next) => { setPayPeriods(next); setError(null) })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoading(false)),
   [])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])

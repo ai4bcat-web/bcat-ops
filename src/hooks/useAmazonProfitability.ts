@@ -7,6 +7,7 @@ import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
+import { errorText } from '@/lib/errorText'
 
 /**
  * Amazon driver profit counts toward company totals whenever there is any.
@@ -131,7 +132,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
   const load = useCallback(() =>
     Promise.all([listAmazonTrips(), listDriverPaySettings(), listDriverPayDeductions(), listDriverPayCredits()])
       .then(([t, s, d, c]) => { setTrips(t); setSettings(s); setDeductions(d); setCredits(c); setError(null) })
-      .catch((err: unknown) => { setError(err instanceof Error ? err.message : String(err)) })
+      .catch((err: unknown) => { setError(errorText(err)) })
       .finally(() => setLoading(false)),
   [])
   const refresh = useCallback(() => { setLoading(true); return load() }, [load])

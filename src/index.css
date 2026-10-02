@@ -464,8 +464,32 @@ body {
 
   .topbar { height: 56px; padding: 0 12px; }
 
+  /*
+   * Let the page scroll, in both directions.
+   *
+   * .page-content is overflow:hidden on a desktop because each page manages its own
+   * scrolling inside a fixed-height shell. On a phone that meant anything wider than the
+   * screen — which is most of a settlement table — was simply clipped, with no way to
+   * reach it. An admin opening owner-operator settlements on their phone could see the
+   * first two columns of a nineteen-column table and nothing else.
+   */
+  .page-content { overflow: auto; -webkit-overflow-scrolling: touch; }
+
   /* Let long tables scroll sideways instead of truncating. */
   .mobile-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /*
+   * A table is the one thing allowed to be wider than the phone, and only inside its own
+   * scroller — so the page itself never scrolls sideways under a reader's thumb while
+   * they are trying to scroll down.
+   */
+  table { max-width: none; }
+
+  /*
+   * Page chrome is laid out for a 1440px desktop in inline styles, which no stylesheet can
+   * override. What it can do is stop that chrome forcing a minimum width on the phone.
+   */
+  .app-main, .page-content > * { min-width: 0; }
 
   /* Comfortable tap targets. */
   button, .sidebar-link, a[role="button"] { min-height: 40px; }
