@@ -600,85 +600,112 @@ export function luminanceAt(data: Uint8Array | Buffer, p: number): number {
 }
 
 /**
- * A local-average field over a single-channel image, via an integral image.
+ * How bright the PAPER is, everywhere on the page.
  *
- * Separated out because the cleanup needs it twice at very different scales: once wide,
- * to model the lighting across the sheet, and once at a one-pixel radius, as the blur an
- * unsharp mask subtracts.
+ * Taken as a high percentile within each tile of a coarse grid, then smoothed and
+ * bilinearly expanded back to full size. Paper is the brightest thing in any small patch
+ * of a document, so a high percentile finds it whether the patch is blank, covered in
+ * print, or in shadow.
+ *
+ * A local MEAN was tried first and is wrong twice over. Over a dense paragraph the mean is
+ * dragged down by the text itself, so dividing by it flattens the paragraph to white —
+ * that is the washout that made cleaned PODs read worse than the photographs. And near the
+ * edge of a page held in someone's hand, the mean mixes bright paper with a dark hand, so
+ * the shaded margin divides to almost nothing and is crushed to solid black, taking the
+ * SHIP FROM and SHIP TO blocks with it. A percentile has neither problem: text and the
+ * dark surround both sit below it and neither moves it.
  */
-function localMeanField(src: Float32Array, w: number, h: number, radius: number): Float32Array {
-  const stride = w + 1
-  const integral = new Float64Array(stride * (h + 1))
-  for (let y = 0; y < h; y++) {
-    let row = 0
-    for (let x = 0; x < w; x++) {
-      row += src[y * w + x]
-      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + row
+function paperLevelField(
+  gray: Float32Array,
+  w: number,
+  h: number,
+  tile: number,
+  percentile: number,
+): Float32Array {
+  const gw = Math.max(1, Math.ceil(w / tile))
+  const gh = Math.max(1, Math.ceil(h / tile))
+  const coarse = new Float32Array(gw * gh)
+  const bucket: number[] = []
+
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      const x0 = gx * tile
+      const y0 = gy * tile
+      const x1 = Math.min(w, x0 + tile)
+      const y1 = Math.min(h, y0 + tile)
+      bucket.length = 0
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) bucket.push(gray[y * w + x])
+      }
+      if (bucket.length === 0) { coarse[gy * gw + gx] = 255; continue }
+      bucket.sort((a, b) => a - b)
+      coarse[gy * gw + gx] = bucket[Math.min(bucket.length - 1, Math.floor(bucket.length * percentile))]
     }
   }
+
+  // Smooth the grid so a tile boundary never shows up as a seam on the finished page.
+  const smooth = new Float32Array(gw * gh)
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      let total = 0
+      let count = 0
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const y = gy + dy
+          const x = gx + dx
+          if (y < 0 || y >= gh || x < 0 || x >= gw) continue
+          total += coarse[y * gw + x]
+          count++
+        }
+      }
+      smooth[gy * gw + gx] = total / count
+    }
+  }
+
   const out = new Float32Array(w * h)
   for (let y = 0; y < h; y++) {
-    const top = Math.max(0, y - radius)
-    const bottom = Math.min(h, y + radius + 1)
+    const fy = Math.min(gh - 1, Math.max(0, (y + 0.5) / tile - 0.5))
+    const y0 = Math.floor(fy)
+    const y1 = Math.min(gh - 1, y0 + 1)
+    const ty = fy - y0
     for (let x = 0; x < w; x++) {
-      const left = Math.max(0, x - radius)
-      const right = Math.min(w, x + radius + 1)
-      const sum =
-        integral[bottom * stride + right] -
-        integral[top * stride + right] -
-        integral[bottom * stride + left] +
-        integral[top * stride + left]
-      out[y * w + x] = sum / ((right - left) * (bottom - top))
+      const fx = Math.min(gw - 1, Math.max(0, (x + 0.5) / tile - 0.5))
+      const x0 = Math.floor(fx)
+      const x1 = Math.min(gw - 1, x0 + 1)
+      const tx = fx - x0
+      const top = smooth[y0 * gw + x0] * (1 - tx) + smooth[y0 * gw + x1] * tx
+      const bottom = smooth[y1 * gw + x0] * (1 - tx) + smooth[y1 * gw + x1] * tx
+      out[y * w + x] = top * (1 - ty) + bottom * ty
     }
   }
   return out
 }
 
-/** The value below which `p` of the samples fall, from a 1000-bucket histogram. */
-function quantile(values: Float32Array, p: number, scale: number): number {
-  const buckets = new Float64Array(1001)
-  for (let i = 0; i < values.length; i++) {
-    const b = Math.min(1000, Math.max(0, Math.round(values[i] * scale)))
-    buckets[b]++
-  }
-  const want = values.length * p
-  let seen = 0
-  for (let b = 0; b <= 1000; b++) {
-    seen += buckets[b]
-    if (seen >= want) return b / scale
-  }
-  return 1000 / scale
-}
-
 /*
  * How the page is separated from its lighting.
  *
- * BACKGROUND_DIVISOR: the lighting field is a local average over roughly an eighth of the
- * short edge. The first version used a twenty-fourth, which is narrower than a paragraph
- * of small print — so inside a dense block the "background" was the text itself, the ratio
- * came out near 1, and the paragraph was flattened to white. That is exactly the washout
- * people reported: handwriting survived and the printed detail did not.
+ * PAPER_TILE_DIVISOR: the grid is about a sixteenth of the short edge per tile — small
+ * enough to follow a shadow across a sheet, large enough that a tile always contains some
+ * paper to measure.
  *
- * INK_QUANTILE and the clamps: after dividing out the lighting, paper sits near 1.0 and
- * ink well below it. Mapping the darkest couple of per cent to black and paper to white is
- * an ordinary levels stretch, and it is what puts contrast back. The clamps bound the two
- * degenerate cases — a nearly blank page, where even the darkest sample is still paper and
- * everything would go black, and a very dark photo, where the point would sit so low that
- * nothing reaches black. The upper clamp is held well below paper on purpose: a shaded
- * table header sits around three quarters of paper brightness, and an anchor above that
- * would fill it in solid and take the words in it with it.
+ * PAPER_PERCENTILE: the ninetieth, not the maximum. The maximum is a specular highlight
+ * off a phone flash, and keying the whole page to a glare spot darkens everything else.
  *
- * SHARPEN_AMOUNT: a light unsharp mask. Flattening the lighting costs a little edge
- * definition, and small print is where that is felt.
+ * INK_POINT: paper now lands at 1.0 by construction, so this is a fixed anchor rather
+ * than something measured. Half of paper brightness is ink; above that is shading. Fixed
+ * is the point — a measured anchor adapts to the page, which means two photographs of the
+ * same document come out looking different.
+ *
+ * SHARPEN_AMOUNT: a light unsharp mask. Flattening costs a little edge definition, and
+ * small print is where that is felt.
  */
-const BACKGROUND_DIVISOR = 8
-const MIN_BACKGROUND_RADIUS = 48
-const INK_QUANTILE = 0.02
-const MIN_INK_POINT = 0.3
-const MAX_INK_POINT = 0.62
+const PAPER_TILE_DIVISOR = 16
+const MIN_PAPER_TILE = 8
+const PAPER_PERCENTILE = 0.9
+const INK_POINT = 0.5
 const SHARPEN_AMOUNT = 0.6
-/** Floors the lighting field so a genuinely black region cannot divide by nearly nothing. */
-const MIN_ILLUMINATION = 24
+/** Floors the paper level so a frame with no paper in it cannot divide by nearly nothing. */
+const MIN_PAPER_LEVEL = 32
 
 /**
  * In-place illumination cleanup: divide the lighting out, then put the contrast back.
@@ -693,35 +720,33 @@ export function applyIlluminationCleanup(jimp: JimpImage): void {
   const gray = new Float32Array(w * h)
   for (let i = 0; i < w * h; i++) gray[i] = luminanceAt(data, i * 4)
 
-  const radius = Math.max(MIN_BACKGROUND_RADIUS, Math.round(Math.min(w, h) / BACKGROUND_DIVISOR))
-  const illumination = localMeanField(gray, w, h, radius)
+  const tile = Math.max(MIN_PAPER_TILE, Math.round(Math.min(w, h) / PAPER_TILE_DIVISOR))
+  const paper = paperLevelField(gray, w, h, tile, PAPER_PERCENTILE)
 
-  // Paper lands near 1.0 whatever the lighting was; ink lands below it.
-  const ratio = new Float32Array(w * h)
-  for (let i = 0; i < w * h; i++) {
-    ratio[i] = gray[i] / Math.max(MIN_ILLUMINATION, illumination[i])
-  }
-
-  const inkPoint = Math.min(
-    MAX_INK_POINT,
-    Math.max(MIN_INK_POINT, quantile(ratio, INK_QUANTILE, 500)),
-  )
-  const span = 1 - inkPoint
-
+  // Paper lands at 1.0 whatever the lighting was; ink lands below it.
   const levelled = new Float32Array(w * h)
   for (let i = 0; i < w * h; i++) {
-    levelled[i] = Math.max(0, Math.min(255, ((ratio[i] - inkPoint) / span) * 255))
+    const ratio = gray[i] / Math.max(MIN_PAPER_LEVEL, paper[i])
+    levelled[i] = Math.max(0, Math.min(255, ((ratio - INK_POINT) / (1 - INK_POINT)) * 255))
   }
 
-  const blurred = localMeanField(levelled, w, h, 1)
-  for (let i = 0; i < w * h; i++) {
-    const sharpened = levelled[i] + SHARPEN_AMOUNT * (levelled[i] - blurred[i])
-    const v = Math.round(Math.max(0, Math.min(255, sharpened)))
-    const p = i * 4
-    data[p] = v
-    data[p + 1] = v
-    data[p + 2] = v
-    data[p + 3] = 255
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x
+      let value = levelled[i]
+      // Unsharp mask on the interior; the one-pixel border keeps its levelled value.
+      if (x > 0 && x < w - 1 && y > 0 && y < h - 1) {
+        const mean =
+          (levelled[i - 1] + levelled[i + 1] + levelled[i - w] + levelled[i + w] + levelled[i]) / 5
+        value = levelled[i] + SHARPEN_AMOUNT * (levelled[i] - mean)
+      }
+      const v = Math.round(Math.max(0, Math.min(255, value)))
+      const p = i * 4
+      data[p] = v
+      data[p + 1] = v
+      data[p + 2] = v
+      data[p + 3] = 255
+    }
   }
 }
 

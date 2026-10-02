@@ -103,6 +103,29 @@ describe('applyIlluminationCleanup', () => {
     expect(type - band).toBeGreaterThan(40)
   })
 
+  it('keeps a shadowed margin readable instead of crushing it to black', () => {
+    /*
+     * A page held in someone's hand against a dark seat: the left strip is both shaded and
+     * next to something much darker than paper. Estimating the background as a local MEAN
+     * mixed the two, so the shaded margin divided to almost nothing and went solid black —
+     * on a real bill of lading (14515) that swallowed the SHIP FROM and SHIP TO addresses
+     * entirely. A percentile sits above the dark surround, so neither moves it.
+     */
+    const img = make(SIZE, SIZE, (x, y) => {
+      if (x < 60) return 18                       // the hand and the seat behind the page
+      const paper = x < 180 ? 95 : 215            // the page, its left third in shadow
+      const inShadowedText = x > 80 && x < 170 && y % 8 < 2
+      return inShadowedText ? paper * 0.35 : paper
+    })
+    applyIlluminationCleanup(img)
+
+    // The shaded paper must still read as paper...
+    expect(meanOf(img, 90, 2, 70, 4)).toBeGreaterThan(200)
+    // ...and the text on it must still read as text, not as part of one black block.
+    const textRows = [8, 16, 24, 32].map((y) => meanOf(img, 90, y, 70, 2))
+    for (const row of textRows) expect(row).toBeLessThan(140)
+  })
+
   it('does not turn a nearly blank page black', () => {
     // With almost no ink, the darkest five per cent of the page is still paper. The
     // clamp is what stops the stretch from treating it as ink.
