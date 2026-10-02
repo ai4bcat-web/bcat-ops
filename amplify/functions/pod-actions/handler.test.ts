@@ -1241,3 +1241,30 @@ describe('senderMappingsAction + setSenderMappingAction', () => {
     )).rejects.toThrow(/requires a sender name or phone number/)
   })
 })
+
+describe('system-driven scan steps', () => {
+  it('accepts a direct Lambda call with no human identity', async () => {
+    // driver-app-api and the backfill script have no email to present. Faking one would put
+    // a lie in the audit trail, so the marker is explicit.
+    await expect(
+      authorize('enhanceDriverDoc', { claims: { bcatSystemCaller: true }, username: 'driver-app-api' }),
+    ).resolves.toMatchObject({ email: 'system:driver-app-api', isAdmin: false })
+  })
+
+  it('accepts it for the merge step too', async () => {
+    await expect(
+      authorize('finalizeDriverDocs', { claims: { bcatSystemCaller: true }, username: 'backfill-script' }),
+    ).resolves.toMatchObject({ isPagePods: true })
+  })
+
+  it('does not let the marker reach any other action', async () => {
+    // It is scoped to the two steps that only ever clean up a document that already exists.
+    await expect(
+      authorize('assign', { claims: { bcatSystemCaller: true }, username: 'whoever' }),
+    ).rejects.toThrow(/Unauthorized|Forbidden/)
+  })
+
+  it('still refuses a call with no identity at all', async () => {
+    await expect(authorize('enhanceDriverDoc', null)).rejects.toThrow('Unauthorized: missing identity')
+  })
+})

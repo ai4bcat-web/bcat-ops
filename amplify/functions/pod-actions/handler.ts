@@ -230,11 +230,35 @@ export async function getCallerEmail(identity: AppSyncIdentity): Promise<string>
   }
 }
 
+/**
+ * The two scan steps can be driven by our own Lambdas rather than a person.
+ *
+ * driver-app-api asks for them after a driver uploads, and the backfill script asks for
+ * them over documents already stored. Neither has a human identity to present, and faking
+ * an email address for them would be a lie in the audit trail.
+ *
+ * Trusting this marker is exactly as safe as the IAM grant that allows a direct Invoke of
+ * this function: AppSync builds the identity itself for a GraphQL call and cannot set it,
+ * so it can only arrive from a caller we already permitted to invoke us. Both actions
+ * additionally only ever clean up a document that already exists — they expose nothing and
+ * delete nothing.
+ */
+const SYSTEM_CALLABLE: ReadonlySet<ManageAction> = new Set(['enhanceDriverDoc', 'finalizeDriverDocs'])
+
+function isSystemCall(action: ManageAction, identity: AppSyncIdentity): boolean {
+  const claims = (identity.claims ?? {}) as Record<string, unknown>
+  return SYSTEM_CALLABLE.has(action) && claims.bcatSystemCaller === true
+}
+
 export async function authorize(
   action: ManageAction,
   identity?: AppSyncIdentity | null,
 ): Promise<Caller> {
   if (!identity) throw new Error('Unauthorized: missing identity')
+  if (isSystemCall(action, identity)) {
+    const who = typeof identity.username === 'string' ? identity.username : 'system'
+    return { email: `system:${who}`, isOwner: false, isAdmin: false, isPagePods: true }
+  }
   const email = await getCallerEmail(identity)
   if (!email) throw new Error('Unauthorized: could not resolve caller email')
   const groups = getGroups(identity)

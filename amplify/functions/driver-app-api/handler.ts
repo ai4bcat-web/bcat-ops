@@ -989,7 +989,8 @@ async function requestScanCleanup(
           Payload: Buffer.from(
             JSON.stringify({
               arguments: { action, input: JSON.stringify(input) },
-              identity: { claims: { email: 'driver-app-api' }, groups: ['ADMIN'] },
+              // A system call: no human identity to present, and no email to invent.
+              identity: { claims: { bcatSystemCaller: true }, username: 'driver-app-api' },
             }),
           ),
         }),
