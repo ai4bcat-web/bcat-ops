@@ -333,6 +333,30 @@ export class OtrClient {
     return { message: j.message ?? '', invoiceId: String(j.invoiceId ?? opts.invoiceId) }
   }
 
+  /**
+   * Ask OTR what a path answers, without acting on anything.
+   *
+   * We know four endpoints because those are the four we were given. Pulling the invoices
+   * that already exist on OTR's portal — and updating one — needs endpoints nobody here has
+   * seen documented, and guessing at them one deploy at a time is a bad way to find out.
+   *
+   * GET only, and the body is truncated: this exists to establish what is THERE, and a
+   * probe that could change something at a factoring company is not a probe.
+   */
+  async probe(path: string): Promise<{ path: string; status: number; body: string }> {
+    if (!path.startsWith('/')) throw new Error('probe path must start with /')
+    try {
+      const res = await this.request(path, {
+        method: 'GET',
+        headers: await this.authedHeaders({ Accept: 'application/json' }),
+      })
+      const text = await res.text()
+      return { path, status: res.status, body: text.slice(0, 1200) }
+    } catch (err) {
+      return { path, status: 0, body: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   /** Read-back for the board: current status of one invoice. */
   async getInvoice(invoiceId: number | string): Promise<OtrInvoiceDetails> {
     const res = await this.request(`/invoices/${encodeURIComponent(String(invoiceId))}`, {
