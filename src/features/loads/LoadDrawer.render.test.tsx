@@ -30,6 +30,7 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({ user: { email: 'ryne@bcatcorp.com' }, isAdmin: true, isOwner: true }),
+  useAuthUser: () => ({ email: 'ryne@bcatcorp.com' }),
 }))
 
 vi.mock('@/features/pods/LoadPods', () => ({

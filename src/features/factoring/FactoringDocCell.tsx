@@ -14,15 +14,17 @@
  * Uploading the wrong thing to the wrong store is how a document appears on screen and is
  * still refused at submit, so this does not invent a third path.
  */
-import { useRef, useState } from 'react'
-import { Check, Loader2, Upload, AlertTriangle, Eye, Download } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Check, Loader2, Upload, AlertTriangle, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { uploadRateConfirm, getRateConfirmUrl } from '@/lib/apiClient'
 import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
-import { downloadPodAsPdf } from '@/lib/podDownload'
+import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { useAppStore } from '@/store/useAppStore'
 import {
   staffUploadDriverDoc,
+  removeDriverDocs,
+  replaceDriverDocs,
   driverDocValidationError,
   DRIVER_DOC_ACCEPT,
 } from '@/lib/driverSubmissionsClient'
@@ -62,27 +64,22 @@ export function FactoringDocCell({
   const loadRateConKey = kind === 'RATECON' ? (load?.rateConfirmKey ?? '') : ''
   const viewUrl = submitted?.url ?? null
 
-  async function openIt() {
-    if (viewUrl) { window.open(viewUrl, '_blank', 'noopener'); return }
-    if (!loadRateConKey) return
-    try {
-      window.open(await getRateConfirmUrl(loadRateConKey), '_blank', 'noopener')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not open the document')
-    }
-  }
+  /*
+   * The rate confirmation on the Load row has no submission behind it, so it can be
+   * previewed and downloaded but not removed from here — removing it means clearing the
+   * field on the load, which is the Loads drawer's job and its audit trail.
+   */
+  const [previewing, setPreviewing] = useState(false)
+  const [loadRateConUrl, setLoadRateConUrl] = useState<string | null>(null)
 
-  async function downloadIt() {
-    const name = `${kind === 'POD' ? 'POD' : 'RateCon'}-${proNumber || 'document'}`
-    try {
-      const url = viewUrl ?? (loadRateConKey ? await getRateConfirmUrl(loadRateConKey) : null)
-      if (!url) return
-      // Always a PDF, the same as everywhere else a POD leaves this office.
-      await downloadPodAsPdf(url, name)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not download the document')
-    }
-  }
+  useEffect(() => {
+    if (!previewing || viewUrl || !loadRateConKey || loadRateConUrl) return
+    let cancelled = false
+    getRateConfirmUrl(loadRateConKey)
+      .then((u) => { if (!cancelled) setLoadRateConUrl(u) })
+      .catch(() => { if (!cancelled) toast.error('Could not open the document') })
+    return () => { cancelled = true }
+  }, [previewing, viewUrl, loadRateConKey, loadRateConUrl])
 
   const canOpen = !!viewUrl || !!loadRateConKey
 
@@ -131,28 +128,17 @@ export function FactoringDocCell({
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-      {/* Present means openable: preview it, or take the PDF. */}
+      {/* Present means openable: the preview is where you confirm it is the right one. */}
       {canOpen && (
-        <>
-          <button
-            type="button"
-            onClick={() => void openIt()}
-            aria-label={`Preview the ${LABEL[kind]} for PRO ${proNumber}`}
-            title={`Preview the ${LABEL[kind]}`}
-            style={iconBtn}
-          >
-            <Eye size={12} />
-          </button>
-          <button
-            type="button"
-            onClick={() => void downloadIt()}
-            aria-label={`Download the ${LABEL[kind]} for PRO ${proNumber}`}
-            title={`Download the ${LABEL[kind]} as a PDF`}
-            style={iconBtn}
-          >
-            <Download size={12} />
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={() => setPreviewing(true)}
+          aria-label={`Preview the ${LABEL[kind]} for PRO ${proNumber}`}
+          title={`Preview the ${LABEL[kind]}`}
+          style={iconBtn}
+        >
+          <Eye size={12} />
+        </button>
       )}
       <button
         type="button"
@@ -195,6 +181,53 @@ export function FactoringDocCell({
         onChange={(e) => void onPick(e)}
         style={{ display: 'none' }}
       />
+
+      {previewing && (
+        <DocumentPreview
+          open
+          onClose={() => setPreviewing(false)}
+          title={`${LABEL[kind]} \u00b7 PRO ${proNumber || '\u2014'}`}
+          subtitle={
+            submitted
+              ? [
+                  submitted.driverName,
+                  submitted.pageCount > 1 ? `${submitted.pageCount} pages` : '',
+                  submitted.enhanced ? 'cleaned scan' : '',
+                ].filter(Boolean).join(' \u00b7 ')
+              : 'Uploaded on the load'
+          }
+          url={viewUrl ?? loadRateConUrl}
+          contentType={submitted?.contentType ?? (loadRateConKey ? 'application/pdf' : null)}
+          downloadName={`${kind === 'POD' ? 'POD' : 'RateCon'}-${proNumber || 'document'}`}
+          accept={DRIVER_DOC_ACCEPT}
+          onReplace={
+            submitted
+              ? async (files) => {
+                  await replaceDriverDocs({
+                    submissionId: submitted.submissionId,
+                    driver: { id: submitted.driverId, name: submitted.driverName, email: null },
+                    kind,
+                    files,
+                    submittedByEmail: staffEmail,
+                    referenceNumber: proNumber || undefined,
+                    loadId: loadId ?? undefined,
+                  })
+                  toast.success(`${LABEL[kind]} replaced for PRO ${proNumber}`)
+                  onUploaded()
+                }
+              : undefined
+          }
+          onRemove={
+            submitted
+              ? async () => {
+                  await removeDriverDocs(submitted.submissionId, kind)
+                  toast.success(`${LABEL[kind]} removed from PRO ${proNumber}`)
+                  onUploaded()
+                }
+              : undefined
+          }
+        />
+      )}
     </span>
   )
 }

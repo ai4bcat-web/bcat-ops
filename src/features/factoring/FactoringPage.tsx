@@ -5,6 +5,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { OtrPanel } from './OtrPanel'
+import { LoadDrawer } from '@/features/loads/LoadDrawer'
+import { useAppStore } from '@/store/useAppStore'
 import {
   Select,
   SelectContent,
@@ -62,6 +64,45 @@ function relativeReceived(iso: string) {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
   return `${Math.floor(hrs / 24)}d ago`
+}
+
+/**
+ * The PRO number, as the way into the load it names.
+ *
+ * Everything in this queue is discussed by PRO, and the next question after "why is 14538
+ * still red" is always on the load — its stops, its rate, its rate confirmation. Opening
+ * the drawer here beats copying the number onto the Loads page.
+ *
+ * A row whose PRO never matched a load keeps its plain number: an underline that goes
+ * nowhere is worse than no underline.
+ */
+function ProLink({ loadId, proNumber }: { loadId: string | null | undefined; proNumber: string }) {
+  const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+  const loads = useAppStore((s) => s.loads)
+  const known = loadId ? loads.some((l) => l.id === loadId) : false
+  const text = (
+    <span style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+      {proNumber}
+    </span>
+  )
+  if (!known || !loadId) {
+    return <span style={{ color: 'var(--ds-t1)' }} title="This PRO is not linked to a load yet">{text}</span>
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setSelectedLoad(loadId, 'view')}
+      aria-label={`Open the load for PRO ${proNumber}`}
+      title="Open this load"
+      style={{
+        border: 'none', background: 'none', padding: 0, cursor: 'pointer',
+        fontFamily: 'inherit', color: 'var(--ds-accent, #2563eb)',
+        textDecoration: 'underline', textUnderlineOffset: 3,
+      }}
+    >
+      {text}
+    </button>
+  )
 }
 
 /**
@@ -343,6 +384,7 @@ export function FactoringPage() {
                       className="hover:bg-[var(--ds-bg)] transition-colors"
                     >
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         <button
                           onClick={() => toggleExpanded(item.id)}
                           aria-expanded={expanded.has(item.id)}
@@ -359,10 +401,11 @@ export function FactoringPage() {
                           <span className="inline-flex items-center justify-center size-7 rounded-md bg-slate-100 text-slate-600">
                             <Mail className="size-3.5" />
                           </span>
-                          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
-                            {item.proNumber}
-                          </span>
                         </button>
+                        {/* The PRO opens the load it names — the expander is the chevron
+                            beside it, so one control does not have to mean two things. */}
+                        <ProLink loadId={item.loadId} proNumber={item.proNumber} />
+                        </span>
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <span style={{
@@ -458,6 +501,8 @@ export function FactoringPage() {
         </div>
         )}
       </div>
+      {/* Opened by the PRO column. */}
+      <LoadDrawer />
     </div>
   )
 }

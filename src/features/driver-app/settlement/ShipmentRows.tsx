@@ -14,9 +14,12 @@
  * line up down the list, which is the point of columns; a real table at 400px would need
  * sideways scrolling to see whether a POD is in.
  */
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Check, Upload, AlertTriangle } from 'lucide-react'
-import type { FactoringFields, SettlementTrip } from '../driverApi'
+import { Check, Upload, AlertTriangle, Eye } from 'lucide-react'
+import type { FactoringFields, SettlementTrip, SubmissionKind } from '../driverApi'
+import { useTripDocs, type TripDoc } from './useTripDocs'
+import { DocPreviewSheet } from './DocPreviewSheet'
 
 type Trip = SettlementTrip & {
   factoring?: FactoringFields | null
@@ -44,7 +47,7 @@ function shipmentLabel(trip: Trip): string {
 }
 
 function DocCell({
-  present, required, label, shipment, onPress,
+  present, required, label, shipment, onPress, onPreview,
 }: {
   present: boolean
   /** Amber when its absence holds the driver's pay. Only the POD does. */
@@ -53,15 +56,33 @@ function DocCell({
   /** Named in the accessible label so the rows are told apart, not just numbered. */
   shipment: string
   onPress: () => void
+  /**
+   * Absent while the document index is still loading, or for a POD the office holds that
+   * this driver never submitted. The tick then stays a tick rather than becoming a button
+   * that opens nothing.
+   */
+  onPreview?: () => void
 }) {
   if (present) {
+    if (!onPreview) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600"
+          aria-label={`${label} on file for ${shipment}`}
+        >
+          <Check className="h-3.5 w-3.5" /> In
+        </span>
+      )
+    }
     return (
-      <span
-        className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600"
-        aria-label={`${label} on file for ${shipment}`}
+      <button
+        type="button"
+        onClick={onPreview}
+        aria-label={`Check the ${label} you sent for ${shipment}`}
+        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs font-medium text-emerald-600 underline-offset-2 hover:underline"
       >
-        <Check className="h-3.5 w-3.5" /> In
-      </span>
+        <Eye className="h-3.5 w-3.5" /> In
+      </button>
     )
   }
   return (
@@ -83,6 +104,8 @@ function DocCell({
 
 export function ShipmentRows({ trips }: { trips: Trip[] }) {
   const navigate = useNavigate()
+  const docs = useTripDocs()
+  const [open, setOpen] = useState<{ doc: TripDoc; kind: SubmissionKind; shipment: string } | null>(null)
 
   if (trips.length === 0) {
     return (
@@ -112,6 +135,9 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
         const podIn = !!f?.podPresent
         const held = !!trip.heldReason
         const shipment = shipmentLabel(trip)
+        const pro = f?.invoiceNo ?? null
+        const podDoc = docs.find('POD', trip.loadId, pro)
+        const rcDoc = docs.find('RATECON', trip.loadId, pro)
         return (
           <div
             key={trip.id}
@@ -150,6 +176,7 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
                 label="POD"
                 shipment={shipment}
                 onPress={() => send('pod', trip)}
+                onPreview={podDoc ? () => setOpen({ doc: podDoc, kind: 'POD', shipment }) : undefined}
               />
             </span>
 
@@ -160,11 +187,33 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
                 label="rate confirmation"
                 shipment={shipment}
                 onPress={() => send('ratecon', trip)}
+                onPreview={rcDoc ? () => setOpen({ doc: rcDoc, kind: 'RATECON', shipment }) : undefined}
               />
             </span>
           </div>
         )
       })}
+
+      {open && (
+        <DocPreviewSheet
+          doc={open.doc}
+          kind={open.kind}
+          shipment={open.shipment}
+          onClose={() => setOpen(null)}
+          onReplace={() => {
+            setOpen(null)
+            docs.refresh()
+            navigate(
+              `/driver/scan?kind=${open.kind === 'POD' ? 'pod' : 'ratecon'}` +
+                `&pro=${encodeURIComponent(open.shipment)}`,
+            )
+          }}
+          onRemoved={() => {
+            setOpen(null)
+            docs.refresh()
+          }}
+        />
+      )}
     </div>
   )
 }

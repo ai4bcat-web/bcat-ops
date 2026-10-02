@@ -22,6 +22,9 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('./OtrPanel', () => ({ OtrPanel: () => <div data-testid="otr-panel" /> }))
+// The drawer the PRO column opens. Its own behaviour is covered by LoadDrawer's tests;
+// here it would only drag the whole load form into a test about the queue.
+vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
 vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn() }))
 vi.mock('@/hooks/useLoadDriverDocs', () => ({
   useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),

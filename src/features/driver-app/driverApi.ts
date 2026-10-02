@@ -134,6 +134,24 @@ export interface SubmissionDoc {
   contentType: string
   pageNumber: number
   uploadedAt: string
+  /** True once the cleanup produced a readable copy; that copy is what the url serves. */
+  enhanced?: boolean
+  scanStatus?: string | null
+}
+
+/**
+ * The finished document per kind — the merged PDF where one exists, otherwise the single
+ * page that is standing in for it until the merge runs. This is what a driver previews:
+ * a POD is one document, not a pile of photos, and the office only ever sends the one.
+ */
+export interface SubmissionDocument {
+  kind: SubmissionKind
+  /** Pass to fetchDocUrl. `combined-POD` addresses the merged PDF. */
+  docId: string
+  pageCount: number
+  enhanced: boolean
+  contentType: string
+  combined: boolean
 }
 
 export interface SubmissionSummary {
@@ -145,6 +163,7 @@ export interface SubmissionSummary {
   createdAt: string
   notifiedAt?: string | null
   docs: SubmissionDoc[]
+  documents?: SubmissionDocument[]
 }
 
 /** One page the driver captured, ready to hand to the server for a presigned PUT. */
@@ -234,6 +253,23 @@ export function fetchSettlement(weekStart: string): Promise<Settlement> {
 export async function fetchSubmissions(): Promise<SubmissionSummary[]> {
   const out = await request<{ submissions: SubmissionSummary[] }>('/submissions')
   return out.submissions
+}
+
+/**
+ * Take a POD or rate confirmation back off a submission.
+ *
+ * The pages stop counting immediately — a removed POD puts the load back on hold — so the
+ * app asks before calling this. The files themselves stay in storage; the office can still
+ * find what was sent if the wrong one was taken off.
+ */
+export async function removeSubmissionDocs(
+  submissionId: string,
+  kind: SubmissionKind,
+): Promise<void> {
+  await request(
+    `/submissions/${encodeURIComponent(submissionId)}/docs?kind=${kind}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function fetchDocUrl(submissionId: string, docId: string): Promise<string> {

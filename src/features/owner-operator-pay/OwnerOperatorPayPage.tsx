@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCirc
 import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
 import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
 import { Avatar } from '@/components/ui/avatar'
+import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
 import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
@@ -19,6 +20,7 @@ import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
 import { SendDriverInvite } from './SendDriverInvite'
 import { SettlementDocUpload } from './SettlementDocUpload'
+import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -75,6 +77,42 @@ function OtrDoc({
       blocking={kind === 'POD'}
       onUploaded={onUploaded}
     />
+  )
+}
+
+/**
+ * The PRO, as the way into the load it names.
+ *
+ * Every conversation about a settlement row is "what is going on with 14559" — and the
+ * answer is on the load. Copying the number and hunting for it on the Loads page is the
+ * step this removes. Falls back to plain text when the row never resolved to a load, so
+ * an unlinked trip reads as unlinked rather than as a dead link.
+ */
+function ProLink({
+  loadId, proNumber, children,
+}: {
+  loadId: string | null | undefined
+  proNumber: string
+  children: React.ReactNode
+}) {
+  const setSelectedLoad = useAppStore((st) => st.setSelectedLoad)
+  const loads = useAppStore((st) => st.loads)
+  const known = loadId ? loads.some((l) => l.id === loadId) : false
+  if (!loadId || !known) return <>{children}</>
+  return (
+    <button
+      type="button"
+      onClick={() => setSelectedLoad(loadId, 'view')}
+      aria-label={`Open the load for PRO ${proNumber || loadId}`}
+      title="Open this load"
+      style={{
+        border: 'none', background: 'none', padding: 0, cursor: 'pointer',
+        font: 'inherit', color: 'var(--ds-accent, #2563eb)', textDecoration: 'underline',
+        textUnderlineOffset: 2,
+      }}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -382,6 +420,8 @@ export function OwnerOperatorPayPage() {
         />
       )}
       {settingsFor && <SettingsModal driver={settingsFor} existing={pay.rows.find((r) => r.driver.id === settingsFor.id)?.baseSetting} onSave={async (patch, expectedUpdatedAt) => { await pay.saveSetting(settingsFor.id, patch, expectedUpdatedAt); setSettings(null) }} onClose={() => setSettings(null)} />}
+      {/* Opened by the PRO column. Present on every page that can select a load. */}
+      <LoadDrawer />
     </div>
   )
 }
@@ -477,7 +517,10 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
               return (
               <tr key={t.id} style={{ borderBottom: '1px solid var(--ds-border)', background: dup ? 'var(--ds-red-bg, #fef2f2)' : held ? '#fffbeb' : undefined }}>
                 <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
-                  <OtrCell trip={t} field="InvoiceNo" />
+                  {/* The PRO is how everyone refers to a load, so it is also the way to it. */}
+                  <ProLink loadId={t.id} proNumber={String(t.readiness?.payload.InvoiceNo ?? '')}>
+                    <OtrCell trip={t} field="InvoiceNo" />
+                  </ProLink>
                 </td>
                 <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)' }}>
                   <OtrCell trip={t} field="PoNumber" />

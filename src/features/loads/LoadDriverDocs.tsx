@@ -6,11 +6,23 @@
  * own app — and the office would still see an empty slot and chase them for it. This is
  * that missing half, for both document kinds.
  *
- * Read-only on purpose. Staff already have upload controls beside this; what was missing
- * was sight of what had already arrived.
+ * It used to be read-only, with a link that opened a presigned URL in a new tab. That is
+ * the one thing it should not be: the reason anyone opens a POD here is to check it is the
+ * right document the right way up, and the next thing they want after "no, that is the
+ * bill of lading for the wrong stop" is to take it off and put the right one on. So the
+ * row opens a preview, and the preview can replace or remove.
  */
-import { FileText, Loader2, ExternalLink, AlertTriangle } from 'lucide-react'
+import { useState } from 'react'
+import { FileText, Loader2, AlertTriangle, Eye } from 'lucide-react'
+import { toast } from 'sonner'
 import { useLoadDriverDocs, type LoadDriverDoc } from '@/hooks/useLoadDriverDocs'
+import { DocumentPreview } from '@/features/documents/DocumentPreview'
+import {
+  removeDriverDocs,
+  replaceDriverDocs,
+  DRIVER_DOC_ACCEPT,
+} from '@/lib/driverSubmissionsClient'
+import { useAuthUser } from '@/hooks/useAuth'
 
 const SOURCE_LABEL: Record<string, string> = {
   PWA: 'from the driver app',
@@ -24,37 +36,13 @@ function when(iso: string): string {
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-function DocRow({ doc }: { doc: LoadDriverDoc }) {
-  const label = doc.fileName?.trim() || `${doc.kind} page ${doc.pageNumber ?? 1}`
-  const pages = doc.pageCount > 1 ? ` · ${doc.pageCount} pages` : ''
-  const who = SOURCE_LABEL[doc.source ?? 'PWA'] ?? 'from the driver app'
-  return (
-    <li className="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-xs font-medium text-foreground">{label}</p>
-        <p className="truncate text-[11px] text-muted-foreground">
-          {doc.driverName} · {who} · {when(doc.uploadedAt)}
-          {/* Says which copy the link opens, so nobody wonders why it looks different
-              from the photo the driver took. */}
-          {pages}
-          {doc.enhanced && <span className="text-emerald-600"> · cleaned scan</span>}
-          {doc.scanStatus === 'FAILED' && <span className="text-amber-700"> · original only</span>}
-        </p>
-      </div>
-      {doc.url ? (
-        <a
-          href={doc.url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary hover:underline"
-        >
-          Open <ExternalLink className="size-3" />
-        </a>
-      ) : (
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-      )}
-    </li>
-  )
+/** "3 pages · cleaned scan" — what the preview is actually showing you. */
+function describe(doc: LoadDriverDoc): string {
+  const bits: string[] = []
+  if (doc.pageCount > 1) bits.push(`${doc.pageCount} pages`)
+  if (doc.enhanced) bits.push('cleaned scan')
+  else if (doc.scanStatus === 'FAILED') bits.push('original only — the cleanup did not run')
+  return bits.join(' · ')
 }
 
 export function LoadDriverDocs({
@@ -64,8 +52,11 @@ export function LoadDriverDocs({
   proNumber: string | null | undefined
   kind: 'POD' | 'RATECON'
 }) {
-  const { pods, ratecons, loading, error } = useLoadDriverDocs(loadId, proNumber)
+  const { pods, ratecons, loading, error, refresh } = useLoadDriverDocs(loadId, proNumber)
+  const user = useAuthUser()
+  const [previewing, setPreviewing] = useState<string | null>(null)
   const docs = kind === 'POD' ? pods : ratecons
+  const open = docs.find((d) => d.id === previewing) ?? null
 
   if (error) {
     return (
@@ -78,6 +69,8 @@ export function LoadDriverDocs({
   // Nothing sent is the normal case and needs no words; the upload control is right there.
   if (loading || docs.length === 0) return null
 
+  const label = kind === 'POD' ? 'POD' : 'Rate confirmation'
+
   return (
     <div className="space-y-1.5">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -86,8 +79,68 @@ export function LoadDriverDocs({
         <span className="font-normal normal-case tracking-normal">({docs.length})</span>
       </p>
       <ul className="space-y-1.5">
-        {docs.map((doc) => <DocRow key={doc.id} doc={doc} />)}
+        {docs.map((doc) => {
+          const name = doc.fileName?.trim() || `${doc.kind} page ${doc.pageNumber ?? 1}`
+          const who = SOURCE_LABEL[doc.source ?? 'PWA'] ?? 'from the driver app'
+          const note = describe(doc)
+          return (
+            <li key={doc.id}>
+              <button
+                type="button"
+                onClick={() => setPreviewing(doc.id)}
+                aria-label={`Preview ${name}`}
+                className="flex w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 py-2 text-left transition-colors hover:bg-muted/60"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-medium text-foreground">{name}</span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {doc.driverName} · {who} · {when(doc.uploadedAt)}
+                    {note && <span className={doc.enhanced ? 'text-emerald-600' : 'text-amber-700'}> · {note}</span>}
+                  </span>
+                </span>
+                {doc.url ? (
+                  <span className="flex shrink-0 items-center gap-1 text-[11px] font-semibold text-primary">
+                    Preview <Eye className="size-3" />
+                  </span>
+                ) : (
+                  <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                )}
+              </button>
+            </li>
+          )
+        })}
       </ul>
+
+      {open && (
+        <DocumentPreview
+          open
+          onClose={() => setPreviewing(null)}
+          title={`${label} · PRO ${proNumber || '—'}`}
+          subtitle={[open.driverName, describe(open)].filter(Boolean).join(' · ')}
+          url={open.url}
+          contentType={open.contentType}
+          downloadName={`${kind === 'POD' ? 'POD' : 'RateCon'}-${proNumber || open.submissionId.slice(-6)}`}
+          accept={DRIVER_DOC_ACCEPT}
+          onReplace={async (files) => {
+            await replaceDriverDocs({
+              submissionId: open.submissionId,
+              driver: { id: open.driverId, name: open.driverName, email: null },
+              kind,
+              files,
+              submittedByEmail: user?.email ?? 'staff',
+              referenceNumber: proNumber ?? undefined,
+              loadId: loadId ?? undefined,
+            })
+            toast.success(`${label} replaced`)
+            refresh()
+          }}
+          onRemove={async () => {
+            await removeDriverDocs(open.submissionId, kind)
+            toast.success(`${label} removed`)
+            refresh()
+          }}
+        />
+      )}
     </div>
   )
 }

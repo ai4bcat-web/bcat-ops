@@ -19,6 +19,7 @@ import {
   PutCommand,
   UpdateCommand,
   QueryCommand,
+  DeleteCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
@@ -148,6 +149,10 @@ interface DriverSubmissionRow {
   createdAt: string
   updatedAt: string
   pendingUploads?: PendingUploads
+  /** The finished single PDF per kind, once the pages have been cleaned and merged. */
+  combinedPodKey?: string | null
+  combinedRateconKey?: string | null
+  combinedAt?: string | null
 }
 
 interface DriverSubmissionDocRow {
@@ -164,6 +169,9 @@ interface DriverSubmissionDocRow {
   notifiedAt?: string | null
   createdAt?: string
   updatedAt?: string
+  /** The cleaned copy, and how the cleanup went. See pod-actions/scan.ts. */
+  enhancedKey?: string | null
+  scanStatus?: string | null
 }
 
 interface PendingPage {
@@ -650,6 +658,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'loads' && segments[1] === 'recent') {
     return { path: '/loads/recent' }
+  }
+  if (segments[0] === 'submissions' && segments[2] === 'docs') {
+    return { path: '/submissions/:id/docs', id: segments[1] }
   }
   if (segments[0] === 'submissions' && segments[2] === 'attach') {
     return { path: '/submissions/:id/attach', id: segments[1] }
@@ -1561,7 +1572,34 @@ export const handler = async (event: FnUrlEvent) => {
               contentType: d.contentType ?? '',
               pageNumber: d.pageNumber,
               uploadedAt: d.uploadedAt,
+              /* Whether the cleaned copy exists, so the app can say which one it is
+                 showing rather than leaving a driver to wonder why their photo looks
+                 different from the one they took. */
+              enhanced: d.scanStatus === 'READY' && !!d.enhancedKey,
+              scanStatus: d.scanStatus ?? null,
             })),
+          /*
+           * The finished single PDF per kind. This is what a driver should preview and
+           * what the office sends on; the loose pages behind it only matter while the
+           * merge has not run yet.
+           */
+          documents: (['POD', 'RATECON'] as const)
+            .map((kind) => {
+              const key = kind === 'POD' ? s.combinedPodKey : s.combinedRateconKey
+              const pages = (docsBySubmission.get(s.id) ?? []).filter((d) => d.kind === kind)
+              if (!key && pages.length === 0) return null
+              return {
+                kind,
+                /* `combined-POD` addresses the merged PDF in the doc-url route; a loose
+                   page falls back to its own id until the merge produces one. */
+                docId: key ? `combined-${kind}` : pages[0].id,
+                pageCount: pages.length || 1,
+                enhanced: pages.some((d) => d.scanStatus === 'READY' && !!d.enhancedKey),
+                contentType: key ? 'application/pdf' : (pages[0].contentType ?? ''),
+                combined: !!key,
+              }
+            })
+            .filter((d): d is NonNullable<typeof d> => d !== null),
         }))
       return reply(200, { submissions: summaries })
     }
@@ -1631,14 +1669,75 @@ export const handler = async (event: FnUrlEvent) => {
       return reply(200, result.error ? { ok: true, error: result.error } : { ok: true })
     }
 
+    /*
+     * Open a document.
+     *
+     * `docId` may be `combined-POD` / `combined-RATECON`, meaning the merged PDF rather
+     * than one page of it. For a real page the CLEANED copy is served where the scan
+     * pipeline produced one: that is the version the office and the broker see, and a
+     * driver checking their own upload should be looking at the same thing they are.
+     */
     if (method === 'GET' && path === '/submissions/:id/doc/:docId/url' && id && docId) {
-      const doc = await getOwnedDoc(id, docId, driverId)
+      let key: string
+      if (docId === 'combined-POD' || docId === 'combined-RATECON') {
+        const submission = await getOwnedSubmission(id, driverId)
+        const combined =
+          docId === 'combined-POD' ? submission.combinedPodKey : submission.combinedRateconKey
+        if (!combined) throw new ApiError(404, 'Document not found')
+        key = combined
+      } else {
+        const doc = await getOwnedDoc(id, docId, driverId)
+        key = doc.scanStatus === 'READY' && doc.enhancedKey ? doc.enhancedKey : doc.s3Key
+      }
       const url = await getSignedUrl(
         s3,
-        new GetObjectCommand({ Bucket: BUCKET, Key: doc.s3Key }),
+        new GetObjectCommand({ Bucket: BUCKET, Key: key }),
         { expiresIn: DOC_GET_EXPIRY },
       )
       return reply(200, { url })
+    }
+
+    /*
+     * Take a document off a submission so the driver can send the right one.
+     *
+     * Only the DynamoDB rows go; the S3 objects stay. A POD decides whether a load is
+     * paid and whether an invoice can be factored, so "I sent the wrong page" must be
+     * fixable by the person who sent it — and must still be recoverable by the office
+     * if it turns out the right page was the one removed.
+     */
+    if (method === 'DELETE' && path === '/submissions/:id/docs' && id) {
+      const kind = event.queryStringParameters?.kind ?? ''
+      if (kind !== 'RATECON' && kind !== 'POD') {
+        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      }
+      await getOwnedSubmission(id, driverId)
+      const docs = await scan<DriverSubmissionDocRow>(
+        DRIVER_SUBMISSION_DOC_TABLE,
+        'submissionId = :sid AND driverId = :did',
+        {},
+        { ':sid': id, ':did': driverId },
+      )
+      const doomed = docs.filter((d) => d.kind === kind)
+      for (const doc of doomed) {
+        await ddb.send(
+          new DeleteCommand({ TableName: DRIVER_SUBMISSION_DOC_TABLE, Key: { id: doc.id } }),
+        )
+      }
+      // The merged PDF has nothing behind it now; leaving the pointer set would keep the
+      // document "present" to every readiness check in the system.
+      await ddb.send(
+        new UpdateCommand({
+          TableName: DRIVER_SUBMISSION_TABLE,
+          Key: { id },
+          UpdateExpression: 'REMOVE #k SET #u = :u',
+          ExpressionAttributeNames: {
+            '#k': kind === 'POD' ? 'combinedPodKey' : 'combinedRateconKey',
+            '#u': 'updatedAt',
+          },
+          ExpressionAttributeValues: { ':u': nowIso() },
+        }),
+      )
+      return reply(200, { removed: doomed.length })
     }
 
     /**

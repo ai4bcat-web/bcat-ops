@@ -9,14 +9,20 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { LoadDriverDocs } from './LoadDriverDocs'
 import type { SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
 
 const listDriverSubmissions = vi.hoisted(() => vi.fn())
 const getDriverDocUrl = vi.hoisted(() => vi.fn())
+const removeDriverDocs = vi.hoisted(() => vi.fn())
+const replaceDriverDocs = vi.hoisted(() => vi.fn())
 
-vi.mock('@/lib/driverSubmissionsClient', () => ({ listDriverSubmissions, getDriverDocUrl }))
+vi.mock('@/lib/driverSubmissionsClient', () => ({
+  listDriverSubmissions, getDriverDocUrl, removeDriverDocs, replaceDriverDocs,
+  DRIVER_DOC_ACCEPT: 'image/jpeg,image/png,application/pdf',
+}))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 function sub(over: Partial<SubmissionWithDocs> = {}): SubmissionWithDocs {
   return {
@@ -44,7 +50,15 @@ describe('LoadDriverDocs', () => {
 
     expect(await screen.findByText('POD-2026-10-01.pdf')).toBeInTheDocument()
     expect(screen.getByText(/Chad Salerno · from the driver app/)).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute('href', 'https://s3.test/doc.pdf'))
+    // The row opens a preview in place. It used to be a link to a presigned URL in a new
+    // tab, which is not a preview: the question in front of a POD is "is this the right
+    // document", and answering it should not cost you the load you were looking at.
+    const row = await screen.findByRole('button', { name: /Preview POD-2026-10-01\.pdf/ })
+    fireEvent.click(row)
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() =>
+      expect(within(dialog).getByTitle(/POD · PRO 14538/)).toHaveAttribute('src', 'https://s3.test/doc.pdf'),
+    )
   })
 
   it('matches on the PRO the driver typed when no load was attached', async () => {

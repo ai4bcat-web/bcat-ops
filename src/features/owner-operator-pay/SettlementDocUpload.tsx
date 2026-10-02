@@ -18,10 +18,14 @@ import { Loader2, Upload, CheckCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   staffUploadDriverDoc,
+  removeDriverDocs,
+  replaceDriverDocs,
   driverDocValidationError,
   DRIVER_DOC_ACCEPT,
   type SubmissionKind,
 } from '@/lib/driverSubmissionsClient'
+import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
+import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import type { Driver } from '@/types'
 
 interface Props {
@@ -53,14 +57,82 @@ export function SettlementDocUpload({
 }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  /*
+   * Only looked up once the document is on file. A settlement shows a whole week of loads
+   * at once, and presigning a document for every row of every week would be a lot of work
+   * for a column most people only glance at.
+   */
+  const { pods, ratecons, refresh } = useLoadDriverDocs(present ? loadId : null, present ? proNumber : null)
+  const doc = (kind === 'POD' ? pods : ratecons)[0] ?? null
 
+  /*
+   * A green tick used to be the whole story, which left the one question anyone has about
+   * a POD on a settlement — "is that actually the right document?" — with nowhere to go but
+   * the Loads page. The tick is now the way in to the document itself.
+   */
   if (present) {
     return (
-      <CheckCircle2
-        size={13}
-        style={{ color: '#15803d', verticalAlign: '-2px' }}
-        aria-label={`${LABEL[kind]} on file`}
-      />
+      <>
+        <button
+          type="button"
+          onClick={() => setPreviewing(true)}
+          aria-label={`Preview the ${LABEL[kind]} for ${proNumber || 'this load'}`}
+          title={`Preview the ${LABEL[kind]}`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            border: 'none', background: 'none', padding: 2, cursor: 'pointer',
+            color: '#15803d', fontFamily: 'inherit',
+          }}
+        >
+          <CheckCircle2 size={13} />
+        </button>
+        {previewing && (
+          <DocumentPreview
+            open
+            onClose={() => setPreviewing(false)}
+            title={`${LABEL[kind]} \u00b7 PRO ${proNumber || '\u2014'}`}
+            subtitle={
+              doc
+                ? [doc.driverName, doc.pageCount > 1 ? `${doc.pageCount} pages` : '', doc.enhanced ? 'cleaned scan' : '']
+                    .filter(Boolean).join(' \u00b7 ')
+                : 'Finding the document\u2026'
+            }
+            url={doc?.url ?? null}
+            contentType={doc?.contentType}
+            downloadName={`${kind === 'POD' ? 'POD' : 'RateCon'}-${proNumber || loadId.slice(-6)}`}
+            accept={DRIVER_DOC_ACCEPT}
+            onReplace={
+              doc
+                ? async (files) => {
+                    await replaceDriverDocs({
+                      submissionId: doc.submissionId,
+                      driver,
+                      kind,
+                      files,
+                      submittedByEmail: staffEmail,
+                      referenceNumber: proNumber || undefined,
+                      loadId,
+                    })
+                    toast.success(`${LABEL[kind]} replaced`)
+                    refresh()
+                    onUploaded()
+                  }
+                : undefined
+            }
+            onRemove={
+              doc
+                ? async () => {
+                    await removeDriverDocs(doc.submissionId, kind)
+                    toast.success(`${LABEL[kind]} removed`)
+                    refresh()
+                    onUploaded()
+                  }
+                : undefined
+            }
+          />
+        )}
+      </>
     )
   }
 

@@ -428,3 +428,106 @@ export async function getDriverDocUrl(s3Key: string): Promise<string> {
   const result = await getUrl({ path: s3Key, options: { expiresIn: 3600 } })
   return result.url.toString()
 }
+
+// ── Removing a document ───────────────────────────────────────────────────────
+
+/**
+ * Take a POD or rate confirmation off a submission.
+ *
+ * Only the DynamoDB rows go. The S3 objects stay exactly where they are, because they are
+ * the record of what actually arrived at a dock on a given day — and because "remove" here
+ * means "this is the wrong document, it should stop counting", not "destroy the evidence".
+ * A POD that is removed by mistake is recoverable by anyone who can read the bucket; one
+ * that is deleted is not, and it is the document that decides whether a driver gets paid.
+ *
+ * The combined PDF pointer is cleared in the same breath. Leaving it set would keep the
+ * old merged document on screen with no pages behind it, which reads as "the POD is still
+ * there" to every readiness check in the system.
+ */
+export async function removeDriverDocs(
+  submissionId: string,
+  kind: SubmissionKind,
+): Promise<void> {
+  const subs = await listDriverSubmissions(1000)
+  const submission = subs.find((s) => s.id === submissionId)
+  if (!submission) throw new Error('That submission no longer exists')
+
+  const doomed = submission.docs.filter((d) => d.kind === kind)
+  for (const doc of doomed) {
+    await gql(
+      `mutation DeleteDriverSubmissionDoc($input: DeleteDriverSubmissionDocInput!) {
+        deleteDriverSubmissionDoc(input: $input) { id }
+      }`,
+      { input: { id: doc.id } },
+    )
+  }
+
+  await gql(
+    `mutation UpdateDriverSubmission($input: UpdateDriverSubmissionInput!) {
+      updateDriverSubmission(input: $input) { id }
+    }`,
+    {
+      input: {
+        id: submissionId,
+        ...(kind === 'POD' ? { combinedPodKey: null } : { combinedRateconKey: null }),
+        updatedAt: new Date().toISOString(),
+      },
+    },
+  )
+}
+
+/**
+ * Swap a document for a new one: the old pages come off, the new ones go on, and the
+ * combined PDF is rebuilt from what is left.
+ *
+ * Removal happens first so a replace can never end up with both sets of pages merged into
+ * one document — which is what "replace" looked like the first time it was written as an
+ * upload on top of an existing submission.
+ */
+export async function replaceDriverDocs(input: {
+  submissionId: string
+  driver: StaffDriverInfo
+  kind: SubmissionKind
+  files: File[]
+  submittedByEmail: string
+  referenceNumber?: string
+  loadId?: string
+}): Promise<void> {
+  const error = driverDocValidationError(input.files)
+  if (error) throw new Error(error)
+
+  await removeDriverDocs(input.submissionId, input.kind)
+  await addDocsToSubmission(input.submissionId, input.driver, input.kind, input.files)
+}
+
+/** Upload pages onto an existing submission, then clean and merge them. */
+async function addDocsToSubmission(
+  submissionId: string,
+  driver: StaffDriverInfo,
+  kind: SubmissionKind,
+  files: File[],
+): Promise<void> {
+  const now = new Date().toISOString()
+  const docs: DriverSubmissionDocRecord[] = []
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]
+    const pageNumber = i + 1
+    const key = driverDocKey(driver.id, submissionId, kind, pageNumber, extForFile(file))
+    await uploadDriverDocFile(key, file)
+    docs.push(
+      await createDriverSubmissionDoc({
+        submissionId,
+        driverId: driver.id,
+        kind,
+        s3Key: key,
+        fileName: file.name,
+        contentType: contentTypeForFile(file),
+        byteSize: file.size,
+        pageNumber,
+        uploadedAt: now,
+      }),
+    )
+  }
+  await Promise.all(docs.map((d) => enhanceDriverDoc(d.id)))
+  await finalizeDriverDocs(submissionId, kind)
+}

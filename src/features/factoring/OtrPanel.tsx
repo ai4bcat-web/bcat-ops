@@ -16,7 +16,7 @@
  * Submit is deliberately a human action and is disabled until every field and
  * both documents are present.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, CheckCircle2, Loader2, Send, ShieldCheck, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -91,6 +91,28 @@ export function OtrPanel({ item, onChanged }: Props) {
     [onChanged],
   )
 
+  /*
+   * Prepare the row the moment someone opens it.
+   *
+   * "Not yet prepared for OTR" with a Prepare button was a dead end dressed as a state:
+   * there is no reason anyone would open a row and NOT want it prepared, and until they
+   * pressed it the fields could not be typed in and the chips all read missing \u2014 which
+   * looked like the queue had no idea what the load was. Preparing is a read plus one
+   * write of a cached blob, so doing it on open costs nothing a person would notice.
+   *
+   * Once per mounted row: the ref stops a failed assemble from retrying in a loop, and
+   * the manual button below is the way back out.
+   */
+  const autoPrepared = useRef(false)
+  const [prepareFailed, setPrepareFailed] = useState(false)
+  useEffect(() => {
+    if (readiness || submitted || autoPrepared.current) return
+    autoPrepared.current = true
+    assembleInvoice(item.id)
+      .then(() => { setPrepareFailed(false); onChanged() })
+      .catch(() => setPrepareFailed(true))
+  }, [readiness, submitted, item.id, onChanged])
+
   // Already at OTR: show their board rather than the assembly panel.
   if (submitted) {
     return (
@@ -122,7 +144,17 @@ export function OtrPanel({ item, onChanged }: Props) {
   if (!readiness) {
     return (
       <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--ds-border)] p-3 text-sm text-muted-foreground">
-        <span>Not yet prepared for OTR.</span>
+        {prepareFailed ? (
+          <>
+            <AlertTriangle className="size-3.5 text-amber-600" />
+            <span>Could not prepare this row automatically.</span>
+          </>
+        ) : (
+          <>
+            <Loader2 className="size-3.5 animate-spin" />
+            <span>Working out what OTR still needs\u2026</span>
+          </>
+        )}
         <Button
           size="sm"
           variant="outline"
@@ -134,7 +166,7 @@ export function OtrPanel({ item, onChanged }: Props) {
           ) : (
             <RefreshCw className="size-3.5" />
           )}
-          Prepare
+          {prepareFailed ? 'Try again' : 'Prepare now'}
         </Button>
       </div>
     )
