@@ -8,7 +8,10 @@ vi.mock('aws-amplify/data', () => ({
 }))
 // Uploading now asks pod-actions to clean the scan. It shares the mocked Amplify client,
 // so left real it would consume a queued response meant for the upload itself.
-vi.mock('./podsClient', () => ({ enhanceDriverDoc: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('./podsClient', () => ({
+  enhanceDriverDoc: vi.fn().mockResolvedValue(undefined),
+  finalizeDriverDocs: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('aws-amplify/storage', () => ({
   uploadData: mockUploadData,
@@ -45,6 +48,8 @@ function setupUpload() {
     result: Promise.resolve({ path: input.path, data: input.data }),
   }) as never)
 }
+
+const NOW = '2026-10-02T12:00:00.000Z'
 
 function makeFile(name: string, type: string, size = 100): File {
   return new File([new Uint8Array(size)], name, { type })
@@ -454,5 +459,65 @@ describe('driverSubmissionsClient', () => {
       expect(url).toBe('https://example.com/signed')
       expect(mockGetUrl).toHaveBeenCalledWith({ path: 'driver-docs/drv-1/sub-1/RATECON/x.pdf', options: { expiresIn: 3600 } })
     })
+  })
+
+})
+
+describe('cleaning and merging on upload', () => {
+  it('cleans every page first, then merges them into one PDF', async () => {
+    // Order is the whole bug this fixes. Merging first handed the enhancer a PDF, which it
+    // correctly reported as having nothing to clean, so every upload came back unenhanced.
+    const { enhanceDriverDoc, finalizeDriverDocs } = await import('./podsClient')
+    const order: string[] = []
+    vi.mocked(enhanceDriverDoc).mockImplementation(async () => { order.push('clean') })
+    vi.mocked(finalizeDriverDocs).mockImplementation(async () => { order.push('merge') })
+
+    setupUpload()
+    setupGraphql([], [
+      // A POD upload looks for an existing submission first; none here, so a new one.
+      { listDriverSubmissions: { items: [] } },
+      { createDriverSubmission: { id: 'sub-9', driverId: 'drv-1', driverName: 'D', createdAt: NOW } },
+      { createDriverSubmissionDoc: { id: 'doc-1', submissionId: 'sub-9', kind: 'POD', s3Key: 'a', uploadedAt: NOW } },
+      { createDriverSubmissionDoc: { id: 'doc-2', submissionId: 'sub-9', kind: 'POD', s3Key: 'b', uploadedAt: NOW } },
+    ])
+
+    await staffUploadDriverDoc({
+      driver: { id: 'drv-1', name: 'D', email: null },
+      kind: 'POD',
+      files: [makeFile('a.jpg', 'image/jpeg'), makeFile('b.jpg', 'image/jpeg')],
+      submittedByEmail: 'staff@bcatcorp.com',
+    })
+
+    expect(vi.mocked(enhanceDriverDoc)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(finalizeDriverDocs)).toHaveBeenCalledWith('sub-9', 'POD')
+    // Both cleans complete before the single merge.
+    expect(order).toEqual(['clean', 'clean', 'merge'])
+  })
+
+  it('uploads each page in its own format rather than pre-combining them', async () => {
+    // A JPEG has to arrive as a JPEG, because the cleanup only works on images.
+    setupUpload()
+    setupGraphql([], [
+      { listDriverSubmissions: { items: [] } },
+      { createDriverSubmission: { id: 'sub-10', driverId: 'drv-1', driverName: 'D', createdAt: NOW } },
+      { createDriverSubmissionDoc: { id: 'doc-1', submissionId: 'sub-10', kind: 'POD', s3Key: 'a', uploadedAt: NOW } },
+      { createDriverSubmissionDoc: { id: 'doc-2', submissionId: 'sub-10', kind: 'POD', s3Key: 'b', uploadedAt: NOW } },
+    ])
+    mockUploadData.mockClear()
+    setupUpload()
+
+    await staffUploadDriverDoc({
+      driver: { id: 'drv-1', name: 'D', email: null },
+      kind: 'POD',
+      files: [makeFile('a.jpg', 'image/jpeg'), makeFile('b.jpg', 'image/jpeg')],
+      submittedByEmail: 'staff@bcatcorp.com',
+    })
+
+    const paths = mockUploadData.mock.calls.map((c) => (c[0] as { path: string }).path)
+    expect(paths).toHaveLength(2)
+    for (const path of paths) expect(path).toMatch(/\.jpg$/)
+    for (const call of mockUploadData.mock.calls) {
+      expect((call[0] as { options?: { contentType?: string } }).options?.contentType).toBe('image/jpeg')
+    }
   })
 })

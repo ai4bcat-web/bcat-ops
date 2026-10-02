@@ -26,28 +26,12 @@ import {
   driverDocValidationError,
   DRIVER_DOC_ACCEPT,
 } from '@/lib/driverSubmissionsClient'
-import { pagesToPdf } from '@/lib/pagesToPdf'
 import type { Load } from '@/types'
 
 type Kind = 'POD' | 'RATECON'
 
 const LABEL: Record<Kind, string> = { POD: 'POD', RATECON: 'Rate con' }
 
-/** Several photographed pages become one PDF, as everywhere else documents are taken. */
-async function asOneFile(files: File[], kind: Kind): Promise<File[]> {
-  if (files.length < 2 && files[0]?.type === 'application/pdf') return files
-  try {
-    const combined = await pagesToPdf(
-      files.map((f) => ({ fileName: f.name, contentType: f.type, blob: f })),
-      kind === 'POD' ? 'POD' : 'RATECON',
-    )
-    if (!combined) return files
-    return [new File([combined.blob], combined.fileName, { type: combined.contentType })]
-  } catch (err) {
-    console.error('[factoring] could not combine pages; sending them as-is', err)
-    return files
-  }
-}
 
 export function FactoringDocCell({
   kind, present, loadId, proNumber, staffEmail, onUploaded,
@@ -113,11 +97,10 @@ export function FactoringDocCell({
 
     setBusy(true)
     try {
-      const files = await asOneFile(picked, kind)
 
       if (kind === 'RATECON') {
         // Straight onto the load, which is where submit reads it from.
-        const key = await uploadRateConfirm(load.id, files[0])
+        const key = await uploadRateConfirm(load.id, picked[0])
         await updateLoad(load.id, { rateConfirmKey: key } as Partial<Load>)
         toast.success(`Rate confirmation saved for PRO ${proNumber}`)
       } else {
@@ -129,7 +112,7 @@ export function FactoringDocCell({
         await staffUploadDriverDoc({
           driver: { id: driverId, name: 'Driver', email: null },
           kind: 'POD',
-          files,
+          files: picked,
           submittedByEmail: staffEmail,
           referenceNumber: proNumber || undefined,
           loadId: load.id,

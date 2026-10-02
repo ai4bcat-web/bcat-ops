@@ -189,6 +189,27 @@ async function findSubmittedPod(loadId: string, proNumber: string): Promise<Row 
   })
   if (!mine.length) return null
 
+  /*
+   * The finished PDF wins, when there is one.
+   *
+   * It is the cleaned pages merged into one document, which is what OTR should receive. The
+   * fallback below sends a single page, and for a multi-page POD that means sending one
+   * sheet of several — so this is not only about quality.
+   */
+  const withCombined = mine
+    .filter((sub) => trim(sub.combinedPodKey))
+    .sort((a, b) => String(b.combinedAt ?? '').localeCompare(String(a.combinedAt ?? '')))[0]
+  if (withCombined) {
+    return {
+      id: withCombined.id,
+      loadId,
+      fileName: `POD-${proNumber || String(withCombined.id).slice(-6)}.pdf`,
+      contentType: 'application/pdf',
+      originalKey: trim(withCombined.combinedPodKey),
+      createdAt: withCombined.combinedAt,
+    }
+  }
+
   const ids = new Set(mine.map((sub) => String(sub.id)))
   const docs = (await scanAllRows(SUBMISSION_DOC_TABLE)).filter(
     (d) => d.kind === 'POD' && ids.has(String(d.submissionId)) && trim(d.s3Key),

@@ -160,10 +160,13 @@ describe('useCashCheckIn', () => {
     act(() => result.current.updateSettings(edit2))
 
     act(() => vi.advanceTimersByTime(500))
-    await waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1))
+    // Wait for saving to FINISH, not merely for the save to have been called. The spy
+    // having run says nothing about its promise having resolved and the flag having
+    // flipped, so reading settingsSaving straight after raced under load.
+    await waitFor(() => expect(result.current.settingsSaving).toBe(false))
 
+    expect(updateSpy).toHaveBeenCalledTimes(1)
     expect(updateSpy).toHaveBeenCalledWith(edit2, 'default')
-    expect(result.current.settingsSaving).toBe(false)
   })
 
   it('keeps local settings while typing even if a remote settings update arrives', async () => {

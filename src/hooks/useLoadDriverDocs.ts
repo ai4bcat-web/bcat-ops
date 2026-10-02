@@ -36,6 +36,8 @@ export interface LoadDriverDoc extends DriverSubmissionDocRecord {
   url: string | null
   /** True when the url above is the cleaned scan rather than the raw upload. */
   enhanced: boolean
+  /** How many pages the document carries. 1 for a loose page awaiting its merge. */
+  pageCount: number
 }
 
 export interface LoadDriverDocs {
@@ -88,23 +90,60 @@ export function useLoadDriverDocs(
     [subs, loadId, proNumber],
   )
 
-  const docs = useMemo<LoadDriverDoc[]>(
+const docs = useMemo<LoadDriverDoc[]>(
     () =>
       mine
-        .flatMap((sub) =>
-          sub.docs.map((d) => {
-            // Prefer the cleaned copy; fall back to the raw upload until it exists.
-            const key = d.scanStatus === 'READY' && d.enhancedKey ? d.enhancedKey : d.s3Key
-            return {
-              ...d,
+        .flatMap((sub) => {
+          /*
+           * One row per document, not per page.
+           *
+           * Once the pages have been cleaned and merged there is a single finished PDF, and
+           * that is the document — showing six page rows beside it would invite someone to
+           * send a page instead of the whole thing.
+           */
+          const combined: LoadDriverDoc[] = []
+          for (const [kind, key] of [
+            ['POD', sub.combinedPodKey],
+            ['RATECON', sub.combinedRateconKey],
+          ] as const) {
+            if (!key) continue
+            const pages = sub.docs.filter((d) => d.kind === kind)
+            const newest = [...pages].sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)))[0]
+            if (!newest) continue
+            combined.push({
+              ...newest,
+              id: `${sub.id}:${kind}:combined`,
+              kind,
+              s3Key: key,
+              fileName: `${kind === 'POD' ? 'POD' : 'RateCon'}-${sub.referenceNumber?.trim() || sub.id.slice(-6)}.pdf`,
+              contentType: 'application/pdf',
+              pageNumber: null,
               driverName: sub.driverName,
               source: sub.source,
               submittedByEmail: sub.submittedByEmail,
               url: urls[key] ?? null,
-              enhanced: key !== d.s3Key,
-            }
-          }),
-        )
+              enhanced: pages.some((d) => d.scanStatus === 'READY'),
+              pageCount: pages.length,
+            })
+          }
+          // Only fall back to individual pages while the merge has not produced one yet.
+          const kindsDone = new Set(combined.map((d) => d.kind))
+          const loose = sub.docs
+            .filter((d) => !kindsDone.has(d.kind))
+            .map((d) => {
+              const key = d.scanStatus === 'READY' && d.enhancedKey ? d.enhancedKey : d.s3Key
+              return {
+                ...d,
+                driverName: sub.driverName,
+                source: sub.source,
+                submittedByEmail: sub.submittedByEmail,
+                url: urls[key] ?? null,
+                enhanced: key !== d.s3Key,
+                pageCount: 1,
+              }
+            })
+          return [...combined, ...loose]
+        })
         // Newest first, and a multi-page document keeps its page order within a day.
         .sort((a, b) =>
           String(b.uploadedAt).localeCompare(String(a.uploadedAt)) ||
@@ -115,10 +154,7 @@ export function useLoadDriverDocs(
 
   // Presign only what is actually on screen, once each.
   useEffect(() => {
-    const wanted = docs.map((d) =>
-      d.scanStatus === 'READY' && d.enhancedKey ? d.enhancedKey : d.s3Key,
-    )
-    const missing = wanted.filter((key) => !urls[key])
+    const missing = docs.map((d) => d.s3Key).filter((key) => !urls[key])
     if (missing.length === 0) return
     let cancelled = false
     void Promise.all(

@@ -1233,6 +1233,7 @@ podActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.user
 // Driver and staff uploads land in DriverSubmissionDoc rather than PodDocument, and they
 // need the same scan cleanup — a phone photo taken at a dock needs it more, not less.
 podActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
+podActionsFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable.tableName)
 
 const podDocumentTableArns = [podDocumentTable.tableArn, `${podDocumentTable.tableArn}/index/*`]
 const podSenderMappingTableArns = [podSenderMappingTable.tableArn]
@@ -1261,11 +1262,18 @@ podActionsFn.addToRolePolicy(
     resources: [backend.auth.resources.userPool.userPoolArn],
   }),
 )
-// Reads the row to find the file, writes back which copy is the cleaned one.
+// Reads the page rows to find the files and writes back which copy is the cleaned one;
+// reads them all again to merge, and records the finished PDF on the submission.
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
+    resources: [driverSubmissionDocTable.tableArn, `${driverSubmissionDocTable.tableArn}/index/*`],
+  }),
+)
 podActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
-    resources: [driverSubmissionDocTable.tableArn],
+    resources: [driverSubmissionTable.tableArn],
   }),
 )
 

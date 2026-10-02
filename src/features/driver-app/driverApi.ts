@@ -5,7 +5,6 @@
 // sees comes through here, and every request carries the driver's own id token — the server
 // resolves which driver they are from that token and never from anything we send.
 import outputs from '../../../amplify_outputs.json'
-import { pagesToPdf } from '@/lib/pagesToPdf'
 
 const envUrl: string | undefined =
   typeof import.meta.env.VITE_DRIVER_API_URL === 'string'
@@ -261,33 +260,6 @@ async function putPage(target: UploadTarget, page: PendingPage): Promise<void> {
   }
 }
 
-/**
- * Combine what the driver captured into ONE PDF before upload.
- *
- * The office wants a single document per POD or rate con, the way JobsDone
- * delivers them, instead of loose photos to assemble. It is also one upload
- * rather than N, which matters on a truck connection.
- *
- * Falls back to the original pages if combining fails: a driver who has just
- * photographed a signed POD at a dock must never lose it to a PDF library
- * error. The office can still work from the photos.
- */
-async function asSinglePdf(pages: PendingPage[], kind: SubmissionKind): Promise<PendingPage[]> {
-  if (pages.length === 0) return pages
-  try {
-    const combined = await pagesToPdf(pages, kind === 'POD' ? 'POD' : 'RATECON')
-    if (!combined) return pages
-    return [{
-      fileName: combined.fileName,
-      contentType: combined.contentType,
-      byteSize: combined.blob.size,
-      blob: combined.blob,
-    }]
-  } catch (err) {
-    console.error('[driverApi] could not combine pages into a PDF; sending them as-is', err)
-    return pages
-  }
-}
 
 function pageMeta(pages: PendingPage[]) {
   return pages.map((p) => ({ fileName: p.fileName, contentType: p.contentType, byteSize: p.byteSize }))
@@ -363,7 +335,7 @@ export async function submitRatecon(input: {
   note?: string
   resumeFromId?: string
 }): Promise<string> {
-  const pages = await asSinglePdf(input.pages, 'RATECON')
+  const { pages } = input
   const { submissionId, uploads } = await createSubmission({ kind: 'RATECON', ...input, pages })
   try {
     await Promise.all(uploads.map((t, i) => putPage(t, pages[i])))
@@ -384,7 +356,7 @@ export async function submitStandalonePod(input: {
   note?: string
   resumeFromId?: string
 }): Promise<string> {
-  const pages = await asSinglePdf(input.pages, 'POD')
+  const { pages } = input
   const { submissionId, uploads } = await createSubmission({ kind: 'POD', ...input, pages })
   try {
     await Promise.all(uploads.map((t, i) => putPage(t, pages[i])))
@@ -402,9 +374,14 @@ export async function submitPod(
   { resume = false }: { resume?: boolean } = {},
 ): Promise<void> {
   let uploads: UploadTarget[]
-  // Only combine on a fresh submit: a resume reuses upload targets the server
-  // already presigned for the original page list, so the two must still match.
-  const pages = resume ? inputPages : await asSinglePdf(inputPages, 'POD')
+  /*
+   * Pages go up as they were captured, one file each.
+   *
+   * They used to be merged into a PDF here first, which handed the server a PDF and left
+   * the scan cleanup with nothing to work on — every upload came back ORIGINAL_ONLY. The
+   * server cleans each page and merges them afterwards, in that order.
+   */
+  const pages = inputPages
 
   if (resume) {
     const out = await request<UploadListResponse>(

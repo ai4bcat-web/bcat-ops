@@ -392,6 +392,14 @@ const schema = a.schema({
       emailMessageId:    a.string(),            // RFC-822 msg id of the parent email, with angle brackets
       emailSubject:      a.string(),            // exact parent subject; POD replies use 'Re: ' + this
       notifiedAt:        a.string(),            // ISO timestamp when the parent notify was sent
+      // ── The finished document ────────────────────────────────────────────
+      // Pages upload one per file so each can be cleaned up as an image. Once they are,
+      // they are merged into ONE enhanced PDF and these point at it. That PDF is the
+      // version everything downstream uses — the office, the driver, and OTR — because a
+      // POD is one document rather than a pile of photos.
+      combinedPodKey:     a.string(),
+      combinedRateconKey: a.string(),
+      combinedAt:         a.string(),
       createdAt:         a.string().required(),
       updatedAt:         a.string(),
     })

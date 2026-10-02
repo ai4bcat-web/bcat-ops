@@ -26,6 +26,7 @@ function when(iso: string): string {
 
 function DocRow({ doc }: { doc: LoadDriverDoc }) {
   const label = doc.fileName?.trim() || `${doc.kind} page ${doc.pageNumber ?? 1}`
+  const pages = doc.pageCount > 1 ? ` · ${doc.pageCount} pages` : ''
   const who = SOURCE_LABEL[doc.source ?? 'PWA'] ?? 'from the driver app'
   return (
     <li className="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 py-2">
@@ -35,6 +36,7 @@ function DocRow({ doc }: { doc: LoadDriverDoc }) {
           {doc.driverName} · {who} · {when(doc.uploadedAt)}
           {/* Says which copy the link opens, so nobody wonders why it looks different
               from the photo the driver took. */}
+          {pages}
           {doc.enhanced && <span className="text-emerald-600"> · cleaned scan</span>}
           {doc.scanStatus === 'FAILED' && <span className="text-amber-700"> · original only</span>}
         </p>

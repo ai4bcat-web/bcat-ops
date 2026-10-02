@@ -971,32 +971,42 @@ async function appendPendingUploads(
  * API. Invoked as an Event so a driver's upload never waits on it, and every failure is
  * swallowed: the pages are saved and the original is the copy we keep.
  */
-async function requestScanCleanup(docs: DriverSubmissionDocRow[]): Promise<void> {
+async function requestScanCleanup(
+  docs: DriverSubmissionDocRow[],
+  submissionId: string,
+  kind: 'RATECON' | 'POD',
+): Promise<void> {
   if (!POD_FUNCTION_NAME || docs.length === 0) return
   const lambda = new LambdaClient({})
-  await Promise.all(
-    docs.map(async (doc) => {
-      try {
-        await lambda.send(
-          new InvokeCommand({
-            FunctionName: POD_FUNCTION_NAME,
-            InvocationType: 'Event',
-            Payload: Buffer.from(
-              JSON.stringify({
-                arguments: { action: 'enhanceDriverDoc', input: JSON.stringify({ id: doc.id }) },
-                identity: { claims: { email: 'driver-app-api' }, groups: ['ADMIN'] },
-              }),
-            ),
-          }),
-        )
-      } catch (err) {
-        console.error('[driver-app-api] could not request scan cleanup', {
-          docId: doc.id,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }),
-  )
+
+  async function call(action: string, input: Record<string, unknown>, sync: boolean): Promise<void> {
+    try {
+      await lambda.send(
+        new InvokeCommand({
+          FunctionName: POD_FUNCTION_NAME,
+          // Cleaning is fire-and-forget; the merge has to wait for it, so it is awaited.
+          InvocationType: sync ? 'RequestResponse' : 'Event',
+          Payload: Buffer.from(
+            JSON.stringify({
+              arguments: { action, input: JSON.stringify(input) },
+              identity: { claims: { email: 'driver-app-api' }, groups: ['ADMIN'] },
+            }),
+          ),
+        }),
+      )
+    } catch (err) {
+      console.error('[driver-app-api] scan step failed', {
+        action,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+
+  // Clean every page first — the cleanup only works on images — then merge the results into
+  // the one PDF everything downstream reads. Merging first is what left every upload
+  // reporting ORIGINAL_ONLY.
+  await Promise.all(docs.map((doc) => call('enhanceDriverDoc', { id: doc.id }, true)))
+  await call('finalizeDriverDocs', { submissionId, kind }, true)
 }
 
 async function persistDocs(
@@ -1109,9 +1119,9 @@ async function completeSubmission(
   }
 
   const docs = await persistDocs(submissionId, driverId, kind, pages)
-  // Clean up the scan the same way a texted POD is cleaned. Asynchronous and
-  // best-effort: the pages are already stored, and the original is what we keep.
-  await requestScanCleanup(docs)
+  // Clean up the scan the same way a texted POD is cleaned, then merge the pages into one
+  // PDF. Best-effort: the pages are already stored and readable on their own.
+  await requestScanCleanup(docs, submissionId, kind)
   const { refs, errors } = await notifyForKind(submission, kind, pages)
   const now = nowIso()
 

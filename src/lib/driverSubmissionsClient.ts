@@ -5,7 +5,7 @@
 // the PWA.
 
 import { generateClient } from 'aws-amplify/data'
-import { enhanceDriverDoc } from './podsClient'
+import { enhanceDriverDoc, finalizeDriverDocs } from './podsClient'
 import { uploadData, getUrl } from 'aws-amplify/storage'
 
 const client = generateClient()
@@ -40,6 +40,10 @@ export interface DriverSubmissionRecord {
   emailMessageId?: string | null
   emailSubject?: string | null
   notifiedAt?: string | null
+  /** The finished single PDF, once the pages have been cleaned and merged. */
+  combinedPodKey?: string | null
+  combinedRateconKey?: string | null
+  combinedAt?: string | null
   createdAt: string
   updatedAt?: string | null
 }
@@ -131,7 +135,7 @@ export function driverDocValidationError(files: File[]): string | null {
 const SUBMISSION_FIELDS = `
   id driverId driverName status source submittedByEmail externalMessageId loadId
   referenceNumber note slackChannelId slackMessageTs emailMessageId emailSubject
-  notifiedAt createdAt updatedAt
+  notifiedAt combinedPodKey combinedRateconKey combinedAt createdAt updatedAt
 `
 
 const DOC_FIELDS = `
@@ -356,10 +360,13 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
       uploadedAt: now,
     })
     docs.push(doc)
-    // Clean it up the way a texted POD is cleaned. Not awaited as a dependency: the
-    // document is saved and the original is intact either way.
-    void enhanceDriverDoc(doc.id)
   }
+
+  // Clean each page, then merge them into the one PDF everything downstream uses. Awaited
+  // so the finished document exists by the time the caller refreshes, but never allowed to
+  // fail the upload: the pages are stored and readable on their own.
+  await Promise.all(docs.map((d) => enhanceDriverDoc(d.id)))
+  await finalizeDriverDocs(submission.id, input.kind)
 
   return { ...submission, docs }
 }
@@ -405,9 +412,12 @@ export async function staffAddPodToSubmission(
       uploadedAt: now,
     })
     docs.push(doc)
-    // Same cleanup when pages are added to an existing submission.
-    void enhanceDriverDoc(doc.id)
   }
+
+  // Same two steps when pages are added to a submission that already had some: clean the
+  // new ones, then rebuild the combined PDF so it includes them.
+  await Promise.all(docs.map((d) => enhanceDriverDoc(d.id)))
+  await finalizeDriverDocs(submission.id, 'POD')
 
   return { ...submission, docs }
 }

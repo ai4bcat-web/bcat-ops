@@ -22,7 +22,6 @@ import {
   DRIVER_DOC_ACCEPT,
   type SubmissionKind,
 } from '@/lib/driverSubmissionsClient'
-import { pagesToPdf } from '@/lib/pagesToPdf'
 import type { Driver } from '@/types'
 
 interface Props {
@@ -48,21 +47,6 @@ interface Props {
 
 const LABEL: Record<SubmissionKind, string> = { POD: 'POD', RATECON: 'Rate con' }
 
-/** Combine what was selected into one PDF, or hand back the originals if that fails. */
-async function asOneFile(files: File[], kind: SubmissionKind): Promise<File[]> {
-  if (files.length < 2 && files[0]?.type === 'application/pdf') return files
-  try {
-    const combined = await pagesToPdf(
-      files.map((f) => ({ fileName: f.name, contentType: f.type, blob: f })),
-      kind === 'POD' ? 'POD' : 'RATECON',
-    )
-    if (!combined) return files
-    return [new File([combined.blob], combined.fileName, { type: combined.contentType })]
-  } catch (err) {
-    console.error('[settlement-upload] could not combine pages; sending them as-is', err)
-    return files
-  }
-}
 
 export function SettlementDocUpload({
   driver, loadId, proNumber, kind, staffEmail, present, blocking = true, onUploaded,
@@ -93,11 +77,10 @@ export function SettlementDocUpload({
 
     setBusy(true)
     try {
-      const files = await asOneFile(picked, kind)
       await staffUploadDriverDoc({
         driver: { id: driver.id, name: driver.name, email: driver.email },
         kind,
-        files,
+        files: picked,
         submittedByEmail: staffEmail,
         referenceNumber: proNumber || undefined,
         loadId,

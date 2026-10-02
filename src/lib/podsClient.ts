@@ -67,6 +67,21 @@ export async function enhanceDriverDoc(docId: string): Promise<void> {
   }
 }
 
+/**
+ * Merge a submission's pages into one enhanced PDF, after they have been cleaned.
+ *
+ * Order matters: cleaning works on images, so merging has to come second. Doing it first —
+ * which is what the browser used to do — handed the enhancer a PDF and it correctly found
+ * nothing to clean.
+ */
+export async function finalizeDriverDocs(submissionId: string, kind: 'POD' | 'RATECON'): Promise<void> {
+  try {
+    await podAction<{ submissionId: string; pages: number }>('finalizeDriverDocs', { submissionId, kind })
+  } catch (err) {
+    console.warn('[pods] could not combine the uploaded pages', submissionId, err)
+  }
+}
+
 export async function assignPod(args: { id: string; loadId: string | null; expectedVersion: number }): Promise<{ item: PodDocument }> {
   return podAction<{ item: PodDocument }>('assign', args)
 }

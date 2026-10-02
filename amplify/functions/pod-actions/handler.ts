@@ -5,6 +5,7 @@ import {
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
+  ScanCommand,
   UpdateItemCommand,
   TransactWriteItemsCommand,
   type AttributeValue,
@@ -38,6 +39,7 @@ import type {
 import { senderKey } from '../../../src/lib/podSenderKey'
 import { enhancePodImage } from './scan'
 import { POD_SCAN_VERSION } from './scan-version.js'
+import { pagesToPdf } from '../../../src/lib/pagesToPdf'
 
 // ── AWS clients ────────────────────────────────────────────────────────────
 
@@ -52,6 +54,7 @@ const POD_SENDER_MAPPING_TABLE_NAME = process.env.POD_SENDER_MAPPING_TABLE_NAME!
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
 /** Driver and staff uploads live here, not in PodDocument. Absent in older stacks. */
 const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
+const DRIVER_SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
 const BUCKET_NAME = process.env.BUCKET_NAME!
 const POD_CONNECTION_PARAM_NAME = process.env.POD_CONNECTION_PARAM_NAME!
 const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME!
@@ -136,6 +139,7 @@ type ManageAction =
   | 'senderMappings'
   | 'setSenderMapping'
   | 'enhanceDriverDoc'
+  | 'finalizeDriverDocs'
 
 interface Caller {
   email: string
@@ -248,7 +252,8 @@ export async function authorize(
     }
   } else if (
     action === 'list' || action === 'assets' || action === 'status' ||
-    action === 'process' || action === 'senderMappings' || action === 'enhanceDriverDoc'
+    action === 'process' || action === 'senderMappings' ||
+    action === 'enhanceDriverDoc' || action === 'finalizeDriverDocs'
   ) {
     // enhanceDriverDoc only ever cleans up a document that already exists and writes a
     // second copy beside it; it exposes nothing and destroys nothing, so authentication
@@ -1556,6 +1561,99 @@ export async function enhanceDriverDocAction(
   }
 }
 
+/**
+ * Merge a submission's pages into ONE enhanced PDF, and record it as the finished document.
+ *
+ * This is the piece that makes "all PODs get enhanced" true. Pages upload one per file so
+ * each can be cleaned as an image — combining them client-side first turned a photo into a
+ * PDF before it ever reached the enhancer, which is why uploads came back ORIGINAL_ONLY.
+ * Cleaning happens first, then merging, in that order.
+ *
+ * Each page contributes its cleaned copy when one exists and its original otherwise, so a
+ * PDF a driver picked from a scanner app — already a finished document — passes through
+ * page for page rather than being rasterized.
+ *
+ * Idempotent: running it again simply rebuilds from whatever the pages currently are, which
+ * is what should happen after a page is added or re-cleaned.
+ */
+export async function finalizeDriverDocsAction(
+  input: Record<string, unknown>,
+): Promise<{ submissionId: string; kind: string; pages: number; key?: string; error?: string }> {
+  if (!DRIVER_SUBMISSION_DOC_TABLE || !DRIVER_SUBMISSION_TABLE) {
+    return { submissionId: '', kind: '', pages: 0, error: 'driver submissions are not configured' }
+  }
+  const submissionId = assertString(input.submissionId, 'submissionId', 200)
+  const kind = assertString(input.kind, 'kind', 20).toUpperCase()
+  if (kind !== 'POD' && kind !== 'RATECON') {
+    return { submissionId, kind, pages: 0, error: "kind must be 'POD' or 'RATECON'" }
+  }
+
+  try {
+    const docs = (await scanTable(DRIVER_SUBMISSION_DOC_TABLE))
+      .filter((d) => String(d.submissionId) === submissionId && String(d.kind) === kind)
+      .sort((a, b) => Number(a.pageNumber ?? 0) - Number(b.pageNumber ?? 0))
+    if (!docs.length) return { submissionId, kind, pages: 0, error: 'no pages to combine' }
+
+    const sources = await Promise.all(
+      docs.map(async (d) => {
+        // The cleaned copy when there is one; the original otherwise.
+        const useEnhanced = d.scanStatus === 'READY' && typeof d.enhancedKey === 'string' && d.enhancedKey
+        const key = String(useEnhanced ? d.enhancedKey : d.s3Key)
+        const { bytes, contentType } = await getObjectBytes(key)
+        return {
+          fileName: String(d.fileName ?? key.split('/').pop() ?? 'page'),
+          // An enhanced copy is always JPEG; an original carries whatever it was stored as.
+          contentType: useEnhanced ? 'image/jpeg' : (contentType ?? String(d.contentType ?? '')),
+          blob: new Blob([bytes as unknown as BlobPart]),
+        }
+      }),
+    )
+
+    // The SAME merge the browser uses, so one implementation decides page size, aspect
+    // ratio and how a source PDF is carried through.
+    const combined = await pagesToPdf(
+      sources.map((src) => ({ ...src, blob: new Blob([src.blob], { type: src.contentType }) })),
+      kind === 'POD' ? 'POD' : 'RATECON',
+    )
+    if (!combined) return { submissionId, kind, pages: 0, error: 'nothing to combine' }
+
+    const driverId = String(docs[0].driverId ?? 'unknown')
+    const key = `driver-docs/${driverId}/${submissionId}/${kind}/combined.pdf`
+    await uploadBytes(key, Buffer.from(await combined.blob.arrayBuffer()), 'application/pdf')
+
+    const field = kind === 'POD' ? 'combinedPodKey' : 'combinedRateconKey'
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: DRIVER_SUBMISSION_TABLE,
+        Key: marshall({ id: submissionId }),
+        UpdateExpression: 'SET #k = :k, #at = :at, #u = :at',
+        ExpressionAttributeNames: { '#k': field, '#at': 'combinedAt', '#u': 'updatedAt' },
+        ExpressionAttributeValues: marshall({ ':k': key, ':at': new Date().toISOString() }),
+      }),
+    )
+
+    return { submissionId, kind, pages: combined.pageCount, key }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Never thrown: the pages are stored and readable on their own. A failed merge must not
+    // present as a lost document.
+    console.error('[pod-actions] finalizeDriverDocs failed', { submissionId, kind, message })
+    return { submissionId, kind, pages: 0, error: message }
+  }
+}
+
+/** Every row of a table. Small tables only; these hold one row per uploaded page. */
+async function scanTable(table: string): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = []
+  let ExclusiveStartKey: Record<string, AttributeValue> | undefined
+  do {
+    const res = await dynamo.send(new ScanCommand({ TableName: table, ExclusiveStartKey }))
+    for (const item of res.Items ?? []) out.push(unmarshall(item))
+    ExclusiveStartKey = res.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return out
+}
+
 export async function retryAction(
   input: Record<string, unknown>,
   caller: Caller,
@@ -1740,6 +1838,9 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
     case 'enhanceDriverDoc':
       await authorize(action, appSyncEvent.identity)
       return enhanceDriverDocAction(input)
+    case 'finalizeDriverDocs':
+      await authorize(action, appSyncEvent.identity)
+      return finalizeDriverDocsAction(input)
     default:
       throw new Error(`Unknown action: ${action}`)
   }
