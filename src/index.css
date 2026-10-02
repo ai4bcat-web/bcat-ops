@@ -493,6 +493,65 @@ body {
 
   /* Comfortable tap targets. */
   button, .sidebar-link, a[role="button"] { min-height: 40px; }
+
+  /*
+   * ── Inline layout, made to fit a phone ──────────────────────────────────
+   *
+   * Most of this app lays itself out in inline styles, written for a 1440px desktop.
+   * A stylesheet cannot normally touch those — but it can match the serialized `style`
+   * attribute, which is what these selectors do. It is blunt and it is deliberate: the
+   * alternative is rewriting a hundred style objects across forty-two pages, which is a
+   * lot of risk for a layout question with one right answer on a 390px screen.
+   *
+   * Everything here is scoped to the phone breakpoint. The desktop is untouched.
+   */
+
+  /* A row of KPI tiles or form fields becomes one column. Two-track grids are left
+     alone: a label/value pair still reads correctly side by side. */
+  [style*="repeat(3"],
+  [style*="repeat(4"],
+  [style*="repeat(5"],
+  [style*="repeat(6"],
+  [style*="repeat(7"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  /* Page chrome padded for a wide screen gives most of a phone to its own margins. */
+  [style*="padding: 20px 32px"],
+  [style*="padding: 16px 32px"],
+  [style*="padding: 24px 32px"],
+  [style*="padding: 18px 32px"],
+  [style*="padding: 14px 32px"],
+  [style*="padding: 16px 24px"],
+  [style*="padding: 20px 24px"],
+  [style*="padding: 24px 24px"] {
+    padding-left: 14px !important;
+    padding-right: 14px !important;
+  }
+
+  /* A container that insists on being wider than the screen forces the whole page
+     sideways. These are the exact values in use — matching on a prefix would also catch
+     a 160px field, which has every right to its minimum. */
+  div[style*="min-width: 520px"],
+  div[style*="min-width: 560px"],
+  div[style*="min-width: 640px"],
+  div[style*="min-width: 760px"],
+  div[style*="min-width: 800px"],
+  div[style*="min-width: 820px"],
+  div[style*="min-width: 1000px"],
+  div[style*="min-width: 1120px"],
+  div[style*="min-width: 1240px"] {
+    min-width: 0 !important;
+  }
+
+  /* Side-by-side panels stack rather than squeeze. */
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns: 2fr 1fr"],
+  [style*="grid-template-columns: 1fr 2fr"],
+  [style*="grid-template-columns: 3fr 1fr"],
+  [style*="grid-template-columns: 1fr 3fr"] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
 
 /* Maintenance tasks table — row hover + pulsing overdue KPI dot */
