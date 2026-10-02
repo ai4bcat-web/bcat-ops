@@ -576,6 +576,7 @@ export function FactoringPage() {
                             present={!missingDocs(item).includes('POD')}
                             loadId={item.loadId}
                             proNumber={item.proNumber}
+                            itemId={item.id}
                             staffEmail={staffEmail}
                             onUploaded={refresh}
                           />
@@ -584,6 +585,7 @@ export function FactoringPage() {
                             present={!missingDocs(item).includes('Rate confirmation')}
                             loadId={item.loadId}
                             proNumber={item.proNumber}
+                            itemId={item.id}
                             staffEmail={staffEmail}
                             onUploaded={refresh}
                           />

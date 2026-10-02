@@ -7,13 +7,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { FactoringPage } from './FactoringPage'
 import type { FactoringItem } from '@/types'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 
 const hookMock = vi.hoisted(() => vi.fn())
 const authMock = vi.hoisted(() => vi.fn())
+const assembleInvoice = vi.hoisted(() => vi.fn().mockResolvedValue({}))
 
 vi.mock('@/hooks/useFactoringItems', () => ({ useFactoringItems: hookMock }))
 vi.mock('@/hooks/useAuth', () => ({ useAuth: authMock }))
@@ -25,7 +26,7 @@ vi.mock('./OtrPanel', () => ({ OtrPanel: () => <div data-testid="otr-panel" /> }
 // The drawer the PRO column opens. Its own behaviour is covered by LoadDrawer's tests;
 // here it would only drag the whole load form into a test about the queue.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
-vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn() }))
+vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn(), assembleInvoice }))
 vi.mock('@/hooks/useLoadDriverDocs', () => ({
   useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),
 }))
@@ -301,3 +302,4 @@ describe('what the queue is worth', () => {
     expect(totals.getByLabelText(/^Pending with OTR: \$2,500\.00 across 1 invoices$/)).toBeInTheDocument()
   })
 })
+

@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Upload, AlertTriangle, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import { uploadRateConfirm, getRateConfirmUrl } from '@/lib/apiClient'
+import { assembleInvoice } from '@/lib/otrClient'
 import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { useAppStore } from '@/store/useAppStore'
@@ -36,13 +37,20 @@ const LABEL: Record<Kind, string> = { POD: 'POD', RATECON: 'Rate con' }
 
 
 export function FactoringDocCell({
-  kind, present, loadId, proNumber, staffEmail, onUploaded,
+  kind, present, loadId, proNumber, itemId, staffEmail, onUploaded,
 }: {
   kind: Kind
   present: boolean
   /** The Load this PRO resolved to. Without it there is nowhere to put the document. */
   loadId: string | null | undefined
   proNumber: string
+  /**
+   * The factoring row this cell belongs to, so readiness can be rebuilt the moment a
+   * document lands. Readiness is a CACHED blob: attaching a POD does not change it, and
+   * without this the row kept saying "missing POD" with the POD sitting right there — which
+   * also kept Submit disabled.
+   */
+  itemId: string
   staffEmail: string
   onUploaded: () => void
 }) {
@@ -116,11 +124,26 @@ export function FactoringDocCell({
         })
         toast.success(`POD saved for PRO ${proNumber}`)
       }
+      await refreshReadiness()
       onUploaded()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : `Could not upload the ${LABEL[kind]}`)
     } finally {
       setBusy(false)
+    }
+  }
+
+  /**
+   * Rebuild the row's cached readiness, then let the caller refresh.
+   *
+   * Never allowed to fail the upload: the document is attached either way, and the row can
+   * always be rebuilt from its own Refresh button.
+   */
+  async function refreshReadiness(): Promise<void> {
+    try {
+      await assembleInvoice(itemId)
+    } catch (err) {
+      console.warn('[factoring] could not rebuild readiness after the upload', itemId, err)
     }
   }
 
@@ -213,6 +236,7 @@ export function FactoringDocCell({
                     loadId: loadId ?? undefined,
                   })
                   toast.success(`${LABEL[kind]} replaced for PRO ${proNumber}`)
+                  await refreshReadiness()
                   onUploaded()
                 }
               : undefined
@@ -222,6 +246,7 @@ export function FactoringDocCell({
               ? async () => {
                   await removeDriverDocs(submitted.submissionId, kind)
                   toast.success(`${LABEL[kind]} removed from PRO ${proNumber}`)
+                  await refreshReadiness()
                   onUploaded()
                 }
               : undefined

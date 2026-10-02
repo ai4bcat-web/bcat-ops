@@ -262,6 +262,7 @@ export function OtrPanel({ item, onChanged }: Props) {
                 present={present}
                 loadId={item.loadId}
                 proNumber={item.proNumber}
+                itemId={item.id}
                 staffEmail={staffEmail}
                 onUploaded={onChanged}
               />
