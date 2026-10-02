@@ -83,12 +83,8 @@ export async function downloadPodAsPdf(url: string, baseName: string): Promise<v
 
   // Wrapping the image in a PDF is a nicety, not the job. If pdf-lib cannot embed this
   // particular JPEG, the file itself still has to reach the person who asked for it.
-  let combined: Awaited<ReturnType<typeof pagesToPdf>> = null
-  try {
-    combined = await pagesToPdf([{ fileName: baseName || 'POD', contentType, blob }], 'POD')
-  } catch {
-    combined = null
-  }
+  const combined = await pagesToPdf([{ fileName: baseName || 'POD', contentType, blob }], 'POD')
+    .catch(() => null)
   if (!combined) {
     saveBlob(blob, baseName || 'POD')
     return

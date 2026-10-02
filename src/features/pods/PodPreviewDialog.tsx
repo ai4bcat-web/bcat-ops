@@ -65,6 +65,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
       } catch (err) {
         throw new Error(
           `Could not get a link for this POD: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
         )
       }
       const url = want === 'enhanced' ? fresh.enhancedUrl : fresh.originalUrl

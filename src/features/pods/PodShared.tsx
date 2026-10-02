@@ -80,6 +80,7 @@ export function PodDownloadBtn({
             // fetch" with no subject sent us looking at S3 for a problem that was here.
             throw new Error(
               `Could not get a link for this POD: ${err instanceof Error ? err.message : String(err)}`,
+              { cause: err },
             )
           }
           const url = variant === 'enhanced' ? assets.enhancedUrl : assets.originalUrl
