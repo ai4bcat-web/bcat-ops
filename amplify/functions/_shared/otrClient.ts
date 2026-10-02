@@ -236,11 +236,11 @@ export class OtrClient {
       // 402 here means the MC itself is invalid — a data problem, not a transport one.
       throw new OtrError(`Broker check failed (${res.status})`, res.status, text)
     }
-    let raw: unknown = null
+    // A non-JSON 200 is OTR telling us something we do not model yet. The caller logs it.
+    let raw: unknown
     try {
       raw = JSON.parse(text)
     } catch {
-      // A non-JSON 200 is OTR telling us something we do not model yet. The caller logs it.
       raw = text
     }
     const message = (raw as { message?: string } | null)?.message ?? ''

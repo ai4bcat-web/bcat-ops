@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { FactoringPage } from './FactoringPage'
 import type { FactoringItem } from '@/types'
 import type { OtrReadiness } from '@/lib/otrInvoice'
