@@ -18,7 +18,7 @@ import { canDeleteFactoringItem } from '@/lib/auth/admin'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { FactoringRowFields } from './FactoringRowFields'
-import { fieldsReadyLabel } from './factoringFields'
+import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
 import { FactoringDocCell } from './FactoringDocCell'
 import { OtrInvoiceBoard } from './OtrInvoiceBoard'
 import type { OtrReadiness } from '@/lib/otrInvoice'
@@ -71,6 +71,12 @@ function relativeReceived(iso: string) {
 function readinessOf(item: FactoringItem): OtrReadiness | null {
   const r = item.otrReadiness
   return r && typeof r === 'object' ? (r as OtrReadiness) : null
+}
+
+/** The PO number OTR requires, once it has resolved. */
+function poOf(item: FactoringItem): string {
+  const v = readinessOf(item)?.payload?.PoNumber
+  return v == null ? '' : String(v)
 }
 
 /** Documents OTR still wants. Unknown readiness means both, since neither is proven. */
@@ -315,7 +321,7 @@ export function FactoringPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
+                    {['PRO #', 'PO #', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
                       <th
                         key={col}
                         style={{
@@ -358,12 +364,22 @@ export function FactoringPage() {
                           </span>
                         </button>
                       </td>
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          fontSize: 13, color: poOf(item) ? 'var(--ds-t1)' : '#b91c1c',
+                          fontWeight: poOf(item) ? 500 : 600,
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {poOf(item) || 'missing'}
+                        </span>
+                      </td>
                       {/* How close this row is to being invoiceable, as a count then the
                           individual fields. Green means resolved, red means still missing. */}
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <span style={{
                           fontSize: 12.5, fontWeight: 700,
-                          color: readinessOf(item)?.ready ? '#15803d' : 'var(--ds-t2)',
+                          // Green only when OTR would actually take it — same rule as Submit.
+                          color: isReadyToSubmit(readinessOf(item)) ? '#15803d' : 'var(--ds-t2)',
                           fontVariantNumeric: 'tabular-nums',
                         }}>
                           {fieldsReadyLabel(readinessOf(item))}
@@ -428,7 +444,7 @@ export function FactoringPage() {
                       {/* The editor, only for a row someone opened. */}
                       {expanded.has(item.id) && (
                         <tr>
-                          <td colSpan={canDelete ? 7 : 6} style={{ padding: '0 16px 14px' }}>
+                          <td colSpan={canDelete ? 8 : 7} style={{ padding: '0 16px 14px' }}>
                             <OtrPanel item={item} onChanged={refresh} />
                           </td>
                         </tr>

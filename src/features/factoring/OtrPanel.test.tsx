@@ -135,3 +135,33 @@ describe('OtrPanel', () => {
     expect(screen.getByRole('button', { name: /Submit to OTR/ })).toBeDisabled()
   })
 })
+
+describe('the submit guard', () => {
+  it('refuses while any required field is red, even if the cached flag says ready', async () => {
+    // `ready` and `missingFields` are two separate stored values. A stale `ready: true`
+    // used to enable Submit while the row still showed red — the exact contradiction
+    // someone reports as "it let me submit".
+    const r = readiness({ ready: true, payload: ALL_FIELDS, missingFields: ['ToZip'] })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+
+    const submit = screen.getByRole('button', { name: /Submit to OTR/ })
+    expect(submit).toBeDisabled()
+    expect(submit.title).toContain('Destination ZIP')
+  })
+
+  it('refuses while a document is missing', async () => {
+    const r = readiness({ ready: true, payload: ALL_FIELDS, missingDocuments: ['POD'] })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+
+    const submit = screen.getByRole('button', { name: /Submit to OTR/ })
+    expect(submit).toBeDisabled()
+    expect(submit.title).toContain('POD')
+  })
+
+  it('allows it once every field and both documents are in', async () => {
+    const r = readiness({ ready: false, payload: ALL_FIELDS })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+
+    expect(screen.getByRole('button', { name: /Submit to OTR/ })).toBeEnabled()
+  })
+})

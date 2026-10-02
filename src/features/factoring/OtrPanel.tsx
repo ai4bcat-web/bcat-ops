@@ -29,6 +29,7 @@ import {
 } from '@/lib/otrInvoice'
 import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr } from '@/lib/otrClient'
 import { setFactoringManualFields } from '@/lib/apiClient'
+import { isReadyToSubmit, whatIsMissing } from './factoringFields'
 import type { FactoringItem } from '@/types'
 
 /** Keyboard and format hints per field, so a phone offers the right keys. */
@@ -141,6 +142,8 @@ export function OtrPanel({ item, onChanged }: Props) {
 
   const missing = new Set<OtrRequiredField>(readiness.missingFields)
   const needsMc = missing.has('BrokerMC')
+  // From the lists the chips are drawn from, never the cached `ready` flag beside them.
+  const canSubmit = isReadyToSubmit(readiness)
   const manual = (item.otrManualFields ?? {}) as Record<string, string>
 
   /**
@@ -263,11 +266,11 @@ export function OtrPanel({ item, onChanged }: Props) {
 
         <Button
           size="sm"
-          disabled={busy !== null || !readiness.ready}
+          disabled={busy !== null || !canSubmit}
           title={
-            readiness.ready
+            canSubmit
               ? 'Create the invoice at OTR and upload the POD and rate confirmation'
-              : `Still needed: ${[...readiness.missingFields.map((f) => OTR_FIELD_LABEL[f]), ...readiness.missingDocuments].join(', ')}`
+              : `Still needed: ${whatIsMissing(readiness, (f) => OTR_FIELD_LABEL[f])}`
           }
           onClick={() =>
             run('submit', () => submitToOtr(item.id), 'Submitted to OTR')
@@ -275,7 +278,7 @@ export function OtrPanel({ item, onChanged }: Props) {
         >
           {busy === 'submit' ? (
             <Loader2 className="size-3.5 animate-spin" />
-          ) : readiness.ready ? (
+          ) : canSubmit ? (
             <CheckCircle2 className="size-3.5" />
           ) : (
             <Send className="size-3.5" />

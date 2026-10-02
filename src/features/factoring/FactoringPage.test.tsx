@@ -218,4 +218,25 @@ describe('the row editor', () => {
     expect(screen.getAllByTestId('otr-panel')).toHaveLength(1)
   })
 })
+
+describe('submitting to OTR', () => {
+  it('shows the PO beside the PRO, and says when it is missing', () => {
+    setup([
+      item({ id: 'a', proNumber: 'A1', otrReadiness: readiness({ payload: { PoNumber: 'PO-7' } }) }),
+      item({ id: 'b', proNumber: 'B2', status: 'NEED_TO_FACTOR', otrReadiness: readiness({ missingFields: ['PoNumber'] }) }),
+    ])
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent)
+    expect(headers.slice(0, 2)).toEqual(['PRO #', 'PO #'])
+
+    expect(screen.getByText('PO-7')).toBeInTheDocument()
+    expect(screen.getByText('missing')).toBeInTheDocument()
+  })
+
+  it('counts a row ready only when nothing is red', () => {
+    // The count used to colour from a cached `ready` boolean stored beside the lists the
+    // chips are drawn from, so the two could disagree.
+    setup([item({ otrReadiness: readiness({ ready: true, missingFields: ['ToZip'] }) })])
+    expect(screen.getByText('10 of 11')).toBeInTheDocument()
+  })
+})
 })
