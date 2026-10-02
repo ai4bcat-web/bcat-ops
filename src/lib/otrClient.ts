@@ -81,6 +81,23 @@ export function submitToOtr(id: string): Promise<{
   return otrAction('submit', { id })
 }
 
+/**
+ * Send the documents again for an invoice OTR already has.
+ *
+ * Submitting creates the invoice and attaches the paperwork after, and it refuses to run
+ * twice — so a failed upload left a real invoice at OTR with nothing on it and no way to
+ * finish short of creating a duplicate.
+ */
+export function uploadOtrDocs(
+  id: string,
+): Promise<{
+  invoiceId: string
+  uploaded: { pod?: string; rateConfirmation?: string }
+  documentErrors: string[]
+}> {
+  return otrAction('uploadDocs', { id })
+}
+
 /** Pull OTR's current status onto one or more rows. */
 export function syncOtrStatus(
   ids: string[],

@@ -27,7 +27,7 @@ import {
   type OtrReadiness,
   type OtrRequiredField,
 } from '@/lib/otrInvoice'
-import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr } from '@/lib/otrClient'
+import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
 import { setFactoringManualFields } from '@/lib/apiClient'
 import { FactoringDocCell } from './FactoringDocCell'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -143,10 +143,31 @@ export function OtrPanel({ item, onChanged }: Props) {
           )}
         </div>
         {item.otrError && (
-          <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-700">
-            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-            {item.otrError}
-          </p>
+          <div className="mt-2 space-y-2">
+            <p className="flex items-start gap-1.5 text-xs text-amber-700">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              {item.otrError}
+            </p>
+            {/*
+              * The invoice exists; only the paperwork failed. Submitting again would create
+              * a second invoice, so this sends the documents to the one OTR already has.
+              */}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() =>
+                run('docs', () => uploadOtrDocs(item.id), 'Documents sent to OTR')
+              }
+            >
+              {busy === 'docs' ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5" />
+              )}
+              Send the documents again
+            </Button>
+          </div>
         )}
       </div>
     )

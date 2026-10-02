@@ -392,6 +392,84 @@ async function s3Bytes(key: string): Promise<{ bytes: Uint8Array; contentType: s
   return { bytes, contentType: r.ContentType ?? 'application/pdf' }
 }
 
+/**
+ * Attach the POD and the rate confirmation to an invoice that already exists at OTR.
+ *
+ * Split out of `submit` so it can be run again. The invoice is created first and the
+ * documents follow, which means a document failure leaves a real invoice at OTR with
+ * nothing attached — and `submit` refuses to run twice, by design, so there was no way to
+ * finish the job without creating a duplicate invoice.
+ *
+ * Every failure records what OTR actually SAID. "Document upload failed (500)" is not a
+ * diagnosis, and throwing the response body away is what made the first one unanswerable.
+ */
+async function uploadInvoiceDocuments(
+  item: Row,
+  load: Row,
+  invoiceId: number | string,
+): Promise<{ uploaded: { pod?: string; rateConfirmation?: string }; errors: string[] }> {
+  const client = otr()
+  const uploaded: { pod?: string; rateConfirmation?: string } = {}
+  const errors: string[] = []
+
+  function describe(label: string, e: unknown): string {
+    if (e instanceof OtrError) {
+      const body = trim(e.body).slice(0, 400)
+      console.error('[otr-actions] document upload rejected', {
+        label,
+        invoiceId: String(invoiceId),
+        status: e.status,
+        body: e.body?.slice(0, 2000),
+      })
+      return `${label}: ${e.message}${body ? ` — ${body}` : ''}`
+    }
+    const message = e instanceof Error ? e.message : String(e)
+    console.error('[otr-actions] document upload failed', { label, invoiceId: String(invoiceId), message })
+    return `${label}: ${message}`
+  }
+
+  const pod = await findPod(String(load.id), String(item.proNumber ?? ''))
+  const podKey = trim(pod?.enhancedKey) || trim(pod?.originalKey)
+  if (podKey) {
+    try {
+      const { bytes, contentType } = await s3Bytes(podKey)
+      await client.uploadDocument({
+        invoiceId,
+        docType: OTR_DOC_TYPE.POD,
+        fileName: `POD-${item.proNumber}.pdf`,
+        contentType,
+        file: bytes,
+      })
+      uploaded.pod = podKey
+    } catch (e) {
+      errors.push(describe('POD', e))
+    }
+  } else {
+    errors.push('POD: nothing on file to send')
+  }
+
+  const rcKey = trim(load.rateConfirmKey)
+  if (rcKey) {
+    try {
+      const { bytes, contentType } = await s3Bytes(rcKey)
+      await client.uploadDocument({
+        invoiceId,
+        docType: OTR_DOC_TYPE.RATE_CONFIRMATION,
+        fileName: `RateCon-${item.proNumber}.pdf`,
+        contentType,
+        file: bytes,
+      })
+      uploaded.rateConfirmation = rcKey
+    } catch (e) {
+      errors.push(describe('Rate confirmation', e))
+    }
+  } else {
+    errors.push('Rate confirmation: nothing on file to send')
+  }
+
+  return { uploaded, errors }
+}
+
 const ok = (data: unknown) => JSON.stringify({ ok: true, data })
 const fail = (error: string) => JSON.stringify({ ok: false, error })
 
@@ -578,45 +656,13 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         const client = otr()
         const created = await client.createInvoice(payload as unknown as OtrInvoicePayload)
 
-        // Documents are best-effort: the invoice already exists at OTR, so a
-        // failed upload must not lose the invoiceId. Record what landed.
-        const uploaded: { pod?: string; rateConfirmation?: string } = {}
-        const docErrors: string[] = []
-
-        const pod = await findPod(String(load.id), String(item.proNumber ?? ''))
-        const podKey = trim(pod?.enhancedKey) || trim(pod?.originalKey)
-        if (podKey) {
-          try {
-            const { bytes, contentType } = await s3Bytes(podKey)
-            await client.uploadDocument({
-              invoiceId: created.invoiceId,
-              docType: OTR_DOC_TYPE.POD,
-              fileName: String(pod?.fileName ?? `POD-${item.proNumber}.pdf`),
-              contentType,
-              file: bytes,
-            })
-            uploaded.pod = podKey
-          } catch (e) {
-            docErrors.push(`POD: ${e instanceof Error ? e.message : String(e)}`)
-          }
-        }
-
-        const rcKey = trim(load.rateConfirmKey)
-        if (rcKey) {
-          try {
-            const { bytes, contentType } = await s3Bytes(rcKey)
-            await client.uploadDocument({
-              invoiceId: created.invoiceId,
-              docType: OTR_DOC_TYPE.RATE_CONFIRMATION,
-              fileName: `RateCon-${item.proNumber}.pdf`,
-              contentType,
-              file: bytes,
-            })
-            uploaded.rateConfirmation = rcKey
-          } catch (e) {
-            docErrors.push(`Rate confirmation: ${e instanceof Error ? e.message : String(e)}`)
-          }
-        }
+        // Documents are best-effort: the invoice already exists at OTR, so a failed
+        // upload must not lose the invoiceId. Retryable on its own afterwards.
+        const { uploaded, errors: docErrors } = await uploadInvoiceDocuments(
+          item,
+          load,
+          created.invoiceId,
+        )
 
         await updateItem(String(item.id), {
           otrInvoiceId: String(created.invoiceId),
@@ -637,6 +683,32 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           uploaded,
           documentErrors: docErrors,
         })
+      }
+
+      /**
+       * Send the documents again for an invoice OTR already has.
+       *
+       * `submit` creates the invoice first and attaches the paperwork after, and it refuses
+       * to run twice — correctly, or a retry would mean a second invoice. So a document
+       * failure used to leave a real invoice at OTR with nothing on it and no way to finish
+       * short of creating a duplicate. This is that way.
+       */
+      case 'uploadDocs': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        const invoiceId = trim(item.otrInvoiceId)
+        if (!invoiceId) return fail('this row has not been submitted to OTR yet')
+
+        const { load } = await buildReadiness(item)
+        if (!load) return fail('no load linked to this row')
+
+        const { uploaded, errors } = await uploadInvoiceDocuments(item, load, invoiceId)
+        await updateItem(String(item.id), {
+          otrDocsUploaded: { ...((item.otrDocsUploaded as Row) ?? {}), ...uploaded },
+          otrError: errors.length ? errors.join('; ') : null,
+        })
+        console.log('[otr-actions] document retry by', actor, { invoiceId, errors })
+        return ok({ invoiceId, uploaded, documentErrors: errors })
       }
 
       /** Mirror OTR's current status onto the row so the queue shows their board. */

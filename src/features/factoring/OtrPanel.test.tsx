@@ -14,6 +14,7 @@ import type { FactoringItem } from '@/types'
 const setFactoringManualFields = vi.hoisted(() => vi.fn())
 const assembleInvoice = vi.hoisted(() => vi.fn())
 const setBrokerMc = vi.hoisted(() => vi.fn())
+const uploadOtrDocs = vi.hoisted(() => vi.fn().mockResolvedValue({ documentErrors: [] }))
 
 vi.mock('@/lib/apiClient', () => ({ setFactoringManualFields }))
 vi.mock('@/lib/otrClient', () => ({
@@ -21,6 +22,7 @@ vi.mock('@/lib/otrClient', () => ({
   setBrokerMc,
   checkBroker: vi.fn(),
   submitToOtr: vi.fn(),
+  uploadOtrDocs,
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.com' }) }))
@@ -236,5 +238,38 @@ describe('the submit guard', () => {
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: /Submit to OTR/ })).toBeEnabled()
+  })
+})
+
+
+/**
+ * Submitting creates the invoice and attaches the paperwork afterwards, and it refuses to
+ * run twice — correctly, or a retry would mean a second invoice at a factoring company.
+ * So a failed document upload left a real invoice at OTR with nothing on it and no way to
+ * finish. PRO 14538 went over as invoice 16222565 with both documents rejected 500.
+ */
+describe('an invoice OTR has, whose documents did not land', () => {
+  const submitted = () =>
+    item({
+      otrInvoiceId: '16222565',
+      otrStatus: 'Pending',
+      otrError: 'POD: Document upload failed (500); Rate confirmation: Document upload failed (500)',
+    })
+
+  it('offers to send the documents again, without creating a second invoice', async () => {
+    render(<OtrPanel item={submitted()} onChanged={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Send the documents again/ }))
+    await waitFor(() => expect(uploadOtrDocs).toHaveBeenCalledWith('13364'))
+  })
+
+  it('shows what OTR said, which is the only way anyone can act on it', () => {
+    render(<OtrPanel item={submitted()} onChanged={vi.fn()} />)
+    expect(screen.getByText(/Document upload failed \(500\)/)).toBeInTheDocument()
+  })
+
+  it('does not offer the retry on an invoice that went over cleanly', () => {
+    render(<OtrPanel item={item({ otrInvoiceId: '16222565', otrStatus: 'Pending' })} onChanged={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /Send the documents again/ })).not.toBeInTheDocument()
   })
 })
