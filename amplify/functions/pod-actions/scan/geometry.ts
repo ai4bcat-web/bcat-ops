@@ -600,25 +600,23 @@ export function luminanceAt(data: Uint8Array | Buffer, p: number): number {
 }
 
 /**
- * In-place illumination cleanup using local mean subtraction (wide neighbourhood so
- * paper shadows go while faint handwriting stays). Works on luminance, never a
- * single channel: red stamps, blue ink and pink paper must keep their contrast.
+ * A local-average field over a single-channel image, via an integral image.
+ *
+ * Separated out because the cleanup needs it twice at very different scales: once wide,
+ * to model the lighting across the sheet, and once at a one-pixel radius, as the blur an
+ * unsharp mask subtracts.
  */
-export function applyIlluminationCleanup(jimp: JimpImage): void {
-  const { width: w, height: h, data } = jimp.bitmap
+function localMeanField(src: Float32Array, w: number, h: number, radius: number): Float32Array {
   const stride = w + 1
-  const integral = new Uint32Array(stride * (h + 1))
+  const integral = new Float64Array(stride * (h + 1))
   for (let y = 0; y < h; y++) {
-    let rowSum = 0
+    let row = 0
     for (let x = 0; x < w; x++) {
-      const p = (y * w + x) * 4
-      const lum = luminanceAt(data, p)
-      data[p] = lum
-      rowSum += lum
-      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowSum
+      row += src[y * w + x]
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + row
     }
   }
-  const radius = Math.max(24, Math.round(Math.min(w, h) / 24))
+  const out = new Float32Array(w * h)
   for (let y = 0; y < h; y++) {
     const top = Math.max(0, y - radius)
     const bottom = Math.min(h, y + radius + 1)
@@ -630,19 +628,100 @@ export function applyIlluminationCleanup(jimp: JimpImage): void {
         integral[top * stride + right] -
         integral[bottom * stride + left] +
         integral[top * stride + left]
-      const localMean = sum / ((right - left) * (bottom - top))
-      // Floor the illumination slightly so very dark areas stay visible.
-      const illumination = Math.max(32, localMean)
-      const p = (y * w + x) * 4
-      const corrected = Math.min(
-        255,
-        Math.max(0, Math.round((data[p] * 255 / illumination - 8) * 255 / 247)),
-      )
-      data[p] = corrected
-      data[p + 1] = corrected
-      data[p + 2] = corrected
-      data[p + 3] = 255
+      out[y * w + x] = sum / ((right - left) * (bottom - top))
     }
+  }
+  return out
+}
+
+/** The value below which `p` of the samples fall, from a 1000-bucket histogram. */
+function quantile(values: Float32Array, p: number, scale: number): number {
+  const buckets = new Float64Array(1001)
+  for (let i = 0; i < values.length; i++) {
+    const b = Math.min(1000, Math.max(0, Math.round(values[i] * scale)))
+    buckets[b]++
+  }
+  const want = values.length * p
+  let seen = 0
+  for (let b = 0; b <= 1000; b++) {
+    seen += buckets[b]
+    if (seen >= want) return b / scale
+  }
+  return 1000 / scale
+}
+
+/*
+ * How the page is separated from its lighting.
+ *
+ * BACKGROUND_DIVISOR: the lighting field is a local average over roughly an eighth of the
+ * short edge. The first version used a twenty-fourth, which is narrower than a paragraph
+ * of small print — so inside a dense block the "background" was the text itself, the ratio
+ * came out near 1, and the paragraph was flattened to white. That is exactly the washout
+ * people reported: handwriting survived and the printed detail did not.
+ *
+ * INK_QUANTILE and the clamps: after dividing out the lighting, paper sits near 1.0 and
+ * ink well below it. Mapping the darkest couple of per cent to black and paper to white is
+ * an ordinary levels stretch, and it is what puts contrast back. The clamps bound the two
+ * degenerate cases — a nearly blank page, where even the darkest sample is still paper and
+ * everything would go black, and a very dark photo, where the point would sit so low that
+ * nothing reaches black. The upper clamp is held well below paper on purpose: a shaded
+ * table header sits around three quarters of paper brightness, and an anchor above that
+ * would fill it in solid and take the words in it with it.
+ *
+ * SHARPEN_AMOUNT: a light unsharp mask. Flattening the lighting costs a little edge
+ * definition, and small print is where that is felt.
+ */
+const BACKGROUND_DIVISOR = 8
+const MIN_BACKGROUND_RADIUS = 48
+const INK_QUANTILE = 0.02
+const MIN_INK_POINT = 0.3
+const MAX_INK_POINT = 0.62
+const SHARPEN_AMOUNT = 0.6
+/** Floors the lighting field so a genuinely black region cannot divide by nearly nothing. */
+const MIN_ILLUMINATION = 24
+
+/**
+ * In-place illumination cleanup: divide the lighting out, then put the contrast back.
+ *
+ * Works on luminance, never a single channel — red stamps, blue ink and pink paper all
+ * have to keep their contrast. The output is greyscale, which is what a POD is.
+ */
+export function applyIlluminationCleanup(jimp: JimpImage): void {
+  const { width: w, height: h, data } = jimp.bitmap
+  if (w === 0 || h === 0) return
+
+  const gray = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) gray[i] = luminanceAt(data, i * 4)
+
+  const radius = Math.max(MIN_BACKGROUND_RADIUS, Math.round(Math.min(w, h) / BACKGROUND_DIVISOR))
+  const illumination = localMeanField(gray, w, h, radius)
+
+  // Paper lands near 1.0 whatever the lighting was; ink lands below it.
+  const ratio = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) {
+    ratio[i] = gray[i] / Math.max(MIN_ILLUMINATION, illumination[i])
+  }
+
+  const inkPoint = Math.min(
+    MAX_INK_POINT,
+    Math.max(MIN_INK_POINT, quantile(ratio, INK_QUANTILE, 500)),
+  )
+  const span = 1 - inkPoint
+
+  const levelled = new Float32Array(w * h)
+  for (let i = 0; i < w * h; i++) {
+    levelled[i] = Math.max(0, Math.min(255, ((ratio[i] - inkPoint) / span) * 255))
+  }
+
+  const blurred = localMeanField(levelled, w, h, 1)
+  for (let i = 0; i < w * h; i++) {
+    const sharpened = levelled[i] + SHARPEN_AMOUNT * (levelled[i] - blurred[i])
+    const v = Math.round(Math.max(0, Math.min(255, sharpened)))
+    const p = i * 4
+    data[p] = v
+    data[p + 1] = v
+    data[p + 2] = v
+    data[p + 3] = 255
   }
 }
 

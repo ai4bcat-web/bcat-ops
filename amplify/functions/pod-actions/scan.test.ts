@@ -49,8 +49,15 @@ describe('POD scan cleanup', { timeout: 90000 }, () => {
     expect(grayAt(80, 40)).toBeGreaterThan(240)
     expect(Math.abs(grayAt(80, 40) - grayAt(240, 40))).toBeLessThan(12)
     expect(grayAt(80, 81)).toBeLessThan(90)
-    expect(grayAt(80, 141)).toBeGreaterThan(100)
-    expect(grayAt(80, 141)).toBeLessThan(225)
+    /*
+     * Faint handwriting has to survive, and it now comes out DARKER than it went in
+     * rather than being held at the mid-grey it arrived as. That is the point of the
+     * levels stretch: pencil at seventy per cent of paper brightness is barely visible
+     * on a phone screen, and a POD is read, not admired. What must still hold is that it
+     * is ink and not paper, and that it stays distinguishable from solid print.
+     */
+    expect(grayAt(80, 141)).toBeLessThan(170)
+    expect(grayAt(80, 141)).toBeGreaterThan(grayAt(80, 81))
     expect(original.equals(originalCopy)).toBe(true)
   })
 

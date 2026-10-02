@@ -40,6 +40,7 @@ import { senderKey } from '../../../src/lib/podSenderKey'
 import { enhancePodImage } from './scan'
 import { POD_SCAN_VERSION } from './scan-version.js'
 import { pagesToPdf } from '../../../src/lib/pagesToPdf'
+import { extractPagePhotos, rebuildPdfWithPhotos } from './pdfPhotos'
 
 // ── AWS clients ────────────────────────────────────────────────────────────
 
@@ -1521,6 +1522,41 @@ export async function assignAction(
  * `ORIGINAL_ONLY` is a normal outcome, not a failure: a PDF from a scanner app is already
  * the document and there is nothing to clean.
  */
+/** A PDF by its magic bytes first, by the content type only as a fallback. */
+function isPdf(bytes: Buffer, contentType: string): boolean {
+  if (bytes.length >= 5 && bytes.subarray(0, 5).toString('latin1') === '%PDF-') return true
+  return /application\/pdf/i.test(contentType)
+}
+
+/**
+ * Clean the photographs inside a PDF and hand back a new PDF, or null to leave it alone.
+ *
+ * Null covers two cases that look different and mean the same thing: a PDF with no
+ * extractable full-page photographs (a scanner-app export with a text layer, a broker's
+ * typeset paperwork), and one where every extraction came back with nothing the cleanup
+ * could improve. In both, the file we already hold is the best version of it.
+ */
+async function enhancePdfPhotos(bytes: Buffer): Promise<Buffer | null> {
+  const photos = await extractPagePhotos(bytes)
+  if (photos.length === 0) return null
+
+  const replacements = new Map<number, { bytes: Buffer; contentType: string }>()
+  for (const photo of photos) {
+    try {
+      const cleaned = await enhancePodImage(photo.bytes, photo.contentType)
+      if (cleaned) replacements.set(photo.pageIndex, { bytes: Buffer.from(cleaned.bytes), contentType: cleaned.contentType })
+    } catch (err) {
+      // One page that will not clean never costs the rest of the document.
+      console.error('[pod-actions] could not clean a page of a PDF', {
+        pageIndex: photo.pageIndex,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  if (replacements.size === 0) return null
+  return rebuildPdfWithPhotos(bytes, replacements)
+}
+
 export async function enhanceDriverDocAction(
   input: Record<string, unknown>,
 ): Promise<{ id: string; scanStatus: string; enhancedKey?: string; error?: string }> {
@@ -1561,9 +1597,37 @@ export async function enhanceDriverDocAction(
 
   try {
     const { bytes, contentType } = await getObjectBytes(doc.s3Key)
-    const enhanced = await enhancePodImage(bytes, contentType ?? doc.contentType ?? '')
+    const type = contentType ?? doc.contentType ?? ''
+
+    /*
+     * A PDF goes down its own road.
+     *
+     * Most PODs arrive as one: a phone wraps the photo in a PDF, and our own merge
+     * produces one. Those used to come back ORIGINAL_ONLY and reach the broker exactly as
+     * they were taken. enhancePdfPhotos pulls the photographs back out, cleans them, and
+     * puts them back — and returns null for a PDF that should be left alone, which is the
+     * right answer for a scanner-app export that is already straight and carries text.
+     */
+    if (isPdf(bytes, type)) {
+      const cleaned = await enhancePdfPhotos(bytes)
+      if (!cleaned) {
+        await record({ scanStatus: 'ORIGINAL_ONLY', scanError: null, scanVersion: POD_SCAN_VERSION })
+        return { id, scanStatus: 'ORIGINAL_ONLY' }
+      }
+      const pdfKey = `${doc.s3Key.replace(/\.[^./]+$/, '')}.enhanced.pdf`
+      await uploadBytes(pdfKey, cleaned, 'application/pdf')
+      await record({
+        enhancedKey: pdfKey,
+        scanStatus: 'READY',
+        scanError: null,
+        scanVersion: POD_SCAN_VERSION,
+      })
+      return { id, scanStatus: 'READY', enhancedKey: pdfKey }
+    }
+
+    const enhanced = await enhancePodImage(bytes, type)
     if (!enhanced) {
-      // Not an image we clean — a scanner-app PDF, for instance. Normal, not a failure.
+      // A type we have no cleanup for at all — a HEIC, a TIFF. Normal, not a failure.
       await record({ scanStatus: 'ORIGINAL_ONLY', scanError: null, scanVersion: POD_SCAN_VERSION })
       return { id, scanStatus: 'ORIGINAL_ONLY' }
     }
@@ -1624,10 +1688,19 @@ export async function finalizeDriverDocsAction(
         const useEnhanced = d.scanStatus === 'READY' && typeof d.enhancedKey === 'string' && d.enhancedKey
         const key = String(useEnhanced ? d.enhancedKey : d.s3Key)
         const { bytes, contentType } = await getObjectBytes(key)
+        /*
+         * Read the type off the bytes, not off the record.
+         *
+         * A cleaned copy used to always be a JPEG, so this assumed one. A cleaned PDF —
+         * a POD whose photographs were pulled out, straightened and put back — is also a
+         * cleaned copy, and calling it a JPEG hands PDF bytes to embedJpg and throws.
+         */
+        const sniffed = isPdf(bytes, contentType ?? '')
+          ? 'application/pdf'
+          : contentType ?? String(d.contentType ?? '')
         return {
           fileName: String(d.fileName ?? key.split('/').pop() ?? 'page'),
-          // An enhanced copy is always JPEG; an original carries whatever it was stored as.
-          contentType: useEnhanced ? 'image/jpeg' : (contentType ?? String(d.contentType ?? '')),
+          contentType: useEnhanced && !isPdf(bytes, contentType ?? '') ? 'image/jpeg' : sniffed,
           blob: new Blob([bytes as unknown as BlobPart]),
         }
       }),
