@@ -3,7 +3,8 @@ import { Download, AlertCircle, Loader2, FileText } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { getPodAssets } from '@/lib/podsClient'
 import { graphqlErrorText } from '@/lib/apiClient'
-import { downloadFromUrl } from '@/lib/download'
+import { toast } from 'sonner'
+import { downloadPodAsPdf } from '@/lib/podDownload'
 import { formatDateTime } from '@/lib/date'
 import type { PodDocument, PodAssets } from '@/types/pods'
 
@@ -50,7 +51,11 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
   const handleDownload = async (url: string, filename: string) => {
     setDownloading(true)
     try {
-      await downloadFromUrl(url, filename)
+      // Always a PDF: the enhanced copy is a JPEG, and it used to be saved under the
+      // original's name — often ending .pdf — so nothing could open it.
+      await downloadPodAsPdf(url, filename)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not download this POD')
     } finally {
       setDownloading(false)
     }
@@ -84,7 +89,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
             <div className="flex items-center gap-2">
               {canEnhance && (
                 <button
-                  onClick={() => handleDownload(assets.enhancedUrl!, `enhanced-${doc.fileName}`)}
+                  onClick={() => handleDownload(assets.enhancedUrl!, doc.fileName)}
                   disabled={downloading}
                   className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200"
                 >

@@ -149,7 +149,7 @@ function PodRow({
           {/* The enhanced scan leads: it is the copy that goes to a broker or to OTR. The
               original is the raw photo, kept as evidence and deliberately quiet. */}
           {hasEnhanced && assets?.enhancedUrl && (
-            <PodDownloadBtn url={assets.enhancedUrl} filename={`${doc.fileName}.enhanced.jpg`} label="Enhanced" />
+            <PodDownloadBtn url={assets.enhancedUrl} filename={doc.fileName} label="Enhanced" />
           )}
           {assets?.originalUrl && (
             <PodDownloadBtn

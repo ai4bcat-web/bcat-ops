@@ -54,7 +54,8 @@ vi.mock('@/hooks/useAuth', () => ({
 }))
 
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
-vi.mock('@/lib/download', () => ({ downloadFromUrl: vi.fn() }))
+const saveBlobMock = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/download', () => ({ downloadFromUrl: vi.fn(), saveBlob: saveBlobMock }))
 vi.mock('@/lib/apiClient', () => ({ graphqlErrorText: (e: unknown) => (e instanceof Error ? e.message : String(e)) }))
 
 const { PodsPage } = await import('./PodsPage')
@@ -296,5 +297,27 @@ describe('PodsPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /Save mappings/i }))
 
     await waitFor(() => expect(within(dialog).getByText(/Roster sync failed/i)).toBeTruthy())
+  })
+
+  it('downloads the enhanced copy as a PDF, named .pdf', async () => {
+    // It used to be saved as JPEG bytes under the original's name, often ending .pdf, so
+    // nothing would open it and the button looked broken.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      blob: async () => new Blob(['%PDF-1.4'], { type: 'application/pdf' }),
+    })
+    globalThis.fetch = fetchMock as never
+    saveBlobMock.mockClear()
+
+    render(<PodsPage />)
+    await waitFor(() => expect(screen.getByText('View')).toBeTruthy())
+    fireEvent.click(screen.getByText('View'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByText('Download enhanced'))
+
+    await waitFor(() => expect(saveBlobMock).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenCalledWith('https://test/enh.jpg')
+    expect(saveBlobMock.mock.calls[0][1]).toBe('pod1.pdf')
   })
 })

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Download, Loader2 } from 'lucide-react'
-import { downloadFromUrl } from '@/lib/download'
+import { toast } from 'sonner'
+import { downloadPodAsPdf } from '@/lib/podDownload'
 
 export function PodActionBtn({
   onClick,
@@ -59,9 +60,12 @@ export function PodDownloadBtn({
       onClick={async () => {
         setBusy(true)
         try {
-          await downloadFromUrl(url, filename)
-        } catch {
-          // download.ts already surfaces a toast; avoid duplicate noise
+          // A POD leaves here for a broker or OTR, where one PDF is the expected form.
+          await downloadPodAsPdf(url, filename)
+        } catch (err) {
+          // Nothing below this toasts, so a swallowed failure read as "the button does
+          // nothing" — which is exactly how the broken enhanced download presented.
+          toast.error(err instanceof Error ? err.message : 'Could not download this POD')
         } finally {
           setBusy(false)
         }
