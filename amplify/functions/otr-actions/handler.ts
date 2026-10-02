@@ -36,6 +36,7 @@ import {
   OTR_STAGING_BASE,
   type OtrInvoicePayload,
 } from '../_shared/otrClient'
+import { asciiProbePdf, highByteProbePdf } from '../_shared/asciiProbePdf'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -709,6 +710,57 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         })
         console.log('[otr-actions] document retry by', actor, { invoiceId, errors })
         return ok({ invoiceId, uploaded, documentErrors: errors })
+      }
+
+      /*
+       * Two tiny PDFs: one with no byte above 0x7F, one identical but for a run of high
+       * bytes after %%EOF. Both are valid single-page documents.
+       *
+       * OTR rejects our PODs reporting 1,852,054 bytes of a 1,018,923-byte file — what
+       * those bytes become after a UTF-8 decode and re-encode. Our logs show the correct
+       * size leaving, and matching their documented request exactly did not move the
+       * number. This asks the question directly: a file that cannot be changed by a UTF-8
+       * round trip against one that must be.
+       *
+       * If the ASCII one lands and the other comes back with an inflated byte count, the
+       * mangling is theirs and the evidence is two files instead of an argument.
+       *
+       * Uploaded as OTHER (7) so a diagnostic never occupies the POD or rate-con slot.
+       */
+      case 'uploadProbe': {
+        const invoiceId = trim(input.invoiceId)
+        if (!invoiceId) return fail('uploadProbe needs an invoiceId')
+        const client = otr()
+        const results: Row[] = []
+
+        for (const probe of [asciiProbePdf(), highByteProbePdf()]) {
+          const sent = { fileName: probe.fileName, sentBytes: probe.bytes.length, highBytes: probe.highBytes }
+          try {
+            const r = await client.uploadDocument({
+              invoiceId,
+              docType: OTR_DOC_TYPE.OTHER,
+              fileName: probe.fileName,
+              contentType: 'application/pdf',
+              file: probe.bytes,
+            })
+            results.push({ ...sent, ok: true, message: r.message })
+          } catch (e) {
+            const body = e instanceof OtrError ? e.body : null
+            // Their error quotes the size they opened. That number against sentBytes is
+            // the whole experiment.
+            const reported = /from (\d+) bytes/.exec(String(body ?? ''))?.[1] ?? null
+            results.push({
+              ...sent,
+              ok: false,
+              status: e instanceof OtrError ? e.status : 0,
+              reportedBytes: reported ? Number(reported) : null,
+              body: String(body ?? (e instanceof Error ? e.message : e)).slice(0, 400),
+            })
+          }
+        }
+
+        console.log('[otr-actions] upload probe', JSON.stringify({ invoiceId, results, by: actor }))
+        return ok({ invoiceId, results })
       }
 
       /** Mirror OTR's current status onto the row so the queue shows their board. */
