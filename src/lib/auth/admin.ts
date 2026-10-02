@@ -21,3 +21,17 @@ export function isOwnerEmail(email: string | null | undefined): boolean {
   if (!email) return false
   return email.toLowerCase().trim() === OWNER_EMAIL
 }
+
+/**
+ * Who may delete a factoring queue row.
+ *
+ * Deliberately narrower than ADMIN_EMAILS and not the ADMIN group: deleting a row drops
+ * the record that a PRO was ever sent for factoring, and the only way back is to forward
+ * the original email again. Ryne and Jenny run factoring, so it is theirs.
+ */
+export const FACTORING_DELETE_EMAILS = ['ryne@bcatcorp.com', 'jenny@bcatcorp.com'] as const
+
+export function canDeleteFactoringItem(email: string | null | undefined): boolean {
+  if (!email) return false
+  return (FACTORING_DELETE_EMAILS as readonly string[]).includes(email.toLowerCase().trim())
+}

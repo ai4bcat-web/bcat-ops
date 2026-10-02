@@ -14,8 +14,14 @@ import {
 } from '@/components/ui/select'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useAuth } from '@/hooks/useAuth'
+import { canDeleteFactoringItem } from '@/lib/auth/admin'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
+import { FactoringRowFields } from './FactoringRowFields'
+import { fieldsReadyLabel } from './factoringFields'
+import { FactoringDocCell } from './FactoringDocCell'
+import { OtrInvoiceBoard } from './OtrInvoiceBoard'
+import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -25,6 +31,14 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
   PENDING_WITH_OTR: 'Pending with OTR',
   FACTORED:         'Factored',
 }
+
+/**
+ * Filter order is the order of the work: what still needs doing, what is waiting on OTR,
+ * then everything, then what is finished. "Need to factor" is the default because an empty
+ * queue there is the only state worth celebrating.
+ */
+const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'ALL', 'FACTORED'] as const
+type FilterKey = (typeof FILTER_ORDER)[number]
 
 const STATUS_ORDER: FactoringItemStatus[] = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED']
 
@@ -48,6 +62,20 @@ function relativeReceived(iso: string) {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h ago`
   return `${Math.floor(hrs / 24)}d ago`
+}
+
+/**
+ * The readiness the Lambda cached on the row. It is an `a.json()` column, already parsed
+ * on read by apiClient, so this is only a cast with a guard rather than a parse.
+ */
+function readinessOf(item: FactoringItem): OtrReadiness | null {
+  const r = item.otrReadiness
+  return r && typeof r === 'object' ? (r as OtrReadiness) : null
+}
+
+/** Documents OTR still wants. Unknown readiness means both, since neither is proven. */
+function missingDocs(item: FactoringItem): Array<'POD' | 'Rate confirmation'> {
+  return readinessOf(item)?.missingDocuments ?? ['POD', 'Rate confirmation']
 }
 
 function matchesSearch(item: FactoringItem, query: string) {
@@ -100,9 +128,13 @@ export function FactoringPage() {
   const { items, loading, error, pendingIds, refresh, updateStatus, removeItem } = useFactoringItems()
   const { user } = useAuth()
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<FactoringItemStatus | 'ALL'>('ALL')
+  const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
+  const [view, setView] = useState<'queue' | 'board'>('queue')
 
-  const canDelete = user?.groups.includes('ADMIN') ?? false
+  // Deleting a row drops the record that a PRO was ever sent for factoring, so it is
+  // limited to the two people who run factoring rather than every admin.
+  const canDelete = canDeleteFactoringItem(user?.email)
+  const staffEmail = user?.email ?? ''
 
   const counts = useMemo(() => ({
     ALL: items.length,
@@ -151,24 +183,44 @@ export function FactoringPage() {
             One row per PRO. Emails forwarded to ivanfactoring@bcatcorp.com appear automatically.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5"
-          onClick={refresh}
-          disabled={loading}
-        >
-          <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
-          Refresh
-        </Button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Two views of the same rows: the work to do, and where OTR has got to. */}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3 }}>
+            {([['queue', 'Queue'], ['board', 'OTR invoice board']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setView(key)}
+                style={{
+                  padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                  fontSize: 12.5, fontWeight: view === key ? 600 : 500, fontFamily: 'inherit',
+                  background: view === key ? 'var(--ds-surface)' : 'transparent',
+                  color: view === key ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                  boxShadow: view === key ? 'var(--sh-sm)' : 'none', whiteSpace: 'nowrap',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            onClick={refresh}
+            disabled={loading}
+          >
+            <RefreshCw className={cn('size-3.5', loading && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
+      {/* Filters — queue only; the board is sorted by submission and has its own refresh. */}
+      <div style={{ padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0, display: view === 'queue' ? undefined : 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           {/* Status tabs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {(['ALL', ...STATUS_ORDER] as const).map((key) => {
+            {FILTER_ORDER.map((key) => {
               const isActive = activeTab === key
               const label = key === 'ALL' ? 'All' : FACTORING_STATUS_LABEL[key]
               const count = counts[key]
@@ -228,6 +280,9 @@ export function FactoringPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
+        {view === 'board' ? (
+          <OtrInvoiceBoard items={items} onChanged={refresh} />
+        ) : (
         <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)' }}>
           {loading && items.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 10, color: 'var(--ds-t3)' }}>
@@ -246,7 +301,7 @@ export function FactoringPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'Subject', 'From', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
+                    {['PRO #', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
                       <th
                         key={col}
                         style={{
@@ -277,13 +332,39 @@ export function FactoringPage() {
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: '14px 16px', minWidth: 260, maxWidth: 420 }}>
-                        <p className="truncate text-sm text-foreground font-medium" title={item.subject}>
-                          {item.subject || '(no subject)'}
-                        </p>
+                      {/* How close this row is to being invoiceable, as a count then the
+                          individual fields. Green means resolved, red means still missing. */}
+                      <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          fontSize: 12.5, fontWeight: 700,
+                          color: readinessOf(item)?.ready ? '#15803d' : 'var(--ds-t2)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}>
+                          {fieldsReadyLabel(readinessOf(item))}
+                        </span>
+                      </td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <FactoringRowFields readiness={readinessOf(item)} />
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <span className="text-sm text-muted-foreground">{item.fromEmail}</span>
+                        <div style={{ display: 'flex', gap: 5 }}>
+                          <FactoringDocCell
+                            kind="POD"
+                            present={!missingDocs(item).includes('POD')}
+                            loadId={item.loadId}
+                            proNumber={item.proNumber}
+                            staffEmail={staffEmail}
+                            onUploaded={refresh}
+                          />
+                          <FactoringDocCell
+                            kind="RATECON"
+                            present={!missingDocs(item).includes('Rate confirmation')}
+                            loadId={item.loadId}
+                            proNumber={item.proNumber}
+                            staffEmail={staffEmail}
+                            onUploaded={refresh}
+                          />
+                        </div>
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <div className="text-sm text-muted-foreground" title={formatReceivedAt(item.receivedAt)}>
@@ -320,7 +401,7 @@ export function FactoringPage() {
                     </tr>
                       {/* OTR readiness: what is filled, what is missing, and the submit action. */}
                       <tr>
-                        <td colSpan={canDelete ? 6 : 5} style={{ padding: '0 16px 14px' }}>
+                        <td colSpan={canDelete ? 7 : 6} style={{ padding: '0 16px 14px' }}>
                           <OtrPanel item={item} onChanged={refresh} />
                         </td>
                       </tr>
@@ -331,6 +412,7 @@ export function FactoringPage() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )
