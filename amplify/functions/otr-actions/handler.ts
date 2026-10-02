@@ -64,7 +64,38 @@ type Row = Record<string, unknown>
 
 interface Args {
   action: string
-  input?: string // JSON
+  /**
+   * AWSJSON. AppSync hands this over as a JSON STRING or as an already-parsed OBJECT
+   * depending on how the value was serialised on the way in, so it must be typed as both.
+   * Assuming the string form is what broke every call this Lambda served from the browser.
+   */
+  input?: string | Record<string, unknown> | null
+}
+
+/**
+ * Read the action's input, whichever form AppSync delivered it in.
+ *
+ * `JSON.parse` on an object stringifies it first, so this was failing with
+ * `"[object Object]" is not valid JSON` — on every single action, from every screen. The
+ * queue looked like it worked because the rows had been prepared server-side by the email
+ * intake; everything a person pressed in the browser was failing.
+ *
+ * Mirrors parseInput in pod-actions, which has always accepted both.
+ */
+export function parseArgsInput(input: Args['input']): Row {
+  if (input == null) return {}
+  if (typeof input === 'string') {
+    if (!input.trim()) return {}
+    const parsed: unknown = JSON.parse(input)
+    if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
+      throw new Error('Invalid input: must be a JSON object')
+    }
+    return parsed as Row
+  }
+  if (Array.isArray(input) || typeof input !== 'object') {
+    throw new Error('Invalid input: must be an object')
+  }
+  return input as Row
 }
 
 const nowIso = () => new Date().toISOString()
@@ -365,7 +396,7 @@ const fail = (error: string) => JSON.stringify({ ok: false, error })
 
 export const handler = async (event: { arguments: Args; identity?: { claims?: { email?: string } } }) => {
   const { action } = event.arguments
-  const input = event.arguments.input ? (JSON.parse(event.arguments.input) as Row) : {}
+  const input = parseArgsInput(event.arguments.input)
   const actor = event.identity?.claims?.email ?? 'unknown'
 
   try {

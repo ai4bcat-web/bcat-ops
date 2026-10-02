@@ -23,6 +23,13 @@ vi.mock('@/lib/otrClient', () => ({
   submitToOtr: vi.fn(),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/hooks/useAuth', () => ({ useAuthUser: () => ({ email: 'ryne@bcatcorp.com' }) }))
+vi.mock('@/hooks/useLoadDriverDocs', () => ({
+  useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),
+}))
+vi.mock('@/store/useAppStore', () => ({
+  useAppStore: (sel: (s: unknown) => unknown) => sel({ loads: [], updateLoad: vi.fn() }),
+}))
 
 const ALL_FIELDS = {
   InvoiceNo: '13364', PoNumber: 'PO-7', BrokerMC: '999999',
@@ -151,6 +158,20 @@ describe('OtrPanel', () => {
     expect(screen.queryByRole('button', { name: /Override Customer/ })).not.toBeInTheDocument()
   })
 
+  it('marks a missing field red, so the gaps stand out once the row is open', () => {
+    /*
+     * The green/red chips are on the COLLAPSED row — the one place nobody is looking once
+     * they have opened it. An opened row used to show the four fields holding the invoice
+     * up exactly like the seven that were already fine.
+     */
+    const r = readiness({ payload: { ...ALL_FIELDS, ToZip: undefined }, missingFields: ['ToZip'] })
+    const { container } = render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+
+    const label = screen.getByText('Destination ZIP')
+    expect(label.className).toMatch(/text-red-700/)
+    expect(container.querySelector('.bg-red-50')).not.toBeNull()
+  })
+
   it('points at the MC when there is no customer yet', () => {
     const r = readiness({ payload: { ...ALL_FIELDS, BrokerMC: undefined }, missingFields: ['BrokerMC'] })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
@@ -168,8 +189,10 @@ describe('OtrPanel', () => {
     const r = readiness({ payload: ALL_FIELDS, missingDocuments: ['POD'] })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
-    expect(screen.getByText(/Missing POD/)).toBeInTheDocument()
+    expect(screen.getByText(/will not take this invoice without the POD/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Submit to OTR/ })).toBeDisabled()
+    // And the way to fix it is right there, rather than back on the collapsed row.
+    expect(screen.getByRole('button', { name: /Upload the POD for PRO 13364/ })).toBeInTheDocument()
   })
 })
 

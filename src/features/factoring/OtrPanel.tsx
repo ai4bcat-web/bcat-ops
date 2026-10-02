@@ -29,6 +29,8 @@ import {
 } from '@/lib/otrInvoice'
 import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr } from '@/lib/otrClient'
 import { setFactoringManualFields } from '@/lib/apiClient'
+import { FactoringDocCell } from './FactoringDocCell'
+import { useAuthUser } from '@/hooks/useAuth'
 import { isReadyToSubmit, whatIsMissing } from './factoringFields'
 import type { FactoringItem } from '@/types'
 
@@ -78,6 +80,7 @@ interface Props {
 }
 
 export function OtrPanel({ item, onChanged }: Props) {
+  const staffEmail = useAuthUser()?.email ?? 'staff'
   const [busy, setBusy] = useState<string | null>(null)
 
   const readiness = (item.otrReadiness as OtrReadiness | null) ?? null
@@ -237,10 +240,40 @@ export function OtrPanel({ item, onChanged }: Props) {
         ))}
       </div>
 
+      {/*
+        * The two documents, in the panel rather than only on the collapsed row.
+        *
+        * Opening a row is what someone does when they are working it, and the paperwork is
+        * half of what a row needs — sending them back up to a pair of small chips on the
+        * collapsed row to attach a POD is how a row ends up opened, read and left alone.
+        */}
+      <div className="flex flex-wrap items-center gap-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] p-2.5">
+        <span className="text-xs font-semibold text-muted-foreground">Documents</span>
+        {(['POD', 'RATECON'] as const).map((kind) => {
+          const label = kind === 'POD' ? 'POD' : 'Rate confirmation'
+          const present = !readiness.missingDocuments?.includes(label)
+          return (
+            <span key={kind} className="flex items-center gap-1.5">
+              <span className={`text-xs ${present ? 'text-muted-foreground' : 'font-semibold text-red-700'}`}>
+                {label}
+              </span>
+              <FactoringDocCell
+                kind={kind}
+                present={present}
+                loadId={item.loadId}
+                proNumber={item.proNumber}
+                staffEmail={staffEmail}
+                onUploaded={onChanged}
+              />
+            </span>
+          )
+        })}
+      </div>
+
       {readiness.missingDocuments?.length > 0 && (
-        <p className="flex items-center gap-1.5 text-xs text-amber-700">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-red-700">
           <AlertTriangle className="size-3.5" />
-          Missing {readiness.missingDocuments.join(' and ')}
+          OTR will not take this invoice without the {readiness.missingDocuments.join(' and the ')}.
         </p>
       )}
 
@@ -389,11 +422,20 @@ function FieldRow({
 
   // Filling a blank: the input is simply there, no extra click to reveal it.
   const showInput = editable && (value === undefined || open)
+  /*
+   * A gap, rather than a value being corrected.
+   *
+   * Opened rows showed every field the same way, so the four things actually holding the
+   * invoice up looked exactly like the seven that were already fine — and the chips that
+   * DO say so are back on the collapsed row, which is the one place you are not looking
+   * once you have opened it.
+   */
+  const isGap = value === undefined
 
   if (showInput) {
     return (
       <form
-        className="flex items-center gap-1.5"
+        className={`flex items-center gap-1.5 ${isGap ? 'rounded-md bg-red-50 px-1.5 py-1' : ''}`}
         onSubmit={(e) => {
           e.preventDefault()
           onSave(draft)
@@ -401,13 +443,15 @@ function FieldRow({
           setDraft('')
         }}
       >
-        <span className="shrink-0 text-muted-foreground">{label}</span>
+        <span className={`shrink-0 ${isGap ? 'font-semibold text-red-700' : 'text-muted-foreground'}`}>
+          {label}
+        </span>
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={hint?.placeholder}
           inputMode={hint?.inputMode}
-          className="h-7 min-w-0 flex-1 text-xs"
+          className={`h-7 min-w-0 flex-1 text-xs ${isGap ? 'border-red-300 bg-white' : ''}`}
           aria-label={`${label} for PRO ${pro}`}
         />
         {/* Named, not just "Save": several of these are open at once on a row with
