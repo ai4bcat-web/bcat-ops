@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Download, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { downloadPodAsPdf } from '@/lib/podDownload'
+import { getPodAssets } from '@/lib/podsClient'
 
 export function PodActionBtn({
   onClick,
@@ -47,9 +48,11 @@ export function PodActionBtn({
  * enhanced copy is the primary action and the original is deliberately quiet.
  */
 export function PodDownloadBtn({
-  url, filename, label, tone = 'primary',
+  podId, variant, filename, label, tone = 'primary',
 }: {
-  url: string
+  /** Re-signed at click, never carried from when the row was opened. See below. */
+  podId: string
+  variant: 'enhanced' | 'original'
   filename: string
   label: string
   tone?: 'primary' | 'muted'
@@ -60,6 +63,25 @@ export function PodDownloadBtn({
       onClick={async () => {
         setBusy(true)
         try {
+          /*
+           * Sign the URL now, not when the row was expanded.
+           *
+           * A presigned URL lasts fifteen minutes. A POD list that had been open longer
+           * than that handed the browser a dead link, and S3 answers an expired signature
+           * with a 403 that carries no CORS headers — so the browser reports it as
+           * "Failed to fetch", which names neither the cause nor the fix. One extra call
+           * on a button somebody presses occasionally is a cheap way to never see it.
+           */
+          const assets = await getPodAssets(podId)
+          const url = variant === 'enhanced' ? assets.enhancedUrl : assets.originalUrl
+          if (!url) {
+            toast.error(
+              variant === 'enhanced'
+                ? 'There is no cleaned copy of this POD yet'
+                : 'This POD has no stored file',
+            )
+            return
+          }
           // A POD leaves here for a broker or OTR, where one PDF is the expected form.
           await downloadPodAsPdf(url, filename)
         } catch (err) {

@@ -200,11 +200,12 @@ export function PodCard({
           <PodActionBtn onClick={() => onPreview(doc)} icon={<Eye size={13} />} label="View" />
           {/* Enhanced first and emphasised; the raw photo stays reachable but quiet. */}
           {assets?.enhancedUrl && doc.processingStatus === 'READY' && (
-            <PodDownloadBtn url={assets.enhancedUrl} filename={doc.fileName} label="Enhanced" />
+            <PodDownloadBtn podId={doc.id} variant="enhanced" filename={doc.fileName} label="Enhanced" />
           )}
           {assets?.originalUrl && (
             <PodDownloadBtn
-              url={assets.originalUrl}
+              podId={doc.id}
+              variant="original"
               filename={doc.fileName}
               label={hasEnhanced ? 'Raw photo' : 'Original'}
               tone={hasEnhanced ? 'muted' : 'primary'}

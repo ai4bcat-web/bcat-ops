@@ -48,11 +48,28 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
   // Only formats browsers decode natively go in <img>; the enhanced copy is always JPEG.
   const isBrowserImage = /^image\/(jpeg|png|webp|gif)/i.test(doc.contentType ?? '')
 
-  const handleDownload = async (url: string, filename: string) => {
+  const handleDownload = async (want: 'enhanced' | 'original', filename: string) => {
     setDownloading(true)
     try {
-      // Always a PDF: the enhanced copy is a JPEG, and it used to be saved under the
-      // original's name — often ending .pdf — so nothing could open it.
+      /*
+       * Sign it now, not when the dialog opened.
+       *
+       * A presigned URL lasts fifteen minutes, and S3 answers an expired one with a 403
+       * carrying no CORS headers — which the browser reports as "Failed to fetch", naming
+       * neither the cause nor the fix. A dialog left open while someone reads the POD is
+       * exactly how that happens.
+       */
+      const fresh = await getPodAssets(doc.id)
+      const url = want === 'enhanced' ? fresh.enhancedUrl : fresh.originalUrl
+      if (!url) {
+        toast.error(
+          want === 'enhanced'
+            ? 'There is no cleaned copy of this POD yet'
+            : 'This POD has no stored file',
+        )
+        return
+      }
+      // Always a PDF: a POD leaves here for a broker or OTR, where one PDF is the form.
       await downloadPodAsPdf(url, filename)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not download this POD')
@@ -89,7 +106,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
             <div className="flex items-center gap-2">
               {canEnhance && (
                 <button
-                  onClick={() => handleDownload(assets.enhancedUrl!, doc.fileName)}
+                  onClick={() => handleDownload('enhanced', doc.fileName)}
                   disabled={downloading}
                   className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs font-semibold bg-emerald-50 text-emerald-700 border-emerald-200"
                 >
@@ -98,7 +115,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
               )}
               {assets?.originalUrl && (
                 <button
-                  onClick={() => handleDownload(assets.originalUrl!, doc.fileName)}
+                  onClick={() => handleDownload('original', doc.fileName)}
                   disabled={downloading}
                   className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-md border text-xs ${
                     canEnhance ? 'font-medium text-muted-foreground' : 'font-semibold'
