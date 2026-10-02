@@ -113,7 +113,8 @@ describe('ScanPage', () => {
     await screen.findByText(/Choose a load for this POD/i)
 
     // Use the standalone reference path instead of picking the existing load.
-    fireEvent.change(screen.getByPlaceholderText(/Load number \(optional\)/i), {
+    // The load picker renders after fetchSubmissions resolves; a sync query raced it.
+    fireEvent.change(await screen.findByPlaceholderText(/Load number \(optional\)/i), {
       target: { value: 'NEW-LOAD' },
     })
     fireEvent.click(screen.getByRole('button', { name: /Continue with this load number/i }))

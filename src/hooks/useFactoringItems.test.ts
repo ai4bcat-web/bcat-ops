@@ -164,9 +164,11 @@ describe('useFactoringItems', () => {
     })
 
     act(() => vi.advanceTimersByTime(30_000))
-    await waitFor(() => expect(listFactoringItems).toHaveBeenCalledTimes(2))
-
-    expect(result.current.items).toHaveLength(2)
+    // Wait for the refreshed STATE, not for the call. A second call having been made says
+    // nothing about its promise having resolved and committed, so asserting on the count
+    // and then reading items raced — reliably alone, intermittently under load.
+    await waitFor(() => expect(result.current.items).toHaveLength(2))
+    expect(listFactoringItems).toHaveBeenCalledTimes(2)
     expect(result.current.items.find((i) => i.id === initial.id)?.status).toBe('PENDING_WITH_OTR')
     expect(result.current.items.find((i) => i.id === newRow.id)?.proNumber).toBe('PRO-002')
 

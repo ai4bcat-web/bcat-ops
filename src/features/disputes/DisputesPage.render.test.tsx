@@ -332,7 +332,10 @@ describe('DisputesPage — paying a recovery onto a settlement', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit dispute' }))
     fireEvent.change(await screen.findByLabelText('Dispute status'), { target: { value: 'POSTED' } })
-    fireEvent.click(screen.getByRole('button', { name: /Save/ }))
+    // Named exactly and awaited. A loose /Save/ also matched "Saving…" once the click had
+    // landed, so a re-query during the save could find a button that does nothing and the
+    // wait below then burned the whole 20s test timeout.
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }))
 
     await waitFor(() => expect(deleteAmazonTrip).toHaveBeenCalledWith('trip-1'))
     const [, patch] = updateAmazonDispute.mock.calls[0]

@@ -188,9 +188,11 @@ describe('PodsPage', () => {
     await waitFor(() => expect(screen.getByRole('dialog')).toBeTruthy())
     const dialog = screen.getByRole('dialog')
 
-    expect(within(dialog).getByAltText('pod1.jpg').getAttribute('src')).toBe('https://test/enh.jpg')
+    // The dialog presigns its assets after mounting, so these only exist once that lands.
+    const img = await within(dialog).findByAltText('pod1.jpg')
+    expect(img.getAttribute('src')).toBe('https://test/enh.jpg')
     expect(within(dialog).getAllByText('Enhanced').length).toBeGreaterThanOrEqual(1)
-    expect(within(dialog).getByText('Download enhanced')).toBeTruthy()
+    expect(await within(dialog).findByText('Download enhanced')).toBeTruthy()
     // Still reachable, and labelled so nobody mistakes it for the better copy.
     expect(within(dialog).getAllByText('Raw photo').length).toBeGreaterThanOrEqual(1)
     expect(within(dialog).queryByText('Original')).toBeNull()
@@ -202,10 +204,12 @@ describe('PodsPage', () => {
     fireEvent.click(screen.getByText('View'))
     const dialog = await screen.findByRole('dialog')
 
-    fireEvent.click(within(dialog).getAllByText('Raw photo')[0])
+    fireEvent.click((await within(dialog).findAllByText('Raw photo'))[0])
 
     expect(await within(dialog).findByText(/Send the enhanced copy instead/)).toBeTruthy()
-    expect(within(dialog).getByAltText('pod1.jpg').getAttribute('src')).toBe('https://test/orig.jpg')
+    await waitFor(() =>
+      expect(within(dialog).getByAltText('pod1.jpg').getAttribute('src')).toBe('https://test/orig.jpg'),
+    )
   })
 
   it('shows retry for failed originals and preserves the original download', async () => {
@@ -314,7 +318,7 @@ describe('PodsPage', () => {
     await waitFor(() => expect(screen.getByText('View')).toBeTruthy())
     fireEvent.click(screen.getByText('View'))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(within(dialog).getByText('Download enhanced'))
+    fireEvent.click(await within(dialog).findByText('Download enhanced'))
 
     await waitFor(() => expect(saveBlobMock).toHaveBeenCalledTimes(1))
     expect(fetchMock).toHaveBeenCalledWith('https://test/enh.jpg')
