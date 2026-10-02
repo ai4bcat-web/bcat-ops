@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { TrendingUp } from 'lucide-react'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
-import { useAmazonProfitability, aggregateAmazon, AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS } from '@/hooks/useAmazonProfitability'
+import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { FLEET_GROUP_LABELS } from '@/lib/fleetGroups'
@@ -54,9 +54,10 @@ export function FleetPLTrendChart() {
         : tab === 'AMAZON' ? amazon
         : tab === 'OWNER_OPERATOR' ? ownerOp
         : {
-            revenue: local.revenue + ownerOp.revenue + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.revenue : 0),
-            expenses: local.expenses + ownerOp.expenses + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.expenses : 0),
-            profit:   local.profit   + ownerOp.profit   + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.profit : 0),
+            // Amazon always counts; a month with none contributes zero on its own.
+            revenue:  local.revenue  + ownerOp.revenue  + amazon.revenue,
+            expenses: local.expenses + ownerOp.expenses + amazon.expenses,
+            profit:   local.profit   + ownerOp.profit   + amazon.profit,
           }
       rows.push({
         label: weekTickLabel(range.start),

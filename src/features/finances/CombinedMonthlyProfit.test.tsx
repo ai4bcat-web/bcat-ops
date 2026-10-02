@@ -4,7 +4,7 @@ import type * as AmazonProfitability from '@/hooks/useAmazonProfitability'
 import type * as OwnerOpProfitability from '@/hooks/useOwnerOperatorProfitability'
 
 // The hooks are stubbed, but their modules load for real so the aggregate functions
-// and the AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS switch under test stay real.
+// under test stay real.
 vi.mock('@/lib/apiClient', () => ({
   listLoads: () => Promise.resolve([]),
   listAmazonTrips: () => Promise.resolve([]),
@@ -57,19 +57,26 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers() })
 
 describe('CombinedMonthlyProfit', () => {
-  it('counts the local fleet and owner operators, but not Amazon', () => {
+  it('counts every source, Amazon included', () => {
     const html = renderToStaticMarkup(<CombinedMonthlyProfit />)
 
-    // $1,000 Ivan net + $480 owner-operator profit. Amazon's $9,000 stays out.
-    expect(html).toContain('$1,480')
-    expect(html).not.toContain('$10,480')
+    // $1,000 Ivan net + $480 owner-operator profit + $9,000 Amazon profit.
+    expect(html).toContain('$10,480')
+    // The old total left Amazon out and read as the company earning less than it had.
+    expect(html).not.toContain('$1,480')
   })
 
-  it('still shows the Amazon figure, labelled as not counted', () => {
+  it('shows the Amazon figure as a contributing source, not a footnote', () => {
     const html = renderToStaticMarkup(<CombinedMonthlyProfit />)
 
     expect(html).toContain('$9,000')
-    expect(html).toContain('not counted')
+    expect(html).toContain('Amazon (profit)')
+    expect(html).not.toContain('not counted')
+  })
+
+  it('names Amazon in the card subtitle', () => {
+    const html = renderToStaticMarkup(<CombinedMonthlyProfit />)
+    expect(html).toContain('Ivan + owner operators + Amazon')
   })
 
   it('breaks the combined total out by contributing source', () => {

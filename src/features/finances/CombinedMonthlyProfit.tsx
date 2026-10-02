@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Wallet } from 'lucide-react'
 import { useFleetMonthlyNet } from '@/hooks/useFleetMonthlyNet'
-import { useAmazonProfitability, aggregateAmazon, AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS } from '@/hooks/useAmazonProfitability'
+import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { monthRange, monthLabel } from '@/features/fleet-profitability/monthRange'
@@ -24,8 +24,10 @@ export function CombinedMonthlyProfit() {
   const { rows: ownerOpRows, loading: ownerOpLoading } = useOwnerOperatorProfitability()
   const amazon = useMemo(() => aggregateAmazon(amzRows, range.start, range.end, { prorate: true }), [amzRows, range.start, range.end])
   const ownerOp = useMemo(() => aggregateOwnerOperator(ownerOpRows, range.start, range.end, { prorate: true }), [ownerOpRows, range.start, range.end])
-  const combined = ivan.net + ownerOp.profit + (AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? amazon.profit : 0)
-  const loading = ivan.loading && amzLoading && ownerOpLoading
+  const combined = ivan.net + ownerOp.profit + amazon.profit
+  // ANY source still loading means the total is partial. This was `&&`, so the figure
+  // settled as soon as the first source arrived and then jumped as the others landed.
+  const loading = ivan.loading || amzLoading || ownerOpLoading
 
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
@@ -34,7 +36,7 @@ export function CombinedMonthlyProfit() {
           <Wallet size={16} style={{ color: 'var(--ds-blue)' }} />
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Total monthly profitability</div>
-            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Ivan + owner operators combined · {monthLabel(range)}</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Ivan + owner operators + Amazon · {monthLabel(range)}</div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -69,7 +71,7 @@ export function CombinedMonthlyProfit() {
                 <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: netColor(ownerOp.profit), fontVariantNumeric: 'tabular-nums' }}>{money(ownerOp.profit)}</div>
               </div>
               <div style={{ flex: 1, minWidth: 120 }}>
-                <div style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Amazon {AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? '(profit)' : '(not counted)'}</div>
+                <div style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Amazon (profit)</div>
                 <div style={{ fontSize: 20, fontWeight: 700, marginTop: 2, color: netColor(amazon.profit), fontVariantNumeric: 'tabular-nums' }}>{money(amazon.profit)}</div>
               </div>
             </div>

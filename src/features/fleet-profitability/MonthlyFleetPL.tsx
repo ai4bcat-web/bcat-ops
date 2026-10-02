@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
 import { isPosted } from '@/lib/invoiceStatus'
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
-import { useAmazonProfitability, aggregateAmazon, AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS } from '@/hooks/useAmazonProfitability'
+import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { useOwnerOperatorProfitability, aggregateOwnerOperator } from '@/hooks/useOwnerOperatorProfitability'
 import { useFleetFixedCosts, type FleetFixedCostKey } from '@/hooks/useFleetFixedCosts'
 import { useTrucks } from '@/hooks/useTrucks'
@@ -141,7 +141,7 @@ export function MonthlyFleetPL() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Monthly Profit &amp; Loss</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'} · Amazon ${AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS ? '(profit)' : '(not counted)'}` : isOwnerOperator ? `${ownerOpDrivers} driver${ownerOpDrivers === 1 ? '' : 's'} · Owner operators` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
+              {isAmazon ? `${amzDrivers} driver${amzDrivers === 1 ? '' : 's'} · Amazon (profit)` : isOwnerOperator ? `${ownerOpDrivers} driver${ownerOpDrivers === 1 ? '' : 's'} · Owner operators` : `${members.length} truck${members.length === 1 ? '' : 's'}`} · {monthLabel(range)}
             </div>
           </div>
         </div>

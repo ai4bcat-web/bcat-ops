@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { useAmazonProfitability, aggregateAmazon, AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS } from '@/hooks/useAmazonProfitability'
+import { useAmazonProfitability, aggregateAmazon } from '@/hooks/useAmazonProfitability'
 import { sundayOf, shiftWeek, weekLabel } from '@/features/driver-pay/week'
 
 const money = (n: number) =>
@@ -33,12 +33,8 @@ export function AmazonProfitPanel() {
 
   return (
     <>
-      {!AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS && (
-        <div style={{ padding: '8px 18px', borderBottom: '1px solid var(--ds-border)', fontSize: 12, color: 'var(--ds-t3)', background: 'var(--ds-bg)' }}>
-          Amazon settlements are shown for history only — not counted in company totals.
-        </div>
-      )}
-
+      {/* The notice that said these were "history only — not counted" is gone with the
+          flag that made it true. Amazon profit now counts toward company totals. */}
       {/* Week stepper */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, padding: '10px 18px', borderBottom: '1px solid var(--ds-border)' }}>
         <button onClick={() => setWeekOffset((o) => o + 1)} style={navBtn} aria-label="Previous week"><ChevronLeft size={15} /></button>

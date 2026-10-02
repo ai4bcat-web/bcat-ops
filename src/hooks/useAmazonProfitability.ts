@@ -8,10 +8,14 @@ import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 
-/** Switch Amazon settlements in/out of combined/company totals. Kept as a single
- *  explicit constant so the historical Amazon panel remains visible while the
- *  contribution can be turned back on in one place. */
-export const AMAZON_CONTRIBUTES_TO_COMPANY_TOTALS = false
+/**
+ * Amazon driver profit counts toward company totals whenever there is any.
+ *
+ * This used to be gated behind a constant set to false, so a month of real Amazon profit
+ * was computed, displayed on its own panel, and then left out of the combined figure —
+ * which read as the company having earned less than it had. Nothing needs switching now:
+ * a month with no Amazon work contributes zero by arithmetic rather than by a flag.
+ */
 
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
