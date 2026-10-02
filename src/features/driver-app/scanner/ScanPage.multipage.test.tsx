@@ -23,18 +23,7 @@ vi.mock('../driverApi', async (orig) => ({
   submitStandalonePod, submitPod, submitRatecon, fetchCurrentLoad, fetchSubmissions,
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
-/*
- * jsdom's Image never fires onload, and PagePicker decodes a picked photo before it hands
- * it on. Without this every pick fails the same way a corrupt file would, and the test
- * would be measuring jsdom rather than the flow.
- */
-class LoadableImage {
-  onload: (() => void) | null = null
-  onerror: (() => void) | null = null
-  set src(_v: string) { queueMicrotask(() => this.onload?.()) }
-}
-vi.stubGlobal('Image', LoadableImage)
-// Only the two object-URL helpers; URL itself still has to be a constructor.
+// Thumbnails build object URLs; jsdom has no implementation.
 URL.createObjectURL = () => 'blob:test'
 URL.revokeObjectURL = () => undefined
 
@@ -44,14 +33,14 @@ vi.stubGlobal('matchMedia', (query: string) => ({
   addEventListener: vi.fn(), removeEventListener: vi.fn(),
   addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
 }))
-// preparePage runs a canvas pipeline jsdom has no backend for; the page shapes are what
+// prepareFile runs a canvas pipeline jsdom has no backend for; the page shapes are what
 // matter here, not the pixels.
 vi.mock('./imagePrep', () => ({
-  preparePage: vi.fn(async (_src: unknown, fileName: string) => ({
-    fileName,
-    contentType: fileName.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+  prepareFile: vi.fn(async (file: File) => ({
+    fileName: file.name,
+    contentType: file.type || 'image/jpeg',
     byteSize: 1234,
-    blob: new Blob(['x'], { type: 'image/jpeg' }),
+    blob: file,
   })),
 }))
 

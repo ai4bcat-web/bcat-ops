@@ -17,11 +17,13 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 // preparePage normalizes images through a canvas, which jsdom cannot do.
 vi.mock('./imagePrep', () => ({
-  preparePage: vi.fn(async (_src: unknown, fileName: string) => ({
-    fileName,
-    contentType: fileName.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
-    byteSize: 100,
-    blob: new Blob(['x'], { type: fileName.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg' }),
+  // prepareFile decides for itself whether a file can be downscaled, and falls back to the
+  // original when it cannot — the picker only has to keep what it is handed.
+  prepareFile: vi.fn(async (file: File) => ({
+    fileName: file.name,
+    contentType: file.type || 'image/jpeg',
+    byteSize: file.size,
+    blob: file,
   })),
 }))
 

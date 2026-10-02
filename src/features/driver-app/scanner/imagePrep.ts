@@ -100,3 +100,75 @@ export async function preparePage(
     blob,
   }
 }
+
+/**
+ * Turn a file the driver picked into a page, whatever it turns out to be.
+ *
+ * This exists because the picker used to decode the photo itself and throw the file away
+ * when that failed — and on an iPhone it fails often. The Files app hands back whatever is
+ * on disk regardless of the `accept` list, which for a photo taken on any recent iPhone is
+ * HEIC; a decode that fails leaves an <img> with naturalWidth 0, which read as "no usable
+ * dimensions" and dropped the page. From the driver's side: pick a document, land back on
+ * the upload screen, nothing saved.
+ *
+ * So decoding is now an optimisation, not a gate. Downscaling saves a driver at a dock
+ * several megabytes of upload, and when it cannot be done the ORIGINAL file is sent. The
+ * server cleans PODs anyway, and a POD that arrives unconverted beats one that never
+ * arrives.
+ */
+export async function prepareFile(file: File): Promise<PendingPage> {
+  const original: PendingPage = {
+    fileName: file.name || 'page',
+    contentType: file.type || 'application/octet-stream',
+    byteSize: file.size,
+    blob: file,
+  }
+
+  // A PDF is already the document: a scanner app made it, and re-encoding would only
+  // rasterize away its text.
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) return original
+
+  const source = await decodeImage(file)
+  if (!source) return original
+
+  try {
+    return await preparePage(source, file.name || 'page.jpg')
+  } catch {
+    // Canvas refused — a picture too large for this phone's limits, or a tainted source.
+    return original
+  } finally {
+    if (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap) source.close()
+  }
+}
+
+/**
+ * Decode a picked file, or null if this browser cannot.
+ *
+ * createImageBitmap first: it handles formats an <img> will not, decodes off the main
+ * thread, and reports failure by rejecting rather than by quietly producing a zero-sized
+ * image. The <img> path stays as the fallback for Safari versions without it.
+ */
+async function decodeImage(file: File): Promise<CanvasImageSource | null> {
+  if (typeof createImageBitmap === 'function') {
+    try {
+      return await createImageBitmap(file)
+    } catch {
+      // Fall through — an <img> may still manage it.
+    }
+  }
+
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement | null>((resolve) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => resolve(null)
+      el.src = url
+    })
+    // A zero-sized decode is a failure wearing a success's clothes.
+    if (!img || !(img.naturalWidth || img.width)) return null
+    return img
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}

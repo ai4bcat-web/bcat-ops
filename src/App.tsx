@@ -104,6 +104,14 @@ function DriverRoutes() {
   )
 }
 
+/**
+ * A phone-sized viewport. Read once at mount: the toaster's position is not worth
+ * re-rendering the whole app for, and nobody resizes a phone.
+ */
+function isPhone(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(max-width: 640px)').matches === true
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -187,7 +195,15 @@ export default function App() {
             </AuthGuard>
           } />
         </Routes>
-        <Toaster position="bottom-right" richColors />
+        {/*
+          * Top-centre on a phone, bottom-right on a desktop.
+          *
+          * The driver app has a fixed tab bar across the bottom, so a bottom-right toast
+          * rendered behind it. Every failure on that screen was invisible — a driver who
+          * picked a file the app could not read saw nothing happen at all, which is how
+          * "it just takes me back to the upload screen" was all anyone could report.
+          */}
+        <Toaster position={isPhone() ? 'top-center' : 'bottom-right'} richColors />
       </TooltipProvider>
       </AuthProvider>
     </BrowserRouter>

@@ -238,7 +238,7 @@ export default function ScanPage() {
 
   if (phase === 'choose') {
     return (
-      <div className="flex min-h-screen flex-col justify-center gap-4 bg-background p-6">
+      <div className="flex min-h-full flex-col justify-center gap-4 bg-background p-6">
         <h1 className="text-center text-2xl font-bold text-foreground">What are you sending?</h1>
         <p className="mb-2 text-center text-sm text-muted-foreground">
           Pick the document you want to scan or upload.
@@ -282,7 +282,7 @@ export default function ScanPage() {
 
   if (phase === 'select') {
     return (
-      <div className="min-h-screen bg-background p-4">
+      <div className="min-h-full bg-background p-4">
         <div className="mb-4 flex items-center gap-2">
           <Button variant="ghost" size="icon" aria-label="Back" onClick={() => setPhase('choose')}>
             <ArrowLeft className="h-6 w-6" />
@@ -412,7 +412,7 @@ export default function ScanPage() {
 
   if (phase === 'review') {
     return (
-      <div className="min-h-screen bg-background p-4">
+      <div className="min-h-full bg-background p-4">
         <div className="mb-4 flex items-center gap-2">
           <Button
             variant="ghost"
@@ -519,7 +519,7 @@ export default function ScanPage() {
 
   if (phase === 'submitting') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center">
+      <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" aria-hidden="true" />
         <p className="mt-4 text-lg font-medium">Uploading {pages.length} page(s)…</p>
         <p className="mt-2 text-sm text-slate-500">Please keep this screen open.</p>
@@ -529,7 +529,7 @@ export default function ScanPage() {
 
   if (phase === 'success') {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center">
+      <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
         <CheckCircle2 className="h-16 w-16 text-emerald-500" aria-hidden="true" />
         <h2 className="mt-4 text-2xl font-bold">Sent!</h2>
         <p className="mt-2 max-w-xs text-slate-600">
@@ -551,7 +551,7 @@ export default function ScanPage() {
 
   // phase === 'error'
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6 text-center">
+    <div className="flex min-h-full flex-col items-center justify-center p-6 text-center">
       <AlertCircle className="h-16 w-16 text-red-500" aria-hidden="true" />
       <h2 className="mt-4 text-xl font-bold">Could not send</h2>
       <p className="mt-2 text-sm text-slate-600">

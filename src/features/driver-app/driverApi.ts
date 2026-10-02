@@ -28,7 +28,20 @@ export const DRIVER_USER_POOL_CLIENT_ID: string =
     : ''
 
 export const MAX_SCAN_PAGES = 12
-export const SCAN_ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+/*
+ * What the file picker offers. HEIC and HEIF are here because an iPhone's Files app hands
+ * back whatever is on disk regardless, and leaving them out only meant the picker greyed
+ * out the driver's own photos while still letting the same file through another route.
+ * prepareFile sends anything it cannot downscale as it came.
+ */
+export const SCAN_ACCEPTED_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'application/pdf',
+]
 export const SCAN_ACCEPTED_TYPES_STRING = SCAN_ACCEPTED_TYPES.join(',')
 
 export class DriverApiError extends Error {

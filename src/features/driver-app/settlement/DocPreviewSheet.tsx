@@ -50,7 +50,11 @@ export function DocPreviewSheet({
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      <header className="flex items-start gap-3 border-b border-border px-4 py-3">
+      {/* Over the tab bar and under the status bar, so both insets are this sheet's to pay. */}
+      <header
+        className="flex items-start gap-3 border-b border-border px-4 py-3"
+        style={{ paddingTop: 'max(env(safe-area-inset-top), 0.75rem)' }}
+      >
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-foreground">
             {LABEL[kind]} · {shipment}
@@ -85,7 +89,10 @@ export function DocPreviewSheet({
         )}
       </div>
 
-      <footer className="grid grid-cols-3 gap-2 border-t border-border p-3">
+      <footer
+        className="grid grid-cols-3 gap-2 border-t border-border p-3"
+        style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)' }}
+      >
         <Button
           variant="outline"
           size="sm"

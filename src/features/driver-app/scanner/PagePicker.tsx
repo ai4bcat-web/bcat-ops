@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } f
 import { FileText, ScanLine, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { preparePage } from './imagePrep'
+import { prepareFile } from './imagePrep'
 import { MAX_SCAN_PAGES, SCAN_ACCEPTED_TYPES_STRING, type PendingPage } from '../driverApi'
 
 interface PagePickerProps {
@@ -28,18 +28,6 @@ interface PagePickerProps {
   onCancel?: () => void
   /** Pages already added, e.g. preserved after a failed upload retry. */
   initialPages?: PendingPage[]
-}
-
-// Executor form on purpose: drivers run this on iPhones that may predate Safari 17.4, which
-// is where Promise.withResolvers first shipped. A TypeError here would kill the photo
-// fallback on exactly the old devices that need it.
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('Failed to load image'))
-    img.src = src
-  })
 }
 
 export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerProps) {
@@ -55,6 +43,16 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
     setPages((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
+  /*
+   * Add what the driver picked. One file failing never costs the others, and a file that
+   * cannot be decoded is still sent.
+   *
+   * This used to run every page through one Promise.all and throw the whole batch away if
+   * any of them failed to decode — which on an iPhone is the normal case, because the
+   * Files app hands back the HEIC on disk whatever the accept list says. The driver picked
+   * a document, landed back on this screen, and nothing had saved. prepareFile falls back
+   * to the original bytes now; this only has to keep the pages it gets.
+   */
   const addPages = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return
     const remaining = MAX_SCAN_PAGES - pages.length
@@ -66,24 +64,21 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
     const toAdd = Array.from(files).slice(0, remaining)
     setBusy(true)
     try {
-      const added = await Promise.all(
-        toAdd.map(async (file, index) => {
-          // A PDF passes through whole: a scanner app's output is already the document.
-          if (file.type === 'application/pdf') {
-            return await preparePage(file, file.name || `upload-${index + 1}.pdf`)
-          }
-          const src = URL.createObjectURL(file)
-          try {
-            const img = await loadImage(src)
-            return await preparePage(img, file.name || `upload-${index + 1}.jpg`)
-          } finally {
-            URL.revokeObjectURL(src)
-          }
-        }),
-      )
-      setPages((prev) => [...prev, ...added])
-    } catch {
-      toast.error('Could not use that file. Try again.')
+      const settled = await Promise.allSettled(toAdd.map((file) => prepareFile(file)))
+      const added = settled
+        .filter((r): r is PromiseFulfilledResult<PendingPage> => r.status === 'fulfilled')
+        .map((r) => r.value)
+      const failed = settled.length - added.length
+
+      if (added.length) setPages((prev) => [...prev, ...added])
+      if (failed > 0) {
+        // Named, so a driver knows whether to try a different file or just carry on.
+        toast.error(
+          added.length
+            ? `${failed} of those would not open. The rest are ready.`
+            : 'That file would not open. Try picking it again, or scan it to a PDF first.',
+        )
+      }
     } finally {
       setBusy(false)
     }
@@ -101,7 +96,7 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
 
   return (
     <div
-      className="flex min-h-dvh flex-col bg-background p-4"
+      className="flex min-h-full flex-col bg-background p-4"
       /* The heading sat under the phone's status bar — the clock and the battery drew
          straight over it, and Cancel shared space with them. Padded past the inset. */
       style={{ paddingTop: 'max(env(safe-area-inset-top), 1rem)' }}

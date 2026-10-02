@@ -53,7 +53,16 @@ function TabButton({
 export function DriverApp() {
   return (
     <div className="flex h-dvh flex-col bg-[#0b1220] text-white">
-      <main className="flex-1 overflow-y-auto overscroll-contain">
+      {/*
+        * min-h-0 lets this actually shrink.
+        *
+        * A flex child defaults to min-height:auto, so a tall page made the <main> grow past
+        * the shell instead of scrolling inside it, and the tab bar was pushed off the
+        * bottom of the screen. The pages themselves used min-h-screen — 100vh inside a
+        * container that is already the viewport minus an 80px nav — which guaranteed every
+        * screen overflowed by exactly the height of the tab bar.
+        */}
+      <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <Suspense
           fallback={
             <div className="flex h-full items-center justify-center text-slate-400">
