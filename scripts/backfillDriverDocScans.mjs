@@ -123,7 +123,9 @@ if (!APPLY) {
 for (const w of work) {
   console.log(`\n${w.kind} ${w.sub.id} (${w.sub.referenceNumber ?? 'no ref'})`)
   for (const page of w.pages) {
-    const out = await call('enhanceDriverDoc', { id: page.id })
+    // force: the whole point of a backfill is to redo what the current rules would do
+    // differently. The live path skips a page that is already at this version.
+    const out = await call('enhanceDriverDoc', { id: page.id, force: true })
     console.log(`   clean ${page.id} -> ${out.scanStatus ?? JSON.stringify(out).slice(0, 120)}`)
   }
   const out = await call('finalizeDriverDocs', { submissionId: w.sub.id, kind: w.kind })

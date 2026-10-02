@@ -125,3 +125,41 @@ describe('the queued scan itself', () => {
     expect(s.merge).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * Not cleaning the same page twice.
+ *
+ * A driver adding a third page to a POD they started this morning re-queues the whole
+ * submission, because the merge has to see every page. Without this the two already-clean
+ * pages go through OCR again — seconds each, for a result byte-identical to the one in S3.
+ */
+describe('scanIsCurrent', () => {
+  it('skips a page already cleaned under the current rules', async () => {
+    const { scanIsCurrent } = await import('./handler')
+    expect(scanIsCurrent({ scanStatus: 'READY', scanVersion: 6 })).toBe(true)
+  })
+
+  it('skips one there was nothing to clean on, which is also a settled answer', async () => {
+    const { scanIsCurrent } = await import('./handler')
+    expect(scanIsCurrent({ scanStatus: 'ORIGINAL_ONLY', scanVersion: 6 })).toBe(true)
+  })
+
+  it('redoes a page cleaned by older rules', async () => {
+    // This is what the backfill relies on: bump the version, everything below it is
+    // eligible again.
+    const { scanIsCurrent } = await import('./handler')
+    expect(scanIsCurrent({ scanStatus: 'READY', scanVersion: 5 })).toBe(false)
+  })
+
+  it('does not treat waiting or failing as done', async () => {
+    const { scanIsCurrent } = await import('./handler')
+    expect(scanIsCurrent({ scanStatus: 'PENDING', scanVersion: 6 })).toBe(false)
+    expect(scanIsCurrent({ scanStatus: 'FAILED', scanVersion: 6 })).toBe(false)
+  })
+
+  it('does not treat a page with no record of a scan as done', async () => {
+    const { scanIsCurrent } = await import('./handler')
+    expect(scanIsCurrent({})).toBe(false)
+    expect(scanIsCurrent({ scanStatus: 'READY' })).toBe(false)
+  })
+})

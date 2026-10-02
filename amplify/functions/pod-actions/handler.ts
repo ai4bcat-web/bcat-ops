@@ -1624,6 +1624,20 @@ async function enhancePdfPhotos(bytes: Buffer): Promise<Buffer | null> {
  * So the upload returns as soon as the pages are stored, and this queues the rest. The
  * caller gets an immediate answer; the work happens on its own Lambda invocation.
  */
+/**
+ * Whether this page has already been through the cleanup under the rules in force now.
+ *
+ * READY and ORIGINAL_ONLY are both settled answers — "we cleaned it" and "there was nothing
+ * here we could clean" — and neither changes on a second look. PENDING and FAILED are not.
+ *
+ * The version is what makes this safe: a rules change moves it, and everything below it
+ * becomes eligible again, which is what the backfill exists to do.
+ */
+export function scanIsCurrent(doc: { scanStatus?: string | null; scanVersion?: number | null }): boolean {
+  if (doc.scanStatus !== 'READY' && doc.scanStatus !== 'ORIGINAL_ONLY') return false
+  return Number(doc.scanVersion ?? 0) >= POD_SCAN_VERSION
+}
+
 export async function queueDriverDocScanAction(
   input: Record<string, unknown>,
 ): Promise<{ queued: boolean; submissionId: string; kind: string; error?: string }> {
@@ -1709,9 +1723,31 @@ export async function enhanceDriverDocAction(
     new GetItemCommand({ TableName: DRIVER_SUBMISSION_DOC_TABLE, Key: marshall({ id }) }),
   )
   const doc = row.Item
-    ? (unmarshall(row.Item) as { id?: string; s3Key?: string; contentType?: string })
+    ? (unmarshall(row.Item) as {
+        id?: string
+        s3Key?: string
+        contentType?: string
+        scanStatus?: string
+        scanVersion?: number
+      })
     : undefined
   if (!doc?.s3Key) return { id, scanStatus: 'FAILED', error: 'document not found' }
+
+  /*
+   * Already done under the current rules: leave it alone.
+   *
+   * A driver adding a third page to a POD they started this morning re-queues the whole
+   * submission, because the merge has to see every page. Without this, the two pages that
+   * were already cleaned go through OCR again — seconds each, for a result identical to
+   * the one already sitting in S3.
+   *
+   * Keyed on the scan VERSION, not merely on having a status, so a rules change still
+   * reaches everything: that is exactly what the backfill relies on, and it passes `force`
+   * to say so out loud.
+   */
+  if (scanIsCurrent(doc) && input.force !== true) {
+    return { id, scanStatus: String(doc.scanStatus) }
+  }
 
   const enhancedKey = `${doc.s3Key.replace(/\.[^./]+$/, '')}.enhanced.jpg`
 

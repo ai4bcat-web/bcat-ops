@@ -38,7 +38,7 @@ import {
 } from './settlement'
 import { weekStartOfISO } from '../../../src/features/driver-pay/week'
 import { splitCityState, normalizeZip } from '../../../src/lib/otrInvoice'
-import { buildPodIndex, loadHasPod, type PodIndex } from '../../../src/lib/podPresence'
+import { buildPodIndex, loadHasPod, normalizePro, type PodIndex } from '../../../src/lib/podPresence'
 import {
   currentLoadForDriver,
   driverIsOnLoad,
@@ -1014,6 +1014,61 @@ async function requestScanCleanup(
   }
 }
 
+/**
+ * A POD submission this driver already has for the same shipment.
+ *
+ * A driver photographs a bill of lading at the dock, then finds a second page in the cab,
+ * or a signature they missed. Every send used to create a NEW submission, so the office saw
+ * two half-PODs for one shipment and the app showed whichever it happened to find first.
+ *
+ * Matched on the PRO the driver typed, by the same rule the office matches on (normalizePro
+ * in src/lib/podPresence.ts). Without a reference there is nothing to match on and a new
+ * submission is the only honest answer — a loose POD belongs to whatever load staff assign
+ * it to, not to the last one this driver happened to send.
+ */
+/**
+ * The submission more POD pages for this shipment belong on, out of everything this driver
+ * has sent. Pure, so the rule can be tested without standing up DynamoDB.
+ *
+ * Newest first: if a driver somehow has two for one PRO, pages go on the one they are
+ * actually working, and staff can merge the older one.
+ */
+export function pickOpenPodSubmission<T extends { referenceNumber?: string | null; createdAt?: string }>(
+  submissions: T[],
+  referenceNumber: string | null,
+): T | null {
+  const want = normalizePro(referenceNumber)
+  if (!want) return null
+  return (
+    submissions
+      .filter((sub) => normalizePro(sub.referenceNumber ?? null) === want)
+      .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0] ?? null
+  )
+}
+
+async function openPodSubmissionFor(
+  driverId: string,
+  referenceNumber: string | null,
+): Promise<DriverSubmissionRow | null> {
+  if (!normalizePro(referenceNumber)) return null
+  try {
+    const mine = await scan<DriverSubmissionRow>(
+      DRIVER_SUBMISSION_TABLE,
+      'driverId = :did',
+      {},
+      { ':did': driverId },
+    )
+    return pickOpenPodSubmission(mine, referenceNumber)
+  } catch (err) {
+    // A failed lookup costs a duplicate submission, which staff can merge. Failing the
+    // upload instead would cost the POD.
+    console.error('[driver-app-api] could not look for an open POD submission', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
 async function persistDocs(
   submissionId: string,
   driverId: string,
@@ -1621,6 +1676,22 @@ export const handler = async (event: FnUrlEvent) => {
       if (!validation.ok) return reply(400, { error: validation.error })
       const pages = validation.pages
       const now = nowIso()
+      const referenceNumber = getStringOrNull(body, 'referenceNumber')
+
+      /*
+       * More pages for a shipment this driver has already sent a POD for go ONTO that
+       * submission. Two submissions for one PRO means the office gets two half-PODs and
+       * the app shows whichever it finds first.
+       */
+      if (kind === 'POD') {
+        const existing = await openPodSubmissionFor(driverId, referenceNumber)
+        if (existing) {
+          const more = await presignedPutTargets(driverId, existing.id, 'POD', pages)
+          await appendPendingUploads(existing.id, 'POD', more.pagesWithKeys)
+          return reply(200, { submissionId: existing.id, uploads: more.targets })
+        }
+      }
+
       const submissionId = randomUUID()
       const { targets, pagesWithKeys } = await presignedPutTargets(driverId, submissionId, kind, pages)
 
@@ -1633,7 +1704,7 @@ export const handler = async (event: FnUrlEvent) => {
             driverId,
             driverName: driver.name,
             status: 'NEW',
-            referenceNumber: getStringOrNull(body, 'referenceNumber'),
+            referenceNumber,
             note: getStringOrNull(body, 'note'),
             createdAt: now,
             updatedAt: now,
