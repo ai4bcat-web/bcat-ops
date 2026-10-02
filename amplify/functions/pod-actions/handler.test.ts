@@ -1247,20 +1247,20 @@ describe('system-driven scan steps', () => {
     // driver-app-api and the backfill script have no email to present. Faking one would put
     // a lie in the audit trail, so the marker is explicit.
     await expect(
-      authorize('enhanceDriverDoc', { claims: { bcatSystemCaller: true }, username: 'driver-app-api' }),
+      authorize('enhanceDriverDoc', { sub: 'system', username: 'driver-app-api', claims: { bcatSystemCaller: true } }),
     ).resolves.toMatchObject({ email: 'system:driver-app-api', isAdmin: false })
   })
 
   it('accepts it for the merge step too', async () => {
     await expect(
-      authorize('finalizeDriverDocs', { claims: { bcatSystemCaller: true }, username: 'backfill-script' }),
+      authorize('finalizeDriverDocs', { sub: 'system', username: 'backfill-script', claims: { bcatSystemCaller: true } }),
     ).resolves.toMatchObject({ isPagePods: true })
   })
 
   it('does not let the marker reach any other action', async () => {
     // It is scoped to the two steps that only ever clean up a document that already exists.
     await expect(
-      authorize('assign', { claims: { bcatSystemCaller: true }, username: 'whoever' }),
+      authorize('assign', { sub: 'system', username: 'whoever', claims: { bcatSystemCaller: true } }),
     ).rejects.toThrow(/Unauthorized|Forbidden/)
   })
 
