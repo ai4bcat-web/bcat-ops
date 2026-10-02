@@ -19,7 +19,7 @@ import type { TripDoc } from './useTripDocs'
 const LABEL: Record<SubmissionKind, string> = { POD: 'POD', RATECON: 'Rate confirmation' }
 
 export function DocPreviewSheet({
-  doc, kind, shipment, onClose, onReplace, onRemoved,
+  doc, kind, shipment, onClose, onReplace, onAddPages, onRemoved,
 }: {
   doc: TripDoc
   kind: SubmissionKind
@@ -27,6 +27,8 @@ export function DocPreviewSheet({
   shipment: string
   onClose: () => void
   onReplace: () => void
+  /** Keep what is there and add more pages to it. */
+  onAddPages: () => void
   onRemoved: () => void
 }) {
   const [url, setUrl] = useState<string | null>(null)
@@ -90,7 +92,7 @@ export function DocPreviewSheet({
       </div>
 
       <footer
-        className="grid grid-cols-3 gap-2 border-t border-border p-3"
+        className="grid grid-cols-2 gap-2 border-t border-border p-3"
         style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.75rem)' }}
       >
         <Button

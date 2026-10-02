@@ -69,6 +69,8 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
         )
       }
       const url = want === 'enhanced' ? fresh.enhancedUrl : fresh.originalUrl
+      const downloadUrl =
+        want === 'enhanced' ? fresh.enhancedDownloadUrl : fresh.originalDownloadUrl
       if (!url) {
         toast.error(
           want === 'enhanced'
@@ -78,7 +80,7 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
         return
       }
       // Always a PDF: a POD leaves here for a broker or OTR, where one PDF is the form.
-      await downloadPodAsPdf(url, filename)
+      await downloadPodAsPdf(url, filename, downloadUrl)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not download this POD')
     } finally {

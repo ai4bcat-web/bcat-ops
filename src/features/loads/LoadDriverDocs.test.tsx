@@ -17,12 +17,14 @@ const listDriverSubmissions = vi.hoisted(() => vi.fn())
 const getDriverDocUrl = vi.hoisted(() => vi.fn())
 const removeDriverDocs = vi.hoisted(() => vi.fn())
 const replaceDriverDocs = vi.hoisted(() => vi.fn())
+const queueDriverDocScan = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 
 vi.mock('@/lib/driverSubmissionsClient', () => ({
   listDriverSubmissions, getDriverDocUrl, removeDriverDocs, replaceDriverDocs,
   DRIVER_DOC_ACCEPT: 'image/jpeg,image/png,application/pdf',
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/lib/podsClient', () => ({ queueDriverDocScan }))
 
 function sub(over: Partial<SubmissionWithDocs> = {}): SubmissionWithDocs {
   return {
@@ -116,5 +118,53 @@ describe('LoadDriverDocs', () => {
     listDriverSubmissions.mockRejectedValue(new Error('Network down'))
     render(<LoadDriverDocs loadId="load-1" proNumber="14538" kind="POD" />)
     expect(await screen.findByText('Network down')).toBeInTheDocument()
+  })
+})
+
+/**
+ * A document that never got cleaned up should be fixable from the load, not by asking a
+ * driver to send it again. Two separate things have to be true before it is done: every
+ * page has been looked at, and they have been merged into the one PDF everything
+ * downstream reads.
+ */
+describe('a document that was never scanned', () => {
+  const loose = (over: Partial<SubmissionWithDocs> = {}) =>
+    sub({
+      loadId: 'load-1',
+      combinedPodKey: null,
+      docs: [{
+        id: 'd1', submissionId: 'sub-1', driverId: 'drv-1', kind: 'POD',
+        s3Key: 'k1', fileName: 'POD.jpg', contentType: 'image/jpeg',
+        pageNumber: 1, uploadedAt: '2026-10-01T12:00:00Z', scanStatus: 'ORIGINAL_ONLY',
+      }],
+      ...over,
+    } as Partial<SubmissionWithDocs>)
+
+  it('offers to clean it up and combine it', async () => {
+    listDriverSubmissions.mockResolvedValue([loose()])
+    render(<LoadDriverDocs loadId="load-1" proNumber="14538" kind="POD" />)
+
+    const fix = await screen.findByRole('button', { name: /Clean it up and combine/ })
+    fireEvent.click(fix)
+    await waitFor(() => expect(queueDriverDocScan).toHaveBeenCalledWith('sub-1', 'POD'))
+  })
+
+  it('does not offer it for a document already cleaned and merged', async () => {
+    listDriverSubmissions.mockResolvedValue([
+      sub({
+        loadId: 'load-1',
+        combinedPodKey: 'driver-docs/drv-1/sub-1/POD/combined.pdf',
+        docs: [{
+          id: 'd1', submissionId: 'sub-1', driverId: 'drv-1', kind: 'POD',
+          s3Key: 'k1', fileName: 'POD.jpg', contentType: 'image/jpeg',
+          pageNumber: 1, uploadedAt: '2026-10-01T12:00:00Z', scanStatus: 'READY',
+          enhancedKey: 'k1.enhanced.jpg',
+        }],
+      } as Partial<SubmissionWithDocs>),
+    ])
+    render(<LoadDriverDocs loadId="load-1" proNumber="14538" kind="POD" />)
+
+    await screen.findByText(/cleaned scan/)
+    expect(screen.queryByRole('button', { name: /Clean it up and combine/ })).not.toBeInTheDocument()
   })
 })

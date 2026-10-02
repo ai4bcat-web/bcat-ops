@@ -92,16 +92,42 @@ describe('downloadPodAsPdf', () => {
  * attempt to read it was blocked.
  */
 describe('when fetch itself is blocked', () => {
-  it('hands the URL to the browser instead of failing', async () => {
+  it('follows a download link instead of failing', async () => {
     const click = vi.fn()
-    const anchor = { href: '', target: '', rel: '', click, remove: vi.fn() } as unknown as HTMLAnchorElement
+    const anchor = { href: '', download: '', rel: '', click, remove: vi.fn() } as unknown as HTMLAnchorElement
     vi.spyOn(document, 'createElement').mockReturnValueOnce(anchor)
     vi.spyOn(document.body, 'appendChild').mockImplementationOnce((n) => n)
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
 
-    await expect(downloadPodAsPdf('https://s3.test/enhanced.pdf?sig=x', 'POD-1')).resolves.toBeUndefined()
-    expect(anchor.href).toBe('https://s3.test/enhanced.pdf?sig=x')
+    await expect(
+      downloadPodAsPdf('https://s3.test/enhanced.pdf?sig=x', 'POD-1', 'https://s3.test/enhanced.pdf?sig=x&dl=1'),
+    ).resolves.toBeUndefined()
+    // The attachment-signed URL, so the browser saves it rather than rendering it.
+    expect(anchor.href).toBe('https://s3.test/enhanced.pdf?sig=x&dl=1')
+    expect(anchor.download).toBe('POD-1.pdf')
     expect(click).toHaveBeenCalled()
+  })
+
+  it('never opens a new tab, which a popup blocker would eat after an await', async () => {
+    // The previous attempt used target="_blank" from an async continuation. The browser
+    // dropped it silently, which looked exactly like the failure it was rescuing.
+    const anchor = { href: '', download: '', rel: '', click: vi.fn(), remove: vi.fn() } as unknown as HTMLAnchorElement
+    vi.spyOn(document, 'createElement').mockReturnValueOnce(anchor)
+    vi.spyOn(document.body, 'appendChild').mockImplementationOnce((n) => n)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    await downloadPodAsPdf('https://s3.test/x.pdf', 'POD-1', 'https://s3.test/x.pdf?dl=1')
+    expect((anchor as unknown as { target?: string }).target).toBeFalsy()
+  })
+
+  it('falls back to the plain URL when no download URL was supplied', async () => {
+    const anchor = { href: '', download: '', rel: '', click: vi.fn(), remove: vi.fn() } as unknown as HTMLAnchorElement
+    vi.spyOn(document, 'createElement').mockReturnValueOnce(anchor)
+    vi.spyOn(document.body, 'appendChild').mockImplementationOnce((n) => n)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    await downloadPodAsPdf('https://s3.test/only.pdf', 'POD-1')
+    expect(anchor.href).toBe('https://s3.test/only.pdf')
   })
 
   it('still reports a real HTTP failure, which a person can act on', async () => {

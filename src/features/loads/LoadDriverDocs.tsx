@@ -13,7 +13,7 @@
  * row opens a preview, and the preview can replace or remove.
  */
 import { useState } from 'react'
-import { FileText, Loader2, AlertTriangle, Eye } from 'lucide-react'
+import { FileText, Loader2, AlertTriangle, Eye, Wand2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLoadDriverDocs, type LoadDriverDoc } from '@/hooks/useLoadDriverDocs'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
@@ -22,6 +22,7 @@ import {
   replaceDriverDocs,
   DRIVER_DOC_ACCEPT,
 } from '@/lib/driverSubmissionsClient'
+import { queueDriverDocScan } from '@/lib/podsClient'
 import { useAuthUser } from '@/hooks/useAuth'
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -34,6 +35,22 @@ function when(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+/**
+ * Whether this document has actually been through the cleanup and come out as one PDF.
+ *
+ * Two things have to be true, and they are separate: every page has been looked at, and
+ * they have been merged. A document that is still loose pages, or whose pages were parked
+ * ORIGINAL_ONLY under older rules, is one somebody should be able to put right from here
+ * rather than by asking a driver to send it again.
+ */
+function needsScanning(doc: LoadDriverDoc): boolean {
+  if (doc.cleaning) return false
+  if (doc.scanStatus === 'FAILED') return true
+  // pageNumber is null only on the combined document this hook synthesises.
+  const combined = doc.pageNumber === null
+  return !combined || !doc.enhanced
 }
 
 /** "3 pages · cleaned scan" — what the preview is actually showing you. */
@@ -58,6 +75,27 @@ export function LoadDriverDocs({
   const { pods, ratecons, loading, error, refresh } = useLoadDriverDocs(loadId, proNumber)
   const user = useAuthUser()
   const [previewing, setPreviewing] = useState<string | null>(null)
+  const [scanning, setScanning] = useState<string | null>(null)
+
+  /**
+   * Run the cleanup over a document that never had it.
+   *
+   * The same queued pass a fresh upload gets: every page cleaned, then merged into the one
+   * PDF everything downstream reads. Queued rather than awaited, so this returns as soon as
+   * the work is handed off and the row polls until it lands.
+   */
+  async function runScan(doc: LoadDriverDoc): Promise<void> {
+    setScanning(doc.submissionId)
+    try {
+      await queueDriverDocScan(doc.submissionId, kind)
+      toast.success('Cleaning it up — the finished PDF appears here in a moment')
+      refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start the cleanup')
+    } finally {
+      setScanning(null)
+    }
+  }
   const docs = kind === 'POD' ? pods : ratecons
   const open = docs.find((d) => d.id === previewing) ?? null
 
@@ -121,6 +159,22 @@ export function LoadDriverDocs({
                   <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                 )}
               </button>
+              {/* Not scanned, or still loose pages: offer to put it right from here. */}
+              {needsScanning(doc) && (
+                <button
+                  type="button"
+                  disabled={scanning === doc.submissionId}
+                  onClick={() => void runScan(doc)}
+                  className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-primary disabled:opacity-50"
+                >
+                  {scanning === doc.submissionId ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Wand2 className="size-3" />
+                  )}
+                  Clean it up and combine into one PDF
+                </button>
+              )}
             </li>
           )
         })}

@@ -577,6 +577,33 @@ export async function signedGetUrl(key: string | null | undefined): Promise<stri
   })
 }
 
+/**
+ * The same object, signed to arrive as a download.
+ *
+ * S3 echoes ResponseContentDisposition back as the response header, so following this link
+ * saves the file instead of rendering it — and a plain link needs no fetch, which is the
+ * part that was failing. "Failed to fetch" is what a browser says when it stops a
+ * cross-origin request before it starts, and nothing on our side can talk it out of that.
+ */
+export async function signedDownloadUrl(
+  key: string | null | undefined,
+  fileName: string,
+): Promise<string | undefined> {
+  if (!key) return undefined
+  // Quotes and backslashes would end the header value early; a POD is not worth a header
+  // injection.
+  const safe = fileName.replace(/[\\"\r\n]/g, '_') || 'document'
+  return getSignedUrl(
+    s3,
+    new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      ResponseContentDisposition: `attachment; filename="${safe}"`,
+    }),
+    { expiresIn: PRESIGN_EXPIRY_SECONDS },
+  )
+}
+
 // ── Image download ───────────────────────────────────────────────────────────
 
 export function validateMediaUrl(urlString: string): URL {
@@ -1466,6 +1493,21 @@ export async function listAction(
   return { items, nextToken }
 }
 
+/** The extension that matches what is actually stored, so the saved file opens. */
+function extensionFor(contentType: string | null | undefined): string {
+  const type = (contentType ?? '').toLowerCase()
+  if (type.includes('pdf')) return '.pdf'
+  if (type.includes('png')) return '.png'
+  if (type.includes('webp')) return '.webp'
+  if (type.includes('heic') || type.includes('heif')) return '.heic'
+  return '.jpg'
+}
+
+/** The cleanup turns images into JPEG and PDFs into PDF; see enhanceDriverDocAction. */
+function enhancedExtensionFor(item: { enhancedKey?: string | null }): string {
+  return /\.pdf$/i.test(item.enhancedKey ?? '') ? '.pdf' : '.jpg'
+}
+
 export async function assetsAction(
   input: Record<string, unknown>,
   caller: Caller,
@@ -1480,12 +1522,20 @@ export async function assetsAction(
     assertGlobalAccess(caller)
   }
 
-  const originalUrl = await signedGetUrl(item.originalKey)
-  const enhancedUrl = await signedGetUrl(item.enhancedKey)
+  const base = (item.fileName ?? `POD-${item.id}`).replace(/\.[^./]+$/, '') || `POD-${item.id}`
+  const [originalUrl, enhancedUrl, originalDownloadUrl, enhancedDownloadUrl] = await Promise.all([
+    signedGetUrl(item.originalKey),
+    signedGetUrl(item.enhancedKey),
+    signedDownloadUrl(item.originalKey, `${base}-original${extensionFor(item.contentType)}`),
+    // The enhanced copy is a JPEG for a photo and a PDF for a PDF; name it for what it is.
+    signedDownloadUrl(item.enhancedKey, `${base}-enhanced${enhancedExtensionFor(item)}`),
+  ])
   return {
     item: serializeStoredPodDocument(item),
     originalUrl,
     enhancedUrl,
+    originalDownloadUrl,
+    enhancedDownloadUrl,
   }
 }
 

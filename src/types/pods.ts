@@ -52,6 +52,17 @@ export interface PodAssets {
   item: PodDocument
   originalUrl?: string
   enhancedUrl?: string
+  /*
+   * The same objects, signed to arrive as a download rather than to be rendered.
+   *
+   * Reading the bytes with fetch and re-wrapping them is the nicer path — it is what turns
+   * an enhanced JPEG into the PDF a broker expects — but it is also the fragile one: a
+   * cross-origin fetch is what an extension, a proxy or a captive network blocks, and all
+   * the browser says is "Failed to fetch". These URLs carry a Content-Disposition, so an
+   * ordinary link saves the file with no script involved at all.
+   */
+  originalDownloadUrl?: string
+  enhancedDownloadUrl?: string
 }
 
 export interface PodSenderMapping {

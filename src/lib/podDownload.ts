@@ -29,17 +29,22 @@ export function pdfFileName(baseName: string): string {
 }
 
 /**
- * Open the file directly, letting the browser fetch it.
+ * Follow a link the browser will save, with no script in the way.
  *
  * The fallback when reading the bytes ourselves fails. A navigation is not an XHR: no CORS
- * preflight, no fetch wrapper, nothing an extension or a network policy blocks the way it
- * blocks a cross-origin fetch. The trade is that an image arrives as an image rather than
- * wrapped in a PDF — which beats "Failed to fetch" and no file at all.
+ * preflight, nothing an extension or a network policy blocks the way it blocks a
+ * cross-origin fetch. The trade is that an image arrives as an image rather than wrapped in
+ * a PDF — which beats "Failed to fetch" and no file at all.
+ *
+ * Deliberately NOT target="_blank": this runs after an await, so the user-gesture context
+ * is gone and a popup blocker eats it silently — which looked exactly like the failure it
+ * was supposed to rescue. The URL carries a Content-Disposition, so a same-tab navigation
+ * saves the file without leaving the page.
  */
-function openDirectly(url: string): void {
+function followDownloadLink(url: string, fileName: string): void {
   const a = document.createElement('a')
   a.href = url
-  a.target = '_blank'
+  a.download = fileName
   a.rel = 'noopener'
   document.body.appendChild(a)
   a.click()
@@ -56,13 +61,19 @@ function openDirectly(url: string): void {
  * READ the bytes falls back to handing the URL to the browser, and anything else says which
  * step gave up.
  */
-export async function downloadPodAsPdf(url: string, baseName: string): Promise<void> {
+export async function downloadPodAsPdf(
+  url: string,
+  baseName: string,
+  /** Signed with a Content-Disposition, for when reading the bytes is blocked. */
+  downloadUrl?: string,
+): Promise<void> {
   let res: Response
   try {
     res = await fetch(url)
   } catch {
-    // Could not even reach it from script. The browser can still fetch it itself.
-    openDirectly(url)
+    // Could not even reach it from script — an extension, a proxy, a captive network. The
+    // browser can still follow a link.
+    followDownloadLink(downloadUrl ?? url, pdfFileName(baseName))
     return
   }
   if (!res.ok) throw new Error(`The file store returned ${res.status}`)

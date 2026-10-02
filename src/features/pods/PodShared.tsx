@@ -84,6 +84,8 @@ export function PodDownloadBtn({
             )
           }
           const url = variant === 'enhanced' ? assets.enhancedUrl : assets.originalUrl
+          const downloadUrl =
+            variant === 'enhanced' ? assets.enhancedDownloadUrl : assets.originalDownloadUrl
           if (!url) {
             toast.error(
               variant === 'enhanced'
@@ -93,7 +95,7 @@ export function PodDownloadBtn({
             return
           }
           // A POD leaves here for a broker or OTR, where one PDF is the expected form.
-          await downloadPodAsPdf(url, filename)
+          await downloadPodAsPdf(url, filename, downloadUrl)
         } catch (err) {
           // Nothing below this toasts, so a swallowed failure read as "the button does
           // nothing" — which is exactly how the broken enhanced download presented.

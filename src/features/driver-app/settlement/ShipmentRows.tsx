@@ -47,7 +47,7 @@ function shipmentLabel(trip: Trip): string {
 }
 
 function DocCell({
-  present, required, label, shipment, onPress, onPreview,
+  present, required, label, shipment, pageCount, onPress, onPreview,
 }: {
   present: boolean
   /** Amber when its absence holds the driver's pay. Only the POD does. */
@@ -55,6 +55,8 @@ function DocCell({
   label: string
   /** Named in the accessible label so the rows are told apart, not just numbered. */
   shipment: string
+  /** How many pages are on file. A driver who sent three wants to see three. */
+  pageCount?: number
   onPress: () => void
   /**
    * Absent while the document index is still loading, or for a POD the office holds that
@@ -66,6 +68,14 @@ function DocCell({
   // On its own line now, so each control can name the document instead of relying on a
   // two-letter column header a driver has to decode.
   const short = label === 'POD' ? 'POD' : 'Rate con'
+  /*
+   * Say how many pages are on file.
+   *
+   * "In" told a driver who photographed three sheets nothing about whether all three
+   * arrived — and a POD missing its second page is the kind of thing nobody notices until
+   * a broker refuses the invoice.
+   */
+  const count = pageCount && pageCount > 1 ? ` · ${pageCount} pages` : pageCount === 1 ? ' · 1 page' : ''
 
   if (present) {
     if (!onPreview) {
@@ -74,7 +84,7 @@ function DocCell({
           className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
           aria-label={`${label} on file for ${shipment}`}
         >
-          <Check className="h-3.5 w-3.5" /> {short} in
+          <Check className="h-3.5 w-3.5" /> {short} in{count}
         </span>
       )
     }
@@ -85,7 +95,7 @@ function DocCell({
         aria-label={`Check the ${label} you sent for ${shipment}`}
         className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
       >
-        <Eye className="h-3.5 w-3.5" /> {short} in
+        <Eye className="h-3.5 w-3.5" /> {short} in{count}
       </button>
     )
   }
@@ -187,6 +197,7 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
                 required
                 label="POD"
                 shipment={shipment}
+                pageCount={podDoc?.document.pageCount}
                 onPress={() => send('pod', trip)}
                 onPreview={podDoc ? () => setOpen({ doc: podDoc, kind: 'POD', shipment }) : undefined}
               />
@@ -195,6 +206,7 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
                 required={false}
                 label="rate confirmation"
                 shipment={shipment}
+                pageCount={rcDoc?.document.pageCount}
                 onPress={() => send('ratecon', trip)}
                 onPreview={rcDoc ? () => setOpen({ doc: rcDoc, kind: 'RATECON', shipment }) : undefined}
               />
@@ -212,6 +224,15 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
           onReplace={() => {
             setOpen(null)
             docs.refresh()
+            navigate(
+              `/driver/scan?kind=${open.kind === 'POD' ? 'pod' : 'ratecon'}` +
+                `&pro=${encodeURIComponent(open.shipment)}`,
+            )
+          }}
+          onAddPages={() => {
+            // Nothing removed: the server puts further pages onto the submission this
+            // shipment already has, so the office still ends up with one document.
+            setOpen(null)
             navigate(
               `/driver/scan?kind=${open.kind === 'POD' ? 'pod' : 'ratecon'}` +
                 `&pro=${encodeURIComponent(open.shipment)}`,

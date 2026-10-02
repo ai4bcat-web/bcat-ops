@@ -25,6 +25,9 @@ beforeEach(() => {
   getPodAssets.mockResolvedValue({
     enhancedUrl: 'https://s3.test/enhanced.pdf?sig=fresh',
     originalUrl: 'https://s3.test/original.jpg?sig=fresh',
+    // Signed with a Content-Disposition, for when reading the bytes is blocked.
+    enhancedDownloadUrl: 'https://s3.test/enhanced.pdf?sig=fresh&dl=1',
+    originalDownloadUrl: 'https://s3.test/original.jpg?sig=fresh&dl=1',
   })
 })
 
@@ -38,14 +41,22 @@ describe('PodDownloadBtn', () => {
     click()
     await waitFor(() => expect(getPodAssets).toHaveBeenCalledWith('pod-1'))
     await waitFor(() =>
-      expect(downloadPodAsPdf).toHaveBeenCalledWith('https://s3.test/enhanced.pdf?sig=fresh', 'POD-14538.pdf'),
+      expect(downloadPodAsPdf).toHaveBeenCalledWith(
+        'https://s3.test/enhanced.pdf?sig=fresh',
+        'POD-14538.pdf',
+        'https://s3.test/enhanced.pdf?sig=fresh&dl=1',
+      ),
     )
   })
 
   it('takes the raw photo when that is what was asked for', async () => {
     click('original')
     await waitFor(() =>
-      expect(downloadPodAsPdf).toHaveBeenCalledWith('https://s3.test/original.jpg?sig=fresh', 'POD-14538.pdf'),
+      expect(downloadPodAsPdf).toHaveBeenCalledWith(
+        'https://s3.test/original.jpg?sig=fresh',
+        'POD-14538.pdf',
+        'https://s3.test/original.jpg?sig=fresh&dl=1',
+      ),
     )
   })
 
