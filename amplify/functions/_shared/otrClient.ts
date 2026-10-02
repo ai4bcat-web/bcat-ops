@@ -303,8 +303,34 @@ export class OtrClient {
     file: Uint8Array
     sendEmail?: boolean
   }): Promise<{ message: string; invoiceId: string }> {
+    /*
+     * A fresh, exactly-sized copy of the bytes.
+     *
+     * transformToByteArray can hand back a VIEW onto a larger buffer, and a Blob built from
+     * a mis-measured view sends the wrong bytes. Copying costs one pass over a POD and
+     * removes the whole class of question.
+     */
+    const bytes = new Uint8Array(opts.file.byteLength)
+    bytes.set(opts.file)
+    const blob = new Blob([bytes], { type: opts.contentType })
+
+    /*
+     * OTR rejected a POD saying it had opened 1,852,054 bytes of a 1,018,923-byte PDF —
+     * almost exactly what that file becomes if its bytes are decoded as UTF-8 text and
+     * re-encoded. Nothing on this side does that, so the size we actually put on the wire
+     * is logged: it says in one line whether the mangling is ours or theirs.
+     */
+    console.log('[otr] uploading document', {
+      fileName: opts.fileName,
+      docType: opts.docType,
+      sourceBytes: opts.file.byteLength,
+      sourceKind: opts.file?.constructor?.name ?? typeof opts.file,
+      blobBytes: blob.size,
+      contentType: opts.contentType,
+    })
+
     const form = new FormData()
-    form.append('file', new Blob([opts.file as BlobPart], { type: opts.contentType }), opts.fileName)
+    form.append('file', blob, opts.fileName)
     form.append('invoiceid', String(opts.invoiceId))
     form.append('InvoiceDocTypes', String(opts.docType))
     form.append('SendEmail', opts.sendEmail ? 'true' : 'false')
