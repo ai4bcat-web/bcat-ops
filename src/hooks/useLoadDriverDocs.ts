@@ -28,8 +28,14 @@ export interface LoadDriverDoc extends DriverSubmissionDocRecord {
   driverName: string
   source: SubmissionWithDocs['source']
   submittedByEmail: SubmissionWithDocs['submittedByEmail']
-  /** Presigned, resolved lazily; null until it loads or if it fails. */
+  /**
+   * Presigned, resolved lazily; null until it loads or if it fails. Points at the CLEANED
+   * copy once the scan pipeline has produced one, since that is the copy anyone should
+   * open or send on. The original stays in S3 as the record of what arrived.
+   */
   url: string | null
+  /** True when the url above is the cleaned scan rather than the raw upload. */
+  enhanced: boolean
 }
 
 export interface LoadDriverDocs {
@@ -86,13 +92,18 @@ export function useLoadDriverDocs(
     () =>
       mine
         .flatMap((sub) =>
-          sub.docs.map((d) => ({
-            ...d,
-            driverName: sub.driverName,
-            source: sub.source,
-            submittedByEmail: sub.submittedByEmail,
-            url: urls[d.s3Key] ?? null,
-          })),
+          sub.docs.map((d) => {
+            // Prefer the cleaned copy; fall back to the raw upload until it exists.
+            const key = d.scanStatus === 'READY' && d.enhancedKey ? d.enhancedKey : d.s3Key
+            return {
+              ...d,
+              driverName: sub.driverName,
+              source: sub.source,
+              submittedByEmail: sub.submittedByEmail,
+              url: urls[key] ?? null,
+              enhanced: key !== d.s3Key,
+            }
+          }),
         )
         // Newest first, and a multi-page document keeps its page order within a day.
         .sort((a, b) =>
@@ -104,7 +115,10 @@ export function useLoadDriverDocs(
 
   // Presign only what is actually on screen, once each.
   useEffect(() => {
-    const missing = docs.filter((d) => !urls[d.s3Key]).map((d) => d.s3Key)
+    const wanted = docs.map((d) =>
+      d.scanStatus === 'READY' && d.enhancedKey ? d.enhancedKey : d.s3Key,
+    )
+    const missing = wanted.filter((key) => !urls[key])
     if (missing.length === 0) return
     let cancelled = false
     void Promise.all(

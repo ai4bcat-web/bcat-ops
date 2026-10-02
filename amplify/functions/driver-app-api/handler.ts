@@ -21,6 +21,7 @@ import {
   QueryCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { CognitoJwtVerifier } from 'aws-jwt-verify'
 import {
@@ -60,6 +61,8 @@ const s3 = new S3Client({})
 
 const DRIVER_SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME!
 const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME!
+/** pod-actions runs the scan cleanup. Absent in stacks where PODs are not wired. */
+const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME ?? ''
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
 const DRIVER_PAY_SETTING_TABLE = process.env.DRIVER_PAY_SETTING_TABLE_NAME!
 const AMAZON_TRIP_TABLE = process.env.AMAZON_TRIP_TABLE_NAME!
@@ -959,6 +962,43 @@ async function appendPendingUploads(
   )
 }
 
+/**
+ * Ask pod-actions to clean up the pages just stored.
+ *
+ * A POD photographed at a dock needs deskewing, cropping and the lighting flattened at
+ * least as much as one texted in, and that pipeline is heavy — tesseract and jimp — so it
+ * stays in the Lambda that already carries it rather than being bundled into the driver
+ * API. Invoked as an Event so a driver's upload never waits on it, and every failure is
+ * swallowed: the pages are saved and the original is the copy we keep.
+ */
+async function requestScanCleanup(docs: DriverSubmissionDocRow[]): Promise<void> {
+  if (!POD_FUNCTION_NAME || docs.length === 0) return
+  const lambda = new LambdaClient({})
+  await Promise.all(
+    docs.map(async (doc) => {
+      try {
+        await lambda.send(
+          new InvokeCommand({
+            FunctionName: POD_FUNCTION_NAME,
+            InvocationType: 'Event',
+            Payload: Buffer.from(
+              JSON.stringify({
+                arguments: { action: 'enhanceDriverDoc', input: JSON.stringify({ id: doc.id }) },
+                identity: { claims: { email: 'driver-app-api' }, groups: ['ADMIN'] },
+              }),
+            ),
+          }),
+        )
+      } catch (err) {
+        console.error('[driver-app-api] could not request scan cleanup', {
+          docId: doc.id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }),
+  )
+}
+
 async function persistDocs(
   submissionId: string,
   driverId: string,
@@ -1069,6 +1109,9 @@ async function completeSubmission(
   }
 
   const docs = await persistDocs(submissionId, driverId, kind, pages)
+  // Clean up the scan the same way a texted POD is cleaned. Asynchronous and
+  // best-effort: the pages are already stored, and the original is what we keep.
+  await requestScanCleanup(docs)
   const { refs, errors } = await notifyForKind(submission, kind, pages)
   const now = nowIso()
 

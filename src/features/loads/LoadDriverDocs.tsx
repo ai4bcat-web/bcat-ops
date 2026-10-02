@@ -33,6 +33,10 @@ function DocRow({ doc }: { doc: LoadDriverDoc }) {
         <p className="truncate text-xs font-medium text-foreground">{label}</p>
         <p className="truncate text-[11px] text-muted-foreground">
           {doc.driverName} · {who} · {when(doc.uploadedAt)}
+          {/* Says which copy the link opens, so nobody wonders why it looks different
+              from the photo the driver took. */}
+          {doc.enhanced && <span className="text-emerald-600"> · cleaned scan</span>}
+          {doc.scanStatus === 'FAILED' && <span className="text-amber-700"> · original only</span>}
         </p>
       </div>
       {doc.url ? (

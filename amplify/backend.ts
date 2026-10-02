@@ -1219,7 +1219,20 @@ podActionsFn.addEnvironment('POD_CONNECTION_PARAM_NAME', podConnectionParamName)
 // Derived name (not `podActionsFn.functionName`) so the environment value is a plain
 // string rather than a reference to the Lambda resource.
 podActionsFn.addEnvironment('POD_FUNCTION_NAME', podFunctionName)
+
+// The driver API asks pod-actions to clean up each uploaded scan. Name and invoke
+// permission only — it never reads anything pod-actions owns.
+driverApiFn.addEnvironment('POD_FUNCTION_NAME', podFunctionName)
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [podFunctionArn],
+  }),
+)
 podActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+// Driver and staff uploads land in DriverSubmissionDoc rather than PodDocument, and they
+// need the same scan cleanup — a phone photo taken at a dock needs it more, not less.
+podActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
 
 const podDocumentTableArns = [podDocumentTable.tableArn, `${podDocumentTable.tableArn}/index/*`]
 const podSenderMappingTableArns = [podSenderMappingTable.tableArn]
@@ -1248,9 +1261,20 @@ podActionsFn.addToRolePolicy(
     resources: [backend.auth.resources.userPool.userPoolArn],
   }),
 )
+// Reads the row to find the file, writes back which copy is the cleaned one.
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [driverSubmissionDocTable.tableArn],
+  }),
+)
 
 backend.storage.resources.bucket.grantPut(podActionsFn, 'pods/*')
 backend.storage.resources.bucket.grantRead(podActionsFn, 'pods/*')
+// Driver and staff uploads live under their own prefix; the cleaned copy is written
+// beside the original there, never over it.
+backend.storage.resources.bucket.grantRead(podActionsFn, 'driver-docs/*')
+backend.storage.resources.bucket.grantPut(podActionsFn, 'driver-docs/*')
 
 // The frontend downloads presigned POD originals/enhanced images with fetch(),
 // so the bucket must answer CORS GETs from the app origins.

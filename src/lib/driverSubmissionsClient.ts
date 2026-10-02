@@ -5,6 +5,7 @@
 // the PWA.
 
 import { generateClient } from 'aws-amplify/data'
+import { enhanceDriverDoc } from './podsClient'
 import { uploadData, getUrl } from 'aws-amplify/storage'
 
 const client = generateClient()
@@ -55,6 +56,11 @@ export interface DriverSubmissionDocRecord {
   pageNumber?: number | null
   uploadedAt: string
   notifiedAt?: string | null
+  /** The cleaned copy, once the scan pipeline has produced one. */
+  enhancedKey?: string | null
+  scanStatus?: 'PENDING' | 'READY' | 'ORIGINAL_ONLY' | 'FAILED' | null
+  scanError?: string | null
+  scanVersion?: number | null
 }
 
 export interface SubmissionWithDocs extends DriverSubmissionRecord {
@@ -130,6 +136,7 @@ const SUBMISSION_FIELDS = `
 
 const DOC_FIELDS = `
   id submissionId driverId kind s3Key fileName contentType byteSize pageNumber uploadedAt notifiedAt
+  enhancedKey scanStatus scanError scanVersion
 `
 
 // ── Queries ───────────────────────────────────────────────────────────────────
@@ -349,6 +356,9 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
       uploadedAt: now,
     })
     docs.push(doc)
+    // Clean it up the way a texted POD is cleaned. Not awaited as a dependency: the
+    // document is saved and the original is intact either way.
+    void enhanceDriverDoc(doc.id)
   }
 
   return { ...submission, docs }
@@ -395,6 +405,8 @@ export async function staffAddPodToSubmission(
       uploadedAt: now,
     })
     docs.push(doc)
+    // Same cleanup when pages are added to an existing submission.
+    void enhanceDriverDoc(doc.id)
   }
 
   return { ...submission, docs }

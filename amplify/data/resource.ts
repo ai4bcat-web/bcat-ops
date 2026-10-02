@@ -417,6 +417,18 @@ const schema = a.schema({
       pageNumber:    a.integer(), // 1-based, for multi-page scans
       uploadedAt:    a.string().required(),
       notifiedAt:    a.string(),  // set once its Slack reply + email reply are sent
+      // ── Scan enhancement ─────────────────────────────────────────────────
+      // The same cleanup the PODs page applies to a texted POD: deskew, crop to the
+      // page, flatten the lighting. A phone photo taken at a dock needs it just as
+      // much as one sent by SMS, and this is the copy that should reach a broker.
+      // The original is always kept — it is the record of what actually arrived.
+      enhancedKey:      a.string(),
+      // 'PENDING' | 'READY' | 'ORIGINAL_ONLY' | 'FAILED'. ORIGINAL_ONLY means the file
+      // was never an image we could enhance (a PDF from a scanner app, for instance),
+      // which is a normal outcome and not a failure.
+      scanStatus:       a.string(),
+      scanError:        a.string(),
+      scanVersion:      a.integer(),
     })
     .secondaryIndexes((index) => [
       index('submissionId'),

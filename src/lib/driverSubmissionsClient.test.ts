@@ -6,6 +6,10 @@ const { mockUploadData, mockGetUrl } = vi.hoisted(() => ({ mockUploadData: vi.fn
 vi.mock('aws-amplify/data', () => ({
   generateClient: vi.fn(() => ({ graphql: mockGraphql })),
 }))
+// Uploading now asks pod-actions to clean the scan. It shares the mocked Amplify client,
+// so left real it would consume a queued response meant for the upload itself.
+vi.mock('./podsClient', () => ({ enhanceDriverDoc: vi.fn().mockResolvedValue(undefined) }))
+
 vi.mock('aws-amplify/storage', () => ({
   uploadData: mockUploadData,
   getUrl: mockGetUrl,

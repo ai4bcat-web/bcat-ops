@@ -50,6 +50,8 @@ const cognito = new CognitoIdentityProviderClient({})
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME!
 const POD_SENDER_MAPPING_TABLE_NAME = process.env.POD_SENDER_MAPPING_TABLE_NAME!
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
+/** Driver and staff uploads live here, not in PodDocument. Absent in older stacks. */
+const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
 const BUCKET_NAME = process.env.BUCKET_NAME!
 const POD_CONNECTION_PARAM_NAME = process.env.POD_CONNECTION_PARAM_NAME!
 const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME!
@@ -133,6 +135,7 @@ type ManageAction =
   | 'backfill'
   | 'senderMappings'
   | 'setSenderMapping'
+  | 'enhanceDriverDoc'
 
 interface Caller {
   email: string
@@ -243,7 +246,13 @@ export async function authorize(
     if (!isOwner && !isAdmin && !isPagePods) {
       throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${PAGE_PODS_GROUP}`)
     }
-  } else if (action === 'list' || action === 'assets' || action === 'status' || action === 'process' || action === 'senderMappings') {
+  } else if (
+    action === 'list' || action === 'assets' || action === 'status' ||
+    action === 'process' || action === 'senderMappings' || action === 'enhanceDriverDoc'
+  ) {
+    // enhanceDriverDoc only ever cleans up a document that already exists and writes a
+    // second copy beside it; it exposes nothing and destroys nothing, so authentication
+    // is the whole bar. The caller has just uploaded the file in question.
     // assets checks document-level visibility separately; status/process just needs auth
   }
 
@@ -1469,6 +1478,84 @@ export async function assignAction(
   return { item: serializeStoredPodDocument(updated) }
 }
 
+/**
+ * Run the POD scan pipeline over a driver or staff upload.
+ *
+ * A POD photographed at a dock needs the same deskew, crop and lighting cleanup as one
+ * texted into JobsDone — more, usually. Those arrive as PodDocument rows and get it
+ * automatically; a driver's own scan and a staff upload land in DriverSubmissionDoc and
+ * used to get nothing, so the copy that reached a broker was the raw photo.
+ *
+ * The original is never touched. The cleaned copy is written beside it and the row records
+ * which it is, exactly as PodDocument does.
+ *
+ * `ORIGINAL_ONLY` is a normal outcome, not a failure: a PDF from a scanner app is already
+ * the document and there is nothing to clean.
+ */
+export async function enhanceDriverDocAction(
+  input: Record<string, unknown>,
+): Promise<{ id: string; scanStatus: string; enhancedKey?: string; error?: string }> {
+  if (!DRIVER_SUBMISSION_DOC_TABLE) {
+    return { id: '', scanStatus: 'FAILED', error: 'driver submission docs are not configured' }
+  }
+  const id = assertString(input.id, 'id', 200)
+
+  const row = await dynamo.send(
+    new GetItemCommand({ TableName: DRIVER_SUBMISSION_DOC_TABLE, Key: marshall({ id }) }),
+  )
+  const doc = row.Item
+    ? (unmarshall(row.Item) as { id?: string; s3Key?: string; contentType?: string })
+    : undefined
+  if (!doc?.s3Key) return { id, scanStatus: 'FAILED', error: 'document not found' }
+
+  const enhancedKey = `${doc.s3Key.replace(/\.[^./]+$/, '')}.enhanced.jpg`
+
+  async function record(fields: Record<string, unknown>): Promise<void> {
+    const names: Record<string, string> = {}
+    const values: Record<string, unknown> = {}
+    const sets: string[] = []
+    for (const [k, v] of Object.entries(fields)) {
+      names[`#${k}`] = k
+      values[`:${k}`] = v
+      sets.push(`#${k} = :${k}`)
+    }
+    await dynamo.send(
+      new UpdateItemCommand({
+        TableName: DRIVER_SUBMISSION_DOC_TABLE,
+        Key: marshall({ id }),
+        UpdateExpression: `SET ${sets.join(', ')}`,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }),
+      }),
+    )
+  }
+
+  try {
+    const { bytes, contentType } = await getObjectBytes(doc.s3Key)
+    const enhanced = await enhancePodImage(bytes, contentType ?? doc.contentType ?? '')
+    if (!enhanced) {
+      // Not an image we clean — a scanner-app PDF, for instance. Normal, not a failure.
+      await record({ scanStatus: 'ORIGINAL_ONLY', scanError: null, scanVersion: POD_SCAN_VERSION })
+      return { id, scanStatus: 'ORIGINAL_ONLY' }
+    }
+    await uploadBytes(enhancedKey, enhanced.bytes, enhanced.contentType)
+    await record({
+      enhancedKey,
+      scanStatus: 'READY',
+      scanError: null,
+      scanVersion: enhanced.scanVersion ?? POD_SCAN_VERSION,
+    })
+    return { id, scanStatus: 'READY', enhancedKey }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Recorded, never thrown: the upload itself succeeded and the original is intact. A
+    // failed cleanup must not look to the caller like a lost document.
+    await record({ scanStatus: 'FAILED', scanError: message.slice(0, 500), scanVersion: POD_SCAN_VERSION })
+    console.error('[pod-actions] enhanceDriverDoc failed', { id, message })
+    return { id, scanStatus: 'FAILED', error: message }
+  }
+}
+
 export async function retryAction(
   input: Record<string, unknown>,
   caller: Caller,
@@ -1650,6 +1737,9 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
       return senderMappingsAction()
     case 'setSenderMapping':
       return setSenderMappingAction(input, await authorize(action, appSyncEvent.identity))
+    case 'enhanceDriverDoc':
+      await authorize(action, appSyncEvent.identity)
+      return enhanceDriverDocAction(input)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

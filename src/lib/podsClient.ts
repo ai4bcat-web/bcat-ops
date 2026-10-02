@@ -53,6 +53,20 @@ export async function getPodAssets(id: string): Promise<PodAssets> {
   return podAction<PodAssets>('assets', { id })
 }
 
+/**
+ * Run the POD scan cleanup over a driver or staff upload.
+ *
+ * Fire-and-forget by design: the document is already saved and the original is intact, so a
+ * failed cleanup must never surface as a failed upload. The row records what happened.
+ */
+export async function enhanceDriverDoc(docId: string): Promise<void> {
+  try {
+    await podAction<{ id: string; scanStatus: string }>('enhanceDriverDoc', { id: docId })
+  } catch (err) {
+    console.warn('[pods] could not enhance the uploaded document', docId, err)
+  }
+}
+
 export async function assignPod(args: { id: string; loadId: string | null; expectedVersion: number }): Promise<{ item: PodDocument }> {
   return podAction<{ item: PodDocument }>('assign', args)
 }
