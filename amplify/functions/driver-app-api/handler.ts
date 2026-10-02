@@ -86,7 +86,21 @@ const verifier = CognitoJwtVerifier.create({
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 const MAX_PAGES = 12
-const ACCEPTED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+/**
+ * Any image, or a PDF.
+ *
+ * This was four named types, and it is the second place a driver's own photo was refused:
+ * a phone that hands over a HEIC — which every recent iPhone does — got "unsupported
+ * content type" back from the upload it had just been allowed to start. The cleanup
+ * pipeline decides for itself what it can improve and keeps the original when it cannot,
+ * so there is nothing here for this list to protect.
+ */
+function isAcceptedUploadType(contentType: string, fileName = ''): boolean {
+  const type = (contentType || '').toLowerCase()
+  if (type.startsWith('image/')) return true
+  if (type === 'application/pdf') return true
+  return /\.(pdf|jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif)$/i.test(fileName)
+}
 const EMAIL_ACCEPTED_CONTENT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 const PRESIGN_EXPIRY = 300
 const DOC_GET_EXPIRY = 300
@@ -865,8 +879,8 @@ function validatePages(pages: unknown): { ok: false; error: string } | { ok: tru
     const contentType = getString(p, 'contentType')?.trim() ?? ''
     const byteSize = Number(getField(p, 'byteSize'))
     if (!fileName) return { ok: false, error: `page ${i + 1} missing fileName` }
-    if (!ACCEPTED_CONTENT_TYPES.includes(contentType)) {
-      return { ok: false, error: `page ${i + 1} unsupported content type` }
+    if (!isAcceptedUploadType(contentType, fileName)) {
+      return { ok: false, error: `page ${i + 1} is not an image or a PDF` }
     }
     if (!Number.isFinite(byteSize) || byteSize <= 0 || byteSize > MAX_UPLOAD_BYTES) {
       return { ok: false, error: `page ${i + 1} size invalid (max ${MAX_UPLOAD_BYTES} bytes)` }

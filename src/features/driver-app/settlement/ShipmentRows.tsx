@@ -63,14 +63,18 @@ function DocCell({
    */
   onPreview?: () => void
 }) {
+  // On its own line now, so each control can name the document instead of relying on a
+  // two-letter column header a driver has to decode.
+  const short = label === 'POD' ? 'POD' : 'Rate con'
+
   if (present) {
     if (!onPreview) {
       return (
         <span
-          className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600"
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
           aria-label={`${label} on file for ${shipment}`}
         >
-          <Check className="h-3.5 w-3.5" /> In
+          <Check className="h-3.5 w-3.5" /> {short} in
         </span>
       )
     }
@@ -79,9 +83,9 @@ function DocCell({
         type="button"
         onClick={onPreview}
         aria-label={`Check the ${label} you sent for ${shipment}`}
-        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs font-medium text-emerald-600 underline-offset-2 hover:underline"
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700"
       >
-        <Eye className="h-3.5 w-3.5" /> In
+        <Eye className="h-3.5 w-3.5" /> {short} in
       </button>
     )
   }
@@ -90,14 +94,14 @@ function DocCell({
       type="button"
       onClick={onPress}
       aria-label={`Send the ${label} for ${shipment}`}
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold ${
+      className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
         required
           ? 'border-amber-400 bg-amber-50 text-amber-800'
           : 'border-border bg-muted/50 text-muted-foreground'
       }`}
     >
-      <Upload className="h-3 w-3" />
-      Send
+      <Upload className="h-3.5 w-3.5" />
+      Send {short}
     </button>
   )
 }
@@ -120,14 +124,21 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
 
   return (
     <div role="table" aria-label="Shipments this week" className="text-sm">
+      {/*
+        * Two columns, not four.
+        *
+        * The document cells were fixed at 44px and the controls inside them are wider than
+        * that — an upload button is an icon and a word — so on a phone the POD column was
+        * cut off at the edge of the screen, which is where it mattered most. The paperwork
+        * gets its own line under the shipment instead, with room for a label on each
+        * action rather than two initials in a header.
+        */}
       <div
         role="row"
-        className="grid grid-cols-[1fr_auto_44px_44px] gap-2 border-b border-border px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+        className="grid grid-cols-[1fr_auto] gap-2 border-b border-border px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         <span role="columnheader">Shipment</span>
         <span role="columnheader" className="text-right">Pay</span>
-        <span role="columnheader" className="text-center">POD</span>
-        <span role="columnheader" className="text-center">RC</span>
       </div>
 
       {trips.map((trip) => {
@@ -142,10 +153,9 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
           <div
             key={trip.id}
             role="row"
-            className={`grid grid-cols-[1fr_auto_44px_44px] items-center gap-2 border-b border-border/60 px-3 py-2.5 ${
-              held ? 'bg-amber-50/60' : ''
-            }`}
+            className={`border-b border-border/60 px-3 py-2.5 ${held ? 'bg-amber-50/60' : ''}`}
           >
+            <div className="grid grid-cols-[1fr_auto] items-start gap-2">
             <div role="cell" className="min-w-0">
               <p className="truncate font-semibold text-card-foreground">{shipment}</p>
               <p className="truncate text-xs text-muted-foreground">
@@ -168,8 +178,10 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
             >
               {money(trip.amount)}
             </span>
+            </div>
 
-            <span role="cell" className="flex justify-center">
+            {/* The paperwork, on its own line with room to say what each one is. */}
+            <div role="cell" className="mt-2 flex flex-wrap items-center gap-2">
               <DocCell
                 present={podIn}
                 required
@@ -178,9 +190,6 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
                 onPress={() => send('pod', trip)}
                 onPreview={podDoc ? () => setOpen({ doc: podDoc, kind: 'POD', shipment }) : undefined}
               />
-            </span>
-
-            <span role="cell" className="flex justify-center">
               <DocCell
                 present={!!f?.rateconPresent}
                 required={false}
@@ -189,7 +198,7 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
                 onPress={() => send('ratecon', trip)}
                 onPreview={rcDoc ? () => setOpen({ doc: rcDoc, kind: 'RATECON', shipment }) : undefined}
               />
-            </span>
+            </div>
           </div>
         )
       })}

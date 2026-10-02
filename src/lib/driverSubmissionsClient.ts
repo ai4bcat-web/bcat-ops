@@ -86,7 +86,7 @@ export const DRIVER_DOC_MIME_TYPES = [
   'image/webp',
 ] as const
 
-export const DRIVER_DOC_ACCEPT = '.pdf,.jpg,.jpeg,.png,.webp'
+export const DRIVER_DOC_ACCEPT = 'image/*,application/pdf'
 export const DRIVER_DOC_MAX_BYTES = 15 * 1024 * 1024 // 15 MB
 export const DRIVER_DOC_MAX_PAGES = 12
 
@@ -113,10 +113,17 @@ function contentTypeForFile(file: File): string {
   return 'image/jpeg'
 }
 
+/**
+ * Any image, or a PDF. Staff upload the same photographs drivers do — including the HEIC
+ * a phone produces — and naming four formats only refused them.
+ */
 export function isDriverDocFile(file: File): boolean {
-  const accepted = (DRIVER_DOC_MIME_TYPES as readonly string[]).includes(file.type)
-  const acceptedExt = /\.(pdf|jpe?g|png|webp)$/i.test(file.name)
-  return (accepted || acceptedExt) && file.size > 0 && file.size <= DRIVER_DOC_MAX_BYTES
+  const type = (file.type || '').toLowerCase()
+  const accepted =
+    type.startsWith('image/') ||
+    type === 'application/pdf' ||
+    /\.(pdf|jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif)$/i.test(file.name)
+  return accepted && file.size > 0 && file.size <= DRIVER_DOC_MAX_BYTES
 }
 
 export function driverDocValidationError(files: File[]): string | null {
@@ -124,7 +131,7 @@ export function driverDocValidationError(files: File[]): string | null {
   if (files.length > DRIVER_DOC_MAX_PAGES) return `At most ${DRIVER_DOC_MAX_PAGES} pages per upload.`
   for (const file of files) {
     if (!isDriverDocFile(file)) {
-      return `${file.name} is not an accepted image/PDF or exceeds ${DRIVER_DOC_MAX_BYTES / 1024 / 1024} MB.`
+      return `${file.name} is not an image or a PDF, or is over ${DRIVER_DOC_MAX_BYTES / 1024 / 1024} MB.`
     }
   }
   return null

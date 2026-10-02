@@ -687,7 +687,7 @@ describe('driver-app-api handler', () => {
       expect(JSON.parse(res.body).error).toContain('size invalid')
     })
 
-    it('rejects a wrong content type', async () => {
+    it('rejects something that is neither an image nor a PDF', async () => {
       const res = await handler(
         baseEvent('/submissions', 'POST', {
           body: {
@@ -696,7 +696,33 @@ describe('driver-app-api handler', () => {
         }),
       )
       expect(res.statusCode).toBe(400)
-      expect(JSON.parse(res.body).error).toContain('unsupported content type')
+      expect(JSON.parse(res.body).error).toContain('not an image or a PDF')
+    })
+
+    it('takes the HEIC an iPhone actually produces', async () => {
+      /*
+       * The list used to name four formats, so a photo from any recent iPhone was refused
+       * by the upload it had just been allowed to start. The cleanup pipeline decides for
+       * itself what it can improve and keeps the original when it cannot, so there was
+       * nothing here for that list to protect.
+       */
+      const res = await handler(
+        baseEvent('/submissions', 'POST', {
+          body: {
+            pages: [{ fileName: 'IMG_4312.HEIC', contentType: 'image/heic', byteSize: 2048 }],
+          },
+        }),
+      )
+      expect(res.statusCode).toBe(200)
+    })
+
+    it('takes a file an Android file manager handed over with no type at all', async () => {
+      const res = await handler(
+        baseEvent('/submissions', 'POST', {
+          body: { pages: [{ fileName: 'pod.jpg', contentType: 'application/octet-stream', byteSize: 2048 }] },
+        }),
+      )
+      expect(res.statusCode).toBe(200)
     })
 
     it('creates a submission and returns presigned PUTs scoped to the driver', async () => {

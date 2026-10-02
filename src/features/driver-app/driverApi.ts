@@ -29,20 +29,27 @@ export const DRIVER_USER_POOL_CLIENT_ID: string =
 
 export const MAX_SCAN_PAGES = 12
 /*
- * What the file picker offers. HEIC and HEIF are here because an iPhone's Files app hands
- * back whatever is on disk regardless, and leaving them out only meant the picker greyed
- * out the driver's own photos while still letting the same file through another route.
- * prepareFile sends anything it cannot downscale as it came.
+ * What the file picker offers: any image, plus PDF.
+ *
+ * It used to name four formats, which on an iPhone greyed out the driver's own camera roll
+ * — photos there are HEIC — while the Files app handed the same file through anyway. A
+ * driver should never be told their photo of a signed POD is the wrong kind of photo.
+ *
+ * Anything an image is, we take. prepareFile downscales what the browser can decode and
+ * sends the rest as it came, and the server cleans PODs after the fact.
  */
-export const SCAN_ACCEPTED_TYPES = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'image/heif',
-  'application/pdf',
-]
-export const SCAN_ACCEPTED_TYPES_STRING = SCAN_ACCEPTED_TYPES.join(',')
+export const SCAN_ACCEPT_ATTRIBUTE = 'image/*,application/pdf'
+
+/** True for a file this app will carry: any image, or a PDF. */
+export function isAcceptedScanFile(contentType: string, fileName = ''): boolean {
+  const type = (contentType || '').toLowerCase()
+  if (type.startsWith('image/')) return true
+  if (type === 'application/pdf') return true
+  // A file picked from some Android file managers arrives with no type at all.
+  return /\.(pdf|jpe?g|png|webp|gif|bmp|tiff?|heic|heif|avif)$/i.test(fileName)
+}
+
+export const SCAN_ACCEPTED_TYPES_STRING = SCAN_ACCEPT_ATTRIBUTE
 
 export class DriverApiError extends Error {
   status: number

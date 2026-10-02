@@ -53,15 +53,15 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
    * a document, landed back on this screen, and nothing had saved. prepareFile falls back
    * to the original bytes now; this only has to keep the pages it gets.
    */
-  const addPages = useCallback(async (files: FileList | null) => {
-    if (!files || files.length === 0) return
+  const addPages = useCallback(async (files: File[]) => {
+    if (files.length === 0) return
     const remaining = MAX_SCAN_PAGES - pages.length
     if (remaining <= 0) {
       toast.error(`You can send up to ${MAX_SCAN_PAGES} pages.`)
       return
     }
 
-    const toAdd = Array.from(files).slice(0, remaining)
+    const toAdd = files.slice(0, remaining)
     setBusy(true)
     try {
       const settled = await Promise.allSettled(toAdd.map((file) => prepareFile(file)))
@@ -84,10 +84,19 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
     }
   }, [pages.length])
 
-  // The value is cleared so picking the same file twice in a row still fires onChange.
+  /*
+   * Take the files OUT of the input before clearing it.
+   *
+   * `input.files` is a live FileList bound to the element, not a snapshot. Setting
+   * `value = ''` — which is what makes picking the same file twice fire onChange again —
+   * empties that list too, so the reference captured a line earlier was already empty by
+   * the time anything read it. Every pick added nothing, and Done stayed grey.
+   *
+   * Array.from copies first, so clearing the input cannot reach what we are holding.
+   */
   const onPick = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files
+      const files = Array.from(e.target.files ?? [])
       e.target.value = ''
       await addPages(files)
     },
