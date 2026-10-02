@@ -2,12 +2,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { act } from 'react'
-import { listFactoringItems, updateFactoringItem, deleteFactoringItem } from '@/lib/apiClient'
+import { listFactoringItems, deleteFactoringItem } from '@/lib/apiClient'
 import { useFactoringItems } from './useFactoringItems'
 import type { FactoringItem } from '@/types'
 
 vi.mock('@/lib/apiClient', () => ({
   listFactoringItems: vi.fn(),
+  // Still mocked: the hook must not reach for it, and a missing export would hide that.
   updateFactoringItem: vi.fn(),
   deleteFactoringItem: vi.fn(),
 }))
@@ -61,120 +62,29 @@ describe('useFactoringItems', () => {
     expect(result.current.items).toEqual([])
   })
 
-  it('keeps a pending item optimistic and reverts on failure', async () => {
-    const initial = item()
-    vi.mocked(listFactoringItems).mockResolvedValue([initial])
-    vi.mocked(updateFactoringItem).mockRejectedValue(new Error('Network error'))
-
+  /**
+   * There is no status setter, on purpose.
+   *
+   * A factoring row's status is a fact about the invoice, not a label somebody applies. It
+   * has exactly three causes: the intake creates the row as NEED_TO_FACTOR, submitting to
+   * OTR sets PENDING_WITH_OTR as part of creating the invoice, and the status sync sets
+   * FACTORED when OTR's board says Paid.
+   *
+   * The optimistic-update machinery that used to live here existed only to make a dropdown
+   * feel quick — a dropdown that let a row read "Pending with OTR" having never been
+   * submitted, or "Factored" against money nobody had been paid.
+   */
+  it('offers no way to set a status by hand', async () => {
+    vi.mocked(listFactoringItems).mockResolvedValue([item()])
     const { result } = renderHook(() => useFactoringItems())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    await expect(
-      act(async () => result.current.updateStatus(initial.id, 'PENDING_WITH_OTR')),
-    ).rejects.toThrow('Network error')
-
-    expect(result.current.items[0].status).toBe('NEED_TO_FACTOR')
-    expect(result.current.pendingIds.has(initial.id)).toBe(false)
+    expect('updateStatus' in result.current).toBe(false)
+    expect(Object.keys(result.current)).toEqual(
+      expect.arrayContaining(['items', 'loading', 'error', 'pendingIds', 'refresh', 'removeItem']),
+    )
   })
 
-  it('does not overwrite a pending status during a background poll', async () => {
-    const initial = item()
-    const serverUpdated = item({ status: 'FACTORED' })
-    vi.mocked(listFactoringItems)
-      .mockResolvedValueOnce([initial])
-      .mockResolvedValueOnce([serverUpdated])
-
-    const { result } = renderHook(() => useFactoringItems())
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    // Start a mutation but don't let it finish before the poll fires.
-    let resolveUpdate: (value: FactoringItem) => void
-    const updatePromise = new Promise<FactoringItem>((resolve) => {
-      resolveUpdate = resolve
-    })
-    vi.mocked(updateFactoringItem).mockReturnValue(updatePromise)
-
-    act(() => {
-      void result.current.updateStatus(initial.id, 'PENDING_WITH_OTR')
-    })
-
-    expect(result.current.items[0].status).toBe('PENDING_WITH_OTR')
-    expect(result.current.pendingIds.has(initial.id)).toBe(true)
-
-    // Poll returns the old server status while the mutation is still pending.
-    act(() => vi.advanceTimersByTime(30_000))
-    await waitFor(() => expect(listFactoringItems).toHaveBeenCalledTimes(2))
-
-    // The optimistic value must survive the poll.
-    expect(result.current.items[0].status).toBe('PENDING_WITH_OTR')
-
-    // Once the mutation resolves, the server value takes over.
-    act(() => resolveUpdate(item({ status: 'PENDING_WITH_OTR' })))
-    await waitFor(() => expect(result.current.pendingIds.has(initial.id)).toBe(false))
-    expect(result.current.items[0].status).toBe('PENDING_WITH_OTR')
-  })
-
-  it('ignores stale poll results after a confirmed status update', async () => {
-    const initial = item({ status: 'NEED_TO_FACTOR', updatedAt: '2026-09-23T10:00:00Z' })
-    vi.mocked(listFactoringItems).mockResolvedValue([initial])
-    const updated = item({ status: 'PENDING_WITH_OTR', updatedAt: '2026-09-23T11:00:00Z' })
-    vi.mocked(updateFactoringItem).mockResolvedValue(updated)
-
-    const { result } = renderHook(() => useFactoringItems())
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    await act(async () => {
-      await result.current.updateStatus(initial.id, 'PENDING_WITH_OTR')
-    })
-    await waitFor(() => expect(result.current.items[0].status).toBe('PENDING_WITH_OTR'))
-    expect(result.current.items[0].updatedAt).toBe('2026-09-23T11:00:00Z')
-
-    // A later poll returns the pre-mutation snapshot.
-    vi.mocked(listFactoringItems).mockResolvedValue([initial])
-    await act(async () => {
-      await result.current.refresh()
-    })
-
-    expect(result.current.items[0].status).toBe('PENDING_WITH_OTR')
-  })
-
-  it('preserves newly arrived rows while another item is pending', async () => {
-    const initial = item()
-    const newRow = item({
-      id: 'PRO-002',
-      proNumber: 'PRO-002',
-      subject: 'Invoice for PRO #PRO-002',
-      status: 'NEED_TO_FACTOR',
-    })
-    vi.mocked(listFactoringItems)
-      .mockResolvedValueOnce([initial])
-      .mockResolvedValueOnce([initial, newRow])
-
-    const { result } = renderHook(() => useFactoringItems())
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    let resolveUpdate: (value: FactoringItem) => void
-    const updatePromise = new Promise<FactoringItem>((resolve) => {
-      resolveUpdate = resolve
-    })
-    vi.mocked(updateFactoringItem).mockReturnValue(updatePromise)
-
-    act(() => {
-      void result.current.updateStatus(initial.id, 'PENDING_WITH_OTR')
-    })
-
-    act(() => vi.advanceTimersByTime(30_000))
-    // Wait for the refreshed STATE, not for the call. A second call having been made says
-    // nothing about its promise having resolved and committed, so asserting on the count
-    // and then reading items raced — reliably alone, intermittently under load.
-    await waitFor(() => expect(result.current.items).toHaveLength(2))
-    expect(listFactoringItems).toHaveBeenCalledTimes(2)
-    expect(result.current.items.find((i) => i.id === initial.id)?.status).toBe('PENDING_WITH_OTR')
-    expect(result.current.items.find((i) => i.id === newRow.id)?.proNumber).toBe('PRO-002')
-
-    act(() => resolveUpdate(item({ status: 'PENDING_WITH_OTR' })))
-    await waitFor(() => expect(result.current.pendingIds.has(initial.id)).toBe(false))
-  })
 
   it('surfaces fetch errors without clearing existing items', async () => {
     vi.mocked(listFactoringItems)

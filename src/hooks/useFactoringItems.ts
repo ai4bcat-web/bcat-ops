@@ -1,8 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { listFactoringItems, updateFactoringItem, deleteFactoringItem } from '@/lib/apiClient'
-import type { FactoringItem, FactoringItemStatus } from '@/types'
+import { listFactoringItems, deleteFactoringItem } from '@/lib/apiClient'
+import type { FactoringItem } from '@/types'
 
 const POLL_MS = 30_000
+
+/*
+ * There is deliberately no setter for `status` here.
+ *
+ * A factoring row's status is a fact about the invoice, not a label somebody applies, and
+ * it has exactly three causes: the intake creates the row as NEED_TO_FACTOR, submitting to
+ * OTR sets PENDING_WITH_OTR as part of creating the invoice, and the status sync sets
+ * FACTORED when OTR's own board says Paid. The queue used to carry a dropdown, which meant
+ * a row could read "Pending with OTR" having never been submitted, or "Factored" against
+ * money nobody had been paid — on the page people use to answer those exact questions.
+ */
 
 export interface UseFactoringItemsResult {
   items: FactoringItem[]
@@ -10,7 +21,6 @@ export interface UseFactoringItemsResult {
   error: string | null
   pendingIds: Set<string>
   refresh: () => void
-  updateStatus: (id: string, status: FactoringItemStatus) => Promise<FactoringItem>
   removeItem: (id: string) => Promise<void>
 }
 
@@ -20,7 +30,6 @@ export function useFactoringItems(): UseFactoringItemsResult {
   const [error, setError] = useState<string | null>(null)
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set())
   const pendingIdsRef = useRef<Set<string>>(new Set())
-  const snapshotRef = useRef<Map<string, FactoringItem>>(new Map())
   const deletedAtRef = useRef<Map<string, string>>(new Map())
 
   const syncPending = useCallback((next: Set<string>) => {
@@ -88,42 +97,6 @@ export function useFactoringItems(): UseFactoringItemsResult {
     }
   }, [load])
 
-  const updateStatus = useCallback(async (id: string, status: FactoringItemStatus) => {
-    const prev = items.find((i) => i.id === id)
-    if (!prev) throw new Error('Item not found')
-    if (prev.status === status) return prev
-
-    snapshotRef.current.set(id, prev)
-    syncPending(new Set(pendingIdsRef.current).add(id))
-    setItems((all) => all.map((i) => (i.id === id ? { ...i, status } : i)))
-
-    try {
-      const updated = await updateFactoringItem(id, { status })
-      setItems((all) => all.map((i) => (i.id === id ? updated : i)))
-      snapshotRef.current.delete(id)
-      syncPending((() => {
-        const next = new Set(pendingIdsRef.current)
-        next.delete(id)
-        return next
-      })())
-      return updated
-    } catch (err) {
-      // Save failed — revert to the previous server-known value so the UI
-      // doesn't display a status that didn't persist.
-      const snapshot = snapshotRef.current.get(id)
-      if (snapshot) {
-        setItems((all) => all.map((i) => (i.id === id ? snapshot : i)))
-      }
-      snapshotRef.current.delete(id)
-      syncPending((() => {
-        const next = new Set(pendingIdsRef.current)
-        next.delete(id)
-        return next
-      })())
-      throw err
-    }
-  }, [items, syncPending])
-
   const removeItem = useCallback(async (id: string) => {
     const target = items.find((i) => i.id === id)
     if (!target) throw new Error('Item not found')
@@ -149,5 +122,5 @@ export function useFactoringItems(): UseFactoringItemsResult {
     }
   }, [items, syncPending])
 
-  return { items, loading, error, pendingIds, refresh: load, updateStatus, removeItem }
+  return { items, loading, error, pendingIds, refresh: load, removeItem }
 }

@@ -7,13 +7,6 @@ import { Input } from '@/components/ui/input'
 import { OtrPanel } from './OtrPanel'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useAppStore } from '@/store/useAppStore'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useAuth } from '@/hooks/useAuth'
 import { canDeleteFactoringItem } from '@/lib/auth/admin'
@@ -42,8 +35,6 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  */
 const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'ALL', 'FACTORED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
-
-const STATUS_ORDER: FactoringItemStatus[] = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED']
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -276,42 +267,53 @@ function CustomerCell({ item }: { item: FactoringItem }) {
   )
 }
 
-function StatusSelect({
-  item,
-  disabled,
-  onChange,
-}: {
-  item: FactoringItem
-  disabled: boolean
-  onChange: (id: string, status: FactoringItemStatus) => void
-}) {
+/**
+ * Where a row stands. Reported, never chosen.
+ *
+ * This was a dropdown, which made the status a label somebody applied rather than a fact
+ * about the invoice. A row could read "Pending with OTR" having never been submitted, or
+ * "Factored" on money nobody had been paid — and the queue is the thing people use to
+ * answer exactly those questions.
+ *
+ * Each value now has one cause and no other:
+ *   Need to factor    — the resting state, until Submit to OTR is pressed
+ *   Pending with OTR  — set by the submit, which is also what creates the invoice
+ *   Factored          — set when OTR's own board says Paid
+ */
+const STATUS_CAUSE: Record<FactoringItemStatus, string> = {
+  NEED_TO_FACTOR: 'Not submitted yet. Press Submit to OTR on the row to send it.',
+  PENDING_WITH_OTR: 'Submitted to OTR. This clears when their board says Paid.',
+  FACTORED: 'OTR has paid this invoice.',
+}
+
+const STATUS_TONE: Record<FactoringItemStatus, { bg: string; fg: string; border: string }> = {
+  NEED_TO_FACTOR: { bg: '#fef3c7', fg: '#b45309', border: '#fcd34d' },
+  PENDING_WITH_OTR: { bg: '#dbeafe', fg: '#1d4ed8', border: '#93c5fd' },
+  FACTORED: { bg: '#dcfce7', fg: '#15803d', border: '#86efac' },
+}
+
+function StatusBadge({ item }: { item: FactoringItem }) {
+  const tone = STATUS_TONE[item.status]
   return (
-    <Select
-      value={item.status}
-      disabled={disabled}
-      onValueChange={(value) => onChange(item.id, value as FactoringItemStatus)}
+    <span
+      title={STATUS_CAUSE[item.status]}
+      aria-label={`Status for PRO ${item.proNumber}: ${FACTORING_STATUS_LABEL[item.status]}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center',
+        padding: '3px 10px', borderRadius: 999,
+        fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+        background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`,
+      }}
     >
-      <SelectTrigger
-        className="h-8 w-[170px] text-xs font-medium"
-        aria-label={`Status for PRO ${item.proNumber}`}
-      >
-        <SelectValue placeholder="Set status" />
-      </SelectTrigger>
-      <SelectContent>
-        {STATUS_ORDER.map((status) => (
-          <SelectItem key={status} value={status} className="text-xs">
-            {FACTORING_STATUS_LABEL[status]}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+      {FACTORING_STATUS_LABEL[item.status]}
+    </span>
   )
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export function FactoringPage() {
-  const { items, loading, error, pendingIds, refresh, updateStatus, removeItem } = useFactoringItems()
+  const { items, loading, error, pendingIds, refresh, removeItem } = useFactoringItems()
   const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
@@ -349,15 +351,6 @@ export function FactoringPage() {
       .filter((item) => matchesSearch(item, search))
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search])
-
-  const handleStatusChange = useCallback(async (id: string, status: FactoringItemStatus) => {
-    try {
-      await updateStatus(id, status)
-      toast.success(`Status updated to ${FACTORING_STATUS_LABEL[status]}`)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update status')
-    }
-  }, [updateStatus])
 
   const handleDelete = useCallback(async (item: FactoringItem) => {
     if (!window.confirm(
@@ -607,11 +600,7 @@ export function FactoringPage() {
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <StatusSelect
-                            item={item}
-                            disabled={pendingIds.has(item.id)}
-                            onChange={handleStatusChange}
-                          />
+                          <StatusBadge item={item} />
                           {pendingIds.has(item.id) && (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           )}
