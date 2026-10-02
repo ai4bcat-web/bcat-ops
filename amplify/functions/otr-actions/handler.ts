@@ -478,30 +478,6 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         return ok({ customerId: customer.id, mcNumber: mc, readiness })
       }
 
-      /*
-       * What does OTR actually expose?
-       *
-       * Four endpoints are in use here because four are what we were given. Listing the
-       * invoices already on their portal, and updating one, need endpoints nobody has seen
-       * documented — and guessing at them one fifteen-minute deploy at a time is a bad way
-       * to find out. This asks, read-only, and reports verbatim.
-       */
-      case 'probe': {
-        const paths = Array.isArray(input.paths)
-          ? (input.paths as unknown[]).map(String).filter((p) => p.startsWith('/')).slice(0, 25)
-          : []
-        if (!paths.length) return fail('probe needs a list of paths, each starting with /')
-        const client = otr()
-        const results = []
-        for (const path of paths) {
-          const result = await client.probe(path)
-          console.log('[otr-actions] probe', JSON.stringify(result))
-          results.push(result)
-        }
-        console.log('[otr-actions] probe run by', actor)
-        return ok({ results })
-      }
-
       /** Ask OTR whether the broker is approved. Never submits. */
       case 'brokerCheck': {
         const item = await getFactoringItem(String(input.id))
