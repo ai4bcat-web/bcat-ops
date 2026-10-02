@@ -72,7 +72,16 @@ export function PodDownloadBtn({
            * "Failed to fetch", which names neither the cause nor the fix. One extra call
            * on a button somebody presses occasionally is a cheap way to never see it.
            */
-          const assets = await getPodAssets(podId)
+          let assets
+          try {
+            assets = await getPodAssets(podId)
+          } catch (err) {
+            // Named, because the other half of this handler also fetches. "Failed to
+            // fetch" with no subject sent us looking at S3 for a problem that was here.
+            throw new Error(
+              `Could not get a link for this POD: ${err instanceof Error ? err.message : String(err)}`,
+            )
+          }
           const url = variant === 'enhanced' ? assets.enhancedUrl : assets.originalUrl
           if (!url) {
             toast.error(

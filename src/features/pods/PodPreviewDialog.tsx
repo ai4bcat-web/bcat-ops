@@ -59,7 +59,14 @@ export function PodPreviewDialog({ doc, onClose }: { doc: PodDocument; onClose: 
        * neither the cause nor the fix. A dialog left open while someone reads the POD is
        * exactly how that happens.
        */
-      const fresh = await getPodAssets(doc.id)
+      let fresh
+      try {
+        fresh = await getPodAssets(doc.id)
+      } catch (err) {
+        throw new Error(
+          `Could not get a link for this POD: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
       const url = want === 'enhanced' ? fresh.enhancedUrl : fresh.originalUrl
       if (!url) {
         toast.error(

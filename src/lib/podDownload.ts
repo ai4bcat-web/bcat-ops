@@ -29,12 +29,43 @@ export function pdfFileName(baseName: string): string {
 }
 
 /**
+ * Open the file directly, letting the browser fetch it.
+ *
+ * The fallback when reading the bytes ourselves fails. A navigation is not an XHR: no CORS
+ * preflight, no fetch wrapper, nothing an extension or a network policy blocks the way it
+ * blocks a cross-origin fetch. The trade is that an image arrives as an image rather than
+ * wrapped in a PDF — which beats "Failed to fetch" and no file at all.
+ */
+function openDirectly(url: string): void {
+  const a = document.createElement('a')
+  a.href = url
+  a.target = '_blank'
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+/**
  * Fetch and save as a PDF. Throws on a bad response so the caller can show a toast
  * rather than appear to do nothing.
+ *
+ * `fetch` can fail for reasons that have nothing to do with the file: a browser extension,
+ * a corporate proxy, a captive network. Those surface as the bare word "Failed to fetch",
+ * which names neither cause nor fix and reads exactly like a broken button. So a failure to
+ * READ the bytes falls back to handing the URL to the browser, and anything else says which
+ * step gave up.
  */
 export async function downloadPodAsPdf(url: string, baseName: string): Promise<void> {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Server returned ${res.status}`)
+  let res: Response
+  try {
+    res = await fetch(url)
+  } catch {
+    // Could not even reach it from script. The browser can still fetch it itself.
+    openDirectly(url)
+    return
+  }
+  if (!res.ok) throw new Error(`The file store returned ${res.status}`)
   const blob = await res.blob()
   const contentType = blob.type || ''
 
@@ -50,10 +81,14 @@ export async function downloadPodAsPdf(url: string, baseName: string): Promise<v
     return
   }
 
-  const combined = await pagesToPdf(
-    [{ fileName: baseName || 'POD', contentType, blob }],
-    'POD',
-  )
+  // Wrapping the image in a PDF is a nicety, not the job. If pdf-lib cannot embed this
+  // particular JPEG, the file itself still has to reach the person who asked for it.
+  let combined: Awaited<ReturnType<typeof pagesToPdf>> = null
+  try {
+    combined = await pagesToPdf([{ fileName: baseName || 'POD', contentType, blob }], 'POD')
+  } catch {
+    combined = null
+  }
   if (!combined) {
     saveBlob(blob, baseName || 'POD')
     return

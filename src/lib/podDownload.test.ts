@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
 import { downloadPodAsPdf, pdfFileName } from './podDownload'
@@ -81,5 +82,32 @@ describe('downloadPodAsPdf', () => {
     mockFetch(png(), false, 403)
     await expect(downloadPodAsPdf('https://s3.test/x.jpg', 'POD.jpg')).rejects.toThrow('403')
     expect(saveBlob).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * "Failed to fetch" is what a browser says when a cross-origin fetch is stopped before it
+ * starts — an extension, a proxy, a captive network. It names neither the cause nor the
+ * fix, and it reads exactly like a broken button. The file is reachable; only our script's
+ * attempt to read it was blocked.
+ */
+describe('when fetch itself is blocked', () => {
+  it('hands the URL to the browser instead of failing', async () => {
+    const click = vi.fn()
+    const anchor = { href: '', target: '', rel: '', click, remove: vi.fn() } as unknown as HTMLAnchorElement
+    vi.spyOn(document, 'createElement').mockReturnValueOnce(anchor)
+    vi.spyOn(document.body, 'appendChild').mockImplementationOnce((n) => n)
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    await expect(downloadPodAsPdf('https://s3.test/enhanced.pdf?sig=x', 'POD-1')).resolves.toBeUndefined()
+    expect(anchor.href).toBe('https://s3.test/enhanced.pdf?sig=x')
+    expect(click).toHaveBeenCalled()
+  })
+
+  it('still reports a real HTTP failure, which a person can act on', async () => {
+    // An expired signature or a missing object is a different problem and must not be
+    // silently turned into a new tab.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 403 })))
+    await expect(downloadPodAsPdf('https://s3.test/x.pdf', 'POD-1')).rejects.toThrow(/returned 403/)
   })
 })
