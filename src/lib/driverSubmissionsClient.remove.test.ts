@@ -16,13 +16,14 @@ const graphql = vi.hoisted(() => vi.fn())
 const uploadData = vi.hoisted(() => vi.fn())
 const enhanceDriverDoc = vi.hoisted(() => vi.fn())
 const finalizeDriverDocs = vi.hoisted(() => vi.fn())
+const queueDriverDocScan = vi.hoisted(() => vi.fn())
 
 vi.mock('aws-amplify/data', () => ({ generateClient: () => ({ graphql }) }))
 vi.mock('aws-amplify/storage', () => ({
   uploadData: (...a: unknown[]) => { uploadData(...a); return { result: Promise.resolve() } },
   getUrl: vi.fn(),
 }))
-vi.mock('./podsClient', () => ({ enhanceDriverDoc, finalizeDriverDocs }))
+vi.mock('./podsClient', () => ({ enhanceDriverDoc, finalizeDriverDocs, queueDriverDocScan }))
 
 const { removeDriverDocs, replaceDriverDocs } = await import('./driverSubmissionsClient')
 
@@ -68,6 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   enhanceDriverDoc.mockResolvedValue(undefined)
   finalizeDriverDocs.mockResolvedValue(undefined)
+  queueDriverDocScan.mockResolvedValue(undefined)
 })
 
 describe('removeDriverDocs', () => {
@@ -125,7 +127,7 @@ describe('replaceDriverDocs', () => {
     expect(created).toBeGreaterThan(deleted)
   })
 
-  it('cleans the new page and rebuilds the one document', async () => {
+  it('queues the cleanup for the new page rather than waiting on it', async () => {
     listReturns([{ id: 'p1', kind: 'POD' }])
     await replaceDriverDocs({
       submissionId: 'sub-1',
@@ -134,8 +136,7 @@ describe('replaceDriverDocs', () => {
       files: [new File(['x'], 'new.jpg', { type: 'image/jpeg' })],
       submittedByEmail: 'ryne@bcatcorp.com',
     })
-    expect(enhanceDriverDoc).toHaveBeenCalledWith('new-doc')
-    expect(finalizeDriverDocs).toHaveBeenCalledWith('sub-1', 'POD')
+    expect(queueDriverDocScan).toHaveBeenCalledWith('sub-1', 'POD')
   })
 
   it('rejects a file type the pipeline cannot take, before anything is removed', async () => {

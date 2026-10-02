@@ -979,8 +979,15 @@ async function appendPendingUploads(
  * A POD photographed at a dock needs deskewing, cropping and the lighting flattened at
  * least as much as one texted in, and that pipeline is heavy — tesseract and jimp — so it
  * stays in the Lambda that already carries it rather than being bundled into the driver
- * API. Invoked as an Event so a driver's upload never waits on it, and every failure is
- * swallowed: the pages are saved and the original is the copy we keep.
+ * API.
+ *
+ * ONE Event invocation, never awaited. The old version awaited a cleanup call per page and
+ * then the merge, so a driver stood at a dock watching a spinner for the length of the
+ * whole pipeline having already done their part. Nothing downstream needs the cleaned copy
+ * to exist yet — every reader falls back to the original until it does — so the upload
+ * returns as soon as the pages are stored.
+ *
+ * Every failure is swallowed: the pages are saved and the original is the copy we keep.
  */
 async function requestScanCleanup(
   docs: DriverSubmissionDocRow[],
@@ -990,35 +997,21 @@ async function requestScanCleanup(
   if (!POD_FUNCTION_NAME || docs.length === 0) return
   const lambda = new LambdaClient({})
 
-  async function call(action: string, input: Record<string, unknown>, sync: boolean): Promise<void> {
-    try {
-      await lambda.send(
-        new InvokeCommand({
-          FunctionName: POD_FUNCTION_NAME,
-          // Cleaning is fire-and-forget; the merge has to wait for it, so it is awaited.
-          InvocationType: sync ? 'RequestResponse' : 'Event',
-          Payload: Buffer.from(
-            JSON.stringify({
-              arguments: { action, input: JSON.stringify(input) },
-              // A system call: no human identity to present, and no email to invent.
-              identity: { claims: { bcatSystemCaller: true }, username: 'driver-app-api' },
-            }),
-          ),
-        }),
-      )
-    } catch (err) {
-      console.error('[driver-app-api] scan step failed', {
-        action,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    }
+  try {
+    await lambda.send(
+      new InvokeCommand({
+        FunctionName: POD_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({ action: 'scanDriverDocs', submissionId, kind })),
+      }),
+    )
+  } catch (err) {
+    console.error('[driver-app-api] could not queue the scan cleanup', {
+      submissionId,
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    })
   }
-
-  // Clean every page first — the cleanup only works on images — then merge the results into
-  // the one PDF everything downstream reads. Merging first is what left every upload
-  // reporting ORIGINAL_ONLY.
-  await Promise.all(docs.map((doc) => call('enhanceDriverDoc', { id: doc.id }, true)))
-  await call('finalizeDriverDocs', { submissionId, kind }, true)
 }
 
 async function persistDocs(
@@ -1039,6 +1032,10 @@ async function persistDocs(
     byteSize: p.byteSize,
     pageNumber: i + 1,
     uploadedAt: now,
+    // PENDING from the moment it is stored. The cleanup is queued rather than awaited, so
+    // without this a page sits with no status at all and every screen has to guess whether
+    // it is waiting on something or simply never going to be cleaned.
+    scanStatus: 'PENDING',
     createdAt: now,
     updatedAt: now,
   }))

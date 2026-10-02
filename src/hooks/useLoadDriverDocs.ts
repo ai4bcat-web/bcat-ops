@@ -38,6 +38,8 @@ export interface LoadDriverDoc extends DriverSubmissionDocRecord {
   enhanced: boolean
   /** How many pages the document carries. 1 for a loose page awaiting its merge. */
   pageCount: number
+  /** True while the cleanup is still running on at least one page of this document. */
+  cleaning: boolean
 }
 
 export interface LoadDriverDocs {
@@ -124,6 +126,7 @@ const docs = useMemo<LoadDriverDoc[]>(
               url: urls[key] ?? null,
               enhanced: pages.some((d) => d.scanStatus === 'READY'),
               pageCount: pages.length,
+              cleaning: pages.some((d) => d.scanStatus === 'PENDING'),
             })
           }
           // Only fall back to individual pages while the merge has not produced one yet.
@@ -140,6 +143,7 @@ const docs = useMemo<LoadDriverDoc[]>(
                 url: urls[key] ?? null,
                 enhanced: key !== d.s3Key,
                 pageCount: 1,
+                cleaning: d.scanStatus === 'PENDING',
               }
             })
           return [...combined, ...loose]
@@ -151,6 +155,23 @@ const docs = useMemo<LoadDriverDoc[]>(
         ),
     [mine, urls],
   )
+
+  /*
+   * While a page is still being cleaned, look again.
+   *
+   * The cleanup is queued rather than awaited now — an upload returns as soon as the pages
+   * are stored — so the finished PDF appears a few seconds after the screen first draws it.
+   * Without this the office would see "cleaning up" until they reloaded the page, which is
+   * the kind of thing that teaches people to distrust the status.
+   *
+   * Stops as soon as nothing is pending, so a settled load costs nothing.
+   */
+  const cleaning = docs.some((d) => d.cleaning)
+  useEffect(() => {
+    if (!cleaning) return
+    const timer = setTimeout(() => setReloadKey((n) => n + 1), 4000)
+    return () => clearTimeout(timer)
+  }, [cleaning, reloadKey])
 
   // Presign only what is actually on screen, once each.
   useEffect(() => {

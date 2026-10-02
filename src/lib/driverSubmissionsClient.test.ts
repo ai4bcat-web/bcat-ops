@@ -11,6 +11,7 @@ vi.mock('aws-amplify/data', () => ({
 vi.mock('./podsClient', () => ({
   enhanceDriverDoc: vi.fn().mockResolvedValue(undefined),
   finalizeDriverDocs: vi.fn().mockResolvedValue(undefined),
+  queueDriverDocScan: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('aws-amplify/storage', () => ({
@@ -464,13 +465,17 @@ describe('driverSubmissionsClient', () => {
 })
 
 describe('cleaning and merging on upload', () => {
-  it('cleans every page first, then merges them into one PDF', async () => {
-    // Order is the whole bug this fixes. Merging first handed the enhancer a PDF, which it
-    // correctly reported as having nothing to clean, so every upload came back unenhanced.
-    const { enhanceDriverDoc, finalizeDriverDocs } = await import('./podsClient')
-    const order: string[] = []
-    vi.mocked(enhanceDriverDoc).mockImplementation(async () => { order.push('clean') })
-    vi.mocked(finalizeDriverDocs).mockImplementation(async () => { order.push('merge') })
+  it('hands the cleanup off instead of making the upload wait for it', async () => {
+    /*
+     * One queue call, and the upload returns. Cleaning is OCR plus image work and the merge
+     * waits on all of it, so running it inline meant whoever uploaded watched a spinner for
+     * the length of the pipeline having already done their part.
+     *
+     * Nothing is lost by not waiting: the pages are in S3 and readable, and every reader
+     * falls back to the original until the cleaned copy exists. The clean-then-merge order
+     * still matters and is now enforced inside the Lambda — see scanDriverDocsAction.
+     */
+    const { enhanceDriverDoc, finalizeDriverDocs, queueDriverDocScan } = await import('./podsClient')
 
     setupUpload()
     setupGraphql([], [
@@ -488,10 +493,10 @@ describe('cleaning and merging on upload', () => {
       submittedByEmail: 'staff@bcatcorp.com',
     })
 
-    expect(vi.mocked(enhanceDriverDoc)).toHaveBeenCalledTimes(2)
-    expect(vi.mocked(finalizeDriverDocs)).toHaveBeenCalledWith('sub-9', 'POD')
-    // Both cleans complete before the single merge.
-    expect(order).toEqual(['clean', 'clean', 'merge'])
+    expect(vi.mocked(queueDriverDocScan)).toHaveBeenCalledExactlyOnceWith('sub-9', 'POD')
+    // Never per page, and never the merge, from the browser.
+    expect(vi.mocked(enhanceDriverDoc)).not.toHaveBeenCalled()
+    expect(vi.mocked(finalizeDriverDocs)).not.toHaveBeenCalled()
   })
 
   it('uploads each page in its own format rather than pre-combining them', async () => {

@@ -5,7 +5,7 @@
 // the PWA.
 
 import { generateClient } from 'aws-amplify/data'
-import { enhanceDriverDoc, finalizeDriverDocs } from './podsClient'
+import { queueDriverDocScan } from './podsClient'
 import { uploadData, getUrl } from 'aws-amplify/storage'
 
 const client = generateClient()
@@ -358,15 +358,15 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
       byteSize: file.size,
       pageNumber,
       uploadedAt: now,
+      scanStatus: 'PENDING',
     })
     docs.push(doc)
   }
 
-  // Clean each page, then merge them into the one PDF everything downstream uses. Awaited
-  // so the finished document exists by the time the caller refreshes, but never allowed to
-  // fail the upload: the pages are stored and readable on their own.
-  await Promise.all(docs.map((d) => enhanceDriverDoc(d.id)))
-  await finalizeDriverDocs(submission.id, input.kind)
+  // Queued, not awaited. Cleaning is OCR plus image work and the merge waits on all of it,
+  // which is seconds of spinner for someone who has already done their part. The pages are
+  // stored and readable now; the finished PDF appears shortly after.
+  await queueDriverDocScan(submission.id, input.kind)
 
   return { ...submission, docs }
 }
@@ -410,14 +410,14 @@ export async function staffAddPodToSubmission(
       byteSize: file.size,
       pageNumber,
       uploadedAt: now,
+      scanStatus: 'PENDING',
     })
     docs.push(doc)
   }
 
-  // Same two steps when pages are added to a submission that already had some: clean the
-  // new ones, then rebuild the combined PDF so it includes them.
-  await Promise.all(docs.map((d) => enhanceDriverDoc(d.id)))
-  await finalizeDriverDocs(submission.id, 'POD')
+  // Same handoff when pages are added to a submission that already had some: the queued
+  // pass cleans whatever has not been cleaned and rebuilds the combined PDF around it.
+  await queueDriverDocScan(submission.id, 'POD')
 
   return { ...submission, docs }
 }
@@ -525,9 +525,11 @@ async function addDocsToSubmission(
         byteSize: file.size,
         pageNumber,
         uploadedAt: now,
+        // PENDING from the moment it is stored: the cleanup is queued, not awaited, and a
+        // page with no status at all leaves every screen guessing whether it is waiting.
+        scanStatus: 'PENDING',
       }),
     )
   }
-  await Promise.all(docs.map((d) => enhanceDriverDoc(d.id)))
-  await finalizeDriverDocs(submissionId, kind)
+  await queueDriverDocScan(submissionId, kind)
 }

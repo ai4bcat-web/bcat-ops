@@ -123,7 +123,18 @@ interface BackfillPageEvent {
   startKey?: Record<string, unknown> | null
 }
 
-type SelfInvokeEvent = ProcessPodInvokeEvent | BackfillScheduleEvent | BackfillPageEvent
+/** Clean every page of one submission, then merge them. Queued, never awaited by a caller. */
+interface ScanDriverDocsEvent {
+  action: 'scanDriverDocs'
+  submissionId: string
+  kind: 'POD' | 'RATECON'
+}
+
+type SelfInvokeEvent =
+  | ProcessPodInvokeEvent
+  | BackfillScheduleEvent
+  | BackfillPageEvent
+  | ScanDriverDocsEvent
 
 type LambdaEvent = AppSyncEvent | SelfInvokeEvent
 
@@ -141,6 +152,7 @@ type ManageAction =
   | 'setSenderMapping'
   | 'enhanceDriverDoc'
   | 'finalizeDriverDocs'
+  | 'queueDriverDocScan'
 
 interface Caller {
   email: string
@@ -244,7 +256,11 @@ export async function getCallerEmail(identity: AppSyncIdentity): Promise<string>
  * additionally only ever clean up a document that already exists — they expose nothing and
  * delete nothing.
  */
-const SYSTEM_CALLABLE: ReadonlySet<ManageAction> = new Set(['enhanceDriverDoc', 'finalizeDriverDocs'])
+const SYSTEM_CALLABLE: ReadonlySet<ManageAction> = new Set([
+  'enhanceDriverDoc',
+  'finalizeDriverDocs',
+  'queueDriverDocScan',
+])
 
 function isSystemCall(action: ManageAction, identity: AppSyncIdentity): boolean {
   const claims = (identity.claims ?? {}) as Record<string, unknown>
@@ -1596,6 +1612,91 @@ async function enhancePdfPhotos(bytes: Buffer): Promise<Buffer | null> {
   return rebuildPdfWithPhotos(bytes, replacements)
 }
 
+/**
+ * Hand the cleanup off and get out of the way.
+ *
+ * Cleaning a page is OCR plus image work and takes seconds; merging waits on all of them.
+ * Doing that inside the upload meant a driver stood at a dock watching a spinner for the
+ * length of the whole pipeline, having already done their part. The pages are in S3 and
+ * readable the moment they land — nothing downstream needs the cleaned copy to exist yet,
+ * because every reader falls back to the original until it does.
+ *
+ * So the upload returns as soon as the pages are stored, and this queues the rest. The
+ * caller gets an immediate answer; the work happens on its own Lambda invocation.
+ */
+export async function queueDriverDocScanAction(
+  input: Record<string, unknown>,
+): Promise<{ queued: boolean; submissionId: string; kind: string; error?: string }> {
+  const submissionId = assertString(input.submissionId, 'submissionId', 200)
+  const kind = assertString(input.kind, 'kind', 20).toUpperCase()
+  if (kind !== 'POD' && kind !== 'RATECON') {
+    return { queued: false, submissionId, kind, error: "kind must be 'POD' or 'RATECON'" }
+  }
+  try {
+    await lambda.send(
+      new InvokeCommand({
+        FunctionName: POD_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({ action: 'scanDriverDocs', submissionId, kind })),
+      }),
+    )
+    return { queued: true, submissionId, kind }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Never thrown: the pages are stored and the originals stand. A cleanup that could not
+    // be queued is a document that stays as it arrived, not a lost upload.
+    console.error('[pod-actions] could not queue the scan', { submissionId, kind, message })
+    return { queued: false, submissionId, kind, error: message }
+  }
+}
+
+/**
+ * The work itself: clean every page of one submission, then merge them into the one PDF.
+ *
+ * Cleaning first and merging after is the order that matters — the cleanup only reads
+ * images, so merging first is what left every upload reporting ORIGINAL_ONLY.
+ */
+export async function scanDriverDocsAction(
+  submissionId: string,
+  kind: 'POD' | 'RATECON',
+  /*
+   * The three steps, injectable.
+   *
+   * Only so the sequencing can be tested on its own: the real steps carry tesseract, jimp
+   * and the whole AWS surface with them, and a test that has to stand all that up to check
+   * that cleaning happens before merging will not be written, which is how the ordering bug
+   * got in the first time.
+   */
+  steps: {
+    listDocs?: (table: string) => Promise<Array<Record<string, unknown>>>
+    clean?: (input: Record<string, unknown>) => Promise<unknown>
+    merge?: (input: Record<string, unknown>) => Promise<unknown>
+  } = {},
+): Promise<void> {
+  if (!DRIVER_SUBMISSION_DOC_TABLE) return
+  const listDocs = steps.listDocs ?? scanTable
+  const clean = steps.clean ?? enhanceDriverDocAction
+  const merge = steps.merge ?? finalizeDriverDocsAction
+  try {
+    const docs = (await listDocs(DRIVER_SUBMISSION_DOC_TABLE)).filter(
+      (d) => String(d.submissionId) === submissionId && String(d.kind) === kind,
+    )
+    if (!docs.length) return
+    for (const doc of docs) {
+      await clean({ id: String(doc.id) })
+    }
+    await merge({ submissionId, kind })
+  } catch (err) {
+    // Swallowed on purpose: this runs with nobody waiting on it, and the originals are
+    // intact. A failure here must never look like a lost document to anyone.
+    console.error('[pod-actions] queued scan failed', {
+      submissionId,
+      kind,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export async function enhanceDriverDocAction(
   input: Record<string, unknown>,
 ): Promise<{ id: string; scanStatus: string; enhancedKey?: string; error?: string }> {
@@ -1915,7 +2016,10 @@ export async function setSenderMappingAction(
 function isSelfInvoke(event: LambdaEvent): event is SelfInvokeEvent {
   return (
     'action' in event &&
-    (event.action === 'processPodId' || event.action === 'backfillSchedule' || event.action === 'backfillPage')
+    (event.action === 'processPodId' ||
+      event.action === 'backfillSchedule' ||
+      event.action === 'backfillPage' ||
+      event.action === 'scanDriverDocs')
   )
 }
 
@@ -1936,6 +2040,10 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
     }
     if (event.action === 'backfillPage') {
       await backfillPageAction(event)
+      return { ok: true }
+    }
+    if (event.action === 'scanDriverDocs') {
+      await scanDriverDocsAction(event.submissionId, event.kind)
       return { ok: true }
     }
     return { ok: false }
@@ -1977,6 +2085,9 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
     case 'finalizeDriverDocs':
       await authorize(action, appSyncEvent.identity)
       return finalizeDriverDocsAction(input)
+    case 'queueDriverDocScan':
+      await authorize(action, appSyncEvent.identity)
+      return queueDriverDocScanAction(input)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

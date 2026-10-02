@@ -82,6 +82,27 @@ export async function finalizeDriverDocs(submissionId: string, kind: 'POD' | 'RA
   }
 }
 
+/**
+ * Hand the whole cleanup off and return.
+ *
+ * Cleaning a page is OCR plus image work and takes seconds; merging waits on all of them.
+ * Running that inside the upload meant whoever uploaded sat watching a spinner for the
+ * length of the pipeline, having already done their part. This call only queues it: the
+ * Lambda invokes itself and answers straight away.
+ *
+ * Nothing is lost by not waiting. The pages are in S3 and readable the moment they land,
+ * and every reader falls back to the original until a cleaned copy exists.
+ */
+export async function queueDriverDocScan(submissionId: string, kind: 'POD' | 'RATECON'): Promise<void> {
+  try {
+    await podAction<{ queued: boolean }>('queueDriverDocScan', { submissionId, kind })
+  } catch (err) {
+    // A cleanup that could not be queued is a document that stays as it arrived, which is
+    // exactly what used to happen to every PDF. Never a failed upload.
+    console.warn('[pods] could not queue the scan cleanup', submissionId, err)
+  }
+}
+
 export async function assignPod(args: { id: string; loadId: string | null; expectedVersion: number }): Promise<{ item: PodDocument }> {
   return podAction<{ item: PodDocument }>('assign', args)
 }

@@ -40,7 +40,10 @@ function when(iso: string): string {
 function describe(doc: LoadDriverDoc): string {
   const bits: string[] = []
   if (doc.pageCount > 1) bits.push(`${doc.pageCount} pages`)
-  if (doc.enhanced) bits.push('cleaned scan')
+  // The cleanup runs after the upload returns, so this is a normal first state rather than
+  // a problem. The document is already readable; it just is not the finished copy yet.
+  if (doc.cleaning) bits.push('cleaning up…')
+  else if (doc.enhanced) bits.push('cleaned scan')
   else if (doc.scanStatus === 'FAILED') bits.push('original only — the cleanup did not run')
   return bits.join(' · ')
 }
@@ -95,7 +98,19 @@ export function LoadDriverDocs({
                   <span className="block truncate text-xs font-medium text-foreground">{name}</span>
                   <span className="block truncate text-[11px] text-muted-foreground">
                     {doc.driverName} · {who} · {when(doc.uploadedAt)}
-                    {note && <span className={doc.enhanced ? 'text-emerald-600' : 'text-amber-700'}> · {note}</span>}
+                    {note && (
+                      <span
+                        className={
+                          doc.cleaning
+                            ? 'text-muted-foreground'
+                            : doc.enhanced
+                              ? 'text-emerald-600'
+                              : 'text-amber-700'
+                        }
+                      >
+                        {' '}· {note}
+                      </span>
+                    )}
                   </span>
                 </span>
                 {doc.url ? (
