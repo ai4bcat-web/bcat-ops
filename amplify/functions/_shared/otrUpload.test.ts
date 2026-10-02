@@ -85,7 +85,7 @@ describe('uploadDocument', () => {
     expect(form.get('InvoiceDocTypes')).toBe('1')
   })
 
-  it('sends the file byte for byte, under its own name and type', async () => {
+  it('sends the file byte for byte, under its own name', async () => {
     /*
      * The failure that started this: OTR opened 1,852,054 bytes of a 1,018,923-byte PDF —
      * what that file becomes if its bytes are decoded as UTF-8 text and re-encoded. If
@@ -94,7 +94,12 @@ describe('uploadDocument', () => {
     const { form } = await upload()
     const file = form.get('file') as File
     expect(file.name).toBe('POD-14538.pdf')
-    expect(file.type).toBe('application/pdf')
+    /*
+     * No declared type on the part, matching OTR's documented example: `--form
+     * "file=@pod.pdf"` sends application/octet-stream, not application/pdf. The extension
+     * on the name is what tells them what it is.
+     */
+    expect(file.type).toBe('')
     expect(file.size).toBe(PDF_BYTES.length)
     expect(new Uint8Array(await file.arrayBuffer())).toEqual(PDF_BYTES)
   })

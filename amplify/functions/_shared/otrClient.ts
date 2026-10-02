@@ -316,7 +316,22 @@ export class OtrClient {
      */
     const bytes = new Uint8Array(opts.file.byteLength)
     bytes.set(opts.file)
-    const blob = new Blob([bytes], { type: opts.contentType })
+
+    /*
+     * The file part carries NO declared type, which is what OTR's own example sends.
+     *
+     * `--form "file=@pod.pdf"` makes curl send the part as application/octet-stream, and
+     * that is the request their documentation says works. We were declaring
+     * application/pdf — more precise, and the only remaining difference between our
+     * request and theirs after the field order was matched.
+     *
+     * It matters because of what came back: they report opening 1,852,054 bytes of a
+     * 1,018,923-byte PDF, and this logs 1,018,923 going out. A gateway that treats a part
+     * it believes is a document as TEXT would produce exactly that expansion, so the part
+     * is now described the way their example describes it. The extension on the filename
+     * still tells them what it is.
+     */
+    const blob = new Blob([bytes])
 
     /*
      * OTR rejected a POD saying it had opened 1,852,054 bytes of a 1,018,923-byte PDF —
@@ -330,7 +345,8 @@ export class OtrClient {
       sourceBytes: opts.file.byteLength,
       sourceKind: opts.file?.constructor?.name ?? typeof opts.file,
       blobBytes: blob.size,
-      contentType: opts.contentType,
+      declaredContentType: opts.contentType,
+      partType: blob.type || '(none, as OTR\'s own example sends it)',
     })
 
     /*
