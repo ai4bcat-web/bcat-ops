@@ -313,6 +313,9 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
     // Populated once the rate-con parser is extended; absent is handled.
     rateCon: (item.rateConExtract as RateConExtract) ?? null,
     customerMcNumber: resolvedCustomer?.mcNumber as string | undefined,
+    // The broker behind the MC, for the queue's customer column. Falls back inside
+    // assembleOtrInvoice to the load's own customer string, marked unconfirmed.
+    customerName: resolvedCustomer?.name as string | undefined,
     originLocation: originLoc
       ? { city: originLoc.city as string, state: originLoc.state as string, zip: originLoc.zip as string }
       : null,

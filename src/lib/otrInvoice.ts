@@ -95,13 +95,29 @@ export interface LocationSlice {
 }
 
 /** Values a human typed on the queue row. Highest precedence. */
-export type ManualOverrides = Partial<Record<OtrRequiredField, string>>
+/**
+ * Values typed by the office, which beat every resolved source.
+ *
+ * `CustomerName` is the one key that is not an OTR required field: OTR resolves the broker
+ * from the MC and never reads a name from us. It is here because the queue shows the name
+ * to humans, and a load whose customer string names a shipper or an agent needs correcting
+ * on the row rather than on the load.
+ */
+export type ManualOverrides = Partial<Record<OtrRequiredField | 'CustomerName', string>>
 
 export interface AssembleInput {
   load: LoadSlice
   rateCon?: RateConExtract | null
   /** Broker MC from the Customer record — entered once per broker by a human. */
   customerMcNumber?: string | null
+  /**
+   * The broker's name from the directory record the MC belongs to.
+   *
+   * Never sent to OTR — they resolve the broker from the MC themselves — but the office
+   * needs it on screen, because an MC is nine digits nobody recognises and "is 14538 the
+   * AmeriFreight one?" is the question that actually gets asked about a factoring row.
+   */
+  customerName?: string | null
   originLocation?: LocationSlice | null
   destinationLocation?: LocationSlice | null
   /** Geocoded fallbacks, only consulted when everything above is blank. */
@@ -126,6 +142,15 @@ export interface OtrReadiness {
   payload: Partial<Record<OtrRequiredField, string | number>>
   /** Which source supplied each resolved field. */
   sources: Partial<Record<OtrRequiredField, OtrFieldSource>>
+  /**
+   * Who the invoice bills, for the humans. Set once an MC resolves, from the directory
+   * record that MC belongs to; the load's own customer string fills in before that, and
+   * `customerConfirmed` says which of the two you are looking at. Not part of the OTR
+   * payload and never counted as a missing field.
+   */
+  customerName?: string | null
+  /** True when the name came from the broker record the MC identifies. */
+  customerConfirmed?: boolean
   /** Required fields that resolved to nothing. */
   missingFields: OtrRequiredField[]
   /** Documents OTR expects alongside the invoice. */
@@ -367,10 +392,23 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
     })
   }
 
+  /*
+   * The name follows the MC. Before one is entered the load's own customer string is the
+   * best guess we have, and it is shown as a guess: a tender can name a shipper or an
+   * agent rather than the broker whose MC we will actually factor against.
+   */
+  const typedName = clean(m.CustomerName)
+  const confirmed =
+    typedName !== undefined ||
+    (clean(input.customerMcNumber) !== undefined && clean(input.customerName) !== undefined)
+  const customerName = typedName ?? clean(input.customerName) ?? clean(load.customer) ?? null
+
   return {
     ready: missingFields.length === 0 && missingDocuments.length === 0,
     payload,
     sources,
+    customerName: customerName ?? null,
+    customerConfirmed: confirmed,
     missingFields,
     missingDocuments,
     warnings,

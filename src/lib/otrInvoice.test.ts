@@ -220,3 +220,52 @@ describe('assembleOtrInvoice', () => {
     expect(r.ready).toBe(false)
   })
 })
+
+/**
+ * The customer name is for humans, not for OTR — they resolve the broker from the MC and
+ * never read a name from us. It still has to be right, because it is the only thing on a
+ * factoring row that a person recognises, and a row attributed to the wrong broker is how
+ * an invoice gets factored against the wrong account.
+ */
+describe('customer name on a factoring row', () => {
+  it('is the broker on file once the MC resolved it', () => {
+    const r = assembleOtrInvoice({
+      load: { customer: 'AMERIFREIGHT SYSTEMS' },
+      customerMcNumber: '123456',
+      customerName: 'AmeriFreight Systems LLC',
+    })
+    expect(r.customerName).toBe('AmeriFreight Systems LLC')
+    expect(r.customerConfirmed).toBe(true)
+  })
+
+  it('falls back to the load, and says it is not confirmed', () => {
+    // A tender often names a shipper or an agent rather than the broker being factored,
+    // so this is a starting point for the office, not an answer.
+    const r = assembleOtrInvoice({ load: { customer: 'MILWOOD' } })
+    expect(r.customerName).toBe('MILWOOD')
+    expect(r.customerConfirmed).toBe(false)
+  })
+
+  it('is empty rather than a guess when nothing names a customer', () => {
+    const r = assembleOtrInvoice({ load: {} })
+    expect(r.customerName).toBeNull()
+    expect(r.customerConfirmed).toBe(false)
+  })
+
+  it('lets the office type over both, and counts that as confirmed', () => {
+    const r = assembleOtrInvoice({
+      load: { customer: 'MILWOOD' },
+      customerName: 'AmeriFreight Systems LLC',
+      customerMcNumber: '123456',
+      manual: { CustomerName: 'Test Broker' },
+    })
+    expect(r.customerName).toBe('Test Broker')
+    expect(r.customerConfirmed).toBe(true)
+  })
+
+  it('never becomes a required field, so it cannot block a submission', () => {
+    const r = assembleOtrInvoice({ load: {} })
+    expect(r.missingFields).not.toContain('CustomerName' as never)
+    expect(Object.keys(r.payload)).not.toContain('CustomerName')
+  })
+})

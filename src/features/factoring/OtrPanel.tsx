@@ -57,11 +57,18 @@ const FIELD_HINT: Partial<Record<OtrRequiredField, { placeholder: string; inputM
 /** Where a value came from, phrased for a human rather than a developer. */
 const SOURCE_LABEL: Record<string, string> = {
   manual: 'entered',
+  broker: 'broker on file',
   ratecon: 'rate con',
   load: 'load',
   location: 'location',
   geocode: 'geocoded',
 }
+
+/**
+ * What the panel will let someone type. The eleven OTR fields, plus the customer name —
+ * which OTR never reads from us but the office reads constantly.
+ */
+type EditableField = OtrRequiredField | 'CustomerName'
 
 interface Props {
   item: FactoringItem
@@ -183,24 +190,42 @@ export function OtrPanel({ item, onChanged }: Props) {
    * an empty value removes the override and lets the load or rate con speak again.
    * Re-assembling afterwards is what turns the typed value into a resolved field.
    */
-  const saveField = (field: OtrRequiredField, value: string) =>
+  const saveField = (field: EditableField, label: string, value: string) =>
     run(
       `field:${field}`,
       async () => {
         await setFactoringManualFields(item.id, { ...manual, [field]: value })
         await assembleInvoice(item.id)
       },
-      value.trim() ? `${OTR_FIELD_LABEL[field]} saved` : `${OTR_FIELD_LABEL[field]} cleared`,
+      value.trim() ? `${label} saved` : `${label} cleared`,
     )
 
   return (
     <div className="space-y-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg)] p-3">
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+        {/*
+          * The customer leads, because it is the field a person checks first: an MC is
+          * nine digits nobody recognises, and the name is how anyone knows whether the
+          * row is the one they are looking for. It is typeable like the rest \u2014 a tender
+          * often names a shipper or an agent rather than the broker being factored.
+          */}
+        <FieldRow
+          field="CustomerName"
+          label="Customer"
+          value={readiness.customerName ?? undefined}
+          source={manual.CustomerName ? 'manual' : readiness.customerConfirmed ? 'broker' : 'load'}
+          pro={item.proNumber}
+          busy={busy !== null}
+          saving={busy === 'field:CustomerName'}
+          editable
+          onSave={(v) => void saveField('CustomerName', 'Customer', v)}
+        />
         {OTR_REQUIRED_FIELDS.map((f) => (
           <FieldRow
             key={f}
             field={f}
+            label={OTR_FIELD_LABEL[f]}
             value={readiness.payload?.[f]}
             source={readiness.sources?.[f]}
             pro={item.proNumber}
@@ -208,7 +233,7 @@ export function OtrPanel({ item, onChanged }: Props) {
             saving={busy === `field:${f}`}
             /* Broker MC has its own control below, because it saves to the customer. */
             editable={f !== 'BrokerMC'}
-            onSave={(v) => void saveField(f, v)}
+            onSave={(v) => void saveField(f, OTR_FIELD_LABEL[f], v)}
           />
         ))}
       </div>
@@ -331,9 +356,11 @@ export function OtrPanel({ item, onChanged }: Props) {
  * actually live.
  */
 function FieldRow({
-  field, value, source, pro, busy, saving, editable, onSave,
+  field, label, value, source, pro, busy, saving, editable, onSave,
 }: {
-  field: OtrRequiredField
+  /** Any editable key, which is the eleven OTR fields plus the customer name. */
+  field: EditableField
+  label: string
   value: string | number | undefined
   source: string | undefined
   pro: string
@@ -345,7 +372,7 @@ function FieldRow({
   const typed = source === 'manual'
   const [draft, setDraft] = useState('')
   const [open, setOpen] = useState(false)
-  const hint = FIELD_HINT[field]
+  const hint = FIELD_HINT[field as OtrRequiredField]
 
   // Filling a blank: the input is simply there, no extra click to reveal it.
   const showInput = editable && (value === undefined || open)
@@ -361,16 +388,26 @@ function FieldRow({
           setDraft('')
         }}
       >
-        <span className="shrink-0 text-muted-foreground">{OTR_FIELD_LABEL[field]}</span>
+        <span className="shrink-0 text-muted-foreground">{label}</span>
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={hint?.placeholder}
           inputMode={hint?.inputMode}
           className="h-7 min-w-0 flex-1 text-xs"
-          aria-label={`${OTR_FIELD_LABEL[field]} for PRO ${pro}`}
+          aria-label={`${label} for PRO ${pro}`}
         />
-        <Button type="submit" size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={busy}>
+        {/* Named, not just "Save": several of these are open at once on a row with
+            more than one gap, and a bare "Save" is ambiguous to a screen reader and
+            to anyone automating the page. */}
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          disabled={busy}
+          aria-label={`Save ${label} for PRO ${pro}`}
+        >
           {saving ? <Loader2 className="size-3 animate-spin" /> : 'Save'}
         </Button>
       </form>
@@ -379,7 +416,7 @@ function FieldRow({
 
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <span className="text-muted-foreground">{OTR_FIELD_LABEL[field]}</span>
+      <span className="text-muted-foreground">{label}</span>
       <span className="flex min-w-0 items-baseline gap-1">
         <span className="truncate font-medium text-foreground" title={String(value)}>
           {String(value)}
@@ -394,7 +431,7 @@ function FieldRow({
             type="button"
             className="shrink-0 text-[10px] font-semibold text-[var(--ds-blue,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
             disabled={busy}
-            aria-label={`${typed ? 'Change' : 'Override'} ${OTR_FIELD_LABEL[field]} for PRO ${pro}`}
+            aria-label={`${typed ? 'Change' : 'Override'} ${label} for PRO ${pro}`}
             onClick={() => { setDraft(typed ? String(value ?? '') : ''); setOpen(true) }}
           >
             {typed ? 'change' : 'override'}

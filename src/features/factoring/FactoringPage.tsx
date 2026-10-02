@@ -114,6 +114,19 @@ function readinessOf(item: FactoringItem): OtrReadiness | null {
   return r && typeof r === 'object' ? (r as OtrReadiness) : null
 }
 
+/**
+ * Who the invoice bills.
+ *
+ * Follows the broker MC: once one is entered, the name is the directory record that MC
+ * belongs to, and that is the name OTR will resolve on their side too. Before that it is
+ * whatever the load calls the customer, shown as a guess \u2014 a tender often names a
+ * shipper or an agent rather than the broker being factored.
+ */
+function customerOf(item: FactoringItem): { name: string; confirmed: boolean } {
+  const r = readinessOf(item)
+  return { name: (r?.customerName ?? '').trim(), confirmed: !!r?.customerConfirmed }
+}
+
 /** The PO number OTR requires, once it has resolved. */
 function poOf(item: FactoringItem): string {
   const v = readinessOf(item)?.payload?.PoNumber
@@ -136,6 +149,32 @@ function matchesSearch(item: FactoringItem, query: string) {
 }
 
 // ── Status select for a row ──────────────────────────────────────────────────
+
+/** The customer column: the confirmed broker, an unconfirmed guess, or nothing yet. */
+function CustomerCell({ item }: { item: FactoringItem }) {
+  const { name, confirmed } = customerOf(item)
+  if (!name) {
+    return (
+      <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }} title="Enter the broker MC and the customer follows">
+        \u2014
+      </span>
+    )
+  }
+  return (
+    <span
+      title={confirmed ? `Broker on file for MC ${readinessOf(item)?.payload?.BrokerMC ?? ''}` : 'From the load \u2014 not yet confirmed against a broker MC'}
+      style={{
+        display: 'block', fontSize: 12.5, overflow: 'hidden',
+        textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        color: confirmed ? 'var(--ds-t1)' : 'var(--ds-t3)',
+        fontWeight: confirmed ? 600 : 400,
+        fontStyle: confirmed ? 'normal' : 'italic',
+      }}
+    >
+      {name}
+    </span>
+  )
+}
 
 function StatusSelect({
   item,
@@ -362,7 +401,7 @@ export function FactoringPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-                    {['PRO #', 'PO #', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
+                    {['PRO #', 'PO #', 'Customer', 'Fields', 'Required for OTR', 'Documents', 'Received', 'Status', ...(canDelete ? ['Actions'] : [])].map((col) => (
                       <th
                         key={col}
                         style={{
@@ -415,6 +454,9 @@ export function FactoringPage() {
                         }}>
                           {poOf(item) || 'missing'}
                         </span>
+                      </td>
+                      <td style={{ padding: '14px 16px', maxWidth: 190 }}>
+                        <CustomerCell item={item} />
                       </td>
                       {/* How close this row is to being invoiceable, as a count then the
                           individual fields. Green means resolved, red means still missing. */}
@@ -487,7 +529,7 @@ export function FactoringPage() {
                       {/* The editor, only for a row someone opened. */}
                       {expanded.has(item.id) && (
                         <tr>
-                          <td colSpan={canDelete ? 8 : 7} style={{ padding: '0 16px 14px' }}>
+                          <td colSpan={canDelete ? 9 : 8} style={{ padding: '0 16px 14px' }}>
                             <OtrPanel item={item} onChanged={refresh} />
                           </td>
                         </tr>

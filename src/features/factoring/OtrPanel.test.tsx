@@ -84,7 +84,7 @@ describe('OtrPanel', () => {
     render(<OtrPanel item={item({ otrReadiness: r, otrManualFields: { FromZip: '60601' } })} onChanged={onChanged} />)
 
     fireEvent.change(screen.getByLabelText('Destination ZIP for PRO 13364'), { target: { value: '48201' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Destination ZIP for PRO 13364' }))
 
     await waitFor(() => expect(setFactoringManualFields).toHaveBeenCalledTimes(1))
     // Existing overrides are preserved — a save is a merge, not a replacement.
@@ -104,7 +104,7 @@ describe('OtrPanel', () => {
     const input = screen.getByLabelText('Destination ZIP for PRO 13364')
     expect(input).toHaveValue('')  // an override starts empty, not pre-filled with the guess
     fireEvent.change(input, { target: { value: '48202' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save Destination ZIP for PRO 13364' }))
 
     await waitFor(() => expect(setFactoringManualFields).toHaveBeenCalledWith('13364', { ToZip: '48202' }))
   })
