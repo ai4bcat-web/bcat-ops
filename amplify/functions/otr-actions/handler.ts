@@ -725,20 +725,32 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
        * If the ASCII one lands and the other comes back with an inflated byte count, the
        * mangling is theirs and the evidence is two files instead of an argument.
        *
-       * Uploaded as OTHER (7) so a diagnostic never occupies the POD or rate-con slot.
+       * The document TYPE has to be the one under investigation. Run as OTHER (7) first,
+       * both probes came back "Object reference not set to an instance of an object" with
+       * no byte count at all — the same thing the rate confirmation (type 3) gets, and
+       * nothing like the POD's (type 1) IronPDF complaint. Types 3 and 7 fail before the
+       * file is looked at, so sending through them measures nothing about the bytes.
+       * Defaults to POD, which is the one path that reaches their PDF reader and reports
+       * the size it opened.
        */
       case 'uploadProbe': {
         const invoiceId = trim(input.invoiceId)
         if (!invoiceId) return fail('uploadProbe needs an invoiceId')
+        const docType = (Number(input.docType) || OTR_DOC_TYPE.POD) as typeof OTR_DOC_TYPE.POD
         const client = otr()
         const results: Row[] = []
 
         for (const probe of [asciiProbePdf(), highByteProbePdf()]) {
-          const sent = { fileName: probe.fileName, sentBytes: probe.bytes.length, highBytes: probe.highBytes }
+          const sent = {
+            fileName: probe.fileName,
+            docType,
+            sentBytes: probe.bytes.length,
+            highBytes: probe.highBytes,
+          }
           try {
             const r = await client.uploadDocument({
               invoiceId,
-              docType: OTR_DOC_TYPE.OTHER,
+              docType,
               fileName: probe.fileName,
               contentType: 'application/pdf',
               file: probe.bytes,
