@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { DriverAuthProvider } from './DriverAuthContext'
+import { isTokenRejection } from './tokenRejection'
 import { useDriverAuth } from './useDriverAuth'
 
 const mockSend = vi.fn()
@@ -155,5 +156,107 @@ describe('DriverAuthContext', () => {
     const signUpCalls = mockSend.mock.calls.filter((call) => call[0].Command === 'SignUp')
     expect(signUpCalls).toHaveLength(1)
     expect(signUpCalls[0][0].Username).toBe('someone@example.com')
+  })
+
+  /*
+   * Session persistence. An access token lives one hour, so a driver who opens
+   * the app the next morning ALWAYS has to refresh over the network. Before
+   * these tests, any failure of that one call wiped a refresh token that was
+   * valid for 60 days and showed the login screen.
+   */
+  describe('session persistence across launches', () => {
+    const transient = Object.assign(new Error('Network error'), { name: 'TimeoutError' })
+
+    function seedStaleSession() {
+      const expiredToken = makeIdToken({ exp: Math.floor(Date.now() / 1000) - 100 })
+      localStorage.setItem('bcat:driver:tokens', storedTokens(expiredToken, Date.now() - 1_000))
+      return expiredToken
+    }
+
+    it('keeps the driver signed in when the launch refresh fails on a bad connection', async () => {
+      seedStaleSession()
+      mockSend.mockRejectedValue(transient)
+
+      const { result } = renderHook(() => useDriverAuth(), { wrapper })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      // Let every attempt exhaust itself, then confirm we are still signed in.
+      await waitFor(
+        () => expect(mockSend.mock.calls.filter((c) => c[0].AuthFlow === 'REFRESH_TOKEN_AUTH')).toHaveLength(3),
+        { timeout: 8000 },
+      )
+
+      expect(result.current.isAuthenticated).toBe(true)
+      expect(result.current.user?.email).toBe('driver@example.com')
+      // The refresh token — the thing that actually carries the session — survives.
+      const stored = JSON.parse(localStorage.getItem('bcat:driver:tokens') ?? '{}')
+      expect(stored.refreshToken).toBe('refresh-token')
+    })
+
+    it('retries a transient refresh failure instead of giving up on the first error', async () => {
+      seedStaleSession()
+      const freshToken = makeIdToken({ exp: Math.floor(Date.now() / 1000) + 3600, email: 'refreshed@example.com' })
+      mockSend
+        .mockRejectedValueOnce(transient)
+        .mockResolvedValue({
+          AuthenticationResult: { IdToken: freshToken, AccessToken: 'new-access', ExpiresIn: 3600 },
+        })
+
+      const { result } = renderHook(() => useDriverAuth(), { wrapper })
+      await waitFor(() => expect(result.current.user?.email).toBe('refreshed@example.com'), { timeout: 5000 })
+      expect(result.current.isAuthenticated).toBe(true)
+    })
+
+    it('signs the driver out only when Cognito actually rejects the refresh token', async () => {
+      seedStaleSession()
+      mockSend.mockRejectedValue(
+        Object.assign(new Error('Refresh Token has expired.'), { name: 'NotAuthorizedException' }),
+      )
+
+      const { result } = renderHook(() => useDriverAuth(), { wrapper })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+
+      await waitFor(() => expect(result.current.isAuthenticated).toBe(false))
+      expect(localStorage.getItem('bcat:driver:tokens')).toBeNull()
+      // A rejection is final — no point retrying it.
+      const refreshCalls = mockSend.mock.calls.filter((call) => call[0].AuthFlow === 'REFRESH_TOKEN_AUTH')
+      expect(refreshCalls).toHaveLength(1)
+    })
+
+    it('recognises a rejection delivered as a wrapped __type', async () => {
+      expect(isTokenRejection({ __type: 'com.amazonaws.cognitoidp#NotAuthorizedException' })).toBe(true)
+      expect(isTokenRejection({ name: 'NotAuthorizedException' })).toBe(true)
+      expect(isTokenRejection({ name: 'TimeoutError' })).toBe(false)
+      expect(isTokenRejection(new TypeError('Failed to fetch'))).toBe(false)
+      expect(isTokenRejection(undefined)).toBe(false)
+    })
+
+    it('refreshes when the app is brought back to the foreground', async () => {
+      // Valid at launch, so nothing happens until the driver returns to a webview
+      // iOS had suspended — the point at which the proactive timer cannot be trusted.
+      const token = makeIdToken({ exp: Math.floor(Date.now() / 1000) + 3600 })
+      localStorage.setItem('bcat:driver:tokens', storedTokens(token, Date.now() + 3_600_000))
+
+      const { result } = renderHook(() => useDriverAuth(), { wrapper })
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      expect(mockSend).not.toHaveBeenCalled()
+
+      // Two hours pass while the app is backgrounded, outliving the token. The
+      // proactive timer is exactly what iOS suspension makes unreliable, so the
+      // clock moves without it ever firing.
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000)
+
+      const freshToken = makeIdToken({ exp: Math.floor(Date.now() / 1000) + 3600, email: 'resumed@example.com' })
+      mockSend.mockResolvedValue({
+        AuthenticationResult: { IdToken: freshToken, AccessToken: 'new-access', ExpiresIn: 3600 },
+      })
+
+      await act(async () => {
+        window.dispatchEvent(new Event('focus'))
+      })
+
+      await waitFor(() => expect(result.current.user?.email).toBe('resumed@example.com'))
+    })
   })
 })

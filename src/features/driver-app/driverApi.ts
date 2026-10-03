@@ -245,7 +245,10 @@ export function isImpersonating(): boolean {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!DRIVER_API_URL) throw new DriverApiError(0, 'Driver API is not configured')
   const token = await getToken()
-  if (!token) throw new DriverApiError(401, 'Your session expired. Sign in again.')
+  // A missing token now usually means we could not reach Cognito to refresh, not
+  // that the session is dead — a genuinely rejected session shows the sign-in
+  // screen instead of ever reaching here.
+  if (!token) throw new DriverApiError(401, "Couldn't verify your session. Check your connection and try again.")
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     authorization: `Bearer ${token}`,
