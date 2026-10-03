@@ -78,6 +78,38 @@ const BUCKET = process.env.BUCKET_NAME!
 const DRIVER_USER_POOL_ID = process.env.DRIVER_USER_POOL_ID!
 const DRIVER_USER_POOL_CLIENT_ID = process.env.DRIVER_USER_POOL_CLIENT_ID!
 
+/*
+ * ── Impersonation ───────────────────────────────────────────────────────────
+ *
+ * An admin can open a driver's app as that driver, so "what are they seeing?" is answered
+ * by looking rather than by asking someone on a truck to describe a screen.
+ *
+ * Three things make that safe to have at all, and none of them is optional:
+ *
+ *   - the STAFF pool is only ever consulted when the caller asks for it explicitly, by
+ *     sending this header. A staff token on an ordinary request is still rejected.
+ *   - the caller must be an admin. Being a staff member is not enough.
+ *   - it is READ ONLY. Every write is refused while impersonating, so nothing a driver
+ *     did can ever have been done by somebody else wearing their name.
+ *
+ * Every accepted impersonation is written to the audit log before the request is served.
+ */
+const IMPERSONATE_HEADER = 'x-bcat-impersonate-driver'
+const STAFF_USER_POOL_ID = process.env.STAFF_USER_POOL_ID ?? ''
+const STAFF_USER_POOL_CLIENT_ID = process.env.STAFF_USER_POOL_CLIENT_ID ?? ''
+const AUDIT_LOG_TABLE = process.env.AUDIT_LOG_TABLE_NAME ?? ''
+
+/** Who may do it. Deliberately a list, not a group: this reads another person's pay. */
+const IMPERSONATION_ADMINS = ['ryne@bcatcorp.com', 'dennis@bcatcorp.com']
+
+const staffVerifier = STAFF_USER_POOL_ID && STAFF_USER_POOL_CLIENT_ID
+  ? CognitoJwtVerifier.create({
+      userPoolId: STAFF_USER_POOL_ID,
+      tokenUse: 'id',
+      clientId: STAFF_USER_POOL_CLIENT_ID,
+    })
+  : null
+
 const verifier = CognitoJwtVerifier.create({
   userPoolId: DRIVER_USER_POOL_ID,
   tokenUse: 'id',
@@ -344,9 +376,110 @@ async function resolveDriverAndSetting(emailLower: string): Promise<{
   return { driver, setting }
 }
 
-async function loadVerifiedDriver(event: FnUrlEvent): Promise<{ driver: DriverRow; setting: DriverPaySettingRow }> {
+export interface VerifiedCaller {
+  driver: DriverRow
+  setting: DriverPaySettingRow
+  /** The admin's email when this is an impersonated read, null when it is the driver. */
+  impersonatedBy: string | null
+}
+
+/** Headers arrive with whatever casing the client sent. */
+function headerValue(headers: Record<string, string | undefined> | undefined, name: string): string {
+  if (!headers) return ''
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name) return (value ?? '').trim()
+  }
+  return ''
+}
+
+export function mayImpersonate(email: string): boolean {
+  return IMPERSONATION_ADMINS.includes(normalizeEmail(email))
+}
+
+/**
+ * A driver resolved from a STAFF token, for an admin looking at their app.
+ *
+ * Verified against the staff pool — never the driver pool — and refused for anyone not on
+ * the admin list. The driver is found by id from the header rather than by email from the
+ * token, which is the whole point and also the reason every other check here has to hold.
+ */
+async function loadImpersonatedDriver(
+  token: string,
+  driverId: string,
+): Promise<VerifiedCaller> {
+  if (!staffVerifier) throw new ApiError(403, 'Impersonation is not configured')
+
+  let claims: { email?: string; email_verified?: boolean }
+  try {
+    claims = (await staffVerifier.verify(token)) as { email?: string; email_verified?: boolean }
+  } catch (err) {
+    throw new ApiError(401, `Invalid staff token: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  const email = normalizeEmail(claims.email ?? '')
+  if (!email) throw new ApiError(401, 'Staff token missing email')
+  if (!mayImpersonate(email)) throw new ApiError(403, 'Not permitted to view a driver app')
+
+  const driver = await getItem<DriverRow>(DRIVER_TABLE, { id: driverId })
+  if (!driver || driver.active === false) throw new ApiError(404, 'Driver not found')
+
+  const settings = await scan<DriverPaySettingRow>(DRIVER_PAY_SETTING_TABLE)
+  const setting = settings.find(
+    (s) => s.driverId === driverId && s.active !== false && isEligiblePayGroup(s.payGroup),
+  )
+  if (!setting) throw new ApiError(404, 'Driver has no active pay setting')
+
+  return { driver, setting, impersonatedBy: email }
+}
+
+/**
+ * Record it. Before the request is served, and never allowed to fail it silently —
+ * an impersonation nobody can find afterwards is the thing that makes this dangerous.
+ */
+async function recordImpersonation(by: string, driver: DriverRow, path: string): Promise<void> {
+  if (!AUDIT_LOG_TABLE) {
+    console.error('[driver-app-api] IMPERSONATION WITH NO AUDIT TABLE', { by, driverId: driver.id, path })
+    return
+  }
+  const now = nowIso()
+  try {
+    await ddb.send(
+      new PutCommand({
+        TableName: AUDIT_LOG_TABLE,
+        Item: {
+          id: randomUUID(),
+          __typename: 'AuditLog',
+          entityType: 'Driver',
+          entityId: driver.id,
+          action: 'IMPERSONATE_DRIVER_APP',
+          user: by,
+          changes: JSON.stringify({ driverName: driver.name, path }),
+          createdAt: now,
+          updatedAt: now,
+        },
+      }),
+    )
+  } catch (err) {
+    // Logged loudly either way: CloudWatch is the fallback record.
+    console.error('[driver-app-api] could not write the impersonation audit row', {
+      by, driverId: driver.id, path,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+  console.log('[driver-app-api] impersonation', { by, driverId: driver.id, driverName: driver.name, path })
+}
+
+async function loadVerifiedDriver(event: FnUrlEvent): Promise<VerifiedCaller> {
   const token = extractBearer(event.headers)
   if (!token) throw new ApiError(401, 'Missing authorization')
+
+  // Only ever consulted when the caller asks for it by name.
+  const impersonating = headerValue(event.headers, IMPERSONATE_HEADER)
+  if (impersonating) {
+    const caller = await loadImpersonatedDriver(token, impersonating)
+    await recordImpersonation(caller.impersonatedBy!, caller.driver, event.rawPath ?? '')
+    return caller
+  }
+
   let claims: { email?: string; email_verified?: boolean }
   try {
     claims = (await verifier.verify(token)) as { email?: string; email_verified?: boolean }
@@ -360,7 +493,7 @@ async function loadVerifiedDriver(event: FnUrlEvent): Promise<{ driver: DriverRo
   if (!email) throw new ApiError(401, 'Token missing email')
   const resolved = await resolveDriverAndSetting(email)
   if (!resolved) throw new ApiError(401, 'Driver not found')
-  return resolved
+  return { ...resolved, impersonatedBy: null }
 }
 
 function ownerOpTripToRaw(trip: OwnerOpTrip, periodStart: string): RawAmazonTrip {
@@ -1508,8 +1641,23 @@ export const handler = async (event: FnUrlEvent) => {
       return await handleEmailIntakeCommit(event)
     }
 
-    const { driver, setting } = await loadVerifiedDriver(event)
+    const { driver, setting, impersonatedBy } = await loadVerifiedDriver(event)
     const driverId = driver.id
+
+    /*
+     * An impersonated session can look and cannot touch.
+     *
+     * This is the line that makes the whole feature safe to have. Without it an admin
+     * could upload, replace or remove a driver's POD while wearing their identity, and
+     * every record of it — the submission, the Slack-free email, the settlement — would
+     * say the driver did it. One check, in one place, covering every route rather than
+     * each one remembering.
+     */
+    if (impersonatedBy && method !== 'GET') {
+      return reply(403, {
+        error: 'You are viewing this driver app, not signed in as the driver. Changes have to be made from the staff pages.',
+      })
+    }
 
     if (method === 'GET' && path === '/me') {
       return reply(200, {

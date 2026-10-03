@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy, Smartphone } from 'lucide-react'
 import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
@@ -19,7 +20,6 @@ import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
 import { SendDriverInvite } from './SendDriverInvite'
-import { DriverViewDialog } from './DriverViewDialog'
 import { SettlementDocUpload } from './SettlementDocUpload'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
@@ -363,7 +363,6 @@ export function OwnerOperatorPayPage() {
           <StatementCard
             key={selectedRow.driver.id}
             row={selectedRow}
-            periodStart={periodStart}
             staffEmail={user?.email ?? ''}
             onRefresh={pay.refresh}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
@@ -428,10 +427,8 @@ export function OwnerOperatorPayPage() {
   )
 }
 
-function StatementCard({ row, periodStart, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
+function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
   row: OwnerOperatorPayRow
-  /** The week being shown, so the driver view is labelled with the same one. */
-  periodStart: string
   /** Recorded on any document uploaded from this card. */
   staffEmail: string
   /** Re-reads the week so an uploaded POD moves its load from held to paid. */
@@ -444,7 +441,7 @@ function StatementCard({ row, periodStart, staffEmail, onRefresh, onAddDeduction
   onExport: () => void
 }) {
   const { driver, setting, statement, oneOffs } = row
-  const [driverView, setDriverView] = useState(false)
+  const navigate = useNavigate()
   const trips = row.trips
   // Held loads stay in the table, in delivery order, so the week reads as one list.
   const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
@@ -475,8 +472,8 @@ function StatementCard({ row, periodStart, staffEmail, onRefresh, onAddDeduction
         {/* First in the row: "what is the driver seeing" is the question asked before
             anything is changed, not after. */}
         <button
-          onClick={() => setDriverView(true)}
-          title={`See ${driver.name}'s settlement the way their app shows it`}
+          onClick={() => navigate(`/driver-view/${driver.id}`)}
+          title={`Open ${driver.name}'s own app, served by the driver API — read only, and recorded`}
           style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
         >
           <Smartphone size={13} /> Driver view
@@ -722,9 +719,6 @@ function StatementCard({ row, periodStart, staffEmail, onRefresh, onAddDeduction
         </div>
       )}
 
-      {driverView && (
-        <DriverViewDialog row={row} periodStart={periodStart} onClose={() => setDriverView(false)} />
-      )}
     </div>
   )
 }

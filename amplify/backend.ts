@@ -361,6 +361,20 @@ driverApiFn.addEnvironment('FUEL_TRANSACTION_TABLE_NAME', driverApiFuelTxTable.t
 driverApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
 driverApiFn.addEnvironment('DRIVER_USER_POOL_ID', driverPool.userPoolId)
 driverApiFn.addEnvironment('DRIVER_USER_POOL_CLIENT_ID', driverPoolClient.userPoolClientId)
+/*
+ * The STAFF pool, so an admin can open a driver's app as that driver.
+ *
+ * Two pools reach this Lambda and they are not interchangeable: a driver's own token
+ * resolves them by email, while a staff token is only ever accepted alongside an explicit
+ * impersonation header, from an admin, for reads. See loadVerifiedDriver.
+ */
+driverApiFn.addEnvironment('STAFF_USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+driverApiFn.addEnvironment(
+  'STAFF_USER_POOL_CLIENT_ID',
+  backend.auth.resources.userPoolClient.userPoolClientId,
+)
+driverApiFn.addEnvironment('AUDIT_LOG_TABLE_NAME', backend.data.resources.tables['AuditLog'].tableName)
+backend.data.resources.tables['AuditLog'].grantWriteData(driverApiFn)
 // Plain env vars (not secrets) so a missing value never blocks the deploy.
 driverApiFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? 'C0B4YJXLYM8')
 driverApiFn.addEnvironment('LOADS_EMAIL_TO', process.env.LOADS_EMAIL_TO ?? 'ivanloads@bcatcorp.com')

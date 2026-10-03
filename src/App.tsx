@@ -24,6 +24,7 @@ import { TimeOffPage } from '@/features/time-off/TimeOffPage'
 import { DriverPayPage } from '@/features/driver-pay/DriverPayPage'
 import { BoxTruckPayPage } from '@/features/driver-pay-box-trucks/BoxTruckPayPage'
 import { OwnerOperatorPayPage } from '@/features/owner-operator-pay/OwnerOperatorPayPage'
+import { DriverAppViewPage } from '@/features/owner-operator-pay/DriverAppViewPage'
 import { MaintenancePage } from '@/features/maintenance/MaintenancePage'
 import { InvoicesPage } from '@/features/invoices/InvoicesPage'
 import { UsersPage } from '@/features/users/UsersPage'
@@ -160,6 +161,10 @@ export default function App() {
               <Route path="/driver-pay" element={<RequirePage page="driverPay"><DriverPayPage /></RequirePage>} />
               <Route path="/driver-pay-box-trucks" element={<RequirePage page="driverPayBoxTrucks"><BoxTruckPayPage /></RequirePage>} />
               <Route path="/owner-operator-pay" element={<RequirePage page="ownerOperatorPay"><OwnerOperatorPayPage /></RequirePage>} />
+              {/* A driver's own app, served by the driver API, for an admin to look at.
+                  Behind the same page gate as the settlements it is reached from; the API
+                  enforces the admin check, the read-only rule and the audit row. */}
+              <Route path="/driver-view/:driverId" element={<RequirePage page="ownerOperatorPay"><DriverAppViewPage /></RequirePage>} />
               <Route path="/disputes" element={<RequirePage page="disputes"><DisputesPage /></RequirePage>} />
               <Route path="/files" element={<RequirePage page="files"><FilesPage /></RequirePage>} />
               <Route path="/settings" element={<RequirePage page="settings"><SettingsPage /></RequirePage>} />

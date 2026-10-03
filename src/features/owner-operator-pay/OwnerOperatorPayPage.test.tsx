@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { OwnerOperatorPayPage } from './OwnerOperatorPayPage'
@@ -145,7 +146,7 @@ afterEach(() => {
 describe('OwnerOperatorPayPage', () => {
   it('disables the previous-week control on the first owner-operator period', () => {
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow()] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
     expect(screen.getByRole('button', { name: /previous week/i })).toBeDisabled()
     expect(screen.getByText(weekLabelLong(OWNER_OP_FIRST_PERIOD))).toBeInTheDocument()
   })
@@ -173,7 +174,7 @@ describe('OwnerOperatorPayPage', () => {
       }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getAllByText('Test Driver').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('TMS-123')).toBeInTheDocument()
@@ -194,7 +195,7 @@ describe('OwnerOperatorPayPage', () => {
       }),
     ]
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getAllByText(DRIVER_PORTAL_URL)).toHaveLength(1)
     expect(screen.getAllByRole('button', { name: /copy the driver app url/i })).toHaveLength(1)
@@ -212,7 +213,7 @@ describe('OwnerOperatorPayPage', () => {
       setting: baseSetting({ email: 'pay@example.com' }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getByText('pay@example.com')).toBeInTheDocument()
     expect(screen.getByText(/sets their own password/i)).toBeInTheDocument()
@@ -224,7 +225,7 @@ describe('OwnerOperatorPayPage', () => {
       setting: baseSetting({ email: null }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getByText(/No email on file/)).toHaveTextContent('Roy Workman cannot sign in to the driver app')
     expect(screen.queryByText(/sets their own password/i)).not.toBeInTheDocument()
@@ -232,7 +233,7 @@ describe('OwnerOperatorPayPage', () => {
 
   it('lists the factoring fee on a week with no loads and on a week with loads', () => {
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow()] }))
-    const { unmount } = render(<OwnerOperatorPayPage />)
+    const { unmount } = render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
     expect(screen.getByText(FACTORING_FEE_LABEL).parentElement).toHaveTextContent('($0.00)')
     unmount()
 
@@ -244,7 +245,7 @@ describe('OwnerOperatorPayPage', () => {
       statement: baseStatement({ gross: 500, driverAmount: 211.2, factoringFee: 10, totalDeductions: 10, checkAmount: 211.2 }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [withTrips] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
     expect(screen.getByText(FACTORING_FEE_LABEL).parentElement).toHaveTextContent('($10.00)')
   })
 
@@ -256,7 +257,7 @@ describe('OwnerOperatorPayPage', () => {
     URL.createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:test' }
     URL.revokeObjectURL = () => {}
     try {
-      render(<OwnerOperatorPayPage />)
+      render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
       fireEvent.click(screen.getByRole('button', { name: /CSV/i }))
       expect(await blobs[0].text()).toContain('"Factoring fee (2%)","0"')
     } finally {
@@ -268,7 +269,7 @@ describe('OwnerOperatorPayPage', () => {
   it('adds weekly mileage at miles × cost per mile and carries it into the card total', async () => {
     const addDeduction = vi.fn().mockResolvedValue(undefined)
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow()], addDeduction }))
-    const { rerender } = render(<OwnerOperatorPayPage />)
+    const { rerender } = render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     fireEvent.change(screen.getByLabelText('Mileage miles'), { target: { value: '2494' } })
     fireEvent.change(screen.getByLabelText('Mileage cost per mile'), { target: { value: '0.086' } })
@@ -293,7 +294,7 @@ describe('OwnerOperatorPayPage', () => {
       statement: baseStatement({ totalDeductions: 214.48, checkAmount: -214.48 }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [settled], addDeduction }))
-    rerender(<OwnerOperatorPayPage />)
+    rerender(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
     expect(screen.getByText('Lease mileage — 2494 mi @ $0.086/mi')).toBeInTheDocument()
     expect(screen.getByText('Total deductions').parentElement).toHaveTextContent('($214.48)')
   })
@@ -304,7 +305,7 @@ describe('OwnerOperatorPayPage', () => {
       setting: baseSetting({ email: 'pay@example.com' }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.queryByText('pay@example.com')).not.toBeInTheDocument()
     expect(screen.getAllByText('driver@example.com').length).toBeGreaterThanOrEqual(1)
@@ -338,7 +339,7 @@ describe('OwnerOperatorPayPage', () => {
       ],
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getAllByText('Broker MC').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('Origin ZIP').length).toBeGreaterThanOrEqual(2)
@@ -373,7 +374,7 @@ describe('OwnerOperatorPayPage', () => {
     URL.createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:test' }
     URL.revokeObjectURL = () => {}
     try {
-      render(<OwnerOperatorPayPage />)
+      render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
       fireEvent.click(screen.getByRole('button', { name: /CSV/i }))
       const text = await blobs[0].text()
       for (const header of [
@@ -397,7 +398,7 @@ describe('OwnerOperatorPayPage', () => {
       trips: [trip({ readiness: readiness({ payload: { InvoiceNo: '13364', PoNumber: 'PO-7' } }) })],
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     const headers = screen.getAllByRole('columnheader').map((th) => th.textContent)
     expect(headers.slice(0, 3)).toEqual(['PRO #', 'PO #', 'Load ID'])
@@ -413,7 +414,7 @@ describe('OwnerOperatorPayPage', () => {
     // someone would factor against a number OTR has never heard of.
     const row = baseRow({ trips: [trip({ readiness: readiness({ payload: { PoNumber: 'PO-7' } }) })] })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     const cells = screen.getByText('PO-7').closest('tr')!.querySelectorAll('td')
     // The field label stands in for the value, which is how every other missing
@@ -431,7 +432,7 @@ describe('OwnerOperatorPayPage', () => {
       statement: baseStatement({ gross: 0, driverAmount: 0 }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getByText(/Held — POD required/)).toBeInTheDocument()
     expect(screen.getByText(/excludes \$900\.00 held for POD/)).toBeInTheDocument()
@@ -444,7 +445,7 @@ describe('OwnerOperatorPayPage', () => {
       statement: baseStatement({ gross: 900, driverAmount: 378 }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.queryByText(/Held — POD required/)).not.toBeInTheDocument()
     expect(screen.queryByText(/held for POD/)).not.toBeInTheDocument()
@@ -457,7 +458,7 @@ describe('OwnerOperatorPayPage', () => {
       })],
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     // The row where someone discovers the document is missing is the row that should
     // let them fix it.
@@ -473,7 +474,7 @@ describe('OwnerOperatorPayPage', () => {
       statement: baseStatement({ gross: 900, driverAmount: 378 }),
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row], podsKnown: false }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     expect(screen.getByText(/PODs could not be checked/)).toBeInTheDocument()
     expect(screen.queryByText(/Held — POD required/)).not.toBeInTheDocument()
@@ -493,7 +494,7 @@ describe('OwnerOperatorPayPage', () => {
     URL.createObjectURL = (b: Blob) => { blobs.push(b); return 'blob:test' }
     URL.revokeObjectURL = () => {}
     try {
-      render(<OwnerOperatorPayPage />)
+      render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
       fireEvent.click(screen.getByRole('button', { name: /CSV/i }))
       const text = await blobs[0].text()
       expect(text).toContain('On this check')
@@ -514,7 +515,7 @@ describe('OwnerOperatorPayPage', () => {
       })],
     })
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
-    render(<OwnerOperatorPayPage />)
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
     const pod = screen.getByRole('button', { name: 'Upload POD for 13364' })
     const rc = screen.getByRole('button', { name: 'Upload Rate con for 13364' })

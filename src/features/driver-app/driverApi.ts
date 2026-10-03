@@ -223,6 +223,24 @@ export function setDriverTokenSupplier(supplier: TokenSupplier): void {
   getToken = supplier
 }
 
+/**
+ * The driver an admin is viewing as, or null for an ordinary driver session.
+ *
+ * Set from the staff app, which then supplies a STAFF token instead of a driver one. The
+ * API only consults the staff pool when this header is present, only accepts an admin, and
+ * refuses every write — so this is a request to LOOK, and the server treats it as one
+ * regardless of what the client believes.
+ */
+let impersonatingDriverId: string | null = null
+
+export function setDriverImpersonation(driverId: string | null): void {
+  impersonatingDriverId = driverId
+}
+
+export function isImpersonating(): boolean {
+  return impersonatingDriverId !== null
+}
+
 /** Every driver route is authenticated — there is deliberately no unauthenticated path. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!DRIVER_API_URL) throw new DriverApiError(0, 'Driver API is not configured')
@@ -232,6 +250,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     'content-type': 'application/json',
     authorization: `Bearer ${token}`,
   }
+  if (impersonatingDriverId) headers['x-bcat-impersonate-driver'] = impersonatingDriverId
   const res = await fetch(`${DRIVER_API_URL.replace(/\/$/, '')}${path}`, {
     ...init,
     headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
