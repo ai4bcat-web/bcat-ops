@@ -36,7 +36,7 @@ import {
   OTR_STAGING_BASE,
   type OtrInvoicePayload,
 } from '../_shared/otrClient'
-import { asciiProbePdf, highByteProbePdf } from '../_shared/asciiProbePdf'
+import { asciiProbePdf, highByteProbePdf, jpegProbe } from '../_shared/asciiProbePdf'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
@@ -740,7 +740,9 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         const client = otr()
         const results: Row[] = []
 
-        for (const probe of [asciiProbePdf(), highByteProbePdf()]) {
+        // A JPEG too: their docs accept images, and every failure so far has been a PDF —
+        // the one that got furthest died inside IronPDF, which is their PDF reader.
+        for (const probe of [asciiProbePdf(), highByteProbePdf(), jpegProbe()]) {
           const sent = {
             fileName: probe.fileName,
             docType,
@@ -752,7 +754,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
               invoiceId,
               docType,
               fileName: probe.fileName,
-              contentType: 'application/pdf',
+              contentType: probe.fileName.endsWith('.jpg') ? 'image/jpeg' : 'application/pdf',
               file: probe.bytes,
             })
             results.push({ ...sent, ok: true, message: r.message })

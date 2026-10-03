@@ -49,8 +49,9 @@ async function upload() {
     file: PDF_BYTES,
   })
   const { url, init } = captured! as { url: string; init: RequestInit }
-  const form = init.body as FormData
-  return { url, init, form }
+  // The body is a finished Buffer now, not a FormData — see buildMultipart for why.
+  const body = Buffer.from(init.body as unknown as Uint8Array)
+  return { url, init, body, text: body.toString('latin1') }
 }
 
 describe('uploadDocument', () => {
@@ -60,61 +61,71 @@ describe('uploadDocument', () => {
     expect(init.method).toBe('POST')
   })
 
-  it('sends the three documented headers and no Content-Type of its own', async () => {
-    // Setting Content-Type by hand would suppress the multipart boundary fetch generates,
-    // and the body would arrive unparseable.
-    const { init } = await upload()
+  it('sends the documented headers, its own boundary, and a Content-Length', async () => {
+    /*
+     * The Content-Length is the point of building the body by hand. Handing fetch a
+     * FormData streams it chunked with no length, and every document we ever sent OTR came
+     * back rejected in ways that look like a parser reading a body it could not frame.
+     */
+    const { init, body } = await upload()
     const headers = init.headers as Record<string, string>
     expect(headers['Ocp-Apim-Subscription-Key']).toBe('sub-key')
     expect(headers.Authorization).toBe('Bearer t0ken')
     expect(headers['X-Invoice-Doc-Type']).toBe('1')
-    expect(Object.keys(headers).map((k) => k.toLowerCase())).not.toContain('content-type')
+    expect(headers['Content-Type']).toMatch(/^multipart\/form-data; boundary=----BCATFormBoundary/)
+    expect(headers['Content-Length']).toBe(String(body.byteLength))
+  })
+
+  it('declares the exact boundary the body actually uses', async () => {
+    const { init, text } = await upload()
+    const boundary = (init.headers as Record<string, string>)['Content-Type'].split('boundary=')[1]
+    expect(text.startsWith(`--${boundary}\r\n`)).toBe(true)
+    expect(text.endsWith(`--${boundary}--\r\n`)).toBe(true)
   })
 
   it('sends exactly the documented fields, in the documented order', async () => {
     // Order matters to a streaming multipart parser that wants the invoice id before it
     // starts consuming the file. OTR's own example is file, DocumentType, invoiceid,
     // SendEmail, InvoiceDocTypes.
-    const { form } = await upload()
-    expect([...form.keys()]).toEqual([
-      'file', 'DocumentType', 'invoiceid', 'SendEmail', 'InvoiceDocTypes',
-    ])
-    expect(form.get('DocumentType')).toBe('invoice-file-upload')
-    expect(form.get('invoiceid')).toBe('16222565')
-    expect(form.get('SendEmail')).toBe('false')
-    expect(form.get('InvoiceDocTypes')).toBe('1')
+    const { text } = await upload()
+    // `form-data; name=` only — a bare /name="/ also matches filename=".
+    const names = [...text.matchAll(/form-data; name="([^"]+)"/g)].map((m) => m[1])
+    expect(names).toEqual(['file', 'DocumentType', 'invoiceid', 'SendEmail', 'InvoiceDocTypes'])
+    expect(text).toContain('name="DocumentType"\r\n\r\ninvoice-file-upload\r\n')
+    expect(text).toContain('name="invoiceid"\r\n\r\n16222565\r\n')
+    expect(text).toContain('name="SendEmail"\r\n\r\nfalse\r\n')
+    expect(text).toContain('name="InvoiceDocTypes"\r\n\r\n1\r\n')
   })
 
-  it('sends the file byte for byte, under its own name', async () => {
+  it('sends the file byte for byte, under its own name and with no declared type', async () => {
     /*
      * The failure that started this: OTR opened 1,852,054 bytes of a 1,018,923-byte PDF —
      * what that file becomes if its bytes are decoded as UTF-8 text and re-encoded. If
-     * anything in this function ever stringifies the body again, this is what catches it.
+     * anything in this function ever puts the body through a string again, this catches it.
+     *
+     * And no Content-Type on the part, matching their documented example: `--form
+     * "file=@pod.pdf"` sends no type, and the extension carries the format.
      */
-    const { form } = await upload()
-    const file = form.get('file') as File
-    expect(file.name).toBe('POD-14538.pdf')
-    /*
-     * No declared type on the part, matching OTR's documented example: `--form
-     * "file=@pod.pdf"` sends application/octet-stream, not application/pdf. The extension
-     * on the name is what tells them what it is.
-     */
-    expect(file.type).toBe('')
-    expect(file.size).toBe(PDF_BYTES.length)
-    expect(new Uint8Array(await file.arrayBuffer())).toEqual(PDF_BYTES)
+    const { body, text } = await upload()
+    expect(text).toContain('name="file"; filename="POD-14538.pdf"')
+    expect(text).not.toContain('Content-Type: application/pdf')
+    const at = body.indexOf(Buffer.from(PDF_BYTES))
+    expect(at).toBeGreaterThan(-1)
+    expect(body.subarray(at, at + PDF_BYTES.length)).toEqual(Buffer.from(PDF_BYTES))
   })
 
   it('sends a copy, so a view onto a larger buffer cannot leak its neighbours', async () => {
     const backing = new Uint8Array([0xaa, 0xbb, 0x25, 0x50, 0x44, 0x46, 0xcc, 0xdd])
     const view = backing.subarray(2, 6)
-    let captured: FormData | null = null
-    const client = clientWith((_u, init) => { captured = init.body as FormData })
+    let captured: Uint8Array | null = null
+    const client = clientWith((_u, init) => { captured = init.body as unknown as Uint8Array })
     await client.uploadDocument({
       invoiceId: '1', docType: OTR_DOC_TYPE.RATE_CONFIRMATION,
       fileName: 'rc.pdf', contentType: 'application/pdf', file: view,
     })
-    const file = (captured! as unknown as FormData).get('file') as File
-    expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array([0x25, 0x50, 0x44, 0x46]))
+    const sent = Buffer.from(captured! as unknown as Uint8Array)
+    expect(sent.includes(Buffer.from([0xaa, 0xbb]))).toBe(false)
+    expect(sent.includes(Buffer.from([0x25, 0x50, 0x44, 0x46]))).toBe(true)
   })
 
   it('names the 413 in words, because that one has an obvious fix', async () => {

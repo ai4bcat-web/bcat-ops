@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { PDFDocument } from 'pdf-lib'
-import { asciiProbePdf, highByteProbePdf } from './asciiProbePdf'
+import { asciiProbePdf, highByteProbePdf, jpegProbe } from './asciiProbePdf'
 
 describe('asciiProbePdf', () => {
   it('contains no byte a UTF-8 round trip could change', () => {
@@ -62,5 +62,21 @@ describe('highByteProbePdf', () => {
     // Under a kilobyte: no chunking, no limits, no compression to explain a difference.
     expect(highByteProbePdf().bytes.length).toBeLessThan(2048)
     expect(asciiProbePdf().bytes.length).toBeLessThan(2048)
+  })
+})
+
+describe('jpegProbe', () => {
+  it('is a real JPEG, so a rejection means something', async () => {
+    const { bytes } = jpegProbe()
+    expect(bytes.subarray(0, 2)).toEqual(new Uint8Array([0xff, 0xd8]))
+    expect(bytes.subarray(bytes.length - 2)).toEqual(new Uint8Array([0xff, 0xd9]))
+    // Decodable, not just correctly bracketed.
+    const { Jimp } = await import('jimp')
+    const img = await Jimp.read(Buffer.from(bytes))
+    expect(img.bitmap.width).toBeGreaterThan(0)
+  })
+
+  it('is small enough that size cannot explain a failure', () => {
+    expect(jpegProbe().bytes.length).toBeLessThan(2048)
   })
 })

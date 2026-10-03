@@ -87,3 +87,33 @@ export function highByteProbePdf(): ProbePdf {
   bytes[bytes.length - 1] = 0x0a
   return { bytes, fileName: 'bcat-highbyte-probe.pdf', highBytes: countHighBytes(bytes) }
 }
+
+/**
+ * A tiny, valid JPEG.
+ *
+ * OTR's documentation says the endpoint takes PDF, PNG or JPEG. Every failure so far has
+ * been a PDF, and the one that got furthest died inside IronPDF — their PDF reader. If an
+ * image lands where a PDF does not, that is both an answer and a way through: the cleanup
+ * pipeline already produces a JPEG per page, so a POD could go up as images.
+ *
+ * Hand-assembled rather than drawn, so it is a few hundred bytes and has no dependency.
+ */
+export function jpegProbe(): ProbePdf {
+  // A 1x1 baseline JPEG: SOI, APP0/JFIF, quantisation, frame, Huffman, scan, EOI.
+  const base64 =
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIi' +
+    'EmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9PjsBCgsLDg0OHBAQHDsoIig7Ozs7Ozs7Ozs7Ozs7' +
+    'Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7O//AABEIAAgACAMBEQACEQEDEQH/xA' +
+    'GiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFB' +
+    'BhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVl' +
+    'dYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TF' +
+    'xsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBg' +
+    'cICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEK' +
+    'FiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFho' +
+    'eIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery' +
+    '8/T19vf4+fr/2gAMAwEAAhEDEQA/APP6AP8A/9k='
+  const bytes = Uint8Array.from(Buffer.from(base64, 'base64'))
+  let high = 0
+  for (const b of bytes) if (b >= 0x80) high++
+  return { bytes, fileName: 'bcat-probe.jpg', highBytes: high }
+}

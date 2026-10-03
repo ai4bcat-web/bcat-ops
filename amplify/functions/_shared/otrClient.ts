@@ -15,6 +15,8 @@
  * happen — never inline at a call site.
  */
 
+import { buildMultipart } from './multipart'
+
 export const OTR_STAGING_BASE = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
 
 /** Document classifications OTR accepts on upload. */
@@ -156,7 +158,10 @@ export class OtrClient {
         'Content-Type': 'application/x-www-form-urlencoded',
         Accept: 'application/json',
       },
-      body,
+      // A Buffer IS a Uint8Array, which fetch accepts; the DOM types only know the
+      // narrower set. Passing it directly is what gets a Content-Length instead of a
+      // chunked stream.
+      body: body as unknown as BodyInit,
     })
     const text = await res.text()
     if (!res.ok) {
@@ -318,62 +323,48 @@ export class OtrClient {
     bytes.set(opts.file)
 
     /*
-     * The file part carries NO declared type, which is what OTR's own example sends.
+     * The body is built here, as one Buffer, rather than handed to fetch as a FormData.
      *
-     * `--form "file=@pod.pdf"` makes curl send the part as application/octet-stream, and
-     * that is the request their documentation says works. We were declaring
-     * application/pdf — more precise, and the only remaining difference between our
-     * request and theirs after the field order was matched.
+     * fetch will encode a FormData perfectly well — and then STREAM it, which means
+     * Transfer-Encoding: chunked and no Content-Length. That is legal HTTP, and it is also
+     * the last thing on this side that had never been changed while every single document
+     * we sent came back rejected: a 1 MB POD, a 139 KB rate confirmation, and two test
+     * PDFs of 610 and 853 bytes, with errors that look like a parser reading a body it
+     * could not frame — a null reference, and a byte count matching nothing anyone sent.
      *
-     * It matters because of what came back: they report opening 1,852,054 bytes of a
-     * 1,018,923-byte PDF, and this logs 1,018,923 going out. A gateway that treats a part
-     * it believes is a document as TEXT would produce exactly that expansion, so the part
-     * is now described the way their example describes it. The extension on the filename
-     * still tells them what it is.
+     * A finished Buffer gets a Content-Length and arrives in one piece. Field names and
+     * order still follow OTR's documented example exactly, and the file part carries no
+     * declared type, as their own curl does.
      */
-    const blob = new Blob([bytes])
+    const { body, contentType } = buildMultipart([
+      { name: 'file', fileName: opts.fileName, bytes },
+      { name: 'DocumentType', value: 'invoice-file-upload' },
+      { name: 'invoiceid', value: String(opts.invoiceId) },
+      { name: 'SendEmail', value: opts.sendEmail ? 'true' : 'false' },
+      { name: 'InvoiceDocTypes', value: String(opts.docType) },
+    ])
 
-    /*
-     * OTR rejected a POD saying it had opened 1,852,054 bytes of a 1,018,923-byte PDF —
-     * almost exactly what that file becomes if its bytes are decoded as UTF-8 text and
-     * re-encoded. Nothing on this side does that, so the size we actually put on the wire
-     * is logged: it says in one line whether the mangling is ours or theirs.
-     */
     console.log('[otr] uploading document', {
       fileName: opts.fileName,
       docType: opts.docType,
-      sourceBytes: opts.file.byteLength,
-      sourceKind: opts.file?.constructor?.name ?? typeof opts.file,
-      blobBytes: blob.size,
-      declaredContentType: opts.contentType,
-      partType: blob.type || '(none, as OTR\'s own example sends it)',
+      fileBytes: bytes.byteLength,
+      bodyBytes: body.byteLength,
+      contentType,
     })
 
-    /*
-     * Field names and order both follow OTR's own documented example exactly:
-     *   file, DocumentType, invoiceid, SendEmail, InvoiceDocTypes
-     * (https://docs.otrsolutions.com/reference/upload-file)
-     *
-     * The names were already right. The ORDER was not, and a streaming multipart parser
-     * that expects the invoice id before it starts consuming the file part is a plausible
-     * reading of two undocumented 500s — one of which was a null dereference inside their
-     * handler. Matching the documented example costs nothing and removes the question.
-     */
-    const form = new FormData()
-    form.append('file', blob, opts.fileName)
-    form.append('DocumentType', 'invoice-file-upload')
-    form.append('invoiceid', String(opts.invoiceId))
-    form.append('SendEmail', opts.sendEmail ? 'true' : 'false')
-    form.append('InvoiceDocTypes', String(opts.docType))
-
-    // Content-Type is deliberately unset: fetch adds the multipart boundary.
     const res = await this.request('/documents/upload', {
       method: 'POST',
       headers: await this.authedHeaders({
         'X-Invoice-Doc-Type': String(opts.docType),
         Accept: 'application/json',
+        // Our own boundary, so the body and the header cannot disagree.
+        'Content-Type': contentType,
+        'Content-Length': String(body.byteLength),
       }),
-      body: form,
+      // A Buffer IS a Uint8Array, which fetch accepts; the DOM lib types only know the
+      // narrower set. Passing the bytes directly is what gets a Content-Length instead of
+      // a chunked stream.
+      body: body as unknown as BodyInit,
     })
     const text = await res.text()
     if (!res.ok) {
