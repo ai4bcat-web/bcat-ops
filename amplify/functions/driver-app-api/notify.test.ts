@@ -164,6 +164,16 @@ describe('notifyRateconSubmitted', () => {
   })
 })
 
+/**
+ * A driver's POD reaches the office by EMAIL ONLY.
+ *
+ * It used to post to Slack as well — threaded under the rate confirmation where there was
+ * one, top-level where there was not. That was removed: a POD arriving is not something
+ * anyone acts on in Slack, because the office sees it on the load, on the settlement and
+ * in the factoring queue, all of which read the document rather than a notice about it.
+ * What the post actually produced was a message for every upload, every replaced page and
+ * every added page.
+ */
 describe('notifyPodAdded', () => {
   const parentRefs = (): ThreadRefs => ({
     slackChannelId: 'C0B4YJXLYM8',
@@ -172,14 +182,14 @@ describe('notifyPodAdded', () => {
     emailSubject: 'New load from Jane Doe',
   })
 
-  it('posts the POD as a threaded reply using the parent ts', async () => {
+  it('posts nothing to Slack, with a parent thread sitting right there', async () => {
     await notifyPodAdded(notice({ driverName: 'Jane Doe', note: null }), parentRefs())
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const body = slackBody()
-    expect(body.channel).toBe(parentRefs().slackChannelId)
-    expect(body.thread_ts).toBe(parentRefs().slackMessageTs)
-    expect(body.text).toMatch(/^:page_facing_up: \*POD uploaded\* for Jane Doe/)
+  it('posts nothing to Slack for a standalone POD either', async () => {
+    await notifyPodAdded(notice({ driverName: 'Solo', referenceNumber: 'VRID-1' }), {})
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('sends the POD email with both In-Reply-To and References headers', async () => {
@@ -192,50 +202,8 @@ describe('notifyPodAdded', () => {
     expect(raw).toContain('Content-Disposition: attachment; filename="ratecon.jpg"')
   })
 
-  it('keeps the Slack thread ref when the threaded Slack post fails but the email succeeds', async () => {
-    fetchMock.mockResolvedValue({ json: async () => ({ ok: false, error: 'not_in_channel' }) })
-    const result = await notifyPodAdded(notice(), parentRefs())
-    expect(result.error).toContain('Slack: not_in_channel')
-    expect(sesSendMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the email thread ref when the POD email fails', async () => {
-    sesSendMock.mockRejectedValue(new Error('SES quota exceeded'))
-    const result = await notifyPodAdded(notice(), parentRefs())
-    expect(result.error).toContain('Email: SES quota exceeded')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(result.refs.slackMessageTs).toBe(parentRefs().slackMessageTs)
-    expect(result.refs.emailMessageId).toBe(parentRefs().emailMessageId)
-  })
-
-  it('falls back to a top-level Slack post only when no parent slackMessageTs is present', async () => {
-    await notifyPodAdded(
-      notice({ driverName: 'Solo' }),
-      { slackChannelId: 'C0B4YJXLYM8', slackMessageTs: '', emailMessageId: '<e@amazonses.com>', emailSubject: 'New load from Solo' },
-    )
-    const body = slackBody()
-    expect(body.channel).toBe('C0B4YJXLYM8')
-    expect(body.thread_ts).toBeUndefined()
-  })
-
-  it('skips the email reply when no parent emailMessageId is present', async () => {
-    const result = await notifyPodAdded(
-      notice({ driverName: 'NoEmail' }),
-      { slackChannelId: 'C0B4YJXLYM8', slackMessageTs: '1699999999.000100', emailMessageId: '', emailSubject: '' },
-    )
-    expect(sesSendMock).not.toHaveBeenCalled()
-    expect(result.refs.slackMessageTs).toBe('1699999999.000100')
-    expect(result.error).toContain('Email: no parent email thread')
-  })
-
-  it('opens fresh top-level Slack and email threads for a standalone POD', async () => {
+  it('opens its own email thread for a standalone POD', async () => {
     const result = await notifyPodAdded(notice({ driverName: 'Solo', referenceNumber: 'VRID-1' }), {})
-
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const body = slackBody()
-    expect(body.channel).toBe('C0B4YJXLYM8')
-    expect(body.thread_ts).toBeUndefined()
-    expect(body.text).toContain('Reference: VRID-1')
 
     const raw = sentEmailRaw()
     expect(raw).toContain('Subject: POD for Solo')
@@ -243,5 +211,33 @@ describe('notifyPodAdded', () => {
     expect(raw).toContain('Content-Disposition: attachment; filename="ratecon.jpg"')
     expect(result.error).toBeUndefined()
     expect(result.refs.emailMessageId).toBeDefined()
+  })
+
+  it('still emails when a rate con opened a Slack thread but no email thread', async () => {
+    /*
+     * This used to be refused — "no parent email thread" — because a Slack thread counted
+     * as a parent and there was no email to reply into. With Slack out of the picture the
+     * POD opens its own email instead of being dropped, which is the point of sending it.
+     */
+    const result = await notifyPodAdded(
+      notice({ driverName: 'NoEmail' }),
+      { slackChannelId: 'C0B4YJXLYM8', slackMessageTs: '1699999999.000100', emailMessageId: '', emailSubject: '' },
+    )
+    expect(sesSendMock).toHaveBeenCalledTimes(1)
+    expect(result.error).toBeUndefined()
+  })
+
+  it('carries a rate confirmation’s Slack refs through untouched', async () => {
+    // The rate con's own thread is still its own; this simply no longer writes to it.
+    const result = await notifyPodAdded(notice(), parentRefs())
+    expect(result.refs.slackChannelId).toBe(parentRefs().slackChannelId)
+    expect(result.refs.slackMessageTs).toBe(parentRefs().slackMessageTs)
+  })
+
+  it('reports an email failure and keeps the thread refs', async () => {
+    sesSendMock.mockRejectedValue(new Error('SES quota exceeded'))
+    const result = await notifyPodAdded(notice(), parentRefs())
+    expect(result.error).toContain('Email: SES quota exceeded')
+    expect(result.refs.emailMessageId).toBe(parentRefs().emailMessageId)
   })
 })

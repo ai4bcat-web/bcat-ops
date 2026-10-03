@@ -1,8 +1,8 @@
 /**
  * Driver-app notification slice.
  *
- * Sends the initial rate-confirmation thread opener (Slack + SES) and later POD replies
- * that must land in the exact same Slack thread and email thread.
+ * Sends the initial rate-confirmation thread opener (Slack + SES) and later POD replies,
+ * which go to EMAIL ONLY — a driver's POD does not post to Slack. See notifyPodAdded.
  *
  * WARNING: these functions are called AFTER the upload is persisted. If Slack succeeds
  * and SES fails, the upload must not be lost. We therefore ALWAYS return whatever refs we
@@ -52,29 +52,22 @@ function encodeSubject(s: string): string {
 
 export const RATECON_SUBJECT_PREFIX = 'New load from '
 
+/**
+ * The rate confirmation opener. There is no POD variant: a driver's POD no longer posts
+ * to Slack at all — see notifyPodAdded.
+ */
 function buildSlackText(
   driverName: string,
   referenceNumber: string | null | undefined,
   note: string | null | undefined,
-  kind: 'ratecon' | 'pod',
 ): string {
-  const lines: (string | null | undefined)[] =
-    kind === 'ratecon'
-      ? [
-          `:package: *New load from ${driverName}* — rate confirmation uploaded`,
-          referenceNumber ? `Reference: ${referenceNumber}` : null,
-          note ? `Note: ${note}` : null,
-        ]
-      : [
-          `:page_facing_up: *POD uploaded* for ${driverName}`,
-          referenceNumber ? `Reference: ${referenceNumber}` : null,
-          // A POD with no load number is the normal case when the driver has the
-          // paperwork before the load is built. Say out loud that it needs attaching,
-          // so it is picked up here rather than discovered later on a held settlement.
-          referenceNumber ? null : '_No load number — assign it to a load in Driver Docs._',
-          note ? `Note: ${note}` : null,
-        ]
-  return lines.filter(Boolean).join('\n')
+  return [
+    `:package: *New load from ${driverName}* — rate confirmation uploaded`,
+    referenceNumber ? `Reference: ${referenceNumber}` : null,
+    note ? `Note: ${note}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 async function postSlack(
@@ -245,7 +238,7 @@ export async function notifyRateconSubmitted(n: SubmissionNotice): Promise<Notif
   const from = process.env.SES_FROM_ADDRESS ?? 'onboarding@bcatcorp.com'
   const subject = `${RATECON_SUBJECT_PREFIX}${n.driverName}`
   const bodyText = emailBodyText(n, 'ratecon')
-  const slackText = buildSlackText(n.driverName, n.referenceNumber, n.note, 'ratecon')
+  const slackText = buildSlackText(n.driverName, n.referenceNumber, n.note)
 
   const [slackResult, emailResult] = await Promise.allSettled([
     postSlack(channel, slackText),
@@ -267,42 +260,54 @@ export async function notifyRateconSubmitted(n: SubmissionNotice): Promise<Notif
   }
 }
 
+/**
+ * A driver's POD reaches the office by email only.
+ *
+ * It used to post to Slack as well — into the rate confirmation's thread where there was
+ * one, or as a new top-level message where there was not. That is gone. A POD arriving is
+ * not news anyone acts on in Slack: the office sees it on the load, on the settlement and
+ * in the factoring queue, all of which read the document itself rather than a notification
+ * about it. What the Slack post actually produced was noise on every upload, including
+ * every replaced page and every added page.
+ *
+ * The email stays, because ivanloads@ is where the paperwork is filed and the attachment
+ * goes with it.
+ */
 export async function notifyPodAdded(n: SubmissionNotice, refs: Partial<ThreadRefs>): Promise<NotifyResult> {
   const from = process.env.SES_FROM_ADDRESS ?? 'onboarding@bcatcorp.com'
   const to = process.env.LOADS_EMAIL_TO ?? 'ivanloads@bcatcorp.com'
   const subject = refs.emailSubject ? `Re: ${refs.emailSubject}` : `POD for ${n.driverName}`
   const bodyText = emailBodyText(n, 'pod')
-  const slackText = buildSlackText(n.driverName, n.referenceNumber, n.note, 'pod')
 
-  // A POD with a parent thread replies into both channels. A standalone POD (PWA upload
-  // with no rate con to reply to) opens fresh top-level Slack and email threads so it
-  // still reaches dispatch and ivanloads@.
-  const hasParentThread = !!(refs.emailMessageId || refs.slackMessageTs)
-  const channel = refs.slackChannelId ?? process.env.INTAKE_IVAN_CHANNEL_ID ?? 'C0B4YJXLYM8'
+  // A POD with a parent email thread replies into it; a standalone one (the PWA upload
+  // with no rate con to reply to) opens its own, so it still reaches ivanloads@.
+  const parentMessageId = refs.emailMessageId
+  const hasParentThread = !!parentMessageId
 
-  const slackPromise: Promise<{ ok: true; ts: string } | { ok: false; error: string }> =
-    hasParentThread
-      ? (refs.slackChannelId
-          ? postSlack(refs.slackChannelId, slackText, refs.slackMessageTs)
-          : Promise.resolve({ ok: false, error: 'no slack channel' }))
-      : postSlack(channel, slackText)
+  const emailResult = await Promise.allSettled([
+    parentMessageId
+      ? sendEmail(to, from, subject, bodyText, n.attachments, {
+          inReplyTo: parentMessageId,
+          references: parentMessageId,
+        })
+      : sendEmail(to, from, subject, bodyText, n.attachments),
+  ])
 
-  const emailPromise: Promise<{ ok: true; messageId: string } | { ok: false; error: string }> =
-    hasParentThread
-      ? (refs.emailMessageId
-          ? sendEmail(to, from, subject, bodyText, n.attachments, {
-              inReplyTo: refs.emailMessageId,
-              references: refs.emailMessageId,
-            })
-          : Promise.resolve({ ok: false, error: 'no parent email thread' }))
-      : sendEmail(to, from, subject, bodyText, n.attachments)
-
-  const [slackResult, emailResult] = await Promise.allSettled([slackPromise, emailPromise])
-  const { slackMessageTs, emailMessageId, errors } = collectResults(slackResult, emailResult)
+  const errors: string[] = []
+  let emailMessageId = ''
+  const settled = emailResult[0]
+  if (settled.status === 'fulfilled') {
+    if (settled.value.ok) emailMessageId = settled.value.messageId
+    else errors.push(`Email: ${settled.value.error}`)
+  } else {
+    errors.push(`Email: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`)
+  }
 
   const outRefs: Partial<ThreadRefs> = {
-    slackChannelId: refs.slackChannelId ?? (hasParentThread ? undefined : channel),
-    slackMessageTs: slackMessageTs || refs.slackMessageTs,
+    // Carried through untouched: a rate confirmation's Slack thread is still its own, and
+    // nothing here opens or replies to one any more.
+    slackChannelId: refs.slackChannelId,
+    slackMessageTs: refs.slackMessageTs,
     emailMessageId: emailMessageId || refs.emailMessageId,
     emailSubject: refs.emailSubject ?? (hasParentThread ? undefined : subject),
   }
