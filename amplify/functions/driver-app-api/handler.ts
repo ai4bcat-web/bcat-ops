@@ -1698,9 +1698,12 @@ export const handler = async (event: FnUrlEvent) => {
         weekCount: weeks.length,
       })
       const out: { weekStart: string; gross: number; net: number; tripCount: number }[] = []
+      // The week in progress is always offered, even with nothing in it yet, so the
+      // app can open on it instead of on the last week that happened to have trips.
+      const currentWeekStart = weekStartOfISO(new Date().toISOString().slice(0, 10))
       for (const start of weeks) {
         const weekTrips = trips.filter((t) => t.periodStart === start)
-        if (!weekTrips.length && !ownerOpCarriesWeeklyCharges(start)) continue
+        if (start !== currentWeekStart && !weekTrips.length && !ownerOpCarriesWeeklyCharges(start)) continue
         const mine = adjustments.filter((c) => c.periodStart === start)
         const settlement = buildSettlement(start, weekTrips, setting,
           deductions.filter((d) => d.periodStart === start),

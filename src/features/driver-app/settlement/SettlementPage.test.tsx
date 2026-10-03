@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Settlement, SettlementWeek } from '../driverApi'
 
@@ -93,13 +93,26 @@ function resetMocks() {
   driverApiMocks.fetchRecentLoads.mockResolvedValue([])
 }
 
+/*
+ * Pinned to a Thursday inside the 2026-09-27 pay week. The page now defaults to
+ * whatever week it actually is, so leaving this to the real clock would have
+ * these tests start failing the moment the week turned.
+ */
+const INSIDE_WEEK_SEP27 = new Date('2026-10-01T12:00:00Z')
+
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  vi.setSystemTime(INSIDE_WEEK_SEP27)
   resetMocks()
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('SettlementPage', () => {
-  it('defaults to the most recent week and shows the check amount from the API', async () => {
+  it('defaults to the current pay week and shows the check amount from the API', async () => {
     render(<MemoryRouter><SettlementPage /></MemoryRouter>)
     // Two sequential fetches (weeks, then the statement) must resolve before the amount
     // renders; the 1s default expires under full-suite load.
@@ -240,5 +253,77 @@ describe('sending paperwork for a load that is not listed', () => {
 
     await waitFor(() => expect(screen.getByText('No settlement data yet')).toBeTruthy())
     expect(screen.getByRole('button', { name: /Send a POD anyway/ })).toBeTruthy()
+  })
+})
+
+/*
+ * Which week the app opens on, and getting back to older pay.
+ *
+ * The weeks endpoint returns history newest-first, but "newest row returned" is
+ * not the same as "this week": early in a week, before any trip is processed,
+ * the newest row with trips is LAST week. Opening there showed a driver a
+ * finished, already-paid check as if it were their current pay.
+ */
+describe('pay week selection', () => {
+  const WEEK_OF_OCT4 = '2026-10-04'
+  const INSIDE_WEEK_OCT4 = new Date('2026-10-06T12:00:00Z')
+
+  it('opens on the current week even when the API has no row for it yet', async () => {
+    // Trips exist only for earlier weeks — the normal state on a Sunday or Monday.
+    vi.setSystemTime(INSIDE_WEEK_OCT4)
+    driverApiMocks.fetchSettlement.mockResolvedValue({ ...baseSettlement, weekStart: WEEK_OF_OCT4, trips: [] })
+
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+
+    await waitFor(() => expect(driverApiMocks.fetchSettlement).toHaveBeenCalledWith(WEEK_OF_OCT4), {
+      timeout: 5000,
+    })
+    // Not last week's settled statement, which is what the API listed first.
+    expect(driverApiMocks.fetchSettlement).not.toHaveBeenCalledWith('2026-09-27')
+  })
+
+  it('offers this week in the picker alongside every historical week', async () => {
+    vi.setSystemTime(INSIDE_WEEK_OCT4)
+    driverApiMocks.fetchSettlement.mockResolvedValue({ ...baseSettlement, weekStart: WEEK_OF_OCT4, trips: [] })
+
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getByLabelText('Pay week')).toBeTruthy(), { timeout: 5000 })
+
+    fireEvent.keyDown(screen.getByLabelText('Pay week'), { key: 'Enter' })
+
+    // The week in progress, plus both weeks that already have pay. Scoped to the
+    // open list because the trigger echoes whichever label is selected.
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy())
+    const options = within(screen.getByRole('listbox'))
+    expect(options.getByText(/10\/4 – 10\/10 · This week/)).toBeTruthy()
+    expect(options.getByText(/9\/27 – 10\/3/)).toBeTruthy()
+    expect(options.getByText(/9\/20 – 9\/26/)).toBeTruthy()
+  })
+
+  it('lets the driver open a historical week and get back to this one', async () => {
+    vi.setSystemTime(INSIDE_WEEK_OCT4)
+    driverApiMocks.fetchSettlement.mockResolvedValue({ ...baseSettlement, weekStart: WEEK_OF_OCT4, trips: [] })
+
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+    await waitFor(() => expect(driverApiMocks.fetchSettlement).toHaveBeenCalledWith(WEEK_OF_OCT4), {
+      timeout: 5000,
+    })
+
+    // Nothing says "past week" while the current one is showing.
+    expect(screen.queryByText('Viewing a past pay week')).toBeNull()
+
+    driverApiMocks.fetchSettlement.mockResolvedValue(baseSettlement) // weekStart 2026-09-27
+    fireEvent.keyDown(screen.getByLabelText('Pay week'), { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText(/9\/27 – 10\/3/)).toBeTruthy())
+    fireEvent.click(screen.getByText(/9\/27 – 10\/3/))
+
+    await waitFor(() => expect(driverApiMocks.fetchSettlement).toHaveBeenCalledWith('2026-09-27'), {
+      timeout: 5000,
+    })
+    // An already-paid week must be labelled as one.
+    await waitFor(() => expect(screen.getByText('Viewing a past pay week')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'This week' }))
+    await waitFor(() => expect(screen.queryByText('Viewing a past pay week')).toBeNull())
   })
 })

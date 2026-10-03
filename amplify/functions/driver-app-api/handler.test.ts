@@ -1031,6 +1031,26 @@ describe('driver-app-api handler', () => {
       expect(body.grossPay).toBe(700)
     })
 
+    it('lists the week in progress even when no trip has landed in it yet', async () => {
+      // A Thursday three weeks past every seeded trip: the state the app is in
+      // early in any week, before that week's loads are processed.
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date('2026-10-22T12:00:00Z'))
+      try {
+        const res = await handler(baseEvent('/settlement/weeks'))
+        expect(res.statusCode).toBe(200)
+        const weeks = JSON.parse(res.body).weeks as { weekStart: string; tripCount: number }[]
+        const starts = weeks.map((w) => w.weekStart)
+        // Newest first, and the newest is the week we are actually in.
+        expect(starts[0]).toBe('2026-10-18')
+        expect(weeks[0].tripCount).toBe(0)
+        // History is still offered behind it.
+        expect(starts).toContain('2026-09-27')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('lists both the Amazon history and the brokerage weeks for an Amazon driver', async () => {
       const res = await handler(baseEvent('/settlement/weeks'))
       expect(res.statusCode).toBe(200)

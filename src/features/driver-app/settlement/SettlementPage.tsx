@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, Loader2, RefreshCcw, Wallet, FilePlus2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ import {
 } from '../driverApi'
 import { StatementCard } from './StatementCard'
 import { UnattachedPods } from '../UnattachedPods'
-import { weekLabel } from '@/features/driver-pay/week'
+import { sundayOf, weekLabel } from '@/features/driver-pay/week'
 
 export function SettlementPage() {
   const navigate = useNavigate()
@@ -28,8 +28,27 @@ export function SettlementPage() {
   const [weeksRetryKey, setWeeksRetryKey] = useState(0)
   const [statementRetryKey, setStatementRetryKey] = useState(0)
 
-  // If the user hasn't picked a week, default to the newest one returned by the API.
-  const selected = selectedWeekStart ?? weeks?.[0]?.weekStart ?? null
+  const currentWeekStart = sundayOf()
+
+  /*
+   * The picker must always offer THIS week, even before any trip has been
+   * processed for it. Without this, a driver opening the app on a Sunday or
+   * Monday landed on last week's statement with nothing saying so, and read a
+   * finished check as their current pay.
+   */
+  const weekOptions = useMemo(() => {
+    if (!weeks || weeks.length === 0) return weeks
+    if (weeks.some((w) => w.weekStart === currentWeekStart)) return weeks
+    return [{ weekStart: currentWeekStart, gross: 0, net: 0, tripCount: 0 }, ...weeks]
+  }, [weeks, currentWeekStart])
+
+  // Default to the current week by name, not merely to the newest row returned.
+  const selected =
+    selectedWeekStart ??
+    weekOptions?.find((w) => w.weekStart === currentWeekStart)?.weekStart ??
+    weekOptions?.[0]?.weekStart ??
+    null
+  const viewingPastWeek = selected != null && selected !== currentWeekStart
 
   useEffect(() => {
     let stale = false
@@ -136,7 +155,7 @@ export function SettlementPage() {
     <div className="mx-auto w-full max-w-md px-4 py-5">
       <h1 className="mb-4 text-xl font-bold text-foreground">Settlement</h1>
 
-      {weeks && weeks.length > 0 && (
+      {weekOptions && weekOptions.length > 0 && (
         <div className="mb-4">
           <label htmlFor="week" className="mb-1.5 block text-sm font-medium text-muted-foreground">
             Pay week
@@ -146,13 +165,30 @@ export function SettlementPage() {
               <SelectValue placeholder="Choose a week" />
             </SelectTrigger>
             <SelectContent>
-              {weeks.map((w) => (
+              {weekOptions.map((w) => (
                 <SelectItem key={w.weekStart} value={w.weekStart} className="text-base">
-                  {weekLabel(w.weekStart)} · {w.tripCount} trip{w.tripCount === 1 ? '' : 's'}
+                  {weekLabel(w.weekStart)}
+                  {w.weekStart === currentWeekStart ? ' · This week' : ''} ·{' '}
+                  {w.tripCount} trip{w.tripCount === 1 ? '' : 's'}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
+
+          {/* A past statement is already paid, so say so plainly — a driver must never
+              mistake last week's settled check for what they are earning now. */}
+          {viewingPastWeek && (
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-lg bg-muted/60 px-3 py-2">
+              <p className="text-sm text-muted-foreground">Viewing a past pay week</p>
+              <Button
+                variant="outline"
+                className="h-9 shrink-0 px-3 text-sm"
+                onClick={() => setSelectedWeekStart(currentWeekStart)}
+              >
+                This week
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
