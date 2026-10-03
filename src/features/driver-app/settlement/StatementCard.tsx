@@ -27,9 +27,15 @@ function lineTotal(lines: SettlementLine[]): number {
 
 interface StatementCardProps {
   settlement: Settlement
+  /**
+   * True when this is the staff preview on the owner-operator settlements rather than the
+   * driver's own app. The paperwork controls become labels — they lead into the driver's
+   * upload screen, which is not where a staff member belongs.
+   */
+  readOnly?: boolean
 }
 
-export function StatementCard({ settlement }: StatementCardProps) {
+export function StatementCard({ settlement, readOnly = false }: StatementCardProps) {
   const totalDeductions = lineTotal(settlement.deductions)
   const totalCredits = lineTotal(settlement.credits)
   const totalDebits = lineTotal(settlement.debits)
@@ -66,7 +72,7 @@ export function StatementCard({ settlement }: StatementCardProps) {
         <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Shipments · {settlement.trips.length}
         </p>
-        <ShipmentRows trips={settlement.trips as TripWithFactoring[]} />
+        <ShipmentRows trips={settlement.trips as TripWithFactoring[]} readOnly={readOnly} />
       </div>
 
       {/* Deductions */}

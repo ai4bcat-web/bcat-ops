@@ -47,9 +47,16 @@ function shipmentLabel(trip: Trip): string {
 }
 
 function DocCell({
-  present, required, label, shipment, pageCount, onPress, onPreview,
+  present, readOnly, required, label, shipment, pageCount, onPress, onPreview,
 }: {
   present: boolean
+  /**
+   * True when this is being shown to someone who is not the driver — the staff preview on
+   * the owner-operator settlements. The cells become labels: the controls here send a
+   * driver into their own upload screen, which is not where a staff member belongs, and
+   * the paperwork they CAN change lives on the Loads page.
+   */
+  readOnly: boolean
   /** Amber when its absence holds the driver's pay. Only the POD does. */
   required: boolean
   label: string
@@ -76,6 +83,24 @@ function DocCell({
    * a broker refuses the invoice.
    */
   const count = pageCount && pageCount > 1 ? ` · ${pageCount} pages` : pageCount === 1 ? ' · 1 page' : ''
+
+  if (readOnly) {
+    return (
+      <span
+        className={`inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
+          present
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : required
+              ? 'border-amber-400 bg-amber-50 text-amber-800'
+              : 'border-border bg-muted/50 text-muted-foreground'
+        }`}
+        aria-label={`${label} ${present ? 'on file' : 'not on file'} for ${shipment}`}
+      >
+        {present ? <Check className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+        {short} {present ? `in${count}` : 'needed'}
+      </span>
+    )
+  }
 
   if (present) {
     if (!onPreview) {
@@ -116,7 +141,7 @@ function DocCell({
   )
 }
 
-export function ShipmentRows({ trips }: { trips: Trip[] }) {
+export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readOnly?: boolean }) {
   const navigate = useNavigate()
   const docs = useTripDocs()
   const [open, setOpen] = useState<{ doc: TripDoc; kind: SubmissionKind; shipment: string } | null>(null)
@@ -194,6 +219,7 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
             <div role="cell" className="mt-2 flex flex-wrap items-center gap-2">
               <DocCell
                 present={podIn}
+                readOnly={readOnly}
                 required
                 label="POD"
                 shipment={shipment}
@@ -203,6 +229,7 @@ export function ShipmentRows({ trips }: { trips: Trip[] }) {
               />
               <DocCell
                 present={!!f?.rateconPresent}
+                readOnly={readOnly}
                 required={false}
                 label="rate confirmation"
                 shipment={shipment}

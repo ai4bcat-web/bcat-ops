@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy, Smartphone } from 'lucide-react'
 import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
 import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
 import { Avatar } from '@/components/ui/avatar'
@@ -19,6 +19,7 @@ import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
 import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
 import { SendDriverInvite } from './SendDriverInvite'
+import { DriverViewDialog } from './DriverViewDialog'
 import { SettlementDocUpload } from './SettlementDocUpload'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
@@ -362,6 +363,7 @@ export function OwnerOperatorPayPage() {
           <StatementCard
             key={selectedRow.driver.id}
             row={selectedRow}
+            periodStart={periodStart}
             staffEmail={user?.email ?? ''}
             onRefresh={pay.refresh}
             onAddDeduction={() => setDedDriver(selectedRow.driver.id)}
@@ -426,8 +428,10 @@ export function OwnerOperatorPayPage() {
   )
 }
 
-function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
+function StatementCard({ row, periodStart, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
   row: OwnerOperatorPayRow
+  /** The week being shown, so the driver view is labelled with the same one. */
+  periodStart: string
   /** Recorded on any document uploaded from this card. */
   staffEmail: string
   /** Re-reads the week so an uploaded POD moves its load from held to paid. */
@@ -440,6 +444,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
   onExport: () => void
 }) {
   const { driver, setting, statement, oneOffs } = row
+  const [driverView, setDriverView] = useState(false)
   const trips = row.trips
   // Held loads stay in the table, in delivery order, so the week reads as one list.
   const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
@@ -467,6 +472,15 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
+        {/* First in the row: "what is the driver seeing" is the question asked before
+            anything is changed, not after. */}
+        <button
+          onClick={() => setDriverView(true)}
+          title={`See ${driver.name}'s settlement the way their app shows it`}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}
+        >
+          <Smartphone size={13} /> Driver view
+        </button>
         {iconBtn(onAddDeduction, Plus, 'Add expense')}
         <button onClick={onAddCredit} title="Add extra pay to this check (detention, bonus, reimbursement…)"
           style={{ display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, border: '1px solid #86efac', background: 'var(--ds-surface)', color: '#15803d', cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' }}>
@@ -706,6 +720,10 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             <span style={{ color: statement.checkAmount >= 0 ? '#15803d' : '#dc2626', fontVariantNumeric: 'tabular-nums' }}>{money(statement.checkAmount)}</span>
           </div>
         </div>
+      )}
+
+      {driverView && (
+        <DriverViewDialog row={row} periodStart={periodStart} onClose={() => setDriverView(false)} />
       )}
     </div>
   )
