@@ -45,7 +45,7 @@ import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
 import { PodsPage } from '@/features/pods/PodsPage'
 import { FleetMilesPage } from '@/features/fleet-miles/FleetMilesPage'
-import { DriverDocsPage } from '@/features/driver-docs'
+import { MissingPaperworkPage } from '@/features/missing-paperwork/MissingPaperworkPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
@@ -180,7 +180,9 @@ export default function App() {
               <Route path="/audit-log" element={<RequirePage page="audit"><AuditPage /></RequirePage>} />
               <Route path="/intake"   element={<RequirePage page="intake"><IntakePage /></RequirePage>} />
               <Route path="/pods"     element={<RequirePage page="pods"><PodsPage /></RequirePage>} />
-              <Route path="/driver-docs" element={<RequirePage page="driverDocs"><DriverDocsPage /></RequirePage>} />
+              <Route path="/missing-paperwork" element={<RequirePage page="driverDocs"><MissingPaperworkPage /></RequirePage>} />
+              {/* The page this replaced. Anyone's bookmark still lands somewhere useful. */}
+              <Route path="/driver-docs" element={<Navigate to="/missing-paperwork" replace />} />
               <Route path="/fleet-miles" element={<RequirePage page="fleetMiles"><FleetMilesPage /></RequirePage>} />
               <Route path="/tasks"   element={<RequirePage page="tasks"><TasksPage /></RequirePage>} />
               <Route path="/users" element={<RequireOwner><UsersPage /></RequireOwner>} />
