@@ -48,7 +48,9 @@ import { DriverDocsPage } from '@/features/driver-docs'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
-import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, AccountPage } from '@/features/driver-app/DriverApp'
+import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, AccountPage } from '@/features/driver-app/DriverApp'
+import { useDriverProgram } from '@/features/driver-app/useDriverProgram'
+import type { DriverProgram } from '@/lib/driverProgram'
 import DriverLoginPage from '@/features/driver-app/DriverLoginPage'
 import DriverSignupPage from '@/features/driver-app/DriverSignupPage'
 
@@ -71,15 +73,19 @@ function DriverLoading() {
  * If they were part-way through sending a document, they go back to it, on the right load.
  * Otherwise, the settlement as before.
  */
-function DriverLanding() {
+function DriverLanding({ program }: { program: DriverProgram }) {
   const intent = readScanIntent()
-  return <Navigate to={intent ? scanIntentPath(intent) : '/driver/settlement'} replace />
+  const home = program === 'PAPERWORK' ? '/driver/paperwork' : '/driver/settlement'
+  return <Navigate to={intent ? scanIntentPath(intent) : home} replace />
 }
 
 function DriverRoutes() {
   const { loading, isAuthenticated } = useDriverAuth()
+  const program = useDriverProgram()
 
-  if (loading) {
+  // Wait for the program before painting the shell: see useDriverProgram for why an Ivan
+  // driver must never be shown the settlement tab even for a frame.
+  if (loading || (isAuthenticated && program === null)) {
     return <DriverLoading />
   }
 
@@ -88,14 +94,15 @@ function DriverRoutes() {
       <Route path="login" element={<DriverLoginPage />} />
       <Route path="signup" element={<DriverSignupPage />} />
       {isAuthenticated ? (
-        <Route element={<DriverApp />}>
+        <Route element={<DriverApp program={program ?? 'SETTLEMENT'} />}>
           {/* The settlement is the driver's home: their pay and every document
               action live there. Scanning is reached from a load, not landed on. */}
           {/* Where a relaunch lands. See DriverLanding. */}
-          <Route index element={<DriverLanding />} />
+          <Route index element={<DriverLanding program={program ?? 'SETTLEMENT'} />} />
           <Route path="scan" element={<ScanPage />} />
           <Route path="loads" element={<SubmissionsPage />} />
           <Route path="settlement" element={<SettlementPage />} />
+          <Route path="paperwork" element={<PaperworkPage />} />
           <Route path="account" element={<AccountPage />} />
         </Route>
       ) : (

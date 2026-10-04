@@ -18,6 +18,7 @@ import {
   setDriverTokenSupplier,
 } from './driverApi'
 import { isTokenRejection } from './tokenRejection'
+import { clearCachedProgram } from './useDriverProgram'
 import { DriverAuthContext, type DriverAuthContextValue, type DriverUser } from './useDriverAuth'
 
 const STORAGE_KEY = 'bcat:driver:tokens'
@@ -134,6 +135,8 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
   const scheduleRetryRef = useRef<() => void>(() => {})
 
   const signOut = useCallback(async () => {
+    // The next driver on this phone must not inherit this one's program.
+    clearCachedProgram()
     clearStoredTokens()
     tokensRef.current = null
     setUser(null)

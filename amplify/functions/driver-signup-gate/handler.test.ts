@@ -149,15 +149,17 @@ describe('driver-signup-gate handler', () => {
   })
 
   it('rejects a pay group that is not on the driver-app roster', async () => {
+    // BOX_TRUCK has no page in the driver app, so it is still off the roster. LOCAL used to
+    // be this test's example and is now allowed — see the next test.
     sendSpy.mockImplementation(async (command) => {
       if (command instanceof ScanCommand) {
         if (command.input.TableName === DRIVER_TABLE) {
-          return { Items: [driverItem('drv-3', 'local@bcatcorp.com', true)] }
+          return { Items: [driverItem('drv-3', 'box@bcatcorp.com', true)] }
         }
         if (command.input.TableName === PAY_SETTING_TABLE) {
           return {
             Items: [
-              paySettingItem('drv-3', 'local@bcatcorp.com', true, 'LOCAL'),
+              paySettingItem('drv-3', 'box@bcatcorp.com', true, 'BOX_TRUCK'),
             ],
           }
         }
@@ -165,9 +167,31 @@ describe('driver-signup-gate handler', () => {
       return undefined
     })
 
-    await expect(handler(signupEvent('local@bcatcorp.com'))).rejects.toThrow(
+    await expect(handler(signupEvent('box@bcatcorp.com'))).rejects.toThrow(
       'No driver record matches this email. Contact dispatch.',
     )
+  })
+
+  it('lets one of Ivan’s own drivers create an account', async () => {
+    /*
+     * LOCAL is Ivan's fleet. They joined the roster when Ivan paperwork shipped: the invite
+     * and sign-up path is the same one the owner operators use, and this gate is what
+     * decides who may take it. Without LOCAL here an invited Ivan driver is told no driver
+     * record matches their email.
+     */
+    sendSpy.mockImplementation(async (command) => {
+      if (command instanceof ScanCommand) {
+        if (command.input.TableName === DRIVER_TABLE) {
+          return { Items: [driverItem('drv-local', 'local@bcatcorp.com', true)] }
+        }
+        if (command.input.TableName === PAY_SETTING_TABLE) {
+          return { Items: [paySettingItem('drv-local', 'local@bcatcorp.com', true, 'LOCAL')] }
+        }
+      }
+      return undefined
+    })
+
+    await expect(handler(signupEvent('local@bcatcorp.com'))).resolves.toBeDefined()
   })
 
   it('matches case-insensitively against DriverPaySetting email when Driver email is absent', async () => {

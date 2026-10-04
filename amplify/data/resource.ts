@@ -413,6 +413,38 @@ const schema = a.schema({
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 
+  /*
+   * Detention times a driver enters for themselves.
+   *
+   * Ivan's drivers are not settled a percentage, so there is no pay line to hang
+   * detention off the way the owner operators have. What they need is a place to record
+   * that they sat at a dock, while they still remember the clock — the office bills it
+   * later. Entered only when it is worth billing (the app asks past two hours), but the
+   * row is kept whatever the gap turns out to be: the driver's account of when they
+   * arrived and left is the record, and trimming it to a threshold would quietly discard
+   * the evidence for the one load somebody disputes.
+   *
+   * One row per driver per load per leg. `leg` is PICKUP or DELIVERY — detention happens
+   * at either end, and a multi-stop load's middle stops are not yet addressable here.
+   */
+  DriverLoadTime: a
+    .model({
+      loadId:    a.string().required(),
+      driverId:  a.string().required(),
+      leg:       a.string().required(),  // 'PICKUP' | 'DELIVERY'
+      // Local wall-clock times as the driver read them, 'YYYY-MM-DDTHH:mm'. Deliberately
+      // NOT instants: a driver reports "I got there at 08:15", and converting that
+      // through a timezone we are guessing at is how an hour goes missing from a claim.
+      timeIn:    a.string(),
+      timeOut:   a.string(),
+      notes:     a.string(),
+      createdAt: a.string().required(),
+      updatedAt: a.string(),
+      updatedBy: a.string(),
+    })
+    .secondaryIndexes((index) => [index('driverId'), index('loadId')])
+    .authorization((allow) => [allow.authenticated()]),
+
   DriverSubmissionDoc: a
     .model({
       submissionId:  a.string().required(),
@@ -431,6 +463,17 @@ const schema = a.schema({
       // much as one sent by SMS, and this is the copy that should reach a broker.
       // The original is always kept — it is the record of what actually arrived.
       enhancedKey:      a.string(),
+      // ── Legibility ───────────────────────────────────────────────────────
+      // Whether the page can actually be READ, which enhancement cannot fix. A photo
+      // taken in a dark cab, out of focus, or of a crumpled page comes back clean and
+      // still unreadable, and nobody finds out until a broker rejects the invoice weeks
+      // later. Scored on upload for every fleet — Ivan's drivers and the owner operators
+      // both — so the driver is told while they are still standing at the dock.
+      // 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN' (never scored, or not an image).
+      legibility:       a.string(),
+      legibilityScore:  a.integer(),  // 0-100; higher is more readable
+      legibilityNotes:  a.string(),   // what was wrong, in words a driver can act on
+
       // 'PENDING' | 'READY' | 'ORIGINAL_ONLY' | 'FAILED'. ORIGINAL_ONLY means the file
       // was never an image we could enhance (a PDF from a scanner app, for instance),
       // which is a normal outcome and not a failure.

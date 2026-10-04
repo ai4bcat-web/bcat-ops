@@ -87,6 +87,8 @@ export interface DriverProfile {
   name: string
   email: string
   payGroup: string
+  /** Which page this driver gets. See src/lib/driverProgram.ts. */
+  program: 'SETTLEMENT' | 'PAPERWORK'
   active: boolean
 }
 
@@ -281,6 +283,91 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchMe(): Promise<DriverProfile> {
   return request<DriverProfile>('/me')
+}
+
+/* ── Ivan paperwork ────────────────────────────────────────────────────────────
+ * Mirrors amplify/functions/driver-app-api/paperwork.ts. Note what is NOT here: no
+ * rate, no amount, no deductions, no check. The payload has no money in it.
+ */
+
+export interface PaperworkStop {
+  type: string
+  name: string | null
+  city: string | null
+  state: string | null
+  appt: string | null
+}
+
+export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'
+
+export interface PaperworkPod {
+  present: boolean
+  pages: number
+  legibility: PodLegibility
+  notes: string | null
+}
+
+export interface PaperworkTimes {
+  timeIn: string | null
+  timeOut: string | null
+  notes: string | null
+  hours: number | null
+  billable: boolean
+}
+
+export interface PaperworkLoad {
+  id: string
+  reference: string
+  customer: string | null
+  deliveryAppt: string | null
+  pickupAppt: string | null
+  origin: string | null
+  destination: string | null
+  miles: number | null
+  trailerNumber: string | null
+  commodity: string | null
+  weight: number | null
+  pieces: number | null
+  notes: string | null
+  status: string | null
+  stops: PaperworkStop[]
+  pod: PaperworkPod
+  pickupTimes: PaperworkTimes
+  deliveryTimes: PaperworkTimes
+}
+
+export interface Paperwork {
+  weekStart: string
+  loads: PaperworkLoad[]
+  loadCount: number
+  podsMissing: number
+  podsIllegible: number
+}
+
+export interface PaperworkWeek {
+  weekStart: string
+  loadCount: number
+  podsMissing: number
+  podsIllegible: number
+}
+
+export async function fetchPaperworkWeeks(): Promise<PaperworkWeek[]> {
+  const out = await request<{ weeks: PaperworkWeek[] }>('/paperwork/weeks')
+  return out.weeks
+}
+
+export async function fetchPaperwork(weekStart: string): Promise<Paperwork> {
+  return request<Paperwork>(`/paperwork?week=${encodeURIComponent(weekStart)}`)
+}
+
+export async function saveLoadTimes(input: {
+  loadId: string
+  leg: 'PICKUP' | 'DELIVERY'
+  timeIn: string | null
+  timeOut: string | null
+  notes?: string | null
+}): Promise<void> {
+  await request('/paperwork/time', { method: 'POST', body: JSON.stringify(input) })
 }
 
 export async function fetchSettlementWeeks(): Promise<SettlementWeek[]> {

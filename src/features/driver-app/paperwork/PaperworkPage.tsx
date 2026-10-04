@@ -1,0 +1,192 @@
+/**
+ * Ivan paperwork — the driver's home when they are on Ivan's own fleet.
+ *
+ * Same shape as the owner operators' settlement so there is one app to explain, and
+ * deliberately none of its money: no rate, no deductions, no check. What it adds is the
+ * two things an employee driver actually needs — what is still missing, and somewhere to
+ * put the clock when they sat at a dock.
+ *
+ * Defaults to the current week and pages back through history, same as the settlement.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { AlertCircle, Camera, FileWarning, Loader2, RefreshCcw, Truck } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
+  fetchPaperwork, fetchPaperworkWeeks,
+  type Paperwork, type PaperworkLoad, type PaperworkWeek,
+} from '../driverApi'
+import { PaperworkRows } from './PaperworkRows'
+import { LoadTimesSheet } from './LoadTimesSheet'
+import { UnattachedPods } from '../UnattachedPods'
+import { sundayOf, weekLabel } from '@/features/driver-pay/week'
+import { errorText } from '@/lib/errorText'
+
+export function PaperworkPage() {
+  const navigate = useNavigate()
+  const [weeks, setWeeks] = useState<PaperworkWeek[] | null>(null)
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(null)
+  const [week, setWeek] = useState<Paperwork | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [weeksRetryKey, setWeeksRetryKey] = useState(0)
+  const [weekRetryKey, setWeekRetryKey] = useState(0)
+  const [times, setTimes] = useState<{ load: PaperworkLoad; leg: 'PICKUP' | 'DELIVERY' } | null>(null)
+
+  const currentWeekStart = sundayOf()
+
+  // The week in progress is always offered, even before anything delivers in it.
+  const weekOptions = useMemo(() => {
+    if (!weeks) return weeks
+    if (weeks.some((w) => w.weekStart === currentWeekStart)) return weeks
+    return [{ weekStart: currentWeekStart, loadCount: 0, podsMissing: 0, podsIllegible: 0 }, ...weeks]
+  }, [weeks, currentWeekStart])
+
+  const selected =
+    selectedWeekStart ??
+    weekOptions?.find((w) => w.weekStart === currentWeekStart)?.weekStart ??
+    weekOptions?.[0]?.weekStart ??
+    null
+
+  useEffect(() => {
+    let stale = false
+    fetchPaperworkWeeks()
+      .then((list) => {
+        if (stale) return
+        setWeeks([...list].sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1)))
+      })
+      .catch((err) => { if (!stale) setError(errorText(err)) })
+    return () => { stale = true }
+  }, [weeksRetryKey])
+
+  useEffect(() => {
+    if (!selected) return
+    let stale = false
+    fetchPaperwork(selected)
+      .then((w) => { if (!stale) { setWeek(w); setError(null) } })
+      .catch((err) => { if (!stale) setError(errorText(err)) })
+    return () => { stale = true }
+  }, [selected, weekRetryKey])
+
+  const reload = useCallback(() => setWeekRetryKey((k) => k + 1), [])
+
+  const loadingWeeks = weeks === null && error === null
+  const loadingWeek = selected != null && week?.weekStart !== selected && error === null
+
+  if (loadingWeeks) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-slate-400">
+        <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+        <p>Loading your week…</p>
+      </div>
+    )
+  }
+
+  if (error && weeks === null) {
+    return (
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 p-6 text-center">
+        <AlertCircle className="h-10 w-10 text-red-400" aria-hidden="true" />
+        <p className="font-medium text-white">{error}</p>
+        <Button onClick={() => { setError(null); setWeeks(null); setWeeksRetryKey((k) => k + 1) }} className="h-11 gap-2 px-6">
+          <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+          Retry
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-md px-4 py-5">
+      <h1 className="mb-4 text-xl font-bold text-white">Paperwork</h1>
+
+      {weekOptions && weekOptions.length > 0 && (
+        <div className="mb-4">
+          <label htmlFor="pw-week" className="mb-1.5 block text-sm font-medium text-slate-400">
+            Week
+          </label>
+          <Select value={selected ?? ''} onValueChange={setSelectedWeekStart}>
+            <SelectTrigger id="pw-week" className="h-12 w-full text-base">
+              <SelectValue placeholder="Choose a week" />
+            </SelectTrigger>
+            <SelectContent>
+              {weekOptions.map((w) => (
+                <SelectItem key={w.weekStart} value={w.weekStart} className="text-base">
+                  {weekLabel(w.weekStart)}
+                  {w.weekStart === currentWeekStart ? ' · This week' : ''} ·{' '}
+                  {w.loadCount} load{w.loadCount === 1 ? '' : 's'}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {/* What is outstanding, before the list. The reason to open the page at all. */}
+      {week && week.weekStart === selected && (week.podsMissing > 0 || week.podsIllegible > 0) && (
+        <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+          {week.podsMissing > 0 && (
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+              <Camera className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {week.podsMissing} load{week.podsMissing === 1 ? '' : 's'} still need a POD
+            </p>
+          )}
+          {week.podsIllegible > 0 && (
+            <p className="flex items-center gap-2 text-sm font-semibold text-red-200">
+              <FileWarning className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} cannot be read — please resend
+            </p>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
+          <p className="font-medium text-red-300">{error}</p>
+          <Button onClick={reload} variant="outline" className="mt-3 h-10 gap-2" aria-label="Retry">
+            <RefreshCcw className="h-4 w-4" aria-hidden="true" />
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {loadingWeek && (
+        <div className="flex flex-col items-center justify-center gap-3 py-10 text-slate-400">
+          <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+          <p>Loading loads…</p>
+        </div>
+      )}
+
+      {!loadingWeek && week && week.weekStart === selected && !error && (
+        <PaperworkRows
+          loads={week.loads}
+          onSendPod={(load) => navigate(`/driver/scan?kind=pod&ref=${encodeURIComponent(load.reference)}&loadId=${encodeURIComponent(load.id)}`)}
+          onRecordTimes={(load, leg) => setTimes({ load, leg })}
+        />
+      )}
+
+      {/* Paperwork for a load the office has not built yet still has to have a way out. */}
+      <div className="mt-5 flex flex-col gap-3">
+        <UnattachedPods />
+        <Button
+          variant="outline"
+          className="h-12 w-full gap-2 text-base"
+          onClick={() => navigate('/driver/scan?kind=pod')}
+        >
+          <Truck className="h-4 w-4" aria-hidden="true" />
+          Send paperwork for another load
+        </Button>
+      </div>
+
+      {times && (
+        <LoadTimesSheet
+          load={times.load}
+          leg={times.leg}
+          onClose={() => setTimes(null)}
+          onSaved={reload}
+        />
+      )}
+    </div>
+  )
+}

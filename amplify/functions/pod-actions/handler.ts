@@ -1763,7 +1763,7 @@ export async function scanDriverDocsAction(
 
 export async function enhanceDriverDocAction(
   input: Record<string, unknown>,
-): Promise<{ id: string; scanStatus: string; enhancedKey?: string; error?: string }> {
+): Promise<{ id: string; scanStatus: string; enhancedKey?: string; error?: string; legibility?: string }> {
   if (!DRIVER_SUBMISSION_DOC_TABLE) {
     return { id: '', scanStatus: 'FAILED', error: 'driver submission docs are not configured' }
   }
@@ -1837,7 +1837,7 @@ export async function enhanceDriverDocAction(
     if (isPdf(bytes, type)) {
       const cleaned = await enhancePdfPhotos(bytes)
       if (!cleaned) {
-        await record({ scanStatus: 'ORIGINAL_ONLY', scanError: null, scanVersion: POD_SCAN_VERSION })
+        await record({ scanStatus: 'ORIGINAL_ONLY', scanError: null, scanVersion: POD_SCAN_VERSION, legibility: 'UNKNOWN', legibilityScore: null, legibilityNotes: null })
         return { id, scanStatus: 'ORIGINAL_ONLY' }
       }
       const pdfKey = `${doc.s3Key.replace(/\.[^./]+$/, '')}.enhanced.pdf`
@@ -1863,8 +1863,13 @@ export async function enhanceDriverDocAction(
       scanStatus: 'READY',
       scanError: null,
       scanVersion: enhanced.scanVersion ?? POD_SCAN_VERSION,
+      // Whether the finished page can be read, for every fleet. The driver app shows this
+      // against the load so a bad photo is caught at the dock rather than by a broker.
+      legibility: enhanced.legibility.legibility,
+      legibilityScore: enhanced.legibility.score,
+      legibilityNotes: enhanced.legibility.notes || null,
     })
-    return { id, scanStatus: 'READY', enhancedKey }
+    return { id, scanStatus: 'READY', enhancedKey, legibility: enhanced.legibility.legibility }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     // Recorded, never thrown: the upload itself succeeded and the original is intact. A

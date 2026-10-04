@@ -273,6 +273,9 @@ const PORTAL_ORIGINS = [
 const driverApiFn = backend.driverAppApi.resources.lambda as LambdaFunction
 const driverSubmissionTable = backend.data.resources.tables['DriverSubmission']
 const driverSubmissionDocTable = backend.data.resources.tables['DriverSubmissionDoc']
+// Detention times Ivan's drivers record for themselves. Writable by the driver API, which
+// is the only thing that writes them.
+const driverLoadTimeTable = backend.data.resources.tables['DriverLoadTime']
 const driverApiAmazonTripTable = backend.data.resources.tables['AmazonTrip']
 const driverApiDeductionTable = backend.data.resources.tables['DriverPayDeduction']
 const driverApiCreditTable = backend.data.resources.tables['DriverPayCredit']
@@ -315,6 +318,8 @@ const driverApiWritableArns = [
   `${driverSubmissionTable.tableArn}/index/*`,
   driverSubmissionDocTable.tableArn,
   `${driverSubmissionDocTable.tableArn}/index/*`,
+  driverLoadTimeTable.tableArn,
+  `${driverLoadTimeTable.tableArn}/index/*`,
 ]
 
 driverApiFn.addToRolePolicy(
@@ -349,6 +354,7 @@ backend.storage.resources.bucket.grantDelete(driverApiFn, 'driver-docs/*')
 driverApiFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable.tableName)
 driverApiFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
 driverApiFn.addEnvironment('DRIVER_TABLE_NAME', driverApiDriverTable.tableName)
+driverApiFn.addEnvironment('DRIVER_LOAD_TIME_TABLE_NAME', driverLoadTimeTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_SETTING_TABLE_NAME', driverApiPaySettingTable.tableName)
 driverApiFn.addEnvironment('AMAZON_TRIP_TABLE_NAME', driverApiAmazonTripTable.tableName)
 driverApiFn.addEnvironment('LOAD_TABLE_NAME', driverApiLoadTable.tableName)

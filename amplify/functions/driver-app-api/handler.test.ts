@@ -669,6 +669,9 @@ describe('driver-app-api handler', () => {
         name: 'Driver A',
         email: EMAIL_A,
         payGroup: 'AMAZON',
+        // Which page the app shows. SETTLEMENT here, and notably this driver carries no
+        // fleetGroup and no driverType — the unstated case has to keep the pay page.
+        program: 'SETTLEMENT',
         active: true,
       })
     })

@@ -1,7 +1,8 @@
 import type { ComponentType, SVGProps } from 'react'
 import { Suspense, lazy } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { Loader2, UserCircle, Wallet } from 'lucide-react'
+import { ClipboardList, Loader2, UserCircle, Wallet } from 'lucide-react'
+import type { DriverProgram } from '@/lib/driverProgram'
 
 // lucide-react does not export a named icon type; this describes the props we use.
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
@@ -14,6 +15,7 @@ type IconComponent = ComponentType<SVGProps<SVGSVGElement>>
 const ScanPage = lazy(() => import('./scanner/ScanPage'))
 const SubmissionsPage = lazy(() => import('./SubmissionsPage'))
 const SettlementPage = lazy(() => import('./settlement/SettlementPage').then((m) => ({ default: m.SettlementPage })))
+const PaperworkPage = lazy(() => import('./paperwork/PaperworkPage').then((m) => ({ default: m.PaperworkPage })))
 const AccountPage = lazy(() => import('./AccountPage').then((m) => ({ default: m.AccountPage })))
 
 function TabButton({
@@ -50,7 +52,7 @@ function TabButton({
   )
 }
 
-export function DriverApp() {
+export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram }) {
   return (
     <div className="flex h-dvh flex-col bg-[#0b1220] text-white">
       {/*
@@ -82,7 +84,12 @@ export function DriverApp() {
 {/* Two tabs, not four. Scanning is not a destination — it is something a driver
             does to a specific load, so it is reached from that load's row on the
             settlement. Four tabs made them hunt for which one held their paperwork. */}
-        <TabButton to="/driver/settlement" icon={Wallet} label="Settlement" />
+        {/* One tab, named for whichever program this driver is on. An Ivan driver has no
+            settlement to visit and an owner operator has no separate paperwork page — so
+            the home tab IS their page, rather than two tabs where one is always empty. */}
+        {program === 'PAPERWORK'
+          ? <TabButton to="/driver/paperwork" icon={ClipboardList} label="Paperwork" />
+          : <TabButton to="/driver/settlement" icon={Wallet} label="Settlement" />}
         <TabButton to="/driver/account" icon={UserCircle} label="Account" />
       </nav>
     </div>
@@ -91,4 +98,4 @@ export function DriverApp() {
 
 // Exported for the parent router so children can be declared next to the lazy
 // imports the tab bar depends on.
-export { ScanPage, SubmissionsPage, SettlementPage, AccountPage }
+export { ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, AccountPage }

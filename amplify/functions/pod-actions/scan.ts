@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { POD_SCAN_VERSION } from './scan-version.js'
+import { scoreLegibility, type LegibilityResult } from './scan/legibility'
 import {
   applyIlluminationCleanup,
   detectSkewAngle,
@@ -46,6 +47,9 @@ export type PodScanReviewFlag =
   | 'GEOMETRY_UNCERTAIN'
   | 'TEXT_UNCERTAIN'
   | 'PERSPECTIVE_CLAMPED'
+  // The cleanup worked and the page still cannot be read. A different kind of problem
+  // from the others here: re-running the scan will not fix it, only a new photo will.
+  | 'ILLEGIBLE'
 
 export interface PodScanOrientation {
   /** Clockwise rotation detected by OSD prior to correction. */
@@ -74,6 +78,13 @@ export interface PodScanResult {
   flags: PodScanReviewFlag[]
   /** Plain-language reason a person should compare this copy with the original, or null. */
   scanReviewReason: string | null
+  /*
+   * Whether the finished page can be READ. Scored on the image a reader actually
+   * receives — after cleanup, after resize — because that is the one that has to be
+   * legible. Enhancement cannot add detail the camera never captured, and a page nobody
+   * can read is worth saying so about while the driver is still at the dock.
+   */
+  legibility: LegibilityResult
 }
 
 function cloneJimp(image: JimpImage): JimpImage {
@@ -219,8 +230,22 @@ const bestWords = (readings: OrientationReading[]): number => Math.max(...readin
  * illumination cleanup is applied to every image, so neither is a reason.
  */
 export function describeReviewReason(flags: PodScanReviewFlag[]): string | null {
+  /*
+   * Order is by how much the message tells someone, not by severity.
+   *
+   * TEXT_UNCERTAIN stays first: a page with no readable text at all is also illegible, but
+   * that message says so AND explains why the page was left unrotated, which the
+   * legibility one does not.
+   *
+   * ILLEGIBLE then outranks the geometry warnings, which say "we could not be sure we
+   * straightened this", resolvable by looking at it. A page that cannot be read is not
+   * fixable by looking — it needs a new photo.
+   */
   if (flags.includes('TEXT_UNCERTAIN')) {
     return 'No readable text was found, so this may not be a document; the photo was cleaned but not rotated or cropped.'
+  }
+  if (flags.includes('ILLEGIBLE')) {
+    return 'This page may not be readable. Check it against the original and ask for a new photo if needed.'
   }
   if (flags.includes('ORIENTATION_UNCERTAIN')) {
     return 'Could not confirm which way is up, so the photo was left as taken.'
@@ -460,6 +485,15 @@ export async function enhancePodImage(
   correctIllumination(workingImage)
 
   const outBytes = await finalize(workingImage)
+
+  /*
+   * 5. Is it readable? Measured on the FINISHED page — re-read from the bytes we are
+   * about to store, so the score describes what the office and the broker will see,
+   * including the downscale `finalize` may have applied.
+   */
+  const finished = await Jimp.read(outBytes)
+  const legibility = scoreLegibility(jimpToGray(finished), finished.width, finished.height)
+  if (legibility.legibility !== 'OK') review.push('ILLEGIBLE')
   const geometry: PodScanGeometry = {
     confidence: boundary.confidence,
     skewAngleDeg: deskew.skewAngleDeg,
@@ -475,5 +509,6 @@ export async function enhancePodImage(
     geometry,
     flags: review,
     scanReviewReason: describeReviewReason(review),
+    legibility,
   }
 }

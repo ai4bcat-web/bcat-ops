@@ -48,6 +48,21 @@ import {
 } from '../../../src/lib/driverJourney'
 import type { Load } from '../../../src/types'
 import { isEligiblePayGroup } from './scope'
+/*
+ * How far back the week picker looks. Ivan's drivers care about the week they are in and
+ * the one just gone; a year of history on a phone is scrolling, not information.
+ */
+const PAPERWORK_HISTORY_START = '2026-09-01'
+import { driverProgramOf } from '../../../src/lib/driverProgram'
+import {
+  buildPaperworkLoad,
+  driverIsOnPaperworkLoad,
+  summarize,
+  type LoadTimeRow,
+  type PaperworkLoadLike,
+  type PodDocRow,
+  referenceOf,
+} from './paperwork'
 import {
   OWNER_OP_FIRST_PERIOD,
   ownerOpTripsFor,
@@ -65,6 +80,7 @@ const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME
 /** pod-actions runs the scan cleanup. Absent in stacks where PODs are not wired. */
 const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME ?? ''
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
+const DRIVER_LOAD_TIME_TABLE = process.env.DRIVER_LOAD_TIME_TABLE_NAME ?? ''
 const DRIVER_PAY_SETTING_TABLE = process.env.DRIVER_PAY_SETTING_TABLE_NAME!
 const AMAZON_TRIP_TABLE = process.env.AMAZON_TRIP_TABLE_NAME!
 const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
@@ -159,6 +175,10 @@ interface DriverRow {
   name: string
   active: boolean
   email?: string | null
+  // Which fleet they run in. These two decide whether the app shows a settlement or
+  // paperwork — see src/lib/driverProgram.ts for why pay group is NOT the input.
+  fleetGroup?: string | null
+  driverType?: string | null
 }
 
 interface DriverPaySettingRow {
@@ -796,6 +816,15 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'settlement' && !segments[1]) {
     return { path: '/settlement' }
+  }
+  if (segments[0] === 'paperwork' && !segments[1]) {
+    return { path: '/paperwork' }
+  }
+  if (segments[0] === 'paperwork' && segments[1] === 'weeks') {
+    return { path: '/paperwork/weeks' }
+  }
+  if (segments[0] === 'paperwork' && segments[1] === 'time') {
+    return { path: '/paperwork/time' }
   }
   if (segments[0] === 'settlement' && segments[1] === 'weeks') {
     return { path: '/settlement/weeks' }
@@ -1667,8 +1696,122 @@ export const handler = async (event: FnUrlEvent) => {
         // setting, and '' is not nullish — a ?? chain leaves their account screen blank.
         email: driver.email || setting.email || '',
         payGroup: setting.payGroup ?? 'AMAZON',
+        // Which page this driver gets: a settlement, or paperwork with no money on it.
+        // The app routes on this rather than on payGroup — see src/lib/driverProgram.ts.
+        program: driverProgramOf({ ...driver, payGroup: setting.payGroup }),
         active: driver.active !== false,
       })
+    }
+
+    /*
+     * Ivan paperwork.
+     *
+     * Deliberately NOT folded into /settlement. That endpoint's job is to explain a
+     * check, and every field on it is a pay field; bolting a "hide the money" flag onto it
+     * would leave one `if` between an Ivan driver and the rate of every load they haul.
+     * A separate endpoint whose payload has no money in it cannot make that mistake.
+     */
+    if (method === 'GET' && (path === '/paperwork' || path === '/paperwork/weeks')) {
+      const weekParam = event.queryStringParameters?.week ?? ''
+      const weekStart = weekParam ? weekStartOfISO(weekParam) : weekStartOfISO(new Date().toISOString().slice(0, 10))
+
+      // Scanned on the delivery window, then narrowed in code: a driver's assignment lives
+      // inside the stops array, which a DynamoDB filter cannot reach into.
+      const windowStart = path === '/paperwork/weeks' ? PAPERWORK_HISTORY_START : weekStart
+      const windowEndEx = path === '/paperwork/weeks'
+        ? dayAfterPeriod(weekStartOfISO(new Date().toISOString().slice(0, 10)))
+        : dayAfterPeriod(weekStart)
+
+      const candidates = await scan<PaperworkLoadLike>(
+        LOAD_TABLE_NAME,
+        'deliveryAppt >= :start AND deliveryAppt < :endEx',
+        {},
+        { ':start': windowStart, ':endEx': windowEndEx },
+      )
+      const mine = candidates.filter((l) => driverIsOnPaperworkLoad(l, driverId))
+
+      // POD pages and recorded times for exactly these loads.
+      const [docs, subs, times] = await Promise.all([
+        scan<PodDocRow & { submissionId?: string | null }>(DRIVER_SUBMISSION_DOC_TABLE, 'driverId = :did', {}, { ':did': driverId }),
+        scan<{ id: string; loadId?: string | null; referenceNumber?: string | null }>(DRIVER_SUBMISSION_TABLE, 'driverId = :did', {}, { ':did': driverId }),
+        DRIVER_LOAD_TIME_TABLE
+          ? scan<LoadTimeRow>(DRIVER_LOAD_TIME_TABLE, 'driverId = :did', {}, { ':did': driverId })
+          : Promise.resolve([] as LoadTimeRow[]),
+      ])
+
+      // A doc knows its submission; the submission knows the load. Join once.
+      const subById = new Map(subs.map((x) => [x.id, x]))
+      function docsForLoad(load: PaperworkLoadLike): PodDocRow[] {
+        const pro = normalizePro(referenceOf(load))
+        return docs.filter((d) => {
+          const sub = d.submissionId ? subById.get(d.submissionId) : undefined
+          if (!sub) return false
+          if (sub.loadId && sub.loadId === load.id) return true
+          return !!pro && normalizePro(sub.referenceNumber ?? '') === pro
+        })
+      }
+
+      const built = mine
+        .map((l) => buildPaperworkLoad(l, docsForLoad(l), times.filter((t) => t.loadId === l.id)))
+        .sort((a, b) => String(a.deliveryAppt ?? '').localeCompare(String(b.deliveryAppt ?? '')))
+
+      if (path === '/paperwork/weeks') {
+        // One row per week that has work in it, plus the week in progress, newest first.
+        const byWeek = new Map<string, typeof built>()
+        for (const l of built) {
+          const wk = weekStartOfISO(String(l.deliveryAppt ?? '').slice(0, 10))
+          if (!wk) continue
+          byWeek.set(wk, [...(byWeek.get(wk) ?? []), l])
+        }
+        const current = weekStartOfISO(new Date().toISOString().slice(0, 10))
+        if (!byWeek.has(current)) byWeek.set(current, [])
+        const weeks = [...byWeek.entries()]
+          .map(([wk, loads]) => ({ weekStart: wk, ...summarize(loads) }))
+          .sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1))
+        return reply(200, { weeks })
+      }
+
+      return reply(200, { weekStart, loads: built, ...summarize(built) })
+    }
+
+    /* Times the driver recorded for a dock they sat at. */
+    if (method === 'POST' && path === '/paperwork/time') {
+      if (!DRIVER_LOAD_TIME_TABLE) return reply(503, { error: 'Time recording is not configured' })
+      const body = JSON.parse(event.body || '{}') as {
+        loadId?: string; leg?: string; timeIn?: string | null; timeOut?: string | null; notes?: string | null
+      }
+      const loadId = (body.loadId ?? '').trim()
+      const leg = (body.leg ?? '').trim().toUpperCase()
+      if (!loadId) return reply(400, { error: 'loadId is required' })
+      if (leg !== 'PICKUP' && leg !== 'DELIVERY') return reply(400, { error: 'leg must be PICKUP or DELIVERY' })
+
+      /*
+       * A driver may only record times against a load they are actually on. Without this
+       * check the loadId is caller-supplied and anyone's clock could be written onto
+       * anyone's load.
+       */
+      const found = await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))
+      const load = found.Item as PaperworkLoadLike | undefined
+      if (!load || !driverIsOnPaperworkLoad(load, driverId)) {
+        return reply(404, { error: 'load not found' })
+      }
+
+      const id = `${driverId}#${loadId}#${leg}`
+      const now = nowIso()
+      const existing = await ddb.send(new GetCommand({ TableName: DRIVER_LOAD_TIME_TABLE, Key: { id } }))
+      await ddb.send(new PutCommand({
+        TableName: DRIVER_LOAD_TIME_TABLE,
+        Item: {
+          id, loadId, driverId, leg,
+          timeIn: (body.timeIn ?? '').trim() || null,
+          timeOut: (body.timeOut ?? '').trim() || null,
+          notes: (body.notes ?? '').trim() || null,
+          createdAt: (existing.Item?.createdAt as string | undefined) ?? now,
+          updatedAt: now,
+          updatedBy: driver.email ?? driverId,
+        },
+      }))
+      return reply(200, { ok: true, loadId, leg })
     }
 
     if (method === 'GET' && path === '/settlement/weeks') {
