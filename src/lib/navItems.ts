@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Repeat, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Route, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Repeat, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Route, ClipboardList, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -69,6 +69,7 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements',   icon: Boxes,  pageKey: 'driverPayBoxTrucks' },
       { to: '/driver-pay',            label: 'Amazon Settlements',      icon: Wallet, pageKey: 'driverPay' },
       { to: '/owner-operator-pay',    label: 'Owner Operator Settlements', icon: Banknote, pageKey: 'ownerOperatorPay' },
+      { to: '/ivan-paperwork',        label: 'Ivan Paperwork',          icon: ClipboardList, pageKey: 'ivanPaperwork' },
       { to: '/disputes',              label: 'Amazon Disputes',         icon: Scale,  pageKey: 'disputes' },
     ],
   },

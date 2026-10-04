@@ -65,6 +65,14 @@ export interface DriverSubmissionDocRecord {
   scanStatus?: 'PENDING' | 'READY' | 'ORIGINAL_ONLY' | 'FAILED' | null
   scanError?: string | null
   scanVersion?: number | null
+  /*
+   * Whether the finished page can be READ, scored on upload. Separate from scanStatus:
+   * a page can clean up perfectly ('READY') and still be unreadable, which is the case
+   * nobody caught before a broker rejected the invoice.
+   */
+  legibility?: 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN' | null
+  legibilityScore?: number | null
+  legibilityNotes?: string | null
 }
 
 export interface SubmissionWithDocs extends DriverSubmissionRecord {
@@ -148,6 +156,7 @@ const SUBMISSION_FIELDS = `
 const DOC_FIELDS = `
   id submissionId driverId kind s3Key fileName contentType byteSize pageNumber uploadedAt notifiedAt
   enhancedKey scanStatus scanError scanVersion
+  legibility legibilityScore legibilityNotes
 `
 
 // ── Queries ───────────────────────────────────────────────────────────────────
