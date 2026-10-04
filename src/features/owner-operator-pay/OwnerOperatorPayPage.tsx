@@ -286,6 +286,16 @@ export function OwnerOperatorPayPage() {
 
   const isThisWeek = periodStart === sundayOf()
   const isFirstWeek = periodStart === OWNER_OP_FIRST_PERIOD
+  /*
+   * A week that has not finished yet.
+   *
+   * Forward navigation used to stop at the current week, which quietly hid work that was
+   * already booked. Roy had PRO 14570 assigned on 2 Oct for delivery on the 5th: for two
+   * days the load existed, was on him, and could not be looked at from here at all —
+   * it belonged to a week there was no button to reach. Dispatch schedules ahead, so this
+   * page has to be able to look ahead.
+   */
+  const isFutureWeek = periodStart > sundayOf()
   const selectedRow = pay.rows.find((r) => r.driver.id === selectedDriverId) ?? pay.rows[0] ?? null
 
   const handleRemoveCredit = async (c: DriverPayCredit) => {
@@ -311,9 +321,16 @@ export function OwnerOperatorPayPage() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button style={{ ...navBtn, opacity: isFirstWeek ? 0.4 : 1 }} onClick={() => !isFirstWeek && setPeriodStart((p) => shiftWeek(p, -1))} disabled={isFirstWeek} aria-label="Previous week"><ChevronLeft size={16} /></button>
               <button onClick={() => setPeriodStart(initialPeriodStart())} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid var(--ds-border)', background: isThisWeek ? 'var(--ds-bg)' : 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>This week</button>
-              <button style={{ ...navBtn, opacity: isThisWeek ? 0.4 : 1 }} onClick={() => !isThisWeek && setPeriodStart((p) => shiftWeek(p, 1))} disabled={isThisWeek} aria-label="Next week"><ChevronRight size={16} /></button>
+              <button style={navBtn} onClick={() => setPeriodStart((p) => shiftWeek(p, 1))} aria-label="Next week"><ChevronRight size={16} /></button>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', minWidth: 180, textAlign: 'right' }}>{weekLabelLong(periodStart)}</span>
+            {/* Now that this page can look ahead, it has to say when it is. A week still
+                being run is scheduled work, not a check anyone is owed yet. */}
+            {isFutureWeek && (
+              <span style={{ flexShrink: 0, borderRadius: 999, padding: '2px 10px', fontSize: 12, fontWeight: 700, background: '#f59e0b22', color: '#b45309' }}>
+                Upcoming — not delivered yet
+              </span>
+            )}
           </div>
         </div>
       </div>

@@ -151,6 +151,39 @@ describe('OwnerOperatorPayPage', () => {
     expect(screen.getByText(weekLabelLong(OWNER_OP_FIRST_PERIOD))).toBeInTheDocument()
   })
 
+  /*
+   * Roy had PRO 14570 assigned to him on 2 Oct for delivery on the 5th — the following pay
+   * week. Forward navigation stopped at the current week, so for two days the load existed,
+   * was on him, and there was no button that would show it. Dispatch books ahead; this page
+   * has to be able to look ahead.
+   */
+  it('lets you look at a week that has not happened yet', () => {
+    // The clock is Wed 30 Sep, so the page opens on the 27 Sep week.
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow()] }))
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
+
+    const next = screen.getByRole('button', { name: /next week/i })
+    expect(next).not.toBeDisabled()
+    expect(screen.queryByText(/Upcoming/)).not.toBeInTheDocument()
+
+    fireEvent.click(next)
+
+    // The week Roy's load actually delivers in.
+    expect(screen.getByText(weekLabelLong('2026-10-04'))).toBeInTheDocument()
+    // And it is labelled, so scheduled work is not read as a check anyone is owed.
+    expect(screen.getByText(/Upcoming — not delivered yet/)).toBeInTheDocument()
+  })
+
+  it('drops the upcoming label once you come back to this week', () => {
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow()] }))
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: /next week/i }))
+    expect(screen.getByText(/Upcoming/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /this week/i }))
+    expect(screen.queryByText(/Upcoming/)).not.toBeInTheDocument()
+    expect(screen.getByText(weekLabelLong(OWNER_OP_FIRST_PERIOD))).toBeInTheDocument()
+  })
+
   it('renders a driver row with brokerage loads and check amount', () => {
     const row = baseRow({
       trips: [
