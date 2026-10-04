@@ -133,9 +133,40 @@ describe('uploadDocument', () => {
       file: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]), // a JPEG
     })
     const text = captured!.toString('latin1')
+    // A real JPEG gets wrapped into a PDF first (see below), so this stub — which pdf-lib
+    // cannot embed — is what proves the sniffed type reaches the part when wrapping fails.
     expect(text).toContain('filename="POD-14538.jpg"')
     expect(text).toContain('Content-Type: image/jpeg')
-    expect(text).not.toContain('application/pdf')
+  })
+
+  it('wraps a real image into a PDF, because OTR only ever reads PDFs', async () => {
+    /*
+     * Measured: a 614-byte JPEG sent as `.jpg` with Content-Type image/jpeg came back from
+     * IronPDF as "Invalid or corrupt pdf format" — their service ignores the declared type.
+     * Enhanced PODs are sometimes `.enhanced.jpg`, so this is the normal path.
+     */
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=',
+      'base64',
+    )
+    let captured: Buffer | null = null
+    const client = clientWith((_u, init) => { captured = Buffer.from(init.body as unknown as Uint8Array) })
+    await client.uploadDocument({
+      invoiceId: '16222565',
+      docType: OTR_DOC_TYPE.POD,
+      fileName: 'POD-14538.jpg',
+      contentType: 'image/jpeg',
+      file: png,
+    })
+    const text = captured!.toString('latin1')
+    expect(text).toContain('filename="POD-14538.pdf"')
+    expect(text).toContain('Content-Type: application/pdf')
+    expect(text).not.toContain('image/png')
+    // And it left as an ASCII-safe PDF, so OTR's UTF-8 round trip cannot touch it.
+    const start = text.indexOf('%PDF')
+    expect(start).toBeGreaterThan(-1)
+    const fileEnd = text.lastIndexOf('\r\n--')
+    expect([...captured!.subarray(start, fileEnd)].every((b) => b <= 0x7f)).toBe(true)
   })
 
   it('sends a copy, so a view onto a larger buffer cannot leak its neighbours', async () => {

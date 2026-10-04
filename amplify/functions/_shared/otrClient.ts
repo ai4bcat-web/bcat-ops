@@ -17,7 +17,7 @@
 
 import { buildMultipart } from './multipart'
 import { sniffDoc, withExt } from './sniffDoc'
-import { toAsciiSafePdf } from './asciiSafePdf'
+import { toAsciiSafePdf, wrapImageInPdf } from './asciiSafePdf'
 
 export const OTR_STAGING_BASE = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
 
@@ -348,8 +348,32 @@ export class OtrClient {
      */
     const sniffed = sniffDoc(bytes)
     let outBytes = bytes
-    const fileName = sniffed ? withExt(opts.fileName, sniffed.ext) : opts.fileName
-    const partType = sniffed?.mime ?? opts.contentType
+    let effective = sniffed
+    let wrapped = false
+
+    /*
+     * An image has to become a PDF before it leaves here. Their docs list PNG and JPEG as
+     * accepted; in practice a 614-byte JPEG declared as image/jpeg came back from IronPDF
+     * as "Invalid or corrupt pdf format", because everything is fed to a PDF reader. Our
+     * enhanced PODs are sometimes `.enhanced.jpg`, so this is the normal path, not an edge.
+     */
+    if (sniffed && (sniffed.ext === 'jpg' || sniffed.ext === 'png')) {
+      try {
+        const pdf = await wrapImageInPdf(bytes, sniffed.ext)
+        const copy = new Uint8Array(pdf.byteLength)
+        copy.set(pdf)
+        outBytes = copy
+        effective = { ext: 'pdf', mime: 'application/pdf' }
+        wrapped = true
+      } catch (e) {
+        console.warn('[otr] could not wrap image in a PDF; sending the image', {
+          message: e instanceof Error ? e.message : String(e),
+        })
+      }
+    }
+
+    const fileName = effective ? withExt(opts.fileName, effective.ext) : opts.fileName
+    const partType = effective?.mime ?? opts.contentType
     let asciiSafe = false
 
     /*
@@ -362,9 +386,9 @@ export class OtrClient {
      * Set OTR_ASCII_SAFE_PDF=off once OTR handles binary bodies correctly.
      */
     const wantAsciiSafe = opts.asciiSafe ?? process.env.OTR_ASCII_SAFE_PDF !== 'off'
-    if (sniffed?.ext === 'pdf' && wantAsciiSafe) {
+    if (effective?.ext === 'pdf' && wantAsciiSafe) {
       try {
-        const safe = await toAsciiSafePdf(bytes)
+        const safe = await toAsciiSafePdf(outBytes)
         // Only worth the size if it actually achieved zero high bytes.
         if (safe.highBytes === 0) {
           // Copied for the same reason the source bytes are, above: an exactly-sized
@@ -406,6 +430,7 @@ export class OtrClient {
       fileName,
       declaredType: partType,
       sniffed: sniffed?.ext ?? 'unknown',
+      wrapped,
       asciiSafe,
       docType: opts.docType,
       sourceBytes: bytes.byteLength,

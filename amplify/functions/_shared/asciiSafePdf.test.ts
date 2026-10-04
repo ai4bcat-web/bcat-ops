@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PDFDocument, PDFRawStream, PDFName, PDFArray } from 'pdf-lib'
-import { toAsciiSafePdf } from './asciiSafePdf'
+import { toAsciiSafePdf, wrapImageInPdf } from './asciiSafePdf'
 import { sniffDoc, withExt } from './sniffDoc'
 
 /** A PDF with a real binary (Flate) image stream, like a scanned POD. */
@@ -113,5 +113,36 @@ describe('sniffDoc', () => {
     // The live bug: enhanced PODs can be .enhanced.jpg, and we named every upload .pdf.
     expect(withExt('POD-14538.pdf', 'jpg')).toBe('POD-14538.jpg')
     expect(withExt('POD-14538', 'pdf')).toBe('POD-14538.pdf')
+  })
+})
+
+describe('wrapImageInPdf', () => {
+  const PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///+/v7+jQ3Y5AAAADklEQVQI12P4AIX8EAgALgAD/aNpbtEAAAAASUVORK5CYII=',
+    'base64',
+  )
+
+  it('turns an image into a one-page PDF at the scan’s own size', async () => {
+    /*
+     * OTR feeds everything to a PDF reader whatever we declare, so a JPEG POD must arrive
+     * already wrapped. The page matches the image pixel for pixel — nothing resampled.
+     */
+    const out = await wrapImageInPdf(PNG, 'png')
+    expect(Buffer.from(out.subarray(0, 4)).toString()).toBe('%PDF')
+
+    const doc = await PDFDocument.load(out, { ignoreEncryption: true })
+    expect(doc.getPageCount()).toBe(1)
+    const page = doc.getPage(0)
+    expect(page.getWidth()).toBe(8)
+    expect(page.getHeight()).toBe(8)
+  })
+
+  it('produces something the ASCII-safe pass can then make survivable', async () => {
+    // The two steps compose: wrap the image, then strip every high byte.
+    const { bytes, highBytes } = await toAsciiSafePdf(await wrapImageInPdf(PNG, 'png'))
+    expect(highBytes).toBe(0)
+    const through = new TextEncoder().encode(new TextDecoder('utf-8').decode(bytes))
+    expect(Buffer.compare(Buffer.from(through), Buffer.from(bytes))).toBe(0)
+    expect((await PDFDocument.load(through, { ignoreEncryption: true })).getPageCount()).toBe(1)
   })
 })

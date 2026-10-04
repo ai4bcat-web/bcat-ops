@@ -106,3 +106,20 @@ function stripHighByteComments(bytes: Uint8Array): Uint8Array {
   }
   return new Uint8Array(out)
 }
+
+/**
+ * Wrap a JPEG or PNG in a single-page PDF.
+ *
+ * OTR's docs say the endpoint accepts PDF, PNG and JPEG. It does not. A 614-byte JPEG,
+ * sent with filename `.jpg` and `Content-Type: image/jpeg`, came back from IronPDF as
+ * "Invalid or corrupt pdf format" — their service hands everything to a PDF reader
+ * regardless of what we declare. An image therefore has to arrive already inside a PDF.
+ */
+export async function wrapImageInPdf(bytes: Uint8Array, kind: 'jpg' | 'png'): Promise<Uint8Array> {
+  const doc = await PDFDocument.create()
+  const img = kind === 'jpg' ? await doc.embedJpg(bytes) : await doc.embedPng(bytes)
+  // The page IS the scan: no margin, no scaling, nothing resampled.
+  const page = doc.addPage([img.width, img.height])
+  page.drawImage(img, { x: 0, y: 0, width: img.width, height: img.height })
+  return doc.save({ useObjectStreams: false })
+}
