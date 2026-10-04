@@ -16,6 +16,8 @@
  */
 
 import { buildMultipart } from './multipart'
+import { sniffDoc, withExt } from './sniffDoc'
+import { toAsciiSafePdf } from './asciiSafePdf'
 
 export const OTR_STAGING_BASE = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
 
@@ -311,6 +313,8 @@ export class OtrClient {
     contentType: string
     file: Uint8Array
     sendEmail?: boolean
+    /** Force the ASCII-safe rewrite on or off; defaults to the OTR_ASCII_SAFE_PDF env. */
+    asciiSafe?: boolean
   }): Promise<{ message: string; invoiceId: string }> {
     /*
      * A fresh, exactly-sized copy of the bytes.
@@ -336,8 +340,58 @@ export class OtrClient {
      * order still follow OTR's documented example exactly, and the file part carries no
      * declared type, as their own curl does.
      */
+    /*
+     * What the file IS, from its own bytes — not from the key's extension. We were naming
+     * every POD `.pdf` and declaring it as such; a scan stored as a JPEG then reached
+     * OTR's PDF reader, which answered exactly what you would expect: "Invalid or corrupt
+     * pdf format".
+     */
+    const sniffed = sniffDoc(bytes)
+    let outBytes = bytes
+    const fileName = sniffed ? withExt(opts.fileName, sniffed.ext) : opts.fileName
+    const partType = sniffed?.mime ?? opts.contentType
+    let asciiSafe = false
+
+    /*
+     * OTR's endpoint decodes the body as UTF-8 and re-encodes it, which shreds any byte
+     * above 0x7F. Proven by arithmetic, twice: a 614-byte JPEG reported back as exactly
+     * 976 bytes, and a 1,018,923-byte POD reported as 1,852,054 against a predicted
+     * 1,860,973. A PDF re-encoded with /ASCIIHexDecode has no high bytes at all, so it
+     * passes through that round trip byte-for-byte. Roughly doubles the size.
+     *
+     * Set OTR_ASCII_SAFE_PDF=off once OTR handles binary bodies correctly.
+     */
+    const wantAsciiSafe = opts.asciiSafe ?? process.env.OTR_ASCII_SAFE_PDF !== 'off'
+    if (sniffed?.ext === 'pdf' && wantAsciiSafe) {
+      try {
+        const safe = await toAsciiSafePdf(bytes)
+        // Only worth the size if it actually achieved zero high bytes.
+        if (safe.highBytes === 0) {
+          outBytes = safe.bytes
+          asciiSafe = true
+        } else {
+          console.warn('[otr] ascii-safe rewrite left high bytes; sending original', {
+            highBytes: safe.highBytes,
+          })
+        }
+      } catch (e) {
+        // A PDF we cannot rewrite is still worth sending as-is.
+        console.warn('[otr] ascii-safe rewrite failed; sending original', {
+          message: e instanceof Error ? e.message : String(e),
+        })
+      }
+    }
+
+    /*
+     * Field order and names follow OTR's documented curl exactly — and so, now, does the
+     * file part's Content-Type. We had been omitting it on the belief that their curl sends
+     * none; capturing `curl --form "file=@pod.pdf"` on the wire shows it sends
+     * `Content-Type: application/pdf`. A .NET handler reading a null ContentType throws
+     * "Object reference not set to an instance of an object", which is precisely what both
+     * of our probe PDFs came back with.
+     */
     const { body, contentType } = buildMultipart([
-      { name: 'file', fileName: opts.fileName, bytes },
+      { name: 'file', fileName, contentType: partType, bytes: outBytes },
       { name: 'DocumentType', value: 'invoice-file-upload' },
       { name: 'invoiceid', value: String(opts.invoiceId) },
       { name: 'SendEmail', value: opts.sendEmail ? 'true' : 'false' },
@@ -345,9 +399,13 @@ export class OtrClient {
     ])
 
     console.log('[otr] uploading document', {
-      fileName: opts.fileName,
+      fileName,
+      declaredType: partType,
+      sniffed: sniffed?.ext ?? 'unknown',
+      asciiSafe,
       docType: opts.docType,
-      fileBytes: bytes.byteLength,
+      sourceBytes: bytes.byteLength,
+      fileBytes: outBytes.byteLength,
       bodyBytes: body.byteLength,
       contentType,
     })

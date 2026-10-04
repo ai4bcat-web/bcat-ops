@@ -733,6 +733,48 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
        * Defaults to POD, which is the one path that reaches their PDF reader and reports
        * the size it opened.
        */
+      /*
+       * Send ONE real document to OTR twice — untouched, and rewritten to pure ASCII — so
+       * the fix is judged on their response rather than on our arithmetic. Takes the S3 key
+       * of an actual POD or rate confirmation.
+       */
+      case 'docProbe': {
+        const invoiceId = trim(input.invoiceId)
+        const key = trim(input.key)
+        if (!invoiceId || !key) return fail('docProbe needs an invoiceId and a key')
+        const docType = (Number(input.docType) || OTR_DOC_TYPE.POD) as typeof OTR_DOC_TYPE.POD
+        const client = otr()
+        const { bytes, contentType } = await s3Bytes(key)
+        const results: Row[] = []
+
+        for (const asciiSafe of [false, true]) {
+          try {
+            const r = await client.uploadDocument({
+              invoiceId,
+              docType,
+              fileName: `probe-${asciiSafe ? 'ascii' : 'raw'}.pdf`,
+              contentType,
+              file: bytes,
+              asciiSafe,
+            })
+            results.push({ asciiSafe, ok: true, message: r.message })
+          } catch (e) {
+            const body = e instanceof OtrError ? e.body : null
+            results.push({
+              asciiSafe,
+              ok: false,
+              status: e instanceof OtrError ? e.status : 0,
+              // The size their reader says it opened is the whole experiment.
+              reportedBytes: Number(/from (\d+) bytes/.exec(String(body ?? ''))?.[1] ?? 0) || null,
+              body: String(body ?? (e instanceof Error ? e.message : e)).slice(0, 300),
+            })
+          }
+        }
+
+        console.log('[otr-actions] doc probe', JSON.stringify({ invoiceId, key, sourceBytes: bytes.length, results }))
+        return ok({ invoiceId, key, sourceBytes: bytes.length, results })
+      }
+
       case 'uploadProbe': {
         const invoiceId = trim(input.invoiceId)
         if (!invoiceId) return fail('uploadProbe needs an invoiceId')

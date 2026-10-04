@@ -97,21 +97,45 @@ describe('uploadDocument', () => {
     expect(text).toContain('name="InvoiceDocTypes"\r\n\r\n1\r\n')
   })
 
-  it('sends the file byte for byte, under its own name and with no declared type', async () => {
+  it('sends the file byte for byte, under its own name, with its type declared', async () => {
     /*
      * The failure that started this: OTR opened 1,852,054 bytes of a 1,018,923-byte PDF —
      * what that file becomes if its bytes are decoded as UTF-8 text and re-encoded. If
      * anything in this function ever puts the body through a string again, this catches it.
      *
-     * And no Content-Type on the part, matching their documented example: `--form
-     * "file=@pod.pdf"` sends no type, and the extension carries the format.
+     * The part DOES carry a Content-Type. This file previously asserted the opposite, on
+     * the claim that `--form "file=@pod.pdf"` sends none. Capturing that exact curl against
+     * a local socket shows it sends `Content-Type: application/pdf` — curl infers it from
+     * the extension. A .NET handler reading a null ContentType raises "Object reference not
+     * set to an instance of an object", which is what both probe PDFs came back with.
      */
     const { body, text } = await upload()
     expect(text).toContain('name="file"; filename="POD-14538.pdf"')
-    expect(text).not.toContain('Content-Type: application/pdf')
+    expect(text).toContain('Content-Type: application/pdf')
     const at = body.indexOf(Buffer.from(PDF_BYTES))
     expect(at).toBeGreaterThan(-1)
     expect(body.subarray(at, at + PDF_BYTES.length)).toEqual(Buffer.from(PDF_BYTES))
+  })
+
+  it('names and types the part from the bytes, not from the name it was given', async () => {
+    /*
+     * Live bug: enhanced PODs are sometimes `.enhanced.jpg`, and every upload was named
+     * `POD-<pro>.pdf` regardless. OTR fed that JPEG to their PDF reader and answered
+     * "Invalid or corrupt pdf format" — about a file that was never a PDF.
+     */
+    let captured: Buffer | null = null
+    const client = clientWith((_u, init) => { captured = Buffer.from(init.body as unknown as Uint8Array) })
+    await client.uploadDocument({
+      invoiceId: '16222565',
+      docType: OTR_DOC_TYPE.POD,
+      fileName: 'POD-14538.pdf', // wrong on purpose
+      contentType: 'application/pdf', // also wrong on purpose
+      file: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]), // a JPEG
+    })
+    const text = captured!.toString('latin1')
+    expect(text).toContain('filename="POD-14538.jpg"')
+    expect(text).toContain('Content-Type: image/jpeg')
+    expect(text).not.toContain('application/pdf')
   })
 
   it('sends a copy, so a view onto a larger buffer cannot leak its neighbours', async () => {
