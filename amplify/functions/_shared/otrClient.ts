@@ -367,7 +367,11 @@ export class OtrClient {
         const safe = await toAsciiSafePdf(bytes)
         // Only worth the size if it actually achieved zero high bytes.
         if (safe.highBytes === 0) {
-          outBytes = safe.bytes
+          // Copied for the same reason the source bytes are, above: an exactly-sized
+          // ArrayBuffer-backed array, so neither the type nor the length is in question.
+          const copy = new Uint8Array(safe.bytes.byteLength)
+          copy.set(safe.bytes)
+          outBytes = copy
           asciiSafe = true
         } else {
           console.warn('[otr] ascii-safe rewrite left high bytes; sending original', {
