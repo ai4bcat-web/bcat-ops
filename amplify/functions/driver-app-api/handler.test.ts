@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import {
   ScanCommand,
   GetCommand,
@@ -961,6 +961,72 @@ describe('driver-app-api handler', () => {
       // The Wednesday load is held for its missing POD, so gross is the Saturday load
       // alone — which still proves it reaches the money math at all.
       expect(body.grossPay).toBe(2500)
+    })
+
+    /*
+     * A driver sees what they have run, not what they are booked for.
+     *
+     * The week query used to run to the end of the pay week, so on Monday a driver's
+     * settlement already listed Friday's load — pay they had not earned — and the paperwork
+     * page asked for a POD for a delivery that had not happened.
+     */
+    describe('loads that have not delivered yet', () => {
+      const MONDAY = new Date('2026-09-28T09:00:00Z') // inside the 2026-09-27 week
+
+      beforeEach(() => {
+        vi.useFakeTimers()
+        vi.setSystemTime(MONDAY)
+        mockVerify.mockReset()
+        mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
+        // Booked for Thursday of the same week, already assigned to the driver.
+        tables['Load-test']['load-c-future'] = {
+          id: 'load-c-future', tmsId: 'TMS-FUTURE', aljexId: '19999',
+          customer: 'Broker Later', miles: 100, rate: 100000,
+          deliveryAppt: '2026-10-01T18:00:00.000Z',
+          deliveryDriverId: DRIVER_C_ID,
+          originCity: 'Joliet, IL', destinationCity: 'Gary, IN',
+        }
+      })
+
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('leaves a load booked later this week off the settlement', async () => {
+        const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+        expect(res.statusCode).toBe(200)
+        const body = JSON.parse(res.body)
+        const future = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-FUTURE')
+        expect(future).toBeUndefined()
+        // And its freight is not in the money either.
+        expect(JSON.stringify(body)).not.toContain('Broker Later')
+      })
+
+      it('still shows a load delivered earlier the same day', async () => {
+        // Nothing records an actual delivery, so today counts — otherwise a driver who
+        // delivered at 08:00 would not see it until tomorrow.
+        tables['Load-test']['load-c-today'] = {
+          id: 'load-c-today', tmsId: 'TMS-TODAY', aljexId: '19998',
+          customer: 'Broker Today', miles: 50, rate: 50000,
+          deliveryAppt: '2026-09-28T08:00:00.000Z',
+          deliveryDriverId: DRIVER_C_ID,
+          originCity: 'Elgin, IL', destinationCity: 'Aurora, IL',
+        }
+        const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+        const body = JSON.parse(res.body)
+        expect(body.trips.some((t: { loadId?: string }) => t.loadId === 'TMS-TODAY')).toBe(true)
+      })
+
+      it('does not count the undelivered load in the week picker either', async () => {
+        // The count and the page have to agree, or the driver is told about work the
+        // statement does not show.
+        const res = await handler(baseEvent('/settlement/weeks'))
+        const weeks = JSON.parse(res.body).weeks as Array<{ weekStart: string; tripCount: number }>
+        const wk = weeks.find((w) => w.weekStart === '2026-09-27')
+        expect(wk).toBeDefined()
+        const res2 = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+        expect(wk!.tripCount).toBe(JSON.parse(res2.body).trips.length)
+      })
     })
 
     it('attaches the per-trip factoring readiness resolved from Load/Customer/Location/POD rows', async () => {

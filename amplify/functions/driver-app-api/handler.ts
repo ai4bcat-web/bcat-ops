@@ -48,6 +48,7 @@ import {
 } from '../../../src/lib/driverJourney'
 import type { Load } from '../../../src/types'
 import { isEligiblePayGroup } from './scope'
+import { deliveredWindowEnd, isDeliveredByNow } from './deliveredWindow'
 /*
  * How far back the week picker looks. Ivan's drivers care about the week they are in and
  * the one just gone; a year of history on a phone is scrolling, not information.
@@ -533,12 +534,6 @@ function ownerOpTripToRaw(trip: OwnerOpTrip, periodStart: string): RawAmazonTrip
 }
 
 /** Exclusive upper bound: the midnight that starts the day AFTER the pay week ends. */
-function dayAfterPeriod(periodStart: string): string {
-  const d = new Date(`${periodStart}T12:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + 7)
-  return d.toISOString().slice(0, 10)
-}
-
 async function loadOwnerOperatorTripsForWeek(
   driverId: string,
   periodStart: string,
@@ -551,13 +546,18 @@ async function loadOwnerOperatorTripsForWeek(
     LOAD_TABLE_NAME,
     'deliveryDriverId = :did AND deliveryAppt >= :start AND deliveryAppt < :endEx',
     {},
-    { ':did': driverId, ':start': periodStart, ':endEx': dayAfterPeriod(periodStart) },
+    // Capped at today: a driver's settlement shows what they have run, never Friday's
+    // load as though it were already earned. See deliveredWindow.ts.
+    { ':did': driverId, ':start': periodStart, ':endEx': deliveredWindowEnd(periodStart, new Date()) },
   )
   return ownerOpTripsFor(loads, driverId, periodStart).map((t) => ownerOpTripToRaw(t, periodStart))
 }
 
 async function loadOwnerOperatorRawTrips(driverId: string): Promise<RawAmazonTrip[]> {
-  const loads = await scan<OwnerOpLoadLike>(LOAD_TABLE_NAME, 'deliveryDriverId = :did', {}, { ':did': driverId })
+  const all = await scan<OwnerOpLoadLike>(LOAD_TABLE_NAME, 'deliveryDriverId = :did', {}, { ':did': driverId })
+  // Same cap as the single-week read, so the week picker's counts match the page.
+  const now = new Date()
+  const loads = all.filter((l) => isDeliveredByNow(l.deliveryAppt, now))
   // Bucket by pay week and reuse the ONE derivation the staff page uses — a second copy
   // here is how the cents conversion and the 'N/A' load-id fallback drift apart.
   const weeks = new Set<string>()
@@ -1718,9 +1718,14 @@ export const handler = async (event: FnUrlEvent) => {
       // Scanned on the delivery window, then narrowed in code: a driver's assignment lives
       // inside the stops array, which a DynamoDB filter cannot reach into.
       const windowStart = path === '/paperwork/weeks' ? PAPERWORK_HISTORY_START : weekStart
+      /*
+       * Never past today. A driver cannot have paperwork for a load they have not
+       * delivered, so asking for it is noise — and on the week list it would count loads
+       * against them that are not yet theirs to answer for.
+       */
       const windowEndEx = path === '/paperwork/weeks'
-        ? dayAfterPeriod(weekStartOfISO(new Date().toISOString().slice(0, 10)))
-        : dayAfterPeriod(weekStart)
+        ? deliveredWindowEnd(weekStartOfISO(new Date().toISOString().slice(0, 10)), new Date())
+        : deliveredWindowEnd(weekStart, new Date())
 
       const candidates = await scan<PaperworkLoadLike>(
         LOAD_TABLE_NAME,
