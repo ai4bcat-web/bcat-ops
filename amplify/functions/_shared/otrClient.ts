@@ -21,6 +21,16 @@ import { toAsciiSafePdf, wrapImageInPdf } from './asciiSafePdf'
 
 export const OTR_STAGING_BASE = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
 
+/** Parse a response body that may not be JSON at all, without throwing over it. */
+function safeJson(text: string): Record<string, unknown> | null {
+  try {
+    const v: unknown = JSON.parse(text)
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : null
+  } catch {
+    return null
+  }
+}
+
 /** Document classifications OTR accepts on upload. */
 export const OTR_DOC_TYPE = {
   POD: 1,
@@ -355,7 +365,17 @@ export class OtrClient {
       ? {
           InvoiceNo: payload.InvoiceNo,
           PoNumber: payload.PoNumber,
-          CustomerMC: Number(payload.BrokerMC),
+          /*
+           * BrokerMC, as a NUMBER — not CustomerMC.
+           *
+           * OTR's own v2 reference lists `CustomerMC` in its required-fields table and
+           * then shows `BrokerMC` in the example body on the same page. The live API
+           * takes BrokerMC; CustomerMC is rejected with a bare
+           * `{"statusCode":400,"message":"Invalid Request"}` that names no field, which is
+           * what "Create invoice failed (400)" was. Verified against production: the same
+           * payload with BrokerMC returns 201 and an invoicePkey.
+           */
+          BrokerMC: Number(payload.BrokerMC),
           ClientDOT: this.cfg.clientDot ?? '',
           InvoiceAmount: payload.InvoiceAmount,
           InvoiceDate: payload.InvoiceDate,
@@ -380,6 +400,35 @@ export class OtrClient {
       body: JSON.stringify(body),
     })
     const text = await res.text()
+    /*
+     * A duplicate is the invoice we were about to create, so carry on with it.
+     *
+     * OTR answers a repeat POST with 409 and the SAME body, invoicePkey included. Treating
+     * that as a failure meant a submit that was interrupted after the invoice was created
+     * — a timeout, a retry, a second click — could never be completed, because every
+     * attempt afterwards died before reaching the documents. Only a 409 that actually
+     * carries an id is accepted; anything else still raises.
+     */
+    if (res.status === 409) {
+      const dup = safeJson(text)
+      const dupId = Number(dup?.invoicePkey ?? dup?.invoiceId)
+      if (Number.isFinite(dupId)) {
+        console.warn('[otr] invoice already exists at OTR; continuing with it', {
+          invoiceNo: payload.InvoiceNo,
+          invoiceId: dupId,
+        })
+        return {
+          invoiceId: dupId,
+          invoiceNo: String(dup?.invoiceNo ?? payload.InvoiceNo),
+          poNumber: String(dup?.poNumber ?? payload.PoNumber),
+          clientName: String(dup?.clientName ?? ''),
+          brokerName: String(dup?.brokerName ?? ''),
+          invoiceExists: true,
+          isDuplicate: true,
+          message: (dup?.Message ?? dup?.message ?? null) as string | null,
+        }
+      }
+    }
     if (!res.ok) {
       throw new OtrError(
         res.status === 402
@@ -392,9 +441,16 @@ export class OtrClient {
       )
     }
     const j = JSON.parse(text) as Record<string, unknown>
-    const invoiceId = Number(j.invoiceId)
+    /*
+     * v2 calls the id `invoicePkey`; v1 called it `invoiceId`.
+     *
+     * The same rename runs through the upload side, where v2 wants `ItemPkey`. Reading
+     * only invoiceId left v2 throwing "Create invoice returned no invoiceId" on a response
+     * that had just created the invoice.
+     */
+    const invoiceId = Number(j.invoicePkey ?? j.invoiceId)
     if (!Number.isFinite(invoiceId)) {
-      throw new OtrError('Create invoice returned no invoiceId', res.status, text)
+      throw new OtrError('Create invoice returned no invoice id', res.status, text)
     }
     return {
       invoiceId,

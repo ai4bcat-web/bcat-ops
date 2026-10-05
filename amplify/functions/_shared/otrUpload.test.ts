@@ -323,12 +323,18 @@ describe('creating an invoice on v2', () => {
     return { client, calls }
   }
 
-  it('sends CustomerMC as a number, not BrokerMC as a string', async () => {
+  it('sends BrokerMC as a number, never a string', async () => {
+    /*
+     * This asserted CustomerMC until production rejected every invoice with it. OTR's v2
+     * reference lists CustomerMC in its required-fields table and shows BrokerMC in the
+     * example body on the same page; the live API takes BrokerMC. The v1→v2 change here is
+     * the TYPE — a number rather than a string — not the field name.
+     */
     const { client, calls } = clientOn('https://otr.test/carrier-tms/2', '1234567')
     await client.createInvoice(PAYLOAD)
     const body = JSON.parse(calls[0].body)
-    expect(body.CustomerMC).toBe(20313)
-    expect(body.BrokerMC).toBeUndefined()
+    expect(body.BrokerMC).toBe(20313)
+    expect(body.CustomerMC).toBeUndefined()
   })
 
   it('sends ClientDOT, which v1 never asked for', async () => {
