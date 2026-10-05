@@ -1255,3 +1255,78 @@ describe('a full-table scan with no filter', () => {
     }
   })
 })
+
+/*
+ * A driver types a PRO; nothing ever turned it into a link.
+ *
+ * Every submission sat with loadId null forever — Chad's POD for 14547 among them — so
+ * only screens that ALSO matched on the PRO found it, and everything keyed on loadId (the
+ * load's own documents, the factoring queue) did not. Six live submissions were in that
+ * state and every one of them matched a real load.
+ */
+describe('attaching a submission to its load', () => {
+  /** The DriverSubmission row this request wrote. */
+  function submissionPut(): Record<string, unknown> {
+    const call = mockDynamoSend.mock.calls
+      .map((c) => c[0] as { input?: { TableName?: string; Item?: Record<string, unknown> } })
+      .filter((c) => c instanceof PutCommand && c.input?.TableName === 'DriverSubmission-test')
+      .pop()
+    return (call?.input?.Item ?? {}) as Record<string, unknown>
+  }
+
+  beforeEach(() => {
+    mockVerify.mockReset()
+    mockVerify.mockResolvedValue({ email: EMAIL_C, email_verified: true })
+    // A PRO on exactly one load. The shared fixtures put 14452 on two, which the
+    // ambiguity test below depends on, so this one is added for the happy path.
+    tables['Load-test']['load-unique-pro'] = {
+      id: 'load-unique-pro', tmsId: 'TMS-UNIQ', aljexId: '77777  ',
+      customer: 'Broker Uniq', rate: 100000,
+      deliveryAppt: '2026-09-29T14:00:00Z', deliveryDriverId: DRIVER_C_ID,
+    }
+  })
+
+  it('links the submission to the load the PRO names', async () => {
+    const res = await handler(baseEvent('/submissions', 'POST', {
+      body: { kind: 'POD', referenceNumber: '77777', pages: [{ fileName: 'p.jpg', contentType: 'image/jpeg', byteSize: 10 }] },
+    }))
+    expect(res.statusCode).toBe(200)
+    // Matched on the padded '77777  ' the table really stores, via normalizePro.
+    const put = submissionPut()
+    expect(put.loadId).toBe('load-unique-pro')
+    expect(put.status).toBe('LINKED')
+  })
+
+  it('leaves it unattached when the PRO matches nothing, rather than losing the POD', async () => {
+    const res = await handler(baseEvent('/submissions', 'POST', {
+      body: { kind: 'POD', referenceNumber: '00000', pages: [{ fileName: 'p.jpg', contentType: 'image/jpeg', byteSize: 10 }] },
+    }))
+    expect(res.statusCode).toBe(200)
+    const put = submissionPut()
+    expect(put.loadId).toBeUndefined()
+    expect(put.status).toBe('NEW')
+  })
+
+  it('refuses to guess when a PRO is on more than one load', async () => {
+    /*
+     * 14452 is on two fixture loads, and one live PRO is on two loads today. Papering the
+     * wrong shipment is worse than leaving the POD loose — loose, it still shows against
+     * the load by PRO and a person can place it.
+     */
+    const res = await handler(baseEvent('/submissions', 'POST', {
+      body: { kind: 'POD', referenceNumber: '14452', pages: [{ fileName: 'p.jpg', contentType: 'image/jpeg', byteSize: 10 }] },
+    }))
+    expect(res.statusCode).toBe(200)
+    const put = submissionPut()
+    expect(put.loadId).toBeUndefined()
+    expect(put.status).toBe('NEW')
+  })
+
+  it('leaves it unattached when the driver typed no reference at all', async () => {
+    const res = await handler(baseEvent('/submissions', 'POST', {
+      body: { kind: 'POD', pages: [{ fileName: 'p.jpg', contentType: 'image/jpeg', byteSize: 10 }] },
+    }))
+    expect(res.statusCode).toBe(200)
+    expect(submissionPut().loadId).toBeUndefined()
+  })
+})

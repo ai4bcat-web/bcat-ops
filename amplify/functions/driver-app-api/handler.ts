@@ -1256,6 +1256,54 @@ export function pickOpenPodSubmission<T extends { referenceNumber?: string | nul
   )
 }
 
+
+/**
+ * The load a driver's PRO points at, so the submission is attached at the moment it is made.
+ *
+ * A driver types a PRO; nothing ever turned that into a link. Every submission sat with
+ * loadId null forever — Chad's POD for 14547 among them — and only the screens that
+ * additionally match on the PRO ever found it. Everything keyed on loadId did not: the
+ * load's own documents, the factoring queue, and anything built on them.
+ *
+ * Attaching here means the POD belongs to the load from the moment it arrives, rather than
+ * being re-derived by every reader that happens to remember to try the PRO as well.
+ *
+ * Deliberately forgiving: a PRO that matches nothing leaves the submission unattached, as
+ * before, because a POD with nowhere to go must still be kept.
+ */
+async function resolveLoadIdByPro(referenceNumber: string | null): Promise<string | null> {
+  const want = normalizePro(referenceNumber)
+  if (!want || !LOAD_TABLE_NAME) return null
+  try {
+    const loads = await scan<{ id: string; aljexId?: string | null }>(LOAD_TABLE_NAME)
+    // The live table stores PROs padded ("14547  "), which is why this compares normalized.
+    const hits = loads.filter((l) => normalizePro(l.aljexId ?? null) === want)
+
+    /*
+     * One match, or none. A PRO is supposed to be unique and very nearly is — one number
+     * is on two loads today — but attaching a POD to the WRONG load is worse than leaving
+     * it unattached, because an unattached POD still shows against the load by PRO and
+     * someone can place it by hand. A guess would quietly paper the wrong shipment.
+     */
+    if (hits.length !== 1) {
+      if (hits.length > 1) {
+        console.warn('[driver-app-api] PRO matches more than one load; leaving the POD unattached', {
+          referenceNumber, matches: hits.map((h) => h.id),
+        })
+      }
+      return null
+    }
+    return hits[0].id
+  } catch (err) {
+    // A failed lookup costs a link, not the document. Never fail the upload over it.
+    console.error('[driver-app-api] could not resolve a load for the PRO', {
+      referenceNumber,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
 async function openPodSubmissionFor(
   driverId: string,
   referenceNumber: string | null,
@@ -2052,6 +2100,9 @@ export const handler = async (event: FnUrlEvent) => {
       const submissionId = randomUUID()
       const { targets, pagesWithKeys } = await presignedPutTargets(driverId, submissionId, kind, pages)
 
+      // Attach it to the load now, from the PRO the driver typed. See resolveLoadIdByPro.
+      const resolvedLoadId = await resolveLoadIdByPro(referenceNumber)
+
       await ddb.send(
         new PutCommand({
           TableName: DRIVER_SUBMISSION_TABLE,
@@ -2060,8 +2111,9 @@ export const handler = async (event: FnUrlEvent) => {
             __typename: 'DriverSubmission',
             driverId,
             driverName: driver.name,
-            status: 'NEW',
+            status: resolvedLoadId ? 'LINKED' : 'NEW',
             referenceNumber,
+            ...(resolvedLoadId ? { loadId: resolvedLoadId } : {}),
             note: getStringOrNull(body, 'note'),
             createdAt: now,
             updatedAt: now,
