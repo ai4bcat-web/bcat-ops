@@ -1441,7 +1441,17 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
 //
 // OTR_BASE_URL is set here rather than hard-coded so moving to production is a
 // config change. Staging until the production credentials are swapped in.
-const OTR_BASE_URL = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
+/*
+ * PRODUCTION, and v2 only.
+ *
+ * Tested with the production subscription key: /carrier-tms/2/auth/token issues a token,
+ * while CarrierTmsV3, CarrierTms, CarrierTmsV2, carrier-tms/1 and carrier-tms/3 all 404 or
+ * 401. There is no v1 in production, so invoices and documents both speak v2 — the client
+ * derives the body shape from this URL, so the two cannot drift apart.
+ *
+ * Staging, for reference: https://servicesstg.otrsolutions.com/carrier-tms/2
+ */
+const OTR_BASE_URL = 'https://services.otrsolutions.com/carrier-tms/2'
 /*
  * Documents go to OTR's v2 API. A separate product on their gateway — our subscription key
  * only reached it once OTR widened it — and the half of the integration that never worked:
@@ -1449,7 +1459,7 @@ const OTR_BASE_URL = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
  * anything its PDF reader could open. v2 took the real 1MB POD untouched and returned 200.
  * Invoices stay on v1, which has always worked; v2's ItemPkey accepts the same invoice id.
  */
-const OTR_UPLOAD_BASE_URL = 'https://servicesstg.otrsolutions.com/carrier-tms/2'
+const OTR_UPLOAD_BASE_URL = 'https://services.otrsolutions.com/carrier-tms/2'
 
 const otrActionsFn = backend.otrActions.resources.lambda as LambdaFunction
 const otrSyncFn = backend.otrStatusSync.resources.lambda as LambdaFunction
