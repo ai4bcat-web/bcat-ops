@@ -212,8 +212,27 @@ async function findJobsdonePod(loadId: string): Promise<Row | null> {
  * `originalKey` carries the S3 key, which lives in the same bucket.
  */
 async function findSubmittedPod(loadId: string, proNumber: string): Promise<Row | null> {
+  return findSubmittedDoc(loadId, proNumber, 'POD')
+}
+
+/**
+ * A document a driver or staff member sent through the app, for this load.
+ *
+ * Generalised from the POD lookup to cover rate confirmations as well. The queue used to
+ * read a rate con from `load.rateConfirmKey` alone, so one uploaded through the driver app
+ * — which is a normal way for it to arrive, the app offers RATECON alongside POD — was
+ * invisible: the row showed "rate confirmation missing" with the document sitting in the
+ * submission the whole time, and the submit then failed for a document we already had.
+ */
+async function findSubmittedDoc(
+  loadId: string,
+  proNumber: string,
+  kind: 'POD' | 'RATECON',
+): Promise<Row | null> {
   if (!SUBMISSION_TABLE || !SUBMISSION_DOC_TABLE) return null
   const wantedPro = normalizePro(proNumber)
+  const label = kind === 'POD' ? 'POD' : 'RateCon'
+  const combinedField = kind === 'POD' ? 'combinedPodKey' : 'combinedRateconKey'
 
   const subs = await scanAllRows(SUBMISSION_TABLE)
   const mine = subs.filter((sub) => {
@@ -231,22 +250,22 @@ async function findSubmittedPod(loadId: string, proNumber: string): Promise<Row 
    * sheet of several — so this is not only about quality.
    */
   const withCombined = mine
-    .filter((sub) => trim(sub.combinedPodKey))
+    .filter((sub) => trim(sub[combinedField]))
     .sort((a, b) => String(b.combinedAt ?? '').localeCompare(String(a.combinedAt ?? '')))[0]
   if (withCombined) {
     return {
       id: withCombined.id,
       loadId,
-      fileName: `POD-${proNumber || String(withCombined.id).slice(-6)}.pdf`,
+      fileName: `${label}-${proNumber || String(withCombined.id).slice(-6)}.pdf`,
       contentType: 'application/pdf',
-      originalKey: trim(withCombined.combinedPodKey),
+      originalKey: trim(withCombined[combinedField]),
       createdAt: withCombined.combinedAt,
     }
   }
 
   const ids = new Set(mine.map((sub) => String(sub.id)))
   const docs = (await scanAllRows(SUBMISSION_DOC_TABLE)).filter(
-    (d) => d.kind === 'POD' && ids.has(String(d.submissionId)) && trim(d.s3Key),
+    (d) => d.kind === kind && ids.has(String(d.submissionId)) && trim(d.s3Key),
   )
   if (!docs.length) return null
 
@@ -256,7 +275,7 @@ async function findSubmittedPod(loadId: string, proNumber: string): Promise<Row 
   return {
     id: doc.id,
     loadId,
-    fileName: doc.fileName ?? `POD-${proNumber}.pdf`,
+    fileName: doc.fileName ?? `${label}-${proNumber}.pdf`,
     contentType: doc.contentType,
     originalKey: doc.s3Key,
     createdAt: doc.uploadedAt,
@@ -280,11 +299,37 @@ async function findPod(loadId: string, proNumber = ''): Promise<Row | null> {
 }
 
 /**
+ * A rate confirmation for this load, from wherever it reached BCAT Ops.
+ *
+ * The key on the Load wins: that is the one staff attached to the load itself, and it is
+ * what the drawer shows. Failing that, a submission carrying a RATECON counts — the app
+ * accepts rate confirmations as readily as PODs, and a document already in the building
+ * should not have to be uploaded a second time to satisfy the queue.
+ */
+async function findRatecon(load: Row, proNumber = ''): Promise<Row | null> {
+  const onLoad = trim(load.rateConfirmKey)
+  if (onLoad) {
+    return {
+      id: `load:${load.id}`,
+      loadId: load.id,
+      fileName: `RateCon-${proNumber || String(load.id).slice(-6)}.pdf`,
+      contentType: 'application/pdf',
+      originalKey: onLoad,
+      createdAt: load.updatedAt,
+    }
+  }
+  return findSubmittedDoc(String(load.id), proNumber, 'RATECON')
+}
+
+/**
  * Exported for findPod.test.ts only. Which store a POD comes from decides whether an
  * invoice can be created at all, and that is worth testing directly rather than through
  * the whole submit action.
  */
 export const __testFindPod = findPod
+
+/** Exported for findRatecon.test.ts only, for the same reason as __testFindPod. */
+export const __testFindRatecon = findRatecon
 
 /** First pickup and last delivery stop, for Location lookups. */
 function endpointStops(load: Row): { origin?: Row; destination?: Row } {
@@ -321,11 +366,12 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
   }
 
   const { origin, destination } = endpointStops(load)
-  const [customer, originLoc, destLoc, pod] = await Promise.all([
+  const [customer, originLoc, destLoc, pod, ratecon] = await Promise.all([
     getCustomer(load.customerId as string | undefined),
     getLocation(origin?.locationId as string | undefined),
     getLocation(destination?.locationId as string | undefined),
     findPod(String(load.id), String(item.proNumber ?? '')),
+    findRatecon(load, String(item.proNumber ?? '')),
   ])
 
   // Fall back to a name match so a load booked before the directory existed
@@ -360,7 +406,9 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
     manual: (item.otrManualFields as ManualOverrides) ?? null,
     submissionDate: today(),
     hasPod: Boolean(pod),
-    hasRateConfirmation: Boolean(trim(load.rateConfirmKey)),
+    // Counts a rate con from EITHER store — see findRatecon. Reading only the key on the
+    // Load reported one missing while it sat in a submission, and blocked the invoice.
+    hasRateConfirmation: Boolean(ratecon),
   })
 
   return { readiness, load }
@@ -451,7 +499,14 @@ async function uploadInvoiceDocuments(
     errors.push('POD: nothing on file to send')
   }
 
-  const rcKey = trim(load.rateConfirmKey)
+  /*
+   * Same lookup readiness used, so the queue and the submit agree. Reading only
+   * load.rateConfirmKey here meant a rate con sent through the driver app showed as
+   * present on the row and then failed to send — "nothing on file" for a document that
+   * was on file.
+   */
+  const rc = await findRatecon(load, String(item.proNumber ?? ''))
+  const rcKey = trim(rc?.originalKey)
   if (rcKey) {
     try {
       const { bytes, contentType } = await s3Bytes(rcKey)
