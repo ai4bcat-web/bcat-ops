@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Camera, FileWarning, Loader2, RefreshCcw, Truck } from 'lucide-react'
+import { AlertCircle, Camera, FileWarning, Loader2, RefreshCcw, Truck, Wrench } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -24,6 +24,47 @@ import { LoadTimesSheet } from './LoadTimesSheet'
 import { UnattachedPods } from '../UnattachedPods'
 import { sundayOf, weekLabel } from '@/features/driver-pay/week'
 import { errorText } from '@/lib/errorText'
+import { useDriverPm } from '../useDriverProgram'
+
+/**
+ * When this driver's truck is next due a PM.
+ *
+ * On the home screen rather than buried in Account, because the point is that a driver sees
+ * it without going looking. Overdue is red and due-soon amber; a PM that is simply a long
+ * way off still shows, quietly, so "when is my next PM" always has an answer here.
+ *
+ * Nothing renders when there is no truck assigned or the profile has not loaded — an empty
+ * gauge on a page about paperwork is just noise.
+ */
+function PmLine() {
+  const pm = useDriverPm()
+  if (!pm) return null
+
+  const tone =
+    pm.state === 'OVERDUE'
+      ? 'border-red-500/30 bg-red-500/10 text-red-700'
+      : pm.state === 'DUE_SOON'
+        ? 'border-amber-500/30 bg-amber-500/10 text-amber-700'
+        : 'border-border bg-muted/40 text-muted-foreground'
+
+  return (
+    <div className={`mb-4 flex items-start gap-2 rounded-xl border p-3 ${tone}`}>
+      <Wrench className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold">{pm.label}</p>
+        {(pm.truckNumber || pm.lastPmDate) && (
+          <p className="mt-0.5 text-xs opacity-80">
+            {[
+              pm.truckNumber ? `Truck ${pm.truckNumber}` : null,
+              pm.currentOdometer != null ? `${pm.currentOdometer.toLocaleString()} mi now` : null,
+              pm.lastPmDate ? `last PM ${pm.lastPmDate}` : null,
+            ].filter(Boolean).join(' · ')}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function PaperworkPage() {
   const navigate = useNavigate()
@@ -100,6 +141,8 @@ export function PaperworkPage() {
   return (
     <div className="mx-auto w-full max-w-md px-4 py-5">
       <h1 className="mb-4 text-xl font-bold text-foreground">Paperwork</h1>
+
+      <PmLine />
 
       {weekOptions && weekOptions.length > 0 && (
         <div className="mb-4">

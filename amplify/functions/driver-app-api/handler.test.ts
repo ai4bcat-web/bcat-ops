@@ -673,6 +673,8 @@ describe('driver-app-api handler', () => {
         // fleetGroup and no driverType — the unstated case has to keep the pay page.
         program: 'SETTLEMENT',
         active: true,
+        // No truck assigned to this fixture driver, so there is no PM to report.
+        pm: null,
       })
     })
   })

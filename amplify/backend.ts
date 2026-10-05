@@ -288,6 +288,10 @@ const driverApiLoadTable = backend.data.resources.tables['Load']
 const driverApiCustomerTable = backend.data.resources.tables['Customer']
 const driverApiLocationTable = backend.data.resources.tables['Location']
 const driverApiPodDocumentTable = backend.data.resources.tables['PodDocument']
+// The Ivan app shows a driver when their own truck's next PM falls due. Equipment holds the
+// last PM; TruckLocation holds Motive's odometer. Read-only — the app never edits either.
+const driverApiEquipmentTable = backend.data.resources.tables['Equipment']
+const driverApiTruckLocationTable = backend.data.resources.tables['TruckLocation']
 
 // The driver API is internet-facing (Function URL, auth handled in-handler), so it gets
 // read-only access to the roster and pay tables it reports from. Only the two submission
@@ -313,6 +317,10 @@ const driverApiReadOnlyArns = [
   `${driverApiLocationTable.tableArn}/index/*`,
   driverApiPodDocumentTable.tableArn,
   `${driverApiPodDocumentTable.tableArn}/index/*`,
+  driverApiEquipmentTable.tableArn,
+  `${driverApiEquipmentTable.tableArn}/index/*`,
+  driverApiTruckLocationTable.tableArn,
+  `${driverApiTruckLocationTable.tableArn}/index/*`,
 ]
 
 const driverApiWritableArns = [
@@ -363,6 +371,8 @@ driverApiFn.addEnvironment('LOAD_TABLE_NAME', driverApiLoadTable.tableName)
 driverApiFn.addEnvironment('CUSTOMER_TABLE_NAME', driverApiCustomerTable.tableName)
 driverApiFn.addEnvironment('LOCATION_TABLE_NAME', driverApiLocationTable.tableName)
 driverApiFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', driverApiPodDocumentTable.tableName)
+driverApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', driverApiEquipmentTable.tableName)
+driverApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', driverApiTruckLocationTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_DEDUCTION_TABLE_NAME', driverApiDeductionTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_CREDIT_TABLE_NAME', driverApiCreditTable.tableName)
 driverApiFn.addEnvironment('FUEL_TRANSACTION_TABLE_NAME', driverApiFuelTxTable.tableName)

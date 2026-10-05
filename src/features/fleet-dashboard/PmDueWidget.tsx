@@ -5,9 +5,12 @@ import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import type { Equipment } from '@/types/equipment'
+import { PM_INTERVAL_MI, PM_DUE_SOON_MI } from '@/lib/pmDue'
 
-const PM_INTERVAL = 25000       // Ivan/LOCAL fleet runs a PM every 25k miles
-const DUE_SOON_MI = 2000        // amber when within 2k mi of the next PM
+// The interval and the due-soon window live in src/lib/pmDue.ts, shared with the Ivan
+// driver app so the number on a driver's phone is the number the office is reading.
+const PM_INTERVAL = PM_INTERVAL_MI
+const DUE_SOON_MI = PM_DUE_SOON_MI
 
 const nf = new Intl.NumberFormat('en-US')
 const miles = (n: number) => `${nf.format(Math.round(n))} mi`

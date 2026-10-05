@@ -9,10 +9,13 @@ const api = {
   saveLoadTimes: vi.fn(),
   fetchSubmissions: vi.fn(),
   fetchRecentLoads: vi.fn(),
+  // The PM line on the home screen reads the driver's profile.
+  fetchMe: vi.fn(),
 }
 vi.mock('../driverApi', () => api)
 
 const { PaperworkPage } = await import('./PaperworkPage')
+const { clearCachedProgram } = await import('../useDriverProgram')
 
 function load(over: Record<string, unknown> = {}) {
   return {
@@ -50,6 +53,13 @@ beforeEach(() => {
   })
   api.fetchSubmissions.mockResolvedValue([])
   api.fetchRecentLoads.mockResolvedValue([])
+  // useDriverPm caches the profile at module level — clear it or one test's truck leaks
+  // into the next, which is also the real sign-out requirement.
+  clearCachedProgram()
+  api.fetchMe.mockResolvedValue({
+    driverId: 'd1', name: 'Jason Smith', email: 'j@x.com', payGroup: 'LOCAL',
+    program: 'PAPERWORK', active: true, pm: null,
+  })
 })
 afterEach(() => vi.useRealTimers())
 
@@ -233,5 +243,60 @@ describe('the ELD badge on a load', () => {
     renderPage()
     await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByText(/ELD/)).toBeNull()
+  })
+})
+
+describe('the PM line on the home screen', () => {
+  function withPm(pm: Record<string, unknown> | null) {
+    api.fetchMe.mockResolvedValue({
+      driverId: 'd1', name: 'Jason Smith', email: 'j@x.com', payGroup: 'LOCAL',
+      program: 'PAPERWORK', active: true, pm,
+    })
+  }
+
+  it('shows when the next PM is due', async () => {
+    withPm({
+      state: 'OK', nextDueAt: 125_000, remaining: 15_000, currentOdometer: 110_000,
+      lastPmMileage: 100_000, lastPmDate: '2026-08-01',
+      label: 'Next PM in 15,000 mi — at 125,000 mi', truckNumber: '009',
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/Next PM in 15,000 mi/)).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText(/Truck 009/)).toBeTruthy()
+    expect(screen.getByText(/110,000 mi now/)).toBeTruthy()
+  })
+
+  it('says so when the PM is overdue', async () => {
+    withPm({
+      state: 'OVERDUE', nextDueAt: 125_000, remaining: -1_500, currentOdometer: 126_500,
+      lastPmMileage: 100_000, lastPmDate: null,
+      label: 'PM overdue by 1,500 mi — it was due at 125,000 mi', truckNumber: '009',
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/PM overdue by 1,500 mi/)).toBeTruthy(), { timeout: 5000 })
+  })
+
+  it('says nothing when the driver has no truck assigned', async () => {
+    // An empty gauge on a page about paperwork is noise.
+    withPm(null)
+    renderPage()
+    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByText(/Next PM|PM overdue|PM due|not scheduled/)).toBeNull()
+  })
+
+  it('says nothing when the API predates the field', async () => {
+    api.fetchMe.mockResolvedValue({
+      driverId: 'd1', name: 'Jason Smith', email: 'j@x.com', payGroup: 'LOCAL',
+      program: 'PAPERWORK', active: true,
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByText(/Next PM|PM overdue|PM due|not scheduled/)).toBeNull()
+  })
+
+  it('does not take the page down when the profile call fails', async () => {
+    api.fetchMe.mockRejectedValue(new Error('offline'))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
   })
 })

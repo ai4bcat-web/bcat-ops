@@ -55,6 +55,7 @@ import { deliveredWindowEnd, isDeliveredByNow } from './deliveredWindow'
  */
 const PAPERWORK_HISTORY_START = '2026-09-01'
 import { driverProgramOf } from '../../../src/lib/driverProgram'
+import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
@@ -88,6 +89,8 @@ const LOAD_TABLE_NAME = process.env.LOAD_TABLE_NAME!
 const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
 const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
+const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
+const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
 const PAY_CREDIT_TABLE = process.env.DRIVER_PAY_CREDIT_TABLE_NAME!
 const FUEL_TX_TABLE = process.env.FUEL_TRANSACTION_TABLE_NAME!
@@ -180,6 +183,8 @@ interface DriverRow {
   // paperwork — see src/lib/driverProgram.ts for why pay group is NOT the input.
   fleetGroup?: string | null
   driverType?: string | null
+  /** Equipment.id of the truck this driver runs — what the PM line is read from. */
+  assignedTruckId?: string | null
 }
 
 interface DriverPaySettingRow {
@@ -1529,6 +1534,56 @@ async function completeSubmission(
   return errors.length > 0 ? { ok: true, error: errors.join('; ') } : { ok: true }
 }
 
+/**
+ * When this driver's own truck is next due for a PM.
+ *
+ * Reads the same two sources the fleet dashboard does — the last PM on the Equipment
+ * record, Motive's odometer on TruckLocation — through the one shared rule in
+ * src/lib/pmDue.ts, so the driver's phone and the office cannot drift apart.
+ *
+ * Null when there is simply no truck to report on: a driver with nothing assigned has no
+ * PM, and an empty gauge is noise. Everything softer than that — a truck with no last PM
+ * recorded, or one Motive has not reported on — comes back as UNKNOWN with a reason,
+ * because those are states somebody should fix rather than hide.
+ */
+async function pmForDriver(
+  driver: DriverRow,
+): Promise<(PmStatus & { truckNumber: string | null }) | null> {
+  const truckId = (driver.assignedTruckId ?? '').trim()
+  if (!truckId || !EQUIPMENT_TABLE) return null
+
+  try {
+    const truck = (
+      await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: truckId } }))
+    ).Item as Record<string, unknown> | undefined
+    if (!truck) return null
+
+    let odometer: number | null = null
+    if (TRUCK_LOCATION_TABLE) {
+      const loc = (
+        await ddb.send(new GetCommand({ TableName: TRUCK_LOCATION_TABLE, Key: { truckId } }))
+      ).Item as Record<string, unknown> | undefined
+      odometer = typeof loc?.odometer === 'number' ? loc.odometer : null
+    }
+
+    return {
+      ...pmStatus({
+        lastPmMileage: typeof truck.lastPmMileage === 'number' ? truck.lastPmMileage : null,
+        lastPmDate: typeof truck.lastPmDate === 'string' ? truck.lastPmDate : null,
+        currentOdometer: odometer,
+      }),
+      truckNumber: typeof truck.unitNumber === 'string' ? truck.unitNumber.trim() || null : null,
+    }
+  } catch (err) {
+    // The PM line is a nicety; it must never take the whole account screen down with it.
+    console.error('[driver-app-api] could not read the PM status', {
+      truckId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return null
+  }
+}
+
 function groupBy<T, K extends string | number | symbol>(items: T[], keyFn: (item: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>()
   for (const item of items) {
@@ -1782,6 +1837,8 @@ export const handler = async (event: FnUrlEvent) => {
         // The app routes on this rather than on payGroup — see src/lib/driverProgram.ts.
         program: driverProgramOf({ ...driver, payGroup: setting.payGroup }),
         active: driver.active !== false,
+        // null for a driver with no truck assigned; the app simply omits the line.
+        pm: await pmForDriver(driver),
       })
     }
 

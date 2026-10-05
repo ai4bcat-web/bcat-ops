@@ -90,6 +90,26 @@ export interface DriverProfile {
   /** Which page this driver gets. See src/lib/driverProgram.ts. */
   program: 'SETTLEMENT' | 'PAPERWORK'
   active: boolean
+  /*
+   * The driver's own truck's next PM, or null when no truck is assigned.
+   *
+   * Optional as well as nullable because the app is a PWA: a cached bundle can meet an API
+   * that predates the field. Absent and null both mean "show nothing".
+   */
+  pm?: DriverPm | null
+}
+
+/** Mirrors pmStatus() in src/lib/pmDue.ts, plus the truck's unit number. */
+export interface DriverPm {
+  state: 'OVERDUE' | 'DUE_SOON' | 'OK' | 'UNKNOWN'
+  nextDueAt: number | null
+  remaining: number | null
+  currentOdometer: number | null
+  lastPmMileage: number | null
+  lastPmDate: string | null
+  /** Already phrased for a driver by the API; the app shows it verbatim. */
+  label: string
+  truckNumber: string | null
 }
 
 /**
