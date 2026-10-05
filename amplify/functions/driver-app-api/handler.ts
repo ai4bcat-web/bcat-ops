@@ -56,6 +56,7 @@ import { deliveredWindowEnd, isDeliveredByNow } from './deliveredWindow'
 const PAPERWORK_HISTORY_START = '2026-09-01'
 import { driverProgramOf } from '../../../src/lib/driverProgram'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
+import { toHosDay, type HosDay, type MotiveLog } from '../../../src/lib/motiveHos'
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
@@ -91,6 +92,8 @@ const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
+const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
+const MOTIVE_BASE = 'https://api.gomotive.com/v1'
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
 const PAY_CREDIT_TABLE = process.env.DRIVER_PAY_CREDIT_TABLE_NAME!
 const FUEL_TX_TABLE = process.env.FUEL_TRANSACTION_TABLE_NAME!
@@ -185,6 +188,8 @@ interface DriverRow {
   driverType?: string | null
   /** Equipment.id of the truck this driver runs — what the PM line is read from. */
   assignedTruckId?: string | null
+  /** Motive user id, set by staff. The ONLY thing that links a driver to their ELD logs. */
+  motiveDriverId?: number | string | null
 }
 
 interface DriverPaySettingRow {
@@ -867,6 +872,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'settlement' && segments[1] === 'weeks') {
     return { path: '/settlement/weeks' }
+  }
+  if (segments[0] === 'motive' && segments[1] === 'day') {
+    return { path: '/motive/day' }
   }
   if (segments[0] === 'loads' && segments[1] === 'current') {
     return { path: '/loads/current' }
@@ -1584,6 +1592,45 @@ async function pmForDriver(
   }
 }
 
+/**
+ * One day of this driver's hours of service, read from Motive.
+ *
+ * Ivan drivers only, and read-only. Duty status is a federal record: the FMCSA requires
+ * edits to go through the certified ELD, so the app shows what Motive holds and sends the
+ * driver to the Motive app to change anything. Nothing here writes.
+ *
+ * The link is the explicit motiveDriverId on the Driver record and nothing else. Motive's
+ * org carries "Chuck Best" against our "Charles Best" and two people called "Jason Smith",
+ * so a name match here would eventually put one driver's legally-significant log in front
+ * of another. See src/lib/motiveDriverMatch.ts.
+ */
+async function hosForDriver(
+  driver: DriverRow,
+  date: string,
+): Promise<{ ok: true; day: HosDay | null } | { ok: false; reason: string }> {
+  if (!MOTIVE_API_KEY) return { ok: false, reason: 'Motive is not configured' }
+
+  const linked = driver.motiveDriverId
+  if (linked == null || String(linked).trim() === '') {
+    return { ok: false, reason: 'No Motive account is linked to this driver yet' }
+  }
+
+  const url =
+    `${MOTIVE_BASE}/logs?driver_ids[]=${encodeURIComponent(String(linked))}` +
+    `&start_date=${encodeURIComponent(date)}&end_date=${encodeURIComponent(date)}&per_page=10`
+
+  const res = await fetch(url, { headers: { 'X-Api-Key': MOTIVE_API_KEY } })
+  if (!res.ok) {
+    console.error('[driver-app-api] Motive logs call failed', { status: res.status, date })
+    return { ok: false, reason: `Motive did not answer (${res.status})` }
+  }
+
+  const body = (await res.json()) as { logs?: Array<{ log?: MotiveLog }> }
+  const log = (body.logs ?? []).map((l) => l?.log).find((l): l is MotiveLog => !!l)
+  // A day with no log is not an error — a driver who did not work has nothing to show.
+  return { ok: true, day: log ? toHosDay(log) : null }
+}
+
 function groupBy<T, K extends string | number | symbol>(items: T[], keyFn: (item: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>()
   for (const item of items) {
@@ -1850,6 +1897,27 @@ export const handler = async (event: FnUrlEvent) => {
      * would leave one `if` between an Ivan driver and the rate of every load they haul.
      * A separate endpoint whose payload has no money in it cannot make that mistake.
      */
+    /*
+     * This driver's own hours of service for one day, from Motive. Read-only.
+     *
+     * Ivan drivers only — owner operators do not get hours in their app, so the check is
+     * the same driverProgramOf the rest of the app routes on rather than a second rule
+     * that could drift from it.
+     */
+    if (method === 'GET' && path === '/motive/day') {
+      if (driverProgramOf({ ...driver, payGroup: setting.payGroup }) !== 'PAPERWORK') {
+        return reply(409, { error: 'Hours of service are an Ivan driver feature.' })
+      }
+      const date = (event.queryStringParameters?.date ?? '').trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return reply(400, { error: 'date must be YYYY-MM-DD' })
+      }
+      const hos = await hosForDriver(driver, date)
+      return hos.ok
+        ? reply(200, { date, linked: true, day: hos.day })
+        : reply(200, { date, linked: false, day: null, reason: hos.reason })
+    }
+
     if (method === 'GET' && (path === '/paperwork' || path === '/paperwork/weeks')) {
       const weekParam = event.queryStringParameters?.week ?? ''
       const weekStart = weekParam ? weekStartOfISO(weekParam) : weekStartOfISO(new Date().toISOString().slice(0, 10))

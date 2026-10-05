@@ -27,6 +27,12 @@ export const driverSchema = z.object({
   assignedTruckId: z.string().nullable().optional(),
   assignedTrailerId: z.string().nullable().optional(),
   fleetGroup: z.enum(['LOCAL', 'AMAZON', 'BOX_TRUCK']).nullable().optional(),
+  /*
+   * Motive user id. Typed by staff, never inferred — it decides whose hours-of-service log
+   * the Ivan app shows, and Motive's org contains both a "Chuck Best" for our "Charles
+   * Best" and two people called "Jason Smith". See src/lib/motiveDriverMatch.ts.
+   */
+  motiveDriverId: z.number().int().positive().nullable().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])

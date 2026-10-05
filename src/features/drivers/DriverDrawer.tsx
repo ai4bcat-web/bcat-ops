@@ -84,7 +84,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null },
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
@@ -122,10 +122,11 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             cdlExpiration: driver.cdlExpiration ?? '', medCardExpiration: driver.medCardExpiration ?? '',
             drugTestDate: driver.drugTestDate ?? '', hireDate: driver.hireDate ?? '',
             assignedTruckId: driver.assignedTruckId ?? null,
+            motiveDriverId: driver.motiveDriverId ?? null,
             assignedTrailerId: driver.assignedTrailerId ?? null,
             fleetGroup: driver.fleetGroup ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -349,6 +350,25 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                             <option key={t.id} value={t.id}>#{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}{(t.make || t.model) ? ` — ${[t.make, t.model].filter(Boolean).join(' ')}` : ''}</option>
                           ))}
                         </select>
+                      )}
+                    />
+                  </Field>
+                  <Field
+                    label="Motive Driver ID"
+                    hint="links their ELD logs — find it in Motive under the driver"
+                  >
+                    <Controller
+                      name="motiveDriverId"
+                      control={control}
+                      render={({ field }) => (
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(e.target.value === '' ? null : Number(e.target.value))}
+                          placeholder="e.g. 3580563"
+                          className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        />
                       )}
                     />
                   </Field>

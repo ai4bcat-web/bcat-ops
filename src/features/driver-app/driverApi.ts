@@ -305,6 +305,46 @@ export function fetchMe(): Promise<DriverProfile> {
   return request<DriverProfile>('/me')
 }
 
+/* ── Hours of service (Ivan only, read-only) ──────────────────────────────────
+ * Mirrors src/lib/motiveHos.ts. Read-only on purpose: duty status is a federal record and
+ * the FMCSA requires edits to go through the certified ELD, so the app shows what Motive
+ * holds and sends the driver to Motive to change it.
+ */
+
+export interface HosSegment {
+  type: string
+  startAt: string
+  endAt: string | null
+  location: string | null
+}
+
+export interface HosDay {
+  date: string
+  drivingSeconds: number
+  onDutySeconds: number
+  offDutySeconds: number
+  sleeperSeconds: number
+  workedSeconds: number
+  totalMiles: number | null
+  vehicleNumbers: string[]
+  firstOnDutyAt: string | null
+  lastOffDutyAt: string | null
+  segments: HosSegment[]
+}
+
+export interface HosResponse {
+  date: string
+  linked: boolean
+  day: HosDay | null
+  /** Why there is nothing to show, when linked is false. */
+  reason?: string
+}
+
+/** This driver's duty status for one day. `date` is YYYY-MM-DD. */
+export function fetchHosDay(date: string): Promise<HosResponse> {
+  return request<HosResponse>(`/motive/day?date=${encodeURIComponent(date)}`)
+}
+
 /* ── Ivan paperwork ────────────────────────────────────────────────────────────
  * Mirrors amplify/functions/driver-app-api/paperwork.ts. Note what is NOT here: no
  * rate, no amount, no deductions, no check. The payload has no money in it.

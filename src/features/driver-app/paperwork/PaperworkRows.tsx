@@ -13,8 +13,10 @@
  *   on file     said quietly. A green tick nobody needs to read is the goal.
  */
 import { AlertTriangle, Camera, Check, ClipboardList, Clock, FileWarning } from 'lucide-react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { PaperworkLoad } from '../driverApi'
+import { HosPanel } from './HosPanel'
 
 function apptLabel(iso: string | null): string {
   if (!iso) return 'No appointment'
@@ -59,6 +61,19 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
  * the only time it is useful. UNKNOWN gets its own amber "check" state rather than being
  * folded into "not required" — the point of surfacing it is that somebody looks.
  */
+/**
+ * The calendar day this load delivered, as YYYY-MM-DD, for looking up that day's log.
+ *
+ * Taken from the delivery appointment because that is the day the driver was running it.
+ * Null when there is no delivery date, in which case there is no day to ask Motive about.
+ */
+function deliveredDate(load: PaperworkLoad): string | null {
+  const iso = load.deliveryAppt ?? load.pickupAppt
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
+}
+
 function EldBadge({ load }: { load: PaperworkLoad }) {
   const { eld } = load
   // An API that predates the field tells us nothing; say nothing rather than "no logs".
@@ -108,6 +123,11 @@ export function PaperworkRows({
   onSendPod: (load: PaperworkLoad) => void
   onRecordTimes: (load: PaperworkLoad, leg: 'PICKUP' | 'DELIVERY') => void
 }) {
+  // Which rows have their duty log open. Per row, so opening one does not fetch the rest.
+  const [openLogs, setOpenLogs] = useState<Set<string>>(new Set())
+  const toggleLogs = (id: string) =>
+    setOpenLogs((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n })
+
   if (loads.length === 0) {
     return (
       <p className="rounded-xl bg-muted/40 p-5 text-center text-sm text-muted-foreground">
@@ -167,6 +187,26 @@ export function PaperworkRows({
                 <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{load.eld.label}</span>
               </p>
+            )}
+
+            {/*
+              The driver's own duty log for the day this load delivered, on demand.
+              Only offered when logs are actually required — on a short-haul day there is
+              no record to keep, so a log panel would be inviting a driver to worry about
+              paperwork the exemption spares them.
+            */}
+            {load.eld?.status === 'REQUIRED' && deliveredDate(load) && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => toggleLogs(load.id)}
+                  className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
+                  {openLogs.has(load.id) ? 'Hide my logs' : 'Show my logs for this day'}
+                </button>
+                {openLogs.has(load.id) && <HosPanel key={deliveredDate(load)!} date={deliveredDate(load)!} />}
+              </div>
             )}
 
             {load.notes && <p className="mt-3 text-sm text-muted-foreground">{load.notes}</p>}
