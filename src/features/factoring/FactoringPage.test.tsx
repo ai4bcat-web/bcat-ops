@@ -303,3 +303,53 @@ describe('what the queue is worth', () => {
   })
 })
 
+/*
+ * A row here opens into eleven fields, two documents and a submit button, so ten of them
+ * is already a long page — and the queue runs to hundreds. Expanding one row at the bottom
+ * of all of them is a scroll nobody wants to repeat.
+ */
+describe('paging through the queue', () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      item({ id: `p${i}`, proNumber: `${20000 + i}`, receivedAt: `2026-10-01T${String(i % 24).padStart(2, '0')}:00:00Z` }))
+
+  it('shows ten by default', () => {
+    setup(many(25))
+    expect(screen.getByText('1–10 of 25')).toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 3')).toBeInTheDocument()
+  })
+
+  it('moves through the pages', () => {
+    setup(many(25))
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getByText('11–20 of 25')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getByText('21–25 of 25')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }))
+    expect(screen.getByText('11–20 of 25')).toBeInTheDocument()
+  })
+
+  it('offers 10, 50 and 100', () => {
+    setup(many(25))
+    const select = screen.getByLabelText('Invoices per page')
+    expect([...select.querySelectorAll('option')].map((o) => o.textContent)).toEqual(['10', '50', '100'])
+    fireEvent.change(select, { target: { value: '50' } })
+    expect(screen.getByText('1–25 of 25')).toBeInTheDocument()
+    expect(screen.getByText('Page 1 of 1')).toBeInTheDocument()
+  })
+
+  it('goes back to the first page when the filter changes', () => {
+    // Otherwise a narrower filter leaves an empty table with the rows behind you.
+    setup(many(25))
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    expect(screen.getByText('11–20 of 25')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: '2000' } })
+    expect(screen.getByText(/^1–/)).toBeInTheDocument()
+  })
+
+  it('says so plainly when a filter matches nothing', () => {
+    setup(many(3))
+    fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: 'zzzzzz' } })
+    expect(screen.queryByText(/of 3$/)).not.toBeInTheDocument()
+  })
+})

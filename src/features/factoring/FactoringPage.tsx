@@ -352,6 +352,33 @@ export function FactoringPage() {
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search])
 
+  /*
+   * Ten at a time.
+   *
+   * A row here opens into a panel of eleven fields, two documents and a submit button, so
+   * ten of them is already a long page — and the queue runs to hundreds. Expanding one row
+   * at the bottom of all of them is a scroll nobody wants to repeat.
+   */
+  const [perPage, setPerPage] = useState(10)
+  const pageCount = Math.max(1, Math.ceil(filtered.length / perPage))
+
+  /*
+   * The page number is remembered AGAINST the filter it belongs to, rather than reset by
+   * an effect. Changing tab, search or page size yields a different key, so page 1 is what
+   * this render reads — no second render, and no window where the table is empty because
+   * the rows are behind you.
+   */
+  const filterKey = `${activeTab}|${search}|${perPage}`
+  const [pageState, setPageState] = useState({ key: filterKey, page: 1 })
+  const page = pageState.key === filterKey ? pageState.page : 1
+  const setPage = (next: number | ((p: number) => number)) =>
+    setPageState({ key: filterKey, page: typeof next === 'function' ? next(page) : next })
+  const safePage = Math.min(page, pageCount)
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * perPage, safePage * perPage),
+    [filtered, safePage, perPage],
+  )
+
   const handleDelete = useCallback(async (item: FactoringItem) => {
     if (!window.confirm(
       `Delete the queue row for PRO ${item.proNumber}?\n\n` +
@@ -511,7 +538,7 @@ export function FactoringPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((item) => (
+                  {paged.map((item) => (
                     <Fragment key={item.id}>
                     <tr
                       style={{ borderBottom: '1px solid var(--ds-border)' }}
@@ -634,6 +661,64 @@ export function FactoringPage() {
                   ))}
                 </tbody>
               </table>
+
+              {/* Where you are in the queue, and how much of it to see at once. */}
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
+                gap: 12, padding: '10px 16px', borderTop: '1px solid var(--ds-border)',
+              }}>
+                <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
+                  {filtered.length === 0
+                    ? 'No invoices'
+                    : `${(safePage - 1) * perPage + 1}–${Math.min(safePage * perPage, filtered.length)} of ${filtered.length}`}
+                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <label style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
+                    Per page{' '}
+                    <select
+                      value={perPage}
+                      onChange={(e) => setPerPage(Number(e.target.value))}
+                      aria-label="Invoices per page"
+                      style={{
+                        height: 28, borderRadius: 8, border: '1px solid var(--ds-border)',
+                        background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5,
+                        padding: '0 6px', fontFamily: 'inherit',
+                      }}
+                    >
+                      {[10, 50, 100].map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </label>
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage <= 1}
+                    aria-label="Previous page"
+                    style={{
+                      height: 28, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)',
+                      background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600,
+                      cursor: safePage <= 1 ? 'default' : 'pointer', opacity: safePage <= 1 ? 0.4 : 1,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Prev
+                  </button>
+                  <span style={{ fontSize: 12.5, color: 'var(--ds-t2)', minWidth: 76, textAlign: 'center' }}>
+                    Page {safePage} of {pageCount}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                    disabled={safePage >= pageCount}
+                    aria-label="Next page"
+                    style={{
+                      height: 28, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)',
+                      background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12.5, fontWeight: 600,
+                      cursor: safePage >= pageCount ? 'default' : 'pointer', opacity: safePage >= pageCount ? 0.4 : 1,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
