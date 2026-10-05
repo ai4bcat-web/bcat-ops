@@ -218,3 +218,78 @@ describe('uploadDocument', () => {
     ).rejects.toMatchObject({ status: 500, body: 'Invalid or corrupt pdf format' })
   })
 })
+
+/*
+ * v2 is where documents actually land.
+ *
+ * v1 decoded the body as UTF-8 and destroyed every byte above 0x7F, then crashed with a
+ * null reference on anything its reader could open — proven with a 610-byte PDF carrying
+ * no high bytes at all. Against v2 the real 1,018,923-byte POD for invoice 16222565
+ * uploaded untouched and returned 200.
+ */
+describe('uploading through OTR v2', () => {
+  function v2Client(capture: (url: string, init: RequestInit) => void): OtrClient {
+    const fetchImpl = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const href = String(url)
+      if (href.endsWith('/auth/token')) {
+        return new Response(JSON.stringify({ access_token: href.includes('carrier-tms/2') ? 'v2tok' : 'v1tok', expires_in: 7200 }), { status: 200 })
+      }
+      capture(href, init ?? {})
+      return new Response(JSON.stringify({}), { status: 200 })
+    })
+    return new OtrClient({
+      baseUrl: 'https://otr.test/CarrierTmsV3',
+      uploadBaseUrl: 'https://otr.test/carrier-tms/2',
+      subscriptionKey: 'sub-key', username: 'u', password: 'p',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+  }
+
+  async function uploadV2(file = PDF_BYTES) {
+    let seen: { url: string; init: RequestInit } | null = null
+    const client = v2Client((url, init) => { seen = { url, init } })
+    await client.uploadDocument({
+      invoiceId: '16222565', docType: OTR_DOC_TYPE.POD,
+      fileName: 'POD-14538.pdf', contentType: 'application/pdf', file,
+    })
+    const { url, init } = seen! as { url: string; init: RequestInit }
+    const body = Buffer.from(init.body as unknown as Uint8Array)
+    return { url, init, body, text: body.toString('latin1') }
+  }
+
+  it('posts to /file-upload on the v2 host', async () => {
+    const { url } = await uploadV2()
+    expect(url).toBe('https://otr.test/carrier-tms/2/file-upload')
+  })
+
+  it('sends ItemPkey, which is what v2 renamed invoiceid to', async () => {
+    const { text } = await uploadV2()
+    expect(text).toContain('name="ItemPkey"\r\n\r\n16222565\r\n')
+    expect(text).not.toContain('name="invoiceid"')
+  })
+
+  it('carries the v2 host’s own token, not the v1 one', async () => {
+    // Two products on their gateway; the tokens are not interchangeable.
+    const { init } = await uploadV2()
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer v2tok')
+  })
+
+  it('sends the file untouched — no ASCII rewrite', async () => {
+    /*
+     * The workaround that v1 forced: re-encoding every stream with /ASCIIHexDecode, which
+     * roughly doubled a POD. v2 takes the binary, so it must not be paying that cost.
+     */
+    const real = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0xff, 0x80, 0xfe])
+    const { body } = await uploadV2(real)
+    const at = body.indexOf(Buffer.from(real))
+    expect(at).toBeGreaterThan(-1)
+    expect(body.subarray(at, at + real.length)).toEqual(Buffer.from(real))
+  })
+
+  it('still sends invoiceid when no v2 host is configured', async () => {
+    // Falling back to v1 has to keep working, including its ASCII workaround.
+    const { text } = await upload()
+    expect(text).toContain('name="invoiceid"')
+    expect(text).not.toContain('name="ItemPkey"')
+  })
+})

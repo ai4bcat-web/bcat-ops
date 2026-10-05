@@ -119,6 +119,18 @@ interface TokenState {
 
 export interface OtrClientConfig {
   baseUrl: string
+  /*
+   * Where documents go. OTR's v2 API, which is a different host path AND a different
+   * subscription product — ours was only granted access to it after they widened the key.
+   *
+   * Invoices still go to `baseUrl` (v1). The two share invoice ids: v2's ItemPkey accepts
+   * the id v1 handed back when the invoice was created, verified against live invoice
+   * 16222565. Straddling two versions is not elegant, but v1 invoice creation works and
+   * v1 document upload never has, so this moves exactly the half that was broken.
+   *
+   * Leave unset to keep uploading through v1.
+   */
+  uploadBaseUrl?: string
   subscriptionKey: string
   username: string
   password: string
@@ -130,6 +142,8 @@ export interface OtrClientConfig {
 
 export class OtrClient {
   private token: TokenState | null = null
+  /** v2 issues its own token from its own /auth/token; they are not interchangeable. */
+  private uploadToken: TokenState | null = null
   private readonly fetchImpl: typeof fetch
   private readonly skewMs: number
 
@@ -148,12 +162,22 @@ export class OtrClient {
     return this.authenticate()
   }
 
-  private async authenticate(): Promise<string> {
+  /** A token for the upload host, cached separately — v1 and v2 tokens are not swappable. */
+  private async uploadAccessToken(): Promise<string> {
+    const base = this.cfg.uploadBaseUrl
+    if (!base) return this.accessToken()
+    if (this.uploadToken && Date.now() < this.uploadToken.expiresAt - this.skewMs) {
+      return this.uploadToken.accessToken
+    }
+    return this.authenticate(base)
+  }
+
+  private async authenticate(base = this.cfg.baseUrl): Promise<string> {
     const body = new URLSearchParams({
       username: this.cfg.username,
       password: this.cfg.password,
     })
-    const res = await this.fetchImpl(`${this.cfg.baseUrl}/auth/token`, {
+    const res = await this.fetchImpl(`${base}/auth/token`, {
       method: 'POST',
       headers: {
         'Ocp-Apim-Subscription-Key': this.cfg.subscriptionKey,
@@ -178,12 +202,40 @@ export class OtrClient {
     if (!json.access_token) {
       throw new OtrError('OTR auth returned no access_token', res.status, text)
     }
-    this.token = {
+    const state: TokenState = {
       accessToken: json.access_token,
       refreshToken: json.refresh_token ?? null,
       expiresAt: Date.now() + (json.expires_in ?? 7200) * 1000,
     }
-    return this.token.accessToken
+    if (base === this.cfg.uploadBaseUrl && base !== this.cfg.baseUrl) this.uploadToken = state
+    else this.token = state
+    return state.accessToken
+  }
+
+  /** Headers for the upload host, carrying ITS token. */
+  private async uploadHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
+    return {
+      'Ocp-Apim-Subscription-Key': this.cfg.subscriptionKey,
+      Authorization: `Bearer ${await this.uploadAccessToken()}`,
+      ...extra,
+    }
+  }
+
+  /** Same one-retry-on-401 as `request`, against the upload host. */
+  private async uploadRequest(path: string, init: RequestInit): Promise<Response> {
+    const base = this.cfg.uploadBaseUrl || this.cfg.baseUrl
+    const res = await this.fetchImpl(`${base}${path}`, init)
+    if (res.status !== 401) return res
+    this.uploadToken = null
+    this.token = null
+    const headers = await this.uploadHeaders(
+      Object.fromEntries(
+        Object.entries((init.headers ?? {}) as Record<string, string>).filter(
+          ([k]) => !['authorization', 'ocp-apim-subscription-key'].includes(k.toLowerCase()),
+        ),
+      ),
+    )
+    return this.fetchImpl(`${base}${path}`, { ...init, headers })
   }
 
   private async authedHeaders(extra: Record<string, string> = {}): Promise<Record<string, string>> {
@@ -385,7 +437,20 @@ export class OtrClient {
      *
      * Set OTR_ASCII_SAFE_PDF=off once OTR handles binary bodies correctly.
      */
-    const wantAsciiSafe = opts.asciiSafe ?? process.env.OTR_ASCII_SAFE_PDF !== 'off'
+    /*
+     * The ASCII rewrite is OFF against v2, and that is the whole point of moving.
+     *
+     * v1 decoded the request body as UTF-8 and shredded every byte above 0x7F, so a POD
+     * had to be re-encoded with /ASCIIHexDecode — roughly double the size — just to
+     * survive the trip. v2 takes the raw binary: the real 1,018,923-byte POD for invoice
+     * 16222565 uploaded untouched and returned 200. Only a v1 upload still needs the
+     * workaround, and OTR_ASCII_SAFE_PDF=on forces it back for either.
+     */
+    const usingV2 = !!this.cfg.uploadBaseUrl && this.cfg.uploadBaseUrl !== this.cfg.baseUrl
+    const asciiSafeDefault = usingV2
+      ? process.env.OTR_ASCII_SAFE_PDF === 'on'
+      : process.env.OTR_ASCII_SAFE_PDF !== 'off'
+    const wantAsciiSafe = opts.asciiSafe ?? asciiSafeDefault
     if (effective?.ext === 'pdf' && wantAsciiSafe) {
       try {
         const safe = await toAsciiSafePdf(outBytes)
@@ -418,10 +483,17 @@ export class OtrClient {
      * "Object reference not set to an instance of an object", which is precisely what both
      * of our probe PDFs came back with.
      */
+    /*
+     * v2 renamed the invoice field to ItemPkey and moved the route to /file-upload. The
+     * id itself is unchanged — v2 accepts the id v1 issued when the invoice was created,
+     * which is what lets invoices stay on v1 while documents move.
+     */
     const { body, contentType } = buildMultipart([
       { name: 'file', fileName, contentType: partType, bytes: outBytes },
       { name: 'DocumentType', value: 'invoice-file-upload' },
-      { name: 'invoiceid', value: String(opts.invoiceId) },
+      usingV2
+        ? { name: 'ItemPkey', value: String(opts.invoiceId) }
+        : { name: 'invoiceid', value: String(opts.invoiceId) },
       { name: 'SendEmail', value: opts.sendEmail ? 'true' : 'false' },
       { name: 'InvoiceDocTypes', value: String(opts.docType) },
     ])
@@ -432,6 +504,7 @@ export class OtrClient {
       sniffed: sniffed?.ext ?? 'unknown',
       wrapped,
       asciiSafe,
+      api: usingV2 ? 'v2' : 'v1',
       docType: opts.docType,
       sourceBytes: bytes.byteLength,
       fileBytes: outBytes.byteLength,
@@ -439,9 +512,9 @@ export class OtrClient {
       contentType,
     })
 
-    const res = await this.request('/documents/upload', {
+    const res = await this.uploadRequest(usingV2 ? '/file-upload' : '/documents/upload', {
       method: 'POST',
-      headers: await this.authedHeaders({
+      headers: await this.uploadHeaders({
         'X-Invoice-Doc-Type': String(opts.docType),
         Accept: 'application/json',
         // Our own boundary, so the body and the header cannot disagree.

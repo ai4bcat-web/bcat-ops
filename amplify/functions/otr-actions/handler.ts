@@ -55,6 +55,8 @@ const BUCKET = process.env.BUCKET_NAME!
 function otr(): OtrClient {
   return new OtrClient({
     baseUrl: process.env.OTR_BASE_URL || OTR_STAGING_BASE,
+    // Documents only. Unset falls back to uploading through baseUrl (v1).
+    uploadBaseUrl: process.env.OTR_UPLOAD_BASE_URL || undefined,
     subscriptionKey: process.env.OTR_SUBSCRIPTION_KEY!,
     username: process.env.OTR_USERNAME!,
     password: process.env.OTR_PASSWORD!,

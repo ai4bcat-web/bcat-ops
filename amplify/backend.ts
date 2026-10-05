@@ -1442,6 +1442,14 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
 // OTR_BASE_URL is set here rather than hard-coded so moving to production is a
 // config change. Staging until the production credentials are swapped in.
 const OTR_BASE_URL = 'https://servicesstg.otrsolutions.com/CarrierTmsV3'
+/*
+ * Documents go to OTR's v2 API. A separate product on their gateway — our subscription key
+ * only reached it once OTR widened it — and the half of the integration that never worked:
+ * v1 shredded every byte above 0x7F on the way in, and crashed with a null reference on
+ * anything its PDF reader could open. v2 took the real 1MB POD untouched and returned 200.
+ * Invoices stay on v1, which has always worked; v2's ItemPkey accepts the same invoice id.
+ */
+const OTR_UPLOAD_BASE_URL = 'https://servicesstg.otrsolutions.com/carrier-tms/2'
 
 const otrActionsFn = backend.otrActions.resources.lambda as LambdaFunction
 const otrSyncFn = backend.otrStatusSync.resources.lambda as LambdaFunction
@@ -1460,6 +1468,7 @@ const otrSubmissionDocTable = backend.data.resources.tables['DriverSubmissionDoc
 for (const fn of [otrActionsFn, otrSyncFn]) {
   fn.addEnvironment('FACTORING_ITEM_TABLE_NAME', otrFactoringTable.tableName)
   fn.addEnvironment('OTR_BASE_URL', OTR_BASE_URL)
+  fn.addEnvironment('OTR_UPLOAD_BASE_URL', OTR_UPLOAD_BASE_URL)
 }
 
 otrActionsFn.addEnvironment('LOAD_TABLE_NAME', otrLoadTable.tableName)
