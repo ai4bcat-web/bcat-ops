@@ -8,14 +8,12 @@ import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
 import { ACTIVE_STATUSES } from '@/lib/intake'
-import { APPT_MOVE_PREFIX, APPT_TASK_PREFIX } from '@/lib/apiClient'
 import { NAV_GROUPS } from '@/lib/navItems'
 
 const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   loads:       { bg: 'rgba(15,23,42,0.06)',       color: 'var(--ds-t3)' },
   intake:      { bg: 'var(--ds-blue-soft)',        color: '#0369a1' },
   appts:       { bg: 'var(--ds-amber-soft)',       color: '#b45309' },
-  apptChanges: { bg: 'var(--ds-amber-soft)',       color: '#b45309' },
   maintenance: { bg: 'var(--ds-red-soft)',         color: '#dc2626' },
   review:      { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
   truckDocs:   { bg: 'var(--ds-red-soft)',          color: '#dc2626' },
@@ -51,11 +49,14 @@ export function NavBar({
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
-  const isApptMove = (i: { externalId?: string | null }) =>
-    (i.externalId ?? '').startsWith(APPT_MOVE_PREFIX) || (i.externalId ?? '').startsWith(APPT_TASK_PREFIX)
-  // Appt-move tasks ride the intake feed but are their own worklist — count them apart.
-  const activeIntakeCount = intakeItems.filter(i => ACTIVE_STATUSES.has(i.status) && !isApptMove(i)).length
-  const apptChangeCount = intakeItems.filter(i => ACTIVE_STATUSES.has(i.status) && isApptMove(i)).length
+  /*
+   * Every open intake item, appt-move tasks included.
+   *
+   * These used to be counted apart because they had their own page. That page is gone and
+   * the intake queue has always listed them, so splitting the badge would now hide work
+   * from the only place it can be seen.
+   */
+  const activeIntakeCount = intakeItems.filter(i => ACTIVE_STATUSES.has(i.status)).length
   // Derived from load state, so the badge is always the true outstanding count — it can't
   // drift the way a counter incremented by a notification would.
   const apptCount = apptQueueCount(loads)
@@ -66,7 +67,6 @@ export function NavBar({
     if (key === 'maintenance') return maintenanceCount || null
     if (key === 'intake') return activeIntakeCount || null
     if (key === 'appts') return apptCount || null
-    if (key === 'apptChanges') return apptChangeCount || null
     if (key === 'review') return reviewCount || null
     if (key === 'truckDocs') return truckDocAlerts || null
     return null

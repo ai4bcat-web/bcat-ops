@@ -195,6 +195,113 @@ function ThreadReply({ item }: { item: IntakeItem }) {
   )
 }
 
+
+/**
+ * One intake item, as a row.
+ *
+ * The queue was a grid of cards, which forced a four-across layout and pushed the one
+ * thing anybody opens this page for — what Slack says about this tender — into a corner of
+ * a box. A list puts every item on a line with its latest reply in the middle, so the
+ * whole queue can be read top to bottom and the state of each thread read with it.
+ *
+ * "Done" is the load existing — status BUILT/DONE or a builtLoadId — not a reaction. The
+ * emoji on these threads (:rocket:, :got-it:) mean somebody acknowledged the tender, which
+ * is not the same as having built it, and 317 items sat in NEW with the work long finished.
+ */
+export function QueueRow({
+  item,
+  onBuildLoad,
+  onUpdateLoad,
+  onMarkDone,
+  onStatusChange,
+  onAssigneeChange,
+}: {
+  item: IntakeItem
+  onBuildLoad: (item: IntakeItem) => void
+  onUpdateLoad: (item: IntakeItem) => void
+  onMarkDone: (item: IntakeItem) => void
+  onStatusChange: (id: string, status: IntakeStatus) => void
+  onAssigneeChange: (id: string, email: string) => void
+}) {
+  const done = item.status === 'BUILT' || item.status === 'DONE' || !!item.builtLoadId
+  const hasLoad = !!item.builtLoadId
+  const replies = item.replyCount ?? 0
+  const reply = (item.lastReplyText ?? '').trim()
+  const badge = STATUS_BADGE[item.status]
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2.5 hover:bg-muted/40"
+      style={{ background: 'var(--ds-surface)' }}
+    >
+      {/* Done, at the left edge, so the column reads as a checklist. */}
+      <div className="w-5 shrink-0">
+        {done
+          ? <CheckCircle2 className="size-4 text-emerald-600" aria-label="Done" />
+          : <span className="block size-4 rounded-full border border-border" aria-label="Not done" />}
+      </div>
+
+      {/* Subject + when */}
+      <div className="min-w-[180px] flex-1">
+        <p className="truncate text-[13px] font-semibold leading-snug text-foreground">
+          {item.subject || '(no subject)'}
+        </p>
+        <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+          {relativeTime(item.receivedAt)}
+          {item.proNumber ? ` · PRO ${item.proNumber}` : ''}
+        </p>
+      </div>
+
+      {/* The last thing said in Slack — the reason this page exists. */}
+      <div className="min-w-[200px] flex-[1.4]">
+        {reply ? (
+          <p className="truncate text-[12px] text-foreground" title={reply}>{reply}</p>
+        ) : (
+          <p className="text-[12px] italic text-muted-foreground">No replies yet</p>
+        )}
+        <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+          {replies > 0 ? `${replies} repl${replies === 1 ? 'y' : 'ies'}` : 'no thread activity'}
+        </p>
+      </div>
+
+      {/* The badge is the control: a list of 200 rows needs status changed in place,
+          not behind a card's worth of buttons. */}
+      <select
+        aria-label="Status"
+        value={item.status}
+        onChange={(e) => onStatusChange(item.id, e.target.value as IntakeStatus)}
+        className={cn('shrink-0 cursor-pointer rounded border px-1.5 py-0.5 text-[10px] font-semibold', badge.className)}
+      >
+        {(Object.keys(STATUS_BADGE) as IntakeStatus[]).map((k) => (
+          <option key={k} value={k}>{STATUS_BADGE[k].label}</option>
+        ))}
+      </select>
+
+      <div className="shrink-0">
+        <AssigneeSelect value={item.assignedTo} onChange={(email) => onAssigneeChange(item.id, email)} />
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        {item.externalUrl && (
+          <a href={item.externalUrl} target="_blank" rel="noreferrer"
+             className="rounded p-1 text-muted-foreground hover:text-foreground" title="Open the Slack thread">
+            <ExternalLink className="size-3.5" />
+          </a>
+        )}
+        <Button size="sm" variant={hasLoad ? 'outline' : 'default'} className="h-7 px-2 text-[11px]"
+                onClick={() => (hasLoad ? onUpdateLoad(item) : onBuildLoad(item))}>
+          {hasLoad ? 'Open load' : 'Build load'}
+        </Button>
+        {!done && (
+          <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => onMarkDone(item)}>
+            Done
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function QueueCard({
   item,
   onBuildLoad,
@@ -616,9 +723,9 @@ export function IntakePage() {
               <p className="text-sm">No active items — all clear</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <div className="overflow-hidden rounded-xl border border-border">
               {activeItems.map((item) => (
-                <QueueCard
+                <QueueRow
                   key={item.id}
                   item={item}
                   onBuildLoad={handleBuildLoad}

@@ -15,7 +15,6 @@ import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
-import { ApptChangesPage } from '@/features/appt-changes/ApptChangesPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { AuditPage } from '@/features/audit/AuditPage'
@@ -159,7 +158,6 @@ export default function App() {
               <Route path="/factoring" element={<RequirePage page="factoring"><FactoringPage /></RequirePage>} />
               <Route path="/vendor-ap" element={<RequirePage page="vendorAp"><VendorApPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
-              <Route path="/appt-changes" element={<RequirePage page="apptChanges"><ApptChangesPage /></RequirePage>} />
               <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />
               <Route path="/locations" element={<RequirePage page="locations"><LocationsPage /></RequirePage>} />
               <Route path="/insurance" element={<RequirePage page="insurance"><InsurancePage /></RequirePage>} />
