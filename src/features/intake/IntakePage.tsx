@@ -21,7 +21,8 @@ import {
   STATUS_BADGE,
   SOURCE_LABEL,
 } from '@/lib/intake'
-import { parseTender } from '@/lib/intakeTender'
+import { parseTender, resolveTenderCustomer } from '@/lib/intakeTender'
+import { useDirectory } from '@/hooks/useDirectory'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -563,6 +564,8 @@ export function IntakePage() {
   const setSelectedLoad      = useAppStore((s) => s.setSelectedLoad)
   const setPendingIntakeItem = useAppStore((s) => s.setPendingIntakeItem)
   const loads                = useAppStore((s) => s.loads)
+  // Needed to bind the tender's broker to a real customer record (and so its MC).
+  const { customers }        = useDirectory()
 
   const actorEmail = user?.email ?? 'dispatch'
 
@@ -618,10 +621,21 @@ export function IntakePage() {
     }
     setPendingIntakeItem(item.id)
     const tender = parseTender(item.subject, item.bodyText)
+    /*
+     * Bind the customer when the tender names one we already hold.
+     *
+     * This is the step that carries the broker's MC through to the factoring queue, which
+     * is otherwise the field that stalls every invoice. Only an exact directory match
+     * counts, and the NAME that lands on the load is the directory record's own — the
+     * customer is still never free text read off an email.
+     */
+    const customer = resolveTenderCustomer(tender.customer, customers)
     setSelectedLoad(null, 'create', {
       driverId: null,
       dateStr: tender.stops.find((s) => s.type === 'pickup')?.dateStr ?? '',
-      ...(tender.format ? { tender } : {}),
+      ...(tender.format
+        ? { tender: customer ? { ...tender, customer: customer.name, customerId: customer.id } : tender }
+        : {}),
     })
   }
 

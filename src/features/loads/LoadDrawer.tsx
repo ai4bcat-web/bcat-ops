@@ -1236,10 +1236,17 @@ export function LoadDrawer() {
           ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null)
           : emptyStopForms(preDate, createPreFill?.driverId ?? null),
         readyToInvoice: false,
-        customer: tender?.customer ?? '',
-        // customerId stays blank on purpose: a customer is only bound by picking the record
-        // (and its MC) from the directory, never by a name read off an email.
-        customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
+        /*
+         * Both come from the directory record or neither comes at all.
+         *
+         * A customer is only ever bound by matching a record we already hold — the name
+         * that lands here is that record's own, never free text read off an email, and the
+         * id is what carries its MC through to the factoring queue. An unrecognised broker
+         * leaves both blank so a human picks one.
+         */
+        customer: tender?.customerId ? (tender.customer ?? '') : '',
+        customerId: tender?.customerId ?? '',
+        miles: null, rate: null, notes: '', hot: false, unscheduled: false,
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

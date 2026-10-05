@@ -24,7 +24,12 @@
  * record, entered once per broker by a human.
  */
 
-export type OtrFieldSource = 'manual' | 'ratecon' | 'load' | 'location' | 'geocode'
+/*
+ * 'invoice' is the factoring row itself — the Aljex invoice email that created it. The PRO
+ * is in that email's subject and is the row's own id, so it is known even when no load has
+ * been built for it.
+ */
+export type OtrFieldSource = 'manual' | 'ratecon' | 'load' | 'location' | 'geocode' | 'invoice'
 
 /** The eleven fields OTR requires, in the order they appear on the queue row. */
 export const OTR_REQUIRED_FIELDS = [
@@ -107,6 +112,8 @@ export type ManualOverrides = Partial<Record<OtrRequiredField | 'CustomerName', 
 
 export interface AssembleInput {
   load: LoadSlice
+  /** The factoring row's own PRO, from the invoice email that created it. */
+  proNumber?: string | null
   rateCon?: RateConExtract | null
   /** Broker MC from the Customer record — entered once per broker by a human. */
   customerMcNumber?: string | null
@@ -254,7 +261,7 @@ export function normalizeDate(v: string | null | undefined): string | undefined 
  * exact gaps, which is what the queue row renders.
  */
 export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
-  const { load, rateCon, manual } = input
+  const { load, rateCon, manual, proNumber } = input
   const m = manual ?? {}
   const rc = rateCon ?? null
 
@@ -281,11 +288,20 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
     }
   }
 
-  // Identity. PRO is the invoice number; the load's pickup number is the PO,
-  // with the tender's own PO # preferred when it states one.
+  /*
+   * Identity. PRO is the invoice number; the load's pickup number is the PO, with the
+   * tender's own PO # preferred when it states one.
+   *
+   * The row's OWN PRO is the last resort and it should almost never be needed — but it is
+   * the one field that is always known. The invoice email that created the row names it in
+   * its subject, and it is the row's id. Reading it only from the load meant a factoring
+   * row whose load has not been built in BCAT Ops reported its own PRO as missing, which is
+   * what happened to 14529.
+   */
   set('InvoiceNo', [
     ['manual', m.InvoiceNo],
     ['load', load.aljexId],
+    ['invoice', proNumber],
   ])
   set('PoNumber', [
     ['manual', m.PoNumber],

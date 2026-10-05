@@ -4,7 +4,7 @@
  * otherwise type — particularly the ZIPs and the customer name the factoring queue needs.
  */
 import { describe, it, expect } from 'vitest'
-import { parseTender, parseAddressLine, parsePlanDate } from './intakeTender'
+import { parseTender, parseAddressLine, parsePlanDate, resolveTenderCustomer } from './intakeTender'
 
 const E2OPEN = `This email was sent from an automated source. Please do not reply to this message as all replies are automatically deleted.
 
@@ -204,5 +204,54 @@ describe('parseTender falling back to the subject', () => {
     )
     // No labelled reference and no city pair — nothing here is safe to put on a load.
     expect(t.stops).toEqual([])
+  })
+})
+
+describe('resolveTenderCustomer', () => {
+  const customers = [
+    { id: 'c1', name: 'BATORY FOODS', mcNumber: '123456', active: true, aliases: ['BATORY'] },
+    { id: 'c2', name: 'Rojac Trucking', mcNumber: '654321', active: true },
+    { id: 'c3', name: 'Batory Foods West', mcNumber: '999', active: true },
+  ] as never[]
+
+  it('binds a customer whose name matches exactly', () => {
+    const c = resolveTenderCustomer('BATORY FOODS', customers)
+    expect(c?.id).toBe('c1')
+  })
+
+  it('matches on an alias too', () => {
+    expect(resolveTenderCustomer('Batory', customers)?.id).toBe('c1')
+  })
+
+  it('ignores case, punctuation and a trailing Inc', () => {
+    expect(resolveTenderCustomer('rojac trucking, inc.', customers)?.id).toBe('c2')
+  })
+
+  it('refuses a merely similar name', () => {
+    /*
+     * The customer carries the MC that decides who gets billed. "Similar name" is not a
+     * basis for choosing that, however confident the score looks.
+     */
+    expect(resolveTenderCustomer('Batory Foods Westside', customers)).toBeNull()
+  })
+
+  it('refuses an unknown broker rather than inventing one', () => {
+    expect(resolveTenderCustomer('NEW WAVE INTERNATIONAL CARGO', customers)).toBeNull()
+  })
+
+  it('refuses when two records share the name, instead of picking one', () => {
+    // A duplicated directory record is a problem to see, not to paper over.
+    const dupes = [...customers, { id: 'c4', name: 'BATORY FOODS', mcNumber: '7', active: true }] as never[]
+    expect(resolveTenderCustomer('BATORY FOODS', dupes)).toBeNull()
+  })
+
+  it('ignores an archived record', () => {
+    const archived = [{ id: 'c9', name: 'OLD BROKER', mcNumber: '1', active: false }] as never[]
+    expect(resolveTenderCustomer('OLD BROKER', archived)).toBeNull()
+  })
+
+  it('is nothing for a blank name', () => {
+    expect(resolveTenderCustomer('', customers)).toBeNull()
+    expect(resolveTenderCustomer(null, customers)).toBeNull()
   })
 })

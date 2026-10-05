@@ -464,9 +464,18 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
     : await findLoadByPro(String(item.proNumber ?? ''))
 
   if (!load) {
+    /*
+     * No load has been built in BCAT Ops for this PRO.
+     *
+     * Everything else on the row is genuinely unknown, but the PRO is not — the Aljex
+     * invoice email that created this row names it in its subject and it is the row's own
+     * id. Passing it through is why 14529 showed "Invoice number (PRO)" as missing while
+     * sitting in a row titled 14529.
+     */
     return {
       readiness: assembleOtrInvoice({
         load: {},
+        proNumber: trim(item.proNumber) || trim(item.id) || null,
         manual: (item.otrManualFields as ManualOverrides) ?? null,
         submissionDate: today(),
       }),
@@ -501,6 +510,8 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
     },
     // Populated once the rate-con parser is extended; absent is handled.
     rateCon: (item.rateConExtract as RateConExtract) ?? null,
+    // The row's own PRO, so a factoring row whose load was never built still knows it.
+    proNumber: trim(item.proNumber) || trim(item.id) || null,
     customerMcNumber: resolvedCustomer?.mcNumber as string | undefined,
     // The name on the broker record, and whether anything ever checked it against the MC.
     // Nothing does today, so this is false everywhere until a lookup exists.

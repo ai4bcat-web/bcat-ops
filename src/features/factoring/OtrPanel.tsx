@@ -66,6 +66,7 @@ const SOURCE_LABEL: Record<string, string> = {
   load: 'load',
   location: 'location',
   geocode: 'geocoded',
+  invoice: 'invoice email',
 }
 
 /**

@@ -24,6 +24,9 @@
  * same email always yields the same prefill.
  */
 
+import { findCustomerMatches } from './tmsDirectory'
+import type { CustomerRecord } from '../types/tms'
+
 export interface TenderStopPrefill {
   type: 'pickup' | 'delivery'
   name?: string
@@ -37,6 +40,12 @@ export interface TenderStopPrefill {
 
 export interface TenderPrefill {
   format: 'E2OPEN' | 'SUBJECT' | null
+  /*
+   * Set only when the broker name matched a directory customer EXACTLY. Its presence is
+   * what lets the load carry an MC into the factoring queue; its absence means a human
+   * still has to pick the customer, which is the correct outcome for an unknown broker.
+   */
+  customerId?: string
   /** The reference a dispatcher would put in Pro # — TMS ID or Route #. */
   reference?: string
   /** Shipment / SO number, which is the PU#. */
@@ -222,4 +231,26 @@ export function parseTender(subject: string | null | undefined, bodyText: string
   const fromBody = body ? parseE2open(body) : null
   if (fromBody && (fromBody.reference || fromBody.stops.length)) return fromBody
   return parseSubject(subject ?? '') ?? EMPTY
+}
+
+
+/**
+ * The directory customer a tender's broker name refers to, when there is no doubt.
+ *
+ * Binding the customer is what carries the MC number into the factoring queue, and the MC
+ * decides who gets billed — so only an EXACT name or alias match counts. findCustomerMatches
+ * also returns near misses for a human to review; those are deliberately refused here,
+ * because "similar name" is not a basis for choosing whose MC goes on an invoice.
+ *
+ * Returning the record rather than the parsed string is the point: the name that lands on
+ * the load is then the directory's own, never free text read off an email.
+ */
+export function resolveTenderCustomer(
+  name: string | null | undefined,
+  customers: CustomerRecord[],
+): CustomerRecord | null {
+  if (!name?.trim()) return null
+  const exact = findCustomerMatches(name, customers).filter((m) => m.score === 1)
+  // Two records sharing a name is a directory problem; picking one here would hide it.
+  return exact.length === 1 ? exact[0].record : null
 }
