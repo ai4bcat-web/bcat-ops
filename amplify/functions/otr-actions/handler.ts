@@ -19,6 +19,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { randomUUID } from 'crypto'
 import {
   assembleOtrInvoice,
@@ -50,6 +51,7 @@ const LOCATION_TABLE = process.env.LOCATION_TABLE_NAME
 const POD_TABLE = process.env.POD_DOCUMENT_TABLE_NAME
 const SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME
 const SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME
+const POD_FUNCTION_NAME = process.env.POD_FUNCTION_NAME ?? ''
 const BUCKET = process.env.BUCKET_NAME!
 
 function otr(): OtrClient {
@@ -262,6 +264,8 @@ async function findSubmittedDoc(
       contentType: 'application/pdf',
       originalKey: trim(withCombined[combinedField]),
       createdAt: withCombined.combinedAt,
+      // Already the cleaned, merged document — there is nothing left to enhance.
+      enhancedKey: trim(withCombined[combinedField]),
     }
   }
 
@@ -280,6 +284,17 @@ async function findSubmittedDoc(
     fileName: doc.fileName ?? `${label}-${proNumber}.pdf`,
     contentType: doc.contentType,
     originalKey: doc.s3Key,
+    /*
+     * The CLEANED page, when the scan has produced one.
+     *
+     * This was not returned at all, so every driver-submitted POD reached OTR as the raw
+     * camera photo — deskewed by nothing, cropped to nothing — while a cleaned copy sat in
+     * S3 beside it. Only a merged multi-page POD escaped, because that path returns the
+     * combined PDF. The caller already prefers enhancedKey; it was simply never given one.
+     */
+    enhancedKey: doc.scanStatus === 'READY' ? doc.enhancedKey : null,
+    scanStatus: doc.scanStatus,
+    submissionId: doc.submissionId,
     createdAt: doc.uploadedAt,
   }
 }
@@ -293,6 +308,95 @@ async function scanAllRows(table: string): Promise<Row[]> {
     ExclusiveStartKey = r.LastEvaluatedKey
   } while (ExclusiveStartKey)
   return out
+}
+
+/*
+ * How long a submit will wait for a POD to be cleaned up before sending it anyway.
+ *
+ * Both this function and pod-actions time out at 60s, and by the time documents are being
+ * uploaded the invoice already exists at OTR — so running out the clock here would lose an
+ * invoice we had just created. Twenty seconds is enough for the scan of a dock photo and
+ * leaves the uploads room to finish. Going over it costs quality on one submit, not the
+ * submit itself: the scan carries on in its own lambda and the cleaned copy is there for
+ * next time.
+ */
+const ENHANCE_WAIT_MS = 20_000
+const ENHANCE_POLL_MS = 1_500
+
+/**
+ * The POD, cleaned up, if cleaning it up is still possible.
+ *
+ * PODs are deskewed, cropped and contrast-corrected by pod-actions after every upload, and
+ * the cleaned copy is what OTR should receive — a flash-lit phone photo of a bill of lading
+ * is a different document from the same page straightened and thresholded. That cleanup is
+ * queued asynchronously so a driver at a dock is not left watching a spinner, which leaves
+ * one window open: a submit pressed while the scan is still PENDING used to fall straight
+ * through to the raw photo. This closes that window by asking for the scan and waiting.
+ *
+ * Only a submission-backed POD can be re-scanned, and only one that has not already been
+ * through the scanner: READY has a cleaned copy, ORIGINAL_ONLY means the scanner looked and
+ * found no page worth extracting, and asking it to look a second time would just spend the
+ * wait to arrive at the same answer.
+ *
+ * Returns the best POD available when the wait is over — never null, never throws. Every
+ * failure here means sending the original, which is what would have been sent anyway.
+ */
+async function enhancedPodForSend(
+  pod: Row | null,
+  loadId: string,
+  proNumber: string,
+): Promise<Row | null> {
+  if (!pod || trim(pod.enhancedKey)) return pod
+
+  const submissionId = trim(pod.submissionId)
+  const status = trim(pod.scanStatus)
+  if (!submissionId || !POD_FUNCTION_NAME) return pod
+  if (status === 'ORIGINAL_ONLY') return pod
+
+  console.log('[otr-actions] POD has no cleaned copy yet; asking for the scan before sending', {
+    loadId,
+    submissionId,
+    scanStatus: status || '(none)',
+  })
+
+  try {
+    await new LambdaClient({}).send(
+      new InvokeCommand({
+        FunctionName: POD_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({ action: 'scanDriverDocs', submissionId, kind: 'POD' })),
+      }),
+    )
+  } catch (err) {
+    console.error('[otr-actions] could not ask for the scan; sending the original', {
+      submissionId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return pod
+  }
+
+  /*
+   * Polled rather than invoked synchronously: the scan runs in its own lambda either way,
+   * and watching the table means a wait that runs out leaves the scan running instead of
+   * killing it. Re-read through findPod so a multi-page POD picks up the merged PDF the
+   * scan writes to the submission, not just the cleaned first page.
+   */
+  const deadline = Date.now() + ENHANCE_WAIT_MS
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, ENHANCE_POLL_MS))
+    const fresh = await findPod(loadId, proNumber)
+    if (fresh && trim(fresh.enhancedKey)) {
+      console.log('[otr-actions] sending the cleaned POD', { loadId, submissionId })
+      return fresh
+    }
+    if (fresh && trim(fresh.scanStatus) === 'ORIGINAL_ONLY') return fresh
+  }
+
+  console.warn('[otr-actions] POD scan did not finish in time; sending the original', {
+    loadId,
+    submissionId,
+  })
+  return pod
 }
 
 /** A POD for this load from either store. JobsDone first, since a human linked it there. */
@@ -329,6 +433,9 @@ async function findRatecon(load: Row, proNumber = ''): Promise<Row | null> {
  * the whole submit action.
  */
 export const __testFindPod = findPod
+
+/** Exported for enhanceBeforeSend.test.ts only, for the same reason as __testFindPod. */
+export const __testEnhancedPodForSend = enhancedPodForSend
 
 /** Exported for findRatecon.test.ts only, for the same reason as __testFindPod. */
 export const __testFindRatecon = findRatecon
@@ -481,7 +588,12 @@ async function uploadInvoiceDocuments(
     return `${label}: ${message}`
   }
 
-  const pod = await findPod(String(load.id), String(item.proNumber ?? ''))
+  const proNumber = String(item.proNumber ?? '')
+  const pod = await enhancedPodForSend(
+    await findPod(String(load.id), proNumber),
+    String(load.id),
+    proNumber,
+  )
   const podKey = trim(pod?.enhancedKey) || trim(pod?.originalKey)
   if (podKey) {
     try {

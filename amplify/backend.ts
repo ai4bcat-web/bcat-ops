@@ -1488,6 +1488,15 @@ for (const fn of [otrActionsFn, otrSyncFn]) {
   fn.addEnvironment('OTR_CLIENT_DOT', OTR_CLIENT_DOT)
 }
 
+// A submit cleans up the POD first if nothing has yet — see enhancedPodForSend. Name and
+// invoke permission only; otr-actions reads the submission tables it already has.
+otrActionsFn.addEnvironment('POD_FUNCTION_NAME', podFunctionName)
+otrActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['lambda:InvokeFunction'],
+    resources: [podFunctionArn],
+  }),
+)
 otrActionsFn.addEnvironment('LOAD_TABLE_NAME', otrLoadTable.tableName)
 otrActionsFn.addEnvironment('CUSTOMER_TABLE_NAME', otrCustomerTable.tableName)
 otrActionsFn.addEnvironment('LOCATION_TABLE_NAME', otrLocationTable.tableName)
