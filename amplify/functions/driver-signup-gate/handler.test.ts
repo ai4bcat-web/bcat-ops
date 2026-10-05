@@ -10,12 +10,15 @@ function driverItem(
   id: string,
   email: string | null,
   active: boolean | undefined,
+  fleet?: { fleetGroup?: string; driverType?: string },
 ): Record<string, { S?: string; BOOL?: boolean }> {
   const item: Record<string, { S?: string; BOOL?: boolean }> = {
     id: { S: id },
   }
   if (email !== null) item.email = { S: email }
   if (typeof active === 'boolean') item.active = { BOOL: active }
+  if (fleet?.fleetGroup) item.fleetGroup = { S: fleet.fleetGroup }
+  if (fleet?.driverType) item.driverType = { S: fleet.driverType }
   return item
 }
 
@@ -258,5 +261,71 @@ describe('driver-signup-gate handler', () => {
     await expect(handler(signupEvent('inactive-setting@bcatcorp.com'))).rejects.toThrow(
       'No driver record matches this email. Contact dispatch.',
     )
+  })
+})
+
+describe('Ivan drivers, who have no pay setting at all', () => {
+  let sendSpy: MockInstance
+
+  /** Only the Driver table has rows — which is the real shape for the Ivan fleet. */
+  function onlyDrivers(items: Record<string, unknown>[]) {
+    sendSpy.mockImplementation(async (command) => {
+      if (command instanceof ScanCommand) {
+        if (command.input.TableName === DRIVER_TABLE) return { Items: items }
+        if (command.input.TableName === PAY_SETTING_TABLE) return { Items: [] }
+      }
+      return undefined
+    })
+  }
+
+  beforeEach(() => {
+    process.env.DRIVER_TABLE_NAME = DRIVER_TABLE
+    process.env.DRIVER_PAY_SETTING_TABLE_NAME = PAY_SETTING_TABLE
+    sendSpy = vi.spyOn(DynamoDBClient.prototype, 'send').mockReset()
+  })
+
+  it('lets a LOCAL driver sign up with no pay setting', async () => {
+    /*
+     * The live bug: Jason Smith's record sat there, active, with that exact address, and
+     * the gate answered "No driver record matches this email" because nothing had ever
+     * created a DriverPaySetting for him — nothing ever will, the Ivan app has no pay page.
+     * All five Ivan drivers were locked out the same way.
+     */
+    onlyDrivers([
+      driverItem('drv-ivan', 'mastermechanicjs22@gmail.com', true, { fleetGroup: 'LOCAL' }),
+    ])
+    await expect(handler(signupEvent('mastermechanicjs22@gmail.com'))).resolves.toBeDefined()
+  })
+
+  it('still refuses an inactive LOCAL driver', async () => {
+    onlyDrivers([driverItem('drv-ivan', 'gone@x.com', false, { fleetGroup: 'LOCAL' })])
+    await expect(handler(signupEvent('gone@x.com'))).rejects.toThrow(/No driver record matches/)
+  })
+
+  it('still refuses an unknown email', async () => {
+    onlyDrivers([driverItem('drv-ivan', 'jason@x.com', true, { fleetGroup: 'LOCAL' })])
+    await expect(handler(signupEvent('stranger@x.com'))).rejects.toThrow(/No driver record matches/)
+  })
+
+  it('does NOT let an unclassified driver through on a missing pay setting', async () => {
+    /*
+     * The fail-safe direction. driverProgramOf treats the unstated case as SETTLEMENT, so a
+     * driver with no fleet and no pay setting is not silently granted an account — this is
+     * the hole that "no setting means Ivan" would have opened.
+     */
+    onlyDrivers([driverItem('drv-x', 'mystery@x.com', true)])
+    await expect(handler(signupEvent('mystery@x.com'))).rejects.toThrow(/No driver record matches/)
+  })
+
+  it('does NOT let an owner operator through on a missing pay setting', async () => {
+    onlyDrivers([
+      driverItem('drv-oo', 'oo@x.com', true, { fleetGroup: 'LOCAL', driverType: 'OWNER_OPERATOR' }),
+    ])
+    await expect(handler(signupEvent('oo@x.com'))).rejects.toThrow(/No driver record matches/)
+  })
+
+  it('does NOT let an Amazon driver through on a missing pay setting', async () => {
+    onlyDrivers([driverItem('drv-az', 'az@x.com', true, { fleetGroup: 'AMAZON' })])
+    await expect(handler(signupEvent('az@x.com'))).rejects.toThrow(/No driver record matches/)
   })
 })
