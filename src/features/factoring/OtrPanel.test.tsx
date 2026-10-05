@@ -158,19 +158,24 @@ describe('OtrPanel', () => {
     expect(screen.getByText(/not checked against the MC/)).toBeInTheDocument()
   })
 
-  it('lets someone correct a wrong broker, which is the only way to fix one', async () => {
+  it('does not let anyone type a customer name', () => {
+    /*
+     * The customer comes from the MC and nothing else. Typing a broker's name asserts it
+     * without checking it, and the typed value then sat on the invoice looking exactly as
+     * settled as a resolved one. Fixing a wrong name means fixing the Broker MC.
+     */
     const r = readiness({ payload: ALL_FIELDS, customerName: 'AMERIFREIGHT SYSTEMS LLC', customerSource: 'directory' })
     render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Correct the customer for PRO 13364' }))
-    fireEvent.change(screen.getByLabelText('Customer for PRO 13364'), {
-      target: { value: 'Wayfinder Logistics' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Save Customer for PRO 13364' }))
+    expect(screen.getByText('AMERIFREIGHT SYSTEMS LLC')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Correct the customer/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Save Customer/ })).not.toBeInTheDocument()
+  })
 
-    await waitFor(() =>
-      expect(setFactoringManualFields).toHaveBeenCalledWith('13364', { CustomerName: 'Wayfinder Logistics' }),
-    )
+  it('asks for the MC when no customer has been resolved', () => {
+    const r = readiness({ payload: ALL_FIELDS, customerName: null, customerSource: null })
+    render(<OtrPanel item={item({ otrReadiness: r })} onChanged={vi.fn()} />)
+    expect(screen.getByText('Enter the Broker MC to name it')).toBeInTheDocument()
   })
 
   it('marks a missing field red, so the gaps stand out once the row is open', () => {

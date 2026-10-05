@@ -432,20 +432,26 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
    * MC. It had not, and a wrong broker that reads as verified is worse than one that reads
    * as a guess.
    */
-  const typedName = clean(m.CustomerName)
+  /*
+   * The customer comes from the MC, and from nothing else.
+   *
+   * It used to fall back twice: to a name somebody typed into the row, and then to
+   * whatever the load was booked under — which is frequently a shipper or an agent rather
+   * than the broker being billed. Both produced a confident-looking name that nobody had
+   * checked against an MC, and factoring the wrong broker is expensive.
+   *
+   * So a row now names a customer only once its MC resolves one. Blank means "give me the
+   * MC", which is a question somebody can answer, rather than a guess nobody can audit.
+   */
   const directoryName = clean(input.customerName)
-  const loadName = clean(load.customer)
-  const customerName = typedName ?? directoryName ?? loadName ?? null
+  const hasMc = clean(String(input.customerMcNumber ?? '')) !== undefined
+  const customerName = hasMc ? (directoryName ?? null) : null
   const customerSource: OtrReadiness['customerSource'] =
-    customerName === undefined || customerName === null
+    customerName === null
       ? null
-      : typedName !== undefined
-        ? 'entered'
-        : directoryName !== undefined
-          ? input.customerNameVerified === true
-            ? 'verified'
-            : 'directory'
-          : 'load'
+      : input.customerNameVerified === true
+        ? 'verified'
+        : 'directory'
 
   return {
     ready: missingFields.length === 0 && missingDocuments.length === 0,

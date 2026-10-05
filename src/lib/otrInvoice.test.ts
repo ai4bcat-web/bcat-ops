@@ -255,10 +255,15 @@ describe('where the customer name came from', () => {
     expect(r.customerSource).toBe('directory')
   })
 
-  it('falls back to the load, and says so', () => {
+  it('does NOT fall back to the name the load was booked under', () => {
+    /*
+     * A load is frequently booked under a shipper or an agent rather than the broker being
+     * billed, so that name reads as a customer while nobody has checked it against an MC.
+     * Blank is a question somebody can answer; a wrong broker is an expensive invoice.
+     */
     const r = assembleOtrInvoice({ load: { customer: 'MILWOOD' } })
-    expect(r.customerName).toBe('MILWOOD')
-    expect(r.customerSource).toBe('load')
+    expect(r.customerName).toBeNull()
+    expect(r.customerSource).toBeNull()
   })
 
   it('is empty rather than a guess when nothing names a customer', () => {
@@ -267,17 +272,24 @@ describe('where the customer name came from', () => {
     expect(r.customerSource).toBeNull()
   })
 
-  it('reads a typed name as entered, never as verified', () => {
-    // With no lookup anywhere, typing is the only way to correct a wrong broker — but a
-    // person asserting a name is not the same as having checked it.
+  it('ignores a name somebody typed — the MC is the only source', () => {
+    // Typing a name asserts it; it does not check it. The row names the broker its MC
+    // resolves, so a manual override cannot put a different one on the invoice.
     const r = assembleOtrInvoice({
       load: { customer: 'AMERIFREIGHT SYSTEMS' },
       customerName: 'AMERIFREIGHT SYSTEMS LLC',
       customerMcNumber: '20313',
       manual: { CustomerName: 'Wayfinder Logistics' },
     })
-    expect(r.customerName).toBe('Wayfinder Logistics')
-    expect(r.customerSource).toBe('entered')
+    expect(r.customerName).toBe('AMERIFREIGHT SYSTEMS LLC')
+    expect(r.customerSource).toBe('directory')
+  })
+
+  it('names nobody until an MC resolves one', () => {
+    // A directory record with no MC is just a string somebody saved.
+    const r = assembleOtrInvoice({ load: { customer: 'MILWOOD' }, customerName: 'MILWOOD LLC' })
+    expect(r.customerName).toBeNull()
+    expect(r.customerSource).toBeNull()
   })
 
   it('never becomes a required field, so it cannot block a submission', () => {

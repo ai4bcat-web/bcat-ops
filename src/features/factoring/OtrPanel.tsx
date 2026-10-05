@@ -230,17 +230,12 @@ export function OtrPanel({ item, onChanged }: Props) {
       {/* Every required field, with its source. Missing ones are called out. */}
       <div className="grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
         {/*
-          * The customer leads, because it is the field a person checks first. Nothing in
-          * this system looks an MC up, so a person correcting it is the only way a row
-          * ends up naming the right broker.
+          * The customer leads, because it is the field a person checks first. It is not
+          * editable here: the MC names the broker, and a typed name was indistinguishable
+          * from a resolved one while being nobody's checked answer.
           */}
-        <CustomerRow
-          readiness={readiness}
-          pro={item.proNumber}
-          busy={busy !== null}
-          saving={busy === 'field:CustomerName'}
-          onSave={(v) => void saveField('CustomerName', 'Customer', v)}
-        />
+        {/* Read only — the MC names the customer. See CustomerRow. */}
+        <CustomerRow readiness={readiness} pro={item.proNumber} />
         {OTR_REQUIRED_FIELDS.map((f) => (
           <FieldRow
             key={f}
@@ -412,51 +407,28 @@ const SOURCE_NOTE: Record<string, string> = {
 }
 
 function CustomerRow({
-  readiness, pro, busy, saving, onSave,
+  readiness, pro,
 }: {
   readiness: OtrReadiness
   pro: string
-  busy: boolean
-  saving: boolean
-  onSave: (value: string) => void
 }) {
   const name = (readiness.customerName ?? '').trim()
   const source = readiness.customerSource ?? null
-  const [draft, setDraft] = useState('')
-  const [open, setOpen] = useState(false)
 
-  if (!name || open) {
+  /*
+   * Read only, on purpose.
+   *
+   * This used to offer a text box. Typing a broker's name asserts it; it does not check
+   * it, and a typed name sat on the invoice looking exactly as settled as a resolved one.
+   * The customer now comes from the MC and nothing else, so the way to fix a wrong name is
+   * to fix the Broker MC below — which is a correction somebody can audit afterwards.
+   */
+  if (!name) {
     return (
-      <form
-        className={`flex items-center gap-1.5 ${name ? '' : 'rounded-md bg-red-50 px-1.5 py-1'}`}
-        onSubmit={(e) => {
-          e.preventDefault()
-          onSave(draft)
-          setOpen(false)
-          setDraft('')
-        }}
-      >
-        <span className={`shrink-0 ${name ? 'text-muted-foreground' : 'font-semibold text-red-700'}`}>
-          Customer
-        </span>
-        <Input
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Who the invoice bills"
-          className={`h-7 min-w-0 flex-1 text-xs ${name ? '' : 'border-red-300 bg-white'}`}
-          aria-label={`Customer for PRO ${pro}`}
-        />
-        <Button
-          type="submit"
-          size="sm"
-          variant="outline"
-          className="h-7 px-2 text-xs"
-          disabled={busy}
-          aria-label={`Save Customer for PRO ${pro}`}
-        >
-          {saving ? <Loader2 className="size-3 animate-spin" /> : 'Save'}
-        </Button>
-      </form>
+      <div className="flex items-center gap-1.5 rounded-md bg-red-50 px-1.5 py-1" aria-label={`Customer for PRO ${pro}`}>
+        <span className="shrink-0 font-semibold text-red-700">Customer</span>
+        <span className="min-w-0 flex-1 text-red-700">Enter the Broker MC to name it</span>
+      </div>
     )
   }
 
@@ -474,15 +446,6 @@ function CustomerRow({
         <span className="shrink-0 text-[10px] text-muted-foreground">
           ({source ? SOURCE_NOTE[source] : 'unknown'})
         </span>
-        <button
-          type="button"
-          className="shrink-0 text-[10px] font-semibold text-[var(--ds-blue,#2563eb)] underline-offset-2 hover:underline disabled:opacity-50"
-          disabled={busy}
-          aria-label={`Correct the customer for PRO ${pro}`}
-          onClick={() => { setDraft(name); setOpen(true) }}
-        >
-          correct
-        </button>
       </span>
     </div>
   )
