@@ -12,7 +12,7 @@
  *               and offers to replace it.
  *   on file     said quietly. A green tick nobody needs to read is the goal.
  */
-import { AlertTriangle, Camera, Check, Clock, FileWarning } from 'lucide-react'
+import { AlertTriangle, Camera, Check, ClipboardList, Clock, FileWarning } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PaperworkLoad } from '../driverApi'
 
@@ -50,6 +50,44 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
       POD on file{pod.pages > 1 ? ` · ${pod.pages} pages` : ''}
     </span>
   )
+}
+
+/**
+ * Whether this run needs records of duty status, by the 150 air-mile rule.
+ *
+ * Shown as a badge next to the POD badge so it is visible before the driver rolls, which is
+ * the only time it is useful. UNKNOWN gets its own amber "check" state rather than being
+ * folded into "not required" — the point of surfacing it is that somebody looks.
+ */
+function EldBadge({ load }: { load: PaperworkLoad }) {
+  const { eld } = load
+  // An API that predates the field tells us nothing; say nothing rather than "no logs".
+  if (!eld) return null
+  if (eld.status === 'REQUIRED') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-semibold text-sky-700"
+        title={eld.label}
+      >
+        <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
+        ELD logs required
+      </span>
+    )
+  }
+  if (eld.status === 'UNKNOWN') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-600"
+        title={eld.label}
+      >
+        <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+        Check ELD
+      </span>
+    )
+  }
+  // Short-haul and inside the radius: no badge. A "no logs needed" chip on every local
+  // load would be noise on a list that is almost entirely local runs.
+  return null
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
@@ -90,7 +128,10 @@ export function PaperworkRows({
                 <p className="text-base font-bold text-foreground">{load.reference}</p>
                 <p className="truncate text-sm text-muted-foreground">{load.customer ?? 'No customer'}</p>
               </div>
-              <PodBadge load={load} />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <EldBadge load={load} />
+                <PodBadge load={load} />
+              </div>
             </div>
 
             <p className="mt-2.5 text-sm text-muted-foreground">
@@ -118,6 +159,14 @@ export function PaperworkRows({
                   </li>
                 ))}
               </ol>
+            )}
+
+            {/* Why logs are required, named so the driver can check it against the run. */}
+            {load.eld && load.eld.status !== 'NOT_REQUIRED' && (
+              <p className="mt-3 flex items-start gap-2 rounded-lg bg-sky-500/10 p-3 text-sm text-sky-800">
+                <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{load.eld.label}</span>
+              </p>
             )}
 
             {load.notes && <p className="mt-3 text-sm text-muted-foreground">{load.notes}</p>}

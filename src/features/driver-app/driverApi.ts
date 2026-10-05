@@ -315,6 +315,16 @@ export interface PaperworkTimes {
   billable: boolean
 }
 
+/** Whether the run needs records of duty status — the 150 air-mile rule. */
+export interface PaperworkEld {
+  status: 'NOT_REQUIRED' | 'REQUIRED' | 'UNKNOWN'
+  required: boolean
+  farthestMiles: number | null
+  farthestCity: string | null
+  /** Already phrased for a driver by the API; the app shows it verbatim. */
+  label: string
+}
+
 export interface PaperworkLoad {
   id: string
   reference: string
@@ -334,6 +344,12 @@ export interface PaperworkLoad {
   pod: PaperworkPod
   pickupTimes: PaperworkTimes
   deliveryTimes: PaperworkTimes
+  /*
+   * Optional because the app is a PWA: a cached bundle can meet an API that predates this
+   * field, and a new bundle can be served a response from one. Absent is treated as "we
+   * don't know", never as "no logs needed".
+   */
+  eld?: PaperworkEld
 }
 
 export interface Paperwork {
@@ -342,6 +358,7 @@ export interface Paperwork {
   loadCount: number
   podsMissing: number
   podsIllegible: number
+  eldRequired?: number
 }
 
 export interface PaperworkWeek {
@@ -349,6 +366,7 @@ export interface PaperworkWeek {
   loadCount: number
   podsMissing: number
   podsIllegible: number
+  eldRequired?: number
 }
 
 export async function fetchPaperworkWeeks(): Promise<PaperworkWeek[]> {

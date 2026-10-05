@@ -193,11 +193,55 @@ describe('the week summary', () => {
       buildPaperworkLoad(load({ id: 'c' }), [{ kind: 'POD', legibility: 'UNREADABLE' }], []),
       buildPaperworkLoad(load({ id: 'd' }), [{ kind: 'POD', legibility: 'LOW' }], []),
     ]
-    expect(summarize(loads)).toEqual({ loadCount: 4, podsMissing: 1, podsIllegible: 2 })
+    expect(summarize(loads)).toEqual({ loadCount: 4, podsMissing: 1, podsIllegible: 2, eldRequired: 4 })
   })
 
   it('does not count a missing POD as illegible as well', () => {
     const loads = [buildPaperworkLoad(load(), [], [])]
-    expect(summarize(loads)).toEqual({ loadCount: 1, podsMissing: 1, podsIllegible: 0 })
+    expect(summarize(loads)).toEqual({ loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 1 })
+  })
+})
+
+describe('the ELD flag on a load', () => {
+  it('requires logs on a run that leaves the 150 air-mile radius', () => {
+    // The fixture runs Chicago -> Indianapolis, about 200 air miles out.
+    const l = buildPaperworkLoad(load(), [], [])
+    expect(l.eld.required).toBe(true)
+    expect(l.eld.status).toBe('REQUIRED')
+    expect(l.eld.label).toMatch(/ELD logs required/)
+    expect(l.eld.label).toMatch(/Pleasant Prairie, WI/)
+  })
+
+  it('does not require logs on a local run', () => {
+    const l = buildPaperworkLoad(
+      load({ originCity: 'Kenosha', originState: 'WI', destinationCity: 'Waukegan', destinationState: 'IL', stops: [] }),
+      [], [],
+    )
+    expect(l.eld.required).toBe(false)
+    expect(l.eld.status).toBe('NOT_REQUIRED')
+    expect(l.eld.label).toMatch(/No ELD logs required/)
+  })
+
+  it('ignores road miles, which would give the wrong answer', () => {
+    /*
+     * 400 routed miles but both ends well inside the circle. The rule is air miles, so a
+     * long road figure must not pull a local run into logs-required.
+     */
+    const l = buildPaperworkLoad(
+      load({ miles: 400, originCity: 'Milwaukee', originState: 'WI', destinationCity: 'Chicago', destinationState: 'IL', stops: [] }),
+      [], [],
+    )
+    expect(l.miles).toBe(400)
+    expect(l.eld.required).toBe(false)
+  })
+
+  it('asks a human rather than clearing a stop it cannot place', () => {
+    const l = buildPaperworkLoad(
+      load({ originCity: 'CTSI Warehouse', originState: null, destinationCity: 'Kenosha', destinationState: 'WI', stops: [] }),
+      [], [],
+    )
+    expect(l.eld.status).toBe('UNKNOWN')
+    expect(l.eld.required).toBe(false)
+    expect(l.eld.label).toMatch(/Check whether ELD logs are required/)
   })
 })

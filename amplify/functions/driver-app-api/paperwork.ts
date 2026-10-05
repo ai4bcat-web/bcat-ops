@@ -18,8 +18,40 @@
 import { getStops } from '../../../src/lib/stops'
 import { driverIsOnLoad } from '../../../src/lib/driverJourney'
 import type { Load, Stop } from '../../../src/types'
+import {
+  assessEld, SHORT_HAUL_AIR_MILES, WORK_REPORTING_LOCATION, type EldStatus,
+} from '../../../src/lib/eldRadius'
 
 /** Enough of a load to describe it to the driver hauling it. */
+/*
+ * The ELD question is answered from the stop CITIES, never from load.miles.
+ *
+ * miles is a routed road distance; the rule is air miles. A 160-road-mile run can sit well
+ * inside a 150-air-mile circle, and reading the road figure would demand logs for days that
+ * are exempt. See src/lib/eldRadius.ts.
+ */
+function assessLoadEld(stops: PaperworkStop[], load: PaperworkLoadLike): PaperworkEld {
+  const cities = [
+    ...stops.map((s) => (s.city && s.state ? `${s.city}, ${s.state}` : s.city)),
+    place(load.originCity, load.originState, null),
+    place(load.destinationCity, load.destinationState, null),
+  ]
+  const a = assessEld(cities)
+  const label =
+    a.status === 'REQUIRED'
+      ? `ELD logs required — ${a.farthestCity} is ${a.farthestMiles} air miles from ${WORK_REPORTING_LOCATION.name}`
+      : a.status === 'UNKNOWN'
+        ? `Check whether ELD logs are required — ${a.unplaceable.length ? `could not locate ${a.unplaceable.join(', ')}` : 'no stop location on file'}`
+        : `No ELD logs required — stays within ${SHORT_HAUL_AIR_MILES} air miles of ${WORK_REPORTING_LOCATION.name}`
+  return {
+    status: a.status,
+    required: a.status === 'REQUIRED',
+    farthestMiles: a.farthestMiles,
+    farthestCity: a.farthestCity,
+    label,
+  }
+}
+
 export interface PaperworkLoadLike {
   id: string
   aljexId?: string | null
@@ -93,6 +125,24 @@ export interface PaperworkLoad {
   pod: PaperworkPod
   pickupTimes: PaperworkTimes
   deliveryTimes: PaperworkTimes
+  eld: PaperworkEld
+}
+
+/**
+ * Whether the day's run needs records of duty status, by the 150 air-mile rule.
+ *
+ * Shown on the load so a driver knows BEFORE they roll, not after. UNKNOWN means a stop
+ * could not be placed on the map — it is never quietly treated as exempt, because the
+ * dangerous error here is telling someone they need no logs for a run that left the radius.
+ */
+export interface PaperworkEld {
+  status: EldStatus
+  required: boolean
+  /** Air miles to the farthest stop, from Pleasant Prairie. */
+  farthestMiles: number | null
+  farthestCity: string | null
+  /** One line for the app to show — already phrased for a driver. */
+  label: string
 }
 
 export interface PaperworkWeek {
@@ -100,6 +150,8 @@ export interface PaperworkWeek {
   loadCount: number
   podsMissing: number
   podsIllegible: number
+  /** Loads this week that leave the 150 air-mile radius, so logs are required. */
+  eldRequired: number
 }
 
 /** Detention starts after two free hours, which is what the app prompts on. */
@@ -225,6 +277,7 @@ export function buildPaperworkLoad(
     },
     pickupTimes: describeTimes(byLeg('PICKUP')),
     deliveryTimes: describeTimes(byLeg('DELIVERY')),
+    eld: assessLoadEld(stops, load),
   }
 }
 
@@ -236,5 +289,6 @@ export function summarize(loads: PaperworkLoad[]): Omit<PaperworkWeek, 'weekStar
     podsIllegible: loads.filter(
       (l) => l.pod.present && (l.pod.legibility === 'LOW' || l.pod.legibility === 'UNREADABLE'),
     ).length,
+    eldRequired: loads.filter((l) => l.eld.required).length,
   }
 }

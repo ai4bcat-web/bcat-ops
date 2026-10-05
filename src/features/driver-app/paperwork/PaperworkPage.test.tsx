@@ -176,3 +176,62 @@ describe('rendering inside the staff View-as-driver frame', () => {
     expect(screen.getByRole('button', { name: /Retry/ })).toBeTruthy()
   })
 })
+
+describe('the ELD badge on a load', () => {
+  it('flags a run that leaves the 150 air-mile radius', async () => {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04',
+      loads: [load({
+        eld: {
+          status: 'REQUIRED', required: true, farthestMiles: 201, farthestCity: 'INDIANAPOLIS, IN',
+          label: 'ELD logs required — INDIANAPOLIS, IN is 201 air miles from Pleasant Prairie, WI',
+        },
+      })],
+      loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 1,
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('ELD logs required')).toBeTruthy(), { timeout: 5000 })
+    // And the reason, so the driver can check it against the run they actually made.
+    expect(screen.getByText(/201 air miles from Pleasant Prairie, WI/)).toBeTruthy()
+  })
+
+  it('says nothing on a local run', async () => {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04',
+      loads: [load({
+        eld: {
+          status: 'NOT_REQUIRED', required: false, farthestMiles: 50, farthestCity: 'CHICAGO, IL',
+          label: 'No ELD logs required — stays within 150 air miles of Pleasant Prairie, WI',
+        },
+      })],
+      loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 0,
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    // A "no logs needed" chip on every local load would be noise — this list is mostly local.
+    expect(screen.queryByText(/ELD/)).toBeNull()
+  })
+
+  it('asks the driver to check when a stop could not be placed', async () => {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04',
+      loads: [load({
+        eld: {
+          status: 'UNKNOWN', required: false, farthestMiles: 50, farthestCity: 'CHICAGO, IL',
+          label: 'Check whether ELD logs are required — could not locate CTSI WAREHOUSE',
+        },
+      })],
+      loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 0,
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Check ELD')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText(/could not locate CTSI WAREHOUSE/)).toBeTruthy()
+  })
+
+  it('says nothing when the API predates the field', async () => {
+    // A cached PWA bundle can meet an older API. Absent must not read as "no logs needed".
+    renderPage()
+    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByText(/ELD/)).toBeNull()
+  })
+})
