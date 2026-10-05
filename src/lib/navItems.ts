@@ -47,7 +47,6 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
       { to: '/pods',      label: 'PODs',      icon: PackageCheck,    pageKey: 'pods' },
-      { to: '/missing-paperwork', label: 'Loads Missing Paperwork', icon: FileText, pageKey: 'driverDocs' },
       { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
       { to: '/vendor-ap', label: 'Vendor AP Queue', icon: Receipt, pageKey: 'vendorAp' },
       // The directory: reusable customers + locations behind the Load form.
