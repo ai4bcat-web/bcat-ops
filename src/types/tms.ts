@@ -110,6 +110,8 @@ export interface TmsSettings {
   accessorialCodes?: unknown[] | null
   loadStatusRules?: Record<string, unknown> | null
   invoiceNumberFormat?: string | null
+  /** Past days leave the appointment queue's working list on their own. See splitPastAppts. */
+  autoClearPastAppts?: boolean | null
   createdAt?: string
   updatedAt?: string
 }

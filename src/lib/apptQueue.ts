@@ -267,9 +267,27 @@ export function isStaleRow(r: ApptQueueRow, todayIso: string = new Date().toISOS
  * (the Pro# 14267 miss). Beyond the grace window it is stale: cleared from view and
  * no longer open. Settled rows age out as soon as their pickup date passes.
  */
-export function splitPastAppts(rows: ApptQueueRow[], todayIso?: string) {
+export function splitPastAppts(
+  rows: ApptQueueRow[],
+  todayIso?: string,
+  opts: { autoClearPastDays?: boolean } = {},
+) {
+  /*
+   * With autoClearPastDays on, a date that has passed is past — booked or not.
+   *
+   * Off (the default) an OUTSTANDING past row is deliberately held on the working list for
+   * STALE_AFTER_DAYS, because a load picked up last week whose delivery is still NEED must
+   * not vanish (the Pro# 14267 miss). That grace is also the only reason past days appear
+   * on the page at all, so the setting has to override it to do anything — which is the
+   * trade it makes: yesterday's unbooked appointment stops being visible the next morning.
+   *
+   * Nothing is written to the loads either way. Turning the setting off brings every row
+   * straight back, and until then they are still there under the past/cleared toggle.
+   */
   const isPastRow = (r: ApptQueueRow) =>
-    r.cleared || (isPastAppt(r.appt, todayIso) && !rowOutstanding(r)) || isStaleRow(r, todayIso)
+    r.cleared ||
+    (isPastAppt(r.appt, todayIso) && (opts.autoClearPastDays || !rowOutstanding(r))) ||
+    isStaleRow(r, todayIso)
   return {
     current: rows.filter((r) => !isPastRow(r)),
     past: rows.filter(isPastRow),

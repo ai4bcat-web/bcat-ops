@@ -509,3 +509,57 @@ describe('manual per-day clear', () => {
     expect(splitPastAppts(rows).current).toHaveLength(1)
   })
 })
+
+describe('clearing past days automatically', () => {
+  const TODAY = '2026-10-05T12:00:00Z'
+
+  /** An outstanding (unbooked) row dated yesterday — the only kind that lingers. */
+  function yesterdayUnbooked(): ApptQueueRow[] {
+    return apptQueue([
+      load({
+        id: 'l1', aljexId: '14600',
+        stops: [
+          { id: 's1', type: 'pickup',   appt: '2026-10-04T15:00:00Z', apptType: 'exact', driverId: null, sequence: 0 },
+          { id: 's2', type: 'delivery', appt: '',                     apptType: 'tbd',   driverId: null, sequence: 1 },
+        ],
+      }),
+    ])
+  }
+
+  it('keeps an unbooked past day on the list when the setting is off', () => {
+    // The Pro# 14267 miss: a delivery still NEED must not vanish on its own.
+    const rows = yesterdayUnbooked()
+    const { current, past } = splitPastAppts(rows, TODAY)
+    expect(current).toHaveLength(1)
+    expect(past).toHaveLength(0)
+  })
+
+  it('moves it to past when the setting is on', () => {
+    const rows = yesterdayUnbooked()
+    const { current, past } = splitPastAppts(rows, TODAY, { autoClearPastDays: true })
+    expect(current).toHaveLength(0)
+    expect(past).toHaveLength(1)
+  })
+
+  it('still leaves today alone', () => {
+    // "Past" is strictly before today in Chicago — a stop later today is not past.
+    const rows = apptQueue([
+      load({
+        id: 'l2', aljexId: '14601',
+        stops: [
+          { id: 's1', type: 'pickup',   appt: '2026-10-05T23:00:00Z', apptType: 'exact', driverId: null, sequence: 0 },
+          { id: 's2', type: 'delivery', appt: '',                     apptType: 'tbd',   driverId: null, sequence: 1 },
+        ],
+      }),
+    ])
+    const { current } = splitPastAppts(rows, TODAY, { autoClearPastDays: true })
+    expect(current).toHaveLength(1)
+  })
+
+  it('writes nothing to the loads, so turning it off brings the rows back', () => {
+    const rows = yesterdayUnbooked()
+    expect(splitPastAppts(rows, TODAY, { autoClearPastDays: true }).current).toHaveLength(0)
+    expect(splitPastAppts(rows, TODAY, { autoClearPastDays: false }).current).toHaveLength(1)
+    expect(rows[0].cleared).toBe(false)
+  })
+})

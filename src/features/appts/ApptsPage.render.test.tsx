@@ -44,6 +44,9 @@ vi.mock('@/lib/apiClient', () => ({
   updateIntakeItem: vi.fn().mockResolvedValue({}),
   listCustomers: vi.fn().mockResolvedValue([]),
   listLocations: vi.fn().mockResolvedValue([]),
+  // The page reads the company-wide auto-clear setting on mount.
+  getTmsSettings: vi.fn().mockResolvedValue({ id: 'default', autoClearPastAppts: false }),
+  saveTmsSettings: vi.fn().mockResolvedValue({ id: 'default' }),
 }))
 
 import { ApptsPage } from './ApptsPage'

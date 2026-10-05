@@ -37,6 +37,7 @@ import {
 import { toast } from 'sonner'
 import type { ApptType, Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
+import type { TenderPrefill } from '@/lib/intakeTender'
 
 // ── Stop ↔ form conversion ───────────────────────────────────────────────────
 // Form stores appt as a datetime-local / date string; the stored Stop uses ISO UTC.
@@ -79,6 +80,50 @@ function emptyStopForms(preDate?: string, driverId?: string | null): StopFormVal
     { ...stopToForm(pu), appt: preDate ?? '' },
     { ...stopToForm(de), appt: preDate ?? '' },
   ]
+}
+
+/**
+ * Stop forms seeded from a parsed tender email.
+ *
+ * One form per stop the tender described, in the order it described them, so a multi-stop
+ * route arrives as a multi-stop load. Falls back to the plain empty pair when the tender
+ * turned out to carry no stops — a prefill that produced one lonely pickup would leave the
+ * form invalid for a reason the dispatcher cannot see.
+ *
+ * `appt` takes the stop's own planned date, so pickup and delivery are not both stamped
+ * with the pickup date. Date only, never a time, for the reason in emptyStopForms: an
+ * invented time reads as an appointment somebody booked.
+ */
+function tenderStopForms(
+  tender: TenderPrefill,
+  preDate?: string,
+  driverId?: string | null,
+): StopFormValue[] {
+  const ordered = [
+    ...tender.stops.filter((s) => s.type === 'pickup'),
+    ...tender.stops.filter((s) => s.type === 'delivery'),
+  ]
+  if (!ordered.some((s) => s.type === 'pickup') || !ordered.some((s) => s.type === 'delivery')) {
+    return emptyStopForms(preDate, driverId)
+  }
+  return ordered.map((st, i) => {
+    const base = stopToForm(makeStop({ type: st.type, driverId: driverId ?? null }, i))
+    const cityState = [st.city, st.state].filter(Boolean).join(', ')
+    return {
+      ...base,
+      sequence: i,
+      appt: st.dateStr ?? preDate ?? '',
+      ...(st.name ? { name: st.name } : {}),
+      ...(cityState ? { city: cityState } : {}),
+      address: {
+        ...base.address,
+        street: st.street ?? null,
+        city: st.city ?? null,
+        state: st.state ?? null,
+        zip: st.zip ?? null,
+      },
+    }
+  })
 }
 
 // "Split" = the delivery is run by a different driver than the pickup. A load is
@@ -1183,11 +1228,18 @@ export function LoadDrawer() {
       })
     } else {
       const preDate = createPreFill?.dateStr
+      const tender = createPreFill?.tender
       reset({
-        aljexId: '', tmsId: '', pickupNumber: '',
-        stops: emptyStopForms(preDate, createPreFill?.driverId ?? null),
+        aljexId: tender?.reference ?? '', tmsId: tender?.reference ?? '',
+        pickupNumber: tender?.pickupNumber ?? '',
+        stops: tender
+          ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null)
+          : emptyStopForms(preDate, createPreFill?.driverId ?? null),
         readyToInvoice: false,
-        customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
+        customer: tender?.customer ?? '',
+        // customerId stays blank on purpose: a customer is only bound by picking the record
+        // (and its MC) from the directory, never by a name read off an email.
+        customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1305,11 +1357,22 @@ export function LoadDrawer() {
         if (pendingIntakeItemId) {
           setPendingIntakeItem(null)
           try {
-            await updateIntakeItem(pendingIntakeItemId, { builtLoadId: newLoad.id, status: 'BUILT' })
+            /*
+             * DONE, not BUILT. Building the load in BCAT Ops IS the work the intake item
+             * was asking for, so a separate "Mark as done" click was pure bookkeeping —
+             * and an item left at BUILT reads as outstanding on a page whose whole job is
+             * showing what still needs doing. The Pro# is the one the load was built with,
+             * which is exactly what the Mark-as-done prompt used to ask for.
+             */
+            await updateIntakeItem(pendingIntakeItemId, {
+              builtLoadId: newLoad.id,
+              status: 'DONE',
+              ...(newLoad.aljexId ? { proNumber: newLoad.aljexId } : {}),
+            })
             notifySlackStatusChange({
               intakeItemId: pendingIntakeItemId,
               oldStatus:    'IN_PROGRESS',
-              newStatus:    'BUILT',
+              newStatus:    'DONE',
               actorName:    userEmail,
               proNumber:    newLoad.aljexId || null,
             })

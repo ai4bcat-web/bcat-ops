@@ -674,6 +674,15 @@ const schema = a.schema({
       accessorialCodes:      a.json(),          // accessorial code objects
       loadStatusRules:       a.json(),
       invoiceNumberFormat:   a.string(),
+      /*
+       * Drop past days off the appointment queue's working list automatically.
+       *
+       * Company-wide rather than per-person: the appointment queue is one shared worklist,
+       * and a dispatcher whose page quietly disagrees with everyone else's about what is
+       * still open is worse than either setting. Applied when the queue is split, so
+       * turning it back off restores every row — nothing is written to the loads.
+       */
+      autoClearPastAppts:    a.boolean(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.

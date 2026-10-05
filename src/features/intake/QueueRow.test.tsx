@@ -68,6 +68,33 @@ describe('what the row shows', () => {
   })
 })
 
+describe('whose rows offer Build load', () => {
+  it('offers it for an Ivan tender, which is built in BCAT Ops', () => {
+    renderRow({ source: 'IVAN_CARTAGE', builtLoadId: null })
+    expect(screen.getByText('Build load')).toBeTruthy()
+  })
+
+  it('does not offer it for a BCAT Logistics tender', () => {
+    // Those are built in the brokerage's own system; the row exists to track the thread.
+    renderRow({ source: 'BCAT_LOGISTICS', builtLoadId: null })
+    expect(screen.queryByText('Build load')).toBeNull()
+  })
+
+  it('still lets a BCAT item with a load open it', () => {
+    const fns = renderRow({ source: 'BCAT_LOGISTICS', builtLoadId: 'l1' })
+    fireEvent.click(screen.getByText('Open load'))
+    expect(fns.onUpdateLoad).toHaveBeenCalled()
+  })
+
+  it('leaves Done available on a BCAT row that has no Build load', () => {
+    // Removing the build button must not remove the only way to close the item out.
+    const fns = renderRow({ source: 'BCAT_LOGISTICS', status: 'NEW', builtLoadId: null })
+    // 'Done' also names an option in the status select, so match the button itself.
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+    expect(fns.onMarkDone).toHaveBeenCalled()
+  })
+})
+
 describe('acting on a row', () => {
   it('offers Build load for an item with no load, and Open load once there is one', () => {
     const a = renderRow({ builtLoadId: null })

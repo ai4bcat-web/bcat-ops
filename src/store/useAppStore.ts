@@ -9,6 +9,7 @@ import * as api from '@/lib/apiClient'
 import { withDerivedLegacy, withStopsFromLegacy } from '@/lib/stops'
 import { requiresApptProofs } from '@/lib/apptQueue'
 import { errorMessage } from '@/lib/utils/errorMessage'
+import type { TenderPrefill } from '@/lib/intakeTender'
 
 // ── Equipment seed data (imported from bcat-command-center PostgreSQL) ─────────
 const SEED_EQUIPMENT: Equipment[] = [
@@ -360,7 +361,15 @@ interface AppState {
   weekStart: string
   selectedLoadId: string | null
   drawerMode: 'view' | 'edit' | 'create' | null
-  createPreFill: { driverId: string | null; dateStr: string } | null
+  /*
+   * Seed values for the next load the drawer opens in create mode.
+   *
+   * `driverId`/`dateStr` come from clicking an empty calendar cell. `tender` is everything
+   * intake could read out of the tender email, so a load built from an intake item starts
+   * with its references, both addresses and the planned dates already filled in instead of
+   * being re-typed off the email (see src/lib/intakeTender.ts).
+   */
+  createPreFill: { driverId: string | null; dateStr: string; tender?: TenderPrefill } | null
   pendingIntakeItemId: string | null
   filterDriverId: string | null
   searchQuery: string
@@ -419,7 +428,7 @@ interface AppState {
   setSelectedLoad: (
     id: string | null,
     mode?: 'view' | 'edit' | 'create',
-    preFill?: { driverId: string | null; dateStr: string }
+    preFill?: { driverId: string | null; dateStr: string; tender?: TenderPrefill }
   ) => void
   setPendingIntakeItem: (id: string | null) => void
   setFilterDriver: (id: string | null) => void

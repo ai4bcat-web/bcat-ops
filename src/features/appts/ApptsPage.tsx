@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HelpCircle, Truck, Search, Trash2, ChevronUp, ChevronDown, History, Download, CheckCircle2, CircleAlert, Clock, Camera, X, ImagePlus } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store/useAppStore'
@@ -19,6 +19,7 @@ import { ApptProofPanel } from '@/components/ApptProofPanel'
 import { loadProofCount } from '@/lib/apptProofs'
 import { apptRowsToCsv, apptCsvFilename } from '@/lib/apptCsv'
 import { saveBlob } from '@/lib/download'
+import { getTmsSettings, saveTmsSettings } from '@/lib/apiClient'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { getStops, updateStop } from '@/lib/stops'
 import { sendApptNotices } from '@/lib/sendApptNotices'
@@ -886,11 +887,45 @@ export function ApptsPage() {
   const [query, setQuery] = useState('')
   const [showPast, setShowPast] = useState(false)
   const [onlyOpen, setOnlyOpen] = useState(false)
+  /*
+   * Company-wide, so every dispatcher's working list agrees about what is still open.
+   * null while it loads — treated as off, and the control stays disabled until it is known
+   * so a slow read cannot be mistaken for "off" and flipped by accident.
+   */
+  const [autoClearPast, setAutoClearPast] = useState<boolean | null>(null)
+  const [savingAutoClear, setSavingAutoClear] = useState(false)
+  // Same people who may clear a single day may change the standing rule.
+  const canClearDays = canSetChangeNeeded(useAppStore((s) => s.currentUserEmail))
   const { entries: auditLog } = useAuditLog()
   // null = the default urgency order from apptQueue (NEED first, soonest first).
   const [sort, setSort] = useState<{ key: ApptSortKey; dir: SortDir } | null>(null)
   // The drawer reads its target from the store, same as the calendar and loads grid.
   const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
+
+  // Written only inside the promise chain — setState directly in an effect body trips
+  // react-hooks/set-state-in-effect, same as TmsSettingsCard.
+  useEffect(() => {
+    getTmsSettings()
+      .then((st) => setAutoClearPast(st?.autoClearPastAppts === true))
+      .catch(() => setAutoClearPast(false))
+  }, [])
+
+  const toggleAutoClearPast = async () => {
+    const next = !autoClearPast
+    setSavingAutoClear(true)
+    try {
+      // Only this one field is sent; saveSettings leaves the rest of the record alone.
+      await saveTmsSettings({ autoClearPastAppts: next })
+      setAutoClearPast(next)
+      toast.success(next
+        ? 'Past days will clear automatically for everyone'
+        : 'Past days stay on the list again')
+    } catch (e) {
+      toast.error(`Couldn't change the setting: ${e instanceof Error ? e.message : 'unknown error'}`)
+    } finally {
+      setSavingAutoClear(false)
+    }
+  }
 
   const driverName = useCallback(
     (id: string | null) => (id ? drivers.find((d) => d.id === id)?.name ?? '—' : '—'),
@@ -911,7 +946,10 @@ export function ApptsPage() {
 
   // Appointment dates that have already gone by are almost always dead history — they
   // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.
-  const { current, past } = useMemo(() => splitPastAppts(matched), [matched])
+  const { current, past } = useMemo(
+    () => splitPastAppts(matched, undefined, { autoClearPastDays: autoClearPast === true }),
+    [matched, autoClearPast],
+  )
   const rows = showPast ? matched : current
 
   const loadsById = useMemo(() => new Map(loads.map((l) => [l.id, l])), [loads])
@@ -1014,8 +1052,24 @@ export function ApptsPage() {
             <History size={13} />
             {showPast
               ? `Hide ${past.length} past / cleared shipment${past.length === 1 ? '' : 's'}`
-              : `Show ${past.length} past / cleared shipment${past.length === 1 ? '' : 's'} (overdue 5+ days auto-clear)`}
+              : `Show ${past.length} past / cleared shipment${past.length === 1 ? '' : 's'}${autoClearPast ? '' : ' (overdue 5+ days auto-clear)'}`}
           </button>
+        )}
+
+        {canClearDays && (
+          <label
+            style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontSize: 12.5, color: 'var(--ds-t3)', cursor: autoClearPast === null || savingAutoClear ? 'default' : 'pointer' }}
+            title="Applies to everyone. Past days move under the past/cleared toggle — nothing is deleted, and turning this off brings them all back."
+          >
+            <input
+              type="checkbox"
+              checked={autoClearPast === true}
+              disabled={autoClearPast === null || savingAutoClear}
+              onChange={() => { void toggleAutoClearPast() }}
+            />
+            Clear past days automatically (everyone)
+          </label>
         )}
 
         {rows.length === 0 && query.trim() !== '' && (

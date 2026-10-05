@@ -21,6 +21,7 @@ import {
   STATUS_BADGE,
   SOURCE_LABEL,
 } from '@/lib/intake'
+import { parseTender } from '@/lib/intakeTender'
 import type { IntakeItem, IntakeStatus } from '@/types'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -288,10 +289,12 @@ export function QueueRow({
             <ExternalLink className="size-3.5" />
           </a>
         )}
-        <Button size="sm" variant={hasLoad ? 'outline' : 'default'} className="h-7 px-2 text-[11px]"
-                onClick={() => (hasLoad ? onUpdateLoad(item) : onBuildLoad(item))}>
-          {hasLoad ? 'Open load' : 'Build load'}
-        </Button>
+        {(hasLoad || canBuildLoad(item)) && (
+          <Button size="sm" variant={hasLoad ? 'outline' : 'default'} className="h-7 px-2 text-[11px]"
+                  onClick={() => (hasLoad ? onUpdateLoad(item) : onBuildLoad(item))}>
+            {hasLoad ? 'Open load' : 'Build load'}
+          </Button>
+        )}
         {!done && (
           <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => onMarkDone(item)}>
             Done
@@ -300,6 +303,17 @@ export function QueueRow({
       </div>
     </div>
   )
+}
+
+/*
+ * BCAT Logistics loads are not built in BCAT Ops.
+ *
+ * Those tenders are handled in the brokerage's own system; the intake row exists so the
+ * team can see the thread and mark it done. Offering "Build load" on them invited a load
+ * nobody wanted. An item that somehow already has a load keeps the link to open it.
+ */
+function canBuildLoad(item: IntakeItem): boolean {
+  return item.source !== 'BCAT_LOGISTICS'
 }
 
 export function QueueCard({
@@ -589,12 +603,26 @@ export function IntakePage() {
     }
   }
 
+  /*
+   * Open the drawer with as much of the tender already filled in as we could read.
+   *
+   * Everything a dispatcher used to re-type off the email — references, both facilities
+   * with street and ZIP, the planned dates — is parsed out of the item here and handed to
+   * the drawer as a prefill. The ZIPs matter most: a load built without them stalls later
+   * in the factoring queue, and they were being dropped purely because nobody wants to
+   * copy two addresses by hand.
+   */
   const handleBuildLoad = (item: IntakeItem) => {
     if (item.status === 'NEW') {
       updateItem(item.id, { status: 'IN_PROGRESS' }, { actorName: actorEmail }).catch(() => {})
     }
     setPendingIntakeItem(item.id)
-    setSelectedLoad(null, 'create')
+    const tender = parseTender(item.subject, item.bodyText)
+    setSelectedLoad(null, 'create', {
+      driverId: null,
+      dateStr: tender.stops.find((s) => s.type === 'pickup')?.dateStr ?? '',
+      ...(tender.format ? { tender } : {}),
+    })
   }
 
   const handleUpdateLoad = (item: IntakeItem) => {

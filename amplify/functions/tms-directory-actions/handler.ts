@@ -969,13 +969,26 @@ async function saveSettings(input: Record<string, unknown>, caller: Caller): Pro
   const isCreate = existing == null
 
   const now = nowIso()
+
+  /*
+   * A field the caller did not mention keeps the value it already had.
+   *
+   * This used to rebuild the whole record from the input, so every caller had to send every
+   * setting or silently erase the ones it left out — which meant any second editor of this
+   * record would wipe the first one's fields. `undefined` (absent) now means "leave it
+   * alone"; an explicit `null` still clears, which is how the settings card clears a field.
+   */
+  const keep = <T,>(raw: unknown, parse: (v: unknown) => T, field: string): T | undefined =>
+    raw === undefined ? (existing?.[field] as T | undefined) : parse(raw)
+
   const item: Record<string, unknown> = {
     id,
-    marginFloorBps: optionalInteger(input.marginFloorBps, { min: 0 }),
-    defaultPaymentTermsDays: optionalInteger(input.defaultPaymentTermsDays, { min: 0 }),
-    accessorialCodes: optionalJsonArray(input.accessorialCodes),
-    loadStatusRules: optionalJsonObject(input.loadStatusRules),
-    invoiceNumberFormat: optionalString(input.invoiceNumberFormat, 50),
+    marginFloorBps: keep(input.marginFloorBps, (v) => optionalInteger(v, { min: 0 }), 'marginFloorBps'),
+    defaultPaymentTermsDays: keep(input.defaultPaymentTermsDays, (v) => optionalInteger(v, { min: 0 }), 'defaultPaymentTermsDays'),
+    accessorialCodes: keep(input.accessorialCodes, optionalJsonArray, 'accessorialCodes'),
+    loadStatusRules: keep(input.loadStatusRules, optionalJsonObject, 'loadStatusRules'),
+    invoiceNumberFormat: keep(input.invoiceNumberFormat, (v) => optionalString(v, 50), 'invoiceNumberFormat'),
+    autoClearPastAppts: keep(input.autoClearPastAppts, (v) => (typeof v === 'boolean' ? v : undefined), 'autoClearPastAppts'),
     updatedBy: caller.email,
     createdAt: isCreate ? now : (existing?.createdAt as string) ?? now,
     updatedAt: now,

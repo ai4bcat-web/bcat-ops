@@ -1,0 +1,225 @@
+/**
+ * Read a tender email well enough to start building the load from it.
+ *
+ * Intake items arrive as forwarded tender emails, and the fields a dispatcher then types
+ * into the load drawer are already sitting in the body — reference numbers, both facilities
+ * with full street addresses, and the planned dates. Re-typing them is both slow and the
+ * main source of the missing ZIPs and customer names that later stall the factoring queue.
+ *
+ * Two shapes are read, because between them they cover every tender with real detail in it:
+ *
+ *   E2OPEN   the "Load Report" tenders (Batory and the other e2open shippers). Structured,
+ *            machine-generated, and complete: Ref #, Shipper, Shipments, a Pick and a Drop
+ *            block each with a full address and a Plan date. 132 of the 391 Ivan items.
+ *   SUBJECT  the subject line alone, which carries a reference, both city/state pairs and
+ *            often the customer. Weaker, but it is all a Schneider rate confirmation or a
+ *            bare forward gives us, and city/state still beats an empty form.
+ *
+ * Deliberately NOT an extractor for everything. Anything it cannot read with confidence it
+ * leaves alone: a wrong ZIP silently attached to a load is worse than a blank one, because
+ * the blank is the thing the queue already knows how to complain about. Every field is
+ * independently optional, and `format: null` means "nothing worth prefilling".
+ *
+ * Pure string work, no network, no dates relative to now — so it is fully testable and the
+ * same email always yields the same prefill.
+ */
+
+export interface TenderStopPrefill {
+  type: 'pickup' | 'delivery'
+  name?: string
+  street?: string
+  city?: string
+  state?: string
+  zip?: string
+  /** Planned date as `YYYY-MM-DD`. Never a time: see the note in parsePlanDate. */
+  dateStr?: string
+}
+
+export interface TenderPrefill {
+  format: 'E2OPEN' | 'SUBJECT' | null
+  /** The reference a dispatcher would put in Pro # — TMS ID or Route #. */
+  reference?: string
+  /** Shipment / SO number, which is the PU#. */
+  pickupNumber?: string
+  customer?: string
+  weightLb?: number
+  stops: TenderStopPrefill[]
+}
+
+const EMPTY: TenderPrefill = { format: null, stops: [] }
+
+function clean(s: string | undefined | null): string {
+  return (s ?? '').replace(/\s+/g, ' ').trim()
+}
+
+/*
+ * Street-type words, used only to find where an address ends and the city begins.
+ *
+ * The address line runs the facility name, the street and the city together with no
+ * separator — "BATORY'S OAKLEY CHICAGO 2234 W 43RD STREET CHICAGO , IL 60609" — and the
+ * city name genuinely appears twice there. Splitting on the last street-type word is what
+ * makes "CHICAGO" the city rather than part of the street, and it is why a multi-word city
+ * like ELK GROVE VILLAGE survives.
+ */
+const STREET_TYPES =
+  /\b(?:ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|BLVD|BOULEVARD|LN|LANE|WAY|CT|COURT|PL|PLACE|PKWY|PARKWAY|HWY|HIGHWAY|CIR|CIRCLE|TER|TERRACE|TRL|TRAIL|SQ|SQUARE|LOOP|LOT|LOTS|LVD|LVL|EXPY|EXPRESSWAY|LANES|LN\.|RT|ROUTE)\b/gi
+
+/**
+ * One e2open address line → name / street / city / state / zip.
+ *
+ * Anchored on the `, ST 60609` tail, which is the only reliably delimited part. Everything
+ * before it is split on the last street-type word; with no street-type word to go on, the
+ * last single word before the comma is taken as the city and nothing is claimed as a street
+ * — a guess at where a street starts is not worth a wrong address.
+ */
+export function parseAddressLine(line: string): Omit<TenderStopPrefill, 'type' | 'dateStr'> {
+  const text = clean(line)
+  const tail = text.match(/^(.*?)\s*,\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?\s*$/i)
+  if (!tail) return {}
+  const [, head, state, zip] = tail
+
+  let name = ''
+  let street = ''
+  let city: string
+
+  const types = [...head.matchAll(STREET_TYPES)]
+  const last = types[types.length - 1]
+  if (last && last.index != null) {
+    const end = last.index + last[0].length
+    city = clean(head.slice(end))
+    const beforeCity = clean(head.slice(0, end))
+    // The street starts at the house number; what precedes it is the facility name.
+    const split = beforeCity.match(/^(.*?)\s(\d+\s.*)$/)
+    if (split) {
+      name = clean(split[1])
+      street = clean(split[2])
+    } else {
+      street = beforeCity
+    }
+  } else {
+    const words = head.split(' ')
+    city = clean(words.pop())
+    name = clean(words.join(' '))
+  }
+
+  // A city that came out empty means the split was wrong; claim neither it nor the street.
+  if (!city) return { name: clean(head), state: state.toUpperCase(), zip }
+
+  return {
+    ...(name ? { name } : {}),
+    ...(street ? { street } : {}),
+    city,
+    state: state.toUpperCase(),
+    zip,
+  }
+}
+
+/**
+ * `Plan: 08/04/2026 00:00 CDT - ...` → `2026-08-04`.
+ *
+ * The date only, never the time. These tenders carry 00:00 as a placeholder for "no
+ * appointment yet", and writing midnight into a stop would read as a confirmed appointment
+ * nobody made — the same reason emptyStopForms sets a date with no time.
+ */
+export function parsePlanDate(line: string): string | undefined {
+  const m = clean(line).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/)
+  if (!m) return undefined
+  const [, mm, dd, yyyy] = m
+  return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
+}
+
+/** The e2open "Load Report" tender — the one format that carries everything. */
+function parseE2open(body: string): TenderPrefill | null {
+  if (!/Load Report/i.test(body)) return null
+
+  const out: TenderPrefill = { format: 'E2OPEN', stops: [] }
+
+  const ref = body.match(/Ref\s*#\s*:\s*(?:TMS\s*ID\s*)?(\d{5,12})/i)
+  if (ref) out.reference = ref[1]
+
+  const shipment = body.match(/Shipments?\s*:\s*(\S+)/i)
+  if (shipment) out.pickupNumber = shipment[1]
+
+  const shipper = body.match(/^\s*Shipper\s*:\s*(.+)$/im)
+  if (shipper) out.customer = clean(shipper[1])
+
+  const weight = body.match(/Weight\s*:\s*([\d,]+(?:\.\d+)?)\s*lb/i)
+  if (weight) {
+    const n = Number(weight[1].replace(/,/g, ''))
+    if (Number.isFinite(n) && n > 0) out.weightLb = Math.round(n)
+  }
+
+  /*
+   * Stops are `-----` delimited blocks whose first line is Pick or Drop. Read in document
+   * order so a multi-stop tender keeps its sequence, and every Pick/Drop is taken — not
+   * just the first of each — because the route is what it says it is.
+   */
+  for (const block of body.split(/^-{5,}\s*$/m)) {
+    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (!lines.length) continue
+    const kind = /^(Pick|Drop)\b/i.exec(lines[0])
+    if (!kind) continue
+    const type = /^pick/i.test(kind[1]) ? 'pickup' : 'delivery'
+
+    // The address is the first line after the header that ends in `, ST ZIP`.
+    const addrLine = lines.slice(1).find((l) => /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?$/i.test(l))
+    const plan = lines.find((l) => /^Plan\s*:/i.test(l))
+
+    const stop: TenderStopPrefill = { type }
+    if (addrLine) Object.assign(stop, parseAddressLine(addrLine))
+    const dateStr = plan ? parsePlanDate(plan) : undefined
+    if (dateStr) stop.dateStr = dateStr
+    // A header with neither an address nor a date tells us nothing worth prefilling.
+    if (addrLine || dateStr) out.stops.push(stop)
+  }
+
+  return out
+}
+
+/**
+ * The subject line, for everything else.
+ *
+ * Two shapes in practice, and both end with the same `CITY, ST to CITY, ST` pair:
+ *   Tender TMS ID 208663813: CHICAGO, IL(08/04) to WAUKEGAN, IL by BATORY FOODS
+ *   Rate Confirmation for Route # 4010756658 - MESA, AZ – Tempe, AZ
+ * No ZIPs and no year, so this yields city/state and a reference — enough to save typing
+ * and to tell the dispatcher they are on the right load, not enough to satisfy factoring.
+ */
+function parseSubject(subject: string): TenderPrefill | null {
+  const text = clean(subject)
+  if (!text) return null
+
+  const out: TenderPrefill = { format: 'SUBJECT', stops: [] }
+
+  const ref = text.match(/(?:TMS\s*ID|Route\s*#|Order\s*#|Load\s*#)\s*:?\s*(\d{5,12})/i)
+  if (ref) out.reference = ref[1]
+
+  const by = text.match(/\bby\s+([A-Z][A-Z0-9&'.\- ]{2,})\s*$/)
+  if (by) out.customer = clean(by[1])
+
+  // `CITY, ST` twice, separated by "to", a dash or an en dash.
+  const pair = text.match(
+    /([A-Za-z][A-Za-z.' ]+?)\s*,\s*([A-Z]{2})\b[^A-Za-z]*(?:to|[-–—])[^A-Za-z]*([A-Za-z][A-Za-z.' ]+?)\s*,\s*([A-Z]{2})\b/,
+  )
+  if (pair) {
+    out.stops.push({ type: 'pickup', city: clean(pair[1]), state: pair[2].toUpperCase() })
+    out.stops.push({ type: 'delivery', city: clean(pair[3]), state: pair[4].toUpperCase() })
+  }
+
+  if (!out.reference && !out.stops.length && !out.customer) return null
+  return out
+}
+
+/**
+ * Everything worth prefilling from one intake item.
+ *
+ * The structured body wins when there is one; the subject is the fallback. They are not
+ * merged — a half-read body plus a subject guess is how fields end up disagreeing with
+ * each other, and the body already carries strictly more than the subject when present.
+ */
+export function parseTender(subject: string | null | undefined, bodyText: string | null | undefined): TenderPrefill {
+  const body = bodyText ?? ''
+  const fromBody = body ? parseE2open(body) : null
+  if (fromBody && (fromBody.reference || fromBody.stops.length)) return fromBody
+  return parseSubject(subject ?? '') ?? EMPTY
+}

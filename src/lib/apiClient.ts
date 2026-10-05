@@ -930,7 +930,7 @@ const DIVISION_FIELDS = `
   id key name legalName mcNumber dotNumber scac remitToName remitToAddress remitToEmail
   invoicePrefix fleetGroup active createdAt updatedAt
 `
-const TMS_SETTINGS_FIELDS = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat createdAt updatedAt`
+const TMS_SETTINGS_FIELDS = `id marginFloorBps defaultPaymentTermsDays accessorialCodes loadStatusRules invoiceNumberFormat autoClearPastAppts createdAt updatedAt`
 const MERGE_JOB_FIELDS = `id sourceId targetId status processedCount remainingCount error createdAt updatedAt`
 
 // Both custom-op wrappers rethrow AppSync's `{errors:[…]}` payload as an Error carrying
