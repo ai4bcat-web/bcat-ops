@@ -41,3 +41,58 @@ describe('QueueCard primary action', () => {
     expect(onUpdateLoad).not.toHaveBeenCalled()
   })
 })
+
+/*
+ * The Slack thread, on the card.
+ *
+ * The queue's status field was never maintained because the conversation happens in Slack
+ * and the app could not see it. These assert the card now shows what was actually said,
+ * and marks done on the load existing rather than on a reaction — the emoji in those
+ * threads (:rocket:, :got-it:) mean acknowledged, not built.
+ */
+function item(over: Partial<IntakeItem>): IntakeItem {
+  return { ...base, ...over } as IntakeItem
+}
+
+describe('the Slack thread on a queue card', () => {
+  it('shows the most recent reply', () => {
+    renderCard(item({
+      lastReplyText: 'PRO# 14556 - Added in BCAT Ops',
+      replyCount: 2,
+      status: 'NEW',
+    }))
+    expect(screen.getByText('PRO# 14556 - Added in BCAT Ops')).toBeTruthy()
+    expect(screen.getByText(/2 replies/)).toBeTruthy()
+  })
+
+  it('says so plainly when nobody has replied', () => {
+    renderCard(item({ lastReplyText: '', replyCount: 0, status: 'BUILT' }))
+    expect(screen.getByText('No replies yet')).toBeTruthy()
+  })
+
+  it('shows a checkmark once the load exists', () => {
+    renderCard(item({ status: 'BUILT', lastReplyText: 'PRO# 14556 - Added in BCAT Ops', replyCount: 1 }))
+    expect(screen.getByLabelText('Done')).toBeTruthy()
+  })
+
+  it('shows no checkmark while the item is still open', () => {
+    renderCard(item({ status: 'NEW', builtLoadId: null, lastReplyText: 'on it', replyCount: 1 }))
+    expect((screen.queryByLabelText('Done'))).toBeNull()
+  })
+
+  it('counts a built load as done even when the status was never moved', () => {
+    // Exactly the 317-item case: the work was done, the status never caught up.
+    renderCard(item({ status: 'NEW', builtLoadId: 'l1', lastReplyText: 'added', replyCount: 1 }))
+    expect(screen.getByLabelText('Done')).toBeTruthy()
+  })
+
+  it('shows the PRO beside the reply once one is known', () => {
+    renderCard(item({ proNumber: '14556', lastReplyText: 'added', replyCount: 1 }))
+    expect(screen.getByText(/PRO 14556/)).toBeTruthy()
+  })
+
+  it('renders nothing for an item with no thread activity at all', () => {
+    renderCard(item({ status: 'NEW', builtLoadId: null, lastReplyText: '', replyCount: 0 }))
+    expect(screen.queryByText('No replies yet')).toBeNull()
+  })
+})

@@ -150,11 +150,70 @@ describe('reconciling a run', () => {
       }
       return {}
     })
-    const fetchMock = vi.fn(async () => ({ json: async () => ({ ok: true }) }))
+    const fetchMock = vi.fn(async (url: unknown) => ({
+      json: async () => (String(url).includes('conversations.replies') ? { ok: true, messages: [] } : { ok: true }),
+    }))
     vi.stubGlobal('fetch', fetchMock)
     const out = await mod.handler()
     expect(out.replied).toBe(0)
-    expect(fetchMock).not.toHaveBeenCalled()
+    // Reading the thread is fine; what must not happen is posting into it.
+    const posted = fetchMock.mock.calls.filter((c) => String(c[0]).includes('chat.postMessage'))
+    expect(posted).toHaveLength(0)
     vi.unstubAllGlobals()
+  })
+})
+
+describe('caching what the thread says', () => {
+  it('reports the last REPLY, never the tender itself', () => {
+    /*
+     * The parent message is the tender, which the queue already shows. A thread nobody has
+     * answered must read as "no replies", not echo the subject back as if someone had.
+     */
+    expect(mod.summarizeThread([{ text: 'Tender TMS ID 212666394', ts: '1.0', user: 'USLACKBOT' }]))
+      .toEqual({ lastReplyText: '', lastReplyAt: '', lastReplyUser: '', replyCount: 0 })
+  })
+
+  it('takes the newest reply and counts them', () => {
+    const s = mod.summarizeThread([
+      { text: 'tender', ts: '1.0', user: 'USLACKBOT' },
+      { text: 'on it', ts: '2.0', user: 'U1' },
+      { text: 'PRO# 14556 - Added in BCAT Ops', ts: '3.0', user: 'U2' },
+    ])
+    expect(s).toEqual({
+      lastReplyText: 'PRO# 14556 - Added in BCAT Ops',
+      lastReplyAt: '3.0', lastReplyUser: 'U2', replyCount: 2,
+    })
+  })
+
+  it('returns null for a thread that could not be read', () => {
+    expect(mod.summarizeThread([])).toBeNull()
+  })
+
+  it('truncates a very long reply rather than storing an essay', () => {
+    const s = mod.summarizeThread([{ text: 'x', ts: '1' }, { text: 'y'.repeat(900), ts: '2' }])
+    expect(s!.lastReplyText).toHaveLength(500)
+  })
+
+  it('refreshes the oldest summary first, so coverage rotates', () => {
+    const picked = mod.selectThreadsToSync([
+      { id: 'fresh', receivedAt: '2026-10-04T10:00:00Z', slackChannelId: 'C', slackMessageTs: '1', threadSyncedAt: '2026-10-05T11:00:00Z' },
+      { id: 'stale', receivedAt: '2026-10-04T10:00:00Z', slackChannelId: 'C', slackMessageTs: '2', threadSyncedAt: '2026-10-01T09:00:00Z' },
+      { id: 'never', receivedAt: '2026-10-04T10:00:00Z', slackChannelId: 'C', slackMessageTs: '3' },
+    ], NOW)
+    expect(picked.map((p) => p.id)).toEqual(['never', 'stale', 'fresh'])
+  })
+
+  it('syncs threads for items of any status, not only open ones', () => {
+    // The point is to show the conversation. A BUILT item's thread is still worth reading.
+    const picked = mod.selectThreadsToSync(
+      [{ id: 'b', status: 'BUILT', receivedAt: '2026-10-04T10:00:00Z', slackChannelId: 'C', slackMessageTs: '1' }],
+      NOW,
+    )
+    expect(picked).toHaveLength(1)
+  })
+
+  it('a Slack outage returns null instead of throwing', async () => {
+    const boom = vi.fn(async () => { throw new Error('slack down') })
+    expect(await mod.readThread('C', '1', boom as unknown as typeof fetch)).toBeNull()
   })
 })

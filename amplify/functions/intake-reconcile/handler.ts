@@ -36,6 +36,13 @@ const LOAD_TABLE = process.env.LOAD_TABLE_NAME ?? ''
 const MAX_REPLIES_PER_RUN = 40
 const POST_INTERVAL_MS = 1200
 
+/**
+ * conversations.replies is a Tier 3 method (~50/min). The oldest summary is refreshed
+ * first, so every thread comes round rather than the newest ones hogging every run.
+ */
+const MAX_THREAD_READS_PER_RUN = 60
+const READ_INTERVAL_MS = 250
+
 /** How far back to look. Anything older is history nobody is chasing. */
 const LOOKBACK_DAYS = 45
 
@@ -52,6 +59,64 @@ interface IntakeRow {
   slackMessageTs?: string | null
   slackRepliedAt?: string | null
   proNumber?: string | null
+  threadSyncedAt?: string | null
+}
+
+export interface ThreadSummary {
+  lastReplyText: string
+  lastReplyAt: string
+  lastReplyUser: string
+  replyCount: number
+}
+
+/**
+ * The last thing said in a thread.
+ *
+ * The PARENT message is not a reply — it is the tender itself, which the queue already
+ * shows — so a thread nobody has answered reports zero replies and no text rather than
+ * echoing the subject back.
+ */
+export function summarizeThread(messages: Array<{ text?: string; ts?: string; user?: string }>): ThreadSummary | null {
+  if (!messages.length) return null
+  const replies = messages.slice(1)
+  if (!replies.length) return { lastReplyText: '', lastReplyAt: '', lastReplyUser: '', replyCount: 0 }
+  const last = replies[replies.length - 1]
+  return {
+    // Slack wraps mentions and links in angle brackets; leave them, the UI renders plain
+    // text and a half-parsed mention is more confusing than the raw form.
+    lastReplyText: (last.text ?? '').trim().slice(0, 500),
+    lastReplyAt: last.ts ?? '',
+    lastReplyUser: last.user ?? '',
+    replyCount: replies.length,
+  }
+}
+
+export async function readThread(
+  channel: string,
+  threadTs: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ThreadSummary | null> {
+  if (!channel.trim() || !threadTs.trim() || !SLACK_BOT_TOKEN) return null
+  const url = `https://slack.com/api/conversations.replies?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&limit=100`
+  try {
+    const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` } })
+    const json = (await res.json()) as { ok?: boolean; messages?: Array<{ text?: string; ts?: string; user?: string }> }
+    if (!json.ok) return null
+    return summarizeThread(json.messages ?? [])
+  } catch {
+    // A Slack outage must not fail the reconcile pass that follows it.
+    return null
+  }
+}
+
+/** Threads to refresh this run: oldest summary first, so coverage rotates. */
+export function selectThreadsToSync(items: IntakeRow[], now: Date): IntakeRow[] {
+  const cutoff = new Date(now.getTime() - LOOKBACK_DAYS * 86_400_000).toISOString()
+  return items
+    .filter((i) => !!i.slackChannelId && !!i.slackMessageTs)
+    .filter((i) => (i.receivedAt ?? '') >= cutoff)
+    .sort((a, b) => String(a.threadSyncedAt ?? '').localeCompare(String(b.threadSyncedAt ?? '')))
+    .slice(0, MAX_THREAD_READS_PER_RUN)
 }
 
 async function scanAll<T>(table: string): Promise<T[]> {
@@ -108,10 +173,10 @@ export function selectReconcilable(items: IntakeRow[], now: Date): IntakeRow[] {
     .sort((a, b) => String(b.receivedAt ?? '').localeCompare(String(a.receivedAt ?? '')))
 }
 
-export const handler = async (): Promise<{ examined: number; replied: number; skipped: number }> => {
+export const handler = async (): Promise<{ examined: number; replied: number; skipped: number; synced: number }> => {
   if (!INTAKE_TABLE || !LOAD_TABLE) {
     console.warn('[intake-reconcile] tables not configured — nothing to do')
-    return { examined: 0, replied: 0, skipped: 0 }
+    return { examined: 0, replied: 0, skipped: 0, synced: 0 }
   }
 
   const [items, loads] = await Promise.all([
@@ -119,6 +184,34 @@ export const handler = async (): Promise<{ examined: number; replied: number; sk
     scanAll<Load>(LOAD_TABLE),
   ])
   const index = buildLoadIndex(loads)
+
+  /*
+   * Pass one: cache what each thread currently says, so the queue can show the
+   * conversation it has never been able to see. Read-only, and done first — the reply
+   * below adds a message, and a summary taken afterwards would show our own words as the
+   * latest thing anybody said.
+   */
+  let synced = 0
+  for (const item of selectThreadsToSync(items, new Date())) {
+    const summary = await readThread(String(item.slackChannelId), String(item.slackMessageTs))
+    if (!summary) continue
+    await ddb.send(new UpdateCommand({
+      TableName: INTAKE_TABLE,
+      Key: { id: item.id },
+      UpdateExpression:
+        'SET lastReplyText = :t, lastReplyAt = :at, lastReplyUser = :u, replyCount = :n, threadSyncedAt = :s',
+      ExpressionAttributeValues: {
+        ':t': summary.lastReplyText,
+        ':at': summary.lastReplyAt,
+        ':u': summary.lastReplyUser,
+        ':n': summary.replyCount,
+        ':s': new Date().toISOString(),
+      },
+    }))
+    synced += 1
+    await new Promise((r) => setTimeout(r, READ_INTERVAL_MS))
+  }
+
   const candidates = selectReconcilable(items, new Date())
 
   let replied = 0
@@ -167,6 +260,6 @@ export const handler = async (): Promise<{ examined: number; replied: number; sk
     await new Promise((r) => setTimeout(r, POST_INTERVAL_MS))
   }
 
-  console.log('[intake-reconcile] done', { examined: candidates.length, replied, skipped })
-  return { examined: candidates.length, replied, skipped }
+  console.log('[intake-reconcile] done', { examined: candidates.length, replied, skipped, synced })
+  return { examined: candidates.length, replied, skipped, synced }
 }

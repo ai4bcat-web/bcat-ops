@@ -712,6 +712,19 @@ const schema = a.schema({
        * timeout, must not post "PRO# 14589 - Added in BCAT Ops" into the same thread again.
        */
       slackRepliedAt:       a.string(),
+      /*
+       * A cached summary of the item's Slack thread, refreshed by intake-reconcile.
+       *
+       * The queue's whole problem is that the conversation happens in Slack and the app
+       * never sees it. Fetching 1,000+ threads when the page opens would exceed Slack's
+       * rate limit many times over, so the job that already holds the token and already
+       * walks these items stores the last thing said in each one.
+       */
+      lastReplyText:        a.string(),
+      lastReplyAt:          a.string(),   // Slack ts of that reply
+      lastReplyUser:        a.string(),   // Slack user id
+      replyCount:           a.integer(),
+      threadSyncedAt:       a.string(),
     })
     .secondaryIndexes((index) => [
       index('assignedTo').sortKeys(['receivedAt']),

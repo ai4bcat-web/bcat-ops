@@ -153,6 +153,48 @@ export function AssigneeSelect({
 
 // ── Queue card ────────────────────────────────────────────────────────────────
 
+
+/**
+ * What the Slack thread currently says, and whether the work landed.
+ *
+ * The queue's status field was never maintained — 317 items sat in NEW describing loads
+ * that already existed — because the conversation happens in Slack and the app could not
+ * see it. intake-reconcile caches the last reply onto the item, so this reads it straight
+ * off the row with no call to Slack when the page opens.
+ *
+ * "Done" is the load existing, not a reaction: the emoji on these threads (:rocket:,
+ * :got-it:) mean somebody acknowledged the tender, not that it was built.
+ */
+function ThreadReply({ item }: { item: IntakeItem }) {
+  const done = item.status === 'BUILT' || item.status === 'DONE' || !!item.builtLoadId
+  const replies = item.replyCount ?? 0
+  const text = (item.lastReplyText ?? '').trim()
+
+  // Nothing cached yet and nothing said: no row rather than an empty box.
+  if (!text && !done && replies === 0) return null
+
+  return (
+    <div className="flex items-start gap-2 rounded-lg bg-muted/50 px-2.5 py-2">
+      {done ? (
+        <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600 mt-px" aria-label="Done" />
+      ) : (
+        <MessageSquare className="size-3.5 shrink-0 text-muted-foreground mt-px" aria-hidden="true" />
+      )}
+      <div className="min-w-0 flex-1">
+        {text ? (
+          <p className="text-[11.5px] leading-snug text-foreground line-clamp-2">{text}</p>
+        ) : (
+          <p className="text-[11.5px] italic text-muted-foreground">No replies yet</p>
+        )}
+        <p className="mt-0.5 text-[10.5px] text-muted-foreground">
+          {replies > 0 ? `${replies} repl${replies === 1 ? 'y' : 'ies'}` : 'thread'}
+          {item.proNumber ? ` · PRO ${item.proNumber}` : ''}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export function QueueCard({
   item,
   onBuildLoad,
@@ -189,6 +231,8 @@ export function QueueCard({
           {badge.label}
         </span>
       </div>
+
+      <ThreadReply item={item} />
 
       {/* Meta row */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">

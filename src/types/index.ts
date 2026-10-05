@@ -362,6 +362,14 @@ export interface IntakeItem {
   builtLoadId?: string | null
   proNumber?: string | null
   notes?: string | null
+  /** Set once the reconciler has replied in this item's thread — never replied twice. */
+  slackRepliedAt?: string | null
+  /* The last thing said in the Slack thread, cached by intake-reconcile. */
+  lastReplyText?: string | null
+  lastReplyAt?: string | null
+  lastReplyUser?: string | null
+  replyCount?: number | null
+  threadSyncedAt?: string | null
   createdAt: string
   updatedAt: string
 }

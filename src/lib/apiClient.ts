@@ -543,6 +543,7 @@ const INTAKE_FIELDS = `
   bodyText bodyHtml s3KeyPdfAttachments
   externalSource externalId externalUrl slackChannelId slackMessageTs
   gmailMessageId extractedMetadata builtLoadId proNumber notes createdAt updatedAt
+  slackRepliedAt lastReplyText lastReplyAt lastReplyUser replyCount threadSyncedAt
 `
 
 export async function listIntakeItems(filter?: { assignedTo?: string; source?: string }): Promise<IntakeItem[]> {
