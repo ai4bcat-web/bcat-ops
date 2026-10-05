@@ -131,6 +131,11 @@ export interface OtrClientConfig {
    * Leave unset to keep uploading through v1.
    */
   uploadBaseUrl?: string
+  /**
+   * Our own DOT number. v2 requires it on every invoice (`ClientDOT`); v1 never asked.
+   * Set from OTR_CLIENT_DOT.
+   */
+  clientDot?: string
   subscriptionKey: string
   username: string
   password: string
@@ -140,12 +145,22 @@ export interface OtrClientConfig {
   refreshSkewSeconds?: number
 }
 
+/** v2 bases are path-versioned as `/carrier-tms/<n>`; v1 was `/CarrierTmsV3`. */
+export function isV2Base(baseUrl: string): boolean {
+  return /\/carrier-tms\/\d+/i.test(baseUrl)
+}
+
 export class OtrClient {
   private token: TokenState | null = null
   /** v2 issues its own token from its own /auth/token; they are not interchangeable. */
   private uploadToken: TokenState | null = null
   private readonly fetchImpl: typeof fetch
   private readonly skewMs: number
+
+  /** True when invoices themselves go to v2 — production is v2-only. */
+  private get invoicesOnV2(): boolean {
+    return isV2Base(this.cfg.baseUrl)
+  }
 
   constructor(private readonly cfg: OtrClientConfig) {
     if (!cfg.baseUrl) throw new Error('OTR baseUrl is required')
@@ -313,13 +328,42 @@ export class OtrClient {
 
   /** Create the invoice. Returns OTR's invoiceId, which every document upload needs. */
   async createInvoice(payload: OtrInvoicePayload): Promise<OtrCreateInvoiceResult> {
+    /*
+     * v2 renamed and trimmed the body. BrokerMC became CustomerMC and is a NUMBER; the
+     * ZIP fields were dropped entirely; and ClientDOT — our own DOT, which v1 never asked
+     * for — is required. Production speaks only v2, so this is not optional there.
+     *
+     * The zips are still collected and still shown on the row: they were required by v1,
+     * they are what a human checks an invoice against, and OTR dropping them from the wire
+     * is no reason to stop knowing them.
+     */
+    const body: Record<string, unknown> = this.invoicesOnV2
+      ? {
+          InvoiceNo: payload.InvoiceNo,
+          PoNumber: payload.PoNumber,
+          CustomerMC: Number(payload.BrokerMC),
+          ClientDOT: this.cfg.clientDot ?? '',
+          InvoiceAmount: payload.InvoiceAmount,
+          InvoiceDate: payload.InvoiceDate,
+          FromCity: payload.FromCity,
+          FromState: payload.FromState,
+          ToCity: payload.ToCity,
+          ToState: payload.ToState,
+        }
+      : ({ ...payload } as Record<string, unknown>)
+
+    if (this.invoicesOnV2 && !this.cfg.clientDot) {
+      // Caught here rather than as an opaque 400 from OTR two calls later.
+      throw new OtrError('OTR_CLIENT_DOT is not configured — v2 requires ClientDOT', 0, '')
+    }
+
     const res = await this.request('/invoices', {
       method: 'POST',
       headers: await this.authedHeaders({
         'Content-Type': 'application/json',
         Accept: 'application/json',
       }),
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     })
     const text = await res.text()
     if (!res.ok) {
@@ -446,7 +490,7 @@ export class OtrClient {
      * 16222565 uploaded untouched and returned 200. Only a v1 upload still needs the
      * workaround, and OTR_ASCII_SAFE_PDF=on forces it back for either.
      */
-    const usingV2 = !!this.cfg.uploadBaseUrl && this.cfg.uploadBaseUrl !== this.cfg.baseUrl
+    const usingV2 = isV2Base(this.cfg.uploadBaseUrl || this.cfg.baseUrl)
     const asciiSafeDefault = usingV2
       ? process.env.OTR_ASCII_SAFE_PDF === 'on'
       : process.env.OTR_ASCII_SAFE_PDF !== 'off'

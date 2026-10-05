@@ -293,3 +293,75 @@ describe('uploading through OTR v2', () => {
     expect(text).not.toContain('name="ItemPkey"')
   })
 })
+
+/*
+ * Production speaks ONLY v2 — every v1 path on services.otrsolutions.com returns 404 — so
+ * invoices move across too, and their body changes shape.
+ */
+describe('creating an invoice on v2', () => {
+  const PAYLOAD = {
+    InvoiceNo: '99002', BrokerMC: '20313', PoNumber: 'PO-TEST-99002',
+    InvoiceAmount: 1850, InvoiceDate: '2026-10-05',
+    FromCity: 'CHICAGO', FromState: 'IL', FromZip: '60601',
+    ToCity: 'INDIANAPOLIS', ToState: 'IN', ToZip: '46201',
+  }
+
+  function clientOn(baseUrl: string, clientDot?: string) {
+    const calls: Array<{ url: string; body: string }> = []
+    const fetchImpl = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const href = String(url)
+      if (href.endsWith('/auth/token')) {
+        return new Response(JSON.stringify({ access_token: 't', expires_in: 7200 }), { status: 200 })
+      }
+      calls.push({ url: href, body: String(init?.body ?? '') })
+      return new Response(JSON.stringify({ invoiceId: 123, invoiceNo: '99002' }), { status: 200 })
+    })
+    const client = new OtrClient({
+      baseUrl, subscriptionKey: 'k', username: 'u', password: 'p', clientDot,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    return { client, calls }
+  }
+
+  it('sends CustomerMC as a number, not BrokerMC as a string', async () => {
+    const { client, calls } = clientOn('https://otr.test/carrier-tms/2', '1234567')
+    await client.createInvoice(PAYLOAD)
+    const body = JSON.parse(calls[0].body)
+    expect(body.CustomerMC).toBe(20313)
+    expect(body.BrokerMC).toBeUndefined()
+  })
+
+  it('sends ClientDOT, which v1 never asked for', async () => {
+    const { client, calls } = clientOn('https://otr.test/carrier-tms/2', '1234567')
+    await client.createInvoice(PAYLOAD)
+    expect(JSON.parse(calls[0].body).ClientDOT).toBe('1234567')
+  })
+
+  it('drops the ZIPs, which v2 does not accept', async () => {
+    const { client, calls } = clientOn('https://otr.test/carrier-tms/2', '1234567')
+    await client.createInvoice(PAYLOAD)
+    const body = JSON.parse(calls[0].body)
+    expect(body.FromZip).toBeUndefined()
+    expect(body.ToZip).toBeUndefined()
+    expect(body.FromCity).toBe('CHICAGO') // the rest survives
+  })
+
+  it('refuses before calling OTR when no ClientDOT is configured', async () => {
+    /*
+     * A missing DOT would come back as an opaque 400 two calls later, after the invoice
+     * attempt had already been made. Failing here says exactly what is wrong.
+     */
+    const { client, calls } = clientOn('https://otr.test/carrier-tms/2')
+    await expect(client.createInvoice(PAYLOAD)).rejects.toThrow(/ClientDOT/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('still sends the v1 body against a v1 base', async () => {
+    const { client, calls } = clientOn('https://otr.test/CarrierTmsV3')
+    await client.createInvoice(PAYLOAD)
+    const body = JSON.parse(calls[0].body)
+    expect(body.BrokerMC).toBe('20313')
+    expect(body.FromZip).toBe('60601')
+    expect(body.CustomerMC).toBeUndefined()
+  })
+})

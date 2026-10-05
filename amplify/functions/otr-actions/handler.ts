@@ -57,6 +57,8 @@ function otr(): OtrClient {
     baseUrl: process.env.OTR_BASE_URL || OTR_STAGING_BASE,
     // Documents only. Unset falls back to uploading through baseUrl (v1).
     uploadBaseUrl: process.env.OTR_UPLOAD_BASE_URL || undefined,
+    // Required by v2 on every invoice; v1 never asked for it.
+    clientDot: process.env.OTR_CLIENT_DOT || undefined,
     subscriptionKey: process.env.OTR_SUBSCRIPTION_KEY!,
     username: process.env.OTR_USERNAME!,
     password: process.env.OTR_PASSWORD!,
