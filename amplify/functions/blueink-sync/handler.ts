@@ -135,7 +135,21 @@ async function syncLocations(): Promise<void> {
       const moved =
         !hasPriorFix ||
         haversineMiles(loc.lat, loc.lon, prevLat, prevLon) >= GEOCODE_DISTANCE_THRESHOLD_MILES
-      if (moved) {
+
+      /*
+       * Also retry whenever there is no stored description at all.
+       *
+       * Movement alone was not enough. Geocoding failed for months — the Google key was
+       * never authorised for the Geocoding API — and a truck that parked during that time
+       * kept its null description indefinitely, because the retry only came after the next
+       * half-mile of movement. The dashboard showed its driver raw coordinates for as long
+       * as the truck sat still.
+       *
+       * Bounded by design: only trucks MISSING a description re-ask, and a stored one is
+       * never re-fetched, so a parked fleet that is already labelled costs nothing.
+       */
+      const missingDescription = prevItem?.description == null
+      if (moved || missingDescription) {
         description = await reverseGeocode(loc.lat, loc.lon)
       } else if (prevItem?.description != null) {
         description = prevItem.description

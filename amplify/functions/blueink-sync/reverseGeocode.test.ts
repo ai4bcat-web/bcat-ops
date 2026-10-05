@@ -1,115 +1,118 @@
-/**
- * reverseGeocode unit tests.
- *
- * The Google Geocoding API is mocked via vi.stubGlobal('fetch', ...), matching the
- * pattern used in amplify/functions/appt-need-notifier/handler.test.ts.
- */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { reverseGeocode, censusReverseGeocode } from './reverseGeocode'
 
-const fetchMock = vi.fn<(url: string) => Promise<Response>>()
-vi.stubGlobal('fetch', fetchMock)
+const ROY = { lat: 43.036104403031, lon: -89.268560647168 } // unit 310, near Madison WI
 
-import { reverseGeocode } from './reverseGeocode'
-
-const mockResponse = (body: unknown, status = 200): Response =>
-  new Response(JSON.stringify(body), { status })
-
-const paysonResponse = {
-  status: 'OK',
-  results: [
-    {
-      address_components: [
-        { long_name: 'Payson', short_name: 'Payson', types: ['locality', 'political'] },
-        { long_name: 'Gila County', short_name: 'Gila County', types: ['administrative_area_level_2', 'political'] },
-        { long_name: 'Arizona', short_name: 'AZ', types: ['administrative_area_level_1', 'political'] },
-        { long_name: 'United States', short_name: 'US', types: ['country', 'political'] },
-      ],
-    },
-  ],
+function jsonOnce(body: unknown, ok = true) {
+  return vi.fn(async () => ({ ok, json: async () => body })) as unknown as typeof fetch
 }
 
-beforeEach(() => {
-  process.env.GOOGLE_PLACES_API_KEY = 'test-google-key'
-  fetchMock.mockReset()
-})
+const CENSUS_OK = {
+  result: {
+    geographies: {
+      'Incorporated Places': [{ NAME: 'Madison city', BASENAME: 'Madison' }],
+      Counties: [{ NAME: 'Dane County', BASENAME: 'Dane' }],
+      States: [{ NAME: 'Wisconsin', STUSAB: 'WI' }],
+    },
+  },
+}
+
+const GOOGLE_DENIED = {
+  status: 'REQUEST_DENIED',
+  error_message: 'This API is not activated on your API project.',
+}
+
+const GOOGLE_OK = {
+  status: 'OK',
+  results: [{
+    address_components: [
+      { long_name: 'Monona', short_name: 'Monona', types: ['locality'] },
+      { long_name: 'Wisconsin', short_name: 'WI', types: ['administrative_area_level_1'] },
+    ],
+  }],
+}
+
+beforeEach(() => { delete process.env.GOOGLE_PLACES_API_KEY })
+afterEach(() => { vi.unstubAllGlobals(); delete process.env.GOOGLE_PLACES_API_KEY })
 
 describe('reverseGeocode', () => {
-  it('returns "City, ST" for a well-formed Google response', async () => {
-    fetchMock.mockResolvedValue(mockResponse(paysonResponse))
-
-    const result = await reverseGeocode(34.15155, -111.31563)
-
-    expect(result).toBe('Payson, AZ')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const url = fetchMock.mock.calls[0][0]
-    expect(typeof url).toBe('string')
-    expect(url).toContain('latlng=34.15155%2C-111.31563')
-    expect(url).toContain('key=test-google-key')
+  it('uses Google when its key works', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'k'
+    const fetchMock = jsonOnce(GOOGLE_OK)
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await reverseGeocode(ROY.lat, ROY.lon)).toBe('Monona, WI')
+    expect(fetchMock).toHaveBeenCalledTimes(1) // never reached the fallback
   })
 
-  it('returns null when the API key is missing', async () => {
-    delete process.env.GOOGLE_PLACES_API_KEY
-    fetchMock.mockResolvedValue(mockResponse(paysonResponse))
+  it('falls back to the Census when Google refuses the Geocoding API', async () => {
+    /*
+     * The real failure. The key was valid and the Geocoding API simply was not enabled on
+     * the project, so every call came back REQUEST_DENIED and every Blue Ink truck stored a
+     * null description — which the dashboard rendered as raw coordinates.
+     */
+    process.env.GOOGLE_PLACES_API_KEY = 'k'
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      calls.push(String(url))
+      const body = String(url).includes('census') ? CENSUS_OK : GOOGLE_DENIED
+      return { ok: true, json: async () => body }
+    }) as unknown as typeof fetch)
 
-    const result = await reverseGeocode(34.15155, -111.31563)
-
-    expect(result).toBeNull()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(await reverseGeocode(ROY.lat, ROY.lon)).toBe('Madison, WI')
+    expect(calls[0]).toContain('maps.googleapis.com')
+    expect(calls[1]).toContain('geocoding.geo.census.gov')
   })
 
-  it('returns null when Google responds with a non-OK status', async () => {
-    fetchMock.mockResolvedValue(mockResponse({ status: 'ZERO_RESULTS', results: [] }))
-
-    const result = await reverseGeocode(34.15155, -111.31563)
-
-    expect(result).toBeNull()
+  it('works with no Google key at all', async () => {
+    vi.stubGlobal('fetch', jsonOnce(CENSUS_OK))
+    expect(await reverseGeocode(ROY.lat, ROY.lon)).toBe('Madison, WI')
   })
 
-  it('returns null when the fetch itself rejects', async () => {
-    fetchMock.mockRejectedValue(new Error('network down'))
+  it('returns null when both sources fail, so the sync is never aborted', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'k'
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network down') }) as unknown as typeof fetch)
+    expect(await reverseGeocode(ROY.lat, ROY.lon)).toBeNull()
+  })
+})
 
-    const result = await reverseGeocode(34.15155, -111.31563)
-
-    expect(result).toBeNull()
+describe('censusReverseGeocode', () => {
+  it('strips the legal suffix from a place name', async () => {
+    // NAME is "Madison city"; BASENAME is the bare town.
+    vi.stubGlobal('fetch', jsonOnce(CENSUS_OK))
+    expect(await censusReverseGeocode(ROY.lat, ROY.lon)).toBe('Madison, WI')
   })
 
-  it('returns null when no usable locality component exists', async () => {
-    fetchMock.mockResolvedValue(
-      mockResponse({
-        status: 'OK',
-        results: [
-          {
-            address_components: [
-              { long_name: 'Arizona', short_name: 'AZ', types: ['administrative_area_level_1', 'political'] },
-              { long_name: 'United States', short_name: 'US', types: ['country', 'political'] },
-            ],
-          },
-        ],
-      }),
-    )
-
-    const result = await reverseGeocode(34.15155, -111.31563)
-
-    expect(result).toBeNull()
+  it('names the county when a point is outside any town', async () => {
+    // Most of an interstate. Still somewhere a dispatcher can picture.
+    vi.stubGlobal('fetch', jsonOnce({
+      result: { geographies: {
+        Counties: [{ NAME: 'Dane County', BASENAME: 'Dane' }],
+        States: [{ NAME: 'Wisconsin', STUSAB: 'WI' }],
+      } },
+    }))
+    expect(await censusReverseGeocode(ROY.lat, ROY.lon)).toBe('Dane County, WI')
   })
 
-  it('falls back through postal_town / sublocality / admin_area_level_2 before giving up', async () => {
-    fetchMock.mockResolvedValue(
-      mockResponse({
-        status: 'OK',
-        results: [
-          {
-            address_components: [
-              { long_name: 'Willowbrook', short_name: 'Willowbrook', types: ['sublocality_level_1', 'sublocality', 'political'] },
-              { long_name: 'Illinois', short_name: 'IL', types: ['administrative_area_level_1', 'political'] },
-            ],
-          },
-        ],
-      }),
-    )
+  it('prefers a census designated place over the county', async () => {
+    vi.stubGlobal('fetch', jsonOnce({
+      result: { geographies: {
+        'Census Designated Places': [{ NAME: 'Blooming Grove CDP', BASENAME: 'Blooming Grove' }],
+        Counties: [{ NAME: 'Dane County', BASENAME: 'Dane' }],
+        States: [{ NAME: 'Wisconsin', STUSAB: 'WI' }],
+      } },
+    }))
+    expect(await censusReverseGeocode(ROY.lat, ROY.lon)).toBe('Blooming Grove, WI')
+  })
 
-    const result = await reverseGeocode(41.75, -87.93)
+  it('returns null without a state, rather than a half label', async () => {
+    vi.stubGlobal('fetch', jsonOnce({ result: { geographies: { 'Incorporated Places': [{ BASENAME: 'Madison' }] } } }))
+    expect(await censusReverseGeocode(ROY.lat, ROY.lon)).toBeNull()
+  })
 
-    expect(result).toBe('Willowbrook, IL')
+  it('returns null on a non-OK response or bad coordinates', async () => {
+    vi.stubGlobal('fetch', jsonOnce({}, false))
+    expect(await censusReverseGeocode(ROY.lat, ROY.lon)).toBeNull()
+    vi.stubGlobal('fetch', jsonOnce(CENSUS_OK))
+    expect(await censusReverseGeocode(Number.NaN, ROY.lon)).toBeNull()
   })
 })

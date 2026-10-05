@@ -149,8 +149,12 @@ describe('blueink-sync location sync', () => {
       mockResponse(bitLocationResponse([{ number: '310', lat: 34.15155, lon: -111.31563, locatedAt: '2026-09-30T18:00:00Z', speedMph: 18 }])),
     )
 
-    // No Google API key → reverseGeocode returns null without calling fetch.
+    /*
+     * Neither geocoder answers: no Google key, and the Census call fails. The row still has
+     * to be written — a truck we cannot name is still a truck we can locate.
+     */
     delete process.env.GOOGLE_PLACES_API_KEY
+    fetchMock.mockRejectedValueOnce(new Error('census unreachable'))
 
     await handler()
 
