@@ -62,57 +62,57 @@ export function LoadTimesSheet({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/60" role="dialog" aria-modal="true" aria-label="Record times">
-      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-[#0b1220] p-5 pb-8 text-white">
+      <div className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-background p-5 pb-8 text-foreground">
         <h2 className="text-lg font-bold">
           {leg === 'PICKUP' ? 'Pickup' : 'Delivery'} times · {load.reference}
         </h2>
-        <p className="mt-1 text-sm text-slate-400">
+        <p className="mt-1 text-sm text-muted-foreground">
           When you arrived and when you left. Over {FREE_HOURS} hours counts as detention and the
           office can bill it.
         </p>
 
         <div className="mt-4 grid grid-cols-2 gap-3">
           <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-300">Time in</span>
+            <span className="mb-1.5 block text-sm font-medium text-muted-foreground">Time in</span>
             <Input
               id={`time-in-${leg}`}
               type="datetime-local"
               value={timeIn}
               onChange={(e) => setTimeIn(e.target.value)}
-              className="h-12 bg-slate-900 text-base text-white"
+              className="h-12 bg-background text-base text-foreground"
             />
           </label>
           <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-slate-300">Time out</span>
+            <span className="mb-1.5 block text-sm font-medium text-muted-foreground">Time out</span>
             <Input
               id={`time-out-${leg}`}
               type="datetime-local"
               value={timeOut}
               onChange={(e) => setTimeOut(e.target.value)}
-              className="h-12 bg-slate-900 text-base text-white"
+              className="h-12 bg-background text-base text-foreground"
             />
           </label>
         </div>
 
         {hours !== null && (
-          <p className={`mt-3 text-sm font-semibold ${billable ? 'text-amber-400' : 'text-slate-400'}`}>
+          <p className={`mt-3 text-sm font-semibold ${billable ? 'text-amber-400' : 'text-muted-foreground'}`}>
             {hours} hour{hours === 1 ? '' : 's'} at the dock
             {billable ? ' · over 2 hours, this is detention' : ' · under 2 hours'}
           </p>
         )}
 
         <label className="mt-4 block">
-          <span className="mb-1.5 block text-sm font-medium text-slate-300">Notes (optional)</span>
+          <span className="mb-1.5 block text-sm font-medium text-muted-foreground">Notes (optional)</span>
           <Input
             id={`time-notes-${leg}`}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Who you spoke to, what the hold-up was"
-            className="h-12 bg-slate-900 text-base text-white"
+            className="h-12 bg-background text-base text-foreground"
           />
         </label>
 
-        {error && <p className="mt-3 text-sm font-medium text-red-400">{error}</p>}
+        {error && <p className="mt-3 text-sm font-medium text-destructive">{error}</p>}
 
         <div className="mt-5 flex gap-3">
           <Button variant="outline" className="h-12 flex-1 text-base" onClick={onClose} disabled={saving}>

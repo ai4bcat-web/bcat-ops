@@ -68,7 +68,7 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/driver-pay-box-trucks', label: 'Box Truck Settlements',   icon: Boxes,  pageKey: 'driverPayBoxTrucks' },
       { to: '/driver-pay',            label: 'Amazon Settlements',      icon: Wallet, pageKey: 'driverPay' },
       { to: '/owner-operator-pay',    label: 'Owner Operator Settlements', icon: Banknote, pageKey: 'ownerOperatorPay' },
-      { to: '/ivan-paperwork',        label: 'Ivan Paperwork',          icon: ClipboardList, pageKey: 'ivanPaperwork' },
+      { to: '/ivan-driver-app',        label: 'Ivan Driver App',          icon: ClipboardList, pageKey: 'ivanDriverApp' },
       { to: '/disputes',              label: 'Amazon Disputes',         icon: Scale,  pageKey: 'disputes' },
     ],
   },

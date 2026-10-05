@@ -77,7 +77,7 @@ export function PaperworkPage() {
 
   if (loadingWeeks) {
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-slate-400">
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
         <p>Loading your week…</p>
       </div>
@@ -87,8 +87,8 @@ export function PaperworkPage() {
   if (error && weeks === null) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 p-6 text-center">
-        <AlertCircle className="h-10 w-10 text-red-400" aria-hidden="true" />
-        <p className="font-medium text-white">{error}</p>
+        <AlertCircle className="h-10 w-10 text-destructive" aria-hidden="true" />
+        <p className="font-medium text-foreground">{error}</p>
         <Button onClick={() => { setError(null); setWeeks(null); setWeeksRetryKey((k) => k + 1) }} className="h-11 gap-2 px-6">
           <RefreshCcw className="h-4 w-4" aria-hidden="true" />
           Retry
@@ -99,11 +99,11 @@ export function PaperworkPage() {
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-5">
-      <h1 className="mb-4 text-xl font-bold text-white">Paperwork</h1>
+      <h1 className="mb-4 text-xl font-bold text-foreground">Paperwork</h1>
 
       {weekOptions && weekOptions.length > 0 && (
         <div className="mb-4">
-          <label htmlFor="pw-week" className="mb-1.5 block text-sm font-medium text-slate-400">
+          <label htmlFor="pw-week" className="mb-1.5 block text-sm font-medium text-muted-foreground">
             Week
           </label>
           <Select value={selected ?? ''} onValueChange={setSelectedWeekStart}>
@@ -127,13 +127,13 @@ export function PaperworkPage() {
       {week && week.weekStart === selected && (week.podsMissing > 0 || week.podsIllegible > 0) && (
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
           {week.podsMissing > 0 && (
-            <p className="flex items-center gap-2 text-sm font-semibold text-amber-200">
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-700">
               <Camera className="h-4 w-4 shrink-0" aria-hidden="true" />
               {week.podsMissing} load{week.podsMissing === 1 ? '' : 's'} still need a POD
             </p>
           )}
           {week.podsIllegible > 0 && (
-            <p className="flex items-center gap-2 text-sm font-semibold text-red-200">
+            <p className="flex items-center gap-2 text-sm font-semibold text-red-700">
               <FileWarning className="h-4 w-4 shrink-0" aria-hidden="true" />
               {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} cannot be read — please resend
             </p>
@@ -143,7 +143,7 @@ export function PaperworkPage() {
 
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
-          <p className="font-medium text-red-300">{error}</p>
+          <p className="font-medium text-red-600">{error}</p>
           <Button onClick={reload} variant="outline" className="mt-3 h-10 gap-2" aria-label="Retry">
             <RefreshCcw className="h-4 w-4" aria-hidden="true" />
             Retry
@@ -152,7 +152,7 @@ export function PaperworkPage() {
       )}
 
       {loadingWeek && (
-        <div className="flex flex-col items-center justify-center gap-3 py-10 text-slate-400">
+        <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
           <p>Loading loads…</p>
         </div>

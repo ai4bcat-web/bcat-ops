@@ -1,5 +1,5 @@
 /**
- * Ivan Paperwork — the staff side.
+ * Ivan Driver App — the staff side.
  *
  * The owner-operator settlements page with the money taken out. It answers one question:
  * whose paperwork is missing this week, and which of what came in cannot be read. Week
@@ -15,7 +15,7 @@ import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubm
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { SendDriverInvite } from '@/features/owner-operator-pay/SendDriverInvite'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { buildIvanPaperwork, type IvanLoadRow } from './ivanPaperwork'
+import { buildIvanDriverApp, type IvanLoadRow } from './ivanDriverApp'
 import { errorText } from '@/lib/errorText'
 
 const getInitials = (name: string) =>
@@ -29,12 +29,27 @@ const apptLabel = (iso: string | null | undefined) =>
       })
     : '—'
 
+const TH: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em', padding: '7px 8px', textAlign: 'right', whiteSpace: 'nowrap' }
+const TD: React.CSSProperties = { fontSize: 12.5, color: 'var(--ds-t1)', padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+
+/**
+ * When the POD arrived. Date AND time, because "the morning after" and "a fortnight
+ * later" both read as a later date without it and only one of them is a problem.
+ */
+function podSentLabel(at: string | null): string {
+  if (!at) return '—'
+  const d = new Date(at)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 const navBtn: React.CSSProperties = {
   height: 32, width: 32, display: 'grid', placeItems: 'center', borderRadius: 8,
   border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
   color: 'var(--ds-t2)', cursor: 'pointer',
 }
 
+/** Compact status for the table, same three states the driver sees on their phone. */
 function PodChip({ row }: { row: IvanLoadRow }) {
   if (row.podState === 'MISSING') {
     return (
@@ -57,7 +72,7 @@ function PodChip({ row }: { row: IvanLoadRow }) {
   )
 }
 
-export function IvanPaperworkPage() {
+export function IvanDriverAppPage() {
   const navigate = useNavigate()
   const drivers = useAppStore((s) => s.drivers)
   const loads = useAppStore((s) => s.loads)
@@ -78,9 +93,10 @@ export function IvanPaperworkPage() {
   }, [])
 
   const rows = useMemo(
-    () => buildIvanPaperwork({ drivers, loads, submissions, weekStart: periodStart }),
+    () => buildIvanDriverApp({ drivers, loads, submissions, weekStart: periodStart }),
     [drivers, loads, submissions, periodStart],
   )
+
 
   const isThisWeek = periodStart === sundayOf()
   const totals = rows.reduce(
@@ -96,7 +112,7 @@ export function IvanPaperworkPage() {
     <div className="page-content" style={{ padding: 20 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ds-t1)' }}>Ivan Paperwork</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ds-t1)' }}>Ivan Driver App</h1>
           <p style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginTop: 2 }}>
             Deliveries by driver, Sun→Sat · {totals.loads} load{totals.loads === 1 ? '' : 's'}
             {totals.missing > 0 && ` · ${totals.missing} POD${totals.missing === 1 ? '' : 's'} missing`}
@@ -167,35 +183,47 @@ export function IvanPaperworkPage() {
             {row.loads.length === 0 ? (
               <p style={{ padding: 14, margin: 0, color: 'var(--ds-t3)', fontSize: 13 }}>Nothing delivering this week.</p>
             ) : (
-              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                {row.loads.map((r) => (
-                  <li key={r.load.id} style={{ padding: 14, borderTop: '1px solid var(--ds-border)' }}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10 }}>
-                      <button
-                        onClick={() => setSelectedLoad(r.load.id, 'view')}
-                        style={{ background: 'none', border: 'none', padding: 0, fontSize: 14, fontWeight: 700, color: 'var(--ds-accent, #1ea8f3)', cursor: 'pointer', fontFamily: 'inherit' }}
-                      >
-                        {r.reference}
-                      </button>
-                      <PodChip row={r} />
-                      <span style={{ fontSize: 12.5, color: 'var(--ds-t3)', marginLeft: 'auto' }}>
-                        {apptLabel(r.load.deliveryAppt)}
-                      </span>
-                    </div>
-                    <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--ds-t2)' }}>
-                      {r.load.customer ?? 'No customer'}
-                      {r.load.originCity || r.load.destinationCity
-                        ? ` · ${[r.load.originCity, r.load.destinationCity].filter(Boolean).join(' → ')}`
-                        : ''}
-                    </p>
-                    {r.podNotes && (
-                      <p style={{ margin: '6px 0 0', fontSize: 12.5, color: '#b91c1c' }}>
-                        Photo problem: {r.podNotes}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+                  <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                    <th style={{ ...TH, textAlign: 'left' }}>PRO #</th>
+                    <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
+                    <th style={{ ...TH, textAlign: 'left' }}>Route</th>
+                    <th style={TH}>Delivered</th>
+                    <th style={TH}>POD</th>
+                    <th style={TH}>POD sent</th>
+                  </tr></thead>
+                  <tbody>
+                    {row.loads.map((r) => (
+                      <tr key={r.load.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                        <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
+                          <button
+                            onClick={() => setSelectedLoad(r.load.id, 'view')}
+                            style={{ background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--ds-accent, #1ea8f3)', cursor: 'pointer', fontFamily: 'inherit' }}
+                          >
+                            {r.reference}
+                          </button>
+                        </td>
+                        <td style={{ ...TD, textAlign: 'left', maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.load.customer ?? '—'}</td>
+                        <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>
+                          {r.load.originCity || '—'} → {r.load.destinationCity || '—'}
+                        </td>
+                        <td style={TD}>{apptLabel(r.load.deliveryAppt)}</td>
+                        <td style={TD}><PodChip row={r} /></td>
+                        <td style={{ ...TD, color: 'var(--ds-t3)' }}>{podSentLabel(r.podUploadedAt)}</td>
+                      </tr>
+                    ))}
+                    {/* The reason a POD was rejected, under the row it belongs to. */}
+                    {row.loads.filter((r) => r.podNotes).map((r) => (
+                      <tr key={`${r.load.id}-why`}>
+                        <td colSpan={6} style={{ ...TD, textAlign: 'left', color: '#b91c1c', paddingTop: 0, whiteSpace: 'normal' }}>
+                          {r.reference}: {r.podNotes}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
         ))}

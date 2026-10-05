@@ -47,7 +47,7 @@ export function DriverAppViewPage() {
   const program = driver ? driverProgramOf(driver) : 'SETTLEMENT'
 
   /** Back to wherever this driver is managed from. */
-  const backTo = program === 'PAPERWORK' ? '/ivan-paperwork' : '/owner-operator-pay'
+  const backTo = program === 'PAPERWORK' ? '/ivan-driver-app' : '/owner-operator-pay'
 
   /*
    * Installed during render, not in an effect.

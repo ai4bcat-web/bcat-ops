@@ -64,6 +64,11 @@ export interface OwnerOpTrip {
   deliveredAt: string
   /** Factoring readiness, computed after trips are built by the hook. */
   readiness?: OtrReadiness
+  /**
+   * When this load's POD arrived, ISO, or null. Attached by the hook from the POD index.
+   * A tick alone says a POD exists; this says whether it came in time to invoice on.
+   */
+  podUploadedAt?: string | null
 }
 
 /** If the requested period is before the first owner-operator week, clamp to it. */

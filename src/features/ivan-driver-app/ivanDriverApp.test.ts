@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildIvanPaperwork, ivanDrivers, podStateOf } from './ivanPaperwork'
+import { buildIvanDriverApp, ivanDrivers, podStateOf } from './ivanDriverApp'
 import type { Driver, Load } from '@/types'
 
 function driver(over: Partial<Driver> = {}): Driver {
@@ -40,13 +40,13 @@ describe('who the page is about', () => {
      * pay page. The two readings differ for exactly these people, so the page says so
      * instead of leaving somebody to wonder why the invite led to a settlement.
      */
-    const rows = buildIvanPaperwork({
+    const rows = buildIvanDriverApp({
       drivers: [driver({ id: 'u', fleetGroup: undefined, driverType: undefined })],
       loads: [], submissions: [], weekStart: WEEK,
     })
     expect(rows[0].unclassified).toBe(true)
 
-    const classified = buildIvanPaperwork({
+    const classified = buildIvanDriverApp({
       drivers: [driver({ id: 'k', fleetGroup: 'LOCAL' })],
       loads: [], submissions: [], weekStart: WEEK,
     })
@@ -56,7 +56,7 @@ describe('who the page is about', () => {
 
 describe('POD state per load', () => {
   it('is missing when nothing was sent', () => {
-    expect(podStateOf(load(), [])).toEqual({ state: 'MISSING', pages: 0, notes: null })
+    expect(podStateOf(load(), [])).toEqual({ state: 'MISSING', pages: 0, notes: null, uploadedAt: null })
   })
 
   it('matches a submission by load id', () => {
@@ -91,7 +91,7 @@ describe('POD state per load', () => {
 
 describe('the week view', () => {
   it('groups a driver’s loads for the selected week only', () => {
-    const rows = buildIvanPaperwork({
+    const rows = buildIvanDriverApp({
       drivers: [driver()],
       loads: [
         load({ id: 'in', deliveryAppt: '2026-10-07T15:00:00Z' }),
@@ -104,7 +104,7 @@ describe('the week view', () => {
   })
 
   it('finds a load assigned through a stop, not just the legacy field', () => {
-    const rows = buildIvanPaperwork({
+    const rows = buildIvanDriverApp({
       drivers: [driver()],
       loads: [load({
         deliveryDriverId: undefined,
@@ -118,7 +118,7 @@ describe('the week view', () => {
   })
 
   it('counts missing and illegible PODs per driver', () => {
-    const rows = buildIvanPaperwork({
+    const rows = buildIvanDriverApp({
       drivers: [driver()],
       loads: [
         load({ id: 'a', aljexId: '1001' }),
@@ -135,14 +135,56 @@ describe('the week view', () => {
     expect(rows[0].podsIllegible).toBe(1)
   })
 
-  it('carries no rate onto the page', () => {
-    // Same rule as the driver's own page: this is paperwork, not a settlement.
-    const rows = buildIvanPaperwork({
+  it('derives no money of its own', () => {
+    /*
+     * The staff row embeds the Load so the table can draw the customer, lane and
+     * appointment, and a Load carries its rate — staff see rates in a dozen other places,
+     * so that is fine here. What must not happen is this page deriving or showing money:
+     * no pay percentage, no gross, no check. The DRIVER's payload is the one with no rate
+     * in it at all, and amplify/functions/driver-app-api/paperwork.test.ts pins that.
+     */
+    const rows = buildIvanDriverApp({
       drivers: [driver()],
       loads: [load({ rate: 2400 } as Partial<Load>)],
       submissions: [], weekStart: WEEK,
     })
     const row = rows[0].loads[0]
-    expect(Object.keys(row)).toEqual(['load', 'reference', 'podState', 'podPages', 'podNotes'])
+    expect(Object.keys(row)).toEqual(['load', 'reference', 'podState', 'podPages', 'podNotes', 'podUploadedAt'])
+    const { load: _embedded, ...derived } = row
+    expect(JSON.stringify(derived)).not.toMatch(/rate|amount|gross|check|pay/i)
+  })
+})
+
+describe('when the POD arrived', () => {
+  it('reports the earliest page, so a re-send does not make a load look late', () => {
+    const rows = buildIvanDriverApp({
+      drivers: [driver()],
+      loads: [load()],
+      submissions: [{
+        loadId: 'l1', referenceNumber: null,
+        docs: [
+          { kind: 'POD', uploadedAt: '2026-10-09T18:30:00Z' }, // re-sent later
+          { kind: 'POD', uploadedAt: '2026-10-07T16:05:00Z' }, // the one that counts
+        ],
+      }],
+      weekStart: WEEK,
+    })
+    expect(rows[0].loads[0].podUploadedAt).toBe('2026-10-07T16:05:00Z')
+  })
+
+  it('is null when no POD is on file', () => {
+    const rows = buildIvanDriverApp({ drivers: [driver()], loads: [load()], submissions: [], weekStart: WEEK })
+    expect(rows[0].loads[0].podUploadedAt).toBeNull()
+  })
+
+  it('ignores a rate confirmation’s timestamp', () => {
+    const rows = buildIvanDriverApp({
+      drivers: [driver()],
+      loads: [load()],
+      submissions: [{ loadId: 'l1', referenceNumber: null, docs: [{ kind: 'RATECON', uploadedAt: '2026-10-06T10:00:00Z' }] }],
+      weekStart: WEEK,
+    })
+    expect(rows[0].loads[0].podUploadedAt).toBeNull()
+    expect(rows[0].loads[0].podState).toBe('MISSING')
   })
 })

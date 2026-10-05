@@ -46,7 +46,7 @@ describe('viewing a driver’s app as an admin', () => {
   it('shows an Ivan driver their paperwork, not a settlement', async () => {
     /*
      * This frame was hardcoded to the settlement, which was right while only owner
-     * operators had an app. On Ivan Paperwork it rendered a settlement an Ivan driver does
+     * operators had an app. On Ivan Driver App it rendered a settlement an Ivan driver does
      * not have — and the API now refuses that outright, so the panel came up empty.
      */
     renderAs(driver({ fleetGroup: 'LOCAL' }))

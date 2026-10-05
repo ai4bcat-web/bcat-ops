@@ -29,6 +29,12 @@ export interface PodSubmissionLike {
   hasPodDoc: boolean
   /** True when it carries at least one rate-confirmation page. */
   hasRateconDoc?: boolean
+  /**
+   * When the POD actually landed, ISO. The settlement pages show it so somebody chasing
+   * paperwork can tell "sent an hour ago" from "sent three weeks ago" — a present tick
+   * says nothing about whether it arrived in time to invoice.
+   */
+  podUploadedAt?: string | null
 }
 
 /** Just enough of a load to look it up. `aljexId` is the PRO. */
@@ -46,6 +52,11 @@ export interface DocKeys {
 export interface PodIndex {
   pod: DocKeys
   ratecon: DocKeys
+  /**
+   * When each load's POD arrived, by load id and by PRO. The EARLIEST upload wins: a POD
+   * re-sent today does not make a load that was papered a fortnight ago look late.
+   */
+  podAt: { byLoadId: Map<string, string>; byPro: Map<string, string> }
 }
 
 /**
@@ -74,6 +85,15 @@ export function buildPodIndex(input: {
 }): PodIndex {
   const pod: DocKeys = { byLoadId: new Set(input.jobsdoneLoadIds), byPro: new Set() }
   const ratecon: DocKeys = { byLoadId: new Set(input.rateconLoadIds ?? []), byPro: new Set() }
+  const podAt = { byLoadId: new Map<string, string>(), byPro: new Map<string, string>() }
+
+  /** Keep the earliest timestamp seen for a key. */
+  function noteArrival(map: Map<string, string>, key: string, at: string | null | undefined): void {
+    const when = (at ?? '').trim()
+    if (!when) return
+    const existing = map.get(key)
+    if (!existing || when < existing) map.set(key, when)
+  }
 
   for (const s of input.submissions) {
     const loadId = (s.loadId ?? '').trim()
@@ -83,9 +103,21 @@ export function buildPodIndex(input: {
       if (loadId) keys.byLoadId.add(loadId)
       if (pro) keys.byPro.add(pro)
     }
+    if (s.hasPodDoc) {
+      if (loadId) noteArrival(podAt.byLoadId, loadId, s.podUploadedAt)
+      if (pro) noteArrival(podAt.byPro, pro, s.podUploadedAt)
+    }
   }
 
-  return { pod, ratecon }
+  return { pod, ratecon, podAt }
+}
+
+/** When this load's POD arrived, or null when nothing is on file (or nothing recorded it). */
+export function podUploadedAt(index: PodIndex, load: PodLoadLike): string | null {
+  const byId = index.podAt.byLoadId.get(load.id)
+  if (byId) return byId
+  const pro = normalizePro(load.aljexId)
+  return (pro && index.podAt.byPro.get(pro)) || null
 }
 
 function hasDoc(keys: DocKeys, load: PodLoadLike): boolean {

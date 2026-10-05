@@ -161,7 +161,7 @@ describe('impersonation', () => {
   /*
    * Ivan's drivers have no DriverPaySetting — nobody creates one for a driver who is not
    * settled a percentage. Both paths required one, so every Ivan driver was refused with
-   * "Driver has no active pay setting": an admin pressing View as driver on Ivan Paperwork
+   * "Driver has no active pay setting": an admin pressing View as driver on Ivan Driver App
    * got nothing, and the driver themselves could not sign in either.
    */
   describe('a driver on the paperwork program, who has no pay setting', () => {

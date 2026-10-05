@@ -147,3 +147,32 @@ describe('Ivan paperwork', () => {
     expect(screen.getByText(/delivery 3.5h/)).toBeTruthy()
   })
 })
+
+/*
+ * The page is rendered in two places: the driver's dark phone shell, and the staff
+ * "View as driver" frame, which is a white panel in the staff theme. It was written with
+ * hardcoded dark classes (text-white on bg-slate-900), so inside the staff frame it drew
+ * white text on white — an admin saw an empty card with a Retry button and no message.
+ * SettlementPage has always used the semantic classes and renders correctly in both.
+ */
+describe('rendering inside the staff View-as-driver frame', () => {
+  it('uses theme-aware classes, never hardcoded dark ones', async () => {
+    const { readFileSync } = await import('node:fs')
+    const files = [
+      'src/features/driver-app/paperwork/PaperworkPage.tsx',
+      'src/features/driver-app/paperwork/PaperworkRows.tsx',
+      'src/features/driver-app/paperwork/LoadTimesSheet.tsx',
+    ]
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8')
+      expect(src, `${f} must not hardcode dark-only colours`).not.toMatch(/text-white|text-slate-\d|bg-slate-\d|#0b1220/)
+    }
+  })
+
+  it('shows the error message rather than an empty card', async () => {
+    api.fetchPaperworkWeeks.mockRejectedValue(new Error('Driver has no active pay setting'))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Driver has no active pay setting')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByRole('button', { name: /Retry/ })).toBeTruthy()
+  })
+})

@@ -24,7 +24,7 @@ import {
 } from '@/lib/apiClient'
 import { listPods } from '@/lib/podsClient'
 import { listDriverSubmissions } from '@/lib/driverSubmissionsClient'
-import { buildPodIndex, type PodIndex, type PodSubmissionLike } from '@/lib/podPresence'
+import { buildPodIndex, podUploadedAt, type PodIndex, type PodSubmissionLike } from '@/lib/podPresence'
 import { splitPayableTrips, type PayHoldReason } from '@/lib/payHold'
 import type { ManualOverrides } from '@/lib/otrInvoice'
 import { useFuelTransactions } from './useFuelTransactions'
@@ -135,6 +135,11 @@ async function loadPodIndex(): Promise<{ index: PodIndex; known: boolean }> {
       referenceNumber: s.referenceNumber,
       hasPodDoc: s.docs.some((d) => d.kind === 'POD'),
       hasRateconDoc: s.docs.some((d) => d.kind === 'RATECON'),
+      // Earliest POD page, so the column reads when the paperwork first landed.
+      podUploadedAt: s.docs
+        .filter((d) => d.kind === 'POD')
+        .map((d) => d.uploadedAt)
+        .sort()[0] ?? null,
     }))
   } catch (err) {
     console.warn('[owner-operator-pay] could not read driver submissions — no load will be held for a missing POD', err)
@@ -265,6 +270,8 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
           if (!load) return trip
           return {
             ...trip,
+            // When the POD landed, so the column can say more than "present".
+            podUploadedAt: podUploadedAt(podIndex, load),
             readiness: otrSettlementReadiness({
               load,
               customersById,

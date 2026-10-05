@@ -30,7 +30,7 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
   const { pod } = load
   if (!pod.present) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-600">
         <Camera className="h-3.5 w-3.5" aria-hidden="true" />
         POD needed
       </span>
@@ -38,14 +38,14 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
   }
   if (pod.legibility === 'UNREADABLE' || pod.legibility === 'LOW') {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-300">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-600">
         <FileWarning className="h-3.5 w-3.5" aria-hidden="true" />
         {pod.legibility === 'UNREADABLE' ? 'POD unreadable' : 'POD hard to read'}
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700">
       <Check className="h-3.5 w-3.5" aria-hidden="true" />
       POD on file{pod.pages > 1 ? ` · ${pod.pages} pages` : ''}
     </span>
@@ -55,8 +55,8 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="truncate text-sm text-slate-200">{value}</dd>
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="truncate text-sm text-foreground">{value}</dd>
     </div>
   )
 }
@@ -72,7 +72,7 @@ export function PaperworkRows({
 }) {
   if (loads.length === 0) {
     return (
-      <p className="rounded-xl bg-slate-900/60 p-5 text-center text-sm text-slate-400">
+      <p className="rounded-xl bg-muted/40 p-5 text-center text-sm text-muted-foreground">
         Nothing delivering this week.
       </p>
     )
@@ -84,19 +84,19 @@ export function PaperworkRows({
         const times = [load.pickupTimes, load.deliveryTimes]
         const billable = times.some((t) => t.billable)
         return (
-          <li key={load.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+          <li key={load.id} className="rounded-xl border border-border bg-muted/40 p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="text-base font-bold text-white">{load.reference}</p>
-                <p className="truncate text-sm text-slate-400">{load.customer ?? 'No customer'}</p>
+                <p className="text-base font-bold text-foreground">{load.reference}</p>
+                <p className="truncate text-sm text-muted-foreground">{load.customer ?? 'No customer'}</p>
               </div>
               <PodBadge load={load} />
             </div>
 
-            <p className="mt-2.5 text-sm text-slate-300">
+            <p className="mt-2.5 text-sm text-muted-foreground">
               {[load.origin, load.destination].filter(Boolean).join('  →  ') || 'No lane'}
             </p>
-            <p className="mt-0.5 text-sm text-slate-400">Delivers {apptLabel(load.deliveryAppt)}</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">Delivers {apptLabel(load.deliveryAppt)}</p>
 
             {/* Everything else about the load. Rate is deliberately not among it. */}
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
@@ -110,21 +110,21 @@ export function PaperworkRows({
             </dl>
 
             {load.stops.length > 2 && (
-              <ol className="mt-3 flex flex-col gap-1 border-l border-slate-800 pl-3">
+              <ol className="mt-3 flex flex-col gap-1 border-l border-border pl-3">
                 {load.stops.map((s, i) => (
-                  <li key={`${load.id}-stop-${i}`} className="text-xs text-slate-400">
-                    <span className="font-semibold uppercase text-slate-500">{s.type}</span>{' '}
+                  <li key={`${load.id}-stop-${i}`} className="text-xs text-muted-foreground">
+                    <span className="font-semibold uppercase text-muted-foreground">{s.type}</span>{' '}
                     {[s.name, [s.city, s.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
                   </li>
                 ))}
               </ol>
             )}
 
-            {load.notes && <p className="mt-3 text-sm text-slate-400">{load.notes}</p>}
+            {load.notes && <p className="mt-3 text-sm text-muted-foreground">{load.notes}</p>}
 
             {/* Why a POD was rejected, in words the driver can act on. */}
             {load.pod.notes && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">
+              <p className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-700">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{load.pod.notes}. Please send a new photo.</span>
               </p>

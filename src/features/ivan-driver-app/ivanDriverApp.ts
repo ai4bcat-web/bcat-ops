@@ -1,5 +1,5 @@
 /**
- * Deriving the staff Ivan Paperwork view. Pure — no store, no clock, no fetch.
+ * Deriving the staff Ivan Driver App view. Pure — no store, no clock, no fetch.
  *
  * Mirrors the driver's own page so the two cannot disagree about what is outstanding, and
  * carries the same restriction: no rate on a load. Staff can see rates in a dozen other
@@ -17,7 +17,13 @@ export type PodState = 'MISSING' | 'ILLEGIBLE' | 'OK'
 export interface PaperworkDocLike {
   loadId?: string | null
   referenceNumber?: string | null
-  docs: Array<{ kind: string; legibility?: string | null; legibilityNotes?: string | null }>
+  docs: Array<{
+    kind: string
+    legibility?: string | null
+    legibilityNotes?: string | null
+    /** ISO. The earliest POD page is what the staff table reports. */
+    uploadedAt?: string | null
+  }>
 }
 
 export interface IvanLoadRow {
@@ -26,6 +32,8 @@ export interface IvanLoadRow {
   podState: PodState
   podPages: number
   podNotes: string | null
+  /** When the POD arrived, ISO, or null. Earliest page wins. */
+  podUploadedAt: string | null
 }
 
 export interface IvanDriverRow {
@@ -53,18 +61,21 @@ function normalizePro(value: string | null | undefined): string | null {
 export function podStateOf(
   load: Load,
   submissions: PaperworkDocLike[],
-): { state: PodState; pages: number; notes: string | null } {
+): { state: PodState; pages: number; notes: string | null; uploadedAt: string | null } {
   const pro = normalizePro(load.aljexId)
   const mine = submissions.filter(
     (s) => (s.loadId && s.loadId === load.id) || (pro && normalizePro(s.referenceNumber) === pro),
   )
   const pages = mine.flatMap((s) => s.docs.filter((d) => (d.kind ?? '').toUpperCase() === 'POD'))
-  if (pages.length === 0) return { state: 'MISSING', pages: 0, notes: null }
+  if (pages.length === 0) return { state: 'MISSING', pages: 0, notes: null, uploadedAt: null }
   const bad = pages.find((d) => d.legibility === 'UNREADABLE' || d.legibility === 'LOW')
+  // Earliest page: a POD re-sent today should not make a load papered last week look late.
+  const uploadedAt = pages.map((d) => (d.uploadedAt ?? '').trim()).filter(Boolean).sort()[0] ?? null
   return {
     state: bad ? 'ILLEGIBLE' : 'OK',
     pages: pages.length,
     notes: bad?.legibilityNotes?.trim() || null,
+    uploadedAt,
   }
 }
 
@@ -75,7 +86,7 @@ export function ivanDrivers(drivers: Driver[]): Driver[] {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-export function buildIvanPaperwork(input: {
+export function buildIvanDriverApp(input: {
   drivers: Driver[]
   loads: Load[]
   submissions: PaperworkDocLike[]
@@ -102,6 +113,7 @@ export function buildIvanPaperwork(input: {
         podState: pod.state,
         podPages: pod.pages,
         podNotes: pod.notes,
+        podUploadedAt: pod.uploadedAt,
       }
     })
 

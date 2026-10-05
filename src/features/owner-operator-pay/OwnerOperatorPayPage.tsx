@@ -27,6 +27,21 @@ import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 const pct = (n: number) => `${Math.round(n * 100)}%`
+/**
+ * "Oct 2, 2:14 PM" for a POD that has arrived, an em dash for one that has not.
+ *
+ * Deliberately shows the time as well as the date: PODs sent the morning after delivery
+ * and PODs sent a fortnight later both read as "a later date" without it, and only one of
+ * those is a problem.
+ */
+function podSentLabel(trip: OwnerOpTrip): string {
+  const at = trip.podUploadedAt
+  if (!at) return '—'
+  const d = new Date(at)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
 const fmtShort = (iso: string) => (iso ? new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' }) : '—')
 
 const navBtn: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', cursor: 'pointer' }
@@ -532,13 +547,14 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             <th style={TH}>Dest state</th>
             <th style={TH}>Dest ZIP</th>
             <th style={TH}>POD</th>
+            <th style={TH}>POD sent</th>
             <th style={TH}>Rate con</th>
             <th style={TH}>Miles</th>
             <th style={TH}>Freight</th>
             <th style={TH}>Driver Amount</th>
           </tr></thead>
           <tbody>
-            {trips.length === 0 && <tr><td colSpan={19} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
+            {trips.length === 0 && <tr><td colSpan={20} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: 18 }}>No brokerage loads delivered this week.</td></tr>}
             {trips.map((t) => {
               const dup = row.duplicateTripIds.has(t.id)
               const held = heldReasonById.get(t.id)
@@ -570,6 +586,9 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                 <td style={TD}><OtrCell trip={t} field="ToState" /></td>
                 <td style={TD}><OtrCell trip={t} field="ToZip" /></td>
                 <td style={TD}><OtrDoc trip={t} kind="POD" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
+                {/* A tick says a POD exists; this says whether it arrived in time to
+                    invoice on, which is the thing somebody chasing paperwork needs. */}
+                <td style={{ ...TD, whiteSpace: 'nowrap', color: 'var(--ds-t3)' }}>{podSentLabel(t)}</td>
                 <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
@@ -580,7 +599,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={17}>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={18}>
                   Freight total / driver share ({pct(setting.payPercent)})
                   {row.heldFreight > 0 && (
                     <span style={{ ...MISSING, fontWeight: 600, marginLeft: 8 }}>
