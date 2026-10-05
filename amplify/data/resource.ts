@@ -107,9 +107,59 @@ const schema = a.schema({
        * only suggest a link for a human to confirm — see src/lib/motiveDriverMatch.ts.
        */
       motiveDriverId:     a.integer(),
+      /*
+       * May this driver record PTO on their time card?
+       *
+       * A flag rather than a list of names in the code: who accrues PTO is an employment
+       * decision that changes, and a name hardcoded in a component is the kind of thing
+       * nobody finds when it does. Today only Jason Smith and Charles Best have it.
+       */
+      ptoEligible:        a.boolean(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated()]),
+
+  /*
+   * One stretch of an employee driver's day: a clock-in/out pair, a paid holiday, or PTO.
+   *
+   * Several rows per day is normal — a driver clocks out for lunch and back in — so the
+   * day's hours are the SUM of its rows, never one row's span. Minutes are stored rather
+   * than recomputed from the timestamps on every read, because a staff correction may set
+   * hours that the raw times no longer explain (a missed clock-out, a forgotten break), and
+   * the corrected figure is the one payroll uses.
+   *
+   * Ivan's own drivers only. Owner operators are settled on a percentage and do not clock.
+   */
+  TimeClockEntry: a
+    .model({
+      driverId:    a.id().required(),
+      /** Chicago calendar day, YYYY-MM-DD. The day owns the row, not the timestamp. */
+      workDate:    a.string().required(),
+      kind:        a.enum(['WORK', 'HOLIDAY', 'PTO']),
+      /** ISO. Null on HOLIDAY/PTO rows, which are a number of hours and no clock. */
+      clockInAt:   a.string(),
+      /** ISO. Null while the driver is still clocked in — that is an open shift. */
+      clockOutAt:  a.string(),
+      /** Paid minutes for this row. The figure payroll uses. */
+      minutes:     a.integer(),
+      note:        a.string(),
+      /** Who entered it. A driver's own clock, or staff adding/fixing it for them. */
+      source:      a.enum(['DRIVER', 'STAFF']),
+      /*
+       * Corrections are recorded, never silent. Staff are the only ones who may change a
+       * row after the fact, and the original minutes are kept beside the new figure so a
+       * disagreement about a paycheck can be settled by looking.
+       */
+      correctedBy:      a.string(),
+      correctedAt:      a.string(),
+      originalMinutes:  a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('driverId').sortKeys(['workDate']),
+      index('workDate'),
+    ])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated()]),
 

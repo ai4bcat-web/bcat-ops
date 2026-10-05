@@ -278,6 +278,8 @@ const driverSubmissionDocTable = backend.data.resources.tables['DriverSubmission
 // Detention times Ivan's drivers record for themselves. Writable by the driver API, which
 // is the only thing that writes them.
 const driverLoadTimeTable = backend.data.resources.tables['DriverLoadTime']
+// The Ivan time clock. Drivers write their own rows; staff correct them from the hours page.
+const timeClockTable = backend.data.resources.tables['TimeClockEntry']
 const driverApiAmazonTripTable = backend.data.resources.tables['AmazonTrip']
 const driverApiDeductionTable = backend.data.resources.tables['DriverPayDeduction']
 const driverApiCreditTable = backend.data.resources.tables['DriverPayCredit']
@@ -330,6 +332,8 @@ const driverApiWritableArns = [
   `${driverSubmissionDocTable.tableArn}/index/*`,
   driverLoadTimeTable.tableArn,
   `${driverLoadTimeTable.tableArn}/index/*`,
+  timeClockTable.tableArn,
+  `${timeClockTable.tableArn}/index/*`,
 ]
 
 driverApiFn.addToRolePolicy(
@@ -365,6 +369,7 @@ driverApiFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable
 driverApiFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
 driverApiFn.addEnvironment('DRIVER_TABLE_NAME', driverApiDriverTable.tableName)
 driverApiFn.addEnvironment('DRIVER_LOAD_TIME_TABLE_NAME', driverLoadTimeTable.tableName)
+driverApiFn.addEnvironment('TIME_CLOCK_TABLE_NAME', timeClockTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_SETTING_TABLE_NAME', driverApiPaySettingTable.tableName)
 driverApiFn.addEnvironment('AMAZON_TRIP_TABLE_NAME', driverApiAmazonTripTable.tableName)
 driverApiFn.addEnvironment('LOAD_TABLE_NAME', driverApiLoadTable.tableName)

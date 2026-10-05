@@ -1,7 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import { Suspense, lazy } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { ClipboardList, Loader2, UserCircle, Wallet } from 'lucide-react'
+import { ClipboardList, Clock, Loader2, UserCircle, Wallet } from 'lucide-react'
 import type { DriverProgram } from '@/lib/driverProgram'
 
 // lucide-react does not export a named icon type; this describes the props we use.
@@ -16,6 +16,7 @@ const ScanPage = lazy(() => import('./scanner/ScanPage'))
 const SubmissionsPage = lazy(() => import('./SubmissionsPage'))
 const SettlementPage = lazy(() => import('./settlement/SettlementPage').then((m) => ({ default: m.SettlementPage })))
 const PaperworkPage = lazy(() => import('./paperwork/PaperworkPage').then((m) => ({ default: m.PaperworkPage })))
+const TimeClockPage = lazy(() => import('./timeclock/TimeClockPage').then((m) => ({ default: m.TimeClockPage })))
 const AccountPage = lazy(() => import('./AccountPage').then((m) => ({ default: m.AccountPage })))
 
 function TabButton({
@@ -90,6 +91,9 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
         {program === 'PAPERWORK'
           ? <TabButton to="/driver/paperwork" icon={ClipboardList} label="Paperwork" />
           : <TabButton to="/driver/settlement" icon={Wallet} label="Settlement" />}
+        {/* The clock is a tab only for Ivan's employees — owner operators do not punch one,
+            and a dead tab is worse than no tab. */}
+        {program === 'PAPERWORK' && <TabButton to="/driver/timeclock" icon={Clock} label="Hours" />}
         <TabButton to="/driver/account" icon={UserCircle} label="Account" />
       </nav>
     </div>
@@ -98,4 +102,4 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
 
 // Exported for the parent router so children can be declared next to the lazy
 // imports the tab bar depends on.
-export { ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, AccountPage }
+export { ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, TimeClockPage, AccountPage }

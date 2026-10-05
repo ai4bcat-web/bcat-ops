@@ -58,6 +58,10 @@ import { driverProgramOf } from '../../../src/lib/driverProgram'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
 import { toHosDay, type HosDay, type MotiveLog } from '../../../src/lib/motiveHos'
 import {
+  summarizeWeek, weekStartOf, recentWeekStarts, isOpenShift, rowMinutes,
+  STANDARD_DAY_MINUTES, type TimeClockRow,
+} from '../../../src/lib/timeClock'
+import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
   summarize,
@@ -94,6 +98,7 @@ const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
+const TIME_CLOCK_TABLE = process.env.TIME_CLOCK_TABLE_NAME ?? ''
 const PAY_DEDUCTION_TABLE = process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME!
 const PAY_CREDIT_TABLE = process.env.DRIVER_PAY_CREDIT_TABLE_NAME!
 const FUEL_TX_TABLE = process.env.FUEL_TRANSACTION_TABLE_NAME!
@@ -190,6 +195,8 @@ interface DriverRow {
   assignedTruckId?: string | null
   /** Motive user id, set by staff. The ONLY thing that links a driver to their ELD logs. */
   motiveDriverId?: number | string | null
+  /** Whether this driver accrues PTO. Today only Jason Smith and Charles Best. */
+  ptoEligible?: boolean | null
 }
 
 interface DriverPaySettingRow {
@@ -875,6 +882,12 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'motive' && segments[1] === 'day') {
     return { path: '/motive/day' }
+  }
+  if (segments[0] === 'timeclock' && !segments[1]) {
+    return { path: '/timeclock' }
+  }
+  if (segments[0] === 'timeclock' && segments[1] === 'punch') {
+    return { path: '/timeclock/punch' }
   }
   if (segments[0] === 'loads' && segments[1] === 'current') {
     return { path: '/loads/current' }
@@ -1631,6 +1644,48 @@ async function hosForDriver(
   return { ok: true, day: log ? toHosDay(log) : null }
 }
 
+/**
+ * The Chicago calendar day right now. The clock belongs to the day a driver is working,
+ * not to UTC — a 7pm shift must not land on tomorrow's card.
+ */
+function chicagoToday(at: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(at)
+}
+
+/** Every time clock row for one driver. Scanned once and filtered — the table is small. */
+async function timeClockRowsFor(driverId: string): Promise<TimeClockRow[]> {
+  if (!TIME_CLOCK_TABLE) return []
+  const out: TimeClockRow[] = []
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: TIME_CLOCK_TABLE,
+        FilterExpression: 'driverId = :d',
+        ExpressionAttributeValues: { ':d': driverId },
+        ExclusiveStartKey,
+      }),
+    )
+    out.push(...((r.Items ?? []) as TimeClockRow[]))
+    ExclusiveStartKey = r.LastEvaluatedKey as Record<string, unknown> | undefined
+  } while (ExclusiveStartKey)
+  return out
+}
+
+/**
+ * The shift this driver currently has running, if any.
+ *
+ * Checked before every clock-in so one driver cannot have two open shifts — a double
+ * clock-in is how a day ends up counted twice, and the second one is almost always a
+ * mis-tap rather than a genuine second shift.
+ */
+function openShiftIn(rows: TimeClockRow[]): TimeClockRow | null {
+  return rows.find(isOpenShift) ?? null
+}
+
 function groupBy<T, K extends string | number | symbol>(items: T[], keyFn: (item: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>()
   for (const item of items) {
@@ -1916,6 +1971,111 @@ export const handler = async (event: FnUrlEvent) => {
       return hos.ok
         ? reply(200, { date, linked: true, day: hos.day })
         : reply(200, { date, linked: false, day: null, reason: hos.reason })
+    }
+
+    /*
+     * The employee time clock. Ivan drivers only — owner operators are settled a percentage
+     * and do not clock, so the gate is driverProgramOf again rather than a second rule.
+     */
+    if (path === '/timeclock' || path === '/timeclock/punch') {
+      if (driverProgramOf({ ...driver, payGroup: setting.payGroup }) !== 'PAPERWORK') {
+        return reply(409, { error: 'The time clock is an Ivan driver feature.' })
+      }
+      if (!TIME_CLOCK_TABLE) return reply(503, { error: 'Time clock is not configured' })
+
+      const rows = await timeClockRowsFor(driverId)
+
+      if (method === 'GET' && path === '/timeclock') {
+        const weekParam = (event.queryStringParameters?.week ?? '').trim()
+        const today = chicagoToday()
+        const weekStart = weekParam ? weekStartOf(weekParam) : weekStartOf(today)
+        const open = openShiftIn(rows)
+        return reply(200, {
+          today,
+          week: summarizeWeek(weekStart, rows),
+          // Newest first, so the app's week picker needs no sorting of its own.
+          weeks: recentWeekStarts(today, 12),
+          openShift: open,
+          // Only Jason and Chuck accrue PTO; the app hides the button for everyone else.
+          ptoEligible: driver.ptoEligible === true,
+        })
+      }
+
+      if (method === 'POST' && path === '/timeclock/punch') {
+        if (impersonatedBy) {
+          // An admin looking at a driver's app must never punch their clock for them.
+          return reply(403, { error: 'Read-only while viewing as a driver.' })
+        }
+        const body = parseBody(event) as Record<string, unknown>
+        const action = String(body.action ?? '')
+        const nowIso = new Date().toISOString()
+
+        if (action === 'IN') {
+          const already = openShiftIn(rows)
+          // Idempotent rather than an error: a double tap should not be a failure screen.
+          if (already) return reply(200, { ok: true, openShift: already, alreadyOpen: true })
+          const item: TimeClockRow = {
+            id: randomUUID(),
+            driverId,
+            workDate: chicagoToday(),
+            kind: 'WORK',
+            clockInAt: nowIso,
+            clockOutAt: null,
+            minutes: null,
+            source: 'DRIVER',
+          }
+          await ddb.send(new PutCommand({ TableName: TIME_CLOCK_TABLE, Item: {
+            ...item, __typename: 'TimeClockEntry', createdAt: nowIso, updatedAt: nowIso,
+          } }))
+          return reply(200, { ok: true, openShift: item })
+        }
+
+        if (action === 'OUT') {
+          const open = openShiftIn(rows)
+          if (!open) return reply(200, { ok: true, openShift: null, alreadyClosed: true })
+          const closed = { ...open, clockOutAt: nowIso }
+          await ddb.send(new UpdateCommand({
+            TableName: TIME_CLOCK_TABLE,
+            Key: { id: open.id },
+            UpdateExpression: 'SET clockOutAt = :o, #m = :m, updatedAt = :u',
+            ExpressionAttributeNames: { '#m': 'minutes' },
+            ExpressionAttributeValues: {
+              ':o': nowIso,
+              // Totalled on close, so the figure is fixed at the moment it was earned.
+              ':m': rowMinutes(closed),
+              ':u': nowIso,
+            },
+          }))
+          return reply(200, { ok: true, openShift: null, minutes: rowMinutes(closed) })
+        }
+
+        if (action === 'HOLIDAY' || action === 'PTO') {
+          if (action === 'PTO' && driver.ptoEligible !== true) {
+            return reply(403, { error: 'PTO is not set up for this driver.' })
+          }
+          const workDate = String(body.date ?? '').trim()
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate)) {
+            return reply(400, { error: 'date must be YYYY-MM-DD' })
+          }
+          const item: TimeClockRow = {
+            id: randomUUID(),
+            driverId,
+            workDate,
+            kind: action,
+            clockInAt: null,
+            clockOutAt: null,
+            minutes: STANDARD_DAY_MINUTES,
+            note: typeof body.note === 'string' ? body.note.slice(0, 200) : null,
+            source: 'DRIVER',
+          }
+          await ddb.send(new PutCommand({ TableName: TIME_CLOCK_TABLE, Item: {
+            ...item, __typename: 'TimeClockEntry', createdAt: nowIso, updatedAt: nowIso,
+          } }))
+          return reply(200, { ok: true, entry: item })
+        }
+
+        return reply(400, { error: 'action must be IN, OUT, HOLIDAY or PTO' })
+      }
     }
 
     if (method === 'GET' && (path === '/paperwork' || path === '/paperwork/weeks')) {

@@ -345,6 +345,65 @@ export function fetchHosDay(date: string): Promise<HosResponse> {
   return request<HosResponse>(`/motive/day?date=${encodeURIComponent(date)}`)
 }
 
+/* ── Time clock (Ivan only) ───────────────────────────────────────────────── */
+
+export interface TimeClockRow {
+  id: string
+  driverId: string
+  workDate: string
+  kind: 'WORK' | 'HOLIDAY' | 'PTO'
+  clockInAt?: string | null
+  clockOutAt?: string | null
+  minutes?: number | null
+  note?: string | null
+  source?: 'DRIVER' | 'STAFF' | null
+  correctedBy?: string | null
+  correctedAt?: string | null
+  originalMinutes?: number | null
+}
+
+export interface TimeClockDay {
+  date: string
+  workedMinutes: number
+  holidayMinutes: number
+  ptoMinutes: number
+  totalMinutes: number
+  open: boolean
+  rows: TimeClockRow[]
+}
+
+export interface TimeClockWeek {
+  weekStart: string
+  weekEnd: string
+  days: TimeClockDay[]
+  workedMinutes: number
+  holidayMinutes: number
+  ptoMinutes: number
+  totalMinutes: number
+  open: boolean
+}
+
+export interface TimeClockResponse {
+  today: string
+  week: TimeClockWeek
+  /** Recent week starts, newest first. */
+  weeks: string[]
+  openShift: TimeClockRow | null
+  ptoEligible: boolean
+}
+
+export function fetchTimeClock(weekStart?: string): Promise<TimeClockResponse> {
+  const q = weekStart ? `?week=${encodeURIComponent(weekStart)}` : ''
+  return request<TimeClockResponse>(`/timeclock${q}`)
+}
+
+export function punchTimeClock(
+  action: 'IN' | 'OUT' | 'HOLIDAY' | 'PTO',
+  opts: { date?: string; note?: string } = {},
+): Promise<{ ok: boolean; openShift?: TimeClockRow | null; alreadyOpen?: boolean }> {
+  return request('/timeclock/punch', { method: 'POST', body: JSON.stringify({ action, ...opts }) })
+}
+
 /* ── Ivan paperwork ────────────────────────────────────────────────────────────
  * Mirrors amplify/functions/driver-app-api/paperwork.ts. Note what is NOT here: no
  * rate, no amount, no deductions, no check. The payload has no money in it.

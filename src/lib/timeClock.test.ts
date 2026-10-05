@@ -1,0 +1,186 @@
+/**
+ * The time clock's arithmetic. The cases worth pinning are the ones that put hours on the
+ * wrong paycheck: the Sunday week boundary, an open shift, and a staff correction.
+ */
+import { describe, it, expect } from 'vitest'
+import {
+  weekStartOf, weekEndOf, weekDays, recentWeekStarts, rowMinutes, isOpenShift,
+  summarizeWeek, minutesLabel, decimalHours, STANDARD_DAY_MINUTES, PAID_HOLIDAYS,
+  type TimeClockRow,
+} from './timeClock'
+
+const row = (over: Partial<TimeClockRow> = {}): TimeClockRow => ({
+  id: 'r1', driverId: 'd1', workDate: '2026-10-05', kind: 'WORK', ...over,
+})
+
+describe('the week, Monday to Sunday', () => {
+  it('starts on Monday', () => {
+    // 2026-10-05 is a Monday.
+    expect(weekStartOf('2026-10-05')).toBe('2026-10-05')
+    expect(weekEndOf('2026-10-05')).toBe('2026-10-11')
+  })
+
+  it('puts a Sunday in the week that STARTED, not the one about to begin', () => {
+    /*
+     * getUTCDay() is 0 for Sunday, so the naive "subtract dow - 1" moves Sunday FORWARD a
+     * week. That is the off-by-one that puts a Sunday shift on the wrong paycheck.
+     */
+    expect(weekStartOf('2026-10-11')).toBe('2026-10-05')
+    expect(weekEndOf('2026-10-11')).toBe('2026-10-11')
+  })
+
+  it('handles every day of one week identically', () => {
+    for (const d of weekDays('2026-10-05')) {
+      expect(weekStartOf(d)).toBe('2026-10-05')
+    }
+  })
+
+  it('lists seven days starting Monday', () => {
+    const days = weekDays('2026-10-05')
+    expect(days).toHaveLength(7)
+    expect(days[0]).toBe('2026-10-05')
+    expect(days[6]).toBe('2026-10-11')
+  })
+
+  it('crosses a month and a year boundary', () => {
+    expect(weekStartOf('2027-01-01')).toBe('2026-12-28')
+    expect(weekEndOf('2026-12-28')).toBe('2027-01-03')
+  })
+
+  it('walks back through previous weeks, newest first', () => {
+    expect(recentWeekStarts('2026-10-08', 3)).toEqual(['2026-10-05', '2026-09-28', '2026-09-21'])
+  })
+})
+
+describe('what a row is worth', () => {
+  it('uses the stored minutes when there are any', () => {
+    expect(rowMinutes(row({ minutes: 437 }))).toBe(437)
+  })
+
+  it('prefers a staff correction over what the clock times say', () => {
+    /*
+     * A correction exists precisely because the timestamps are wrong — a missed clock-out,
+     * a break nobody logged. Recomputing from them would undo the fix every read.
+     */
+    const corrected = row({
+      clockInAt: '2026-10-05T12:00:00Z',
+      clockOutAt: '2026-10-06T02:00:00Z',   // 14 hours of raw span
+      minutes: 480,                          // staff say it was 8
+      originalMinutes: 840,
+    })
+    expect(rowMinutes(corrected)).toBe(480)
+  })
+
+  it('falls back to the timestamps for a row never totalled', () => {
+    expect(rowMinutes(row({ clockInAt: '2026-10-05T12:00:00Z', clockOutAt: '2026-10-05T20:30:00Z' })))
+      .toBe(510)
+  })
+
+  it('pays an open shift nothing', () => {
+    /*
+     * Counting up to "now" would grow while a driver is at lunch, and a forgotten
+     * clock-out would quietly bill a 14-hour day. Nothing until the shift is closed.
+     */
+    const open = row({ clockInAt: '2026-10-05T12:00:00Z', clockOutAt: null })
+    expect(rowMinutes(open)).toBe(0)
+    expect(isOpenShift(open)).toBe(true)
+  })
+
+  it('pays a holiday and PTO a standard day', () => {
+    expect(rowMinutes(row({ kind: 'HOLIDAY' }))).toBe(STANDARD_DAY_MINUTES)
+    expect(rowMinutes(row({ kind: 'PTO' }))).toBe(STANDARD_DAY_MINUTES)
+  })
+
+  it('refuses a clock-out before the clock-in', () => {
+    expect(rowMinutes(row({ clockInAt: '2026-10-05T20:00:00Z', clockOutAt: '2026-10-05T12:00:00Z' })))
+      .toBe(0)
+  })
+
+  it('does not treat a holiday as an open shift', () => {
+    expect(isOpenShift(row({ kind: 'HOLIDAY' }))).toBe(false)
+  })
+})
+
+describe('a week of rows', () => {
+  it('sums several shifts in one day', () => {
+    // Clocking out for lunch and back in is normal; the day is the SUM, not one span.
+    const w = summarizeWeek('2026-10-05', [
+      row({ id: 'a', workDate: '2026-10-05', minutes: 240 }),
+      row({ id: 'b', workDate: '2026-10-05', minutes: 210 }),
+    ])
+    expect(w.days[0].workedMinutes).toBe(450)
+    expect(w.totalMinutes).toBe(450)
+  })
+
+  it('keeps worked, holiday and PTO apart but totals them together', () => {
+    const w = summarizeWeek('2026-10-05', [
+      row({ id: 'a', workDate: '2026-10-05', minutes: 480 }),
+      row({ id: 'b', workDate: '2026-10-06', kind: 'HOLIDAY' }),
+      row({ id: 'c', workDate: '2026-10-07', kind: 'PTO' }),
+    ])
+    expect(w.workedMinutes).toBe(480)
+    expect(w.holidayMinutes).toBe(STANDARD_DAY_MINUTES)
+    expect(w.ptoMinutes).toBe(STANDARD_DAY_MINUTES)
+    expect(w.totalMinutes).toBe(480 + STANDARD_DAY_MINUTES * 2)
+  })
+
+  it('applies NO overtime past forty hours', () => {
+    // Specified: hours are hours. 60 worked hours is 60, not 40 + 20 at a multiplier.
+    const w = summarizeWeek('2026-10-05',
+      weekDays('2026-10-05').map((d, i) => row({ id: `r${i}`, workDate: d, minutes: 600 })))
+    expect(w.workedMinutes).toBe(4200)
+    expect(decimalHours(w.totalMinutes)).toBe(70)
+  })
+
+  it('shows all seven days even when nothing was worked', () => {
+    const w = summarizeWeek('2026-10-05', [])
+    expect(w.days).toHaveLength(7)
+    expect(w.totalMinutes).toBe(0)
+    expect(w.days.every((d) => d.totalMinutes === 0)).toBe(true)
+  })
+
+  it('ignores rows from another week rather than folding them in', () => {
+    const w = summarizeWeek('2026-10-05', [
+      row({ id: 'a', workDate: '2026-10-05', minutes: 480 }),
+      row({ id: 'b', workDate: '2026-09-28', minutes: 480 }),
+    ])
+    expect(w.totalMinutes).toBe(480)
+  })
+
+  it('flags the week while a shift is still running', () => {
+    const w = summarizeWeek('2026-10-05', [
+      row({ workDate: '2026-10-07', clockInAt: '2026-10-07T12:00:00Z', clockOutAt: null }),
+    ])
+    expect(w.open).toBe(true)
+    expect(w.days[2].open).toBe(true)
+  })
+
+  it('normalises a mid-week start to its Monday', () => {
+    expect(summarizeWeek('2026-10-08', []).weekStart).toBe('2026-10-05')
+  })
+})
+
+describe('formatting', () => {
+  it('reads hours the way a person would', () => {
+    expect(minutesLabel(495)).toBe('8h 15m')
+    expect(minutesLabel(0)).toBe('0h 0m')
+  })
+
+  it('gives payroll a clean decimal', () => {
+    expect(decimalHours(495)).toBe(8.25)
+    expect(decimalHours(480)).toBe(8)
+  })
+})
+
+describe('paid holidays', () => {
+  it('is the standard six', () => {
+    expect(PAID_HOLIDAYS).toHaveLength(6)
+    expect(PAID_HOLIDAYS.map((h) => h.label)).toContain('Thanksgiving')
+    expect(PAID_HOLIDAYS.map((h) => h.label)).toContain("New Year's Day")
+  })
+
+  it('offers a fixed list rather than free text', () => {
+    // So "Thanksgiving", "thanksgiving" and "Turkey day" cannot become three holidays.
+    expect(PAID_HOLIDAYS.every((h) => typeof h.key === 'string' && h.key.length > 0)).toBe(true)
+  })
+})

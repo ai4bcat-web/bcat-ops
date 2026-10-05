@@ -47,7 +47,7 @@ import { FleetMilesPage } from '@/features/fleet-miles/FleetMilesPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
-import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, AccountPage } from '@/features/driver-app/DriverApp'
+import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, TimeClockPage, AccountPage } from '@/features/driver-app/DriverApp'
 import { useDriverProgram } from '@/features/driver-app/useDriverProgram'
 import type { DriverProgram } from '@/lib/driverProgram'
 import DriverLoginPage from '@/features/driver-app/DriverLoginPage'
@@ -102,6 +102,7 @@ function DriverRoutes() {
           <Route path="loads" element={<SubmissionsPage />} />
           <Route path="settlement" element={<SettlementPage />} />
           <Route path="paperwork" element={<PaperworkPage />} />
+          <Route path="timeclock" element={<TimeClockPage />} />
           <Route path="account" element={<AccountPage />} />
         </Route>
       ) : (
