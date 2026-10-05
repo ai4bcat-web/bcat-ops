@@ -914,7 +914,7 @@ export type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResu
 
 const CUSTOMER_FIELDS = `
   id name contactName contactEmail contactPhone notes
-  mcNumber dotNumber billingEmail billingContactName billingPhone billingAddress
+  mcNumber dotNumber factored billingEmail billingContactName billingPhone billingAddress
   paymentTermsDays creditLimitCents creditHoldFlag requiredDocsForInvoice
   defaultDivisionKey defaultSalesRepId aliases normalizedName active apptWorkflow mergedIntoId
   createdAt updatedAt

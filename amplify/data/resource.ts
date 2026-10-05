@@ -561,6 +561,18 @@ const schema = a.schema({
        */
       mcNameVerified: a.boolean(),
       dotNumber:    a.string(),
+      /*
+       * Whether this customer's loads get factored.
+       *
+       * Factoring is what makes an MC and origin/destination ZIPs mandatory — OTR needs
+       * them on the invoice. A customer we bill direct needs none of that, and demanding
+       * it at booking would block work for paperwork nobody will ever send.
+       *
+       * Null means "not decided". Treated as NOT factored, so a customer nobody has
+       * classified never blocks a booking; the factoring queue is where a missing MC
+       * becomes visible, and it is visible there either way.
+       */
+      factored:     a.boolean(),
       billingEmail:      a.string(),
       billingContactName: a.string(),
       billingPhone:      a.string(),

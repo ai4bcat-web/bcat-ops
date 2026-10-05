@@ -1460,6 +1460,12 @@ const OTR_BASE_URL = 'https://services.otrsolutions.com/carrier-tms/2'
  * Invoices stay on v1, which has always worked; v2's ItemPkey accepts the same invoice id.
  */
 const OTR_UPLOAD_BASE_URL = 'https://services.otrsolutions.com/carrier-tms/2'
+/*
+ * BCAT's own USDOT, which v2 requires on every invoice as ClientDOT. Not a secret — it is
+ * painted on the doors of every truck — so it lives here rather than in SSM, where it
+ * would be one more thing to set up on a new branch.
+ */
+const OTR_CLIENT_DOT = '547328'
 
 const otrActionsFn = backend.otrActions.resources.lambda as LambdaFunction
 const otrSyncFn = backend.otrStatusSync.resources.lambda as LambdaFunction
@@ -1479,6 +1485,7 @@ for (const fn of [otrActionsFn, otrSyncFn]) {
   fn.addEnvironment('FACTORING_ITEM_TABLE_NAME', otrFactoringTable.tableName)
   fn.addEnvironment('OTR_BASE_URL', OTR_BASE_URL)
   fn.addEnvironment('OTR_UPLOAD_BASE_URL', OTR_UPLOAD_BASE_URL)
+  fn.addEnvironment('OTR_CLIENT_DOT', OTR_CLIENT_DOT)
 }
 
 otrActionsFn.addEnvironment('LOAD_TABLE_NAME', otrLoadTable.tableName)

@@ -23,7 +23,7 @@ import { DriverDocUploadDialog } from '@/features/driver-docs'
 import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm } from '@/lib/apiClient'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
-import { loadSchema, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
+import { loadSchemaFor, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
 import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
 import { apptTypeAfterEdit, requiresApptProofs } from '@/lib/apptQueue'
 import { locationAddress } from '@/lib/tmsDirectory'
@@ -1134,12 +1134,29 @@ export function LoadDrawer() {
   const isEdit       = drawerMode === 'edit' || isCreate
   const activeDrivers = drivers.filter((d) => d.active)
 
+  /*
+   * Which customers are factored, so the form knows whose loads need an MC and ZIPs.
+   * Unset is treated as not factored by loadSchemaFor — an unclassified customer must
+   * never block a booking.
+   */
+  const formDirectory = useDirectory()
+  const factoredAwareSchema = useMemo(() => {
+    const factored = new Set(
+      formDirectory.customers.filter((c) => c.factored === true).map((c) => c.id),
+    )
+    return loadSchemaFor((id) => !!id && factored.has(id))
+  }, [formDirectory.customers])
 
   const {
     register, control, handleSubmit, reset, watch, setValue,
     formState: { errors },
   } = useForm<LoadFormValues>({
-    resolver: zodResolver(loadSchema),
+    /*
+     * The MC/ZIP rules apply only to a customer we factor — see loadSchemaFor. A
+     * direct-billed customer never has an invoice sent to OTR, so demanding paperwork for
+     * one would block real work.
+     */
+    resolver: zodResolver(factoredAwareSchema),
     defaultValues: {
       aljexId: '', tmsId: '', pickupNumber: '',
       stops: emptyStopForms(), readyToInvoice: false,

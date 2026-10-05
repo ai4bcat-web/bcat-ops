@@ -100,6 +100,25 @@ export function CustomersPage() {
                 {c.mcNumber && <span style={{ color: 'var(--ds-t3)' }}> · MC {c.mcNumber}</span>}
                 {c.dotNumber && <span style={{ color: 'var(--ds-t3)' }}> · DOT {c.dotNumber}</span>}
               </div>
+              {/*
+                * Factored or not, and the booking rules that follow from it.
+                *
+                * Only a factored customer's loads reach OTR, and only OTR needs an MC and
+                * origin/destination ZIPs. Marking a customer here is what decides whether
+                * booking one of their loads demands that paperwork — so it sits on the row
+                * rather than behind the edit dialog, where nobody would find it.
+                */}
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 5, fontSize: 11.5, color: c.factored ? '#047857' : 'var(--ds-t3)', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={c.factored === true}
+                  onChange={(e) => void dir.saveCustomer(c, { factored: e.target.checked })}
+                  aria-label={`${c.name} is factored`}
+                />
+                {c.factored
+                  ? 'Factored — loads need an MC and both ZIPs'
+                  : 'Not factored — no MC or ZIP needed to book'}
+              </label>
               {(c.billingEmail || c.billingAddress?.city) && (
                 <div style={{ fontSize: 11.5, color: 'var(--ds-t3)', marginTop: 3 }}>
                   Billing: {[c.billingContactName, c.billingEmail, c.billingAddress?.city].filter(Boolean).join(' · ')}

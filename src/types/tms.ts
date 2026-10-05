@@ -19,6 +19,12 @@ export interface CustomerRecord {
   notes?: string | null
   mcNumber?: string | null
   dotNumber?: string | null
+  /**
+   * Whether this customer's loads get factored. Factoring is what makes an MC and
+   * origin/destination ZIPs mandatory at booking; a direct-billed customer needs neither.
+   * Null means nobody has decided, and is treated as not factored.
+   */
+  factored?: boolean | null
   billingEmail?: string | null
   billingContactName?: string | null
   billingPhone?: string | null
