@@ -98,6 +98,15 @@ const schema = a.schema({
       // Phased onboarding template in effect for this driver (e.g. Amazon Relay). Optional:
       // legacy/Ivan/Local drivers read null and keep the flat (non-phased) checklist behavior.
       onboardingTemplateId: a.string(),
+      /*
+       * This driver's Motive user id, set by staff — never inferred.
+       *
+       * It decides whose hours-of-service log the driver app shows, and duty status is a
+       * federal record, so a near-miss is not acceptable: Motive carries "Chuck Best" where
+       * we carry "Charles Best", and TWO accounts called "Jason Smith". Name matching can
+       * only suggest a link for a human to confirm — see src/lib/motiveDriverMatch.ts.
+       */
+      motiveDriverId:     a.integer(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.

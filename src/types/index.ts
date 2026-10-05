@@ -34,6 +34,8 @@ export interface Driver {
   onboardingStatus?: DriverOnboardingStatus | null
   complianceStatus?: ComplianceStatus | null   // cached, updated by scanner
   onboardingTemplateId?: string | null  // phased onboarding template in effect (e.g. Amazon)
+  /** Motive user id, set by staff. Never inferred — see src/lib/motiveDriverMatch.ts. */
+  motiveDriverId?: number | null
   createdAt: string
   updatedAt: string
 }
