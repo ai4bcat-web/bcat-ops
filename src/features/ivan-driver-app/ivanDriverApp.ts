@@ -126,3 +126,53 @@ export function buildIvanDriverApp(input: {
     }
   })
 }
+
+/* ── One flat list ────────────────────────────────────────────────────────────
+ *
+ * The page reads as a single table of the week's deliveries with the driver as just
+ * another column, rather than a section per driver. Grouping by driver answers "what is
+ * Jason carrying"; a flat list answers "what is outstanding", which is the question the
+ * office opens this page with — and it lets the whole week be sorted by whichever column
+ * matters at the time.
+ */
+
+export interface IvanFlatRow extends IvanLoadRow {
+  driver: Driver
+  driverName: string
+}
+
+export type IvanSortKey = 'driver' | 'reference' | 'customer' | 'delivered' | 'pod' | 'podSent'
+export type SortDirection = 'asc' | 'desc'
+
+export function flattenRows(rows: IvanDriverRow[]): IvanFlatRow[] {
+  return rows.flatMap((r) => r.loads.map((l) => ({ ...l, driver: r.driver, driverName: r.driver.name })))
+}
+
+/** Missing first, then hard-to-read, then done — worst state at the top when sorted. */
+const POD_ORDER: Record<PodState, number> = { MISSING: 0, ILLEGIBLE: 1, OK: 2 }
+
+export function sortFlatRows(
+  rows: IvanFlatRow[],
+  key: IvanSortKey,
+  direction: SortDirection,
+): IvanFlatRow[] {
+  const dir = direction === 'asc' ? 1 : -1
+  const value = (r: IvanFlatRow): string | number => {
+    switch (key) {
+      case 'driver':    return r.driverName.toLowerCase()
+      case 'reference': return r.reference.toLowerCase()
+      case 'customer':  return (r.load.customer ?? '').toLowerCase()
+      case 'delivered': return r.load.deliveryAppt ?? ''
+      case 'pod':       return POD_ORDER[r.podState]
+      // A load with no POD sorts last whichever way the column runs: "never arrived" is
+      // not a date, and parking it among the early ones would read as early paperwork.
+      case 'podSent':   return r.podUploadedAt ?? '\uffff'
+    }
+  }
+  return [...rows].sort((a, b) => {
+    const av = value(a)
+    const bv = value(b)
+    if (av === bv) return a.reference.localeCompare(b.reference)
+    return (av < bv ? -1 : 1) * dir
+  })
+}

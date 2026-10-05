@@ -8,14 +8,17 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, Smartphone, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, Smartphone, AlertTriangle, ArrowUpDown } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useAppStore } from '@/store/useAppStore'
 import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { SendDriverInvite } from '@/features/owner-operator-pay/SendDriverInvite'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { buildIvanDriverApp, type IvanLoadRow } from './ivanDriverApp'
+import {
+  buildIvanDriverApp, flattenRows, sortFlatRows,
+  type IvanLoadRow, type IvanSortKey, type SortDirection,
+} from './ivanDriverApp'
 import { errorText } from '@/lib/errorText'
 
 const getInitials = (name: string) =>
@@ -47,6 +50,37 @@ const navBtn: React.CSSProperties = {
   height: 32, width: 32, display: 'grid', placeItems: 'center', borderRadius: 8,
   border: '1px solid var(--ds-border)', background: 'var(--ds-surface)',
   color: 'var(--ds-t2)', cursor: 'pointer',
+}
+
+interface SortState { key: IvanSortKey; direction: SortDirection }
+
+/** A column header that sorts. The active column shows which way it is running. */
+function SortHeader({
+  label, col, align = 'right', sort, onSort,
+}: {
+  label: string
+  col: IvanSortKey
+  align?: 'left' | 'right'
+  sort: SortState
+  onSort: (s: SortState) => void
+}) {
+  const active = sort.key === col
+  return (
+    <th style={{ ...TH, textAlign: align }}>
+      <button
+        onClick={() => onSort({ key: col, direction: active && sort.direction === 'asc' ? 'desc' : 'asc' })}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none',
+          padding: 0, font: 'inherit', letterSpacing: 'inherit', textTransform: 'inherit',
+          color: active ? 'var(--ds-t1)' : 'inherit', cursor: 'pointer',
+        }}
+        aria-label={`Sort by ${label}`}
+      >
+        {label}
+        {active && <ArrowUpDown size={11} style={{ transform: sort.direction === 'desc' ? 'scaleY(-1)' : undefined }} />}
+      </button>
+    </th>
+  )
 }
 
 /** Compact status for the table, same three states the driver sees on their phone. */
@@ -97,6 +131,10 @@ export function IvanDriverAppPage() {
     [drivers, loads, submissions, periodStart],
   )
 
+  // Default: the thing most worth seeing first is who still owes paperwork.
+  const [sort, setSort] = useState<SortState>({ key: 'pod', direction: 'asc' })
+  const flat = useMemo(() => sortFlatRows(flattenRows(rows), sort.key, sort.direction), [rows, sort])
+
 
   const isThisWeek = periodStart === sundayOf()
   const totals = rows.reduce(
@@ -144,90 +182,99 @@ export function IvanDriverAppPage() {
         </p>
       )}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {rows.map((row) => (
-          <section key={row.driver.id} style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', overflow: 'hidden' }}>
-            <header style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, padding: 14, borderBottom: '1px solid var(--ds-border)' }}>
-              <Avatar initials={getInitials(row.driver.name)} />
-              <div style={{ flex: 1, minWidth: 140 }}>
-                <p style={{ fontWeight: 650, color: 'var(--ds-t1)' }}>{row.driver.name}</p>
-                <p style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>
-                  {row.loads.length} load{row.loads.length === 1 ? '' : 's'}
-                  {row.podsMissing > 0 && ` · ${row.podsMissing} missing`}
-                  {row.podsIllegible > 0 && ` · ${row.podsIllegible} not legible`}
-                </p>
+      {/*
+        * The drivers, and what can be done to them — invite, or look at their app.
+        * Lifted out of the table because those are per-PERSON actions: repeating them on
+        * every one of a driver's loads was noise, and it is what stopped the week being
+        * one list.
+        */}
+      {rows.length > 0 && (
+        <section style={{ marginBottom: 16, border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 14 }}>
+          <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', marginBottom: 10 }}>Drivers</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+            {rows.map((row) => (
+              <div key={row.driver.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '8px 10px', minWidth: 260, flex: '1 1 300px', background: 'var(--ds-bg)' }}>
+                <Avatar initials={getInitials(row.driver.name)} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontWeight: 650, color: 'var(--ds-t1)', fontSize: 13 }}>{row.driver.name}</p>
+                  <p style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
+                    {row.loads.length} load{row.loads.length === 1 ? '' : 's'}
+                    {row.podsMissing > 0 && ` · ${row.podsMissing} missing`}
+                    {row.podsIllegible > 0 && ` · ${row.podsIllegible} not legible`}
+                  </p>
+                  {row.unclassified && (
+                    <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '4px 0 0', color: '#b45309', fontSize: 11 }}>
+                      <AlertTriangle size={11} style={{ marginTop: 2, flexShrink: 0 }} />
+                      <span>No fleet set — the app still shows them a settlement. Set it to Local in Files → Drivers.</span>
+                    </p>
+                  )}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  <SendDriverInvite driver={row.driver} email={row.driver.email ?? ''} />
+                  <button
+                    onClick={() => navigate(`/driver-view/${row.driver.id}`)}
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, height: 28, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    <Smartphone size={13} /> View as driver
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                <SendDriverInvite driver={row.driver} email={row.driver.email ?? ''} />
-                <button
-                  onClick={() => navigate(`/driver-view/${row.driver.id}`)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
-                >
-                  <Smartphone size={14} /> View as driver
-                </button>
-              </div>
-            </header>
+            ))}
+          </div>
+        </section>
+      )}
 
-            {/* The record says nothing about this driver's fleet, so the app keeps their
-                settlement rather than guessing. Actionable, so it is said out loud. */}
-            {row.unclassified && (
-              <p style={{ display: 'flex', alignItems: 'flex-start', gap: 8, margin: 0, padding: '10px 14px', background: '#f59e0b14', color: '#b45309', fontSize: 12.5 }}>
-                <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0 }} />
-                <span>
-                  This driver has no fleet set, so the app still shows them a settlement rather than
-                  paperwork. Set their fleet to Local in Files → Drivers.
-                </span>
-              </p>
-            )}
-
-            {row.loads.length === 0 ? (
-              <p style={{ padding: 14, margin: 0, color: 'var(--ds-t3)', fontSize: 13 }}>Nothing delivering this week.</p>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
-                  <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                    <th style={{ ...TH, textAlign: 'left' }}>PRO #</th>
-                    <th style={{ ...TH, textAlign: 'left' }}>Customer</th>
-                    <th style={{ ...TH, textAlign: 'left' }}>Route</th>
-                    <th style={TH}>Delivered</th>
-                    <th style={TH}>POD</th>
-                    <th style={TH}>POD sent</th>
-                  </tr></thead>
-                  <tbody>
-                    {row.loads.map((r) => (
-                      <tr key={r.load.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                        <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
-                          <button
-                            onClick={() => setSelectedLoad(r.load.id, 'view')}
-                            style={{ background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--ds-accent, #1ea8f3)', cursor: 'pointer', fontFamily: 'inherit' }}
-                          >
-                            {r.reference}
-                          </button>
-                        </td>
-                        <td style={{ ...TD, textAlign: 'left', maxWidth: 190, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.load.customer ?? '—'}</td>
-                        <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>
-                          {r.load.originCity || '—'} → {r.load.destinationCity || '—'}
-                        </td>
-                        <td style={TD}>{apptLabel(r.load.deliveryAppt)}</td>
-                        <td style={TD}><PodChip row={r} /></td>
-                        <td style={{ ...TD, color: 'var(--ds-t3)' }}>{podSentLabel(r.podUploadedAt)}</td>
-                      </tr>
-                    ))}
-                    {/* The reason a POD was rejected, under the row it belongs to. */}
-                    {row.loads.filter((r) => r.podNotes).map((r) => (
-                      <tr key={`${r.load.id}-why`}>
-                        <td colSpan={6} style={{ ...TD, textAlign: 'left', color: '#b91c1c', paddingTop: 0, whiteSpace: 'normal' }}>
-                          {r.reference}: {r.podNotes}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        ))}
-      </div>
+      {/* The week, as one list. Driver is a column like any other. */}
+      {flat.length === 0 ? (
+        rows.length > 0 && (
+          <p style={{ color: 'var(--ds-t3)', fontSize: 13.5, padding: 14, border: '1px solid var(--ds-border)', borderRadius: 10 }}>
+            Nothing delivering this week.
+          </p>
+        )
+      ) : (
+        <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 880 }}>
+            <thead><tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
+              <SortHeader label="Driver"   col="driver"    align="left" sort={sort} onSort={setSort} />
+              <SortHeader label="PRO #"    col="reference" align="left" sort={sort} onSort={setSort} />
+              <SortHeader label="Customer" col="customer"  align="left" sort={sort} onSort={setSort} />
+              <th style={{ ...TH, textAlign: 'left' }}>Route</th>
+              <SortHeader label="Delivered" col="delivered" sort={sort} onSort={setSort} />
+              <SortHeader label="POD"       col="pod"       sort={sort} onSort={setSort} />
+              <SortHeader label="POD sent"  col="podSent"   sort={sort} onSort={setSort} />
+            </tr></thead>
+            <tbody>
+              {flat.map((r) => (
+                <tr key={r.load.id} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                  <td style={{ ...TD, textAlign: 'left', fontWeight: 600 }}>{r.driverName}</td>
+                  <td style={{ ...TD, textAlign: 'left', fontFamily: 'var(--font-mono, monospace)', fontWeight: 600 }}>
+                    <button
+                      onClick={() => setSelectedLoad(r.load.id, 'view')}
+                      style={{ background: 'none', border: 'none', padding: 0, fontSize: 12.5, fontWeight: 700, color: 'var(--ds-accent, #1ea8f3)', cursor: 'pointer', fontFamily: 'inherit' }}
+                    >
+                      {r.reference}
+                    </button>
+                  </td>
+                  <td style={{ ...TD, textAlign: 'left', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.load.customer ?? '—'}</td>
+                  <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>
+                    {r.load.originCity || '—'} → {r.load.destinationCity || '—'}
+                  </td>
+                  <td style={TD}>{apptLabel(r.load.deliveryAppt)}</td>
+                  <td style={TD}><PodChip row={r} /></td>
+                  <td style={{ ...TD, color: 'var(--ds-t3)' }}>{podSentLabel(r.podUploadedAt)}</td>
+                </tr>
+              ))}
+              {flat.filter((r) => r.podNotes).map((r) => (
+                <tr key={`${r.load.id}-why`}>
+                  <td colSpan={7} style={{ ...TD, textAlign: 'left', color: '#b91c1c', paddingTop: 0, whiteSpace: 'normal' }}>
+                    {r.reference}: {r.podNotes}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Reads the selected load from the store, as on the settlements page. */}
       <LoadDrawer />

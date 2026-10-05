@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { buildIvanDriverApp, ivanDrivers, podStateOf } from './ivanDriverApp'
+import {
+  buildIvanDriverApp, flattenRows, ivanDrivers, podStateOf, sortFlatRows,
+} from './ivanDriverApp'
 import type { Driver, Load } from '@/types'
 
 function driver(over: Partial<Driver> = {}): Driver {
@@ -186,5 +188,68 @@ describe('when the POD arrived', () => {
     })
     expect(rows[0].loads[0].podUploadedAt).toBeNull()
     expect(rows[0].loads[0].podState).toBe('MISSING')
+  })
+})
+
+/*
+ * The page is one list of the week's deliveries with the driver as a column, not a section
+ * per driver. Grouping answers "what is Jason carrying"; a flat list answers "what is
+ * outstanding", which is what the office opens this page to find out.
+ */
+describe('the week as one sortable list', () => {
+  const twoDrivers = {
+    drivers: [driver({ id: 'd1', name: 'Jason Smith' }), driver({ id: 'd2', name: 'Charles Best' })],
+    loads: [
+      load({ id: 'a', aljexId: '1002', customer: 'Zeta', deliveryDriverId: 'd1', deliveryAppt: '2026-10-07T09:00:00Z' }),
+      load({ id: 'b', aljexId: '1001', customer: 'Alpha', deliveryDriverId: 'd2', deliveryAppt: '2026-10-05T09:00:00Z' }),
+    ],
+    submissions: [{ loadId: 'b', referenceNumber: null, docs: [{ kind: 'POD', legibility: 'OK', uploadedAt: '2026-10-05T18:00:00Z' }] }],
+    weekStart: WEEK,
+  }
+
+  it('flattens every driver’s loads into one list carrying the driver name', () => {
+    const flat = flattenRows(buildIvanDriverApp(twoDrivers))
+    expect(flat).toHaveLength(2)
+    expect(flat.map((r) => r.driverName).sort()).toEqual(['Charles Best', 'Jason Smith'])
+  })
+
+  it('sorts by driver name', () => {
+    const flat = flattenRows(buildIvanDriverApp(twoDrivers))
+    expect(sortFlatRows(flat, 'driver', 'asc').map((r) => r.driverName)).toEqual(['Charles Best', 'Jason Smith'])
+    expect(sortFlatRows(flat, 'driver', 'desc').map((r) => r.driverName)).toEqual(['Jason Smith', 'Charles Best'])
+  })
+
+  it('sorts by customer, PRO and delivery time', () => {
+    const flat = flattenRows(buildIvanDriverApp(twoDrivers))
+    expect(sortFlatRows(flat, 'customer', 'asc').map((r) => r.load.customer)).toEqual(['Alpha', 'Zeta'])
+    expect(sortFlatRows(flat, 'reference', 'asc').map((r) => r.reference)).toEqual(['1001', '1002'])
+    expect(sortFlatRows(flat, 'delivered', 'asc').map((r) => r.load.id)).toEqual(['b', 'a'])
+  })
+
+  it('sorts the worst POD state to the top', () => {
+    // Missing before hard-to-read before done: the column exists to find what is owed.
+    const flat = flattenRows(buildIvanDriverApp(twoDrivers))
+    expect(sortFlatRows(flat, 'pod', 'asc').map((r) => r.podState)).toEqual(['MISSING', 'OK'])
+  })
+
+  it('keeps a load with no POD last whichever way POD sent runs', () => {
+    /*
+     * "Never arrived" is not a date. Sorting it among the early timestamps would read as
+     * paperwork that came in promptly, which is the opposite of the truth.
+     */
+    const flat = flattenRows(buildIvanDriverApp(twoDrivers))
+    expect(sortFlatRows(flat, 'podSent', 'asc').map((r) => r.load.id)).toEqual(['b', 'a'])
+  })
+
+  it('breaks a tie on the PRO, so the order never wobbles between renders', () => {
+    const tied = flattenRows(buildIvanDriverApp({
+      ...twoDrivers,
+      loads: [
+        load({ id: 'x', aljexId: '2002', deliveryDriverId: 'd1', deliveryAppt: '2026-10-07T09:00:00Z' }),
+        load({ id: 'y', aljexId: '2001', deliveryDriverId: 'd1', deliveryAppt: '2026-10-07T09:00:00Z' }),
+      ],
+      submissions: [],
+    }))
+    expect(sortFlatRows(tied, 'delivered', 'asc').map((r) => r.reference)).toEqual(['2001', '2002'])
   })
 })
