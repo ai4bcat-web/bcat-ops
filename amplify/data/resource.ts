@@ -704,6 +704,14 @@ const schema = a.schema({
       builtLoadId:          a.id(),
       proNumber:            a.string(),   // BCAT Logistics: Pro# entered on Mark as Done
       notes:                a.string(),
+      /*
+       * When the reconciler replied in this item's Slack thread, ISO.
+       *
+       * The idempotency key for automatic replies. Set the moment chat.postMessage
+       * succeeds, checked before every send — a cron that ran twice, or retried after a
+       * timeout, must not post "PRO# 14589 - Added in BCAT Ops" into the same thread again.
+       */
+      slackRepliedAt:       a.string(),
     })
     .secondaryIndexes((index) => [
       index('assignedTo').sortKeys(['receivedAt']),

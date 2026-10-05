@@ -30,6 +30,7 @@ import { motiveOdometerSync } from './functions/motive-odometer-sync/resource'
 import { motiveLocationSync } from './functions/motive-location-sync/resource'
 import { motiveFaultSync } from './functions/motive-fault-sync/resource'
 import { blueinkSync } from './functions/blueink-sync/resource'
+import { intakeReconcile } from './functions/intake-reconcile/resource'
 import { complianceScanner } from './functions/compliance-scanner/resource'
 import { onboardingPortalApi } from './functions/onboarding-portal-api/resource'
 import { onboardingEmailer } from './functions/onboarding-emailer/resource'
@@ -72,6 +73,7 @@ const backend = defineBackend({
   motiveMileageSync,
   motiveOdometerSync,
   blueinkSync,
+  intakeReconcile,
   motiveLocationSync,
   motiveFaultSync,
   complianceScanner,
@@ -796,6 +798,35 @@ const odometerCloseDayRule = new Rule(motiveOdometerFn.stack, 'MotiveOdometerClo
 odometerCloseDayRule.addTarget(new EventsLambdaTarget(motiveOdometerFn, {
   event: RuleTargetInput.fromObject({ mode: 'closeDay' }),
 }))
+
+
+// ── intakeReconcile Lambda ────────────────────────────────────────────────────
+// Replies in a tender's OWN Slack thread once its load exists, and moves the intake
+// item to BUILT. It never starts a thread — see the handler for the refusal.
+const intakeReconcileFn = backend.intakeReconcile.resources.lambda as LambdaFunction
+const intakeReconcileTable = backend.data.resources.tables['IntakeItem']
+intakeReconcileFn.addEnvironment('INTAKE_TABLE_NAME', intakeReconcileTable.tableName)
+intakeReconcileFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['Load'].tableName)
+intakeReconcileFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Scan', 'dynamodb:GetItem'],
+    resources: [
+      intakeReconcileTable.tableArn, `${intakeReconcileTable.tableArn}/index/*`,
+      backend.data.resources.tables['Load'].tableArn,
+      `${backend.data.resources.tables['Load'].tableArn}/index/*`,
+    ],
+  }),
+)
+// Writes only the reconciliation fields, and only on IntakeItem.
+intakeReconcileFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [intakeReconcileTable.tableArn] }),
+)
+new Rule(backend.data.stack, 'IntakeReconcileSchedule', {
+  // Every 20 minutes: chat.postMessage is one per second per channel and the cap is 40
+  // per run, so a backlog drains over a few passes rather than in a burst.
+  schedule: Schedule.rate(Duration.minutes(20)),
+  targets: [new EventsLambdaTarget(intakeReconcileFn)],
+})
 
 // ── blueinkSync Lambda (Blue Ink Tech ELD) ─────────────────────────────────
 // One Lambda, two cadences via the event payload: frequent location sync (default
