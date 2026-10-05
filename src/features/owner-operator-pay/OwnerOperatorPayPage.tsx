@@ -132,11 +132,31 @@ function ProLink({
   )
 }
 
-/** What a held load is waiting on, in the cell where its pay would otherwise be. */
-function HeldAmount({ reason }: { reason: PayHoldReason }) {
+/**
+ * A held load's pay: the amount, and what it is waiting on.
+ *
+ * This used to show "Held — POD required" with no number, which answered the wrong
+ * question. Everyone already knows a POD is missing — the POD column says so two cells
+ * along. What they wanted to know is what the load is WORTH, because that is the size of
+ * the reason to go and chase the driver for it.
+ *
+ * The figure is muted rather than struck through: this money is not cancelled, it is
+ * waiting. It joins the check by itself the week the POD lands, and the total below still
+ * excludes it and says so.
+ *
+ * The driver's own app has always shown the amount with the same warning beside it. This
+ * brings the office's view in line with what the driver is already looking at.
+ */
+function HeldAmount({ reason, amount }: { reason: PayHoldReason; amount: number }) {
   return (
-    <span style={MISSING} title="Not on this check until the POD is on file. It pays itself once the POD arrives.">
-      Held — {PAY_HOLD_LABEL[reason]}
+    <span
+      title="Not on this check until the POD is on file. It pays itself once the POD arrives."
+      style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.3 }}
+    >
+      <span style={{ color: 'var(--ds-t3)', fontWeight: 600 }}>{money(amount)}</span>
+      <span style={{ ...MISSING, fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+        {PAY_HOLD_LABEL[reason]}
+      </span>
     </span>
   )
 }
@@ -593,7 +613,9 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>
-                  {held ? <HeldAmount reason={held} /> : money(tripPayAmount(t.freightAmount, setting))}
+                  {held
+                    ? <HeldAmount reason={held} amount={tripPayAmount(t.freightAmount, setting)} />
+                    : money(tripPayAmount(t.freightAmount, setting))}
                 </td>
               </tr>
             )})}

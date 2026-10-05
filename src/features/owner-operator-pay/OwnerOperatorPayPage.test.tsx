@@ -467,7 +467,21 @@ describe('OwnerOperatorPayPage', () => {
     useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [row] }))
     render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
 
-    expect(screen.getByText(/Held — POD required/)).toBeInTheDocument()
+    /*
+     * The amount is SHOWN on a held load, not replaced by the word "Held".
+     *
+     * Everyone already knows the POD is missing — the POD column says so two cells along.
+     * What the office needs is what the load is worth, because that is the size of the
+     * reason to chase the driver. 900 freight x 42% = $378.00, still excluded from the
+     * check and still labelled.
+     */
+    // This fixture sets expensesBeforePercent, so the driver amount IS the freight: $900.
+    // Asserted on the cell itself, since "$900.00" also appears in the excluded-total line.
+    const label = screen.getByText('POD required')
+    expect(label.parentElement?.textContent).toContain('$900.00')
+    expect(screen.queryByText(/Held — POD required/)).not.toBeInTheDocument()
+
+    // And it is still off the check, which is the part that must not drift.
     expect(screen.getByText(/excludes \$900\.00 held for POD/)).toBeInTheDocument()
     expect(screen.getAllByText(/1 held off this check/).length).toBeGreaterThanOrEqual(1)
   })
