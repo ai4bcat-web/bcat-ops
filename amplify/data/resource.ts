@@ -775,9 +775,16 @@ const schema = a.schema({
   FactoringItem: a
     .model({
       proNumber:  a.string().required(),
-      status:     a.enum(['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED']),
+      /*
+       * ARCHIVED takes a row out of the working queue without destroying it. Added when the
+       * queue was reset to a clean slate: the history is worth keeping, and a status is
+       * reversible in a way a delete is not.
+       */
+      status:     a.enum(['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED', 'ARCHIVED']),
       subject:    a.string().required(),
       fromEmail:  a.string().required(),
+      /** Who the invoice email was delivered to. The queue only accepts the factoring group. */
+      toEmails:   a.string().array(),
       receivedAt: a.datetime().required(),
       messageId:  a.string().required(),
 

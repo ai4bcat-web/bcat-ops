@@ -379,7 +379,8 @@ export interface IntakeItem {
 // ── Factoring queue ───────────────────────────────────────────────────────────
 
 
-export type FactoringItemStatus = 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED'
+/** ARCHIVED is out of the working queue but not destroyed — see the FactoringPage filter. */
+export type FactoringItemStatus = 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED' | 'ARCHIVED'
 
 /** OTR's own invoice statuses, mirrored onto the row so the queue shows their board. */
 export type OtrInvoiceStatus =

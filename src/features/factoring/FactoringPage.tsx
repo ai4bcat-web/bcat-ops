@@ -26,6 +26,7 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
   NEED_TO_FACTOR:   'Need to factor',
   PENDING_WITH_OTR: 'Pending with OTR',
   FACTORED:         'Factored',
+  ARCHIVED:         'Archived',
 }
 
 /**
@@ -33,7 +34,7 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  * then everything, then what is finished. "Need to factor" is the default because an empty
  * queue there is the only state worth celebrating.
  */
-const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'ALL', 'FACTORED'] as const
+const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'ALL', 'FACTORED', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -284,12 +285,14 @@ const STATUS_CAUSE: Record<FactoringItemStatus, string> = {
   NEED_TO_FACTOR: 'Not submitted yet. Press Submit to OTR on the row to send it.',
   PENDING_WITH_OTR: 'Submitted to OTR. This clears when their board says Paid.',
   FACTORED: 'OTR has paid this invoice.',
+  ARCHIVED: 'Taken out of the queue by hand. Nothing was deleted — set a status to bring it back.',
 }
 
 const STATUS_TONE: Record<FactoringItemStatus, { bg: string; fg: string; border: string }> = {
   NEED_TO_FACTOR: { bg: '#fef3c7', fg: '#b45309', border: '#fcd34d' },
   PENDING_WITH_OTR: { bg: '#dbeafe', fg: '#1d4ed8', border: '#93c5fd' },
   FACTORED: { bg: '#dcfce7', fg: '#15803d', border: '#86efac' },
+  ARCHIVED: { bg: '#f1f5f9', fg: '#64748b', border: '#cbd5e1' },
 }
 
 function StatusBadge({ item }: { item: FactoringItem }) {
@@ -339,15 +342,24 @@ export function FactoringPage() {
   const staffEmail = user?.email ?? ''
 
   const counts = useMemo(() => ({
-    ALL: items.length,
+    ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
     NEED_TO_FACTOR: items.filter((i) => i.status === 'NEED_TO_FACTOR').length,
     PENDING_WITH_OTR: items.filter((i) => i.status === 'PENDING_WITH_OTR').length,
     FACTORED: items.filter((i) => i.status === 'FACTORED').length,
+    ARCHIVED: items.filter((i) => i.status === 'ARCHIVED').length,
   }), [items])
 
   const filtered = useMemo(() => {
     return items
-      .filter((item) => (activeTab === 'ALL' ? true : item.status === activeTab))
+      /*
+       * "All" means all the LIVE work, not literally every row. Archived items are the
+       * ones somebody deliberately took out of the queue, and putting them back into the
+       * default view would undo the only thing archiving does. They keep their own tab so
+       * nothing is actually lost.
+       */
+      .filter((item) =>
+        activeTab === 'ALL' ? item.status !== 'ARCHIVED' : item.status === activeTab,
+      )
       .filter((item) => matchesSearch(item, search))
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
   }, [items, activeTab, search])

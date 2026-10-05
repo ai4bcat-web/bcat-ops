@@ -50,11 +50,20 @@ export function totalsByStatus(
     NEED_TO_FACTOR: { ...EMPTY_TOTAL },
     PENDING_WITH_OTR: { ...EMPTY_TOTAL },
     FACTORED: { ...EMPTY_TOTAL },
+    ARCHIVED: { ...EMPTY_TOTAL },
   }
 
   for (const item of items) {
     const amount = invoiceAmountOf(item)
-    const buckets: Array<StatusTotal | undefined> = [out.ALL, out[item.status]]
+    /*
+     * ALL is the live work, matching the filter tab of the same name — an archived row is
+     * out of the queue, so counting its money in the headline total would say the office
+     * still has it to collect.
+     */
+    const buckets: Array<StatusTotal | undefined> = [
+      ...(item.status === 'ARCHIVED' ? [] : [out.ALL]),
+      out[item.status],
+    ]
     for (const bucket of buckets) {
       if (!bucket) continue
       bucket.count++

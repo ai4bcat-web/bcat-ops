@@ -97,3 +97,25 @@ describe('money', () => {
     expect(money(0)).toBe('$0.00')
   })
 })
+
+describe('archived rows', () => {
+  it('are kept out of the ALL totals', () => {
+    // ALL is the live work. Counting archived money there says the office still has it
+    // to collect, which is the opposite of what archiving meant.
+    const totals = totalsByStatus([
+      { id: '1', status: 'NEED_TO_FACTOR', otrReadiness: { payload: { InvoiceAmount: 100 } } },
+      { id: '2', status: 'ARCHIVED', otrReadiness: { payload: { InvoiceAmount: 999 } } },
+    ] as never[])
+    expect(totals.ALL.count).toBe(1)
+    expect(totals.ALL.total).toBe(100)
+  })
+
+  it('still total up under their own status', () => {
+    // Archived is hidden, not destroyed — the tab has to show what is in it.
+    const totals = totalsByStatus([
+      { id: '2', status: 'ARCHIVED', otrReadiness: { payload: { InvoiceAmount: 999 } } },
+    ] as never[])
+    expect(totals.ARCHIVED.count).toBe(1)
+    expect(totals.ARCHIVED.total).toBe(999)
+  })
+})

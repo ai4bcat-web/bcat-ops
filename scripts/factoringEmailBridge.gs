@@ -211,12 +211,22 @@ function factoringProcessMessageInternal_(message, cfg, props, msgId) {
   const from = message.getFrom() || '';
   const receivedAt = message.getDate().toISOString();
 
+  // Every header that can carry the group. The Lambda re-checks these rather than trusting
+  // this script alone, and stores them on the row so it can always explain why it is there.
+  const recipients = [
+    message.getTo(),
+    message.getCc(),
+    message.getHeader('Delivered-To'),
+    message.getHeader('X-Original-To'),
+  ].filter(function (h) { return !!h; });
+
   const payload = {
     secret: cfg.secret,
     messageId: msgId,
     subject: subject,
     from: from,
     receivedAt: receivedAt,
+    recipients: recipients,
   };
 
   const response = UrlFetchApp.fetch(cfg.url, {

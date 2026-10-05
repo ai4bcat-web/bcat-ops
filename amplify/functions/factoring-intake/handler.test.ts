@@ -14,7 +14,7 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
   return { DynamoDBClient, PutItemCommand }
 })
 
-import { handler, extractProNumber } from './handler'
+import { handler, extractProNumber, isForFactoringQueue, extractAddresses } from './handler'
 
 type MockCommand = {
   __type?: string
@@ -274,5 +274,44 @@ describe('factoring-intake handler', () => {
       duplicate: true,
     })
     expect(send).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('only mail addressed to the factoring group creates a row', () => {
+  it('extracts addresses from a header with display names', () => {
+    expect(extractAddresses('Ivan Factoring <ivanfactoring@bcatcorp.com>, ryne@bcatcorp.com'))
+      .toEqual(['ivanfactoring@bcatcorp.com', 'ryne@bcatcorp.com'])
+  })
+
+  it('accepts the group whatever the casing', () => {
+    expect(isForFactoringQueue(['IvanFactoring@BcatCorp.com'])).toBe(true)
+  })
+
+  it('accepts when the group is one recipient among several', () => {
+    expect(isForFactoringQueue(['ryne@bcatcorp.com', 'ivanfactoring@bcatcorp.com'])).toBe(true)
+  })
+
+  it('refuses mail merely sent to somebody else', () => {
+    expect(isForFactoringQueue(['ryne@bcatcorp.com', 'dispatch@bcatcorp.com'])).toBe(false)
+  })
+
+  it('refuses a lookalike address', () => {
+    // The bridge's Gmail query includes a full-text term, so near misses do reach here.
+    expect(isForFactoringQueue(['ivanfactoring@bcatcorp.com.example.net'])).toBe(false)
+    expect(isForFactoringQueue(['notivanfactoring@bcatcorp.com'])).toBe(false)
+  })
+
+  it('refuses a message that only MENTIONS the group', () => {
+    /*
+     * The whole point of checking the address rather than the text: a forwarded invoice
+     * quoting "ivanfactoring@bcatcorp.com" in its body was never delivered to the group,
+     * and the bridge's search deliberately casts a wide net that catches exactly that.
+     */
+    expect(isForFactoringQueue(extractAddresses('please copy ivanfactoring at bcatcorp dot com')))
+      .toBe(false)
+  })
+
+  it('refuses nothing at all', () => {
+    expect(isForFactoringQueue([])).toBe(false)
   })
 })

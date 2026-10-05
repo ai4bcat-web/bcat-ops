@@ -7,8 +7,14 @@
  * status NEED_TO_FACTOR, and reports the Function URL POST endpoint.
  *
  * Auth: shared webhook secret (INTAKE_WEBHOOK_SECRET), surfaced here as
- * FACTORING_INTAKE_SECRET. The bridge is trusted to only forward factor@
- * messages, but we still validate payload shape and never log the secret.
+ * FACTORING_INTAKE_SECRET. Payload shape is validated here and the secret is never logged.
+ *
+ * The queue is for mail delivered to the ivanfactoring@bcatcorp.com group and nothing else.
+ * That used to be the bridge's business alone — this Lambda took whatever it was handed and
+ * never saw, let alone recorded, who the message was addressed to. So a row that should not
+ * have been there could not even be explained after the fact: there was nothing on it to
+ * say where it came from. The recipients now travel with the payload, are checked here, and
+ * are stored on the row.
  */
 import { createHash, timingSafeEqual } from 'crypto'
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
@@ -30,9 +36,39 @@ interface LambdaFunctionUrlEvent {
   }
 }
 
+/** The one address that may create a factoring row. */
+export const FACTORING_RECIPIENT = 'ivanfactoring@bcatcorp.com'
+
 type ValidatedPayload =
-  | { ok: true; secret: string; messageId: string; subject: string; from: string; receivedAt?: string }
+  | {
+      ok: true
+      secret: string
+      messageId: string
+      subject: string
+      from: string
+      receivedAt?: string
+      /** Every address the message was delivered to, as the bridge saw them. */
+      recipients: string[]
+    }
   | { ok: false; status: number; error: string }
+
+/** Addresses out of a To/Cc/Delivered-To header, which may carry display names. */
+export function extractAddresses(headerValue: string): string[] {
+  return (headerValue.match(/<([^>]+)>|[^\s,<>]+@[^\s,<>]+/g) ?? []).map((a) =>
+    a.replace(/^</, '').replace(/>$/, '').trim().toLowerCase(),
+  )
+}
+
+/**
+ * Was this message actually addressed to the factoring group?
+ *
+ * Matches the ADDRESS, not the text. A quoted mention of the group in a forwarded body or
+ * a signature is not delivery to it, and the bridge's Gmail query deliberately casts a wide
+ * net that includes full-text hits — so this is the check that has to be exact.
+ */
+export function isForFactoringQueue(recipients: string[]): boolean {
+  return recipients.some((r) => r.trim().toLowerCase() === FACTORING_RECIPIENT)
+}
 
 /** Runtime boundary check: every field must be a string before .trim() or secrets use. */
 function validatePayload(raw: unknown): ValidatedPayload {
@@ -57,6 +93,18 @@ function validatePayload(raw: unknown): ValidatedPayload {
     return { ok: false, status: 400, error: 'receivedAt must be a string' }
   }
 
+  /*
+   * `recipients` may be a string (a raw header) or an array of them, because the bridge
+   * sends several headers — To, Cc, Delivered-To, X-Original-To — and any one of them can
+   * carry the group.
+   */
+  const rawRecipients = p.recipients
+  const recipientText = Array.isArray(rawRecipients)
+    ? rawRecipients.filter((v): v is string => typeof v === 'string')
+    : typeof rawRecipients === 'string'
+      ? [rawRecipients]
+      : []
+
   return {
     ok: true,
     secret: p.secret,
@@ -64,6 +112,7 @@ function validatePayload(raw: unknown): ValidatedPayload {
     subject: p.subject.trim(),
     from: typeof p.from === 'string' ? p.from.trim() : '',
     receivedAt: typeof p.receivedAt === 'string' ? p.receivedAt.trim() : undefined,
+    recipients: recipientText.flatMap(extractAddresses),
   }
 }
 
@@ -148,7 +197,34 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     return respond(401, { error: 'unauthorized' })
   }
 
-  const { messageId, subject, from, receivedAt: rawReceivedAt } = validated
+  const { messageId, subject, from, receivedAt: rawReceivedAt, recipients } = validated
+
+  /*
+   * Only mail delivered to the factoring group creates a row.
+   *
+   * 422 rather than 400: to the bridge this is the same class of answer as an unusable
+   * subject — stop offering me this message — so it gets labelled for review and acked
+   * instead of being retried forever.
+   *
+   * A payload carrying no recipients at all is accepted and loudly logged rather than
+   * refused. An older bridge does not send them yet, and silently dropping every invoice
+   * the moment this deploys would be a worse failure than the one being fixed. The warning
+   * is the signal that scripts/factoringEmailBridge.gs still needs pasting in; once no
+   * warnings appear, this branch can become a refusal.
+   */
+  if (recipients.length === 0) {
+    console.warn(
+      '[factoring-intake] payload carried no recipients — the Gmail bridge predates the ' +
+        'recipient check and cannot be verified; accepting on the bridge\'s own filter',
+      { messageId },
+    )
+  } else if (!isForFactoringQueue(recipients)) {
+    console.warn('[factoring-intake] 422 — not addressed to the factoring group', {
+      messageId,
+      recipients,
+    })
+    return respond(422, { error: `not addressed to ${FACTORING_RECIPIENT}` })
+  }
 
   if (!subject) {
     return respond(422, { error: 'no invoice PRO number' })
@@ -176,6 +252,9 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
             status: 'NEED_TO_FACTOR',
             subject,
             fromEmail: from,
+            // Stored so a row can always explain why it is here. Without it, a row that
+            // should not have been in the queue could not be accounted for after the fact.
+            toEmails: recipients.length ? recipients : undefined,
             receivedAt,
             messageId,
             createdAt: now,
