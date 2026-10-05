@@ -158,6 +158,61 @@ describe('impersonation', () => {
     error.mockRestore()
   })
 
+  /*
+   * Ivan's drivers have no DriverPaySetting — nobody creates one for a driver who is not
+   * settled a percentage. Both paths required one, so every Ivan driver was refused with
+   * "Driver has no active pay setting": an admin pressing View as driver on Ivan Paperwork
+   * got nothing, and the driver themselves could not sign in either.
+   */
+  describe('a driver on the paperwork program, who has no pay setting', () => {
+    const IVAN = { id: 'drv-ivan', name: 'Charles Best', email: 'charles@bcatcorp.com', active: true, fleetGroup: 'LOCAL' }
+
+    beforeEach(() => {
+      send.mockImplementation(async (cmd: { constructor: { name: string }; input: Record<string, unknown> }) => {
+        const name = cmd.constructor.name
+        if (name === 'GetCommand') return { Item: IVAN }
+        if (name === 'ScanCommand') {
+          const t = String(cmd.input.TableName)
+          // No pay setting exists for them. That is the normal state, not a mistake.
+          if (t.includes('PaySetting')) return { Items: [] }
+          if (t.includes('Driver-')) return { Items: [IVAN] }
+          return { Items: [] }
+        }
+        return {}
+      })
+    })
+
+    it('can be viewed by an admin', async () => {
+      const res = await handler(event('GET', '/paperwork', { 'x-bcat-impersonate-driver': 'drv-ivan' }))
+      expect(res.statusCode).toBe(200)
+    })
+
+    it('resolves on their own token too, so they can sign in', async () => {
+      driverVerify.mockResolvedValue({ email: 'charles@bcatcorp.com', email_verified: true })
+      const res = await handler(event('GET', '/me', {}))
+      expect(res.statusCode).toBe(200)
+      const me = JSON.parse(res.body)
+      expect(me.driverId).toBe('drv-ivan')
+      expect(me.program).toBe('PAPERWORK')
+    })
+
+    it('is refused a settlement rather than shown a $0 check', async () => {
+      /*
+       * The synthesised setting carries 0%. Computing a settlement from it would render a
+       * real-looking $0.00 cheque, so the endpoint declines instead.
+       */
+      driverVerify.mockResolvedValue({ email: 'charles@bcatcorp.com', email_verified: true })
+      const res = await handler(event('GET', '/settlement', {}))
+      expect(res.statusCode).toBe(409)
+      expect(JSON.parse(res.body).error).toMatch(/paperwork, not a settlement/i)
+    })
+
+    it('still cannot be written to while impersonated', async () => {
+      const res = await handler(event('POST', '/paperwork/time', { 'x-bcat-impersonate-driver': 'drv-ivan' }))
+      expect(res.statusCode).toBe(403)
+    })
+  })
+
   it('names who may do it', () => {
     expect(mayImpersonate('ryne@bcatcorp.com')).toBe(true)
     expect(mayImpersonate('RYNE@BCATCORP.COM ')).toBe(true)

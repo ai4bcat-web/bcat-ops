@@ -23,7 +23,9 @@ import {
   setDriverImpersonation,
 } from '@/features/driver-app/driverApi'
 import { SettlementPage } from '@/features/driver-app/settlement/SettlementPage'
+import { PaperworkPage } from '@/features/driver-app/paperwork/PaperworkPage'
 import { useDrivers } from '@/hooks/useDrivers'
+import { driverProgramOf } from '@/lib/driverProgram'
 
 /** iPhone 14 at CSS pixels — wide enough to be honest, narrow enough to catch a clip. */
 const PHONE_WIDTH = 390
@@ -33,6 +35,19 @@ export function DriverAppViewPage() {
   const navigate = useNavigate()
   const { drivers } = useDrivers()
   const driver = drivers.find((d) => d.id === driverId)
+
+  /*
+   * Which of the driver's two apps to render.
+   *
+   * This used to be hardcoded to the settlement, which was right while only owner operators
+   * had an app. Opening an Ivan driver that way showed them a settlement they do not have —
+   * and the API now refuses it outright, so the frame came up empty. Read from the same
+   * helper the driver's own app routes on, so this and their phone cannot disagree.
+   */
+  const program = driver ? driverProgramOf(driver) : 'SETTLEMENT'
+
+  /** Back to wherever this driver is managed from. */
+  const backTo = program === 'PAPERWORK' ? '/ivan-paperwork' : '/owner-operator-pay'
 
   /*
    * Installed during render, not in an effect.
@@ -81,7 +96,7 @@ export function DriverAppViewPage() {
           background: 'var(--ds-surface)', flexShrink: 0,
         }}
       >
-        <Button variant="outline" size="sm" onClick={() => navigate('/owner-operator-pay')}>
+        <Button variant="outline" size="sm" onClick={() => navigate(backTo)}>
           <ArrowLeft className="size-3.5" /> Back
         </Button>
         <Smartphone size={16} style={{ color: 'var(--ds-t2)' }} />
@@ -119,8 +134,8 @@ export function DriverAppViewPage() {
             overflow: 'hidden', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)',
           }}
         >
-          {driverId ? (
-            <SettlementPage />
+          {driverId && driver ? (
+            program === 'PAPERWORK' ? <PaperworkPage /> : <SettlementPage />
           ) : (
             <div style={{ display: 'grid', placeItems: 'center', height: 240, color: 'var(--ds-t3)' }}>
               <Loader2 className="size-5 animate-spin" />

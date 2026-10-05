@@ -392,9 +392,41 @@ async function resolveDriverAndSetting(emailLower: string): Promise<{
   if (!driverId) return null
   const driver = driverByEmail ?? drivers.find((d) => d.id === driverId)
   if (!driver || driver.active === false) return null
-  if (!setting) return null
 
-  return { driver, setting }
+  const effective = setting ?? syntheticPaperworkSetting(driver)
+  if (!effective) return null
+
+  return { driver, setting: effective }
+}
+
+/*
+ * A pay setting for a driver who has none, and should not need one.
+ *
+ * DriverPaySetting carries a percentage, a fuel card and fixed expenses — the machinery of
+ * a settlement. Ivan's own drivers are not settled a percentage, so nobody ever created one
+ * for them: all five (Charles Best, Eulalio Cortez, Jason Smith, John Brittich, Joshua Kly)
+ * have no row at all. Both the sign-in path and the impersonation path required one, so
+ * every Ivan driver was refused by the API — "Driver has no active pay setting" — which is
+ * why Ivan paperwork could not be opened for any of them, by them or by an admin.
+ *
+ * Synthesised ONLY for a driver whose own record positively says LOCAL. A missing setting
+ * on anyone else stays an error: inventing 0% for a driver who is owed a percentage would
+ * render as a $0 check, and a settlement that silently reads zero is far worse than one
+ * that refuses to load.
+ */
+function syntheticPaperworkSetting(driver: DriverRow): DriverPaySettingRow | null {
+  if (driverProgramOf(driver) !== 'PAPERWORK') return null
+  return {
+    id: `synthetic-paperwork:${driver.id}`,
+    driverId: driver.id,
+    active: true,
+    payGroup: 'LOCAL',
+    // Never used: the paperwork endpoints read no pay field, and /settlement refuses a
+    // driver on this program outright rather than computing against these.
+    payPercent: 0,
+    expensesBeforePercent: false,
+    email: driver.email ?? null,
+  }
 }
 
 export interface VerifiedCaller {
@@ -444,9 +476,11 @@ async function loadImpersonatedDriver(
   if (!driver || driver.active === false) throw new ApiError(404, 'Driver not found')
 
   const settings = await scan<DriverPaySettingRow>(DRIVER_PAY_SETTING_TABLE)
-  const setting = settings.find(
+  const found = settings.find(
     (s) => s.driverId === driverId && s.active !== false && isEligiblePayGroup(s.payGroup),
   )
+  // Ivan's drivers have no pay setting by design — see syntheticPaperworkSetting.
+  const setting = found ?? syntheticPaperworkSetting(driver)
   if (!setting) throw new ApiError(404, 'Driver has no active pay setting')
 
   return { driver, setting, impersonatedBy: email }
@@ -1817,6 +1851,16 @@ export const handler = async (event: FnUrlEvent) => {
         },
       }))
       return reply(200, { ok: true, loadId, leg })
+    }
+
+    /*
+     * A driver on the paperwork program has no settlement, and must not be shown one.
+     * Refused outright rather than computed: their synthesised pay setting carries 0%, and
+     * a settlement built from it would render as a real $0.00 check.
+     */
+    if (driverProgramOf({ ...driver, payGroup: setting.payGroup }) === 'PAPERWORK'
+        && (path === '/settlement' || path === '/settlement/weeks')) {
+      return reply(409, { error: 'This driver has paperwork, not a settlement. Use /paperwork.' })
     }
 
     if (method === 'GET' && path === '/settlement/weeks') {
