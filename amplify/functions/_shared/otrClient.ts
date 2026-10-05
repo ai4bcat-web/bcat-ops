@@ -297,11 +297,25 @@ export class OtrClient {
     if (!opts.brokerMc && !opts.brokerDot) {
       throw new Error('brokerCheck requires brokerMc or brokerDot')
     }
-    const qs = new URLSearchParams()
-    if (opts.brokerMc) qs.set('brokerMc', opts.brokerMc)
-    if (opts.brokerDot) qs.set('brokerDot', opts.brokerDot)
+    /*
+     * v2 takes the MC in the PATH: GET /broker-check/{brokerMc}. v1 took a query string,
+     * and against production that shape is simply not a route — the call came back 404,
+     * which is how this was found rather than by reading.
+     *
+     * v2 has no brokerDot form, so an MC is required there; v1 accepted either.
+     */
+    let path: string
+    if (this.invoicesOnV2) {
+      if (!opts.brokerMc) throw new Error('brokerCheck on v2 requires brokerMc')
+      path = `/broker-check/${encodeURIComponent(opts.brokerMc)}`
+    } else {
+      const qs = new URLSearchParams()
+      if (opts.brokerMc) qs.set('brokerMc', opts.brokerMc)
+      if (opts.brokerDot) qs.set('brokerDot', opts.brokerDot)
+      path = `/broker-check?${qs}`
+    }
 
-    const res = await this.request(`/broker-check?${qs}`, {
+    const res = await this.request(path, {
       method: 'GET',
       headers: await this.authedHeaders({ Accept: 'application/json' }),
     })
@@ -635,9 +649,15 @@ export class OtrClient {
 export function brokerNameFrom(raw: unknown): string | null {
   if (!raw || typeof raw !== 'object') return null
   const record = raw as Record<string, unknown>
-  const keys = ['brokerName', 'clientName', 'debtorName', 'customerName', 'name', 'companyName']
+  /*
+   * Matched case-insensitively: v1 replied with lowercase keys and v2 replies with `Name`,
+   * so a case-sensitive lookup silently found nothing against production and the row went
+   * back to showing an MC nobody recognises.
+   */
+  const keys = ['brokername', 'clientname', 'debtorname', 'customername', 'name', 'companyname']
+  const lower = new Map(Object.entries(record).map(([k, v]) => [k.toLowerCase(), v]))
   for (const key of keys) {
-    const value = record[key]
+    const value = lower.get(key)
     if (typeof value === 'string' && value.trim()) return value.trim()
   }
   // Some replies nest the subject one level down.

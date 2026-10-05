@@ -71,6 +71,38 @@ export const stopsSchema = z
   .min(2, 'A load needs at least one pickup and one delivery')
   .refine((stops) => stops.some((s) => s.type === 'pickup'), { message: 'At least one pickup is required' })
   .refine((stops) => stops.some((s) => s.type === 'delivery'), { message: 'At least one delivery is required' })
+  /*
+   * A ZIP on the first pickup and the last delivery, because the factoring queue cannot
+   * invoice without them.
+   *
+   * OTR wants an origin and destination ZIP on every invoice. These were optional, so they
+   * were collected at factoring time instead — by hand, weeks later, by someone reading an
+   * address off a rate confirmation. The person booking the load has the address in front
+   * of them, which makes this the cheapest moment in the chain to capture it.
+   *
+   * Only the two ENDPOINTS are checked. A middle stop on a multi-stop run never reaches an
+   * invoice, and demanding a ZIP for one would block a booking for no gain.
+   */
+  .superRefine((stops, ctx) => {
+    const hasZip = (s: { address?: { zip?: string | null } | null }) =>
+      ((s.address?.zip ?? '').trim()).length >= 3
+    const pickup = stops.find((s) => s.type === 'pickup')
+    const delivery = [...stops].reverse().find((s) => s.type === 'delivery')
+    if (pickup && !hasZip(pickup)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Origin ZIP is required — the invoice cannot be factored without it',
+        path: [stops.indexOf(pickup), 'address', 'zip'],
+      })
+    }
+    if (delivery && !hasZip(delivery)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Destination ZIP is required — the invoice cannot be factored without it',
+        path: [stops.indexOf(delivery), 'address', 'zip'],
+      })
+    }
+  })
 
 // Multi-stop load form. The single pickup*/delivery*/origin*/destination*/*DriverId
 // fields are no longer edited directly — they're derived from `stops` by the store on
@@ -83,9 +115,13 @@ export const loadSchema = z.object({
   stops: stopsSchema,
   readyToInvoice: z.boolean(),
 
-  // Extended fields (optional)
   customer: z.string().optional().nullable(),
-  customerId: z.string().optional().nullable(),
+  /*
+   * Required, and it must be a directory customer rather than free text, because the
+   * broker's MC hangs off that record and the invoice is billed to the MC. A load booked
+   * against a typed name reaches factoring with no MC and no way to find one.
+   */
+  customerId: z.string().trim().min(1, 'Customer is required — the invoice bills their MC'),
   miles: z.number().min(0).optional().nullable(),
   rate: z.number().min(0).optional().nullable(),   // dollars in form, stored as cents
   notes: z.string().optional().nullable(),

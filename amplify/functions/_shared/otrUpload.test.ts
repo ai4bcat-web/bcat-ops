@@ -365,3 +365,43 @@ describe('creating an invoice on v2', () => {
     expect(body.CustomerMC).toBeUndefined()
   })
 })
+
+describe('broker check across the two versions', () => {
+  function checkOn(baseUrl: string) {
+    const calls: string[] = []
+    const fetchImpl = vi.fn(async (url: unknown) => {
+      const href = String(url)
+      if (href.endsWith('/auth/token')) {
+        return new Response(JSON.stringify({ access_token: 't', expires_in: 7200 }), { status: 200 })
+      }
+      calls.push(href)
+      return new Response(JSON.stringify({ Name: 'WAYFINDER LOGISTICS', McNumber: '20313', BrokerTestResult: 'Approved' }), { status: 200 })
+    })
+    const client = new OtrClient({
+      baseUrl, subscriptionKey: 'k', username: 'u', password: 'p',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    })
+    return { client, calls }
+  }
+
+  it('puts the MC in the path on v2, which is the only route there', async () => {
+    // Found by the call coming back 404 against production, not by reading the docs.
+    const { client, calls } = checkOn('https://otr.test/carrier-tms/2')
+    await client.brokerCheck({ brokerMc: '20313' })
+    expect(calls[0]).toBe('https://otr.test/carrier-tms/2/broker-check/20313')
+  })
+
+  it('keeps the query-string form on v1', async () => {
+    const { client, calls } = checkOn('https://otr.test/CarrierTmsV3')
+    await client.brokerCheck({ brokerMc: '20313' })
+    expect(calls[0]).toContain('/broker-check?brokerMc=20313')
+  })
+
+  it('reads the broker name whatever case OTR used', async () => {
+    // v1 replied in lowercase; v2 replies with `Name`. A case-sensitive lookup found
+    // nothing against production and the row fell back to showing a bare MC.
+    const { client } = checkOn('https://otr.test/carrier-tms/2')
+    const r = await client.brokerCheck({ brokerMc: '20313' })
+    expect(r.brokerName).toBe('WAYFINDER LOGISTICS')
+  })
+})
