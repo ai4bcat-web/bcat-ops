@@ -395,8 +395,22 @@ const driverApiUrl = new FunctionUrl(driverApiFn.stack, 'DriverAppApiUrl', {
   cors: {
     // Same origin allowlist the other portals use — the PWA is served from the app itself.
     allowedOrigins: PORTAL_ORIGINS,
-    allowedMethods: [HttpMethod.GET, HttpMethod.POST],
-    allowedHeaders: ['content-type', 'authorization'],
+    /*
+     * DELETE is here because the driver app uses it: removing a document calls
+     * DELETE /submissions/:id/docs. It was missing, so the browser's preflight refused
+     * the request before it left the page and every "remove this document" failed with a
+     * bare "Failed to fetch" — for real drivers, not only for an admin looking on.
+     * PUT is deliberately absent: the only PUT goes straight to S3 with a presigned URL,
+     * which is a different origin with its own CORS.
+     */
+    allowedMethods: [HttpMethod.GET, HttpMethod.POST, HttpMethod.DELETE],
+    /*
+     * x-bcat-impersonate-driver is what View as driver sends. A custom header makes the
+     * browser preflight the request, and a preflight that does not name the header is
+     * rejected — which is why that screen showed "Failed to fetch" with no matching
+     * entry in the Lambda's log: the request never reached AWS at all.
+     */
+    allowedHeaders: ['content-type', 'authorization', 'x-bcat-impersonate-driver'],
   },
 })
 

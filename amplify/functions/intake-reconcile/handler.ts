@@ -62,6 +62,26 @@ interface IntakeRow {
   threadSyncedAt?: string | null
 }
 
+/**
+ * Has somebody already said this PRO in the thread?
+ *
+ * Almost always, yes. The person who built the load usually replies "Pro# 14548" at the
+ * time, and the first live run posted "PRO# 14548 - Added in BCAT Ops" underneath exactly
+ * that — the same fact twice, in a channel people read. The status update is what this job
+ * is for; the reply is only worth making when nobody has made it.
+ *
+ * Compared on digits alone, because the human form varies ("Pro# 14548", "PRO 14548",
+ * "14548 added") and any of them means the thread already carries the number.
+ */
+export function threadAlreadyStates(
+  messages: Array<{ text?: string }>,
+  pro: string,
+): boolean {
+  const digits = pro.replace(/\D/g, '')
+  if (!digits) return false
+  return messages.some((m) => (m.text ?? '').replace(/\D/g, '').includes(digits))
+}
+
 export interface ThreadSummary {
   lastReplyText: string
   lastReplyAt: string
@@ -88,6 +108,24 @@ export function summarizeThread(messages: Array<{ text?: string; ts?: string; us
     lastReplyAt: last.ts ?? '',
     lastReplyUser: last.user ?? '',
     replyCount: replies.length,
+  }
+}
+
+/** Raw messages, for the checks that need more than the summary. */
+export async function fetchThreadMessages(
+  channel: string,
+  threadTs: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Array<{ text?: string; ts?: string; user?: string }> | null> {
+  if (!channel.trim() || !threadTs.trim() || !SLACK_BOT_TOKEN) return null
+  const url = `https://slack.com/api/conversations.replies?channel=${encodeURIComponent(channel)}&ts=${encodeURIComponent(threadTs)}&limit=100`
+  try {
+    const res = await fetchImpl(url, { headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` } })
+    const json = (await res.json()) as { ok?: boolean; messages?: Array<{ text?: string; ts?: string; user?: string }> }
+    if (!json.ok) return null
+    return json.messages ?? []
+  } catch {
+    return null
   }
 }
 
@@ -224,15 +262,25 @@ export const handler = async (): Promise<{ examined: number; replied: number; sk
     // Only a number the tender labels. An unlabelled hit is left for a person.
     if (!match || match.confidence !== 'LABELLED') { skipped += 1; continue }
 
-    const result = await postThreadReply(
-      String(item.slackChannelId),
-      String(item.slackMessageTs),
-      slackBuiltReply(match.pro),
-    )
-    if (!result.ok) {
-      console.error('[intake-reconcile] reply failed', { id: item.id, error: result.error })
-      skipped += 1
-      continue
+    /*
+     * Say it only if nobody has. The queue still gets its status either way — that is the
+     * part nobody was doing — but a channel people actually read should not be told a
+     * second time what it was already told.
+     */
+    const messages = await fetchThreadMessages(String(item.slackChannelId), String(item.slackMessageTs))
+    const alreadySaid = messages !== null && threadAlreadyStates(messages, match.pro)
+
+    if (!alreadySaid) {
+      const result = await postThreadReply(
+        String(item.slackChannelId),
+        String(item.slackMessageTs),
+        slackBuiltReply(match.pro),
+      )
+      if (!result.ok) {
+        console.error('[intake-reconcile] reply failed', { id: item.id, error: result.error })
+        skipped += 1
+        continue
+      }
     }
 
     /*
@@ -253,11 +301,13 @@ export const handler = async (): Promise<{ examined: number; replied: number; sk
       },
     }))
     replied += 1
-    console.log('[intake-reconcile] replied in thread', {
+    console.log('[intake-reconcile] reconciled', {
       id: item.id, pro: match.pro, matchedOn: match.matchedOn, loadId: match.load.id,
+      posted: !alreadySaid, reason: alreadySaid ? 'thread already states the PRO' : 'posted',
     })
 
-    await new Promise((r) => setTimeout(r, POST_INTERVAL_MS))
+    // Only a real post needs the pacing; a silent status update does not.
+    if (!alreadySaid) await new Promise((r) => setTimeout(r, POST_INTERVAL_MS))
   }
 
   console.log('[intake-reconcile] done', { examined: candidates.length, replied, skipped, synced })

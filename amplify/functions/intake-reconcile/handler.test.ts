@@ -217,3 +217,42 @@ describe('caching what the thread says', () => {
     expect(await mod.readThread('C', '1', boom as unknown as typeof fetch)).toBeNull()
   })
 })
+
+describe('not repeating what the thread already says', () => {
+  it('spots the PRO however a person wrote it', () => {
+    /*
+     * The first live run posted "PRO# 14548 - Added in BCAT Ops" underneath a human's
+     * "Pro# 14548" from days earlier — the same fact twice, in a channel people read.
+     */
+    const said = [{ text: 'Pro# 14548' }]
+    expect(mod.threadAlreadyStates(said, '14548')).toBe(true)
+    expect(mod.threadAlreadyStates([{ text: 'PRO 14548 built' }], '14548')).toBe(true)
+    expect(mod.threadAlreadyStates([{ text: '14548 added in ops' }], '14548')).toBe(true)
+  })
+
+  it('does not confuse a different number for the PRO', () => {
+    expect(mod.threadAlreadyStates([{ text: 'Pro# 14549' }], '14548')).toBe(false)
+    expect(mod.threadAlreadyStates([{ text: "who's the driver?" }], '14548')).toBe(false)
+    expect(mod.threadAlreadyStates([], '14548')).toBe(false)
+  })
+
+  it('still updates the queue when it stays quiet', async () => {
+    // The status update is the part nobody was doing; the reply is the optional half.
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      calls.push(String(url))
+      return {
+        json: async () => String(url).includes('conversations.replies')
+          ? { ok: true, messages: [{ text: 'tender' }, { text: 'Pro# 14556' }] }
+          : { ok: true },
+      }
+    }))
+    const out = await mod.handler()
+    expect(out.replied).toBe(1)
+    expect(calls.filter((u) => u.includes('chat.postMessage'))).toHaveLength(0)
+    const update = send.mock.calls.map((c) => c[0]).find((c) => c.constructor.name === 'UpdateCommand'
+      && (c.input.ExpressionAttributeValues as Record<string, unknown>)?.[':status'] === 'BUILT')
+    expect(update).toBeTruthy()
+    vi.unstubAllGlobals()
+  })
+})
