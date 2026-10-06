@@ -70,6 +70,25 @@ function buildSlackText(
     .join('\n')
 }
 
+/** What a POD post says. Deliberately short: the document itself is on the load. */
+function buildPodSlackText(
+  driverName: string,
+  referenceNumber: string | null | undefined,
+  note: string | null | undefined,
+): string {
+  return [
+    `:page_facing_up: *POD uploaded* for ${driverName}`,
+    referenceNumber ? `Reference: ${referenceNumber}` : null,
+    // A POD with no load number is the normal case when the driver has the paperwork
+    // before the load is built. Say so out loud, so it is picked up here rather than
+    // discovered later on a held settlement.
+    referenceNumber ? null : '_No load number — assign it to a load in Driver Docs._',
+    note ? `Note: ${note}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 async function postSlack(
   channel: string,
   text: string,
@@ -261,59 +280,43 @@ export async function notifyRateconSubmitted(n: SubmissionNotice): Promise<Notif
 }
 
 /**
- * A driver's POD reaches the office by email only.
+ * A driver's POD is announced in its own Slack channel, and nowhere else.
  *
- * It used to post to Slack as well — into the rate confirmation's thread where there was
- * one, or as a new top-level message where there was not. That is gone. A POD arriving is
- * not news anyone acts on in Slack: the office sees it on the load, on the settlement and
- * in the factoring queue, all of which read the document itself rather than a notification
- * about it. What the Slack post actually produced was noise on every upload, including
- * every replaced page and every added page.
+ * It used to email ivanloads@ instead. That address is wired into #intake-ivan, so every
+ * POD arrived there as an email — and because the intake webhook skips bot messages but
+ * deliberately allows email, each one also became an intake item in the build queue. A
+ * POD is not a tender; nothing in that queue was ever going to be built from one. It was
+ * noise on the channel dispatch watches for new freight, and noise in the queue.
  *
- * The email stays, because ivanloads@ is where the paperwork is filed and the attachment
- * goes with it.
+ * So it posts to #intake-pods instead, always as a top-level message rather than threaded
+ * under a rate confirmation: a dedicated channel read as a list of PODs is the point, and
+ * burying half of them in threads elsewhere would defeat it. The bot post also means the
+ * intake webhook ignores it by subtype, so no intake item is created either.
+ *
+ * No email. The document reaches the office through the load, the settlement and the
+ * factoring queue, all of which read the file itself rather than a notification about it.
  */
 export async function notifyPodAdded(n: SubmissionNotice, refs: Partial<ThreadRefs>): Promise<NotifyResult> {
-  const from = process.env.SES_FROM_ADDRESS ?? 'onboarding@bcatcorp.com'
-  const to = process.env.LOADS_EMAIL_TO ?? 'ivanloads@bcatcorp.com'
-  const subject = refs.emailSubject ? `Re: ${refs.emailSubject}` : `POD for ${n.driverName}`
-  const bodyText = emailBodyText(n, 'pod')
+  const channel = process.env.INTAKE_PODS_CHANNEL_ID ?? 'C0C6ZT55R0T'
+  const slackResult = await postSlack(channel, buildPodSlackText(n.driverName, n.referenceNumber, n.note))
 
-  // A POD with a parent email thread replies into it; a standalone one (the PWA upload
-  // with no rate con to reply to) opens its own, so it still reaches ivanloads@.
-  const parentMessageId = refs.emailMessageId
-  const hasParentThread = !!parentMessageId
-
-  const emailResult = await Promise.allSettled([
-    parentMessageId
-      ? sendEmail(to, from, subject, bodyText, n.attachments, {
-          inReplyTo: parentMessageId,
-          references: parentMessageId,
-        })
-      : sendEmail(to, from, subject, bodyText, n.attachments),
-  ])
-
-  const errors: string[] = []
-  let emailMessageId = ''
-  const settled = emailResult[0]
-  if (settled.status === 'fulfilled') {
-    if (settled.value.ok) emailMessageId = settled.value.messageId
-    else errors.push(`Email: ${settled.value.error}`)
-  } else {
-    errors.push(`Email: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`)
-  }
-
+  /*
+   * The refs pass through untouched, and the POD's own message handle is not kept.
+   *
+   * These four belong to the RATE CONFIRMATION's thread in #intake-ivan. Overwriting them
+   * with the POD's handle would lose that thread. And the POD's own handle is not stored
+   * because nothing reads it: these refs exist so a later POD can reply into an existing
+   * thread, and no POD threads any more — each one is its own line in #intake-pods.
+   */
   const outRefs: Partial<ThreadRefs> = {
-    // Carried through untouched: a rate confirmation's Slack thread is still its own, and
-    // nothing here opens or replies to one any more.
     slackChannelId: refs.slackChannelId,
     slackMessageTs: refs.slackMessageTs,
-    emailMessageId: emailMessageId || refs.emailMessageId,
-    emailSubject: refs.emailSubject ?? (hasParentThread ? undefined : subject),
+    emailMessageId: refs.emailMessageId,
+    emailSubject: refs.emailSubject,
   }
 
   return {
     refs: outRefs,
-    error: errors.length > 0 ? `POD notification failed (${errors.join('; ')})` : undefined,
+    error: slackResult.ok ? undefined : `POD notification failed (Slack: ${slackResult.error})`,
   }
 }

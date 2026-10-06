@@ -165,14 +165,16 @@ describe('notifyRateconSubmitted', () => {
 })
 
 /**
- * A driver's POD reaches the office by EMAIL ONLY.
+ * A driver's POD is announced in #intake-pods, and nowhere else.
  *
- * It used to post to Slack as well — threaded under the rate confirmation where there was
- * one, top-level where there was not. That was removed: a POD arriving is not something
- * anyone acts on in Slack, because the office sees it on the load, on the settlement and
- * in the factoring queue, all of which read the document rather than a notice about it.
- * What the post actually produced was a message for every upload, every replaced page and
- * every added page.
+ * It used to email ivanloads@ instead. That address is wired into #intake-ivan, so every
+ * POD arrived on the channel dispatch watches for new freight — and because the intake
+ * webhook skips bot messages but deliberately allows email, each one also became an
+ * intake item in the build queue. A POD is not a tender; nothing there was ever going to
+ * be built from one.
+ *
+ * The posts are top-level by design. A dedicated channel read as a list of PODs is the
+ * point, and threading half of them under rate confirmations elsewhere would defeat it.
  */
 describe('notifyPodAdded', () => {
   const parentRefs = (): ThreadRefs => ({
@@ -182,62 +184,63 @@ describe('notifyPodAdded', () => {
     emailSubject: 'New load from Jane Doe',
   })
 
-  it('posts nothing to Slack, with a parent thread sitting right there', async () => {
-    await notifyPodAdded(notice({ driverName: 'Jane Doe', note: null }), parentRefs())
-    expect(fetchMock).not.toHaveBeenCalled()
+  it('posts to #intake-pods, not to the intake channel', async () => {
+    await notifyPodAdded(notice({ driverName: 'Jane Doe' }), {})
+    expect(slackBody().channel).toBe('C0C6ZT55R0T')
+    expect(slackBody().channel).not.toBe('C0B4YJXLYM8')
   })
 
-  it('posts nothing to Slack for a standalone POD either', async () => {
-    await notifyPodAdded(notice({ driverName: 'Solo', referenceNumber: 'VRID-1' }), {})
-    expect(fetchMock).not.toHaveBeenCalled()
+  it('posts top-level even when a rate confirmation thread is sitting right there', async () => {
+    // Threading it would bury it in #intake-ivan, which is the channel we just left.
+    await notifyPodAdded(notice({ driverName: 'Jane Doe' }), parentRefs())
+    expect(slackBody().channel).toBe('C0C6ZT55R0T')
+    expect(slackBody().thread_ts).toBeUndefined()
   })
 
-  it('sends the POD email with both In-Reply-To and References headers', async () => {
-    await notifyPodAdded(notice({ driverName: 'Jane Doe', referenceNumber: null }), parentRefs())
-
-    const raw = sentEmailRaw()
-    expect(raw).toContain(`In-Reply-To: ${parentRefs().emailMessageId}`)
-    expect(raw).toContain(`References: ${parentRefs().emailMessageId}`)
-    expect(raw).toContain('Subject: Re: New load from Jane Doe')
-    expect(raw).toContain('Content-Disposition: attachment; filename="ratecon.jpg"')
+  it('names the driver and the load it belongs to', async () => {
+    await notifyPodAdded(notice({ driverName: 'Jane Doe', referenceNumber: '14569', note: 'Dock 5' }), {})
+    const { text } = slackBody()
+    expect(text).toContain('POD uploaded')
+    expect(text).toContain('Jane Doe')
+    expect(text).toContain('Reference: 14569')
+    expect(text).toContain('Note: Dock 5')
   })
 
-  it('opens its own email thread for a standalone POD', async () => {
-    const result = await notifyPodAdded(notice({ driverName: 'Solo', referenceNumber: 'VRID-1' }), {})
-
-    const raw = sentEmailRaw()
-    expect(raw).toContain('Subject: POD for Solo')
-    expect(raw).not.toContain('In-Reply-To:')
-    expect(raw).toContain('Content-Disposition: attachment; filename="ratecon.jpg"')
-    expect(result.error).toBeUndefined()
-    expect(result.refs.emailMessageId).toBeDefined()
+  it('says out loud when a POD has no load number yet', async () => {
+    // The normal case when a driver has the paperwork before the load is built. Better
+    // caught here than discovered later on a settlement that will not pay.
+    await notifyPodAdded(notice({ driverName: 'Solo', referenceNumber: null }), {})
+    expect(slackBody().text).toContain('No load number')
   })
 
-  it('still emails when a rate con opened a Slack thread but no email thread', async () => {
-    /*
-     * This used to be refused — "no parent email thread" — because a Slack thread counted
-     * as a parent and there was no email to reply into. With Slack out of the picture the
-     * POD opens its own email instead of being dropped, which is the point of sending it.
-     */
-    const result = await notifyPodAdded(
-      notice({ driverName: 'NoEmail' }),
-      { slackChannelId: 'C0B4YJXLYM8', slackMessageTs: '1699999999.000100', emailMessageId: '', emailSubject: '' },
-    )
-    expect(sesSendMock).toHaveBeenCalledTimes(1)
-    expect(result.error).toBeUndefined()
+  it('sends NO email — that is what put PODs in #intake-ivan', async () => {
+    await notifyPodAdded(notice(), parentRefs())
+    expect(sesSendMock).not.toHaveBeenCalled()
   })
 
-  it('carries a rate confirmation’s Slack refs through untouched', async () => {
-    // The rate con's own thread is still its own; this simply no longer writes to it.
+  it('carries a rate confirmation’s thread refs through untouched', async () => {
+    // Those handles belong to the rate con's message; overwriting them would lose it.
     const result = await notifyPodAdded(notice(), parentRefs())
     expect(result.refs.slackChannelId).toBe(parentRefs().slackChannelId)
     expect(result.refs.slackMessageTs).toBe(parentRefs().slackMessageTs)
+    expect(result.refs.emailMessageId).toBe(parentRefs().emailMessageId)
+    expect(result.refs.emailSubject).toBe(parentRefs().emailSubject)
   })
 
-  it('reports an email failure and keeps the thread refs', async () => {
-    sesSendMock.mockRejectedValue(new Error('SES quota exceeded'))
+  it('reports a Slack failure and still keeps the thread refs', async () => {
+    fetchMock.mockResolvedValue({ json: async () => ({ ok: false, error: 'channel_not_found' }) })
     const result = await notifyPodAdded(notice(), parentRefs())
-    expect(result.error).toContain('Email: SES quota exceeded')
-    expect(result.refs.emailMessageId).toBe(parentRefs().emailMessageId)
+    expect(result.error).toContain('channel_not_found')
+    expect(result.refs.slackMessageTs).toBe(parentRefs().slackMessageTs)
+  })
+
+  it('honours an override channel, so the id is not trapped in the build', async () => {
+    process.env.INTAKE_PODS_CHANNEL_ID = 'C0OVERRIDE'
+    try {
+      await notifyPodAdded(notice(), {})
+      expect(slackBody().channel).toBe('C0OVERRIDE')
+    } finally {
+      delete process.env.INTAKE_PODS_CHANNEL_ID
+    }
   })
 })

@@ -401,6 +401,10 @@ backend.data.resources.tables['AuditLog'].grantWriteData(driverApiFn)
 // Plain env vars (not secrets) so a missing value never blocks the deploy.
 driverApiFn.addEnvironment('INTAKE_IVAN_CHANNEL_ID', process.env.INTAKE_IVAN_CHANNEL_ID ?? 'C0B4YJXLYM8')
 driverApiFn.addEnvironment('LOADS_EMAIL_TO', process.env.LOADS_EMAIL_TO ?? 'ivanloads@bcatcorp.com')
+// #intake-pods. A driver's POD is announced here and nowhere else — it used to email
+// ivanloads@, which feeds #intake-ivan, so every POD landed on the channel dispatch
+// watches for new freight AND became an intake item nobody was ever going to build.
+driverApiFn.addEnvironment('INTAKE_PODS_CHANNEL_ID', process.env.INTAKE_PODS_CHANNEL_ID ?? 'C0C6ZT55R0T')
 driverApiFn.addEnvironment('SES_FROM_ADDRESS', process.env.SES_FROM_ADDRESS ?? 'onboarding@bcatcorp.com')
 
 // Function URL — drivers call this directly from the PWA; JWT verification is handled in the Lambda.
