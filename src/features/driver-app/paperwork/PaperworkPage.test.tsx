@@ -261,9 +261,12 @@ describe('the PM line on the home screen', () => {
       label: 'Next PM in 15,000 mi — at 125,000 mi', truckNumber: '009',
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText(/Next PM in 15,000 mi/)).toBeTruthy(), { timeout: 5000 })
+    // The gauge leads with the miles remaining and draws a bar across the interval; the
+    // label sentence moved into the bar's own component (PmGauge).
+    await waitFor(() => expect(screen.getByText('15,000 mi to next PM')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByRole('progressbar')).toBeTruthy()
     expect(screen.getByText(/Truck 009/)).toBeTruthy()
-    expect(screen.getByText(/110,000 mi now/)).toBeTruthy()
+    expect(screen.getByText(/110,000 mi/)).toBeTruthy()
   })
 
   it('says so when the PM is overdue', async () => {
@@ -273,7 +276,7 @@ describe('the PM line on the home screen', () => {
       label: 'PM overdue by 1,500 mi — it was due at 125,000 mi', truckNumber: '009',
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText(/PM overdue by 1,500 mi/)).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('PM overdue by 1,500 mi')).toBeTruthy(), { timeout: 5000 })
   })
 
   it('says nothing when the driver has no truck assigned', async () => {

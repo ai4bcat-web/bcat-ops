@@ -91,3 +91,20 @@ describe('closing a queue row out', () => {
     expect(localStatusFor(null)).toBe('PENDING_WITH_OTR')
   })
 })
+
+describe('a row OTR has not spoken about', () => {
+  it('has no status at all, rather than "Pending"', () => {
+    /*
+     * "Pending" is one of OTR's own statuses (code 1). Defaulting to it meant a freshly
+     * submitted row displayed a status in OTR's wording that OTR had never sent — which
+     * reads as fact and is wrong the moment OTR says something else.
+     */
+    expect(otrStatusMeta(null)).toBeNull()
+    expect(otrStatusMeta(undefined)).toBeNull()
+    expect(otrStatusMeta('')).toBeNull()
+  })
+
+  it('is not treated as factored either', () => {
+    expect(localStatusFor(null)).toBe('PENDING_WITH_OTR')
+  })
+})

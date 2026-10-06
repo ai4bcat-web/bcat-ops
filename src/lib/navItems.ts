@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Route, ClipboardList, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Route, ClipboardList, Clock, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -67,6 +67,8 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/driver-pay',            label: 'Amazon Settlements',      icon: Wallet, pageKey: 'driverPay' },
       { to: '/owner-operator-pay',    label: 'Owner Operator Settlements', icon: Banknote, pageKey: 'ownerOperatorPay' },
       { to: '/ivan-driver-app',        label: 'Ivan Driver App',          icon: ClipboardList, pageKey: 'ivanDriverApp' },
+      // Employee time cards. Beside the Ivan app because that is who clocks.
+      { to: '/hours',                  label: 'Employee Hours',           icon: Clock,  pageKey: 'hours' },
       { to: '/disputes',              label: 'Amazon Disputes',         icon: Scale,  pageKey: 'disputes' },
     ],
   },

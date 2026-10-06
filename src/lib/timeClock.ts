@@ -211,3 +211,53 @@ export function minutesLabel(total: number): string {
 export function decimalHours(minutes: number): number {
   return Math.round((Math.max(0, minutes) / 60) * 100) / 100
 }
+
+
+/* ── Motive cross-check ────────────────────────────────────────────────────── */
+
+export interface MotiveDayWindow {
+  /** First time the driver went on duty that day, ISO. */
+  firstOnDutyAt: string | null
+  /** Last time they came off it, ISO. Null while the day is still running. */
+  lastOffDutyAt: string | null
+  /** Driving + on-duty seconds Motive recorded. */
+  workedSeconds: number
+}
+
+export type MotiveCheck =
+  /** Motive and the time card agree within tolerance. */
+  | { state: 'MATCH'; diffMinutes: number }
+  /** They differ by more than tolerance — a human should look. */
+  | { state: 'GAP'; diffMinutes: number }
+  /** Nothing from Motive for that day, or the driver is not linked. */
+  | { state: 'NO_DATA' }
+  /** The shift has not been closed yet, so there is nothing to compare. */
+  | { state: 'OPEN' }
+
+/** Beyond this much difference the day is worth a human's attention. */
+export const MOTIVE_TOLERANCE_MINUTES = 60
+
+/**
+ * Compare one day's time card against what the truck's ELD recorded.
+ *
+ * A cross-check, deliberately NOT a correction. The two measure different things: a driver
+ * doing paperwork or waiting at a dock is on the clock while the truck records nothing, and
+ * a truck left idling records time nobody worked. So a difference is surfaced for somebody
+ * to look at and never used to overwrite a card — the card is what payroll pays, and only a
+ * person may change it.
+ *
+ * An open shift compares to nothing, because the card has no total yet.
+ */
+export function compareToMotive(
+  day: DayTotal,
+  motive: MotiveDayWindow | null | undefined,
+): MotiveCheck {
+  if (day.open) return { state: 'OPEN' }
+  if (!motive || (!motive.firstOnDutyAt && motive.workedSeconds <= 0)) return { state: 'NO_DATA' }
+
+  const motiveMinutes = Math.round(motive.workedSeconds / 60)
+  const diff = day.totalMinutes - motiveMinutes
+  return Math.abs(diff) > MOTIVE_TOLERANCE_MINUTES
+    ? { state: 'GAP', diffMinutes: diff }
+    : { state: 'MATCH', diffMinutes: diff }
+}

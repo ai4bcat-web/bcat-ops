@@ -1,6 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
-import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus } from '@/types'
+import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
@@ -2759,3 +2759,79 @@ export async function notifyApptNeeded(args: {
 }
 
 
+
+// ── Time clock ────────────────────────────────────────────────────────────────
+
+const TIME_CLOCK_FIELDS = `
+  id driverId workDate kind clockInAt clockOutAt minutes note source
+  correctedBy correctedAt originalMinutes createdAt updatedAt
+`
+
+/**
+ * Every time clock row in a date range, for the staff hours page.
+ *
+ * Filtered client-side like the other small datasets here: the whole table is one row per
+ * punch for a handful of employee drivers, so a server-side index would cost more to
+ * maintain than it saves.
+ */
+export async function listTimeClockEntries(range?: {
+  from?: string
+  to?: string
+  driverId?: string
+}): Promise<TimeClockEntry[]> {
+  const result = await client.graphql({
+    query: `query ListTimeClockEntries { listTimeClockEntries(limit: 10000) { items { ${TIME_CLOCK_FIELDS} } } }`,
+  }) as { data: { listTimeClockEntries: { items: TimeClockEntry[] } } }
+  let items = result.data.listTimeClockEntries.items ?? []
+  if (range?.from)     items = items.filter((e) => e.workDate >= range.from!)
+  if (range?.to)       items = items.filter((e) => e.workDate <= range.to!)
+  if (range?.driverId) items = items.filter((e) => e.driverId === range.driverId)
+  return items
+}
+
+/**
+ * Correct one row, on the record.
+ *
+ * `correctedBy` and `originalMinutes` are written here rather than left to the caller, so a
+ * correction cannot be made anonymously or lose what the figure used to be — which is the
+ * only thing that makes a disagreement about a paycheck settleable by looking.
+ */
+export async function correctTimeClockEntry(
+  entry: TimeClockEntry,
+  patch: { minutes?: number; note?: string; kind?: TimeClockEntry['kind'] },
+  staffEmail: string,
+): Promise<TimeClockEntry> {
+  const result = await client.graphql({
+    query: `mutation UpdateTimeClockEntry($input: UpdateTimeClockEntryInput!) { updateTimeClockEntry(input: $input) { ${TIME_CLOCK_FIELDS} } }`,
+    variables: {
+      input: {
+        id: entry.id,
+        ...patch,
+        correctedBy: staffEmail,
+        correctedAt: new Date().toISOString(),
+        // Kept from the FIRST correction, so it is the driver's original figure and not
+        // whatever the previous correction happened to set.
+        originalMinutes: entry.originalMinutes ?? entry.minutes ?? 0,
+      },
+    },
+  }) as { data: { updateTimeClockEntry: TimeClockEntry } }
+  return result.data.updateTimeClockEntry
+}
+
+/** Staff adding a row a driver never recorded — a forgotten shift, a holiday, PTO. */
+export async function createTimeClockEntry(
+  input: Omit<TimeClockEntry, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<TimeClockEntry> {
+  const result = await client.graphql({
+    query: `mutation CreateTimeClockEntry($input: CreateTimeClockEntryInput!) { createTimeClockEntry(input: $input) { ${TIME_CLOCK_FIELDS} } }`,
+    variables: { input },
+  }) as { data: { createTimeClockEntry: TimeClockEntry } }
+  return result.data.createTimeClockEntry
+}
+
+export async function deleteTimeClockEntry(id: string): Promise<void> {
+  await client.graphql({
+    query: `mutation DeleteTimeClockEntry($input: DeleteTimeClockEntryInput!) { deleteTimeClockEntry(input: $input) { id } }`,
+    variables: { input: { id } },
+  })
+}

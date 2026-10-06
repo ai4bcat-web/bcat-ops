@@ -137,9 +137,22 @@ export function OtrPanel({ item, onChanged }: Props) {
             their portal agree. The mapping lives in src/lib/otrInvoiceStatus.ts; their API
             sends a number and their portal shows a word, and inventing our own wording
             would leave the office deciding whether two labels mean the same thing.
+
+            Shown ONLY once OTR has actually reported one. This used to fall back to
+            "Pending", which is itself one of OTR's statuses — so a row that had just been
+            submitted, and about which OTR had said nothing at all, displayed a status in
+            OTR's own wording as though it had come from them. Until the hourly sync brings
+            one back there is no OTR status, and the row says exactly that.
           */}
           {(() => {
-            const meta = otrStatusMeta(item.otrStatus) ?? otrStatusMeta(1)!
+            const meta = otrStatusMeta(item.otrStatus)
+            if (!meta) {
+              return (
+                <span className="text-xs text-muted-foreground">
+                  Submitted &mdash; waiting for OTR&rsquo;s first status
+                </span>
+              )
+            }
             return (
               <span
                 className="rounded px-2 py-0.5 text-xs font-semibold"

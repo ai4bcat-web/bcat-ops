@@ -432,3 +432,24 @@ export interface FactoringItem {
 }
 
 
+
+/** One stretch of an employee driver's day. See src/lib/timeClock.ts for the arithmetic. */
+export interface TimeClockEntry {
+  id: string
+  driverId: string
+  /** Chicago calendar day, YYYY-MM-DD. */
+  workDate: string
+  kind: 'WORK' | 'HOLIDAY' | 'PTO'
+  clockInAt?: string | null
+  clockOutAt?: string | null
+  minutes?: number | null
+  note?: string | null
+  source?: 'DRIVER' | 'STAFF' | null
+  /** Staff email. Set only on a corrected row. */
+  correctedBy?: string | null
+  correctedAt?: string | null
+  /** What the row said before the FIRST correction. */
+  originalMinutes?: number | null
+  createdAt?: string
+  updatedAt?: string
+}

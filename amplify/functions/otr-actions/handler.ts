@@ -853,7 +853,12 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           otrSubmittedAt: nowIso(),
           otrSubmittedBy: actor,
           otrAmount: Math.round(Number(payload.InvoiceAmount) * 100),
-          otrStatus: 'Pending',
+          /*
+           * No otrStatus here. "Pending" is one of OTR's OWN statuses, so writing it at
+           * submit time put a status in OTR's wording on a row OTR had not spoken about
+           * yet — indistinguishable from a real one, and wrong the moment OTR disagreed.
+           * The row carries a status only once the hourly sync brings one back.
+           */
           otrDocsUploaded: uploaded,
           otrReadiness: readiness,
           status: 'PENDING_WITH_OTR',

@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest'
 import {
   weekStartOf, weekEndOf, weekDays, recentWeekStarts, rowMinutes, isOpenShift,
   summarizeWeek, minutesLabel, decimalHours, STANDARD_DAY_MINUTES, PAID_HOLIDAYS,
-  type TimeClockRow,
+  compareToMotive, type TimeClockRow, type DayTotal,
 } from './timeClock'
 
 const row = (over: Partial<TimeClockRow> = {}): TimeClockRow => ({
@@ -182,5 +182,57 @@ describe('paid holidays', () => {
   it('offers a fixed list rather than free text', () => {
     // So "Thanksgiving", "thanksgiving" and "Turkey day" cannot become three holidays.
     expect(PAID_HOLIDAYS.every((h) => typeof h.key === 'string' && h.key.length > 0)).toBe(true)
+  })
+})
+
+describe('comparing a time card to Motive', () => {
+  const day = (over: Partial<DayTotal> = {}): DayTotal => ({
+    date: '2026-10-05', workedMinutes: 480, holidayMinutes: 0, ptoMinutes: 0,
+    totalMinutes: 480, open: false, rows: [], ...over,
+  })
+
+  it('agrees when the two are close', () => {
+    const c = compareToMotive(day(), { firstOnDutyAt: 'x', lastOffDutyAt: 'y', workedSeconds: 8 * 3600 })
+    expect(c.state).toBe('MATCH')
+  })
+
+  it('tolerates an hour either way', () => {
+    // A driver doing paperwork is working while the truck records nothing; an idling truck
+    // records time nobody worked. Small differences are normal, not errors.
+    expect(compareToMotive(day(), { firstOnDutyAt: 'x', lastOffDutyAt: 'y', workedSeconds: 7.2 * 3600 }).state)
+      .toBe('MATCH')
+  })
+
+  it('flags a real gap for a human', () => {
+    const c = compareToMotive(day({ totalMinutes: 720 }), { firstOnDutyAt: 'x', lastOffDutyAt: 'y', workedSeconds: 8 * 3600 })
+    expect(c.state).toBe('GAP')
+    expect(c).toMatchObject({ diffMinutes: 240 })
+  })
+
+  it('flags a gap the other way too', () => {
+    // The card reading LESS than the truck matters just as much — a missed clock-in.
+    const c = compareToMotive(day({ totalMinutes: 120 }), { firstOnDutyAt: 'x', lastOffDutyAt: 'y', workedSeconds: 8 * 3600 })
+    expect(c.state).toBe('GAP')
+    expect(c).toMatchObject({ diffMinutes: -360 })
+  })
+
+  it('says nothing when Motive has no day', () => {
+    expect(compareToMotive(day(), null).state).toBe('NO_DATA')
+    expect(compareToMotive(day(), { firstOnDutyAt: null, lastOffDutyAt: null, workedSeconds: 0 }).state)
+      .toBe('NO_DATA')
+  })
+
+  it('does not compare a shift that is still running', () => {
+    expect(compareToMotive(day({ open: true }), { firstOnDutyAt: 'x', lastOffDutyAt: null, workedSeconds: 3600 }).state)
+      .toBe('OPEN')
+  })
+
+  it('never returns a corrected figure, only a difference', () => {
+    /*
+     * The card is what payroll pays. Motive is evidence for a person to weigh, never a
+     * value that overwrites a card — so there is deliberately no "suggested minutes" here.
+     */
+    const c = compareToMotive(day({ totalMinutes: 720 }), { firstOnDutyAt: 'x', lastOffDutyAt: 'y', workedSeconds: 8 * 3600 })
+    expect(Object.keys(c).sort()).toEqual(['diffMinutes', 'state'])
   })
 })

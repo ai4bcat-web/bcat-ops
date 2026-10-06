@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Camera, FileWarning, Loader2, RefreshCcw, Truck, Wrench } from 'lucide-react'
+import { AlertCircle, Camera, FileWarning, Loader2, RefreshCcw, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -25,6 +25,7 @@ import { UnattachedPods } from '../UnattachedPods'
 import { sundayOf, weekLabel } from '@/features/driver-pay/week'
 import { errorText } from '@/lib/errorText'
 import { useDriverPm } from '../useDriverProgram'
+import { PmGauge } from './PmGauge'
 
 /**
  * When this driver's truck is next due a PM.
@@ -38,32 +39,9 @@ import { useDriverPm } from '../useDriverProgram'
  */
 function PmLine() {
   const pm = useDriverPm()
+  // Nothing to show for a driver with no truck assigned, or before the profile lands.
   if (!pm) return null
-
-  const tone =
-    pm.state === 'OVERDUE'
-      ? 'border-red-500/30 bg-red-500/10 text-red-700'
-      : pm.state === 'DUE_SOON'
-        ? 'border-amber-500/30 bg-amber-500/10 text-amber-700'
-        : 'border-border bg-muted/40 text-muted-foreground'
-
-  return (
-    <div className={`mb-4 flex items-start gap-2 rounded-xl border p-3 ${tone}`}>
-      <Wrench className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <div className="min-w-0">
-        <p className="text-sm font-semibold">{pm.label}</p>
-        {(pm.truckNumber || pm.lastPmDate) && (
-          <p className="mt-0.5 text-xs opacity-80">
-            {[
-              pm.truckNumber ? `Truck ${pm.truckNumber}` : null,
-              pm.currentOdometer != null ? `${pm.currentOdometer.toLocaleString()} mi now` : null,
-              pm.lastPmDate ? `last PM ${pm.lastPmDate}` : null,
-            ].filter(Boolean).join(' · ')}
-          </p>
-        )}
-      </div>
-    </div>
-  )
+  return <PmGauge pm={pm} />
 }
 
 export function PaperworkPage() {
