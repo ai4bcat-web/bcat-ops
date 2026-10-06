@@ -890,6 +890,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'timeclock' && segments[1] === 'punch') {
     return { path: '/timeclock/punch' }
   }
+  if (segments[0] === 'staff' && segments[1] === 'motive-days') {
+    return { path: '/staff/motive-days' }
+  }
   if (segments[0] === 'loads' && segments[1] === 'current') {
     return { path: '/loads/current' }
   }
@@ -1737,6 +1740,93 @@ async function overnightForWeek(
   }
 }
 
+/**
+ * A staff caller, for routes that are about the fleet rather than about one driver.
+ *
+ * The impersonation path verifies the same token but then narrows to a single driver and
+ * writes an audit entry, which is right for "look at their app" and wrong for "show me the
+ * office a report". Same staff pool, same permission check, no impersonation.
+ */
+async function verifyStaff(event: FnUrlEvent): Promise<string> {
+  const token = extractBearer(event.headers)
+  if (!token) throw new ApiError(401, 'Missing authorization')
+  if (!staffVerifier) throw new ApiError(403, 'Staff access is not configured')
+  let claims: { email?: string }
+  try {
+    claims = (await staffVerifier.verify(token)) as { email?: string }
+  } catch (err) {
+    throw new ApiError(401, `Invalid staff token: ${err instanceof Error ? err.message : String(err)}`)
+  }
+  const email = normalizeEmail(claims.email ?? '')
+  if (!email) throw new ApiError(401, 'Staff token missing email')
+  if (!mayImpersonate(email)) throw new ApiError(403, 'Not permitted')
+  return email
+}
+
+/**
+ * When each driver's truck was actually moving, by day, for the hours page.
+ *
+ * The signal is the ELD's own DRIVING segments. A driver cannot set those by hand the way
+ * they can a clock-in — the device logs them from vehicle motion — so they are the honest
+ * check on a time card. On-duty-not-driving is reported alongside, because a driver doing a
+ * pre-trip or waiting at a dock is working while the truck is still.
+ *
+ * One Motive call for every driver over the whole period rather than one per driver per
+ * day: /v1/logs takes a list of driver ids and a date range, and a fortnight of five drivers
+ * would otherwise be seventy requests to learn the same thing.
+ */
+async function motiveDaysFor(
+  driverIds: string[],
+  from: string,
+  to: string,
+): Promise<Record<string, Record<string, { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number; onDutySeconds: number }>>> {
+  const out: Record<string, Record<string, { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number; onDutySeconds: number }>> = {}
+  if (!MOTIVE_API_KEY) return out
+
+  const drivers = await scan<DriverRow>(DRIVER_TABLE)
+  // Only drivers with an explicit Motive link; a name match must never decide whose log
+  // this is. See src/lib/motiveDriverMatch.ts.
+  const linked = drivers.filter(
+    (d) => driverIds.includes(d.id) && d.motiveDriverId != null && String(d.motiveDriverId).trim() !== '',
+  )
+  if (linked.length === 0) return out
+
+  const byMotiveId = new Map(linked.map((d) => [String(d.motiveDriverId), d.id]))
+  const params = linked.map((d) => `driver_ids[]=${encodeURIComponent(String(d.motiveDriverId))}`).join('&')
+  const url = `${MOTIVE_BASE}/logs?${params}&start_date=${encodeURIComponent(from)}&end_date=${encodeURIComponent(to)}&per_page=100`
+
+  try {
+    const res = await fetch(url, { headers: { 'X-Api-Key': MOTIVE_API_KEY } })
+    if (!res.ok) {
+      console.error('[driver-app-api] Motive logs failed for the hours page', { status: res.status })
+      return out
+    }
+    const body = (await res.json()) as { logs?: Array<{ log?: MotiveLog & { driver?: { id?: number } } }> }
+    for (const row of body.logs ?? []) {
+      const log = row?.log
+      if (!log) continue
+      const driverId = byMotiveId.get(String(log.driver?.id ?? ''))
+      const date = String(log.date ?? '').slice(0, 10)
+      if (!driverId || !date) continue
+      const day = toHosDay(log)
+      const moving = day.segments.filter((sg) => sg.type === 'driving')
+      out[driverId] ??= {}
+      out[driverId][date] = {
+        firstMoveAt: moving[0]?.startAt ?? null,
+        lastMoveAt: moving.length ? (moving[moving.length - 1].endAt ?? null) : null,
+        drivingSeconds: day.drivingSeconds,
+        onDutySeconds: day.onDutySeconds,
+      }
+    }
+  } catch (err) {
+    // The hours page works without it; the comparison column simply says nothing.
+    console.error('[driver-app-api] could not read Motive for the hours page', {
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+  return out
+}
+
 function groupBy<T, K extends string | number | symbol>(items: T[], keyFn: (item: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>()
   for (const item of items) {
@@ -1958,6 +2048,24 @@ export const handler = async (event: FnUrlEvent) => {
 
     if (method === 'POST' && path === '/email-intake/commit') {
       return await handleEmailIntakeCommit(event)
+    }
+
+    /*
+     * Staff-only, and handled before the driver branch so a driver token can never reach it:
+     * it answers about other people's days, which is the office's business and not a
+     * driver's.
+     */
+    if (method === 'GET' && path === '/staff/motive-days') {
+      await verifyStaff(event)
+      const q = event.queryStringParameters ?? {}
+      const ids = String(q.driverIds ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+      const from = String(q.from ?? '').trim()
+      const to = String(q.to ?? '').trim()
+      if (!ids.length) return reply(400, { error: 'driverIds required' })
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return reply(400, { error: 'from and to must be YYYY-MM-DD' })
+      }
+      return reply(200, { days: await motiveDaysFor(ids, from, to) })
     }
 
     const { driver, setting, impersonatedBy } = await loadVerifiedDriver(event)

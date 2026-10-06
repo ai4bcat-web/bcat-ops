@@ -121,6 +121,16 @@ export async function fetchMilesForVehicle(
  * for, and leaving it out would flatter every MPG figure — on a local fleet that idles, by
  * a lot. The number here is what actually came out of the tank.
  */
+/*
+ * UNITS. Motive's documentation calls driving_fuel and idle_fuel litres. They are not, for
+ * a vehicle with metric_units false: checked against the live fleet, miles / fuel gives
+ * 5.9-9.5 for these trucks, a plausible Class 8 figure, while reading it as litres gives
+ * 22-36, which no semi has achieved. The field honours the vehicle's own unit setting and
+ * the documentation is wrong. A metric vehicle is converted rather than trusted, so this
+ * stays correct if one is ever added to the fleet.
+ */
+const LITRES_PER_GALLON = 3.785411784
+
 export async function fetchFuelByVehicle(
   apiKey: string,
   startDate: string,
@@ -138,7 +148,7 @@ export async function fetchFuelByVehicle(
     const data = (await getJson(`${BASE_URL}/v1/vehicle_utilization?${params.toString()}`, apiKey)) as {
       vehicle_idle_rollups?: Array<{
         vehicle_idle_rollup?: {
-          vehicle?: { id?: number }
+          vehicle?: { id?: number; metric_units?: boolean | null }
           driving_fuel?: number | null
           idle_fuel?: number | null
         }
@@ -150,7 +160,9 @@ export async function fetchFuelByVehicle(
       const r = row.vehicle_idle_rollup
       const id = r?.vehicle?.id
       if (typeof id !== 'number') continue
-      const gallons = (r?.driving_fuel ?? 0) + (r?.idle_fuel ?? 0)
+      const raw = (r?.driving_fuel ?? 0) + (r?.idle_fuel ?? 0)
+      // A metric vehicle reports litres; everything downstream of here is US units.
+      const gallons = r?.vehicle?.metric_units ? raw / LITRES_PER_GALLON : raw
       if (gallons > 0) out.set(id, (out.get(id) ?? 0) + gallons)
     }
     const total = data.pagination?.total ?? rows.length

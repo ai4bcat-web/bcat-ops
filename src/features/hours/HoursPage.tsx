@@ -27,8 +27,10 @@ import { listTimeClockEntries, correctTimeClockEntry } from '@/lib/apiClient'
 import type { TimeClockEntry } from '@/types'
 import {
   summarizePayPeriod, payPeriodStartOf, payPeriodDays, recentPayPeriodStarts,
-  minutesLabel, decimalHours, rowMinutes, type TimeClockRow,
+  minutesLabel, decimalHours, rowMinutes, clockEdges, CLOCK_EDGE_TOLERANCE_MINUTES,
+  type TimeClockRow,
 } from '@/lib/timeClock'
+import { fetchMotiveDays, type MotiveDaysByDriver } from '@/lib/staffMotiveDays'
 import { errorText } from '@/lib/errorText'
 
 /** How far a time card may differ from the truck before the office is asked to look. */
@@ -65,6 +67,12 @@ export function HoursPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; hours: string; note: string } | null>(null)
+  /*
+   * When each truck actually moved, from the ELD. Loaded beside the cards rather than with
+   * them: the page is useful without it, and Motive being slow or down must not stop
+   * payroll being read.
+   */
+  const [motive, setMotive] = useState<MotiveDaysByDriver>({})
   const [saving, setSaving] = useState(false)
 
   const periods = useMemo(() => recentPayPeriodStarts(todayChicago(), 13), [])
@@ -88,6 +96,17 @@ export function HoursPage() {
     () => drivers.filter((d) => d.fleetGroup === 'LOCAL' && d.active !== false && d.type !== 'broker'),
     [drivers],
   )
+
+  useEffect(() => {
+    const ids = clocking.map((d) => d.id)
+    if (ids.length === 0) return
+    let stale = false
+    const days = payPeriodDays(periodStart)
+    fetchMotiveDays(ids, days[0], days[13])
+      .then((m) => { if (!stale) setMotive(m) })
+      .catch(() => { /* the comparison column simply says nothing */ })
+    return () => { stale = true }
+  }, [clocking, periodStart])
 
   const byDriver = useMemo(() => {
     return clocking.map((d) => {
@@ -192,6 +211,7 @@ export function HoursPage() {
                       <th className="px-4 py-2 font-medium">Day</th>
                       <th className="px-4 py-2 font-medium">Entries</th>
                       <th className="px-4 py-2 text-right font-medium">Hours</th>
+                      <th className="px-4 py-2 font-medium">Truck moving</th>
                       <th className="px-4 py-2 font-medium">Correct</th>
                     </tr>
                   </thead>
@@ -226,6 +246,20 @@ export function HoursPage() {
                           </td>
                           <td className="px-4 py-2 text-right font-semibold tabular-nums">
                             {day.open ? 'on the clock' : minutesLabel(day.totalMinutes)}
+                          </td>
+                          {/*
+                            When the wheels actually turned, and how far the clock sits
+                            outside it. A driver cannot set driving segments by hand the way
+                            they can a clock-in, so this is the honest check — but it is
+                            reported as minutes for a person to judge, never as a verdict: a
+                            pre-trip, fuelling or waiting for a dock are all paid work with
+                            the truck standing still.
+                          */}
+                          <td className="px-4 py-2 text-xs">
+                            <TruckTime
+                              truck={motive[driver.id]?.[date]}
+                              edges={clockEdges(day, motive[driver.id]?.[date])}
+                            />
                           </td>
                           <td className="px-4 py-2">
                             {day.rows.map((r) => (
@@ -278,3 +312,40 @@ export function HoursPage() {
 }
 
 export { MOTIVE_GAP_TOLERANCE_MIN }
+
+/** Clock time against wheel time for one day. */
+function TruckTime({
+  truck,
+  edges,
+}: {
+  truck?: { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number }
+  edges: { earlyInMinutes: number | null; lateOutMinutes: number | null }
+}) {
+  const clock = (iso: string | null | undefined) =>
+    iso
+      ? new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })
+      : '—'
+
+  // No link, or no log for that day. Said as "no Motive data" rather than left blank, so
+  // nobody reads an empty cell as "the truck never moved".
+  if (!truck) return <span className="text-muted-foreground">no Motive data</span>
+  if (!truck.firstMoveAt) return <span className="text-muted-foreground">truck did not move</span>
+
+  const flag = (minutes: number | null) =>
+    minutes != null && minutes > CLOCK_EDGE_TOLERANCE_MINUTES
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="tabular-nums text-foreground">
+        {clock(truck.firstMoveAt)} – {clock(truck.lastMoveAt)}
+      </span>
+      {(flag(edges.earlyInMinutes) || flag(edges.lateOutMinutes)) && (
+        <span className="text-amber-700">
+          {flag(edges.earlyInMinutes) ? `in ${edges.earlyInMinutes}m early` : ''}
+          {flag(edges.earlyInMinutes) && flag(edges.lateOutMinutes) ? ' · ' : ''}
+          {flag(edges.lateOutMinutes) ? `out ${edges.lateOutMinutes}m late` : ''}
+        </span>
+      )}
+    </div>
+  )
+}

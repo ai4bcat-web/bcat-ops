@@ -7,7 +7,7 @@ import {
   weekStartOf, weekEndOf, weekDays, recentWeekStarts, rowMinutes, isOpenShift,
   summarizeWeek, minutesLabel, decimalHours, STANDARD_DAY_MINUTES, PAID_HOLIDAYS,
   compareToMotive, payPeriodStartOf, payPeriodEndOf, payPeriodDays,
-  recentPayPeriodStarts, summarizePayPeriod,
+  recentPayPeriodStarts, summarizePayPeriod, clockEdges, CLOCK_EDGE_TOLERANCE_MINUTES,
   type TimeClockRow, type DayTotal,
 } from './timeClock'
 
@@ -331,5 +331,71 @@ describe('a pay period of rows', () => {
 
   it('normalises a mid-period date to the period start', () => {
     expect(summarizePayPeriod('2026-10-07', []).periodStart).toBe('2026-09-28')
+  })
+})
+
+describe('clock edges against when the truck moved', () => {
+  const day = (rows: TimeClockRow[]): DayTotal => ({
+    date: '2026-10-06', workedMinutes: 480, holidayMinutes: 0, ptoMinutes: 0,
+    totalMinutes: 480, open: false, rows,
+  })
+  const shift = (inAt: string | null, outAt: string | null): TimeClockRow => ({
+    id: 'r1', driverId: 'd1', workDate: '2026-10-06', kind: 'WORK',
+    clockInAt: inAt, clockOutAt: outAt, minutes: 480,
+  })
+  const truck = {
+    firstMoveAt: '2026-10-06T13:00:00Z', lastMoveAt: '2026-10-06T21:00:00Z',
+    drivingSeconds: 7 * 3600, onDutySeconds: 3600,
+  }
+
+  it('reports clocking in before the wheels turned', () => {
+    const e = clockEdges(day([shift('2026-10-06T12:00:00Z', '2026-10-06T21:00:00Z')]), truck)
+    expect(e.earlyInMinutes).toBe(60)
+  })
+
+  it('reports clocking out after the truck stopped', () => {
+    const e = clockEdges(day([shift('2026-10-06T13:00:00Z', '2026-10-06T22:30:00Z')]), truck)
+    expect(e.lateOutMinutes).toBe(90)
+  })
+
+  it('reports a negative when the clock started AFTER the truck moved', () => {
+    // Worth seeing too: it means unpaid driving, which is a different problem.
+    const e = clockEdges(day([shift('2026-10-06T13:30:00Z', '2026-10-06T21:00:00Z')]), truck)
+    expect(e.earlyInMinutes).toBe(-30)
+  })
+
+  it('uses the first clock-in and the last clock-out across several shifts', () => {
+    // A driver who clocks out for lunch has four stamps; only the ends bound the day.
+    const e = clockEdges(day([
+      shift('2026-10-06T12:00:00Z', '2026-10-06T16:00:00Z'),
+      shift('2026-10-06T17:00:00Z', '2026-10-06T22:00:00Z'),
+    ]), truck)
+    expect(e.earlyInMinutes).toBe(60)
+    expect(e.lateOutMinutes).toBe(60)
+  })
+
+  it('says nothing when Motive has no day for that truck', () => {
+    expect(clockEdges(day([shift('2026-10-06T12:00:00Z', '2026-10-06T21:00:00Z')]), null))
+      .toEqual({ earlyInMinutes: null, lateOutMinutes: null })
+  })
+
+  it('says nothing about an end that was never clocked', () => {
+    const e = clockEdges(day([shift('2026-10-06T12:00:00Z', null)]), truck)
+    expect(e.earlyInMinutes).toBe(60)
+    expect(e.lateOutMinutes).toBeNull()
+  })
+
+  it('ignores holiday and PTO rows, which have no clock at all', () => {
+    const e = clockEdges(day([{ id: 'h', driverId: 'd1', workDate: '2026-10-06', kind: 'HOLIDAY' }]), truck)
+    expect(e.earlyInMinutes).toBeNull()
+  })
+
+  it('reports minutes rather than a verdict', () => {
+    /*
+     * A pre-trip inspection, fuelling, or waiting for a dock are all paid work with the
+     * truck sitting still. Early is not automatically wrong, so this hands a person the
+     * number and lets them judge.
+     */
+    expect(CLOCK_EDGE_TOLERANCE_MINUTES).toBe(30)
   })
 })

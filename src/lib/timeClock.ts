@@ -224,6 +224,60 @@ export interface MotiveDayWindow {
   workedSeconds: number
 }
 
+/** When the truck was actually moving that day, from the ELD. */
+export interface TruckDayWindow {
+  firstMoveAt: string | null
+  lastMoveAt: string | null
+  drivingSeconds: number
+  onDutySeconds: number
+}
+
+export interface ClockEdges {
+  /** Minutes a driver clocked IN before the truck first moved. Negative means after. */
+  earlyInMinutes: number | null
+  /** Minutes a driver clocked OUT after the truck last moved. Negative means before. */
+  lateOutMinutes: number | null
+}
+
+/** Minutes clocked that day beyond this before/after the truck moved are worth a look. */
+export const CLOCK_EDGE_TOLERANCE_MINUTES = 30
+
+/**
+ * How a day's clock lines up with when the truck actually moved.
+ *
+ * The question this answers is "did somebody clock in an hour before they drove" — so it
+ * compares EDGES, not totals. compareToMotive already covers the totals, and the two catch
+ * different things: a driver can work the right number of hours and still have booked them
+ * at the wrong end of the day.
+ *
+ * Positive earlyIn means the clock started before the wheels did. That is NOT automatically
+ * wrong — a pre-trip inspection, fuelling, or waiting for a dock are all paid work with the
+ * truck sitting still — which is exactly why this reports minutes for a person to judge
+ * rather than flagging a verdict. Thirty minutes is the point at which it stops looking like
+ * a pre-trip.
+ */
+export function clockEdges(day: DayTotal, truck: TruckDayWindow | null | undefined): ClockEdges {
+  const none = { earlyInMinutes: null, lateOutMinutes: null }
+  if (!truck) return none
+
+  const work = day.rows.filter((r) => r.kind === 'WORK')
+  const ins = work.map((r) => r.clockInAt).filter((v): v is string => !!v).sort()
+  const outs = work.map((r) => r.clockOutAt).filter((v): v is string => !!v).sort()
+
+  const mins = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 60_000)
+
+  return {
+    earlyInMinutes:
+      ins[0] && truck.firstMoveAt && Number.isFinite(Date.parse(ins[0]))
+        ? mins(ins[0], truck.firstMoveAt)
+        : null,
+    lateOutMinutes:
+      outs.length && truck.lastMoveAt && Number.isFinite(Date.parse(outs[outs.length - 1]))
+        ? mins(truck.lastMoveAt, outs[outs.length - 1])
+        : null,
+  }
+}
+
 export type MotiveCheck =
   /** Motive and the time card agree within tolerance. */
   | { state: 'MATCH'; diffMinutes: number }
