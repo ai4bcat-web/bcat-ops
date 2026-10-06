@@ -36,6 +36,16 @@ export interface TenderStopPrefill {
   zip?: string
   /** Planned date as `YYYY-MM-DD`. Never a time: see the note in parsePlanDate. */
   dateStr?: string
+  /**
+   * `HH:mm` of a BOOKED appointment, from the tender's Appt line.
+   *
+   * Only ever set when the tender states a real one. The Plan line carries 00:00 on every
+   * one of the 166 tenders on file — it is a placeholder for "no appointment yet", and
+   * writing midnight into a stop would read as a time somebody booked.
+   */
+  time?: string
+  /** Facility instructions — appointment rules, sealing, notice periods. */
+  instructions?: string
 }
 
 export interface TenderPrefill {
@@ -145,6 +155,22 @@ export function parsePlanDate(line: string): string | undefined {
 }
 
 /** The e2open "Load Report" tender — the one format that carries everything. */
+/**
+ * `Appt: 06/17/2026 08:00 CDT - ...` -> `{ dateStr, time }`, or null when it reads `--`.
+ *
+ * This is the BOOKED appointment, and the only place in a tender a real time appears. 20 of
+ * the 166 tenders on file carry one; the rest say `--`, meaning it is still to be made.
+ */
+export function parseApptLine(line: string): { dateStr: string; time?: string } | null {
+  const m = clean(line).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/)
+  if (!m) return null
+  const [, mm, dd, yyyy, hh, mi] = m
+  const dateStr = `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
+  // Midnight means here what it means on the Plan line: not actually booked.
+  if (!hh || (hh === '00' && mi === '00')) return { dateStr }
+  return { dateStr, time: `${hh.padStart(2, '0')}:${mi}` }
+}
+
 function parseE2open(body: string): TenderPrefill | null {
   if (!/Load Report/i.test(body)) return null
 
@@ -183,10 +209,30 @@ function parseE2open(body: string): TenderPrefill | null {
 
     const stop: TenderStopPrefill = { type }
     if (addrLine) Object.assign(stop, parseAddressLine(addrLine))
-    const dateStr = plan ? parsePlanDate(plan) : undefined
+
+    /*
+     * A booked Appt wins over the planned date. Plan is when the shipper wants it; Appt is
+     * what was actually agreed, and it is the only line that carries a real time.
+     */
+    const apptLine = lines.find((l) => /^Appt\s*:/i.test(l))
+    const booked = apptLine ? parseApptLine(apptLine) : null
+    const dateStr = booked?.dateStr ?? (plan ? parsePlanDate(plan) : undefined)
     if (dateStr) stop.dateStr = dateStr
-    // A header with neither an address nor a date tells us nothing worth prefilling.
-    if (addrLine || dateStr) out.stops.push(stop)
+    if (booked?.time) stop.time = booked.time
+
+    /*
+     * Facility instructions — "Appointments required", "48 Hour Notice", "must be locked or
+     * sealed". 162 of the 166 tenders carry one, and it is the thing a dispatcher otherwise
+     * reads off the email and retypes.
+     */
+    const instructionLines = lines
+      .filter((l) => /^Instructions\s*:/i.test(l))
+      .map((l) => clean(l.replace(/^Instructions\s*:/i, '')))
+      .filter(Boolean)
+    if (instructionLines.length) stop.instructions = instructionLines.join(' · ')
+
+    // A header with none of these tells us nothing worth prefilling.
+    if (addrLine || dateStr || stop.instructions) out.stops.push(stop)
   }
 
   return out

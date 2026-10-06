@@ -94,6 +94,18 @@ function emptyStopForms(preDate?: string, driverId?: string | null): StopFormVal
  * with the pickup date. Date only, never a time, for the reason in emptyStopForms: an
  * invented time reads as an appointment somebody booked.
  */
+/** The tender's facility instructions, labelled by which end they belong to. */
+function tenderNotes(tender: TenderPrefill | null | undefined): string {
+  if (!tender) return ''
+  const seen = new Set<string>()
+  return tender.stops
+    .filter((st) => st.instructions)
+    .map((st) => `${st.type === 'pickup' ? 'Pickup' : 'Delivery'}: ${st.instructions}`)
+    // The same instruction often repeats across stops of a multi-stop run; say it once.
+    .filter((line) => !seen.has(line) && seen.add(line))
+    .join('\n')
+}
+
 function tenderStopForms(
   tender: TenderPrefill,
   preDate?: string,
@@ -109,10 +121,19 @@ function tenderStopForms(
   return ordered.map((st, i) => {
     const base = stopToForm(makeStop({ type: st.type, driverId: driverId ?? null }, i))
     const cityState = [st.city, st.state].filter(Boolean).join(', ')
+    /*
+     * A booked time makes this a real appointment; a date alone does not.
+     *
+     * The form's `appt` is a datetime-local string when there is a time and a plain date
+     * when there is not, which is the same distinction the stops themselves draw: a date at
+     * midnight means "this day, time still to be agreed" and must not read as 00:00 booked.
+     */
+    const when = st.dateStr ?? preDate ?? ''
     return {
       ...base,
       sequence: i,
-      appt: st.dateStr ?? preDate ?? '',
+      appt: when && st.time ? `${when}T${st.time}` : when,
+      apptType: st.time ? ('exact' as const) : base.apptType,
       ...(st.name ? { name: st.name } : {}),
       ...(cityState ? { city: cityState } : {}),
       address: {
@@ -1313,7 +1334,14 @@ export function LoadDrawer() {
          */
         customer: tender?.customerId ? (tender.customer ?? '') : '',
         customerId: tender?.customerId ?? '',
-        miles: null, rate: null, notes: '', hot: false, unscheduled: false,
+        /*
+         * Facility instructions off the tender — "Appointments required", "48 Hour Notice",
+         * "must be locked or sealed". 162 of the 166 tenders on file carry one, and it is
+         * exactly what a dispatcher otherwise reads off the email and retypes. Labelled by
+         * stop, because a delivery's notice period is not the shipper's sealing rule.
+         */
+        notes: tenderNotes(tender),
+        miles: null, rate: null, hot: false, unscheduled: false,
       })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps

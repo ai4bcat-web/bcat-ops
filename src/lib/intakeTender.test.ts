@@ -4,7 +4,7 @@
  * otherwise type — particularly the ZIPs and the customer name the factoring queue needs.
  */
 import { describe, it, expect } from 'vitest'
-import { parseTender, parseAddressLine, parsePlanDate, resolveTenderCustomer, type TenderPrefill } from './intakeTender'
+import { parseTender, parseAddressLine, parsePlanDate, parseApptLine, resolveTenderCustomer, type TenderPrefill } from './intakeTender'
 
 const E2OPEN = `This email was sent from an automated source. Please do not reply to this message as all replies are automatically deleted.
 
@@ -89,6 +89,8 @@ describe('parseTender on a real e2open tender', () => {
       state: 'IL',
       zip: '60609',
       dateStr: '2026-08-04',
+      // The facility's own rules, carried through rather than retyped off the email.
+      instructions: 'Appointments required - https://na-app.tms.e2open.com',
     })
     expect(t.stops[1]).toEqual({
       type: 'delivery',
@@ -98,6 +100,7 @@ describe('parseTender on a real e2open tender', () => {
       state: 'IL',
       zip: '60087',
       dateStr: '2026-08-05',
+      instructions: '48 Hour Notice for delivery appointments required',
     })
   })
 
@@ -349,5 +352,71 @@ describe('the document that came in on the tender', () => {
     // The attachment is pointed at, not copied: it is already in the same bucket.
     const t: TenderPrefill = { format: 'SUBJECT', stops: [], rateConKey: 'intake-attachments/i1/1-ratecon.pdf' }
     expect(t.rateConKey).toMatch(/\.pdf$/)
+  })
+})
+
+describe('appointment times and facility instructions', () => {
+  const WITH_APPT = `Load Report
+-----------------------------------------
+Ref #: TMS ID 208663813
+      Shipments: SO-1732669
+Shipper: BATORY FOODS
+-----------------------------------------
+Pick
+BATORY'S OAKLEY CHICAGO 2234 W 43RD STREET CHICAGO , IL 60609
+Instructions:  Appointments required  - https://na-app.tms.e2open.com
+Plan: 06/17/2026 00:00 CDT - 06/17/2026 00:00 CDT
+Appt: 06/17/2026 08:00 CDT - 06/17/2026 08:00 CDT
+-----------------------------------------
+Drop
+EAGLE FOODS 3898 SUNSET AVENUE WAUKEGAN , IL 60087
+Instructions: 48 Hour Notice for delivery appointments required
+Plan: 06/18/2026 00:00 CDT - 06/18/2026 00:00 CDT
+Appt: --`
+
+  it('takes the BOOKED time from the Appt line', () => {
+    const t = parseTender('x', WITH_APPT)
+    expect(t.stops[0].dateStr).toBe('2026-06-17')
+    expect(t.stops[0].time).toBe('08:00')
+  })
+
+  it('prefers the booked appointment over the planned date', () => {
+    // Plan is when the shipper wants it; Appt is what was actually agreed.
+    expect(parseApptLine('Appt: 06/17/2026 08:00 CDT - 06/17/2026 08:00 CDT'))
+      .toEqual({ dateStr: '2026-06-17', time: '08:00' })
+  })
+
+  it('gives a date but NO time when the appointment is unbooked', () => {
+    /*
+     * Plan carries 00:00 on all 166 tenders on file — a placeholder for "no appointment
+     * yet". Writing midnight into a stop would read as a time somebody agreed.
+     */
+    const t = parseTender('x', WITH_APPT)
+    expect(t.stops[1].dateStr).toBe('2026-06-18')
+    expect(t.stops[1].time).toBeUndefined()
+  })
+
+  it('treats a midnight Appt as unbooked too', () => {
+    expect(parseApptLine('Appt: 06/17/2026 00:00 CDT')).toEqual({ dateStr: '2026-06-17' })
+  })
+
+  it('is nothing for an Appt that reads --', () => {
+    expect(parseApptLine('Appt: --')).toBeNull()
+  })
+
+  it('carries each stop’s instructions', () => {
+    const t = parseTender('x', WITH_APPT)
+    expect(t.stops[0].instructions).toMatch(/Appointments required/)
+    expect(t.stops[1].instructions).toMatch(/48 Hour Notice/)
+  })
+
+  it('keeps the shipment number as the PU#', () => {
+    expect(parseTender('x', WITH_APPT).pickupNumber).toBe('SO-1732669')
+  })
+
+  it('still reads the full address alongside all of it', () => {
+    const t = parseTender('x', WITH_APPT)
+    expect(t.stops[0]).toMatchObject({ city: 'CHICAGO', state: 'IL', zip: '60609' })
+    expect(t.stops[1]).toMatchObject({ city: 'WAUKEGAN', state: 'IL', zip: '60087' })
   })
 })
