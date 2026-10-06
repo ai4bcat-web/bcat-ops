@@ -44,6 +44,16 @@ export function FaultCodesWidget() {
   const equipment = useAppStore((s) => s.equipment)
   const [faults, setFaults] = useState<TruckFaultCode[]>([])
   const [loading, setLoading] = useState(true)
+  /*
+   * Ivan's own trucks by default.
+   *
+   * The feed covers every vehicle on the Motive org, and the Amazon and box-truck units
+   * swamped the list — a mechanic looking for what Ivan needs fixed had to read past trucks
+   * that are somebody else's problem. The other fleets are one click away rather than gone,
+   * because a fault on a truck nobody is looking at is exactly the one that must not vanish
+   * silently.
+   */
+  const [ivanOnly, setIvanOnly] = useState(true)
 
   useEffect(() => {
     let alive = true
@@ -63,6 +73,14 @@ export function FaultCodesWidget() {
       const eq = byUnit.get(f.truckId)
       // Retired truck: intentionally hidden. No Equipment match at all: still shown, flagged.
       if (eq && (eq.type !== 'truck' || eq.active === false)) continue
+      /*
+       * Only a truck KNOWN to belong to another fleet is filtered out.
+       *
+       * An unmatched vehicle, or one whose fleet was never recorded, is an unknown rather
+       * than a known not-Ivan — hiding it would be acting on a guess, and the unfiled ones
+       * are the reason this widget flags them in the first place.
+       */
+      if (ivanOnly && eq?.fleetGroup && eq.fleetGroup !== 'LOCAL') continue
       const entry = grouped.get(f.truckId) ?? {
         truckId: f.truckId,
         unitNumber: eq?.unitNumber ?? f.unitNumber,
@@ -81,7 +99,7 @@ export function FaultCodesWidget() {
     return [...grouped.values()].sort(
       (a, b) => b.codes.length - a.codes.length || a.unitNumber.localeCompare(b.unitNumber),
     )
-  }, [faults, equipment])
+  }, [faults, equipment, ivanOnly])
   const faultCount = trucks.reduce((count, truck) => count + truck.codes.length, 0)
 
   return (
@@ -95,23 +113,31 @@ export function FaultCodesWidget() {
               {loading
                 ? 'Loading engine diagnostics…'
                 : faultCount === 0
-                  ? 'No open codes on active vehicles'
+                  ? (ivanOnly ? 'No open codes on Ivan trucks' : 'No open codes on active vehicles')
                   : `${faultCount} open code${faultCount === 1 ? '' : 's'} on ${trucks.length} vehicle${trucks.length === 1 ? '' : 's'}`}
             </div>
           </div>
         </div>
-        {hasPageAccess('maintenance') && (
-          <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-            Maintenance <ChevronRight size={13} />
-          </Link>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          {/* The other fleets are one click away, never silently gone. */}
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t3)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={ivanOnly} onChange={(e) => setIvanOnly(e.target.checked)} />
+            Ivan trucks only
+          </label>
+          {hasPageAccess('maintenance') && (
+            <Link to="/maintenance" style={{ fontSize: 12, color: 'var(--ds-blue)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+              Maintenance <ChevronRight size={13} />
+            </Link>
+          )}
+        </div>
       </div>
 
       {trucks.length === 0 ? (
         <div style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--ds-t3)', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
           {loading
             ? <span style={{ opacity: 0.7 }}>Checking Motive…</span>
-            : <><CheckCircle2 size={22} style={{ opacity: 0.35, color: '#15803d' }} />All active vehicles are clear.</>}
+            : <><CheckCircle2 size={22} style={{ opacity: 0.35, color: '#15803d' }} />
+                {ivanOnly ? 'All Ivan trucks are clear.' : 'All active vehicles are clear.'}</>}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12, padding: 16 }}>

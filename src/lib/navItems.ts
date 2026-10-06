@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Route, ClipboardList, Clock, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, ClipboardList, Clock, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -76,7 +76,6 @@ export const NAV_GROUPS: NavSection[] = [
     title: 'Fleet',
     items: [
       { to: '/fleet-dashboard', label: 'Fleet Manager Dashboard', icon: Gauge, pageKey: 'fleetManagerDashboard' },
-      { to: '/fleet-miles', label: 'Fleet Miles', icon: Route, pageKey: 'fleetMiles' },
       { to: '/maintenance', label: 'Maintenance',     icon: Wrench,   pageKey: 'maintenance', badgeKey: 'maintenance' },
       { to: '/invoices',    label: 'Invoices',        icon: Receipt,  pageKey: 'invoices' },
       { to: '/truck-docs',  label: 'Asset Documents', icon: FileText, pageKey: 'truckDocs',   badgeKey: 'truckDocs' },
