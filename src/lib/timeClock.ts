@@ -261,3 +261,102 @@ export function compareToMotive(
     ? { state: 'GAP', diffMinutes: diff }
     : { state: 'MATCH', diffMinutes: diff }
 }
+
+
+/* ── Pay periods ───────────────────────────────────────────────────────────── */
+
+/**
+ * The first day of a known pay period, which anchors every other one.
+ *
+ * Pay runs fortnightly, and 28 September 2026 to 11 October 2026 is a real period — given
+ * by the office. Everything else is counted from here in 14-day steps, forwards and
+ * backwards, so there is one definition rather than a rule that has to be reapplied each
+ * year. A period is two of the Monday-to-Sunday weeks above, so the two never disagree
+ * about which day belongs where.
+ */
+export const PAY_PERIOD_ANCHOR = '2026-09-28'
+
+export const PAY_PERIOD_DAYS = 14
+
+/** Whole days between two dates, which is exact because both are taken at noon UTC. */
+function daysBetween(fromDate: string, toDate: string): number {
+  const a = Date.parse(`${fromDate}T12:00:00Z`)
+  const b = Date.parse(`${toDate}T12:00:00Z`)
+  return Math.round((b - a) / 86_400_000)
+}
+
+/**
+ * The pay period containing this date, as its first day.
+ *
+ * Math.floor, not a remainder: a date BEFORE the anchor gives a negative offset, and `%` in
+ * JavaScript keeps the sign of the dividend — so the obvious version puts late September
+ * into the period that starts in October, which is the kind of off-by-one that pays somebody
+ * for the wrong fortnight.
+ */
+export function payPeriodStartOf(dateStr: string): string {
+  const offset = daysBetween(PAY_PERIOD_ANCHOR, dateStr)
+  const periods = Math.floor(offset / PAY_PERIOD_DAYS)
+  const d = new Date(`${PAY_PERIOD_ANCHOR}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + periods * PAY_PERIOD_DAYS)
+  return d.toISOString().slice(0, 10)
+}
+
+/** The last day — a Sunday — of the pay period containing this date. */
+export function payPeriodEndOf(dateStr: string): string {
+  const d = new Date(`${payPeriodStartOf(dateStr)}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + PAY_PERIOD_DAYS - 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/** All fourteen days of a period, in order. */
+export function payPeriodDays(periodStart: string): string[] {
+  const start = new Date(`${payPeriodStartOf(periodStart)}T12:00:00Z`)
+  return Array.from({ length: PAY_PERIOD_DAYS }, (_, i) => {
+    const d = new Date(start)
+    d.setUTCDate(d.getUTCDate() + i)
+    return d.toISOString().slice(0, 10)
+  })
+}
+
+/** The N most recent pay period starts, newest first, including the one in progress. */
+export function recentPayPeriodStarts(today: string, count: number): string[] {
+  const start = new Date(`${payPeriodStartOf(today)}T12:00:00Z`)
+  return Array.from({ length: Math.max(0, count) }, (_, i) => {
+    const d = new Date(start)
+    d.setUTCDate(d.getUTCDate() - i * PAY_PERIOD_DAYS)
+    return d.toISOString().slice(0, 10)
+  })
+}
+
+export interface PayPeriodTotal extends Omit<WeekTotal, 'weekStart' | 'weekEnd'> {
+  periodStart: string
+  periodEnd: string
+  /** The two Monday-to-Sunday weeks inside it, so a period can be read a week at a time. */
+  weeks: WeekTotal[]
+}
+
+/**
+ * A pay period's rows, bucketed by day and by the two weeks inside it.
+ *
+ * Built from summarizeWeek rather than beside it, so the fortnight is literally the sum of
+ * its weeks and the two cannot drift apart. No overtime here either: a period is the plain
+ * sum of its days, with no threshold at 40 hours or at 80.
+ */
+export function summarizePayPeriod(periodStart: string, rows: TimeClockRow[]): PayPeriodTotal {
+  const start = payPeriodStartOf(periodStart)
+  const days = payPeriodDays(start)
+  const weeks = [weekStartOf(days[0]), weekStartOf(days[7])].map((w) => summarizeWeek(w, rows))
+  const all = weeks.flatMap((w) => w.days)
+
+  return {
+    periodStart: start,
+    periodEnd: payPeriodEndOf(start),
+    days: all,
+    weeks,
+    workedMinutes: weeks.reduce((n, w) => n + w.workedMinutes, 0),
+    holidayMinutes: weeks.reduce((n, w) => n + w.holidayMinutes, 0),
+    ptoMinutes: weeks.reduce((n, w) => n + w.ptoMinutes, 0),
+    totalMinutes: weeks.reduce((n, w) => n + w.totalMinutes, 0),
+    open: weeks.some((w) => w.open),
+  }
+}

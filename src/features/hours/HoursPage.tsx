@@ -26,8 +26,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { listTimeClockEntries, correctTimeClockEntry } from '@/lib/apiClient'
 import type { TimeClockEntry } from '@/types'
 import {
-  summarizeWeek, weekStartOf, weekDays, recentWeekStarts, minutesLabel, decimalHours,
-  rowMinutes, type TimeClockRow,
+  summarizePayPeriod, payPeriodStartOf, payPeriodDays, recentPayPeriodStarts,
+  minutesLabel, decimalHours, rowMinutes, type TimeClockRow,
 } from '@/lib/timeClock'
 import { errorText } from '@/lib/errorText'
 
@@ -46,10 +46,11 @@ function dayLabel(date: string): string {
   })
 }
 
-function weekLabel(weekStart: string): string {
-  const s = new Date(`${weekStart}T12:00:00Z`)
+/** "Sep 28 – Oct 11" — the fortnight as the office says it. */
+function periodLabel(periodStart: string): string {
+  const s = new Date(`${periodStart}T12:00:00Z`)
   const e = new Date(s)
-  e.setUTCDate(e.getUTCDate() + 6)
+  e.setUTCDate(e.getUTCDate() + 13)
   const f = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   return `${f(s)} – ${f(e)}`
 }
@@ -59,25 +60,25 @@ export function HoursPage() {
   const { user } = useAuth()
   const staffEmail = user?.email ?? ''
 
-  const [weekStart, setWeekStart] = useState(() => weekStartOf(todayChicago()))
+  const [periodStart, setPeriodStart] = useState(() => payPeriodStartOf(todayChicago()))
   const [entries, setEntries] = useState<TimeClockEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; hours: string; note: string } | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const weeks = useMemo(() => recentWeekStarts(todayChicago(), 12), [])
-  const days = useMemo(() => weekDays(weekStart), [weekStart])
+  const periods = useMemo(() => recentPayPeriodStarts(todayChicago(), 13), [])
+  const days = useMemo(() => payPeriodDays(periodStart), [periodStart])
 
   const load = useCallback((start: string) => {
-    const end = weekDays(start)[6]
+    const end = payPeriodDays(start)[13]
     listTimeClockEntries({ from: start, to: end })
       .then((rows) => { setEntries(rows); setError(null) })
       .catch((e) => setError(errorText(e)))
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { load(weekStart) }, [load, weekStart])
+  useEffect(() => { load(periodStart) }, [load, periodStart])
 
   /*
    * Only drivers who clock. Everyone else would be an empty row forever, and a page of
@@ -91,11 +92,11 @@ export function HoursPage() {
   const byDriver = useMemo(() => {
     return clocking.map((d) => {
       const rows = entries.filter((e) => e.driverId === d.id) as TimeClockRow[]
-      return { driver: d, week: summarizeWeek(weekStart, rows) }
+      return { driver: d, period: summarizePayPeriod(periodStart, rows) }
     })
-  }, [clocking, entries, weekStart])
+  }, [clocking, entries, periodStart])
 
-  const grandTotal = byDriver.reduce((n, r) => n + r.week.totalMinutes, 0)
+  const grandTotal = byDriver.reduce((n, r) => n + r.period.totalMinutes, 0)
 
   const startEdit = (row: TimeClockEntry) => {
     setEditing({
@@ -117,7 +118,7 @@ export function HoursPage() {
       await correctTimeClockEntry(row, { minutes: Math.round(hours * 60), note: editing.note }, staffEmail)
       toast.success('Correction saved')
       setEditing(null)
-      load(weekStart)
+      load(periodStart)
     } catch (e) {
       toast.error(errorText(e))
     } finally {
@@ -139,22 +140,23 @@ export function HoursPage() {
         <div>
           <h1 className="text-lg font-bold text-foreground">Employee hours</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Ivan drivers&rsquo; time cards, Monday to Sunday. No overtime &mdash; hours are hours.
+            Ivan drivers&rsquo; time cards, by fortnightly pay period. No overtime &mdash; hours
+            are hours, at forty and at eighty.
           </p>
         </div>
         <div className="flex items-center gap-3">
           <select
-            aria-label="Week"
-            value={weekStart}
-            onChange={(e) => { setLoading(true); setWeekStart(e.target.value) }}
+            aria-label="Pay period"
+            value={periodStart}
+            onChange={(e) => { setLoading(true); setPeriodStart(e.target.value) }}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm"
           >
-            {weeks.map((w, i) => (
-              <option key={w} value={w}>{weekLabel(w)}{i === 0 ? ' · This week' : ''}</option>
+            {periods.map((p, i) => (
+              <option key={p} value={p}>{periodLabel(p)}{i === 0 ? ' · Current' : ''}</option>
             ))}
           </select>
           <div className="text-right">
-            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Week total</p>
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Period total</p>
             <p className="text-lg font-bold tabular-nums text-foreground">{minutesLabel(grandTotal)}</p>
           </div>
         </div>
@@ -171,16 +173,16 @@ export function HoursPage() {
           <p className="text-sm text-muted-foreground">No Ivan drivers on the roster.</p>
         ) : (
           <div className="flex flex-col gap-5">
-            {byDriver.map(({ driver, week }) => (
+            {byDriver.map(({ driver, period }) => (
               <section key={driver.id} className="rounded-xl border border-border bg-background">
                 <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3">
                   <h2 className="text-sm font-semibold text-foreground">{driver.name}</h2>
                   <p className="text-sm tabular-nums text-muted-foreground">
-                    <span className="font-bold text-foreground">{minutesLabel(week.totalMinutes)}</span>
-                    {' '}· {decimalHours(week.totalMinutes)} h
-                    {week.holidayMinutes > 0 ? ` · holiday ${minutesLabel(week.holidayMinutes)}` : ''}
-                    {week.ptoMinutes > 0 ? ` · PTO ${minutesLabel(week.ptoMinutes)}` : ''}
-                    {week.open ? ' · still on the clock' : ''}
+                    <span className="font-bold text-foreground">{minutesLabel(period.totalMinutes)}</span>
+                    {' '}· {decimalHours(period.totalMinutes)} h
+                    {period.holidayMinutes > 0 ? ` · holiday ${minutesLabel(period.holidayMinutes)}` : ''}
+                    {period.ptoMinutes > 0 ? ` · PTO ${minutesLabel(period.ptoMinutes)}` : ''}
+                    {period.open ? ' · still on the clock' : ''}
                   </p>
                 </header>
 
@@ -194,10 +196,16 @@ export function HoursPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {days.map((date) => {
-                      const day = week.days.find((d) => d.date === date)!
+                    {days.map((date, i) => {
+                      const day = period.days.find((d) => d.date === date)!
+                      // Fourteen undifferentiated rows are hard to read; the line between
+                      // the two weeks is where the eye expects a break.
+                      const weekBreak = i === 7
                       return (
-                        <tr key={date} className="border-b border-border/60 last:border-0">
+                        <tr
+                          key={date}
+                          className={`last:border-0 ${weekBreak ? 'border-t-2 border-t-border' : ''} border-b border-border/60`}
+                        >
                           <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{dayLabel(date)}</td>
                           <td className="px-4 py-2">
                             {day.rows.length === 0 ? (

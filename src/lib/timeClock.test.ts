@@ -6,7 +6,9 @@ import { describe, it, expect } from 'vitest'
 import {
   weekStartOf, weekEndOf, weekDays, recentWeekStarts, rowMinutes, isOpenShift,
   summarizeWeek, minutesLabel, decimalHours, STANDARD_DAY_MINUTES, PAID_HOLIDAYS,
-  compareToMotive, type TimeClockRow, type DayTotal,
+  compareToMotive, payPeriodStartOf, payPeriodEndOf, payPeriodDays,
+  recentPayPeriodStarts, summarizePayPeriod,
+  type TimeClockRow, type DayTotal,
 } from './timeClock'
 
 const row = (over: Partial<TimeClockRow> = {}): TimeClockRow => ({
@@ -234,5 +236,100 @@ describe('comparing a time card to Motive', () => {
      */
     const c = compareToMotive(day({ totalMinutes: 720 }), { firstOnDutyAt: 'x', lastOffDutyAt: 'y', workedSeconds: 8 * 3600 })
     expect(Object.keys(c).sort()).toEqual(['diffMinutes', 'state'])
+  })
+})
+
+describe('pay periods', () => {
+  it('uses the period the office gave us', () => {
+    // 28 Sep 2026 to 11 Oct 2026, stated by Ryne.
+    expect(payPeriodStartOf('2026-09-28')).toBe('2026-09-28')
+    expect(payPeriodEndOf('2026-09-28')).toBe('2026-10-11')
+  })
+
+  it('puts every day of that fortnight in it', () => {
+    for (const d of payPeriodDays('2026-09-28')) {
+      expect(payPeriodStartOf(d)).toBe('2026-09-28')
+    }
+    expect(payPeriodDays('2026-09-28')).toHaveLength(14)
+  })
+
+  it('starts the next period the very next day', () => {
+    expect(payPeriodStartOf('2026-10-12')).toBe('2026-10-12')
+    expect(payPeriodEndOf('2026-10-12')).toBe('2026-10-25')
+  })
+
+  it('counts BACKWARDS correctly, which the obvious version gets wrong', () => {
+    /*
+     * A date before the anchor gives a negative offset, and `%` in JavaScript keeps the
+     * sign of the dividend — so a remainder-based version puts mid-September into the
+     * period starting in October. That pays somebody for the wrong fortnight.
+     */
+    expect(payPeriodStartOf('2026-09-27')).toBe('2026-09-14')
+    expect(payPeriodStartOf('2026-09-14')).toBe('2026-09-14')
+    expect(payPeriodStartOf('2026-09-13')).toBe('2026-08-31')
+  })
+
+  it('still lands on a Monday a year either side of the anchor', () => {
+    for (const d of ['2025-10-06', '2027-10-04', '2026-01-05']) {
+      const start = payPeriodStartOf(d)
+      expect(new Date(`${start}T12:00:00Z`).getUTCDay()).toBe(1)
+    }
+  })
+
+  it('crosses a year boundary without drifting', () => {
+    expect(payPeriodEndOf(payPeriodStartOf('2027-01-01'))).toBe(
+      payPeriodDays(payPeriodStartOf('2027-01-01'))[13],
+    )
+  })
+
+  it('walks back through previous periods, newest first', () => {
+    expect(recentPayPeriodStarts('2026-10-06', 3))
+      .toEqual(['2026-09-28', '2026-09-14', '2026-08-31'])
+  })
+})
+
+describe('a pay period of rows', () => {
+  const r = (date: string, minutes: number): TimeClockRow => ({
+    id: date, driverId: 'd1', workDate: date, kind: 'WORK', minutes,
+  })
+
+  it('is the sum of its two weeks', () => {
+    const p = summarizePayPeriod('2026-09-28', [r('2026-09-29', 480), r('2026-10-07', 300)])
+    expect(p.weeks).toHaveLength(2)
+    expect(p.weeks[0].totalMinutes).toBe(480)
+    expect(p.weeks[1].totalMinutes).toBe(300)
+    expect(p.totalMinutes).toBe(780)
+  })
+
+  it('covers all fourteen days', () => {
+    const p = summarizePayPeriod('2026-09-28', [])
+    expect(p.days).toHaveLength(14)
+    expect(p.days[0].date).toBe('2026-09-28')
+    expect(p.days[13].date).toBe('2026-10-11')
+  })
+
+  it('applies no overtime at 40 hours or at 80', () => {
+    // Hours are hours, as specified — for a fortnight as much as for a week.
+    const rows = payPeriodDays('2026-09-28').map((d) => r(d, 600))
+    const p = summarizePayPeriod('2026-09-28', rows)
+    expect(decimalHours(p.totalMinutes)).toBe(140)
+  })
+
+  it('ignores rows outside the period', () => {
+    const p = summarizePayPeriod('2026-09-28', [r('2026-09-27', 480), r('2026-10-12', 480)])
+    expect(p.totalMinutes).toBe(0)
+  })
+
+  it('keeps holiday and PTO separate across the fortnight', () => {
+    const p = summarizePayPeriod('2026-09-28', [
+      { id: 'h', driverId: 'd1', workDate: '2026-09-30', kind: 'HOLIDAY' },
+      { id: 'p', driverId: 'd1', workDate: '2026-10-08', kind: 'PTO' },
+    ])
+    expect(p.holidayMinutes).toBe(STANDARD_DAY_MINUTES)
+    expect(p.ptoMinutes).toBe(STANDARD_DAY_MINUTES)
+  })
+
+  it('normalises a mid-period date to the period start', () => {
+    expect(summarizePayPeriod('2026-10-07', []).periodStart).toBe('2026-09-28')
   })
 })
