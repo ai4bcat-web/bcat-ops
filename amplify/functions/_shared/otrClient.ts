@@ -104,6 +104,38 @@ export interface OtrInvoiceDetails {
   destination: { city: string; state: string } | null
 }
 
+/**
+ * Parse a response that is SUPPOSED to carry JSON, and say what went wrong when it does not.
+ *
+ * `JSON.parse('')` throws "Unexpected end of JSON input" — a message that describes our own
+ * parser rather than anything OTR did, and which reached the office as a toast telling them
+ * nothing about their invoice. OTR really does answer some requests 2xx with no body at all
+ * (a bare 204 on create), so this is a case to handle rather than a thing that cannot
+ * happen.
+ *
+ * Throws an OtrError carrying the status and the raw body, so the queue shows a sentence a
+ * person can act on and CloudWatch keeps whatever OTR actually sent.
+ */
+function parseJsonOrThrow(text: string, status: number, what: string): Record<string, unknown> {
+  const trimmed = (text ?? '').trim()
+  if (!trimmed) {
+    throw new OtrError(
+      `${what}: OTR returned ${status} with an empty response, so there is nothing to confirm it worked. Check the invoice in the OTR portal before resubmitting.`,
+      status,
+      text,
+    )
+  }
+  const parsed = safeJson(trimmed)
+  if (!parsed) {
+    throw new OtrError(
+      `${what}: OTR returned ${status} with a response we could not read (${trimmed.slice(0, 120)})`,
+      status,
+      text,
+    )
+  }
+  return parsed
+}
+
 export class OtrError extends Error {
   constructor(
     message: string,
@@ -221,7 +253,7 @@ export class OtrClient {
       // Never echo the request body — it carries the password.
       throw new OtrError(`OTR auth failed (${res.status})`, res.status, text)
     }
-    const json = JSON.parse(text) as {
+    const json = parseJsonOrThrow(text, res.status, 'OTR sign-in') as {
       access_token?: string
       refresh_token?: string
       expires_in?: number
@@ -442,7 +474,29 @@ export class OtrClient {
         text,
       )
     }
-    const j = JSON.parse(text) as Record<string, unknown>
+    /*
+     * A 204 here means OTR took the request and told us nothing — and it is NOT success.
+     *
+     * Reproduced against production: an invoice whose BrokerMC is not in OTR's broker
+     * database comes back 204 with a zero-byte body, while the same payload with a known MC
+     * returns 201 and an invoicePkey. 204 is indistinguishable from success by status alone,
+     * so the only honest reading is "no invoice was created, and OTR did not say why".
+     *
+     * Previously this fell through to JSON.parse(''), which threw "Unexpected end of JSON
+     * input" — a message about our own parser, shown to the office as the entire explanation
+     * for why their load would not factor.
+     */
+    if (res.status === 204 || !text.trim()) {
+      throw new OtrError(
+        `OTR accepted the request but created nothing (${res.status}). This is what OTR does ` +
+          `when it does not recognise the broker — check MC ${payload.BrokerMC} on the ` +
+          `customer record, and use Check broker to confirm it before resubmitting.`,
+        res.status,
+        text,
+      )
+    }
+
+    const j = parseJsonOrThrow(text, res.status, 'Create invoice')
     /*
      * v2 calls the id `invoicePkey`; v1 called it `invoiceId`.
      *
@@ -652,7 +706,12 @@ export class OtrClient {
         text,
       )
     }
-    const j = JSON.parse(text) as { message?: string; invoiceId?: string }
+    /*
+     * An upload that answers 204 has still uploaded. Unlike create, nothing downstream needs
+     * a field out of this body — the invoice id came from the create call — so an empty
+     * response is success rather than a failure to report.
+     */
+    const j = (safeJson(text) ?? {}) as { message?: string; invoiceId?: string }
     return { message: j.message ?? '', invoiceId: String(j.invoiceId ?? opts.invoiceId) }
   }
 
@@ -688,7 +747,7 @@ export class OtrClient {
       throw new OtrError(`Get invoice ${invoiceId} failed (${res.status})`, res.status, text)
     }
 
-    const parsed = JSON.parse(text) as Record<string, unknown>
+    const parsed = parseJsonOrThrow(text, res.status, `Get invoice ${invoiceId}`)
     // v1 wraps it; v2 is flat. An array is tolerated in case v2 ever returns several.
     const inv = (Array.isArray(parsed)
       ? (parsed[0] ?? {})

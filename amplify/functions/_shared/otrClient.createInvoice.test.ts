@@ -38,7 +38,11 @@ function stubFetch(invoiceReply: { status: number; body: unknown }) {
       )
     }
     calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) })
-    return new Response(JSON.stringify(invoiceReply.body), {
+    // A raw string is sent verbatim, so a test can hand back an empty or non-JSON body.
+    const body = typeof invoiceReply.body === 'string'
+      ? invoiceReply.body
+      : JSON.stringify(invoiceReply.body)
+    return new Response(body === '' ? null : body, {
       status: invoiceReply.status,
       headers: { 'content-type': 'application/json' },
     })
@@ -133,5 +137,44 @@ describe('the v2 create-invoice response', () => {
   it('names the broker MC when OTR has not approved it', async () => {
     const { impl } = stubFetch({ status: 402, body: { message: 'not approved' } })
     await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/730061 is not approved/)
+  })
+})
+
+describe('when OTR answers with no body at all', () => {
+  it('explains a 204 instead of crashing on JSON.parse', async () => {
+    /*
+     * The live failure on PRO 14519. OTR returns 204 with a zero-byte body when it does not
+     * recognise the broker MC — reproduced against production, where the same payload with
+     * a known MC returns 201 and an invoicePkey. The old code fell through to
+     * JSON.parse(''), so the office was shown "Unexpected end of JSON input" as the entire
+     * explanation for why their load would not factor.
+     */
+    const { impl } = stubFetch({ status: 204, body: '' })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/created nothing/)
+  })
+
+  it('names the MC to check, because that is what is usually wrong', async () => {
+    const { impl } = stubFetch({ status: 204, body: '' })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/730061/)
+  })
+
+  it('never surfaces a parser message to the office', async () => {
+    const { impl } = stubFetch({ status: 204, body: '' })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.not.toThrow(/Unexpected end of JSON/)
+  })
+
+  it('treats an empty 200 the same way — a success with nothing to confirm it', async () => {
+    const { impl } = stubFetch({ status: 200, body: '' })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/created nothing/)
+  })
+
+  it('explains a body that is not JSON rather than throwing over it', async () => {
+    const { impl } = stubFetch({ status: 200, body: '<html>maintenance</html>' })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/could not read/)
+  })
+
+  it('still creates normally when OTR answers properly', async () => {
+    const { impl } = stubFetch({ status: 201, body: CREATED })
+    expect((await client(impl).createInvoice(PAYLOAD)).invoiceId).toBe(25520749)
   })
 })
