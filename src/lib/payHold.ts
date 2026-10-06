@@ -23,10 +23,19 @@ export interface HoldableTrip {
   readiness?: { missingDocuments: Array<'POD' | 'Rate confirmation'> }
 }
 
-export type PayHoldReason = 'NO_POD'
+export type PayHoldReason = 'NO_POD' | 'NOT_DELIVERED'
 
 export const PAY_HOLD_LABEL: Record<PayHoldReason, string> = {
   NO_POD: 'POD required',
+  /*
+   * Booked for a day that has not happened yet.
+   *
+   * The driver app used to drop these loads entirely, so a driver looking at their week
+   * saw two shipments while the office saw four. Hiding work a driver is about to run —
+   * and the money on it — made the app look wrong and the week look emptier than it is.
+   * They are shown, with the pay they WILL earn, and marked as not on this check.
+   */
+  NOT_DELIVERED: 'Not delivered yet',
 }
 
 export interface PayHoldOptions {

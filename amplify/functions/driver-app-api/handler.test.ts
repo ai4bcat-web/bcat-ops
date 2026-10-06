@@ -925,8 +925,10 @@ describe('driver-app-api handler', () => {
       const held = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-450')
       expect(held.heldReason).toBe('NO_POD')
       expect(held.heldLabel).toBe('POD required')
-      // Zero, not $396 — a driver must never read a figure that is not coming.
-      expect(held.amount).toBe(0)
+      // The pay IS shown. The row says it is not on this check and grossPay excludes it,
+      // so hiding the figure only left the driver ringing the office to ask their rate.
+      expect(held.amount).toBeGreaterThan(0)
+      expect(held.onThisCheck).toBe(false)
       // Only the Saturday load, which has a POD, reaches the money math.
       expect(body.grossPay).toBe(2500)
     })
@@ -994,14 +996,45 @@ describe('driver-app-api handler', () => {
         vi.useRealTimers()
       })
 
-      it('leaves a load booked later this week off the settlement', async () => {
+      it('LISTS a load booked later this week, marked as not delivered yet', async () => {
+        /*
+         * It used to be dropped entirely, so a driver saw two shipments where the office
+         * saw four — Roy's week was missing the two that deliver later in it. Hiding work
+         * a driver is about to run, and the money on it, made the app look wrong.
+         */
         const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
         expect(res.statusCode).toBe(200)
         const body = JSON.parse(res.body)
         const future = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-FUTURE')
-        expect(future).toBeUndefined()
-        // And its freight is not in the money either.
-        expect(JSON.stringify(body)).not.toContain('Broker Later')
+        expect(future).toBeDefined()
+        expect(future.heldReason).toBe('NOT_DELIVERED')
+        expect(future.heldLabel).toBe('Not delivered yet')
+        expect(future.onThisCheck).toBe(false)
+        // It shows what it will pay...
+        expect(future.amount).toBeGreaterThan(0)
+      })
+
+      it('keeps an undelivered load OUT of the check amount', async () => {
+        // The whole reason it used to be hidden: it must never read as pay already earned.
+        const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+        const body = JSON.parse(res.body)
+        const future = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-FUTURE')
+        const onCheck = body.trips.filter((t: { onThisCheck?: boolean }) => t.onThisCheck)
+        expect(onCheck).not.toContainEqual(future)
+        // The invariant that matters, stated directly: the cheque is exactly the loads
+        // marked as on it, and the future one is not among them however much it pays.
+        const paid = onCheck.reduce((n: number, t: { amount: number }) => n + t.amount, 0)
+        expect(body.grossPay).toBe(paid)
+        expect(future.amount).toBeGreaterThan(0)
+      })
+
+      it('says NOT_DELIVERED rather than NO_POD on a future load', async () => {
+        // It has no POD either, but "you have not run it" is the true answer; asking for
+        // paperwork that cannot exist yet is the wrong thing to put in front of a driver.
+        const res = await handler(baseEvent('/settlement', 'GET', { query: { week: '2026-09-27' } }))
+        const body = JSON.parse(res.body)
+        const future = body.trips.find((t: { loadId?: string }) => t.loadId === 'TMS-FUTURE')
+        expect(future.heldReason).not.toBe('NO_POD')
       })
 
       it('still shows a load delivered earlier the same day', async () => {

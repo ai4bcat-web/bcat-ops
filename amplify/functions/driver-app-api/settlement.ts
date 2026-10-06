@@ -30,12 +30,15 @@ export interface SettlementTrip {
   destination?: string | null
   miles?: number | null
   rate?: number | null
+  /** What this load pays, whether or not it is on this check. */
   amount: number
+  /** False when the load is listed but not paid on this check — see heldReason. */
+  onThisCheck?: boolean
   factoring?: FactoringFields | null
   /**
-   * Set when this load is NOT on the check yet. Only a missing POD does that today.
-   * The driver sees the same held figure the office sees; a statement that quietly
-   * differs from the cheque is how a driver loses trust in the app.
+   * Set when this load is NOT on the check yet: the POD is missing, or it has not been
+   * delivered. The driver sees the same held figure the office sees; a statement that
+   * quietly differs from the cheque is how a driver loses trust in the app.
    */
   heldReason?: PayHoldReason | null
   heldLabel?: string | null
@@ -202,24 +205,33 @@ export function buildSettlement(
   // A load with no POD cannot be invoiced, so it is held off the check — the same rule
   // the owner-operator settlement page applies. A trip with no factoring view at all is
   // unknown rather than POD-less, and unknown never holds anyone's pay.
-  const heldTripIds = new Set(
-    trips
-      .filter((t) =>
-        tripHoldReason(
-          {
-            freightAmount: t.freightAmount,
-            // No factoring view, or a POD store we could not read: both are unknown,
-            // and unknown never holds pay.
-            readiness:
-              t.factoring && t.factoring.podKnown !== false
-                ? { missingDocuments: t.factoring.podPresent ? [] : ['POD'] }
-                : undefined,
-          },
-          { podsKnown: true },
-        ) !== null,
-      )
-      .map((t) => t.id),
-  )
+  const today = new Date().toISOString().slice(0, 10)
+  /*
+   * Why each trip is off the check, or null when it is on it.
+   *
+   * Two reasons now, and the order matters: a load that has not been delivered yet is
+   * NOT_DELIVERED even though it also has no POD, because "you have not run it" is the
+   * true answer and "we need your POD" would be asking for paperwork that cannot exist.
+   */
+  const holdReasons = new Map<string, PayHoldReason>()
+  for (const t of trips) {
+    const undelivered = (t.shipmentDate ?? '').slice(0, 10) > today
+    if (undelivered) { holdReasons.set(t.id, 'NOT_DELIVERED'); continue }
+    const reason = tripHoldReason(
+      {
+        freightAmount: t.freightAmount,
+        // No factoring view, or a POD store we could not read: both are unknown,
+        // and unknown never holds pay.
+        readiness:
+          t.factoring && t.factoring.podKnown !== false
+            ? { missingDocuments: t.factoring.podPresent ? [] : ['POD'] }
+            : undefined,
+      },
+      { podsKnown: true },
+    )
+    if (reason) holdReasons.set(t.id, reason)
+  }
+  const heldTripIds = new Set(holdReasons.keys())
 
   const tripInputs = trips
     .filter((t) => !heldTripIds.has(t.id))
@@ -311,11 +323,21 @@ export function buildSettlement(
         destination: t.destination ?? null,
         miles: t.miles ?? null,
         rate: tripRate(t),
-        // A held load shows $0 pay, not a figure the driver would expect in the bank.
-        amount: heldTripIds.has(t.id) ? 0 : tripPayAmount(t.freightAmount, rateModel as DriverPaySettingInput),
+        /*
+         * The pay this load earns, ALWAYS — held or not.
+         *
+         * It used to be forced to $0 when held, so a driver with no POD on file could not
+         * see what the load was worth at all. That is the number they most want, and
+         * withholding it does not make the check any clearer: the row already says it is
+         * not on this check, the check total already excludes it, and a driver who cannot
+         * see their rate has to ring the office to ask.
+         */
+        amount: tripPayAmount(t.freightAmount, rateModel as DriverPaySettingInput),
+        /** True only for the loads actually paid on this check — the totals use this. */
+        onThisCheck: !heldTripIds.has(t.id),
         factoring: t.factoring ?? null,
-        heldReason: heldTripIds.has(t.id) ? 'NO_POD' : null,
-        heldLabel: heldTripIds.has(t.id) ? PAY_HOLD_LABEL.NO_POD : null,
+        heldReason: holdReasons.get(t.id) ?? null,
+        heldLabel: holdReasons.has(t.id) ? PAY_HOLD_LABEL[holdReasons.get(t.id)!] : null,
       })),
     grossPay: statement.gross,
     // Always listed, even at $0 on a week with no loads: a driver who never sees the

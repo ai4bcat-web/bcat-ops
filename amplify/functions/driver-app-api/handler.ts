@@ -48,7 +48,14 @@ import {
 } from '../../../src/lib/driverJourney'
 import type { Load } from '../../../src/types'
 import { isEligiblePayGroup } from './scope'
-import { deliveredWindowEnd, isDeliveredByNow } from './deliveredWindow'
+import { deliveredWindowEnd } from './deliveredWindow'
+
+/** Exclusive end of a pay week — the Sunday after it, as a bare date. */
+function weekEndExclusive(periodStart: string): string {
+  const d = new Date(`${periodStart}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 7)
+  return d.toISOString().slice(0, 10)
+}
 /*
  * How far back the week picker looks. Ivan's drivers care about the week they are in and
  * the one just gone; a year of history on a phone is scrolling, not information.
@@ -594,22 +601,35 @@ async function loadOwnerOperatorTripsForWeek(
   // an inclusive BETWEEN drops every load delivered ON the final Saturday
   // ('2026-10-03T05:00:00.000Z' sorts after '2026-10-03'). Compare against the start of
   // the next day instead, so the driver app and the staff page agree on the last day.
+  /*
+   * The WHOLE pay week, including loads not yet delivered.
+   *
+   * This used to stop at today, so a driver looking at their week saw two shipments while
+   * the office saw four — Roy's 14604 and 14605 deliver on the 7th and the 9th and simply
+   * were not there. Hiding work a driver is about to run, and the money on it, made the
+   * app look wrong and the week look emptier than it is.
+   *
+   * The original worry still stands and is answered a better way: an undelivered load must
+   * not read as pay already earned. It is marked NOT_DELIVERED, left off the check amount,
+   * and shown with the pay it WILL earn — which is the same thing the staff settlement page
+   * does with these loads, and now the two agree.
+   *
+   * The paperwork endpoint keeps the cap. Asking a driver for a POD on a delivery that has
+   * not happened is still noise.
+   */
   const loads = await scan<OwnerOpLoadLike>(
     LOAD_TABLE_NAME,
     'deliveryDriverId = :did AND deliveryAppt >= :start AND deliveryAppt < :endEx',
     {},
-    // Capped at today: a driver's settlement shows what they have run, never Friday's
-    // load as though it were already earned. See deliveredWindow.ts.
-    { ':did': driverId, ':start': periodStart, ':endEx': deliveredWindowEnd(periodStart, new Date()) },
+    { ':did': driverId, ':start': periodStart, ':endEx': weekEndExclusive(periodStart) },
   )
   return ownerOpTripsFor(loads, driverId, periodStart).map((t) => ownerOpTripToRaw(t, periodStart))
 }
 
 async function loadOwnerOperatorRawTrips(driverId: string): Promise<RawAmazonTrip[]> {
-  const all = await scan<OwnerOpLoadLike>(LOAD_TABLE_NAME, 'deliveryDriverId = :did', {}, { ':did': driverId })
-  // Same cap as the single-week read, so the week picker's counts match the page.
-  const now = new Date()
-  const loads = all.filter((l) => isDeliveredByNow(l.deliveryAppt, now))
+  const loads = await scan<OwnerOpLoadLike>(LOAD_TABLE_NAME, 'deliveryDriverId = :did', {}, { ':did': driverId })
+  // No delivered cap, matching the single-week read above, so the week picker's counts
+  // match the page it opens.
   // Bucket by pay week and reuse the ONE derivation the staff page uses — a second copy
   // here is how the cents conversion and the 'N/A' load-id fallback drift apart.
   const weeks = new Set<string>()

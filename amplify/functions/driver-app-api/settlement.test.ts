@@ -325,12 +325,25 @@ describe('a POD gates pay', () => {
     expect(s.trips[0].amount).toBe(880)
   })
 
-  it('holds a load with no POD, and shows $0 rather than a figure that is not coming', () => {
+  it('keeps a load with no POD off the check but still shows what it pays', () => {
+    /*
+     * The amount used to be forced to $0 here. That hid the one number a driver most
+     * wants — what the load is worth — and withholding it made the check no clearer: the
+     * row says it is not on this check, and grossPay already excludes it. A driver who
+     * cannot see their rate just rings the office to ask.
+     */
     const s = build([trip({ factoring: factoring({ podPresent: false, blocked: true }) })])
     expect(s.grossPay).toBe(0)
     expect(s.trips[0].heldReason).toBe('NO_POD')
     expect(s.trips[0].heldLabel).toBe('POD required')
-    expect(s.trips[0].amount).toBe(0)
+    expect(s.trips[0].amount).toBe(880)
+    expect(s.trips[0].onThisCheck).toBe(false)
+  })
+
+  it('marks a load that is on the check', () => {
+    const s = build([trip({ factoring: factoring({ podPresent: true }) })])
+    expect(s.trips[0].onThisCheck).toBe(true)
+    expect(s.trips[0].heldReason).toBeNull()
   })
 
   it('does not hold a load over a missing rate confirmation', () => {

@@ -202,14 +202,23 @@ export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readO
               {held && (
                 <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-amber-800">
                   <AlertTriangle className="h-3 w-3" />
-                  Not on this check until the POD is in
+                  {trip.heldReason === 'NOT_DELIVERED'
+                    ? 'Not delivered yet — pays on a later check'
+                    : 'Not on this check until the POD is in'}
                 </p>
               )}
             </div>
 
+            {/*
+              The figure shows whether or not the load is on this check — it is what the
+              driver most wants to know — but a held one is muted and labelled so it can
+              never be mistaken for money arriving in this week's bank.
+            */}
             <span
               role="cell"
-              className="whitespace-nowrap text-right font-semibold tabular-nums text-card-foreground"
+              className={`whitespace-nowrap text-right font-semibold tabular-nums ${
+                held ? 'text-muted-foreground' : 'text-card-foreground'
+              }`}
             >
               {money(trip.amount)}
             </span>
