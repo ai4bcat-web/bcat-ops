@@ -1,7 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import { Suspense, lazy } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { ClipboardList, Clock, Loader2, UserCircle, Wallet } from 'lucide-react'
+import { Clock, LayoutDashboard, Loader2, UserCircle, Wallet } from 'lucide-react'
 import type { DriverProgram } from '@/lib/driverProgram'
 
 // lucide-react does not export a named icon type; this describes the props we use.
@@ -17,6 +17,7 @@ const SubmissionsPage = lazy(() => import('./SubmissionsPage'))
 const SettlementPage = lazy(() => import('./settlement/SettlementPage').then((m) => ({ default: m.SettlementPage })))
 const PaperworkPage = lazy(() => import('./paperwork/PaperworkPage').then((m) => ({ default: m.PaperworkPage })))
 const TimeClockPage = lazy(() => import('./timeclock/TimeClockPage').then((m) => ({ default: m.TimeClockPage })))
+import { OnTheClockBar } from './timeclock/OnTheClockBar'
 const AccountPage = lazy(() => import('./AccountPage').then((m) => ({ default: m.AccountPage })))
 
 function TabButton({
@@ -56,6 +57,8 @@ function TabButton({
 export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram }) {
   return (
     <div className="flex h-dvh flex-col bg-[#0b1220] text-white">
+      {/* Only Ivan's employees punch a clock, so only they can have one running. */}
+      <OnTheClockBar enabled={program === 'PAPERWORK'} />
       {/*
         * min-h-0 lets this actually shrink.
         *
@@ -89,7 +92,7 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
             settlement to visit and an owner operator has no separate paperwork page — so
             the home tab IS their page, rather than two tabs where one is always empty. */}
         {program === 'PAPERWORK'
-          ? <TabButton to="/driver/paperwork" icon={ClipboardList} label="Paperwork" />
+          ? <TabButton to="/driver/paperwork" icon={LayoutDashboard} label="Dashboard" />
           : <TabButton to="/driver/settlement" icon={Wallet} label="Settlement" />}
         {/* The clock is a tab only for Ivan's employees — owner operators do not punch one,
             and a dead tab is worse than no tab. */}

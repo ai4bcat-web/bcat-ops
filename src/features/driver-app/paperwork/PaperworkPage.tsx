@@ -118,7 +118,7 @@ export function PaperworkPage() {
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-5">
-      <h1 className="mb-4 text-xl font-bold text-foreground">Paperwork</h1>
+      <h1 className="mb-4 text-xl font-bold text-foreground">Dashboard</h1>
 
       <PmLine />
 

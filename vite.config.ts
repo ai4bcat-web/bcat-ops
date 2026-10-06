@@ -62,9 +62,30 @@ export default defineConfig({
             },
           },
           {
+            /*
+             * Bundle filenames carry a content hash, so every deploy is a new URL and a
+             * cache miss — a driver always ends up running current code. The flip side is
+             * that the OLD url never expires on its own: without a bound, every build a
+             * phone has ever seen stays in storage forever, several megabytes at a time,
+             * and the browser eventually evicts the whole origin to reclaim it. That is a
+             * worse outcome than any of it being cached, because it takes the offline copy
+             * with it.
+             *
+             * A handful of entries is all that is ever useful: the current bundle, plus
+             * enough headroom that a deploy mid-session does not evict the one a driver is
+             * still running. purgeOnQuotaError lets Workbox drop this cache rather than let
+             * a full disk fail a write elsewhere.
+             */
             urlPattern: ({ url }: { url: URL }) => url.pathname.endsWith('.js'),
             handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'bcat-driver-js' },
+            options: {
+              cacheName: 'bcat-driver-js',
+              expiration: {
+                maxEntries: 6,
+                maxAgeSeconds: 30 * 24 * 60 * 60,
+                purgeOnQuotaError: true,
+              },
+            },
           },
         ],
       },

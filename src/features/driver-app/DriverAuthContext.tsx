@@ -19,6 +19,7 @@ import {
 } from './driverApi'
 import { isTokenRejection } from './tokenRejection'
 import { clearCachedProgram } from './useDriverProgram'
+import { clearCachedShift } from './timeclock/useOpenShift'
 import { DriverAuthContext, type DriverAuthContextValue, type DriverUser } from './useDriverAuth'
 
 const STORAGE_KEY = 'bcat:driver:tokens'
@@ -137,6 +138,8 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     // The next driver on this phone must not inherit this one's program.
     clearCachedProgram()
+    // The next driver on a shared phone must not inherit the last one's running shift.
+    clearCachedShift()
     clearStoredTokens()
     tokensRef.current = null
     setUser(null)
