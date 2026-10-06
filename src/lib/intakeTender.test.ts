@@ -255,3 +255,39 @@ describe('resolveTenderCustomer', () => {
     expect(resolveTenderCustomer(null, customers)).toBeNull()
   })
 })
+
+describe('what a tender can and cannot tell us', () => {
+  const E2 = `Load Report
+-----------------------------------------
+Ref #: TMS ID 208663813
+      Shipments: SO-1732669
+
+Shipper: BATORY FOODS
+-----------------------------------------
+Pick
+BATORY'S OAKLEY CHICAGO 2234 W 43RD STREET CHICAGO , IL 60609
+Plan: 08/04/2026 00:00 CDT
+-----------------------------------------
+Drop
+EAGLE FOODS 3898 SUNSET AVENUE WAUKEGAN , IL 60087
+Plan: 08/05/2026 00:00 CDT`
+
+  it('gives the BROKER reference, which is not an Aljex PRO', () => {
+    /*
+     * The reference on a tender is the broker's own — a TMS ID, a route number. An Aljex
+     * PRO is assigned later, when the load is built in Aljex, and its presence on a load is
+     * exactly the fact that the load exists there. Treating one as the other would have
+     * every intake-built load claiming a PRO it never had, so the drawer puts this in TMS
+     * ID and leaves Pro# empty for a human to type off Aljex.
+     */
+    const t = parseTender('Tender TMS ID 208663813', E2)
+    expect(t.reference).toBe('208663813')
+    // Nothing in a tender is an Aljex PRO, so the parser never claims to produce one.
+    expect(t).not.toHaveProperty('proNumber')
+    expect(t).not.toHaveProperty('aljexId')
+  })
+
+  it('gives the shipment number, which is the PU#', () => {
+    expect(parseTender('x', E2).pickupNumber).toBe('SO-1732669')
+  })
+})

@@ -1230,7 +1230,16 @@ export function LoadDrawer() {
       const preDate = createPreFill?.dateStr
       const tender = createPreFill?.tender
       reset({
-        aljexId: tender?.reference ?? '', tmsId: tender?.reference ?? '',
+        /*
+         * The Pro# is NOT prefilled, deliberately.
+         *
+         * A PRO is assigned by Aljex when the load is built there, so its presence on a
+         * BCAT Ops load is the fact that the load exists in Aljex. The tender email carries
+         * the BROKER's reference — a TMS ID like 208663813 — which is a different number
+         * entirely, and putting it here would have made every intake-built load claim an
+         * Aljex PRO it never had. That reference belongs in TMS ID, where it is correct.
+         */
+        aljexId: '', tmsId: tender?.reference ?? '',
         pickupNumber: tender?.pickupNumber ?? '',
         stops: tender
           ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null)
