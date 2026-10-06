@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { apptOutstanding, requiresApptProofs } from '@/lib/apptQueue'
+import { revenueByFleet, type RevenueSplit } from '@/lib/revenueByFleet'
 import type { Driver, Load } from '@/types'
 
 export type DateRangeKey = 'today' | 'this-week' | 'this-month' | 'this-quarter' | 'this-year'
@@ -21,6 +22,8 @@ export interface DashboardMetrics {
   needsInvoice: number     // shipments completed (non-TBD delivery) yesterday or earlier, still not ready to invoice
   needsAppt: number        // BATORY stops still to book — the only ones this office books
   revenue: number          // sum of load.rate in cents
+  /** The same revenue, split by which fleet earned it. Parts always add to `revenue`. */
+  revenueSplit: RevenueSplit
   revenueDelta: number     // revenue − previous-period revenue (cents)
   revenueConnected: boolean // false when all rates are null
   brokerLoads: number         // count of broker-covered loads in range
@@ -142,6 +145,12 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
     const activeDrivers = activeDriverSet.size
 
     const revenue          = current.reduce((sum, l) => sum + (l.rate ?? 0), 0)
+    /*
+     * Computed HERE rather than in the page, off the same `current` the headline uses.
+     * Filtering the range a second time somewhere else is how a total and its own
+     * breakdown end up disagreeing.
+     */
+    const revenueSplit     = revenueByFleet(current, drivers)
     const prevRevenue      = previous.reduce((sum, l) => sum + (l.rate ?? 0), 0)
     const revenueConnected = current.some((l) => l.rate != null && l.rate > 0)
     const revenueConnectedPrev = previous.some((l) => l.rate != null && l.rate > 0)
@@ -205,6 +214,7 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       needsInvoice,
       needsAppt,
       revenue,
+      revenueSplit,
       revenueDelta,
       revenueConnected,
       brokerLoads,

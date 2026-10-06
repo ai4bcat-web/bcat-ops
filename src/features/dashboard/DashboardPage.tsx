@@ -13,6 +13,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
+import type { RevenueSplit } from '@/lib/revenueByFleet'
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
@@ -249,6 +250,96 @@ function FactoringCard({ totals, loading, onOpen }: {
   )
 }
 
+
+const FLEET_COLORS: Record<string, string> = {
+  OWNER_OP: '#a78bfa', IVAN: '#1ea8f3', BOX_TRUCK: '#f59e0b',
+  BROKER: '#6d28d9', UNASSIGNED: '#94a3b8',
+}
+
+/**
+ * Revenue, and which fleet earned it.
+ *
+ * One total answers "how did we do" and nothing else. Owner operators settle a percentage
+ * off brokerage loads, Ivan's drivers are on the payroll and box trucks are their own line,
+ * so the single figure could not say which part of the business actually moved.
+ *
+ * The bar is the shape of the month at a glance; the rows underneath are the numbers for
+ * when a glance is not enough. Broker-covered and driverless loads keep their own rows so
+ * the parts visibly add up to the headline.
+ */
+function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
+  split: RevenueSplit
+  delta?: string
+  deltaDir: 'up' | 'down' | 'neutral'
+  sublabel: string
+  connected: boolean
+}) {
+  const shown = split.byBucket.filter((b) => b.revenue > 0)
+  return (
+    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)',
+      boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
+        background: '#1ea8f3', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
+      <div style={{ padding: '16px 18px', position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+            Revenue
+          </div>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+            <DollarSign size={15} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
+            color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+            {connected ? cents(split.total) : '$0'}
+          </div>
+          {connected && delta && <DualDeltaBadge delta={delta} dir={deltaDir} />}
+        </div>
+
+        {/* The shape of the month. Hidden when there is nothing to shape. */}
+        {split.total > 0 && (
+          <div style={{ display: 'flex', height: 6, borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
+            {shown.map((b) => (
+              <div
+                key={b.bucket}
+                title={`${b.label}: ${cents(b.revenue)}`}
+                style={{ width: `${(b.revenue / split.total) * 100}%`, background: FLEET_COLORS[b.bucket] }}
+              />
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {shown.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{sublabel}</div>
+          )}
+          {shown.map((b) => (
+            <div key={b.bucket} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+                <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: FLEET_COLORS[b.bucket], flexShrink: 0 }} />
+                {b.label}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ds-t3)' }}>{b.loads}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+                {cents(b.revenue)}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {split.unrated > 0 && (
+          <div style={{ marginTop: 9, fontSize: 11, color: 'var(--ds-t3)' }}>
+            {split.unrated} load{split.unrated === 1 ? '' : 's'} with no rate — not counted
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function IconBtn({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
     <button title={label} style={{
@@ -400,15 +491,12 @@ export function DashboardPage() {
             sparkColor="#f59e0b"
             icon={<CalendarClock size={15} />}
           />
-          <KpiCard
-            label="Revenue"
-            value={metrics.revenueConnected ? cents(metrics.revenue) : '$0'}
-            sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
+          <RevenueCard
+            split={metrics.revenueSplit}
+            connected={metrics.revenueConnected}
             delta={metrics.revenueConnected ? `${metrics.revenueDelta >= 0 ? '+' : '−'}${cents(Math.abs(metrics.revenueDelta))}` : undefined}
             deltaDir={metrics.revenueDelta > 0 ? 'up' : metrics.revenueDelta < 0 ? 'down' : 'neutral'}
-            accent="#1ea8f3"
-            sparkColor="#1ea8f3"
-            icon={<DollarSign size={15} />}
+            sublabel={metrics.revenueConnected ? `vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}` : 'Connect rates to loads'}
           />
           <BrokerCoveredCard
             count={metrics.brokerLoads}
