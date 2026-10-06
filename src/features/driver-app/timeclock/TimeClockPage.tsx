@@ -12,7 +12,7 @@
  * on the hours page, who correct it on the record with their name against it.
  */
 import { useCallback, useEffect, useState } from 'react'
-import { Clock, Loader2, Plane, PartyPopper, RefreshCcw } from 'lucide-react'
+import { Clock, Loader2, Moon, Plane, PartyPopper, RefreshCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,6 +21,11 @@ import {
 import { fetchTimeClock, punchTimeClock, type TimeClockResponse } from '../driverApi'
 import { minutesLabel, PAID_HOLIDAYS } from '@/lib/timeClock'
 import { errorText } from '@/lib/errorText'
+
+/** Cents to "$1,500.00" — a figure a driver checks against what they were paid. */
+function money(cents: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100)
+}
 
 /** "Mon, Oct 6" — a driver scans their week by weekday. */
 function dayLabel(date: string): string {
@@ -178,6 +183,45 @@ export function TimeClockPage() {
           <div><dt className="text-muted-foreground">PTO</dt><dd className="font-semibold">{minutesLabel(week.ptoMinutes)}</dd></div>
         </dl>
       </div>
+
+      {/*
+        The pay period's overnight runs, and what they came to.
+        The only money in the Ivan app, and it lives here because this is where a driver
+        looks to see what a period was worth. Gross: Ivan drivers have nothing deducted, so
+        a "net" line would be the same number wearing a label that invites a hunt for the
+        difference. Scoped to the same Monday-to-Sunday week as the card above it.
+      */}
+      {data.overnight && data.overnight.loads.length > 0 && (
+        <section className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+          <div className="flex items-baseline justify-between">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-indigo-900">
+              <Moon className="h-4 w-4" aria-hidden="true" /> Overnight loads
+            </h2>
+            <p className="text-lg font-bold tabular-nums text-indigo-900">
+              {money(data.overnight.grossCents)}
+            </p>
+          </div>
+          <p className="mt-0.5 text-xs text-indigo-900/70">
+            {data.overnight.loads.length} run{data.overnight.loads.length === 1 ? '' : 's'} this
+            period &middot; gross
+          </p>
+          <ul className="mt-2.5 flex flex-col gap-1.5">
+            {data.overnight.loads.map((l) => (
+              <li key={l.id} className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="min-w-0 flex-1 truncate text-indigo-900">
+                  <span className="font-semibold">{l.reference}</span>
+                  {l.origin || l.destination
+                    ? ` · ${[l.origin, l.destination].filter(Boolean).join(' → ')}`
+                    : ''}
+                </span>
+                <span className="shrink-0 font-semibold tabular-nums text-indigo-900">
+                  {l.rateCents != null ? money(l.rateCents) : '—'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <ul className="flex flex-col gap-2">
         {week.days.map((d) => (

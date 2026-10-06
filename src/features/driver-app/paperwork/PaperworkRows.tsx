@@ -12,7 +12,7 @@
  *               and offers to replace it.
  *   on file     said quietly. A green tick nobody needs to read is the goal.
  */
-import { AlertTriangle, Camera, Check, ClipboardList, Clock, FileWarning } from 'lucide-react'
+import { AlertTriangle, Camera, Check, ClipboardList, Clock, FileWarning, Moon } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { PaperworkLoad } from '../driverApi'
@@ -105,6 +105,11 @@ function EldBadge({ load }: { load: PaperworkLoad }) {
   return null
 }
 
+/** Cents to "$1,500.00". Whole dollars and cents, because this is a figure someone checks. */
+function money(cents: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100)
+}
+
 /** One end of the lane: where, and when it is due there. */
 function Leg({ label, place, when }: { label: string; place: string | null; when: string | null }) {
   return (
@@ -164,6 +169,12 @@ export function PaperworkRows({
                 <p className="truncate text-sm text-muted-foreground">{load.customer ?? 'No customer'}</p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
+                {load.overnight && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                    <Moon className="h-3.5 w-3.5" aria-hidden="true" />
+                    Overnight
+                  </span>
+                )}
                 <EldBadge load={load} />
                 <PodBadge load={load} />
               </div>
@@ -206,6 +217,20 @@ export function PaperworkRows({
                   </li>
                 ))}
               </ol>
+            )}
+
+            {/*
+              What the run paid. The ONLY money in this app, and only on an overnight run —
+              Ivan drivers are not settled a percentage, so every other load reaches the app
+              with no rate at all. Shown gross: there is nothing deducted from it.
+            */}
+            {load.overnight && load.rateCents != null && (
+              <p className="mt-3 flex items-baseline justify-between rounded-lg bg-indigo-500/10 px-3 py-2">
+                <span className="text-sm font-medium text-indigo-900">Overnight rate</span>
+                <span className="text-base font-bold tabular-nums text-indigo-900">
+                  {money(load.rateCents)}
+                </span>
+              </p>
             )}
 
             {/* Why logs are required, named so the driver can check it against the run. */}

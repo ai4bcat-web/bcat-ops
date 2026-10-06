@@ -191,3 +191,75 @@ describe('when staff are viewing a driver’s app', () => {
     expect((screen.getByRole('button', { name: /Clock in/ }) as HTMLButtonElement).disabled).toBe(false)
   })
 })
+
+describe('overnight loads on the time clock', () => {
+  const overnight = {
+    weekStart: '2026-10-05',
+    grossCents: 240_000,
+    loads: [
+      { id: 'l1', reference: '14536', origin: 'CICERO, IL', destination: 'NEWTON, IA',
+        deliveredOn: '2026-10-06', rateCents: 150_000 },
+      { id: 'l2', reference: '13660', origin: 'URBANDALE, IA', destination: 'CHICAGO, IL',
+        deliveredOn: '2026-10-08', rateCents: 90_000 },
+    ],
+  }
+
+  it('lists the period’s runs with the gross total', async () => {
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: false, overnight,
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Overnight loads')).toBeTruthy())
+    expect(screen.getByText('$2,400.00')).toBeTruthy()
+    expect(screen.getByText(/2 runs this period/)).toBeTruthy()
+    expect(screen.getByText('$1,500.00')).toBeTruthy()
+    expect(screen.getByText('$900.00')).toBeTruthy()
+  })
+
+  it('says the total is gross', async () => {
+    /*
+     * Ivan drivers have nothing deducted, so a "net" line would be the same number wearing
+     * a label that invites a hunt for a difference that does not exist. Saying gross once
+     * is the honest version.
+     */
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: false, overnight,
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText(/gross/)).toBeTruthy())
+    expect(screen.queryByText(/net/i)).toBeNull()
+  })
+
+  it('shows nothing at all in a period with no overnight runs', async () => {
+    // Most Ivan weeks are entirely local; an empty money section every week would be noise.
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: false, overnight: { weekStart: '2026-10-05', loads: [], grossCents: 0 },
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Week total')).toBeTruthy())
+    expect(screen.queryByText('Overnight loads')).toBeNull()
+  })
+
+  it('shows nothing when the API predates the field', async () => {
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Week total')).toBeTruthy())
+    expect(screen.queryByText('Overnight loads')).toBeNull()
+  })
+
+  it('shows a dash for a run with no rate recorded, not a zero', async () => {
+    // "$0.00" would read as "this run paid nothing", which is a different claim.
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: false,
+      overnight: { weekStart: '2026-10-05', grossCents: 0,
+        loads: [{ id: 'l3', reference: '14999', origin: 'A', destination: 'NEWTON, IA',
+                  deliveredOn: '2026-10-07', rateCents: null }] },
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('14999')).toBeTruthy())
+    expect(screen.getByText('—')).toBeTruthy()
+  })
+})

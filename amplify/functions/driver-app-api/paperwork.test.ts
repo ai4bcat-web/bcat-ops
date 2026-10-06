@@ -193,12 +193,18 @@ describe('the week summary', () => {
       buildPaperworkLoad(load({ id: 'c' }), [{ kind: 'POD', legibility: 'UNREADABLE' }], []),
       buildPaperworkLoad(load({ id: 'd' }), [{ kind: 'POD', legibility: 'LOW' }], []),
     ]
-    expect(summarize(loads)).toEqual({ loadCount: 4, podsMissing: 1, podsIllegible: 2, eldRequired: 4 })
+    expect(summarize(loads)).toEqual({
+      loadCount: 4, podsMissing: 1, podsIllegible: 2, eldRequired: 4,
+      overnightCount: 0, overnightCents: 0,
+    })
   })
 
   it('does not count a missing POD as illegible as well', () => {
     const loads = [buildPaperworkLoad(load(), [], [])]
-    expect(summarize(loads)).toEqual({ loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 1 })
+    expect(summarize(loads)).toEqual({
+      loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 1,
+      overnightCount: 0, overnightCents: 0,
+    })
   })
 })
 
@@ -243,5 +249,76 @@ describe('the ELD flag on a load', () => {
     expect(l.eld.status).toBe('UNKNOWN')
     expect(l.eld.required).toBe(false)
     expect(l.eld.label).toMatch(/Check whether ELD logs are required/)
+  })
+})
+
+describe('over-the-road runs and their rate', () => {
+  it('marks a run to Iowa and shows what it earned', () => {
+    const l = buildPaperworkLoad(
+      load({ destinationCity: 'Newton', destinationState: 'IA', rate: 150_000, stops: [] }),
+      [], [],
+    )
+    expect(l.overnight).toBe(true)
+    expect(l.rateCents).toBe(150_000)
+  })
+
+  it('marks a run FROM Iowa too', () => {
+    const l = buildPaperworkLoad(
+      load({ originCity: 'Urbandale', originState: 'IA', destinationCity: 'Chicago',
+             destinationState: 'IL', rate: 90_000, stops: [] }),
+      [], [],
+    )
+    expect(l.overnight).toBe(true)
+    expect(l.rateCents).toBe(90_000)
+  })
+
+  it('shows NO rate on a local run, even though the load has one', () => {
+    /*
+     * The rule this payload exists to keep: an Ivan driver is not settled a percentage, so
+     * no money may reach them — OTR runs are the single, deliberate exception. The rate is
+     * read only inside the over-the-road branch, so a local load has no path by which its
+     * rate can leak.
+     */
+    const l = buildPaperworkLoad(
+      load({ originCity: 'Chicago', originState: 'IL', destinationCity: 'Waukegan',
+             destinationState: 'IL', rate: 50_000, stops: [] }),
+      [], [],
+    )
+    expect(l.overnight).toBe(false)
+    expect(l.rateCents).toBeNull()
+  })
+
+  it('shows no rate on an OTR run that has none recorded', () => {
+    const l = buildPaperworkLoad(
+      load({ destinationCity: 'Newton', destinationState: 'IA', rate: null, stops: [] }),
+      [], [],
+    )
+    expect(l.overnight).toBe(true)
+    expect(l.rateCents).toBeNull()
+  })
+
+  it('does not call a long non-Iowa run over-the-road', () => {
+    // Holmen WI needs ELD logs at 197 air miles but is not an Iowa run; the two rules are
+    // separate questions and must not be collapsed into one.
+    const l = buildPaperworkLoad(
+      load({ originCity: 'Pleasant Prairie', originState: 'WI', destinationCity: 'Holmen',
+             destinationState: 'WI', rate: 80_000, stops: [] }),
+      [], [],
+    )
+    expect(l.eld.required).toBe(true)
+    expect(l.overnight).toBe(false)
+    expect(l.rateCents).toBeNull()
+  })
+
+  it('totals the week’s OTR runs', () => {
+    const loads = [
+      buildPaperworkLoad(load({ id: 'a', destinationCity: 'Newton', destinationState: 'IA', rate: 150_000, stops: [] }), [], []),
+      buildPaperworkLoad(load({ id: 'b', originCity: 'Urbandale', originState: 'IA', destinationCity: 'Chicago', destinationState: 'IL', rate: 90_000, stops: [] }), [], []),
+      buildPaperworkLoad(load({ id: 'c', originCity: 'Chicago', originState: 'IL', destinationCity: 'Waukegan', destinationState: 'IL', rate: 50_000, stops: [] }), [], []),
+    ]
+    const w = summarize(loads)
+    expect(w.overnightCount).toBe(2)
+    // The local load's rate is not in the total, because it is not in the payload at all.
+    expect(w.overnightCents).toBe(240_000)
   })
 })

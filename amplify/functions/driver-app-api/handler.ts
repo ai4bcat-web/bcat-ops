@@ -58,9 +58,10 @@ import { driverProgramOf } from '../../../src/lib/driverProgram'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
 import { toHosDay, type HosDay, type MotiveLog } from '../../../src/lib/motiveHos'
 import {
-  summarizeWeek, weekStartOf, recentWeekStarts, isOpenShift, rowMinutes,
+  summarizeWeek, weekStartOf, weekDays, recentWeekStarts, isOpenShift, rowMinutes,
   STANDARD_DAY_MINUTES, type TimeClockRow,
 } from '../../../src/lib/timeClock'
+import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
@@ -1686,6 +1687,56 @@ function openShiftIn(rows: TimeClockRow[]): TimeClockRow | null {
   return rows.find(isOpenShift) ?? null
 }
 
+/**
+ * The overnight runs in one pay period, and what they earned.
+ *
+ * Shown on the time clock because that is where a driver looks to see what a period came
+ * to. Scoped to the SAME Monday-to-Sunday week the card uses, so the loads listed and the
+ * hours above them describe one period rather than two overlapping ones.
+ *
+ * Gross, and only gross: Ivan drivers have nothing deducted, so a net figure would be the
+ * same number wearing a label that invites someone to look for the difference.
+ */
+async function overnightForWeek(
+  driverId: string,
+  weekStart: string,
+): Promise<{ weekStart: string; loads: Array<Record<string, unknown>>; grossCents: number }> {
+  const txt = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
+  const days = weekDays(weekStart)
+  const from = days[0]
+  const to = days[6]
+
+  const loads = await scan<Record<string, unknown>>(LOAD_TABLE_NAME)
+  const mine = loads.filter((l) => {
+    if (!driverIsOnPaperworkLoad(l as never, driverId)) return false
+    const delivered = String(l.deliveryAppt ?? '').slice(0, 10)
+    return delivered >= from && delivered <= to
+  })
+
+  const out = mine
+    .filter((l) =>
+      isOvernightLoad([
+        `${txt(l.originCity)}${txt(l.originState) ? `, ${txt(l.originState)}` : ''}`,
+        `${txt(l.destinationCity)}${txt(l.destinationState) ? `, ${txt(l.destinationState)}` : ''}`,
+      ]),
+    )
+    .map((l) => ({
+      id: String(l.id),
+      reference: txt(l.aljexId) || txt(l.pickupNumber) || String(l.id).slice(-6),
+      origin: txt(l.originCity) || null,
+      destination: txt(l.destinationCity) || null,
+      deliveredOn: String(l.deliveryAppt ?? '').slice(0, 10) || null,
+      rateCents: typeof l.rate === 'number' ? l.rate : null,
+    }))
+    .sort((a, b) => String(a.deliveredOn ?? '').localeCompare(String(b.deliveredOn ?? '')))
+
+  return {
+    weekStart,
+    loads: out,
+    grossCents: out.reduce((n, l) => n + (l.rateCents ?? 0), 0),
+  }
+}
+
 function groupBy<T, K extends string | number | symbol>(items: T[], keyFn: (item: T) => K): Map<K, T[]> {
   const map = new Map<K, T[]>()
   for (const item of items) {
@@ -1993,6 +2044,9 @@ export const handler = async (event: FnUrlEvent) => {
         return reply(200, {
           today,
           week: summarizeWeek(weekStart, rows),
+          // The pay period's overnight runs and what they earned — the one place money
+          // reaches an Ivan driver. Gross: nothing is deducted from it.
+          overnight: await overnightForWeek(driverId, weekStart),
           // Newest first, so the app's week picker needs no sorting of its own.
           weeks: recentWeekStarts(today, 12),
           openShift: open,

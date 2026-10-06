@@ -383,6 +383,23 @@ export interface TimeClockWeek {
   open: boolean
 }
 
+export interface OvernightLoadRow {
+  id: string
+  reference: string
+  origin: string | null
+  destination: string | null
+  deliveredOn: string | null
+  /** CENTS. */
+  rateCents: number | null
+}
+
+export interface OvernightPeriod {
+  weekStart: string
+  loads: OvernightLoadRow[]
+  /** What the period's overnight runs earned, in CENTS. Gross — nothing is deducted. */
+  grossCents: number
+}
+
 export interface TimeClockResponse {
   today: string
   week: TimeClockWeek
@@ -392,6 +409,8 @@ export interface TimeClockResponse {
   ptoEligible: boolean
   /** True when staff are viewing a driver's app. Punching is refused server-side. */
   readOnly?: boolean
+  /** The pay period's overnight runs. Absent on an API that predates them. */
+  overnight?: OvernightPeriod
 }
 
 export function fetchTimeClock(weekStart?: string): Promise<TimeClockResponse> {
@@ -471,6 +490,15 @@ export interface PaperworkLoad {
    * don't know", never as "no logs needed".
    */
   eld?: PaperworkEld
+  /** An overnight run — to or from Iowa. */
+  overnight?: boolean
+  /*
+   * The rate in CENTS, and only ever on an overnight run.
+   *
+   * The single exception to this payload carrying no money: Ivan drivers are not settled a
+   * percentage, so every other load reaches the app without a rate at all.
+   */
+  rateCents?: number | null
 }
 
 export interface Paperwork {
@@ -480,6 +508,9 @@ export interface Paperwork {
   podsMissing: number
   podsIllegible: number
   eldRequired?: number
+  overnightCount?: number
+  /** What the period's overnight runs earned, in CENTS. */
+  overnightCents?: number
 }
 
 export interface PaperworkWeek {
@@ -488,6 +519,8 @@ export interface PaperworkWeek {
   podsMissing: number
   podsIllegible: number
   eldRequired?: number
+  overnightCount?: number
+  overnightCents?: number
 }
 
 export async function fetchPaperworkWeeks(): Promise<PaperworkWeek[]> {

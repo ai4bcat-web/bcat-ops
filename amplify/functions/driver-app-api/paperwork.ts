@@ -21,6 +21,7 @@ import type { Load, Stop } from '../../../src/types'
 import {
   assessEld, SHORT_HAUL_AIR_MILES, WORK_REPORTING_LOCATION, type EldStatus,
 } from '../../../src/lib/eldRadius'
+import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 
 /** Enough of a load to describe it to the driver hauling it. */
 /*
@@ -69,6 +70,8 @@ export interface PaperworkLoadLike {
   originName?: string | null
   destinationName?: string | null
   trailerNumber?: string | null
+  /** CENTS, as stored on the Load. */
+  rate?: number | null
   commodity?: string | null
   weight?: number | null
   pieces?: number | null
@@ -126,6 +129,18 @@ export interface PaperworkLoad {
   pickupTimes: PaperworkTimes
   deliveryTimes: PaperworkTimes
   eld: PaperworkEld
+  /** An over-the-road run — to or from Iowa. See src/lib/overnight.ts. */
+  overnight: boolean
+  /*
+   * The rate, in CENTS, and ONLY on an over-the-road run.
+   *
+   * This is the one deliberate exception to the rule that this payload carries no money.
+   * Everything else here exists so an Ivan driver cannot be shown a rate they are not
+   * settled on; OTR runs are paid differently and the office wants the driver to see what
+   * the load earned. Null on every local load, and the field is only populated when
+   * overnight is true — so a bug that mislabels a local run still cannot leak its rate.
+   */
+  rateCents: number | null
 }
 
 /**
@@ -152,6 +167,10 @@ export interface PaperworkWeek {
   podsIllegible: number
   /** Loads this week that leave the 150 air-mile radius, so logs are required. */
   eldRequired: number
+  /** Over-the-road runs this week — to or from Iowa. */
+  overnightCount: number
+  /** What those runs earned, in CENTS. */
+  overnightCents: number
 }
 
 /** Detention starts after two free hours, which is what the app prompts on. */
@@ -253,6 +272,16 @@ export function buildPaperworkLoad(
 
   const byLeg = (leg: string) => times.find((t) => t.leg === leg)
 
+  /*
+   * Over-the-road is decided from the same places the ELD check uses, so the two cannot
+   * disagree about where a load went. They answer different questions from the same facts.
+   */
+  const overnight = isOvernightLoad([
+    ...stops.map((st) => (st.city && st.state ? `${st.city}, ${st.state}` : st.city)),
+    place(load.originCity, load.originState, null),
+    place(load.destinationCity, load.destinationState, null),
+  ])
+
   return {
     id: load.id,
     reference: referenceOf(load),
@@ -278,6 +307,10 @@ export function buildPaperworkLoad(
     pickupTimes: describeTimes(byLeg('PICKUP')),
     deliveryTimes: describeTimes(byLeg('DELIVERY')),
     eld: assessLoadEld(stops, load),
+    overnight,
+    // Belt and braces: the rate is read only inside this branch, so a load that is not
+    // over-the-road has no path by which its rate can reach the app at all.
+    rateCents: overnight && typeof load.rate === 'number' ? load.rate : null,
   }
 }
 
@@ -290,5 +323,8 @@ export function summarize(loads: PaperworkLoad[]): Omit<PaperworkWeek, 'weekStar
       (l) => l.pod.present && (l.pod.legibility === 'LOW' || l.pod.legibility === 'UNREADABLE'),
     ).length,
     eldRequired: loads.filter((l) => l.eld.required).length,
+    overnightCount: loads.filter((l) => l.overnight).length,
+    /** What the week's OTR runs earned, in CENTS. Zero when there are none. */
+    overnightCents: loads.reduce((n, l) => n + (l.rateCents ?? 0), 0),
   }
 }
