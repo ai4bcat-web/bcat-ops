@@ -12,6 +12,7 @@ import { KpiCard } from '@/components/ui/kpi-card'
 import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
+import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
@@ -165,6 +166,89 @@ function BrokerCoveredCard({ count, countDelta, revenue, revenueDelta, sublabel,
   )
 }
 
+
+/**
+ * The factoring queue as money, not just a count.
+ *
+ * "12 to factor" says nothing about whether that is a quiet afternoon or thirty thousand
+ * dollars sitting unsent. Three buckets, each with its own figure, and one line across the
+ * top for what is still owed to us — waiting to send plus sent and unpaid — because that is
+ * the number somebody actually wants when they ask how the week is going.
+ *
+ * Where a row cannot be valued it is SAID, never folded into the total as zero. A figure
+ * that quietly omits rows is worse than no figure on a card whose whole job is the amount.
+ */
+function FactoringCard({ totals, loading, onOpen }: {
+  totals: FactoringTotals
+  loading: boolean
+  onOpen: () => void
+}) {
+  const accent = totals.needToFactor.count > 0 ? '#dc2626' : '#22c55e'
+  const rows: { label: string; bucket: FactoringTotals['needToFactor']; color: string }[] = [
+    { label: 'Need to factor', bucket: totals.needToFactor, color: '#b45309' },
+    { label: 'Pending with OTR', bucket: totals.pendingWithOtr, color: '#1d4ed8' },
+    { label: 'Factored', bucket: totals.factored, color: '#15803d' },
+  ]
+  const unvalued = rows.reduce((n, r) => n + r.bucket.unvalued, 0)
+
+  return (
+    <div
+      onClick={onOpen}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen() }}
+      style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)',
+        boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+    >
+      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
+        background: accent, filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
+      <div style={{ padding: '16px 18px', position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+            Factoring
+          </div>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+            <AlertCircle size={15} />
+          </div>
+        </div>
+
+        {/* Still owed to us — the headline, because it is the question being asked. */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
+            color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+            {loading ? '—' : cents(totals.outstandingAmount)}
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ds-t3)', marginBottom: 12 }}>
+          outstanding · {totals.outstandingCount} invoice{totals.outstandingCount === 1 ? '' : 's'}
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {rows.map((r) => (
+            <div key={r.label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+                <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: r.color, flexShrink: 0 }} />
+                {r.label}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ds-t3)' }}>{r.bucket.count}</span>
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+                {cents(r.bucket.amount)}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {unvalued > 0 && (
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--ds-amber)' }}>
+            {unvalued} invoice{unvalued === 1 ? '' : 's'} with no rate on the load — not in these totals
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function IconBtn({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
     <button title={label} style={{
@@ -197,12 +281,16 @@ export function DashboardPage() {
    * card and the page can never disagree about how much is waiting.
    */
   const { items: factoringItems, loading: factoringLoading } = useFactoringItems()
-  const factoring = useMemo(() => ({
-    loading: factoringLoading,
-    needToFactor: factoringItems.filter((i) => i.status === 'NEED_TO_FACTOR').length,
-    pendingWithOtr: factoringItems.filter((i) => i.status === 'PENDING_WITH_OTR').length,
-  }), [factoringItems, factoringLoading])
   const loads = useAppStore((s) => s.loads)
+  /*
+   * Valued off the loads as well as the queue: nothing is submitted yet on a NEED_TO_FACTOR
+   * row, so it has no OTR amount and the rate on the load it resolves to is the only figure
+   * there is.
+   */
+  const factoringTotalsValue = useMemo(
+    () => factoringTotals(factoringItems, loads),
+    [factoringItems, loads],
+  )
   const navigate = useNavigate()
   const { hasPageAccess } = useAuth()
   const isMobile = useIsMobile()
@@ -291,25 +379,18 @@ export function DashboardPage() {
             icon={<Package size={15} />}
           />
           {/*
-            The factoring queue, not a derived "past delivery not invoiced" guess.
+            The factoring queue in money, not a derived "past delivery not invoiced" guess.
 
-            That old number was computed from appointment dates and the ready-to-invoice
-            flag, so it could sit at forty while the queue people actually work was empty —
-            two numbers about the same money, disagreeing. This one counts the rows on the
-            queue: what is waiting to be sent, and what is sitting at OTR unpaid.
+            That old number came from appointment dates and the ready-to-invoice flag, so it
+            could sit at forty while the queue people actually work was empty — two numbers
+            about the same money, disagreeing. This reads the queue itself, and reads it as
+            an amount, because "12 to factor" says nothing about whether that is a quiet
+            afternoon or thirty thousand dollars sitting unsent.
           */}
-          <KpiCard
-            label="To Factor"
-            value={factoring.needToFactor}
-            sublabel={
-              factoring.loading ? 'Loading the queue…'
-                : factoring.needToFactor > 0 ? `${factoring.pendingWithOtr} also pending at OTR`
-                : factoring.pendingWithOtr > 0 ? `Nothing to send · ${factoring.pendingWithOtr} pending at OTR`
-                : 'Queue is clear'
-            }
-            accent={factoring.needToFactor > 0 ? '#dc2626' : '#22c55e'}
-            sparkColor="#22c55e"
-            icon={<AlertCircle size={15} />}
+          <FactoringCard
+            totals={factoringTotalsValue}
+            loading={factoringLoading}
+            onOpen={() => navigate('/factoring')}
           />
           <KpiCard
             label="Batory Appts to Book"
