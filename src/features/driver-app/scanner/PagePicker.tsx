@@ -1,24 +1,27 @@
 /**
- * Add the pages of a document, from the phone's own camera or its files.
+ * Add the pages of a document: scan them here, or pick a file.
  *
- * Upload only. There is no camera here at all — not a live viewfinder, and not a
- * shortcut into the phone's camera either.
+ * Both routes exist, and the history is why. A live viewfinder was tried once and gave
+ * drivers a black screen on real phones. A plain straight-to-camera shortcut replaced it
+ * and was removed too, for a better reason: a raw photo is the worst version of a POD,
+ * because nothing crops it, straightens it or checks it is readable before it is sent.
  *
- * A live-video capture screen was tried and gave drivers a black screen on real phones.
- * A straight-to-camera shortcut replaced it and was removed too: a photo taken in the
- * moment is the worst version of a POD, because nothing crops it, straightens it or
- * checks it is readable before it is sent. The scanner app already on the phone does all
- * of that and produces one PDF.
+ * Upload stayed, and still leads — a driver who already scanned the page with Notes or
+ * Google Drive has the best possible version of it and should not be talked out of that.
  *
- * So a driver picks a file. Their phone still offers its camera inside its own file
- * sheet if they want it — that is the operating system's choice, not a path this screen
- * promotes.
+ * What is new is that the missing middle is covered. Scan does here what those apps do:
+ * finds the page, flattens it, lifts the ink, and says so when the shot is too dark or
+ * too blurry — using the SAME detector the server runs after upload, so what the driver
+ * sees framed is what the server will crop to. The old black-screen failure is handled
+ * rather than hoped against: ScanCamera checks that frames are genuinely arriving and
+ * sends the driver back here if they are not.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { FileText, ScanLine, Trash2, Upload, X } from 'lucide-react'
+import { Camera, FileText, ScanLine, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { prepareFile } from './imagePrep'
+import { ScanCamera } from './ScanCamera'
 import { MAX_SCAN_PAGES, SCAN_ACCEPTED_TYPES_STRING, type PendingPage } from '../driverApi'
 
 interface PagePickerProps {
@@ -35,6 +38,7 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
 
   const [pages, setPages] = useState<PendingPage[]>(initialPages)
   const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
 
   const atMax = pages.length >= MAX_SCAN_PAGES
   const pageLabel = pages.length === 1 ? '1 page' : `${pages.length} pages`
@@ -130,13 +134,35 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
         Upload the document
       </Button>
 
+      {/*
+        Second, not first. A driver who already scanned the page with Notes or Google
+        Drive has the best version of it there is, and this button should not talk them
+        out of that. It is for the far more common case: standing at a dock with a paper
+        POD and no patience for leaving the app.
+      */}
+      <Button
+        type="button"
+        size="lg"
+        variant="outline"
+        className="mt-3 h-16 w-full justify-start gap-3 text-base"
+        disabled={busy || atMax}
+        onClick={() => setScanning(true)}
+      >
+        <Camera className="h-5 w-5" />
+        <span className="flex flex-col items-start leading-tight">
+          Scan it with the camera
+          <span className="text-xs font-normal text-muted-foreground">
+            Crops and straightens the page for you
+          </span>
+        </span>
+      </Button>
+
       {/* Said once, where it is useful, rather than left for someone to work out. */}
       <div className="mt-4 flex items-start gap-2 rounded-xl border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
         <ScanLine className="mt-0.5 h-4 w-4 shrink-0" />
         <p>
-          Scan it first with the app on your phone — Notes on iPhone, Google Drive on
-          Android — then pick the PDF it makes. It crops and straightens the page, handles
-          more than one page, and reads far better than a photo.
+          Already scanned it with Notes or Google Drive? Upload that PDF — it handles more
+          than one page and reads best of all.
         </p>
       </div>
 
@@ -173,6 +199,18 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
           {busy ? 'Working…' : `Done${pages.length > 0 ? ` (${pages.length})` : ''}`}
         </Button>
       </div>
+
+      {scanning && (
+        <ScanCamera
+          remaining={MAX_SCAN_PAGES - pages.length}
+          onClose={() => setScanning(false)}
+          onCapture={(page) => {
+            // Stays open on purpose: a multi-page POD is the normal case, and closing
+            // after every shot would make the driver reopen the camera for page two.
+            setPages((prev) => (prev.length >= MAX_SCAN_PAGES ? prev : [...prev, page]))
+          }}
+        />
+      )}
 
       <input
         ref={libraryInputRef}

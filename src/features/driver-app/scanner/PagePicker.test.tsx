@@ -58,9 +58,31 @@ describe('PagePicker', () => {
     expect(screen.getByTestId('library-input')).not.toHaveAttribute('capture')
   })
 
-  it('tells drivers to scan it first', () => {
+  it('still points at a phone scanner app, which reads best of all', () => {
     render(<PagePicker onDone={vi.fn()} />)
-    expect(screen.getByText(/Scan it first with the app on your phone/i)).toBeInTheDocument()
+    expect(screen.getByText(/Already scanned it with Notes or Google Drive/i)).toBeInTheDocument()
+  })
+
+  it('offers scanning with the camera as well as uploading', () => {
+    render(<PagePicker onDone={vi.fn()} />)
+    expect(screen.getByRole('button', { name: /Scan it with the camera/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Upload the document/i })).toBeInTheDocument()
+  })
+
+  it('leads with Upload — a page already scanned elsewhere is the best version there is', () => {
+    const { container } = render(<PagePicker onDone={vi.fn()} />)
+    const labels = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '')
+    const upload = labels.findIndex((t) => /Upload the document/i.test(t))
+    const scan = labels.findIndex((t) => /Scan it with the camera/i.test(t))
+    expect(upload).toBeGreaterThanOrEqual(0)
+    expect(scan).toBeGreaterThan(upload)
+  })
+
+  it('does not open the camera until it is asked to', () => {
+    // getUserMedia on mount would prompt for the camera on a screen the driver may only
+    // be passing through, and a denied prompt is remembered by the browser.
+    render(<PagePicker onDone={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /Take the photo/i })).toBeNull()
   })
 
   it('cannot send nothing', () => {

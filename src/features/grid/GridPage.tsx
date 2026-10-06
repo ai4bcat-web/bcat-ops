@@ -291,11 +291,14 @@ export function GridPage() {
     switch (tab) {
       case 'ready':      return driverFiltered.filter((l) => l.readyToInvoice)
       case 'notReady':   return driverFiltered.filter((l) => !l.readyToInvoice)
-      case 'unassigned': return driverFiltered.filter((l) => !l.pickupDriverId)
+      // The same derivation the status chip uses. These were two different counts under
+      // one word — the tab said 40, the chip said 20 — because the tab asked "no pickup
+      // driver" while the status excludes loads that have already moved.
+      case 'unassigned': return driverFiltered.filter((l) => statusById.get(l.id) === 'unassigned')
       case 'split':      return driverFiltered.filter((l) => isSplitLoad(l))
       default:           return driverFiltered
     }
-  }, [driverFiltered, tab])
+  }, [driverFiltered, tab, statusById])
 
   // Comprehensive search across ALL load fields (shared with calendar + top-bar search).
   const searched = useMemo(() => {
@@ -330,9 +333,9 @@ export function GridPage() {
     all:        driverFiltered.length,
     ready:      driverFiltered.filter((l) => l.readyToInvoice).length,
     notReady:   driverFiltered.filter((l) => !l.readyToInvoice).length,
-    unassigned: driverFiltered.filter((l) => !l.pickupDriverId).length,
+    unassigned: driverFiltered.filter((l) => statusById.get(l.id) === 'unassigned').length,
     split:      driverFiltered.filter((l) => isSplitLoad(l)).length,
-  }), [driverFiltered])
+  }), [driverFiltered, statusById])
 
   const columns = useMemo<ColumnDef<Load>[]>(() => [
     {
