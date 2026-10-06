@@ -21,6 +21,20 @@
  * characters, and never fall back to a partial or fuzzy match.
  */
 
+/**
+ * Where a document actually lives, so a screen can open the thing rather than only say
+ * it exists.
+ *
+ * Two shapes because the two stores are reached differently and cannot be unified. A
+ * driver upload and a staff rate confirmation are S3 keys the browser may presign
+ * itself (`driver-docs/`, `rate-confirms/`). A JobsDone POD lives under `pods/`, which
+ * no browser credential can read — that prefix is deliberately absent from the storage
+ * rules — so it is reached by id through the pod-actions Lambda, which presigns it.
+ */
+export type DocRef =
+  | { kind: 's3'; key: string }
+  | { kind: 'podDocument'; id: string }
+
 /** Just enough of a submission to decide, from any source. */
 export interface PodSubmissionLike {
   loadId?: string | null
@@ -29,6 +43,10 @@ export interface PodSubmissionLike {
   hasPodDoc: boolean
   /** True when it carries at least one rate-confirmation page. */
   hasRateconDoc?: boolean
+  /** S3 key of the finished POD — the merged PDF where there is one. */
+  podKey?: string | null
+  /** S3 key of the finished rate confirmation. */
+  rateconKey?: string | null
   /**
    * When the POD actually landed, ISO. The settlement pages show it so somebody chasing
    * paperwork can tell "sent an hour ago" from "sent three weeks ago" — a present tick
@@ -47,6 +65,13 @@ export interface PodLoadLike {
 export interface DocKeys {
   byLoadId: Set<string>
   byPro: Set<string>
+  /**
+   * Where to find it, when the store that answered knew. Presence and location are kept
+   * apart on purpose: a load can be known to HAVE a POD from a store that cannot say
+   * where it is, and that must still read as "on file" rather than as missing.
+   */
+  refByLoadId: Map<string, DocRef>
+  refByPro: Map<string, DocRef>
 }
 
 export interface PodIndex {
@@ -82,9 +107,21 @@ export function buildPodIndex(input: {
   submissions: PodSubmissionLike[]
   /** Load ids whose Load row already carries a rate-confirmation S3 key. */
   rateconLoadIds?: Iterable<string>
+  /** load id → PodDocument id, so a JobsDone POD can be opened through the Lambda. */
+  jobsdonePodIds?: Iterable<readonly [string, string]>
+  /** load id → `rate-confirms/…` key off the Load row. */
+  rateconKeys?: Iterable<readonly [string, string]>
 }): PodIndex {
-  const pod: DocKeys = { byLoadId: new Set(input.jobsdoneLoadIds), byPro: new Set() }
-  const ratecon: DocKeys = { byLoadId: new Set(input.rateconLoadIds ?? []), byPro: new Set() }
+  const emptyRefs = () => ({ refByLoadId: new Map<string, DocRef>(), refByPro: new Map<string, DocRef>() })
+  const pod: DocKeys = { byLoadId: new Set(input.jobsdoneLoadIds), byPro: new Set(), ...emptyRefs() }
+  const ratecon: DocKeys = { byLoadId: new Set(input.rateconLoadIds ?? []), byPro: new Set(), ...emptyRefs() }
+
+  for (const [loadId, id] of input.jobsdonePodIds ?? []) {
+    if (loadId && id) pod.refByLoadId.set(loadId, { kind: 'podDocument', id })
+  }
+  for (const [loadId, key] of input.rateconKeys ?? []) {
+    if (loadId && key) ratecon.refByLoadId.set(loadId, { kind: 's3', key })
+  }
   const podAt = { byLoadId: new Map<string, string>(), byPro: new Map<string, string>() }
 
   /** Keep the earliest timestamp seen for a key. */
@@ -98,10 +135,23 @@ export function buildPodIndex(input: {
   for (const s of input.submissions) {
     const loadId = (s.loadId ?? '').trim()
     const pro = normalizePro(s.referenceNumber)
-    for (const [has, keys] of [[s.hasPodDoc, pod], [s.hasRateconDoc, ratecon]] as const) {
+    for (const [has, keys, key] of [
+      [s.hasPodDoc, pod, s.podKey],
+      [s.hasRateconDoc, ratecon, s.rateconKey],
+    ] as const) {
       if (!has) continue
       if (loadId) keys.byLoadId.add(loadId)
       if (pro) keys.byPro.add(pro)
+      /*
+       * A ref already placed by the Load row wins. That one is what the office uploaded
+       * against this load; a driver submission matched only by a PRO the driver typed is
+       * the weaker claim, and must not replace it.
+       */
+      const trimmed = (key ?? '').trim()
+      if (trimmed) {
+        if (loadId && !keys.refByLoadId.has(loadId)) keys.refByLoadId.set(loadId, { kind: 's3', key: trimmed })
+        if (pro && !keys.refByPro.has(pro)) keys.refByPro.set(pro, { kind: 's3', key: trimmed })
+      }
     }
     if (s.hasPodDoc) {
       if (loadId) noteArrival(podAt.byLoadId, loadId, s.podUploadedAt)
@@ -126,9 +176,26 @@ function hasDoc(keys: DocKeys, load: PodLoadLike): boolean {
   return pro !== null && keys.byPro.has(pro)
 }
 
+function docRef(keys: DocKeys, load: PodLoadLike): DocRef | null {
+  const byId = keys.refByLoadId.get(load.id)
+  if (byId) return byId
+  const pro = normalizePro(load.aljexId)
+  return (pro && keys.refByPro.get(pro)) || null
+}
+
 /** True when some store holds a POD for this load. */
 export function loadHasPod(index: PodIndex, load: PodLoadLike): boolean {
   return hasDoc(index.pod, load)
+}
+
+/** Where this load's POD is, when a store could say. Null is "on file but not locatable". */
+export function loadPodRef(index: PodIndex, load: PodLoadLike): DocRef | null {
+  return docRef(index.pod, load)
+}
+
+/** Where this load's rate confirmation is, when a store could say. */
+export function loadRateconRef(index: PodIndex, load: PodLoadLike): DocRef | null {
+  return docRef(index.ratecon, load)
 }
 
 /**

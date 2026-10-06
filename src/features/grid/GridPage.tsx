@@ -7,7 +7,7 @@ import {
 } from '@tanstack/react-table'
 import {
   ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Circle, XCircle,
-  Eye, Trash2, UserCheck, Plus, Download, Search, Filter, CalendarDays,
+  Eye, Trash2, UserCheck, Plus, Download, Search, CalendarDays, Loader2,
 } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
 import { useLoadPaperwork, paperworkFor } from '@/hooks/useLoadPaperwork'
@@ -17,6 +17,13 @@ import { MobileLoadAgenda } from '@/features/calendar/MobileLoadAgenda'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useAppStore } from '@/store/useAppStore'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
+import {
+  loadStatus, LOAD_STATUSES, LOAD_STATUS_BY_ID, isOpenStatus,
+  type LoadStatusId, type LoadStatusMeta,
+} from '@/lib/loadStatus'
+import { resolveDoc } from '@/lib/openPaperwork'
+import { DocumentPreview } from '@/features/documents/DocumentPreview'
+import type { PaperworkCell } from '@/hooks/useLoadPaperwork'
 import { DriverFilterMenu } from '@/components/DriverFilterMenu'
 import {
   allSelectableDriverIds, loadVisibleForDrivers,
@@ -69,26 +76,100 @@ const KPI_COLORS: Record<TabId, string> = {
  * The dash matters: red is a claim that nothing has been sent, and making that claim
  * because a query failed is how somebody ends up chasing a driver for a POD they already
  * submitted.
+ *
+ * A green tick is a BUTTON. Knowing the paperwork exists is half an answer — the other
+ * half is reading it, and sending somebody into the drawer to do that is what made people
+ * keep a second system open. It opens the real document: the merged PDF where the scan
+ * pipeline produced one, the cleaned scan for a JobsDone POD, the uploaded file otherwise.
  */
-function PaperworkDot({ has, label }: { has: boolean | null; label: string }) {
-  if (has === null) {
+function PaperworkDot({
+  cell, label, onOpen,
+}: {
+  cell: PaperworkCell
+  label: string
+  onOpen: () => void
+}) {
+  if (cell.has === null) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
           <span style={{ color: 'var(--ds-t3)', fontSize: 13 }}>—</span>
         </TooltipTrigger>
-        <TooltipContent>{label}: not known yet</TooltipContent>
+        <TooltipContent>{label}: still loading</TooltipContent>
+      </Tooltip>
+    )
+  }
+  if (!cell.has) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <XCircle className="size-4 text-red-600" aria-label={`${label} missing`} />
+        </TooltipTrigger>
+        <TooltipContent>{label} missing</TooltipContent>
+      </Tooltip>
+    )
+  }
+  // On file but no store could say where — the tick is still true, it just cannot open.
+  if (!cell.ref) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <CheckCircle2 className="size-4 text-emerald-600" aria-label={`${label} on file`} />
+        </TooltipTrigger>
+        <TooltipContent>{label} on file — open the load to view it</TooltipContent>
       </Tooltip>
     )
   }
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {has
-          ? <CheckCircle2 className="size-4 text-emerald-600" aria-label={`${label} on file`} />
-          : <XCircle className="size-4 text-red-600" aria-label={`${label} missing`} />}
+        <button
+          type="button"
+          // The row opens the drawer; this must not also do that.
+          onClick={(e) => { e.stopPropagation(); onOpen() }}
+          aria-label={`View ${label}`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 5px',
+            border: 'none', borderRadius: 6, background: 'transparent', cursor: 'pointer',
+            color: 'var(--ds-green, #16a34a)', fontFamily: 'inherit',
+          }}
+        >
+          <CheckCircle2 className="size-4 text-emerald-600" />
+          <Eye className="size-3 opacity-70" />
+        </button>
       </TooltipTrigger>
-      <TooltipContent>{has ? `${label} on file` : `${label} missing`}</TooltipContent>
+      <TooltipContent>{label} on file — click to view or download</TooltipContent>
+    </Tooltip>
+  )
+}
+
+const STATUS_TONE: Record<LoadStatusMeta['tone'], { bg: string; fg: string; dot: string }> = {
+  neutral: { bg: 'var(--ds-bg)',        fg: 'var(--ds-t2)', dot: '#94a3b8' },
+  info:    { bg: 'rgba(30,168,243,.10)', fg: '#0b7fc4',      dot: '#1ea8f3' },
+  active:  { bg: 'rgba(167,139,250,.14)', fg: '#7c5cd6',     dot: '#a78bfa' },
+  warn:    { bg: 'rgba(245,158,11,.14)', fg: '#b45309',      dot: '#f59e0b' },
+  good:    { bg: 'rgba(34,197,94,.13)',  fg: '#15803d',      dot: '#22c55e' },
+}
+
+/** The status as a chip: a colour to scan by and a word to be sure by. */
+function StatusChip({ id }: { id: LoadStatusId }) {
+  const meta = LOAD_STATUS_BY_ID[id]
+  const tone = STATUS_TONE[meta.tone]
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap',
+            padding: '2px 8px', borderRadius: 999, background: tone.bg, color: tone.fg,
+            fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.01em',
+          }}
+        >
+          <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: tone.dot, flexShrink: 0 }} />
+          {meta.label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{meta.hint}</TooltipContent>
     </Tooltip>
   )
 }
@@ -109,6 +190,26 @@ export function GridPage() {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [groupByDay, setGroupByDay] = useState(false)
   const [showColMenu, setShowColMenu] = useState(false)
+  /*
+   * Which statuses are showing. An EMPTY set means every status, not none — the common
+   * case is "show me everything", and making that the empty state keeps the filter bar
+   * unlit until somebody actually narrows it.
+   */
+  const [statusFilter, setStatusFilter] = useState<Set<LoadStatusId>>(new Set())
+  const toggleStatus = useCallback((id: LoadStatusId) => {
+    setStatusFilter((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
+
+  /** The paperwork the user asked to read, resolved to a URL at the moment of opening. */
+  const [preview, setPreview] = useState<
+    { title: string; subtitle: string; name: string; url: string; contentType?: string | null } | null
+  >(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
 
   /*
    * Whose loads to show — one driver, one fleet, or everybody.
@@ -131,7 +232,44 @@ export function GridPage() {
     [chosenDriverIds, drivers],
   )
 
-  const driverName = (id: string | null) => id ? (drivers.find((d) => d.id === id)?.name ?? '—') : 'Unassigned'
+  // Memoized so it can be a real dependency of the columns below rather than a reason to
+  // silence the rule — a fresh function every render would make that memo rebuild always.
+  const driverName = useCallback(
+    (id: string | null) => id ? (drivers.find((d) => d.id === id)?.name ?? '—') : 'Unassigned',
+    [drivers],
+  )
+
+  /*
+   * Resolve and open one document. The URL is minted HERE, on the click, never cached on
+   * the row: these are presigned and short-lived, and a grid that sat open all morning
+   * would hand out links S3 has already stopped honouring.
+   */
+  const openPaperwork = useCallback(async (load: Load, cell: PaperworkCell, label: string) => {
+    if (!cell.ref) return
+    setPreviewBusy(true)
+    try {
+      const doc = await resolveDoc(cell.ref, `${label}-${load.aljexId || load.id.slice(-6)}`)
+      setPreview({
+        title: `${label} · PRO ${load.aljexId || '—'}`,
+        subtitle: [load.customer, load.originCity && load.destinationCity
+          ? `${load.originCity} → ${load.destinationCity}` : ''].filter(Boolean).join(' · '),
+        name: `${label}-${load.aljexId || load.id.slice(-6)}`,
+        url: doc.url,
+        contentType: doc.contentType,
+      })
+    } catch (err) {
+      toast.error(`Couldn't open the ${label.toLowerCase()}: ${err instanceof Error ? err.message : 'unknown error'}`)
+    } finally {
+      setPreviewBusy(false)
+    }
+  }, [])
+
+  /** One status per load, derived once per render pass rather than per cell. */
+  const statusById = useMemo(() => {
+    const m = new Map<string, LoadStatusId>()
+    for (const l of loads) m.set(l.id, loadStatus(l, paperworkFor(paperwork.index, l).pod.has))
+    return m
+  }, [loads, paperwork.index])
 
   /*
    * The driver filter runs BEFORE the tabs, so the KPI tiles count what the grid shows.
@@ -141,9 +279,12 @@ export function GridPage() {
    * owner-operator, so nothing is filtered by driver and the grid never flashes empty.
    */
   const driverFiltered = useMemo(() => {
-    if (drivers.length === 0) return loads
-    return loads.filter((l) => loadVisibleForDrivers(l, visibleDriverIdSet))
-  }, [loads, drivers.length, visibleDriverIdSet])
+    const byDriver = drivers.length === 0
+      ? loads
+      : loads.filter((l) => loadVisibleForDrivers(l, visibleDriverIdSet))
+    if (statusFilter.size === 0) return byDriver
+    return byDriver.filter((l) => statusFilter.has(statusById.get(l.id) ?? 'planned'))
+  }, [loads, drivers.length, visibleDriverIdSet, statusFilter, statusById])
 
   // Tab-filtered data
   const tabFiltered = useMemo(() => {
@@ -165,6 +306,26 @@ export function GridPage() {
   }, [tabFiltered, searchQuery, drivers])
 
   // Counts for tab badges
+  /*
+   * Counted off the DRIVER-filtered list but before the status filter, so each chip keeps
+   * showing how many loads it would bring back. Counting after would zero every chip the
+   * moment one was selected, which reads as "there are none" rather than "you hid them".
+   */
+  const statusCounts = useMemo(() => {
+    const base = drivers.length === 0 ? loads : loads.filter((l) => loadVisibleForDrivers(l, visibleDriverIdSet))
+    const m = new Map<LoadStatusId, number>()
+    for (const l of base) {
+      const id = statusById.get(l.id) ?? 'planned'
+      m.set(id, (m.get(id) ?? 0) + 1)
+    }
+    return m
+  }, [loads, drivers.length, visibleDriverIdSet, statusById])
+
+  const openCount = useMemo(
+    () => [...statusCounts].reduce((n, [id, c]) => n + (isOpenStatus(id) ? c : 0), 0),
+    [statusCounts],
+  )
+
   const counts = useMemo(() => ({
     all:        driverFiltered.length,
     ready:      driverFiltered.filter((l) => l.readyToInvoice).length,
@@ -250,6 +411,19 @@ export function GridPage() {
       },
     },
     {
+      id: 'status',
+      header: ({ column }) => (
+        <button className="flex items-center" onClick={() => column.toggleSorting()}>
+          STATUS <SortIcon col={column} />
+        </button>
+      ),
+      // Sorted by lifecycle position, not alphabetically: "At delivery" before "Delivered"
+      // is the order a dispatcher thinks in, and A-before-D is noise.
+      accessorFn: (row) => LOAD_STATUSES.findIndex((s) => s.id === (statusById.get(row.id) ?? 'planned')),
+      cell: ({ row }) => <StatusChip id={statusById.get(row.original.id) ?? 'planned'} />,
+      size: 130,
+    },
+    {
       accessorKey: 'pickupAppt',
       header: ({ column }) => (
         <button className="flex items-center" onClick={() => column.toggleSorting()}>
@@ -330,15 +504,23 @@ export function GridPage() {
       id: 'ratecon',
       header: 'RATE CON',
       enableSorting: false,
-      cell: ({ row }) => <PaperworkDot has={paperworkFor(paperwork.index, row.original).ratecon} label="Rate confirmation" />,
-      size: 80,
+      cell: ({ row }) => {
+        const cell = paperworkFor(paperwork.index, row.original).ratecon
+        return <PaperworkDot cell={cell} label="Rate confirmation"
+          onOpen={() => void openPaperwork(row.original, cell, 'RateCon')} />
+      },
+      size: 90,
     },
     {
       id: 'pod',
       header: 'POD',
       enableSorting: false,
-      cell: ({ row }) => <PaperworkDot has={paperworkFor(paperwork.index, row.original).pod} label="POD" />,
-      size: 60,
+      cell: ({ row }) => {
+        const cell = paperworkFor(paperwork.index, row.original).pod
+        return <PaperworkDot cell={cell} label="POD"
+          onOpen={() => void openPaperwork(row.original, cell, 'POD')} />
+      },
+      size: 70,
     },
     {
       accessorKey: 'readyToInvoice',
@@ -368,8 +550,15 @@ export function GridPage() {
       },
       size: 60,
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [drivers])
+    /*
+     * EVERY value the cells close over belongs here.
+     *
+     * Leaving `paperwork.index` out is exactly what made the RATE CON and POD columns show
+     * a dash on every row forever: the cells captured the index while it was still null,
+     * and the memo never recomputed once it loaded. The suppression that used to sit here
+     * is gone with it — it was hiding the bug, not a false positive.
+     */
+  ], [driverName, updateLoad, paperwork.index, statusById, openPaperwork])
 
   const table = useReactTable<Load>({
     data: searched,
@@ -523,6 +712,17 @@ export function GridPage() {
           ))}
         </div>
 
+        {statusFilter.size > 0 && (
+          <button
+            onClick={() => setStatusFilter(new Set())}
+            style={{ height: 34, padding: '0 10px', borderRadius: 7, cursor: 'pointer',
+              border: '1px solid var(--ds-border)', background: 'var(--ds-bg)',
+              color: 'var(--ds-t2)', fontSize: 12.5, fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+          >
+            Clear status filter
+          </button>
+        )}
+
         {/* Search */}
         <div style={{ position: 'relative', width: 240, flexShrink: 0 }}>
           <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
@@ -622,8 +822,63 @@ export function GridPage() {
         )}
 
         <div style={{ flex: 1 }} />
-        <Btn icon={<Filter size={13} />} label="Columns" onClick={() => {}} />
+        {previewBusy && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--ds-t3)' }}>
+            <Loader2 className="size-3 animate-spin" /> Opening…
+          </span>
+        )}
+        <span style={{ fontSize: 12, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
+          {openCount} open
+        </span>
       </div>
+
+      {/*
+        ── Status filter ────────────────────────────────────────────────────────
+        The lifecycle across the top, in order, each with the count it would bring back.
+        This is the question a dispatcher actually asks a board — "what is sitting at a
+        dock", "what delivered without paperwork" — and it had no answer here before.
+
+        Statuses with nothing in them are still shown, greyed. A row of chips that
+        changes shape as work moves through it is one people stop being able to aim at.
+      */}
+      {!isMobile && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+          padding: '8px 20px', borderBottom: '1px solid var(--ds-border)',
+          background: 'var(--ds-bg)', flexShrink: 0,
+        }}>
+          {LOAD_STATUSES.map((meta) => {
+            const n = statusCounts.get(meta.id) ?? 0
+            const on = statusFilter.has(meta.id)
+            const tone = STATUS_TONE[meta.tone]
+            return (
+              <Tooltip key={meta.id}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => toggleStatus(meta.id)}
+                    aria-pressed={on}
+                    disabled={n === 0 && !on}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+                      height: 28, padding: '0 10px', borderRadius: 999, cursor: n === 0 && !on ? 'default' : 'pointer',
+                      border: `1px solid ${on ? tone.dot : 'var(--ds-border)'}`,
+                      background: on ? tone.bg : 'var(--ds-surface)',
+                      color: on ? tone.fg : (n === 0 ? 'var(--ds-t3)' : 'var(--ds-t2)'),
+                      fontSize: 12, fontWeight: on ? 700 : 500, fontFamily: 'inherit',
+                      opacity: n === 0 && !on ? 0.5 : 1,
+                    }}
+                  >
+                    <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: tone.dot, flexShrink: 0 }} />
+                    {meta.label}
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, opacity: 0.8 }}>{n}</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{meta.hint}</TooltipContent>
+              </Tooltip>
+            )
+          })}
+        </div>
+      )}
 
       {/* ── Table (desktop) / card agenda (mobile) ──────────────────────────── */}
       {isMobile ? (
@@ -688,6 +943,25 @@ export function GridPage() {
       )}
 
       <LoadDrawer />
+
+      {/*
+        Read the paperwork without leaving the board. DocumentPreview is the same viewer
+        the load drawer and the settlement pages use — one viewer, so view, download and
+        the JPEG-to-PDF wrap behave identically wherever somebody opens a document.
+        Read-only here: replacing or removing a document is a decision that belongs on the
+        load, next to everything else about it, not on a row in a list of 700.
+      */}
+      {preview && (
+        <DocumentPreview
+          open
+          onClose={() => setPreview(null)}
+          title={preview.title}
+          subtitle={preview.subtitle}
+          url={preview.url}
+          contentType={preview.contentType}
+          downloadName={preview.name}
+        />
+      )}
     </div>
   )
 }

@@ -11,6 +11,7 @@ import {
 import { KpiCard } from '@/components/ui/kpi-card'
 import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
+import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
@@ -190,6 +191,17 @@ const RANGES: { value: DateRangeKey; label: string }[] = [
 export function DashboardPage() {
   const [rangeKey, setRangeKey] = useState<DateRangeKey>('this-month')
   const metrics = useDashboardMetrics(rangeKey)
+
+  /*
+   * The factoring queue, counted off the same rows the Factoring page works from, so the
+   * card and the page can never disagree about how much is waiting.
+   */
+  const { items: factoringItems, loading: factoringLoading } = useFactoringItems()
+  const factoring = useMemo(() => ({
+    loading: factoringLoading,
+    needToFactor: factoringItems.filter((i) => i.status === 'NEED_TO_FACTOR').length,
+    pendingWithOtr: factoringItems.filter((i) => i.status === 'PENDING_WITH_OTR').length,
+  }), [factoringItems, factoringLoading])
   const loads = useAppStore((s) => s.loads)
   const navigate = useNavigate()
   const { hasPageAccess } = useAuth()
@@ -278,18 +290,31 @@ export function DashboardPage() {
             accent="#1ea8f3"
             icon={<Package size={15} />}
           />
+          {/*
+            The factoring queue, not a derived "past delivery not invoiced" guess.
+
+            That old number was computed from appointment dates and the ready-to-invoice
+            flag, so it could sit at forty while the queue people actually work was empty —
+            two numbers about the same money, disagreeing. This one counts the rows on the
+            queue: what is waiting to be sent, and what is sitting at OTR unpaid.
+          */}
           <KpiCard
-            label="Needs Invoice"
-            value={metrics.needsInvoice}
-            sublabel={metrics.needsInvoice > 0 ? 'Past deliveries not invoiced' : 'All caught up'}
-            accent={metrics.needsInvoice > 0 ? '#dc2626' : '#22c55e'}
+            label="To Factor"
+            value={factoring.needToFactor}
+            sublabel={
+              factoring.loading ? 'Loading the queue…'
+                : factoring.needToFactor > 0 ? `${factoring.pendingWithOtr} also pending at OTR`
+                : factoring.pendingWithOtr > 0 ? `Nothing to send · ${factoring.pendingWithOtr} pending at OTR`
+                : 'Queue is clear'
+            }
+            accent={factoring.needToFactor > 0 ? '#dc2626' : '#22c55e'}
             sparkColor="#22c55e"
             icon={<AlertCircle size={15} />}
           />
           <KpiCard
-            label="Appts to Book"
+            label="Batory Appts to Book"
             value={metrics.needsAppt}
-            sublabel={metrics.needsAppt > 0 ? 'Loads with NEED status' : 'All booked'}
+            sublabel={metrics.needsAppt > 0 ? 'Stops still on the Batory ladder' : 'All booked'}
             accent={metrics.needsAppt > 0 ? '#f59e0b' : undefined}
             sparkColor="#f59e0b"
             icon={<CalendarClock size={15} />}

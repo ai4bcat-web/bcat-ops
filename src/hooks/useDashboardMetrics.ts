@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
+import { apptOutstanding, requiresApptProofs } from '@/lib/apptQueue'
 import type { Driver, Load } from '@/types'
 
 export type DateRangeKey = 'today' | 'this-week' | 'this-month' | 'this-quarter' | 'this-year'
@@ -18,7 +19,7 @@ export interface DashboardMetrics {
   activeDrivers: number
   readyToInvoice: number
   needsInvoice: number     // shipments completed (non-TBD delivery) yesterday or earlier, still not ready to invoice
-  needsAppt: number        // loads with at least one TBD appointment (all time)
+  needsAppt: number        // BATORY stops still to book — the only ones this office books
   revenue: number          // sum of load.rate in cents
   revenueDelta: number     // revenue − previous-period revenue (cents)
   revenueConnected: boolean // false when all rates are null
@@ -120,10 +121,18 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
         !l.readyToInvoice
     ).length
 
-    // Appt booking backlog — all loads with at least one TBD appointment
-    const needsAppt = loads.filter(
-      (l) => l.pickupApptType === 'tbd' || l.deliveryApptType === 'tbd'
-    ).length
+    /*
+     * Appt booking backlog — BATORY only.
+     *
+     * Every other customer's appointments arrive already booked on the rate confirmation;
+     * counting them made the card a number nobody could act on, and a number nobody acts
+     * on teaches people to ignore the card. Batory's go through the request-and-confirm
+     * ladder, which is the work this office actually does.
+     *
+     * apptOutstanding is the same derivation the Appts page uses, so the card and the page
+     * cannot disagree about what is outstanding.
+     */
+    const needsAppt = apptOutstanding(loads.filter((l) => requiresApptProofs(l))).length
 
     const activeDriverSet = new Set<string>()
     current.forEach((l) => {

@@ -19,7 +19,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { listPods } from '@/lib/podsClient'
 import { listDriverSubmissions } from '@/lib/driverSubmissionsClient'
 import {
-  buildPodIndex, loadHasPod, loadHasRatecon, type PodIndex, type PodSubmissionLike,
+  buildPodIndex, loadHasPod, loadHasRatecon, loadPodRef, loadRateconRef,
+  type DocRef, type PodIndex, type PodSubmissionLike,
 } from '@/lib/podPresence'
 import type { Load } from '@/types'
 
@@ -52,11 +53,16 @@ export function useLoadPaperwork(loads: Load[]): LoadPaperwork {
       let ok = true
 
       const jobsdoneLoadIds: string[] = []
+      const jobsdonePodIds: Array<readonly [string, string]> = []
       try {
         let nextToken: string | undefined
         for (let page = 0; page < 100; page++) {
           const res = await listPods({ nextToken })
-          for (const doc of res.items) if (doc.loadId) jobsdoneLoadIds.push(doc.loadId)
+          for (const doc of res.items) {
+            if (!doc.loadId) continue
+            jobsdoneLoadIds.push(doc.loadId)
+            jobsdonePodIds.push([doc.loadId, doc.id] as const)
+          }
           nextToken = res.nextToken ?? undefined
           if (!nextToken) break
         }
@@ -72,6 +78,10 @@ export function useLoadPaperwork(loads: Load[]): LoadPaperwork {
           referenceNumber: s.referenceNumber,
           hasPodDoc: s.docs.some((d) => d.kind === 'POD'),
           hasRateconDoc: s.docs.some((d) => d.kind === 'RATECON'),
+          // The merged PDF when the scan pipeline has produced one, otherwise the newest
+          // single page — a cell that opens the first page beats one that opens nothing.
+          podKey: s.combinedPodKey ?? newestKey(s, 'POD'),
+          rateconKey: s.combinedRateconKey ?? newestKey(s, 'RATECON'),
         }))
       } catch (err) {
         console.warn('[useLoadPaperwork] could not read driver submissions', err)
@@ -79,12 +89,15 @@ export function useLoadPaperwork(loads: Load[]): LoadPaperwork {
       }
 
       // A rate con on the Load itself — the drawer upload and the Slack tender attachment.
-      const rateconLoadIds = loads
-        .filter((l) => ((l as Load & { rateConfirmKey?: string }).rateConfirmKey ?? '').trim())
-        .map((l) => l.id)
+      const rateconKeys: Array<readonly [string, string]> = []
+      for (const l of loads) {
+        const key = ((l as Load & { rateConfirmKey?: string }).rateConfirmKey ?? '').trim()
+        if (key) rateconKeys.push([l.id, key] as const)
+      }
+      const rateconLoadIds = rateconKeys.map(([id]) => id)
 
       if (cancelled) return
-      setIndex(buildPodIndex({ jobsdoneLoadIds, submissions, rateconLoadIds }))
+      setIndex(buildPodIndex({ jobsdoneLoadIds, submissions, rateconLoadIds, jobsdonePodIds, rateconKeys }))
       setKnown(ok)
       setLoading(false)
     }
@@ -99,11 +112,33 @@ export function useLoadPaperwork(loads: Load[]): LoadPaperwork {
   return { index, known, loading, refresh }
 }
 
+/** The newest page of one kind, as a fallback before the merge has produced a PDF. */
+function newestKey(
+  sub: { docs: Array<{ kind: string; s3Key?: string | null; uploadedAt?: string | null }> },
+  kind: 'POD' | 'RATECON',
+): string | null {
+  const pages = sub.docs.filter((d) => d.kind === kind && d.s3Key)
+  if (pages.length === 0) return null
+  return [...pages].sort((a, b) =>
+    String(b.uploadedAt ?? '').localeCompare(String(a.uploadedAt ?? '')),
+  )[0].s3Key ?? null
+}
+
+export interface PaperworkCell {
+  /** null = not known yet. The cell must show "unknown", never "missing". */
+  has: boolean | null
+  /** Where to open it. Null with has===true means on file but this store could not say where. */
+  ref: DocRef | null
+}
+
 /** Convenience so the grid cells read as a question rather than an index lookup. */
 export function paperworkFor(
   index: PodIndex | null,
   load: Load,
-): { pod: boolean | null; ratecon: boolean | null } {
-  if (!index) return { pod: null, ratecon: null }
-  return { pod: loadHasPod(index, load), ratecon: loadHasRatecon(index, load) }
+): { pod: PaperworkCell; ratecon: PaperworkCell } {
+  if (!index) return { pod: { has: null, ref: null }, ratecon: { has: null, ref: null } }
+  return {
+    pod: { has: loadHasPod(index, load), ref: loadPodRef(index, load) },
+    ratecon: { has: loadHasRatecon(index, load), ref: loadRateconRef(index, load) },
+  }
 }
