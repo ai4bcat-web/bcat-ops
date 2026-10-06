@@ -630,11 +630,21 @@ export function IntakePage() {
      * customer is still never free text read off an email.
      */
     const customer = resolveTenderCustomer(tender.customer, customers)
+    /*
+     * The rate confirmation that arrived on the Slack message, if one did. A tender carries
+     * one; where several PDFs came in, guessing which is "the" rate con would be worse than
+     * attaching none, so this takes the first and leaves the rest to a human.
+     */
+    const rateConKey = (item.s3KeyPdfAttachments ?? []).find((k) => k.toLowerCase().endsWith('.pdf'))
+
+    // Carried even when nothing could be parsed: a tender with an unreadable body may still
+    // have brought its rate con, and that document is the most useful thing in the email.
+    const prefill = { ...tender, ...(rateConKey ? { rateConKey } : {}) }
     setSelectedLoad(null, 'create', {
       driverId: null,
       dateStr: tender.stops.find((s) => s.type === 'pickup')?.dateStr ?? '',
-      ...(tender.format
-        ? { tender: customer ? { ...tender, customer: customer.name, customerId: customer.id } : tender }
+      ...(tender.format || rateConKey
+        ? { tender: customer ? { ...prefill, customer: customer.name, customerId: customer.id } : prefill }
         : {}),
     })
   }

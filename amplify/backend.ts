@@ -452,6 +452,14 @@ backend.slackIntakeWebhook.resources.lambda.addToRolePolicy(
 
 webhookFn.addEnvironment('TABLE_NAME', intakeTable.tableName)
 
+/*
+ * A tender's rate confirmation arrives as a file ON the Slack message. Storing it here is
+ * what lets Build load attach it to the load and the parser read the lane off it — without
+ * this the attachment list was always empty and every field was typed by hand.
+ */
+webhookFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+backend.storage.resources.bucket.grantPut(webhookFn, 'intake-attachments/*')
+
 // Function URL — Slack posts to this endpoint
 const slackWebhookUrl = new FunctionUrl(webhookFn.stack, 'SlackIntakeWebhookUrl', {
   function: webhookFn,

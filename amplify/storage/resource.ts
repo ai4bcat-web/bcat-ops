@@ -14,6 +14,15 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
+    /*
+     * Documents that came in ON a Slack tender — usually the rate confirmation itself.
+     * Written by the intake webhook (via its own IAM role, not these rules) and read here
+     * so building a load can attach one without copying the bytes to a second key.
+     */
+    'intake-attachments/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read', 'delete']),
+    ],
     'driver-photos/*': [
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),

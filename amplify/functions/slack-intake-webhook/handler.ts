@@ -1,5 +1,6 @@
 import { createHmac, createHash, timingSafeEqual } from 'crypto'
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
 const dynamo          = new DynamoDBClient({})
@@ -17,6 +18,94 @@ interface LambdaFunctionUrlEvent {
   headers:          Record<string, string>
   body:             string | null
   isBase64Encoded?: boolean
+}
+
+const s3 = new S3Client({})
+const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? ''
+
+/** Documents worth keeping. A tender's rate confirmation is a PDF; screenshots are images. */
+const KEEPABLE = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif))$/i
+
+/** Nobody forwards a hundred-megabyte rate con, and a Lambda should not try to hold one. */
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
+/** More than this on one message is a thread of screenshots, not a tender. */
+const MAX_ATTACHMENTS = 5
+
+/**
+ * Save the documents attached to a Slack message, and return their S3 keys.
+ *
+ * This is the step that was missing: the webhook already saw these files and wrote their
+ * NAMES into the body text, but stored `s3KeyPdfAttachments: []` regardless — so a rate
+ * confirmation forwarded into Slack never reached BCAT Ops, and 1 of 1,395 intake items
+ * had an attachment. Building a load then had nothing to attach and nothing to read a lane
+ * from, which is the whole reason those fields were typed by hand.
+ *
+ * `url_private` is not public: it is fetched with the bot's own token, which is why this
+ * needs SLACK_BOT_TOKEN rather than just the signing secret.
+ *
+ * Every failure is swallowed. The item is worth creating whether or not its attachment
+ * came down — losing the tender because a file download timed out would be a far worse
+ * outcome than an attachment somebody re-uploads.
+ */
+async function saveSlackAttachments(
+  files: Array<{ name?: string; mimetype?: string; filetype?: string; url_private?: string }>,
+  itemId: string,
+): Promise<string[]> {
+  if (!BUCKET_NAME || !SLACK_BOT_TOKEN) {
+    if (files.length) console.warn('[intake] attachments skipped: bucket or bot token not configured')
+    return []
+  }
+
+  const keep = files
+    .filter((f) => !!f.url_private && KEEPABLE.test(f.mimetype ?? ''))
+    .slice(0, MAX_ATTACHMENTS)
+  if (keep.length === 0) return []
+
+  const keys: string[] = []
+  for (const [i, file] of keep.entries()) {
+    try {
+      const res = await fetch(file.url_private!, {
+        headers: { Authorization: `Bearer ${SLACK_BOT_TOKEN}` },
+      })
+      if (!res.ok) {
+        console.error('[intake] attachment download failed', { status: res.status, name: file.name })
+        continue
+      }
+      const body = new Uint8Array(await res.arrayBuffer())
+      if (body.byteLength === 0 || body.byteLength > MAX_ATTACHMENT_BYTES) {
+        console.warn('[intake] attachment skipped on size', { name: file.name, bytes: body.byteLength })
+        continue
+      }
+      /*
+       * A Slack URL answers 200 with an HTML sign-in page when the token cannot read the
+       * file, so a bad token would otherwise store login pages as rate confirmations. A PDF
+       * starts with %PDF; anything claiming to be one and starting with '<' is that page.
+       */
+      const looksHtml = body[0] === 0x3c
+      if (looksHtml) {
+        console.error('[intake] attachment came back as HTML — check the bot token scope', { name: file.name })
+        continue
+      }
+
+      const safeName = (file.name ?? `attachment-${i + 1}`).replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 80)
+      const key = `intake-attachments/${itemId}/${i + 1}-${safeName}`
+      await s3.send(new PutObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: key,
+        Body: body,
+        ContentType: file.mimetype || 'application/octet-stream',
+      }))
+      keys.push(key)
+    } catch (err) {
+      console.error('[intake] attachment failed', {
+        name: file.name,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  return keys
 }
 
 export const handler = async (event: LambdaFunctionUrlEvent) => {
@@ -171,7 +260,10 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
 
   const now = new Date().toISOString()
 
-  console.log('[intake] creating item', { id, source, externalId, subject })
+  // Before the write, so the item carries its documents from the moment it exists.
+  const attachmentKeys = await saveSlackAttachments(files, id)
+
+  console.log('[intake] creating item', { id, source, externalId, subject, attachments: attachmentKeys.length })
 
   try {
     await dynamo.send(new PutItemCommand({
@@ -193,7 +285,7 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
         externalUrl,
         slackChannelId:      channelId,
         slackMessageTs:      msgTs,
-        s3KeyPdfAttachments: [],
+        s3KeyPdfAttachments: attachmentKeys,
         createdAt:           now,
         updatedAt:           now,
       }, { removeUndefinedValues: true }),

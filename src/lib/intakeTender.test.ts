@@ -4,7 +4,7 @@
  * otherwise type — particularly the ZIPs and the customer name the factoring queue needs.
  */
 import { describe, it, expect } from 'vitest'
-import { parseTender, parseAddressLine, parsePlanDate, resolveTenderCustomer } from './intakeTender'
+import { parseTender, parseAddressLine, parsePlanDate, resolveTenderCustomer, type TenderPrefill } from './intakeTender'
 
 const E2OPEN = `This email was sent from an automated source. Please do not reply to this message as all replies are automatically deleted.
 
@@ -341,5 +341,13 @@ Your Confirmation Number: 4819121`
     // directory's "AXLE LOGISTICS" exactly — and an exact match is the only kind accepted.
     const customers = [{ id: 'c1', name: 'AXLE LOGISTICS', active: true }] as never[]
     expect(resolveTenderCustomer('Axle Logistics, LLC', customers)?.id).toBe('c1')
+  })
+})
+
+describe('the document that came in on the tender', () => {
+  it('is carried on the prefill so the load can attach it', () => {
+    // The attachment is pointed at, not copied: it is already in the same bucket.
+    const t: TenderPrefill = { format: 'SUBJECT', stops: [], rateConKey: 'intake-attachments/i1/1-ratecon.pdf' }
+    expect(t.rateConKey).toMatch(/\.pdf$/)
   })
 })

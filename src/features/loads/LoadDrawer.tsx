@@ -1380,6 +1380,19 @@ export function LoadDrawer() {
              * showing what still needs doing. The Pro# is the one the load was built with,
              * which is exactly what the Mark-as-done prompt used to ask for.
              */
+            /*
+             * Attach the tender's own document, when it came with one.
+             *
+             * The key is pointed at rather than copied: it is already in the same bucket and
+             * readable, and duplicating the bytes would leave two copies to keep in step.
+             * Only the first PDF — a tender carries one rate confirmation, and guessing
+             * which of several is "the" one would be worse than attaching none.
+             */
+            const tenderPdf = createPreFill?.tender?.rateConKey
+            if (tenderPdf) {
+              await updateLoad(newLoad.id, { rateConfirmKey: tenderPdf } as never)
+            }
+
             await updateIntakeItem(pendingIntakeItemId, {
               builtLoadId: newLoad.id,
               status: 'DONE',

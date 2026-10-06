@@ -46,6 +46,13 @@ export interface TenderPrefill {
    * still has to pick the customer, which is the correct outcome for an unknown broker.
    */
   customerId?: string
+  /*
+   * S3 key of the rate confirmation that came in on the tender, when one did.
+   *
+   * Pointed at rather than copied when the load is built: it is already in the same bucket
+   * and readable, and a second copy would be one more thing to keep in step.
+   */
+  rateConKey?: string
   /** The reference a dispatcher would put in Pro # — TMS ID or Route #. */
   reference?: string
   /** Shipment / SO number, which is the PU#. */
