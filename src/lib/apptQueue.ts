@@ -1,7 +1,7 @@
 import { getStops } from './stops'
 import { apptHasTime, chicagoDateStr } from './date'
 import { apptWorkflowStatus, type EffectiveApptStatus } from './apptStatus'
-import type { ApptType, Load, Stop } from '@/types'
+import type { ApptType, Load, Stop, StopType } from '@/types'
 
 /**
  * Why a stop is in the queue.
@@ -24,6 +24,26 @@ export interface ApptRef {
   appt: string
   apptType?: ApptType
   apptEnd?: string
+}
+
+/**
+ * A stop on the shipment that is NOT the first pickup or the last delivery.
+ *
+ * Those two have their own columns because they are what the legacy pickupAppt /
+ * deliveryAppt fields mirror and what every other screen means by "the pickup" and "the
+ * delivery". Everything in between had nowhere to appear at all — on PRO 14565 the second
+ * Batory pickup was invisible, which meant nobody could request its time, and the ladder
+ * for that stop could never start. A stop you cannot see is a stop nobody books.
+ */
+export interface ApptExtraStop {
+  stopId: string
+  type: StopType
+  /** Facility and city, joined the way the row's other locations are. */
+  location: string
+  ref: ApptRef
+  kind: ApptNeedKind | null
+  status: EffectiveApptStatus | null
+  confirmed: boolean
 }
 
 export interface ApptQueueRow {
@@ -57,6 +77,8 @@ export interface ApptQueueRow {
   /** The load's scheduled pickup and delivery — the same two the calendar shows. */
   pickup: ApptRef
   delivery: ApptRef
+  /** Every OTHER stop, in route order. Empty on an ordinary two-stop shipment. */
+  extraStops: ApptExtraStop[]
 }
 
 /**
@@ -90,11 +112,18 @@ export function apptNeedKind(stop: Stop): ApptNeedKind | null {
   return apptHasTime(stop.appt) ? null : 'pending'
 }
 
-/** True when at least one of the shipment's two appointments is not yet CONFIRMED. */
+/**
+ * True when at least one of the shipment's appointments is not yet CONFIRMED.
+ *
+ * EVERY stop counts, not only the two with columns. A shipment whose only open work is a
+ * middle pickup used to read as settled — it fell out of "Open only", out of the open
+ * count and off the dashboard card, while a Batory stop sat unrequested.
+ */
 export const rowOutstanding = (r: ApptQueueRow): boolean =>
   (r.pickupStatus !== null && r.pickupStatus !== 'confirmed') ||
   (r.deliveryStatus !== null && r.deliveryStatus !== 'confirmed') ||
-  !!(r.pickupKind || r.deliveryKind)
+  !!(r.pickupKind || r.deliveryKind) ||
+  r.extraStops.some((s) => (s.status !== null && s.status !== 'confirmed') || !!s.kind)
 
 /** Statuses that represent work on the Appts page (Dennis queue + non-Batory ratecon). */
 const DENNIS_ACTIONABLE_STATUSES: EffectiveApptStatus[] = [
@@ -108,9 +137,11 @@ const DENNIS_ACTIONABLE_STATUSES: EffectiveApptStatus[] = [
 export const isDennisActionable = (status: EffectiveApptStatus | null): boolean =>
   status !== null && DENNIS_ACTIONABLE_STATUSES.includes(status)
 
-/** True when the row has at least one end that belongs on the Appts page. */
+/** True when the row has at least one stop that belongs on the Appts page. */
 export const rowActionable = (r: ApptQueueRow): boolean =>
-  isDennisActionable(r.pickupStatus) || isDennisActionable(r.deliveryStatus)
+  isDennisActionable(r.pickupStatus) ||
+  isDennisActionable(r.deliveryStatus) ||
+  r.extraStops.some((s) => isDennisActionable(s.status))
 
 /**
  * Which customers must have BOTH proof screenshots (E2Open update + email confirmation)
@@ -172,6 +203,24 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
     const pickupKind = pickupStop ? apptNeedKind(pickupStop) : null
     const deliveryKind = deliveryStop ? apptNeedKind(deliveryStop) : null
 
+    /*
+     * Everything between the first pickup and the last delivery. Identified by stop id
+     * rather than by position, so a load whose stops are reordered cannot accidentally
+     * put the same stop in two places on the row.
+     */
+    const endIds = new Set([pickupStop?.id, deliveryStop?.id].filter(Boolean) as string[])
+    const extraStops: ApptExtraStop[] = stops
+      .filter((s) => !endIds.has(s.id))
+      .map((s) => ({
+        stopId: s.id,
+        type: s.type,
+        location: [s.name, s.city].filter(Boolean).join(', '),
+        ref: { stopId: s.id, appt: s.appt, apptType: s.apptType, apptEnd: s.apptEnd },
+        kind: apptNeedKind(s),
+        status: apptWorkflowStatus(s, load),
+        confirmed: stopConfirmed(s, load),
+      }))
+
     rows.push({
       loadId: load.id,
       pickupKind,
@@ -193,11 +242,14 @@ export function apptQueue(loads: Load[]): ApptQueueRow[] {
       deliveryStatus: deliveryStop ? apptWorkflowStatus(deliveryStop, load) : null,
       pickup: refs.pickup,
       delivery: refs.delivery,
+      extraStops,
     })
   }
 
   const rank = (r: ApptQueueRow) =>
-    r.pickupKind === 'need' || r.deliveryKind === 'need' ? 0 : rowOutstanding(r) ? 1 : 2
+    r.pickupKind === 'need' || r.deliveryKind === 'need' || r.extraStops.some((s) => s.kind === 'need')
+      ? 0
+      : rowOutstanding(r) ? 1 : 2
 
   return rows.sort((a, b) => {
     const ra = rank(a), rb = rank(b)

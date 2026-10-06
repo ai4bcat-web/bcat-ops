@@ -111,6 +111,12 @@ export function ApptProofPanel({ load, updateLoad }: {
   const stops = getStops(load)
   const pu = stops.find((s) => s.type === 'pickup')
   const de = [...stops].reverse().find((s) => s.type === 'delivery')
+  /*
+   * Every stop gets a panel, not just the two ends. Batory's ladder is per stop — request,
+   * confirm, two screenshots — and a middle pickup with no panel is a stop whose ladder
+   * cannot be walked at all.
+   */
+  const middle = stops.filter((s) => s.id !== pu?.id && s.id !== de?.id)
 
   const save = async (stop: Stop, slot: ApptProofSlot, key: string | null) => {
     const proofs = { ...(stop.apptProofs ?? {}), [slot]: key }
@@ -213,6 +219,7 @@ export function ApptProofPanel({ load, updateLoad }: {
   return (
     <div data-testid="appt-proofs" style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
       {renderEnd('Pickup', pu)}
+      {middle.map((s) => renderEnd(s.type === 'pickup' ? 'Extra pickup' : 'Extra drop', s))}
       {renderEnd('Delivery', de)}
       {emailFor && (
         <ApptRequestEmailModal

@@ -878,6 +878,40 @@ function Section({ title, hint, rows, drivers, loadsById, auditLog, updateLoad, 
                       : '—'}
                   </td>
                 </tr>
+                {/*
+                  Stops between the first pickup and the last delivery.
+                  ALWAYS shown, never behind a toggle — this row exists because PRO 14565's
+                  second Batory pickup was invisible, so nobody could request its time and
+                  the ladder for it never started. Hiding it again behind a disclosure would
+                  reproduce the bug for anyone who did not think to click.
+                */}
+                {r.extraStops.map((extra) => (
+                  <tr key={extra.stopId} style={{ background: 'var(--ds-bg)' }}>
+                    <td style={{ ...td, padding: '6px 4px 6px 28px' }} />
+                    <ApptTimeCell
+                      load={loadRec}
+                      refr={extra.ref}
+                      apptField={extra.type === 'pickup' ? 'pickupAppt' : 'deliveryAppt'}
+                      typeField={extra.type === 'pickup' ? 'pickupApptType' : 'deliveryApptType'}
+                      kind={extra.kind}
+                      status={extra.status}
+                      updateLoad={updateLoad}
+                    />
+                    <td
+                      colSpan={COLUMNS.length - 1}
+                      style={{ ...td, color: 'var(--ds-t2)', fontSize: 12 }}
+                    >
+                      <span style={{
+                        display: 'inline-block', marginRight: 8, padding: '1px 6px', borderRadius: 999,
+                        background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
+                        fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', color: 'var(--ds-t3)',
+                      }}>
+                        {extra.type === 'pickup' ? 'EXTRA PICKUP' : 'EXTRA DROP'}
+                      </span>
+                      {extra.location || '—'}
+                    </td>
+                  </tr>
+                ))}
                 {showProofs && batory && loadRec && (
                   <tr>
                     <td colSpan={1 + COLUMNS.length} style={{ ...td, padding: '10px 12px 14px 40px', background: 'var(--ds-bg)' }} onClick={(e) => e.stopPropagation()}>

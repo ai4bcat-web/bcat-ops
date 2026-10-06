@@ -563,3 +563,88 @@ describe('clearing past days automatically', () => {
     expect(rows[0].cleared).toBe(false)
   })
 })
+
+/**
+ * A load with more than two stops.
+ *
+ * PRO 14565 is the case that exposed this: Dynamics 3PL, then Batory Foods Wilmington,
+ * then Bell Laboratories. The row showed the first pickup and the last delivery, so the
+ * second Batory pickup appeared nowhere — nobody could request its time, and the ladder
+ * for that stop could never start. A stop you cannot see is a stop nobody books.
+ */
+describe('multi-stop shipments', () => {
+  const threeStops = (over: Partial<Stop>[] = [{}, {}, {}]): Load => ({
+    id: 'l1', aljexId: '14565', customer: 'BATORY FOODS', readyToInvoice: false,
+    stops: [
+      { id: 'a', type: 'pickup', name: 'DYNAMICS 3PL', city: 'WILMINGTON, IL', sequence: 0,
+        driverId: null, appt: '2026-10-08T17:00:00.000Z', apptType: 'tbd', ...over[0] },
+      { id: 'b', type: 'pickup', name: 'BATORY FOODS WILMINGTON', city: 'WILMINGTON, IL', sequence: 1,
+        driverId: null, appt: '2026-10-08T05:00:00.000Z', apptType: 'tbd', ...over[1] },
+      { id: 'c', type: 'delivery', name: 'BELL LABORATORIES', city: 'WINDSOR, WI', sequence: 2,
+        driverId: null, appt: '2026-10-09T05:00:00.000Z', apptType: 'tbd', ...over[2] },
+    ],
+  } as unknown as Load)
+
+  it('carries the middle pickup instead of dropping it', () => {
+    const [row] = apptQueue([threeStops()])
+    expect(row.extraStops).toHaveLength(1)
+    expect(row.extraStops[0].stopId).toBe('b')
+    expect(row.extraStops[0].location).toBe('BATORY FOODS WILMINGTON, WILMINGTON, IL')
+    expect(row.extraStops[0].type).toBe('pickup')
+  })
+
+  it('still puts the first pickup and last delivery in their own columns', () => {
+    const [row] = apptQueue([threeStops()])
+    expect(row.pickup.stopId).toBe('a')
+    expect(row.delivery.stopId).toBe('c')
+  })
+
+  it('gives the middle stop its own ladder state, not the row’s', () => {
+    const [row] = apptQueue([threeStops([{ apptStatus: 'confirmed' }, {}, {}])])
+    expect(row.extraStops[0].status).not.toBe('confirmed')
+    expect(row.extraStops[0].kind).toBe('need')
+  })
+
+  it('leaves an ordinary two-stop shipment with no extras at all', () => {
+    const two = {
+      id: 'l2', aljexId: '1', readyToInvoice: false,
+      stops: [
+        { id: 'p', type: 'pickup', sequence: 0, driverId: null, appt: '2026-10-08T17:00:00.000Z', apptType: 'exact' },
+        { id: 'd', type: 'delivery', sequence: 1, driverId: null, appt: '2026-10-09T17:00:00.000Z', apptType: 'exact' },
+      ],
+    } as unknown as Load
+    expect(apptQueue([two])[0].extraStops).toEqual([])
+  })
+
+  it('counts a shipment as OPEN when only the middle stop is outstanding', () => {
+    /*
+     * The part that actually hid work. With both ends settled the row read as finished —
+     * it fell out of "Open only", out of the open count and off the dashboard card — while
+     * a Batory stop sat unrequested in the middle of it.
+     */
+    const row = apptQueue([threeStops([
+      { apptType: 'exact', appt: '2026-10-08T17:00:00.000Z', apptStatus: 'confirmed' },
+      {},
+      { apptType: 'exact', appt: '2026-10-09T17:00:00.000Z', apptStatus: 'confirmed' },
+    ])])[0]
+    expect(row.pickupKind).toBeNull()
+    expect(row.deliveryKind).toBeNull()
+    expect(rowOutstanding(row)).toBe(true)
+  })
+
+  it('ranks a shipment whose middle stop still needs a time with the urgent ones', () => {
+    const settled = {
+      id: 'settled', aljexId: '2', readyToInvoice: false,
+      stops: [
+        { id: 'p', type: 'pickup', sequence: 0, driverId: null, appt: '2026-10-01T17:00:00.000Z', apptType: 'exact' },
+        { id: 'd', type: 'delivery', sequence: 1, driverId: null, appt: '2026-10-02T17:00:00.000Z', apptType: 'exact' },
+      ],
+    } as unknown as Load
+    const rows = apptQueue([settled, threeStops([
+      { apptType: 'exact', appt: '2026-10-08T17:00:00.000Z' },
+      {},
+      { apptType: 'exact', appt: '2026-10-09T17:00:00.000Z' },
+    ])])
+    expect(rows[0].aljexId).toBe('14565')
+  })
+})

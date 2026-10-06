@@ -10,11 +10,15 @@ export function stopProofCount(s: Stop): number {
   return (s.apptProofs?.request ? 1 : 0) + (s.apptProofs?.e2open ? 1 : 0) + (s.apptProofs?.email ? 1 : 0)
 }
 
-/** "n/6" completeness across a Batory shipment's pickup + delivery. */
+/**
+ * Completeness across EVERY stop on the shipment — "n/9" on a three-stop load.
+ *
+ * It used to count only the first pickup and the last delivery, which meant a three-stop
+ * Batory load could show a green, complete 6/6 while the middle stop had no screenshots on
+ * it at all. A badge that says finished while a stop is unproven is worse than no badge:
+ * it is the one place somebody checks before they stop chasing.
+ */
 export function loadProofCount(load: Load): { have: number; want: number } {
-  const stops = getStops(load)
-  const pu = stops.find((s) => s.type === 'pickup')
-  const de = [...stops].reverse().find((s) => s.type === 'delivery')
-  const ends = [pu, de].filter(Boolean) as Stop[]
-  return { have: ends.reduce((n, s) => n + stopProofCount(s), 0), want: ends.length * PROOFS_PER_STOP }
+  const stops = getStops(load) as Stop[]
+  return { have: stops.reduce((n, s) => n + stopProofCount(s), 0), want: stops.length * PROOFS_PER_STOP }
 }
