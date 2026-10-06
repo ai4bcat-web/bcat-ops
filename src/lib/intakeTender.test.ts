@@ -291,3 +291,55 @@ Plan: 08/05/2026 00:00 CDT`
     expect(parseTender('x', E2).pickupNumber).toBe('SO-1732669')
   })
 })
+
+describe('a broker acceptance notice', () => {
+  /*
+   * Axle, M2 and others send only this: one line saying the rate confirmation was accepted.
+   * No lane, no rate, no dates, no attachment. There is exactly as much here as there is —
+   * the reference and who it is from — and claiming more would be inventing it.
+   */
+  const AXLE_SUBJECT = 'Fwd: Axle Logistics, LLC Rate Confirmation for 3650024'
+  const AXLE_BODY = `driver roy
+
+---------- Forwarded message ---------
+From: Jensen.Dupilka@axlelogistics.com
+Subject: Axle Logistics, LLC Rate Confirmation for 3650024
+To: <ivancartage@bcatcorp.com>
+
+Axle Logistics, LLC Rate Confirmation for 3650024 has been Accepted.
+
+Your Confirmation Number: 4819121`
+
+  it('takes the broker’s reference', () => {
+    expect(parseTender(AXLE_SUBJECT, AXLE_BODY).reference).toBe('3650024')
+  })
+
+  it('takes the broker’s name, without the Fwd: prefix', () => {
+    expect(parseTender(AXLE_SUBJECT, AXLE_BODY).customer).toBe('Axle Logistics, LLC')
+  })
+
+  it('does NOT take the confirmation number as the reference', () => {
+    // 4819121 is Axle's internal acknowledgement, not a load number. Putting it in TMS ID
+    // would key the load to something no one can look up.
+    expect(parseTender(AXLE_SUBJECT, AXLE_BODY).reference).not.toBe('4819121')
+  })
+
+  it('claims no lane, because the email has none', () => {
+    const t = parseTender(AXLE_SUBJECT, AXLE_BODY)
+    expect(t.stops).toEqual([])
+  })
+
+  it('works for the M2 variant of the same shape', () => {
+    const t = parseTender('Fwd: M2 Logistics, Inc. Rate Confirmation for 5859872',
+      'M2 Logistics, Inc. Rate Confirmation for 5859872 has been Accepted.')
+    expect(t.reference).toBe('5859872')
+    expect(t.customer).toBe('M2 Logistics, Inc.')
+  })
+
+  it('still matches the directory record despite the LLC suffix', () => {
+    // normalizeName drops a trailing LLC/Inc, so "Axle Logistics, LLC" binds to the
+    // directory's "AXLE LOGISTICS" exactly — and an exact match is the only kind accepted.
+    const customers = [{ id: 'c1', name: 'AXLE LOGISTICS', active: true }] as never[]
+    expect(resolveTenderCustomer('Axle Logistics, LLC', customers)?.id).toBe('c1')
+  })
+})

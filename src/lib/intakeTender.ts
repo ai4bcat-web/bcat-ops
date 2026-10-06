@@ -200,11 +200,28 @@ function parseSubject(subject: string): TenderPrefill | null {
 
   const out: TenderPrefill = { format: 'SUBJECT', stops: [] }
 
-  const ref = text.match(/(?:TMS\s*ID|Route\s*#|Order\s*#|Load\s*#)\s*:?\s*(\d{5,12})/i)
+  /*
+   * "Rate Confirmation for 3650024" is included because several brokers — Axle, M2 — send
+   * nothing but an acceptance notice with that one line in it. The number is theirs, not an
+   * Aljex PRO, so it lands in TMS ID like every other tender reference.
+   */
+  const ref = text.match(
+    /(?:TMS\s*ID|Route\s*#|Order\s*#|Load\s*#|Rate\s*Confirmation\s+for)\s*:?\s*#?\s*(\d{5,12})/i,
+  )
   if (ref) out.reference = ref[1]
 
   const by = text.match(/\bby\s+([A-Z][A-Z0-9&'.\- ]{2,})\s*$/)
   if (by) out.customer = clean(by[1])
+
+  /*
+   * "Axle Logistics, LLC Rate Confirmation for 3650024" — the broker names itself before
+   * the phrase. Only taken when it is not already known from a "by X" suffix, and only up
+   * to the phrase, so a forwarding prefix like "Fwd:" never becomes part of the name.
+   */
+  if (!out.customer) {
+    const before = text.match(/(?:^|:\s*)([A-Za-z][A-Za-z0-9&'.,\- ]{2,}?)\s+Rate\s*Confirmation\s+for\b/i)
+    if (before) out.customer = clean(before[1])
+  }
 
   // `CITY, ST` twice, separated by "to", a dash or an en dash.
   const pair = text.match(
