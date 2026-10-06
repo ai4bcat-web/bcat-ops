@@ -336,3 +336,74 @@ describe('a manually entered invoice amount', () => {
     expect(r.sources.InvoiceAmount).toBe('manual')
   })
 })
+
+describe('what a rate confirmation fills in', () => {
+  /*
+   * The parser writes these onto the row and assembleOtrInvoice reads them. Before that
+   * link existed the document was uploaded and every field it stated was still typed by
+   * hand, which is what these pin.
+   */
+  const bareLoad = { aljexId: '14523' }
+
+  it('takes the ZIPs from the rate con when the load has none', () => {
+    // The ZIPs are what stall the factoring queue, and a load's stops rarely carry them.
+    const r = assembleOtrInvoice({
+      load: bareLoad,
+      rateCon: {
+        originCity: 'LIBERTYVILLE', originState: 'IL', originZip: '60048',
+        destinationCity: 'CHICAGO', destinationState: 'IL', destinationZip: '60607',
+      },
+      submissionDate: '2026-10-05',
+    })
+    expect(r.payload.FromZip).toBe('60048')
+    expect(r.payload.ToZip).toBe('60607')
+    expect(r.sources.FromZip).toBe('ratecon')
+  })
+
+  it('takes the PO number the broker will match on', () => {
+    const r = assembleOtrInvoice({
+      load: bareLoad, rateCon: { poNumber: 'NWI180010' }, submissionDate: '2026-10-05',
+    })
+    expect(r.payload.PoNumber).toBe('NWI180010')
+    expect(r.sources.PoNumber).toBe('ratecon')
+  })
+
+  it('lets a manual entry beat the rate con', () => {
+    // Somebody typed it because the document was wrong; re-reading must not undo that.
+    const r = assembleOtrInvoice({
+      load: bareLoad,
+      rateCon: { poNumber: 'FROM-PDF' },
+      manual: { PoNumber: 'TYPED' },
+      submissionDate: '2026-10-05',
+    })
+    expect(r.payload.PoNumber).toBe('TYPED')
+    expect(r.sources.PoNumber).toBe('manual')
+  })
+
+  it('fills nothing from a field the parser could not read', () => {
+    // A null is the parser saying "not stated". It must not become an empty string that
+    // reads as "the document says there is no PO".
+    const r = assembleOtrInvoice({
+      load: bareLoad,
+      rateCon: { poNumber: null, originZip: null },
+      submissionDate: '2026-10-05',
+    })
+    expect(r.payload.PoNumber).toBeUndefined()
+    expect(r.missingFields).toContain('PoNumber')
+    expect(r.missingFields).toContain('FromZip')
+  })
+
+  it('never takes the broker MC from the rate con', () => {
+    /*
+     * The MC decides who gets billed. It is entered once per broker on the Customer record;
+     * a number read off a PDF is not evidence enough to change that.
+     */
+    const r = assembleOtrInvoice({
+      load: bareLoad,
+      rateCon: { brokerName: 'NEW WAVE INTERNATIONAL CARGO' } as never,
+      submissionDate: '2026-10-05',
+    })
+    expect(r.payload.BrokerMC).toBeUndefined()
+    expect(r.missingFields).toContain('BrokerMC')
+  })
+})

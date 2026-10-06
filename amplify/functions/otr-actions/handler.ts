@@ -687,6 +687,54 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
       }
 
       /**
+       * Store what the rate confirmation said, then rebuild readiness from it.
+       *
+       * assembleOtrInvoice already prefers the rate con over the load for the PO number and
+       * takes the ZIPs from it — it simply had nothing to read, because nothing ever wrote
+       * `rateConExtract`. The document was uploaded, and every field it stated was still
+       * typed in by hand afterwards.
+       *
+       * The broker MC is deliberately NOT accepted here even if the parser returns one. It
+       * decides who gets billed and is entered once per broker on the Customer record; a
+       * number read off a PDF is not evidence enough to change that.
+       */
+      case 'rateConExtract': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        const raw = (input.extract ?? {}) as Record<string, unknown>
+
+        const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+        const num = (v: unknown) => {
+          const n = typeof v === 'number' ? v : Number(v)
+          return Number.isFinite(n) && n > 0 ? n : null
+        }
+        // Only the fields assembleOtrInvoice reads, each independently optional. A null is
+        // kept as a null rather than dropped, so re-reading a document can clear a value
+        // the previous read got wrong.
+        const extract: RateConExtract = {
+          brokerName: str(raw.brokerName),
+          poNumber: str(raw.poNumber),
+          totalRate: num(raw.totalRate),
+          date: str(raw.date),
+          originCity: str(raw.originCity),
+          originState: str(raw.originState),
+          originZip: str(raw.originZip),
+          destinationCity: str(raw.destinationCity),
+          destinationState: str(raw.destinationState),
+          destinationZip: str(raw.destinationZip),
+        }
+
+        await updateItem(String(item.id), { rateConExtract: extract })
+        const fresh = await getFactoringItem(String(item.id))
+        const { readiness, load } = await buildReadiness(fresh ?? item)
+        await updateItem(String(item.id), {
+          otrReadiness: readiness,
+          loadId: load ? String(load.id) : undefined,
+        })
+        return ok({ extract, readiness })
+      }
+
+      /**
        * Record a broker MC, creating the Customer when the load's broker has no
        * directory record yet. The MC is stored on the customer so it is entered
        * once per broker, not once per load.

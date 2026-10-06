@@ -105,12 +105,27 @@ function EldBadge({ load }: { load: PaperworkLoad }) {
   return null
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+/** One end of the lane: where, and when it is due there. */
+function Leg({ label, place, when }: { label: string; place: string | null; when: string | null }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="truncate text-sm text-foreground">{value}</dd>
+    <div className="flex items-baseline gap-2">
+      <dt className="w-10 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{place ?? '—'}</span>
+        {when && (
+          <span className="block text-xs tabular-nums text-muted-foreground">{apptLabel(when)}</span>
+        )}
+      </dd>
     </div>
+  )
+}
+
+/** A fact about the load, small enough to sit beside the others. */
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">{children}</span>
   )
 }
 
@@ -154,21 +169,33 @@ export function PaperworkRows({
               </div>
             </div>
 
-            <p className="mt-2.5 text-sm text-muted-foreground">
-              {[load.origin, load.destination].filter(Boolean).join('  →  ') || 'No lane'}
-            </p>
-            <p className="mt-0.5 text-sm text-muted-foreground">Delivers {apptLabel(load.deliveryAppt)}</p>
-
-            {/* Everything else about the load. Rate is deliberately not among it. */}
-            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2.5">
-              {load.pickupAppt && <Detail label="Pickup" value={apptLabel(load.pickupAppt)} />}
-              {load.miles !== null && <Detail label="Miles" value={String(load.miles)} />}
-              {load.trailerNumber && <Detail label="Trailer" value={load.trailerNumber} />}
-              {load.commodity && <Detail label="Commodity" value={load.commodity} />}
-              {load.weight !== null && <Detail label="Weight" value={`${load.weight.toLocaleString()} lb`} />}
-              {load.pieces !== null && <Detail label="Pieces" value={String(load.pieces)} />}
-              {load.status && <Detail label="Status" value={load.status} />}
+            {/*
+              The lane, stacked rather than joined with an arrow. On a phone a long pair ran
+              to three wrapped lines and which end was which stopped being obvious; two
+              labelled lines survive any city name.
+            */}
+            <dl className="mt-3 flex flex-col gap-1.5">
+              <Leg label="From" place={load.origin} when={load.pickupAppt} />
+              <Leg label="To" place={load.destination} when={load.deliveryAppt} />
             </dl>
+
+            {/*
+              Everything else as chips on one wrapping line. This was a two-column grid of
+              label-over-value pairs, which on a narrow screen left most of the row as white
+              space and pushed the POD button below the fold — and the button is the thing
+              the driver came to press. Rate is deliberately not among them.
+            */}
+            {(load.miles !== null || load.trailerNumber || load.commodity ||
+              load.weight !== null || load.pieces !== null || load.status) && (
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {load.status && <Chip>{load.status}</Chip>}
+                {load.trailerNumber && <Chip>Trailer {load.trailerNumber}</Chip>}
+                {load.miles !== null && <Chip>{load.miles.toLocaleString()} mi</Chip>}
+                {load.weight !== null && <Chip>{load.weight.toLocaleString()} lb</Chip>}
+                {load.pieces !== null && <Chip>{load.pieces} pcs</Chip>}
+                {load.commodity && <Chip>{load.commodity}</Chip>}
+              </div>
+            )}
 
             {load.stops.length > 2 && (
               <ol className="mt-3 flex flex-col gap-1 border-l border-border pl-3">

@@ -17,8 +17,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Loader2, Upload, AlertTriangle, Eye } from 'lucide-react'
 import { toast } from 'sonner'
-import { uploadRateConfirm, getRateConfirmUrl } from '@/lib/apiClient'
-import { assembleInvoice } from '@/lib/otrClient'
+import { uploadRateConfirm, getRateConfirmUrl, parseRateConfirm } from '@/lib/apiClient'
+import { assembleInvoice, saveRateConExtract } from '@/lib/otrClient'
 import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
 import { useAppStore } from '@/store/useAppStore'
@@ -30,6 +30,57 @@ import {
   DRIVER_DOC_ACCEPT,
 } from '@/lib/driverSubmissionsClient'
 import type { Load } from '@/types'
+
+/**
+ * Read an uploaded rate confirmation and put what it says on the row.
+ *
+ * Fire-and-forget on purpose. The upload itself has already succeeded and the document is
+ * safely on the load; reading it is a convenience that takes a few seconds against a model,
+ * and making the operator wait — or fail the upload because the parse failed — would trade
+ * a certain good outcome for an uncertain one.
+ *
+ * Only the fields the document actually states are written; the parser returns null for
+ * anything it could not read, and readiness still prefers a manual entry over all of it.
+ */
+async function fillFromRateCon(file: File, itemId: string, proNumber: string): Promise<void> {
+  try {
+    const base64 = await fileToBase64(file)
+    const parsed = await parseRateConfirm({
+      fileBase64: base64,
+      mediaType: file.type || 'application/pdf',
+      todayISO: new Date().toISOString().slice(0, 10),
+    })
+    const invoice = parsed.invoice
+    if (!invoice) return
+
+    const { readiness } = await saveRateConExtract(itemId, invoice)
+    const filled = Object.entries(invoice).filter(([, v]) => v != null).length
+    if (filled > 0) {
+      toast.success(
+        `Read ${filled} field${filled === 1 ? '' : 's'} off the rate con for PRO ${proNumber}`,
+        { description: readiness.missingFields.length
+            ? `Still missing: ${readiness.missingFields.join(', ')}`
+            : 'Nothing left missing on this row.' },
+      )
+    }
+  } catch {
+    // The document is uploaded either way; the fields just stay to be typed.
+  }
+}
+
+/** A File as raw base64, which is what the parser mutation takes. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('could not read the file'))
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      // strip the "data:...;base64," prefix FileReader adds
+      resolve(result.slice(result.indexOf(',') + 1))
+    }
+    reader.readAsDataURL(file)
+  })
+}
 
 type Kind = 'POD' | 'RATECON'
 
@@ -108,6 +159,8 @@ export function FactoringDocCell({
         const key = await uploadRateConfirm(load.id, picked[0])
         await updateLoad(load.id, { rateConfirmKey: key } as Partial<Load>)
         toast.success(`Rate confirmation saved for PRO ${proNumber}`)
+        // Then read it, so the fields it states stop being typed in by hand.
+        void fillFromRateCon(picked[0], itemId, proNumber)
       } else {
         const driverId = load.deliveryDriverId
         if (!driverId) {

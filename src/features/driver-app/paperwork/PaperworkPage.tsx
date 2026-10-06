@@ -144,6 +144,31 @@ export function PaperworkPage() {
         </div>
       )}
 
+      {/*
+        The week at a glance, always — not only when something is wrong.
+        The alert box below says what is outstanding; this says what the week IS, so a
+        driver opening a clean week sees "6 loads, all PODs in" rather than a bare list and
+        no confirmation that nothing is owed.
+      */}
+      {week && week.weekStart === selected && (
+        <dl className="mb-4 grid grid-cols-3 gap-2 rounded-xl border border-border bg-muted/40 p-3 text-center">
+          <div>
+            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Loads</dt>
+            <dd className="text-lg font-bold tabular-nums text-foreground">{week.loadCount}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">PODs needed</dt>
+            <dd className={`text-lg font-bold tabular-nums ${week.podsMissing > 0 ? 'text-amber-600' : 'text-foreground'}`}>
+              {week.podsMissing}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">ELD logs</dt>
+            <dd className="text-lg font-bold tabular-nums text-foreground">{week.eldRequired ?? 0}</dd>
+          </div>
+        </dl>
+      )}
+
       {/* What is outstanding, before the list. The reason to open the page at all. */}
       {week && week.weekStart === selected && (week.podsMissing > 0 || week.podsIllegible > 0) && (
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">

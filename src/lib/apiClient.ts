@@ -1,6 +1,7 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
+import type { RateConExtract } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
@@ -1197,7 +1198,12 @@ export async function parseRateConfirm(args: {
   fileBase64: string
   mediaType?: string
   todayISO?: string
-}): Promise<{ appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null; error?: string | null }> {
+}): Promise<{
+  appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null
+  /** The billing fields off the same single pass. Null when the parser could not read them. */
+  invoice?: RateConExtract | null
+  error?: string | null
+}> {
   let res: unknown
   try {
     res = await client.graphql({
@@ -1211,7 +1217,11 @@ export async function parseRateConfirm(args: {
   }
   let data: unknown = (res as { data?: { parseRateConfirm?: unknown } }).data?.parseRateConfirm
   if (typeof data === 'string') { try { data = JSON.parse(data) } catch { /* leave */ } }
-  return (data ?? { appts: null, error: 'no-response' }) as { appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null; error?: string | null }
+  return (data ?? { appts: null, error: 'no-response' }) as {
+    appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null
+    invoice?: RateConExtract | null
+    error?: string | null
+  }
 }
 
 export async function parseTripScreenshot(args: {

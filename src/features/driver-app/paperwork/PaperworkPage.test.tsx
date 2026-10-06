@@ -72,11 +72,18 @@ describe('Ivan paperwork', () => {
     renderPage()
     await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
     expect(screen.getByText('Wayfinder Logistics')).toBeTruthy()
-    expect(screen.getByText(/Chicago, IL.*Indianapolis, IN/)).toBeTruthy()
-    expect(screen.getByText('185')).toBeTruthy()
-    expect(screen.getByText('TRL-42')).toBeTruthy()
+    // The lane is two labelled lines rather than one joined string: on a phone a long pair
+    // wrapped to three lines and which end was which stopped being obvious.
+    expect(screen.getByText('From')).toBeTruthy()
+    expect(screen.getByText('Chicago, IL')).toBeTruthy()
+    expect(screen.getByText('To')).toBeTruthy()
+    expect(screen.getByText('Indianapolis, IN')).toBeTruthy()
+    // The rest are chips, carrying their units so they read without a label.
+    expect(screen.getByText('185 mi')).toBeTruthy()
+    expect(screen.getByText('Trailer TRL-42')).toBeTruthy()
     expect(screen.getByText('Paper goods')).toBeTruthy()
     expect(screen.getByText('41,000 lb')).toBeTruthy()
+    expect(screen.getByText('22 pcs')).toBeTruthy()
   })
 
   it('shows no rate and no settlement anywhere on the page', async () => {
@@ -218,8 +225,13 @@ describe('the ELD badge on a load', () => {
     })
     renderPage()
     await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
-    // A "no logs needed" chip on every local load would be noise — this list is mostly local.
-    expect(screen.queryByText(/ELD/)).toBeNull()
+    /*
+     * A "no logs needed" chip on every local load would be noise — this list is mostly
+     * local. Matched on the badge and the explanation specifically: the week summary strip
+     * carries an "ELD logs" count label, which is a different thing and should stay.
+     */
+    expect(screen.queryByText('ELD logs required')).toBeNull()
+    expect(screen.queryByText('Check ELD')).toBeNull()
   })
 
   it('asks the driver to check when a stop could not be placed', async () => {
@@ -242,7 +254,8 @@ describe('the ELD badge on a load', () => {
     // A cached PWA bundle can meet an older API. Absent must not read as "no logs needed".
     renderPage()
     await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
-    expect(screen.queryByText(/ELD/)).toBeNull()
+    expect(screen.queryByText('ELD logs required')).toBeNull()
+    expect(screen.queryByText('Check ELD')).toBeNull()
   })
 })
 

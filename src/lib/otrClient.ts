@@ -7,7 +7,7 @@
  */
 import { generateClient } from 'aws-amplify/data'
 import { graphqlErrorText } from '@/lib/apiClient'
-import type { OtrReadiness } from '@/lib/otrInvoice'
+import type { OtrReadiness, RateConExtract } from '@/lib/otrInvoice'
 
 const client = generateClient()
 
@@ -50,6 +50,20 @@ export function resolveLoad(id: string): Promise<{ loadId: string; customer?: st
 /** Rebuild readiness: what's filled, where it came from, what's missing. */
 export function assembleInvoice(id: string): Promise<OtrReadiness> {
   return otrAction('assemble', { id })
+}
+
+/**
+ * Store what a rate confirmation stated, and rebuild readiness from it.
+ *
+ * Readiness already prefers the rate con for the PO number and takes the ZIPs from it; this
+ * is what finally gives it something to read. The broker MC is never sent — it decides who
+ * gets billed and stays a human entry on the Customer record.
+ */
+export function saveRateConExtract(
+  id: string,
+  extract: RateConExtract,
+): Promise<{ extract: RateConExtract; readiness: OtrReadiness }> {
+  return otrAction('rateConExtract', { id, extract })
 }
 
 /**
