@@ -534,6 +534,7 @@ body {
      a 160px field, which has every right to its minimum. */
   div[style*="min-width: 520px"],
   div[style*="min-width: 560px"],
+  div[style*="min-width: 620px"],
   div[style*="min-width: 640px"],
   div[style*="min-width: 760px"],
   div[style*="min-width: 800px"],

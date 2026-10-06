@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, subWeeks, subMonths } from 'date-fns'
 import { Fuel, Upload, TrendingUp, TrendingDown, Truck as TruckIcon, AlertTriangle, ShieldCheck } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
+import { TruckMpgTable } from './TruckMpgTable'
 import { useFuelTransactions, type FuelTransaction } from '@/hooks/useFuelTransactions'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { DieselPriceWidget } from '@/features/dashboard/DieselPriceWidget'
@@ -403,8 +404,15 @@ export function FuelPage() {
           </div>
         )}
 
-        {/* Fuel by truck — with miles & MPG */}
+        {/* Fuel by truck — what the cards were charged. */}
         <FuelByTruckTable rows={byTruck} loading={loading} />
+
+        {/*
+          Fuel economy, which is a different question from fuel spend and comes from a
+          different place: Motive's own miles and fuel, not the cards. A card transaction is
+          money leaving on a date, not fuel burned in a period.
+        */}
+        <TruckMpgTable />
 
         {/* Unmapped fuel cards — not attached to any truck (all time) */}
         {(unmappedCards.length > 0 || ignoredCards.length > 0) && (

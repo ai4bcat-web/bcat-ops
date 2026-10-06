@@ -109,3 +109,53 @@ export async function fetchMilesForVehicle(
   }
   return totalMiles
 }
+
+/**
+ * Fuel burned per vehicle over a period, in US gallons, keyed by Motive vehicle id.
+ *
+ * Fetched for the WHOLE fleet in one request per period rather than one per truck: this
+ * endpoint returns every vehicle on the org (8 of them) in a single page, so asking per
+ * truck would multiply the calls by the fleet size for the same answer.
+ *
+ * driving_fuel AND idle_fuel. A truck idling at a dock burns fuel that no mile accounts
+ * for, and leaving it out would flatter every MPG figure — on a local fleet that idles, by
+ * a lot. The number here is what actually came out of the tank.
+ */
+export async function fetchFuelByVehicle(
+  apiKey: string,
+  startDate: string,
+  endDate: string,
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>()
+  let page = 1
+  while (true) {
+    const params = new URLSearchParams({
+      start_date: startDate,
+      end_date:   endDate,
+      per_page:   '100',
+      page_no:    String(page),
+    })
+    const data = (await getJson(`${BASE_URL}/v1/vehicle_utilization?${params.toString()}`, apiKey)) as {
+      vehicle_idle_rollups?: Array<{
+        vehicle_idle_rollup?: {
+          vehicle?: { id?: number }
+          driving_fuel?: number | null
+          idle_fuel?: number | null
+        }
+      }>
+      pagination?: PaginationMeta
+    }
+    const rows = data.vehicle_idle_rollups ?? []
+    for (const row of rows) {
+      const r = row.vehicle_idle_rollup
+      const id = r?.vehicle?.id
+      if (typeof id !== 'number') continue
+      const gallons = (r?.driving_fuel ?? 0) + (r?.idle_fuel ?? 0)
+      if (gallons > 0) out.set(id, (out.get(id) ?? 0) + gallons)
+    }
+    const total = data.pagination?.total ?? rows.length
+    if (rows.length === 0 || page * 100 >= total) break
+    page += 1
+  }
+  return out
+}

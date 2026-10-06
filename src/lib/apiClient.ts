@@ -2171,13 +2171,15 @@ export interface TruckMileage {
   periodStart: string   // YYYY-MM-DD
   periodType:  string   // 'WEEK' | 'MONTH'
   miles:       number
+  /** US gallons from Motive, driving plus idle. Null when Motive had no fuel for it. */
+  gallons?:    number | null
   source:      string
   syncedAt:    string
   createdAt:   string
   updatedAt:   string
 }
 
-const TRUCK_MILEAGE_FIELDS = `truckId unitNumber periodStart periodType miles source syncedAt createdAt updatedAt`
+const TRUCK_MILEAGE_FIELDS = `truckId unitNumber periodStart periodType miles gallons source syncedAt createdAt updatedAt`
 
 /**
  * List mileage records. With a truckId, returns that truck's full history (all

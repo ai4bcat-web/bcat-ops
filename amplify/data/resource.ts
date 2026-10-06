@@ -1184,6 +1184,15 @@ const schema = a.schema({
       periodStart: a.string().required(),   // YYYY-MM-DD — week Monday or month 1st
       periodType:  a.string().required(),   // 'WEEK' | 'MONTH'
       miles:       a.float().required(),
+      /*
+       * US gallons burned in the same period, driving plus idle, from Motive.
+       *
+       * Optional because it arrives from a different endpoint than the miles and may be
+       * absent for an older record or a vehicle Motive has no fuel data for. A null means
+       * "not known", and MPG is simply not shown — never a zero, which would read as a
+       * truck that burned nothing.
+       */
+      gallons:     a.float(),
       source:      a.string().required(),   // 'motive'
       syncedAt:    a.datetime().required(),
     })

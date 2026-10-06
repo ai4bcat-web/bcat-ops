@@ -25,7 +25,7 @@ import {
   ScanCommand,
   PutCommand,
 } from '@aws-sdk/lib-dynamodb'
-import { fetchVehicleMap, fetchMilesForVehicle } from './motiveClient'
+import { fetchVehicleMap, fetchMilesForVehicle, fetchFuelByVehicle } from './motiveClient'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
@@ -189,6 +189,7 @@ async function upsertMileage(
   periodStart: string,
   periodType:  string,
   miles:       number,
+  gallons?:    number,
 ) {
   const now = new Date().toISOString()
   await dynamo.send(new PutCommand({
@@ -203,13 +204,19 @@ async function upsertMileage(
       'periodStart#periodType': `${periodStart}#${periodType}`,
       unitNumber,
       miles,
+      // Omitted rather than written as 0 when unknown: a zero would read as a truck that
+      // burned no fuel, and MPG computed from it would be nonsense.
+      ...(typeof gallons === 'number' && gallons > 0 ? { gallons } : {}),
       source:    'motive',
       syncedAt:  now,
       createdAt: now,
       updatedAt: now,
     },
   }))
-  console.log(`[mileage] upserted truck=${unitNumber} ${periodType} ${periodStart} → ${miles.toFixed(1)} mi`)
+  console.log(
+    `[mileage] upserted truck=${unitNumber} ${periodType} ${periodStart} → ${miles.toFixed(1)} mi` +
+    (typeof gallons === 'number' ? ` / ${gallons.toFixed(1)} gal` : ''),
+  )
 }
 
 // ── Core sync ─────────────────────────────────────────────────────────────────
@@ -222,16 +229,42 @@ interface Period {
   type:  PeriodType
 }
 
-async function syncTruck(truck: SyncTarget, periods: Period[]): Promise<void> {
+async function syncTruck(
+  truck: SyncTarget,
+  periods: Period[],
+  /** Gallons for the whole fleet, by period start then Motive vehicle id. */
+  fuel: Map<string, Map<number, number>>,
+): Promise<void> {
   for (const period of periods) {
     try {
       const miles = await fetchMilesForVehicle(MOTIVE_API_KEY, truck.motiveVehicleId, period.start, period.end)
-      await upsertMileage(truck.truckId, truck.unitNumber, period.start, period.type, miles)
+      // undefined, not 0, when Motive reported no fuel for this truck — see the model.
+      const gallons = fuel.get(`${period.start}#${period.type}`)?.get(truck.motiveVehicleId)
+      await upsertMileage(truck.truckId, truck.unitNumber, period.start, period.type, miles, gallons)
     } catch (err) {
       // Log and continue — one period failing shouldn't abort the whole sync
       console.error(`[mileage] failed truck=${truck.unitNumber} ${period.type} ${period.start}:`, err)
     }
   }
+}
+
+/**
+ * Fuel for every vehicle, once per period.
+ *
+ * The endpoint returns the whole fleet in one page, so this is one call per PERIOD rather
+ * than one per truck per period. A period whose fuel cannot be fetched is left out of the
+ * map entirely, which reads downstream as "not known" rather than as zero gallons.
+ */
+async function fetchFuelForPeriods(periods: Period[]): Promise<Map<string, Map<number, number>>> {
+  const out = new Map<string, Map<number, number>>()
+  for (const period of periods) {
+    try {
+      out.set(`${period.start}#${period.type}`, await fetchFuelByVehicle(MOTIVE_API_KEY, period.start, period.end))
+    } catch (err) {
+      console.error(`[mileage] fuel unavailable for ${period.type} ${period.start}:`, err)
+    }
+  }
+  return out
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -308,9 +341,19 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
     console.log(`[motive-mileage-sync] daily sync: last 7 days + week/month/year through ${today}`)
   }
 
+  /*
+   * Fuel first, once per period for the whole fleet.
+   *
+   * Fetched up front rather than inside the per-truck loop: the endpoint answers for every
+   * vehicle at once, so doing it per truck would multiply the calls by the fleet size to
+   * learn the same thing. One miss leaves that period out of the map, which reads as "not
+   * known" downstream rather than as zero gallons.
+   */
+  const fuel = await fetchFuelForPeriods(periods)
+
   // Bounded concurrency across (truck × period) so big backfills stay under the timeout.
   const jobs = trucks.flatMap((truck) => periods.map((period) => ({ truck, period })))
-  await runPooled(jobs, 5, ({ truck, period }) => syncTruck(truck, [period]))
+  await runPooled(jobs, 5, ({ truck, period }) => syncTruck(truck, [period], fuel))
 
   console.log(`[motive-mileage-sync] complete — ${jobs.length} (truck × period) writes`)
 }
