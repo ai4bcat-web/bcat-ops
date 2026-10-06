@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { readScanIntent, scanIntentPath } from '@/features/driver-app/scanner/scanIntent'
 import { Toaster } from 'sonner'
+import { UpdateBanner } from '@/components/UpdateBanner'
 import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/context/AuthContext'
@@ -217,6 +218,12 @@ export default function App() {
           * "it just takes me back to the upload screen" was all anyone could report.
           */}
         <Toaster position={isPhone() ? 'top-center' : 'bottom-right'} richColors />
+        {/*
+          A long-lived tab runs whatever JavaScript it loaded. This is the only thing that
+          tells somebody their window is behind the server — without it a shipped feature
+          can look missing for days, which is what happened with the employee hours page.
+        */}
+        <UpdateBanner />
       </TooltipProvider>
       </AuthProvider>
     </BrowserRouter>
