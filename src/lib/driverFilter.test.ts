@@ -66,23 +66,31 @@ describe('driverGroupOf', () => {
 })
 
 describe('who is offered in the picker', () => {
-  it('drops broker pseudo-drivers and inactive people, and sorts by name', () => {
-    // BROKER COVERED carries loads but is nobody, so filtering to "their" work is a lie.
-    expect(selectableDrivers(ALL).map((d) => d.name)).toEqual(['Alvaro', 'Bruno', 'Chad', 'Dina'])
+  it('OFFERS broker pseudo-drivers, and still drops inactive people', () => {
+    /*
+     * Brokers used to be dropped here, on the reasoning that BROKER COVERED is nobody.
+     * That hid their loads from the board entirely: the load still carries the id, so it
+     * matched no visible driver and vanished. 98 real loads were invisible that way.
+     */
+    expect(selectableDrivers(ALL).map((d) => d.name))
+      .toEqual(['Alvaro', 'BROKER COVERED', 'Bruno', 'Chad', 'Dina'])
   })
 
-  it('splits the two groups', () => {
+  it('splits the three groups', () => {
     expect(driversInGroup(ALL, 'IVAN').map((d) => d.id)).toEqual(['ivan-1', 'ivan-2'])
     expect(driversInGroup(ALL, 'OWNER_OP').map((d) => d.id)).toEqual(['oo-1', 'oo-2'])
+    expect(driversInGroup(ALL, 'BROKER').map((d) => d.id)).toEqual(['bk-1'])
   })
 })
 
 describe('the default selection', () => {
-  it('shows Ivan drivers and hides owner operators', () => {
-    expect(defaultVisibleDriverIds(ALL)).toEqual(['ivan-1', 'ivan-2'])
+  it('shows Ivan drivers AND brokered loads, and hides owner operators', () => {
+    // Brokered belongs in the default: NEED TO COVER is freight with nobody on it yet,
+    // which is the most urgent thing a dispatch board can show.
+    expect(defaultVisibleDriverIds(ALL)).toEqual(['ivan-1', 'ivan-2', 'bk-1'])
   })
 
-  it('is empty rather than everything when there are no Ivan drivers', () => {
+  it('is empty rather than everything when there are no Ivan or brokered drivers', () => {
     // Defaulting to "all" here would quietly put every owner-operator load on the board.
     expect(defaultVisibleDriverIds([AMZ, OO])).toEqual([])
   })
@@ -141,11 +149,12 @@ describe('loadVisibleForDrivers', () => {
 
 describe('driverFilterSummary', () => {
   it('names the default state rather than counting it', () => {
-    expect(driverFilterSummary(ALL, visible('ivan-1', 'ivan-2'))).toBe('Ivan drivers')
+    expect(driverFilterSummary(ALL, visible('ivan-1', 'ivan-2', 'bk-1'))).toBe('Ivan + brokered')
   })
 
   it('says all drivers when everyone is shown', () => {
-    expect(driverFilterSummary(ALL, visible('ivan-1', 'ivan-2', 'oo-1', 'oo-2'))).toBe('All drivers')
+    expect(driverFilterSummary(ALL, visible('ivan-1', 'ivan-2', 'oo-1', 'oo-2', 'bk-1')))
+      .toBe('All drivers')
   })
 
   it('names a single driver', () => {
@@ -178,9 +187,16 @@ describe('allSelectableDriverIds — the Loads page default', () => {
     expect(all.size).toBeGreaterThan(defaultVisibleDriverIds(ALL).length)
   })
 
-  it('leaves out brokers and inactive people, same as the picker', () => {
+  it('includes brokered and leaves out inactive people, same as the picker', () => {
     const ids = allSelectableDriverIds(ALL)
-    expect(ids).not.toContain('bk-1')
+    expect(ids).toContain('bk-1')
     expect(ids).not.toContain('x-1')
+  })
+
+  it('covers a brokered load, which is what "all drivers" has to mean', () => {
+    // The reported bug: PRO 14526 sits on BROKER NEED TO COVER and did not appear even
+    // with every driver selected, because the pseudo-driver was not among them.
+    const brokered = { id: 'l-brokered', pickupDriverId: 'bk-1', deliveryDriverId: 'bk-1' } as Load
+    expect(loadVisibleForDrivers(brokered, new Set(allSelectableDriverIds(ALL)))).toBe(true)
   })
 })

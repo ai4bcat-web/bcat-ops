@@ -32,7 +32,7 @@ interface Props {
   onChange: (ids: string[]) => void
 }
 
-const GROUPS: DriverGroup[] = ['IVAN', 'OWNER_OP']
+const GROUPS: DriverGroup[] = ['IVAN', 'BROKER', 'OWNER_OP']
 
 /** A checkbox row. Not DropdownMenuItem: that closes the menu, and this is multi-select. */
 function Row({

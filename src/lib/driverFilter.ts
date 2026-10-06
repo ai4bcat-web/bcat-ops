@@ -25,11 +25,12 @@
 import { getStops } from './stops'
 import type { Driver, Load, Stop } from '../types'
 
-export type DriverGroup = 'IVAN' | 'OWNER_OP'
+export type DriverGroup = 'IVAN' | 'OWNER_OP' | 'BROKER'
 
 export const DRIVER_GROUP_LABEL: Record<DriverGroup, string> = {
   IVAN: 'Ivan drivers',
   OWNER_OP: 'Owner operators',
+  BROKER: 'Brokered',
 }
 
 /** Enough of a driver to classify and list one. */
@@ -38,23 +39,31 @@ export type FilterableDriver = Pick<
   'id' | 'name' | 'active' | 'type' | 'fleetGroup' | 'driverType' | 'colorKey'
 >
 
-export function driverGroupOf(driver: Pick<Driver, 'fleetGroup' | 'driverType'>): DriverGroup {
+export function driverGroupOf(driver: Pick<Driver, 'fleetGroup' | 'driverType' | 'type'>): DriverGroup {
+  // BROKER COVERED / BROKER NEED TO COVER are pseudo-drivers, not people. They are still
+  // the only thing carrying these loads, so they get a group rather than being discarded.
+  if (driver.type === 'broker') return 'BROKER'
   if (driver.fleetGroup === 'AMAZON') return 'OWNER_OP'
   if (driver.driverType === 'OWNER_OPERATOR') return 'OWNER_OP'
   return 'IVAN'
 }
 
 /**
- * The drivers worth offering in the picker: real, active people.
+ * The drivers worth offering in the picker.
  *
- * `type: 'broker'` entries are pseudo-drivers like BROKER COVERED that carry loads but
- * are nobody; listing them would imply you could filter to "that person's" work.
- * Inactive drivers are dropped too — a list with every driver who ever worked here is a
- * list nobody scrolls.
+ * Broker pseudo-drivers USED to be excluded here, on the reasoning that BROKER COVERED is
+ * nobody and listing it would imply you could filter to "that person's" work. That was
+ * wrong in the way that matters: a load assigned to one still carries its id, so it
+ * matched no visible driver and vanished from the board entirely. 98 loads were invisible
+ * — 95 covered, 3 still needing cover — including freight nobody had picked up yet, which
+ * is the single thing a dispatcher most needs to see.
+ *
+ * They are their own group now. Inactive drivers are still dropped: a list with every
+ * driver who ever worked here is a list nobody scrolls.
  */
 export function selectableDrivers<T extends FilterableDriver>(drivers: T[]): T[] {
   return drivers
-    .filter((d) => d.active !== false && d.type !== 'broker')
+    .filter((d) => d.active !== false)
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -63,9 +72,20 @@ export function driversInGroup<T extends FilterableDriver>(drivers: T[], group: 
   return selectableDrivers(drivers).filter((d) => driverGroupOf(d) === group)
 }
 
-/** The default selection: Ivan's own drivers, because this is their dispatch board. */
+/**
+ * The default selection: Ivan's own drivers AND the brokered loads.
+ *
+ * Brokered belongs in the default even though it is not a person. A load marked BROKER
+ * NEED TO COVER is freight with nobody on it yet — the most urgent thing the board can
+ * show — and one marked BROKER COVERED still moves on a day somebody is planning around.
+ * Owner-operators stay out by default for the reason at the top of this file: they bring
+ * their own work and are settled elsewhere.
+ */
 export function defaultVisibleDriverIds(drivers: FilterableDriver[]): string[] {
-  return driversInGroup(drivers, 'IVAN').map((d) => d.id)
+  return [
+    ...driversInGroup(drivers, 'IVAN'),
+    ...driversInGroup(drivers, 'BROKER'),
+  ].map((d) => d.id)
 }
 
 /** Every driver id on a load, across its stops and the legacy mirrored fields. */
@@ -107,11 +127,15 @@ export function driverFilterSummary(
   if (shown.length === all.length) return 'All drivers'
 
   const ivan = driversInGroup(drivers, 'IVAN')
+  const brokers = driversInGroup(drivers, 'BROKER')
   const ownerOps = driversInGroup(drivers, 'OWNER_OP')
   const allIvan = ivan.length > 0 && ivan.every((d) => visibleDriverIds.has(d.id))
+  const allBrokers = brokers.every((d) => visibleDriverIds.has(d.id))
   const noOwnerOps = ownerOps.every((d) => !visibleDriverIds.has(d.id))
   // The default deserves its own words; a bare count would read as an odd custom state.
-  if (allIvan && noOwnerOps && shown.length === ivan.length) return 'Ivan drivers'
+  if (allIvan && allBrokers && noOwnerOps && shown.length === ivan.length + brokers.length) {
+    return 'Ivan + brokered'
+  }
 
   if (shown.length === 1) return shown[0].name
   return `${shown.length} drivers`

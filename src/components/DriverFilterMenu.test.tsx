@@ -60,7 +60,7 @@ describe('DriverFilterMenu', () => {
         onChange={vi.fn()}
       />,
     )
-    expect(screen.getByRole('button', { name: 'Drivers shown: Ivan drivers' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Drivers shown: Ivan + brokered' })).toBeInTheDocument()
   })
 
   it('shows Ivan drivers checked and owner operators unchecked by default', () => {
@@ -72,10 +72,21 @@ describe('DriverFilterMenu', () => {
     expect(screen.getByRole('menuitemcheckbox', { name: 'Dina' })).toHaveAttribute('aria-checked', 'false')
   })
 
-  it('never offers a broker pseudo-driver', () => {
-    // BROKER COVERED carries loads but is nobody to filter by.
+  it('OFFERS the broker pseudo-drivers, in their own group', () => {
+    /*
+     * They used to be hidden, on the reasoning that BROKER COVERED is nobody to filter by.
+     * The load still carries that id though, so it matched no visible driver and dropped
+     * off the board — 98 of them, including freight nobody had picked up yet.
+     */
     open(defaultVisibleDriverIds(DRIVERS))
-    expect(screen.queryByRole('menuitemcheckbox', { name: 'BROKER COVERED' })).toBeNull()
+    expect(screen.getByRole('menuitemcheckbox', { name: 'BROKER COVERED' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitemcheckbox', { name: /Brokered \(1\)/ })).toBeInTheDocument()
+  })
+
+  it('has brokered CHECKED by default, which is the whole point', () => {
+    open(defaultVisibleDriverIds(DRIVERS))
+    expect(screen.getByRole('menuitemcheckbox', { name: 'BROKER COVERED' }))
+      .toHaveAttribute('aria-checked', 'true')
   })
 
   it('turns one driver on without disturbing the rest', () => {
@@ -106,7 +117,8 @@ describe('DriverFilterMenu', () => {
     const onChange = open(['ivan-1'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Show all' }))
-    expect(onChange).toHaveBeenCalledWith(['ivan-1', 'ivan-2', 'oo-1', 'oo-2'])
+    // Show all must mean ALL — a brokered load that "all drivers" misses is the bug.
+    expect(onChange).toHaveBeenCalledWith(['ivan-1', 'bk-1', 'ivan-2', 'oo-1', 'oo-2'])
 
     fireEvent.click(screen.getByRole('button', { name: 'Show none' }))
     expect(onChange).toHaveBeenCalledWith([])
