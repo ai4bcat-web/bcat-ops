@@ -7,13 +7,25 @@
  * for this build.
  */
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { RefreshCw, X } from 'lucide-react'
 import { useAppUpdate } from '@/hooks/useAppUpdate'
 
 export function UpdateBanner() {
   const { available, reload } = useAppUpdate()
+  const { pathname } = useLocation()
   const [dismissed, setDismissed] = useState(false)
 
+  /*
+   * Staff only.
+   *
+   * The driver app is a PWA whose service worker already fetches the shell network-first
+   * and whose bundle filenames carry a content hash, so a driver picks up a new build on
+   * their next load without being asked. It also has a fixed tab bar across the bottom —
+   * the same thing that once hid every toast on that screen — so a banner pinned there
+   * would sit behind it and be unreadable anyway.
+   */
+  if (pathname.startsWith('/driver')) return null
   if (!available || dismissed) return null
 
   return (
