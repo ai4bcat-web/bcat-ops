@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { readScanIntent, scanIntentPath } from '@/features/driver-app/scanner/scanIntent'
 import { Toaster } from 'sonner'
 import { UpdateBanner } from '@/components/UpdateBanner'
+import { DriverAutoUpdate } from '@/components/DriverAutoUpdate'
 import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { AuthProvider } from '@/context/AuthContext'
@@ -222,6 +223,7 @@ export default function App() {
           can look missing for days, which is what happened with the employee hours page.
         */}
         <UpdateBanner />
+        <DriverAutoUpdate />
       </TooltipProvider>
       </AuthProvider>
     </BrowserRouter>

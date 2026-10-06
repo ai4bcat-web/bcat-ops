@@ -968,11 +968,16 @@ describe('driver-app-api handler', () => {
     })
 
     /*
-     * A driver sees what they have run, not what they are booked for.
+     * Future loads: the two programs answer differently, on purpose.
      *
-     * The week query used to run to the end of the pay week, so on Monday a driver's
-     * settlement already listed Friday's load — pay they had not earned — and the paperwork
-     * page asked for a POD for a delivery that had not happened.
+     * An OWNER OPERATOR's page is a settlement. They are quoted a rate per load and want
+     * to see the week they are running, so a load booked for Thursday is listed with what
+     * it pays, marked not delivered, and kept off the check. Hiding it made their app
+     * disagree with the office about how many loads they had.
+     *
+     * An IVAN driver's page is paperwork. They are employees dispatched off the calendar
+     * and the page exists to collect PODs, so a delivery that has not happened is nothing
+     * to show and nothing to ask for. Those still stop at today.
      */
     describe('loads that have not delivered yet', () => {
       const MONDAY = new Date('2026-09-28T09:00:00Z') // inside the 2026-09-27 week
@@ -1026,6 +1031,18 @@ describe('driver-app-api handler', () => {
         const paid = onCheck.reduce((n: number, t: { amount: number }) => n + t.amount, 0)
         expect(body.grossPay).toBe(paid)
         expect(future.amount).toBeGreaterThan(0)
+      })
+
+      it('keeps a future load OFF the Ivan paperwork page', async () => {
+        /*
+         * The other half of the rule. The settlement lists it because an owner operator is
+         * owed a rate for it; the paperwork page must not, because asking an employee for a
+         * POD on a delivery that has not happened is noise they cannot act on.
+         */
+        const res = await handler(baseEvent('/paperwork', 'GET', { query: { week: '2026-09-27' } }))
+        expect(res.statusCode).toBe(200)
+        expect(res.body).not.toContain('TMS-FUTURE')
+        expect(res.body).not.toContain('Broker Later')
       })
 
       it('says NOT_DELIVERED rather than NO_POD on a future load', async () => {
