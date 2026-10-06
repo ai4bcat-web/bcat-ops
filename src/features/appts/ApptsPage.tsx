@@ -28,6 +28,34 @@ import { formatDateShort, chicagoDateStr, apptTimeLabel, PENDING_LABEL, formatDa
 import type { AuditLogEntry, Load, Stop } from '@/types'
 
 const RED = '#dc2626'
+
+/*
+ * Whether this page is showing Batory only is a working preference, not data: it lives in
+ * this browser so each person's view is their own, and it is open to everyone rather than
+ * gated like the auto-clear rule, which changes what the whole company sees.
+ *
+ * Every access is guarded. A private window or blocked site data simply falls back to the
+ * default, which is Batory only.
+ */
+const BATORY_ONLY_KEY = 'bcat.appts.batoryOnly'
+
+function readBatoryOnly(): boolean {
+  try {
+    const raw = window.localStorage.getItem(BATORY_ONLY_KEY)
+    // Only an explicit "false" turns it off; anything unreadable means the default.
+    return raw === null ? true : raw !== 'false'
+  } catch {
+    return true
+  }
+}
+
+function writeBatoryOnly(on: boolean): void {
+  try {
+    window.localStorage.setItem(BATORY_ONLY_KEY, String(on))
+  } catch {
+    // Nothing to do: the toggle still works for this session.
+  }
+}
 const AMBER = '#b45309'
 const GREEN = '#15803d'
 
@@ -888,6 +916,20 @@ export function ApptsPage() {
   const [showPast, setShowPast] = useState(false)
   const [onlyOpen, setOnlyOpen] = useState(false)
   /*
+   * This page exists for the Batory request-and-confirm ladder, so it opens on Batory
+   * shipments alone. Everyone else's appointments come booked on the rate confirmation
+   * and need nothing done here; left in the list they are rows nobody acts on, burying
+   * the ones somebody must. The toggle is there because "nobody acts on them" is not
+   * "nobody ever looks".
+   */
+  const [batoryOnly, setBatoryOnly] = useState<boolean>(readBatoryOnly)
+  const toggleBatoryOnly = () => {
+    setBatoryOnly((v) => {
+      writeBatoryOnly(!v)
+      return !v
+    })
+  }
+  /*
    * Company-wide, so every dispatcher's working list agrees about what is still open.
    * null while it loads — treated as off, and the control stays disabled until it is known
    * so a slow read cannot be mistaken for "off" and flipped by accident.
@@ -932,17 +974,29 @@ export function ApptsPage() {
     [drivers],
   )
 
+  /*
+   * Filtered before the queue is built, not after, so every number on the page agrees
+   * with it — the open count, the per-day counts and the past/cleared count all come off
+   * this list. A tally that counted shipments the page was not showing would read as a
+   * broken filter.
+   */
+  const apptLoads = useMemo(
+    () => (batoryOnly ? loads.filter((l) => requiresApptProofs(l)) : loads),
+    [loads, batoryOnly],
+  )
+  const hiddenCount = loads.length - apptLoads.length
+
   const matched = useMemo(() => {
     // All shipments retains booked work even when the other end is waiting on Ruben.
     // Restrict to Dennis's actionable work only when Open only is selected.
-    const all = onlyOpen ? apptOutstanding(loads) : apptQueue(loads)
+    const all = onlyOpen ? apptOutstanding(apptLoads) : apptQueue(apptLoads)
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((r) =>
       [r.aljexId, r.pickupNumber, r.customer, r.location, r.deliveryLocation, r.notes].some((v) => v.toLowerCase().includes(q)),
     )
-  }, [loads, query, onlyOpen])
-  const openTotal = useMemo(() => apptOutstanding(loads).length, [loads])
+  }, [apptLoads, query, onlyOpen])
+  const openTotal = useMemo(() => apptOutstanding(apptLoads).length, [apptLoads])
 
   // Appointment dates that have already gone by are almost always dead history — they
   // bury the stops that can still be booked. Hidden, not dropped: the count stays visible.
@@ -1000,6 +1054,28 @@ export function ApptsPage() {
           >
             {onlyOpen ? `Open only (${openTotal})` : `All shipments · ${openTotal} open`}
           </button>
+          {/*
+            Batory only is the default and the normal state, so it is NOT painted as an
+            active filter — a permanently lit chip teaches people to stop reading it. It
+            lights up when it is off, which is the state worth noticing, and says how many
+            shipments it is holding back so the number is never a surprise.
+          */}
+          <button
+            onClick={toggleBatoryOnly}
+            aria-pressed={!batoryOnly}
+            title={batoryOnly
+              ? 'Showing Batory shipments only — the ones this page books. Click to include every other customer.'
+              : 'Showing every customer. Click to go back to Batory only.'}
+            style={{ height: 34, padding: '0 12px', borderRadius: 8, fontSize: 12.5, fontFamily: 'inherit', cursor: 'pointer',
+              border: `1px solid ${batoryOnly ? 'var(--ds-border)' : 'var(--ds-blue)'}`,
+              background: batoryOnly ? 'var(--ds-bg)' : 'var(--ds-blue-soft)',
+              color: batoryOnly ? 'var(--ds-t2)' : 'var(--ds-blue)',
+              fontWeight: batoryOnly ? 500 : 700, whiteSpace: 'nowrap' }}
+          >
+            {batoryOnly
+              ? `Batory only${hiddenCount > 0 ? ` · ${hiddenCount} hidden` : ''}`
+              : 'All customers'}
+          </button>
           <div style={{ position: 'relative', minWidth: 240 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', pointerEvents: 'none' }} />
             <input
@@ -1038,7 +1114,13 @@ export function ApptsPage() {
           <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)',
             borderRadius: 12, boxShadow: 'var(--sh-sm)', padding: '28px 18px',
             textAlign: 'center', fontSize: 12.5, color: 'var(--ds-t3)' }}>
-            {onlyOpen ? 'Nothing open — every shipment is booked.' : 'No shipments yet.'}
+            {onlyOpen
+              ? 'Nothing open — every shipment is booked.'
+              : batoryOnly && hiddenCount > 0
+                // Never a bare "No shipments yet" when the filter is the reason: an empty
+                // page with freight sitting behind a toggle reads as data that went missing.
+                ? `No Batory shipments — ${hiddenCount} other customer${hiddenCount === 1 ? '' : 's'}' shipment${hiddenCount === 1 ? '' : 's'} hidden by the Batory only filter.`
+                : 'No shipments yet.'}
           </div>
         )}
 

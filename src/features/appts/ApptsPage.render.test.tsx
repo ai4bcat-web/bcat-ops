@@ -77,6 +77,13 @@ beforeEach(() => {
   vi.clearAllMocks()
   loads.mockReturnValue([])
   auditLog.mockReturnValue([])
+  /*
+   * The page now opens on Batory shipments only, and almost every fixture below is some
+   * other customer — several deliberately so, to prove the non-Batory ladder. Turning the
+   * filter off here keeps each of those tests about what it was written to test; the
+   * default and the toggle get their own block at the end, where they are the subject.
+   */
+  window.localStorage.setItem('bcat.appts.batoryOnly', 'false')
 })
 
 describe('ApptsPage', () => {
@@ -574,5 +581,77 @@ describe('per-day Clear (Ryne/Ruben only)', () => {
     const [, patch] = updateLoad.mock.calls[0]
     expect(patch.stops.every((s: { apptCleared?: boolean }) => s.apptCleared === true)).toBe(true)
     confirmSpy.mockRestore()
+  })
+})
+
+/**
+ * The page exists for the Batory request-and-confirm ladder, so it opens on Batory alone.
+ *
+ * Everyone else's appointments arrive booked on the rate confirmation and need nothing
+ * done here. Left in the list they are rows nobody acts on, burying the ones somebody
+ * must — which is the whole failure this filter prevents. The toggle exists because
+ * "nobody acts on them" is not "nobody ever looks".
+ */
+describe('Batory only', () => {
+  const batory = (over: Partial<Load> = {}) => pair({ customer: 'BATORY FOODS INC', ...over })
+  const other = (over: Partial<Load> = {}) => pair({ customer: 'Axle Logistics, LLC', ...over })
+
+  beforeEach(() => window.localStorage.removeItem('bcat.appts.batoryOnly'))
+
+  it('shows Batory shipments and hides everyone else by default', async () => {
+    loads.mockReturnValue([batory({ id: 'l1', aljexId: '14569' }), other({ id: 'l2', aljexId: '99999' })])
+    render(<ApptsPage />)
+    expect(await screen.findByText('14569')).toBeTruthy()
+    expect(screen.queryByText('99999')).toBeNull()
+  })
+
+  it('says how many it is holding back, so the number is never a surprise', async () => {
+    loads.mockReturnValue([batory({ id: 'l1' }), other({ id: 'l2' }), other({ id: 'l3' })])
+    render(<ApptsPage />)
+    expect(await screen.findByRole('button', { name: /Batory only · 2 hidden/ })).toBeTruthy()
+  })
+
+  it('brings everyone back when switched off', async () => {
+    loads.mockReturnValue([batory({ id: 'l1', aljexId: '14569' }), other({ id: 'l2', aljexId: '99999' })])
+    render(<ApptsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Batory only/ }))
+    expect(await screen.findByText('99999')).toBeTruthy()
+    expect(screen.getByText('14569')).toBeTruthy()
+  })
+
+  it('remembers the choice, because re-hiding it every morning is the same as not having it', async () => {
+    loads.mockReturnValue([batory({ id: 'l1' }), other({ id: 'l2' })])
+    const first = render(<ApptsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Batory only/ }))
+    first.unmount()
+
+    render(<ApptsPage />)
+    expect(await screen.findByRole('button', { name: 'All customers' })).toBeTruthy()
+  })
+
+  it('counts open work off the filtered list, so the tally matches the rows', async () => {
+    // A count that included shipments the page was not showing would read as a broken
+    // filter — the same trap the loads grid KPI tiles sit in.
+    loads.mockReturnValue([batory({ id: 'l1' }), other({ id: 'l2' }), other({ id: 'l3' })])
+    render(<ApptsPage />)
+    expect(await screen.findByRole('button', { name: /All shipments · 1 open/ })).toBeTruthy()
+  })
+
+  it('explains an empty page rather than claiming there is no work', async () => {
+    // "No shipments yet" over freight sitting behind a toggle reads as data gone missing.
+    loads.mockReturnValue([other({ id: 'l2' }), other({ id: 'l3' })])
+    render(<ApptsPage />)
+    expect(await screen.findByText(/No Batory shipments/)).toBeTruthy()
+    expect(screen.getByText(/2 other customers. shipments hidden/)).toBeTruthy()
+  })
+
+  it('recognises Batory from the linked customer record, not only the typed name', async () => {
+    // The directory's apptWorkflow is the source of truth; the name match only covers a
+    // customer that is not linked yet. Same rule the load drawer uses.
+    loads.mockReturnValue([
+      pair({ id: 'l1', aljexId: '14569', customer: 'BF Inc', customerApptWorkflow: 'BATORY' }),
+    ])
+    render(<ApptsPage />)
+    expect(await screen.findByText('14569')).toBeTruthy()
   })
 })
