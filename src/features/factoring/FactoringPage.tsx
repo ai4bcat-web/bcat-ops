@@ -16,7 +16,6 @@ import { FactoringRowFields } from './FactoringRowFields'
 import { fieldsReadyLabel, isReadyToSubmit } from './factoringFields'
 import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
-import { OtrInvoiceBoard } from './OtrInvoiceBoard'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 
@@ -320,7 +319,6 @@ export function FactoringPage() {
   const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
-  const [view, setView] = useState<'queue' | 'board'>('queue')
   /**
    * Which rows are open. Collapsed by default: the panel is an editor, and rendering one
    * per row turned a list of twenty PROs into twenty stacked forms. The row itself already
@@ -416,24 +414,6 @@ export function FactoringPage() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Two views of the same rows: the work to do, and where OTR has got to. */}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3 }}>
-            {([['queue', 'Queue'], ['board', 'OTR invoice board']] as const).map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setView(key)}
-                style={{
-                  padding: '4px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
-                  fontSize: 12.5, fontWeight: view === key ? 600 : 500, fontFamily: 'inherit',
-                  background: view === key ? 'var(--ds-surface)' : 'transparent',
-                  color: view === key ? 'var(--ds-t1)' : 'var(--ds-t3)',
-                  boxShadow: view === key ? 'var(--sh-sm)' : 'none', whiteSpace: 'nowrap',
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
           <Button
             variant="outline"
             size="sm"
@@ -447,8 +427,8 @@ export function FactoringPage() {
         </div>
       </div>
 
-      {/* Filters — queue only; the board is sorted by submission and has its own refresh. */}
-      <div style={{ padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0, display: view === 'queue' ? undefined : 'none' }}>
+      {/* Filters */}
+      <div style={{ padding: '16px 32px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           {/* Status tabs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -514,9 +494,6 @@ export function FactoringPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
-        {view === 'board' ? (
-          <OtrInvoiceBoard items={items} onChanged={refresh} />
-        ) : (
         <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)', overflow: 'hidden', boxShadow: 'var(--sh-sm)' }}>
           {loading && items.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '64px 0', gap: 10, color: 'var(--ds-t3)' }}>
@@ -734,7 +711,6 @@ export function FactoringPage() {
             </div>
           )}
         </div>
-        )}
       </div>
       {/* Opened by the PRO column. */}
       <LoadDrawer />

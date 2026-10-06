@@ -98,6 +98,8 @@ export interface OtrInvoiceDetails {
   fuelAdvanceStatus: string | null
   submittedDate: string | null
   lastUpdated: string | null
+  /** v2's single-line lane string, when it sent one. */
+  description?: string | null
   origin: { city: string; state: string } | null
   destination: { city: string; state: string } | null
 }
@@ -654,9 +656,30 @@ export class OtrClient {
     return { message: j.message ?? '', invoiceId: String(j.invoiceId ?? opts.invoiceId) }
   }
 
-  /** Read-back for the board: current status of one invoice. */
+  /**
+   * Read back what OTR currently says about one invoice.
+   *
+   * v1 and v2 disagree about everything here, and this was still speaking v1 — the path
+   * `/invoices/{id}` is a 404 on v2, so every status refresh had been failing silently
+   * against production since the switch.
+   *
+   * v2 takes the id as a QUERY parameter and answers with a flat object whose Status is a
+   * NUMBER, not a word:
+   *
+   *   { "InvoiceNo": "14523",
+   *     "InvoiceItems": { "Description": "Ln: LIBERTYVILLE,IL To CHICAGO,IL", "UnitPrice": 500 },
+   *     "ModifiedDate": "2026-10-05T19:05:51.77",
+   *     "Status": 1 }
+   *
+   * Most of what v1 returned — customer, PO, schedule, fuel advance — simply is not in the
+   * v2 response, so those come back null rather than as zeros or empty strings that would
+   * read as "OTR says there is no PO".
+   */
   async getInvoice(invoiceId: number | string): Promise<OtrInvoiceDetails> {
-    const res = await this.request(`/invoices/${encodeURIComponent(String(invoiceId))}`, {
+    const path = this.invoicesOnV2
+      ? `/invoices?invoicePkeys=${encodeURIComponent(String(invoiceId))}`
+      : `/invoices/${encodeURIComponent(String(invoiceId))}`
+    const res = await this.request(path, {
       method: 'GET',
       headers: await this.authedHeaders({ Accept: 'application/json' }),
     })
@@ -664,20 +687,35 @@ export class OtrClient {
     if (!res.ok) {
       throw new OtrError(`Get invoice ${invoiceId} failed (${res.status})`, res.status, text)
     }
-    const inv = ((JSON.parse(text) as { invoice?: Record<string, unknown> }).invoice ??
-      {}) as Record<string, unknown>
+
+    const parsed = JSON.parse(text) as Record<string, unknown>
+    // v1 wraps it; v2 is flat. An array is tolerated in case v2 ever returns several.
+    const inv = (Array.isArray(parsed)
+      ? (parsed[0] ?? {})
+      : ((parsed.invoice as Record<string, unknown>) ?? parsed)) as Record<string, unknown>
+
     const lane = (inv.lane ?? {}) as Record<string, { city?: string; state?: string }>
+    const items = (inv.InvoiceItems ?? {}) as Record<string, unknown>
+    const amount = Number(inv.invoiceAmount ?? items.UnitPrice ?? 0)
+
     return {
-      // OTR capitalizes this key; tolerate either spelling.
+      // v2 sends a number, v1 a word. Both are passed through as text and resolved to
+      // OTR's own label by src/lib/otrInvoiceStatus.ts, which is the only place that maps.
       status: String(inv.Status ?? inv.status ?? ''),
-      invoiceNo: String(inv.invoiceNo ?? ''),
+      invoiceNo: String(inv.InvoiceNo ?? inv.invoiceNo ?? ''),
       poNumber: String(inv.poNumber ?? ''),
       customerName: String(inv.customerName ?? ''),
-      invoiceAmount: Number(inv.invoiceAmount ?? 0),
+      invoiceAmount: Number.isFinite(amount) ? amount : 0,
       scheduleId: inv.scheduleId ? String(inv.scheduleId) : null,
       fuelAdvanceStatus: inv.fuelAdvanceStatus ? String(inv.fuelAdvanceStatus) : null,
       submittedDate: inv.submittedDate ? String(inv.submittedDate) : null,
-      lastUpdated: inv.lastUpdated ? String(inv.lastUpdated) : null,
+      lastUpdated: inv.ModifiedDate
+        ? String(inv.ModifiedDate)
+        : inv.lastUpdated
+          ? String(inv.lastUpdated)
+          : null,
+      /** v2's one-line lane, e.g. "Ln:  LIBERTYVILLE,IL To  CHICAGO,IL". */
+      description: typeof items.Description === 'string' ? items.Description.trim() : null,
       origin: lane.origin
         ? { city: String(lane.origin.city ?? ''), state: String(lane.origin.state ?? '') }
         : null,

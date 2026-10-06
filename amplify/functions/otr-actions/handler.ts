@@ -29,6 +29,7 @@ import {
   type OtrReadiness,
 } from '../../../src/lib/otrInvoice'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
+import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 import { normalizePro } from '../../../src/lib/podPresence'
 import {
   OtrClient,
@@ -1016,8 +1017,12 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           if (!item?.otrInvoiceId) continue
           try {
             const d = await client.getInvoice(String(item.otrInvoiceId))
-            // OTR's "Paid" is the terminal state; reflect it on the local status.
-            const local = d.status === 'Paid' ? 'FACTORED' : 'PENDING_WITH_OTR'
+            /*
+             * v2 answers with a status NUMBER, so comparing to the word 'Paid' never
+             * matched and nothing was ever marked factored. localStatusFor owns that
+             * decision now, in the same module that owns the labels.
+             */
+            const local = localStatusFor(d.status)
             await updateItem(id, {
               otrStatus: d.status,
               otrScheduleId: d.scheduleId,

@@ -19,8 +19,16 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 
 const FACTORING_TABLE = process.env.FACTORING_ITEM_TABLE_NAME!
 
-/** OTR's terminal status — nothing changes after it, so stop polling. */
-const TERMINAL = 'Paid'
+/*
+ * Which invoices are finished, so we stop paying to ask about them.
+ *
+ * This used to be the single string 'Paid', compared against otrStatus both in the scan
+ * filter and in the local-status decision. v2 answers with a status NUMBER, so the string
+ * never matched anything: no invoice was ever recognised as terminal, every one of them was
+ * re-polled every hour forever, and none was ever marked factored. The terminal set now
+ * comes from the one module that knows OTR's statuses.
+ */
+import { otrStatusMeta, localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 
 type Row = Record<string, unknown>
 
@@ -40,8 +48,12 @@ export const handler = async () => {
     const r = await ddb.send(
       new ScanCommand({
         TableName: FACTORING_TABLE,
-        FilterExpression: 'attribute_exists(otrInvoiceId) AND (attribute_not_exists(otrStatus) OR otrStatus <> :paid)',
-        ExpressionAttributeValues: { ':paid': TERMINAL },
+        /*
+         * Server-side we only ask for rows that reached OTR at all; which of those are
+         * finished is decided below, because a DynamoDB filter cannot express "status is
+         * one of the terminal ones" as cheaply as a comparison in memory can.
+         */
+        FilterExpression: 'attribute_exists(otrInvoiceId)',
         ProjectionExpression: 'id, proNumber, otrInvoiceId, otrStatus',
         ExclusiveStartKey,
       }),
@@ -56,6 +68,9 @@ export const handler = async () => {
   for (const row of pending) {
     const id = String(row.id)
     const invoiceId = String(row.otrInvoiceId)
+    // Approved, Dead and Duplicate are OTR's last words on an invoice. Asking again costs
+    // a paid API call to be told the same thing.
+    if (otrStatusMeta(row.otrStatus as string | undefined)?.terminal) continue
     try {
       const d = await client.getInvoice(invoiceId)
       // Nothing moved — skip the write so updatedAt stays meaningful.
@@ -72,8 +87,8 @@ export const handler = async () => {
             ':s': d.status,
             ':sch': d.scheduleId ?? null,
             ':t': new Date().toISOString(),
-            // Local queue status follows OTR: Paid means the shipment is factored.
-            ':local': d.status === TERMINAL ? 'FACTORED' : 'PENDING_WITH_OTR',
+            // Local queue status follows OTR; only Approved closes a row out.
+            ':local': localStatusFor(d.status),
             ':null': null,
           },
         }),

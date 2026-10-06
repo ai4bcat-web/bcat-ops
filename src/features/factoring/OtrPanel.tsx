@@ -27,6 +27,7 @@ import {
   type OtrReadiness,
   type OtrRequiredField,
 } from '@/lib/otrInvoice'
+import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
 import { setFactoringManualFields } from '@/lib/apiClient'
 import { FactoringDocCell } from './FactoringDocCell'
@@ -131,9 +132,24 @@ export function OtrPanel({ item, onChanged }: Props) {
       <div className="rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg)] p-3 text-sm">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <span className="font-semibold text-foreground">OTR invoice {item.otrInvoiceId}</span>
-          <span className="text-muted-foreground">
-            Status: <span className="font-medium text-foreground">{item.otrStatus ?? 'Pending'}</span>
-          </span>
+          {/*
+            OTR's own word for it, in OTR's own colour — so a glance here and a glance at
+            their portal agree. The mapping lives in src/lib/otrInvoiceStatus.ts; their API
+            sends a number and their portal shows a word, and inventing our own wording
+            would leave the office deciding whether two labels mean the same thing.
+          */}
+          {(() => {
+            const meta = otrStatusMeta(item.otrStatus) ?? otrStatusMeta(1)!
+            return (
+              <span
+                className="rounded px-2 py-0.5 text-xs font-semibold"
+                style={{ background: meta.tone.bg, color: meta.tone.fg, border: `1px solid ${meta.tone.border}` }}
+                title={meta.needsAttention ? 'OTR or the broker is waiting on us' : undefined}
+              >
+                {meta.label}
+              </span>
+            )
+          })()}
           {item.otrScheduleId && (
             <span className="text-muted-foreground">Schedule {item.otrScheduleId}</span>
           )}
