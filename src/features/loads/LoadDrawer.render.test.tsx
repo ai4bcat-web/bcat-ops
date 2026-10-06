@@ -37,6 +37,18 @@ vi.mock('@/features/pods/LoadPods', () => ({
   LoadPods: () => null,
 }))
 
+// The address book is loaded over the API; these tests only need it to exist and be empty.
+// The Batory rule then falls through to the /batory/i name match, which is the same path a
+// tender from an unlinked broker takes in production.
+vi.mock('@/hooks/useDirectory', () => ({
+  useDirectory: () => ({
+    customers: [], locations: [], loading: false, error: null,
+    refresh: vi.fn(), addCustomer: vi.fn(), addLocation: vi.fn(),
+    saveCustomer: vi.fn(), saveLocation: vi.fn(),
+    archiveCustomer: vi.fn(), archiveLocation: vi.fn(),
+  }),
+}))
+
 const { LoadDrawer } = await import('./LoadDrawer')
 
 const baseState = (drawerMode: string | null) => ({
@@ -90,5 +102,106 @@ describe('LoadDrawer uses the shared panel, not its own chrome', () => {
     render(<LoadDrawer />)
     expect(screen.getByRole('button', { name: /Delete load/i })).toBeTruthy()
     expect(screen.getByText(/Edit Load/i)).toBeTruthy()
+  })
+})
+
+/**
+ * Build Load prefills the stop details off the tender — but a Batory tender must arrive
+ * with its appointments blank.
+ *
+ * Batory bookings go through the request-and-confirm ladder: Dennis asks for a time, the
+ * shipper grants it, and two screenshots evidence it. A date lifted off the tender is a
+ * time nobody agreed, sitting in the exact field that ladder exists to fill, and the load
+ * reads as booked when nothing has been booked. The facility and city still prefill,
+ * because that part is not in dispute — only the appointment and the facility
+ * instructions, which the ladder also establishes by hand, are withheld.
+ */
+const tenderFor = (customer: string) => ({
+  format: 'E2OPEN' as const,
+  reference: '208663813',
+  pickupNumber: 'SO-77',
+  customer,
+  stops: [
+    {
+      type: 'pickup' as const, name: "BATORY'S OAKLEY", street: '2234 W 43RD STREET',
+      city: 'CHICAGO', state: 'IL', zip: '60609', dateStr: '2026-10-09', time: '08:00',
+      instructions: 'Appointments required',
+    },
+    {
+      type: 'delivery' as const, name: 'MIDWEST FOODS', street: '1 MAIN ST',
+      city: 'DES MOINES', state: 'IA', zip: '50301', dateStr: '2026-10-10', time: '14:00',
+      instructions: '48 Hour Notice',
+    },
+  ],
+})
+
+const createWithTender = (customer: string) => ({
+  ...baseState('create'),
+  createPreFill: { dateStr: '2026-10-09', tender: tenderFor(customer) },
+})
+
+/*
+ * Build Load is a Radix Dialog, so its fields are portalled to document.body — the render
+ * container is empty, and a field's value lives on the DOM property, not in the markup.
+ * Reading container.innerHTML would pass every one of these vacuously.
+ */
+const fieldValues = (type: string) =>
+  [...document.body.querySelectorAll('input')].filter((el) => el.type === type).map((el) => el.value)
+
+const textValues = () => [
+  ...[...document.body.querySelectorAll('input')].filter((el) => el.type === 'text').map((el) => el.value),
+  ...[...document.body.querySelectorAll('textarea')].map((el) => el.value),
+]
+
+describe('Build Load prefill, Batory vs everyone else', () => {
+  it('prefills the booked appointment date and time for a non-Batory tender', () => {
+    state = createWithTender('Axle Logistics, LLC')
+    render(<LoadDrawer />)
+    // The appointment is a date input plus a time input, not one datetime field.
+    expect(fieldValues('date')).toEqual(expect.arrayContaining(['2026-10-09', '2026-10-10']))
+    expect(fieldValues('time')).toEqual(expect.arrayContaining(['08:00', '14:00']))
+  })
+
+  it('prefills the facility, city and instructions for a non-Batory tender', () => {
+    state = createWithTender('Axle Logistics, LLC')
+    render(<LoadDrawer />)
+    const values = textValues()
+    expect(values).toContain("BATORY'S OAKLEY")
+    expect(values).toContain('DES MOINES, IA')
+    expect(values.join('\n')).toContain('48 Hour Notice')
+  })
+
+  it('leaves every appointment date and time blank for a Batory tender', () => {
+    state = createWithTender('BATORY FOODS INC')
+    render(<LoadDrawer />)
+    // Nothing carried over at all — not the tender's times, not even the plan date.
+    expect(fieldValues('date').filter(Boolean)).toEqual([])
+    expect(fieldValues('time').filter(Boolean)).toEqual([])
+  })
+
+  it('still prefills the Batory facility and city — only the appointment is withheld', () => {
+    state = createWithTender('BATORY FOODS INC')
+    render(<LoadDrawer />)
+    const values = textValues()
+    expect(values).toContain("BATORY'S OAKLEY")
+    expect(values).toContain('CHICAGO, IL')
+  })
+
+  it('withholds the facility instructions on a Batory tender', () => {
+    state = createWithTender('BATORY FOODS INC')
+    render(<LoadDrawer />)
+    expect(textValues().join('\n')).not.toContain('48 Hour Notice')
+  })
+
+  it('says why the Batory appointments are blank, so nobody hunts for the date', () => {
+    state = createWithTender('BATORY FOODS INC')
+    render(<LoadDrawer />)
+    expect(screen.getByText(/Batory load/i)).toBeTruthy()
+  })
+
+  it('says nothing about Batory on anyone else\'s tender', () => {
+    state = createWithTender('Axle Logistics, LLC')
+    render(<LoadDrawer />)
+    expect(screen.queryByText(/Batory load/i)).toBeNull()
   })
 })

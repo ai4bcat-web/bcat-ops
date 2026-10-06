@@ -110,6 +110,16 @@ function tenderStopForms(
   tender: TenderPrefill,
   preDate?: string,
   driverId?: string | null,
+  /*
+   * Batory appointments are never prefilled.
+   *
+   * Their loads go through the request-and-confirm ladder — a time is asked for, granted,
+   * and evidenced with screenshots — so a date carried over from the tender is a time
+   * nobody agreed, sitting in the very field the workflow exists to fill, and the load
+   * reads as booked. The rest of the stop — name, city, street, zip — still prefills, as
+   * it did before appointment prefill existed; only the appointment is left for a person.
+   */
+  skipAppointments = false,
 ): StopFormValue[] {
   const ordered = [
     ...tender.stops.filter((s) => s.type === 'pickup'),
@@ -128,12 +138,13 @@ function tenderStopForms(
      * when there is not, which is the same distinction the stops themselves draw: a date at
      * midnight means "this day, time still to be agreed" and must not read as 00:00 booked.
      */
-    const when = st.dateStr ?? preDate ?? ''
+    const when = skipAppointments ? '' : (st.dateStr ?? preDate ?? '')
+    const time = skipAppointments ? undefined : st.time
     return {
       ...base,
       sequence: i,
-      appt: when && st.time ? `${when}T${st.time}` : when,
-      apptType: st.time ? ('exact' as const) : base.apptType,
+      appt: when && time ? `${when}T${time}` : when,
+      apptType: time ? ('exact' as const) : base.apptType,
       ...(st.name ? { name: st.name } : {}),
       ...(cityState ? { city: cityState } : {}),
       address: {
@@ -702,6 +713,7 @@ function NewLoadDialog({
   aljexId,
   onDelete,
   tender,
+  isBatory = false,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -718,6 +730,8 @@ function NewLoadDialog({
   onDelete?: () => void
   /** What intake parsed off the tender, including any document it carried. */
   tender?: TenderPrefill | null
+  /** Batory loads take their appointments from the request ladder, never from a tender. */
+  isBatory?: boolean
 }) {
   // The reusable address book: customer + facility names suggest as you type.
   const directory = useDirectory()
@@ -868,6 +882,17 @@ function NewLoadDialog({
                 {tender.rateConKey ? <Check size={14} style={{ marginTop: 1, flexShrink: 0 }} />
                   : <FileText size={14} style={{ marginTop: 1, flexShrink: 0 }} />}
                 <span>
+                  {/*
+                    Said here because a blank appointment on a Batory load otherwise reads
+                    as a prefill that failed, and somebody goes looking for the date in the
+                    email instead of starting the request.
+                  */}
+                  {isBatory && (
+                    <span style={{ display: 'block', marginBottom: 4 }}>
+                      <b>Batory load</b> — appointments are left blank on purpose; request
+                      them through the appointments page.
+                    </span>
+                  )}
                   {tender.rateConKey ? (
                     <>
                       <b>Rate confirmation attached</b> from the tender — it goes on the load
@@ -1245,6 +1270,23 @@ export function LoadDrawer() {
    * never block a booking.
    */
   const formDirectory = useDirectory()
+
+  /*
+   * Is the load being built a Batory one? Same rule the appointments queue uses, so the two
+   * cannot disagree about whose loads go through the request ladder.
+   */
+  const createPreFillIsBatory = useMemo(() => {
+    const t = createPreFill?.tender
+    if (!t) return false
+    const linked = t.customerId
+      ? formDirectory.customers.find((c) => c.id === t.customerId)
+      : undefined
+    return requiresApptProofs({
+      customer: t.customer ?? '',
+      customerApptWorkflow: linked?.apptWorkflow ?? null,
+    })
+  }, [createPreFill?.tender, formDirectory.customers])
+
   const factoredAwareSchema = useMemo(() => {
     const factored = new Set(
       formDirectory.customers.filter((c) => c.factored === true).map((c) => c.id),
@@ -1308,6 +1350,10 @@ export function LoadDrawer() {
     } else {
       const preDate = createPreFill?.dateStr
       const tender = createPreFill?.tender
+      // Batory loads keep the prefill they already had and skip what this round added:
+      // appointment times and facility instructions, both of which their request ladder
+      // establishes by hand. Everything else about the tender still carries over.
+      const tenderIsBatory = createPreFillIsBatory
       reset({
         /*
          * The Pro# is NOT prefilled, deliberately.
@@ -1321,7 +1367,7 @@ export function LoadDrawer() {
         aljexId: '', tmsId: tender?.reference ?? '',
         pickupNumber: tender?.pickupNumber ?? '',
         stops: tender
-          ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null)
+          ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory)
           : emptyStopForms(preDate, createPreFill?.driverId ?? null),
         readyToInvoice: false,
         /*
@@ -1340,7 +1386,7 @@ export function LoadDrawer() {
          * exactly what a dispatcher otherwise reads off the email and retypes. Labelled by
          * stop, because a delivery's notice period is not the shipper's sealing rule.
          */
-        notes: tenderNotes(tender),
+        notes: tenderIsBatory ? '' : tenderNotes(tender),
         miles: null, rate: null, hot: false, unscheduled: false,
       })
     }
@@ -1560,6 +1606,7 @@ export function LoadDrawer() {
         aljexId={load?.aljexId}
         onDelete={!isCreate ? handleDelete : undefined}
         tender={createPreFill?.tender ?? null}
+        isBatory={createPreFillIsBatory}
       />
     )
   }
