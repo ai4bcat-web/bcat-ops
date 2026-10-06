@@ -1189,8 +1189,27 @@ export function LoadDrawer() {
     const factored = new Set(
       formDirectory.customers.filter((c) => c.factored === true).map((c) => c.id),
     )
-    return loadSchemaFor((id) => !!id && factored.has(id))
-  }, [formDirectory.customers])
+    /*
+     * On an EXISTING load, only hold it to what it already had.
+     *
+     * The MC and ZIP rules arrived after hundreds of loads were already booked, and
+     * applying them to every save meant nobody could move an appointment on any of those
+     * loads — the rule exists so an invoice can be assembled later, which is no reason to
+     * block dispatch today. A field the load already carries is still protected, so an edit
+     * cannot quietly strip one.
+     */
+    const stops = load ? getStops(load) : []
+    const firstPickup = stops.find((st) => st.type === 'pickup')
+    const lastDelivery = [...stops].reverse().find((st) => st.type === 'delivery')
+    return loadSchemaFor((id) => !!id && factored.has(id), {
+      isNew: isCreate,
+      had: {
+        customerId: !!(load?.customerId ?? '').trim(),
+        originZip: ((firstPickup?.address?.zip ?? '').trim()).length >= 3,
+        destinationZip: ((lastDelivery?.address?.zip ?? '').trim()).length >= 3,
+      },
+    })
+  }, [formDirectory.customers, load, isCreate])
 
   const {
     register, control, handleSubmit, reset, watch, setValue,

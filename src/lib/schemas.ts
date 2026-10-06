@@ -123,11 +123,36 @@ export type LoadFormValues = z.infer<typeof loadSchema>
  * Only the two ENDPOINT stops need a ZIP. A middle stop on a multi-stop run never reaches
  * an invoice.
  */
-export function loadSchemaFor(isFactored: (customerId: string | null | undefined) => boolean) {
+/**
+ * What the load already had when the drawer opened.
+ *
+ * A rule introduced today cannot be a reason to refuse a save on a load booked before it
+ * existed. Hundreds of loads predate the MC and ZIP requirement, and holding them to it
+ * meant nobody could move an appointment on any of them — the requirement exists to make an
+ * invoice assemblable later, which is no reason to block dispatch work now.
+ *
+ * So a field is required when it is being CREATED, or when the load already had it and the
+ * edit would remove it. A field that was already blank stays editable and stays blank.
+ */
+export interface LoadRequirementBaseline {
+  /** True when this is a new load — everything is required. */
+  isNew: boolean
+  /** Fields the saved load already carried, so an edit cannot quietly strip them. */
+  had?: { customerId?: boolean; originZip?: boolean; destinationZip?: boolean }
+}
+
+export function loadSchemaFor(
+  isFactored: (customerId: string | null | undefined) => boolean,
+  baseline: LoadRequirementBaseline = { isNew: true },
+) {
+  /** Enforce when the load is new, or when it already had this and would now lose it. */
+  const required = (field: keyof NonNullable<LoadRequirementBaseline['had']>) =>
+    baseline.isNew || baseline.had?.[field] === true
+
   return loadSchema.superRefine((load, ctx) => {
     if (!isFactored(load.customerId)) return
 
-    if (!(load.customerId ?? '').trim()) {
+    if (required('customerId') && !(load.customerId ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Customer is required — the invoice bills their MC',
@@ -140,14 +165,14 @@ export function loadSchemaFor(isFactored: (customerId: string | null | undefined
     const stops = load.stops ?? []
     const pickup = stops.find((st) => st.type === 'pickup')
     const delivery = [...stops].reverse().find((st) => st.type === 'delivery')
-    if (pickup && !hasZip(pickup)) {
+    if (required('originZip') && pickup && !hasZip(pickup)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Origin ZIP is required — this customer is factored',
         path: ['stops', stops.indexOf(pickup), 'address', 'zip'],
       })
     }
-    if (delivery && !hasZip(delivery)) {
+    if (required('destinationZip') && delivery && !hasZip(delivery)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'Destination ZIP is required — this customer is factored',
