@@ -396,6 +396,49 @@ export function GridPage() {
       ),
     },
     {
+      id: 'customer',
+      header: ({ column }) => (
+        <button className="flex items-center" onClick={() => column.toggleSorting()}>
+          CUSTOMER <SortIcon col={column} />
+        </button>
+      ),
+      /*
+       * The name on the load, not the directory record's.
+       *
+       * They are usually the same, and where they differ the load's own is what was agreed
+       * on this booking — a customer renamed in the directory last month must not silently
+       * rewrite the history of loads booked under the old name.
+       */
+      accessorFn: (row) => row.customer ?? '',
+      cell: ({ getValue }) => {
+        const name = (getValue() as string).trim()
+        if (!name) {
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span style={{ fontSize: 12, color: 'var(--ds-amber)' }}>No customer</span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Nothing can be factored without one — open the load and pick the broker.
+              </TooltipContent>
+            </Tooltip>
+          )
+        }
+        return (
+          <span
+            title={name}
+            style={{
+              fontSize: 12.5, color: 'var(--ds-t1)', display: 'block',
+              maxWidth: 170, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
+            {name}
+          </span>
+        )
+      },
+      size: 180,
+    },
+    {
       id: 'route',
       header: 'Origin → Destination',
       enableSorting: false,
@@ -605,7 +648,8 @@ export function GridPage() {
   }
 
   const allColNames: Record<string, string> = {
-    aljexId: 'Pro #', tmsId: 'TMS ID / PO', pickupNumber: 'PU#', route: 'Origin → Dest',
+    aljexId: 'Pro #', tmsId: 'TMS ID / PO', pickupNumber: 'PU#', customer: 'Customer',
+    route: 'Origin → Dest', status: 'Status', ratecon: 'Rate Con', pod: 'POD',
     pickupAppt: 'PU Appt', deliveryAppt: 'DE Appt',
     pickupDriver: 'PU Driver', deliveryDriver: 'DE Driver', readyToInvoice: 'RTI',
   }
