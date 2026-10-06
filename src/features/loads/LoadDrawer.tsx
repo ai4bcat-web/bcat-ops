@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller, useFieldArray, useWatch, type Control } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw, Plus, Truck, Package } from 'lucide-react'
+import { CheckCircle2, Circle, Edit2, Trash2, Clock, CalendarRange, AlarmClock, HelpCircle, Upload, X, FileImage, ChevronDown, RotateCw, Plus, Truck, Package, Check, FileText } from 'lucide-react'
 import { SidePanel } from '@/features/files/SidePanel'
 import { panelBtn } from '@/lib/ui/panel-btn'
 import { DirectoryPicker } from '@/components/directory-picker/DirectoryPicker'
@@ -680,6 +680,7 @@ function NewLoadDialog({
   mode = 'create',
   aljexId,
   onDelete,
+  tender,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -694,6 +695,8 @@ function NewLoadDialog({
   mode?: 'create' | 'edit'
   aljexId?: string
   onDelete?: () => void
+  /** What intake parsed off the tender, including any document it carried. */
+  tender?: TenderPrefill | null
 }) {
   // The reusable address book: customer + facility names suggest as you type.
   const directory = useDirectory()
@@ -822,6 +825,42 @@ function NewLoadDialog({
         {/* Scrollable body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
           <form id="new-load-form" onSubmit={handleSubmit(onSubmit)}>
+
+            {/*
+              What the tender brought with it.
+              Building a load from intake attaches the rate confirmation that arrived on the
+              Slack message, but it happens on save — so without saying so here, somebody
+              fills the form with no idea whether the document is coming, and uploads a
+              second copy to be sure. It also says plainly when the tender had NO document,
+              which is the more common case and the one worth knowing before you look for it.
+            */}
+            {mode === 'create' && tender && (
+              <div
+                style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 16,
+                  padding: '10px 12px', borderRadius: 8, fontSize: 12.5,
+                  background: tender.rateConKey ? '#ecfdf5' : 'var(--ds-bg)',
+                  border: `1px solid ${tender.rateConKey ? '#86efac' : 'var(--ds-border)'}`,
+                  color: tender.rateConKey ? '#15803d' : 'var(--ds-t3)',
+                }}
+              >
+                {tender.rateConKey ? <Check size={14} style={{ marginTop: 1, flexShrink: 0 }} />
+                  : <FileText size={14} style={{ marginTop: 1, flexShrink: 0 }} />}
+                <span>
+                  {tender.rateConKey ? (
+                    <>
+                      <b>Rate confirmation attached</b> from the tender — it goes on the load
+                      when you save, and the factoring queue reads it from there.
+                    </>
+                  ) : (
+                    <>
+                      This tender arrived with <b>no rate confirmation</b> attached. Upload one
+                      on the load or in the factoring queue once you have it.
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
 
             {/* ── Section 1: Identifiers ─────────────────────────────── */}
             <div style={{ marginBottom: 24 }}>
@@ -1492,6 +1531,7 @@ export function LoadDrawer() {
         mode={isCreate ? 'create' : 'edit'}
         aljexId={load?.aljexId}
         onDelete={!isCreate ? handleDelete : undefined}
+        tender={createPreFill?.tender ?? null}
       />
     )
   }
