@@ -230,6 +230,8 @@ export interface TruckDayWindow {
   lastMoveAt: string | null
   drivingSeconds: number
   onDutySeconds: number
+  /** Unit numbers the day was logged against. Drivers swap trucks; this names which. */
+  vehicles?: string[]
 }
 
 export interface ClockEdges {
@@ -239,7 +241,15 @@ export interface ClockEdges {
   lateOutMinutes: number | null
 }
 
-/** Minutes clocked that day beyond this before/after the truck moved are worth a look. */
+/**
+ * Beyond this many minutes either side, the gap is worth MENTIONING.
+ *
+ * Not a threshold for discipline, and nothing in this file treats it as one. A driver can
+ * be clocked on for an hour before the wheels turn for entirely ordinary reasons — a
+ * pre-trip inspection, fuelling, a dock that is not ready, or simply a day that began in a
+ * different truck. The number exists so a person can glance down a column and see which
+ * days are worth a word, not so the page can decide something about somebody.
+ */
 export const CLOCK_EDGE_TOLERANCE_MINUTES = 30
 
 /**
@@ -250,11 +260,13 @@ export const CLOCK_EDGE_TOLERANCE_MINUTES = 30
  * different things: a driver can work the right number of hours and still have booked them
  * at the wrong end of the day.
  *
- * Positive earlyIn means the clock started before the wheels did. That is NOT automatically
- * wrong — a pre-trip inspection, fuelling, or waiting for a dock are all paid work with the
- * truck sitting still — which is exactly why this reports minutes for a person to judge
- * rather than flagging a verdict. Thirty minutes is the point at which it stops looking like
- * a pre-trip.
+ * Positive earlyIn means the clock started before the wheels did. That is NOT evidence of
+ * anything on its own — a pre-trip inspection, fuelling, waiting for a dock, or a day that
+ * started in another truck are all ordinary — which is why this returns minutes and no
+ * judgement. Nothing downstream should turn it into one.
+ *
+ * The comparison follows the DRIVER, not the vehicle: Motive keys hours of service to the
+ * person, so swapping trucks mid-week never points this at somebody else's wheels.
  */
 export function clockEdges(day: DayTotal, truck: TruckDayWindow | null | undefined): ClockEdges {
   const none = { earlyInMinutes: null, lateOutMinutes: null }

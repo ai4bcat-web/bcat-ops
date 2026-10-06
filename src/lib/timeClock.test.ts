@@ -399,3 +399,41 @@ describe('clock edges against when the truck moved', () => {
     expect(CLOCK_EDGE_TOLERANCE_MINUTES).toBe(30)
   })
 })
+
+describe('truck swaps', () => {
+  it('follows the DRIVER, so a swap cannot point at the wrong wheels', () => {
+    /*
+     * Motive keys hours of service to the person, not the vehicle. A driver who changes
+     * trucks mid-week still has one continuous log, so the comparison never lands on
+     * somebody else's driving — which is what makes it safe to show at all when swapping
+     * is routine.
+     */
+    const twoTrucks = {
+      firstMoveAt: '2026-10-06T13:00:00Z',
+      lastMoveAt: '2026-10-06T21:00:00Z',
+      drivingSeconds: 7 * 3600,
+      onDutySeconds: 3600,
+      vehicles: ['0012', '0780'],
+    }
+    const e = clockEdges(
+      {
+        date: '2026-10-06', workedMinutes: 480, holidayMinutes: 0, ptoMinutes: 0,
+        totalMinutes: 480, open: false,
+        rows: [{
+          id: 'r1', driverId: 'd1', workDate: '2026-10-06', kind: 'WORK',
+          clockInAt: '2026-10-06T12:00:00Z', clockOutAt: '2026-10-06T21:00:00Z', minutes: 480,
+        }],
+      },
+      twoTrucks,
+    )
+    // One driver, two units, still one coherent comparison.
+    expect(e.earlyInMinutes).toBe(60)
+    expect(twoTrucks.vehicles).toHaveLength(2)
+  })
+
+  it('is a tolerance for mentioning, not for discipline', () => {
+    // Nothing in this module turns the number into a verdict, and the comment on the
+    // constant says why: a pre-trip, fuelling or a slow dock all land outside the window.
+    expect(CLOCK_EDGE_TOLERANCE_MINUTES).toBe(30)
+  })
+})

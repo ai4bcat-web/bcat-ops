@@ -160,7 +160,9 @@ export function HoursPage() {
           <h1 className="text-lg font-bold text-foreground">Employee hours</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Ivan drivers&rsquo; time cards, by fortnightly pay period. No overtime &mdash; hours
-            are hours, at forty and at eighty.
+            are hours, at forty and at eighty. Truck times are from Motive for context only
+            &mdash; drivers swap trucks, and a pre-trip or a slow dock puts the clock outside
+            the driving window quite legitimately.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -211,7 +213,7 @@ export function HoursPage() {
                       <th className="px-4 py-2 font-medium">Day</th>
                       <th className="px-4 py-2 font-medium">Entries</th>
                       <th className="px-4 py-2 text-right font-medium">Hours</th>
-                      <th className="px-4 py-2 font-medium">Truck moving</th>
+                      <th className="px-4 py-2 font-medium">Truck moving (FYI)</th>
                       <th className="px-4 py-2 font-medium">Correct</th>
                     </tr>
                   </thead>
@@ -248,12 +250,12 @@ export function HoursPage() {
                             {day.open ? 'on the clock' : minutesLabel(day.totalMinutes)}
                           </td>
                           {/*
-                            When the wheels actually turned, and how far the clock sits
-                            outside it. A driver cannot set driving segments by hand the way
-                            they can a clock-in, so this is the honest check — but it is
-                            reported as minutes for a person to judge, never as a verdict: a
-                            pre-trip, fuelling or waiting for a dock are all paid work with
-                            the truck standing still.
+                            When the wheels actually turned, for context — not for holding
+                            anyone to account. A pre-trip, fuelling, a dock that is not ready
+                            or a day begun in a different truck all put the clock legitimately
+                            outside the driving window, and these drivers do swap trucks. The
+                            column names the unit so a swap reads as a swap, and the wording
+                            stays a note rather than a finding.
                           */}
                           <td className="px-4 py-2 text-xs">
                             <TruckTime
@@ -313,12 +315,19 @@ export function HoursPage() {
 
 export { MOTIVE_GAP_TOLERANCE_MIN }
 
-/** Clock time against wheel time for one day. */
+/**
+ * Clock time against wheel time for one day — context, not a finding.
+ *
+ * Phrased as a note on purpose. These drivers swap trucks, and a clock legitimately sits
+ * outside the driving window for a pre-trip, fuelling, or a dock that is not ready. The unit
+ * number is shown so a swap reads as a swap rather than as a discrepancy, and nothing here
+ * is coloured red or called a problem.
+ */
 function TruckTime({
   truck,
   edges,
 }: {
-  truck?: { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number }
+  truck?: { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number; vehicles?: string[] }
   edges: { earlyInMinutes: number | null; lateOutMinutes: number | null }
 }) {
   const clock = (iso: string | null | undefined) =>
@@ -334,17 +343,23 @@ function TruckTime({
   const flag = (minutes: number | null) =>
     minutes != null && minutes > CLOCK_EDGE_TOLERANCE_MINUTES
 
+  const notes = [
+    flag(edges.earlyInMinutes) ? `clocked on ${edges.earlyInMinutes}m before driving` : null,
+    flag(edges.lateOutMinutes) ? `${edges.lateOutMinutes}m after` : null,
+  ].filter(Boolean)
+
   return (
     <div className="flex flex-col gap-0.5">
       <span className="tabular-nums text-foreground">
         {clock(truck.firstMoveAt)} – {clock(truck.lastMoveAt)}
+        {/* Which unit, so a swap is legible rather than looking like a discrepancy. */}
+        {truck.vehicles?.length ? (
+          <span className="ml-1.5 text-muted-foreground">#{truck.vehicles.join(', #')}</span>
+        ) : null}
       </span>
-      {(flag(edges.earlyInMinutes) || flag(edges.lateOutMinutes)) && (
-        <span className="text-amber-700">
-          {flag(edges.earlyInMinutes) ? `in ${edges.earlyInMinutes}m early` : ''}
-          {flag(edges.earlyInMinutes) && flag(edges.lateOutMinutes) ? ' · ' : ''}
-          {flag(edges.lateOutMinutes) ? `out ${edges.lateOutMinutes}m late` : ''}
-        </span>
+      {notes.length > 0 && (
+        // Muted, not amber. This is something to notice, not something to answer for.
+        <span className="text-muted-foreground">{notes.join(', ')}</span>
       )}
     </div>
   )

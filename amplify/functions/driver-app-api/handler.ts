@@ -1763,6 +1763,15 @@ async function verifyStaff(event: FnUrlEvent): Promise<string> {
   return email
 }
 
+interface TruckDay {
+  firstMoveAt: string | null
+  lastMoveAt: string | null
+  drivingSeconds: number
+  onDutySeconds: number
+  /** Unit numbers the day was logged against — these drivers swap trucks. */
+  vehicles: string[]
+}
+
 /**
  * When each driver's truck was actually moving, by day, for the hours page.
  *
@@ -1779,8 +1788,8 @@ async function motiveDaysFor(
   driverIds: string[],
   from: string,
   to: string,
-): Promise<Record<string, Record<string, { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number; onDutySeconds: number }>>> {
-  const out: Record<string, Record<string, { firstMoveAt: string | null; lastMoveAt: string | null; drivingSeconds: number; onDutySeconds: number }>> = {}
+): Promise<Record<string, Record<string, TruckDay>>> {
+  const out: Record<string, Record<string, TruckDay>> = {}
   if (!MOTIVE_API_KEY) return out
 
   const drivers = await scan<DriverRow>(DRIVER_TABLE)
@@ -1816,6 +1825,18 @@ async function motiveDaysFor(
         lastMoveAt: moving.length ? (moving[moving.length - 1].endAt ?? null) : null,
         drivingSeconds: day.drivingSeconds,
         onDutySeconds: day.onDutySeconds,
+        /*
+         * Which truck(s) the day was logged against.
+         *
+         * These drivers swap trucks, so naming the vehicle is what stops a perfectly normal
+         * day looking like a discrepancy. The log itself follows the DRIVER — Motive keys
+         * hours of service to the person, not the vehicle — so a swap never moved the
+         * comparison onto somebody else's wheels in the first place; this just makes that
+         * legible to whoever is reading the row.
+         */
+        vehicles: Array.isArray(log.vehicle_numbers)
+          ? log.vehicle_numbers.map((v) => String(v).trim()).filter(Boolean)
+          : [],
       }
     }
   } catch (err) {
