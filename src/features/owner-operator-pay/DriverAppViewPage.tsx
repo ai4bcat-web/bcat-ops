@@ -13,10 +13,10 @@
  * Mounted inside the staff app behind its auth guard, so reaching the route at all already
  * requires a staff session. Every view is written to the audit log by the API.
  */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchAuthSession } from 'aws-amplify/auth'
-import { ArrowLeft, Loader2, Smartphone, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, Clock, ClipboardList, Loader2, Smartphone, ShieldAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   setDriverTokenSupplier,
@@ -24,6 +24,7 @@ import {
 } from '@/features/driver-app/driverApi'
 import { SettlementPage } from '@/features/driver-app/settlement/SettlementPage'
 import { PaperworkPage } from '@/features/driver-app/paperwork/PaperworkPage'
+import { TimeClockPage } from '@/features/driver-app/timeclock/TimeClockPage'
 import { useDrivers } from '@/hooks/useDrivers'
 import { driverProgramOf } from '@/lib/driverProgram'
 
@@ -35,6 +36,8 @@ export function DriverAppViewPage() {
   const navigate = useNavigate()
   const { drivers } = useDrivers()
   const driver = drivers.find((d) => d.id === driverId)
+  // Which of the driver's tabs the phone frame is showing.
+  const [tab, setTab] = useState<'paperwork' | 'hours'>('paperwork')
 
   /*
    * Which of the driver's two apps to render.
@@ -135,7 +138,38 @@ export function DriverAppViewPage() {
           }}
         >
           {driverId && driver ? (
-            program === 'PAPERWORK' ? <PaperworkPage /> : <SettlementPage />
+            program === 'PAPERWORK' ? (
+              /*
+               * The driver's own tabs, inside the phone frame.
+               *
+               * This rendered the paperwork page alone, with no tab bar — so a feature on
+               * any OTHER tab was simply invisible here, which is how the time clock came
+               * to look missing rather than untested. Staff see what the driver sees.
+               */
+              <>
+                <div style={{ display: 'flex', borderBottom: '1px solid var(--ds-border)' }}>
+                  {([['paperwork', 'Paperwork', ClipboardList], ['hours', 'Hours', Clock]] as const)
+                    .map(([key, label, Icon]) => (
+                      <button
+                        key={key}
+                        onClick={() => setTab(key)}
+                        style={{
+                          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          gap: 6, padding: '10px 0', border: 'none', cursor: 'pointer',
+                          fontFamily: 'inherit', fontSize: 13,
+                          fontWeight: tab === key ? 600 : 500,
+                          background: tab === key ? 'var(--ds-surface)' : 'var(--ds-bg)',
+                          color: tab === key ? 'var(--ds-t1)' : 'var(--ds-t3)',
+                          borderBottom: tab === key ? '2px solid var(--ds-t1)' : '2px solid transparent',
+                        }}
+                      >
+                        <Icon size={14} /> {label}
+                      </button>
+                    ))}
+                </div>
+                {tab === 'paperwork' ? <PaperworkPage /> : <TimeClockPage />}
+              </>
+            ) : <SettlementPage />
           ) : (
             <div style={{ display: 'grid', placeItems: 'center', height: 240, color: 'var(--ds-t3)' }}>
               <Loader2 className="size-5 animate-spin" />

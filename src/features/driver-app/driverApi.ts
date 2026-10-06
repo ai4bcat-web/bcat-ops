@@ -390,6 +390,8 @@ export interface TimeClockResponse {
   weeks: string[]
   openShift: TimeClockRow | null
   ptoEligible: boolean
+  /** True when staff are viewing a driver's app. Punching is refused server-side. */
+  readOnly?: boolean
 }
 
 export function fetchTimeClock(weekStart?: string): Promise<TimeClockResponse> {

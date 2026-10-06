@@ -1998,6 +1998,13 @@ export const handler = async (event: FnUrlEvent) => {
           openShift: open,
           // Only Jason and Chuck accrue PTO; the app hides the button for everyone else.
           ptoEligible: driver.ptoEligible === true,
+          /*
+           * An admin viewing a driver's app must never punch their clock, so the punch
+           * route refuses outright. Saying so here lets the app disable the button rather
+           * than letting staff press it and meet a 403 — the refusal is the right behaviour
+           * either way, but a disabled button explains itself and an error does not.
+           */
+          readOnly: Boolean(impersonatedBy),
         })
       }
 

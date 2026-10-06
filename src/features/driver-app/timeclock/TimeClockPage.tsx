@@ -106,6 +106,8 @@ export function TimeClockPage() {
   if (!data) return null
   const { week, openShift } = data
   const isThisWeek = selected === data.weeks[0]
+  // Staff viewing a driver's app. The server refuses a punch; the button says so first.
+  const readOnly = data.readOnly === true
 
   return (
     <div className="mx-auto w-full max-w-md px-4 py-5">
@@ -119,12 +121,18 @@ export function TimeClockPage() {
         <Button
           className="mt-3 h-14 w-full text-base font-semibold"
           variant={openShift ? 'outline' : 'default'}
-          disabled={busy}
+          disabled={busy || readOnly}
+          title={readOnly ? 'You are viewing this driver\u2019s app; only they can punch their clock' : undefined}
           onClick={() => void punch(openShift ? 'OUT' : 'IN')}
         >
           <Clock className="mr-2 h-5 w-5" aria-hidden="true" />
           {busy ? 'Working…' : openShift ? 'Clock out' : 'Clock in'}
         </Button>
+        {readOnly && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Viewing only &mdash; a driver&rsquo;s clock can only be punched by them.
+          </p>
+        )}
         {openShift && (
           /*
            * An open shift is worth nothing until it closes — said out loud so a driver is
@@ -199,7 +207,7 @@ export function TimeClockPage() {
           <Button
             variant="outline"
             className="h-12"
-            disabled={busy}
+            disabled={busy || readOnly}
             onClick={() => void punch('HOLIDAY', { date: data.today })}
           >
             <PartyPopper className="mr-2 h-4 w-4" aria-hidden="true" />
@@ -210,7 +218,7 @@ export function TimeClockPage() {
             <Button
               variant="outline"
               className="h-12"
-              disabled={busy}
+              disabled={busy || readOnly}
               onClick={() => void punch('PTO', { date: data.today })}
             >
               <Plane className="mr-2 h-4 w-4" aria-hidden="true" />

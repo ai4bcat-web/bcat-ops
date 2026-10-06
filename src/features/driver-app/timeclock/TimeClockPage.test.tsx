@@ -147,3 +147,47 @@ describe('what a driver cannot do', () => {
     expect(screen.queryByText(/Add a paid holiday/)).toBeNull()
   })
 })
+
+describe('when staff are viewing a driver’s app', () => {
+  it('shows the clock but will not let it be punched', async () => {
+    /*
+     * The server refuses an impersonated punch outright — an admin must never clock a
+     * driver in. The button is disabled so staff meet an explanation rather than a 403.
+     */
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: true, readOnly: true,
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Clock in')).toBeTruthy())
+    expect((screen.getByRole('button', { name: /Clock in/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/can only be punched by them/)).toBeTruthy()
+  })
+
+  it('does not let staff add a holiday or PTO either', async () => {
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: true, readOnly: true,
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText(/Add a paid holiday/)).toBeTruthy())
+    expect((screen.getByRole('button', { name: /Add a paid holiday/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: /Use PTO/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('still shows the week, because that is the point of looking', async () => {
+    api.fetchTimeClock.mockResolvedValue({
+      today: '2026-10-05', week: WEEK, weeks: ['2026-10-05'], openShift: null,
+      ptoEligible: false, readOnly: true,
+    })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Week total')).toBeTruthy())
+    expect(screen.getAllByText('8h 15m').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('lets a real driver punch normally', async () => {
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Clock in')).toBeTruthy())
+    expect((screen.getByRole('button', { name: /Clock in/ }) as HTMLButtonElement).disabled).toBe(false)
+  })
+})
