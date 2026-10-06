@@ -82,7 +82,17 @@ export function useLoadDriverDocs(
       .catch((err: unknown) => {
         if (cancelled) return
         setSubs([])
-        setError(err instanceof Error ? err.message : 'Could not load driver documents')
+        /*
+         * Never an empty message.
+         *
+         * A GraphQL failure can carry a blank `message`, and the row rendered that blank as
+         * an empty paragraph — so a load whose paperwork failed to load looked identical to
+         * a load with no paperwork. Silence is the one thing this must not do: the whole
+         * point of the panel is to stop the office chasing a driver for a POD they sent.
+         */
+        const detail = err instanceof Error ? err.message.trim() : ''
+        setError(detail || 'Could not load the documents this driver sent — try Refresh.')
+        console.error('[useLoadDriverDocs] failed', err)
       })
     return () => { cancelled = true }
   }, [loadId, proNumber, reloadKey])

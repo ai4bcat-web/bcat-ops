@@ -6,10 +6,11 @@ import {
   type RowSelectionState,
 } from '@tanstack/react-table'
 import {
-  ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Circle,
+  ArrowUpDown, ArrowUp, ArrowDown, CheckCircle2, Circle, XCircle,
   Eye, Trash2, UserCheck, Plus, Download, Search, Filter, CalendarDays,
 } from 'lucide-react'
 import { useLoads } from '@/hooks/useLoads'
+import { useLoadPaperwork, paperworkFor } from '@/hooks/useLoadPaperwork'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { MobileLoadAgenda } from '@/features/calendar/MobileLoadAgenda'
@@ -57,6 +58,36 @@ const KPI_COLORS: Record<TabId, string> = {
   split:      '#a78bfa',
 }
 
+/**
+ * Green when the document is on file, red when it is not, a dash when we could not tell.
+ *
+ * The dash matters: red is a claim that nothing has been sent, and making that claim
+ * because a query failed is how somebody ends up chasing a driver for a POD they already
+ * submitted.
+ */
+function PaperworkDot({ has, label }: { has: boolean | null; label: string }) {
+  if (has === null) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span style={{ color: 'var(--ds-t3)', fontSize: 13 }}>—</span>
+        </TooltipTrigger>
+        <TooltipContent>{label}: not known yet</TooltipContent>
+      </Tooltip>
+    )
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {has
+          ? <CheckCircle2 className="size-4 text-emerald-600" aria-label={`${label} on file`} />
+          : <XCircle className="size-4 text-red-600" aria-label={`${label} missing`} />}
+      </TooltipTrigger>
+      <TooltipContent>{has ? `${label} on file` : `${label} missing`}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function GridPage() {
   const { loads, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
@@ -67,6 +98,8 @@ export function GridPage() {
 
   const [tab, setTab] = useState<TabId>('all')
   const [sorting, setSorting] = useState<SortingState>([{ id: 'pickupAppt', desc: false }])
+  // One fetch for the page, answering both paperwork columns for every row.
+  const paperwork = useLoadPaperwork(loads)
   const [columnVisibility, setColumnVisibility] = usePersistentColumnVisibility()
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [groupByDay, setGroupByDay] = useState(false)
@@ -243,6 +276,31 @@ export function GridPage() {
           </span>
         )
       },
+    },
+    /*
+      Paperwork at a glance: is the rate con on file, is the POD on file.
+
+      Both answers span three stores — the key on the Load, JobsDone's PodDocument, and what
+      a driver sent from their own app — and reading fewer than all three is what made a POD
+      an owner operator had already submitted show as missing here. See useLoadPaperwork.
+
+      A dash, not a red cross, when the stores could not be read: red means "no paperwork",
+      and saying that because a query failed sends somebody chasing a driver who already
+      sent it.
+    */
+    {
+      id: 'ratecon',
+      header: 'RATE CON',
+      enableSorting: false,
+      cell: ({ row }) => <PaperworkDot has={paperworkFor(paperwork.index, row.original).ratecon} label="Rate confirmation" />,
+      size: 80,
+    },
+    {
+      id: 'pod',
+      header: 'POD',
+      enableSorting: false,
+      cell: ({ row }) => <PaperworkDot has={paperworkFor(paperwork.index, row.original).pod} label="POD" />,
+      size: 60,
     },
     {
       accessorKey: 'readyToInvoice',

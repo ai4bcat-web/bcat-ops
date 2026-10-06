@@ -189,24 +189,42 @@ export async function listDriverSubmissionsByDriver(driverId: string, limit = 10
   return attachDocs(submissions, limit)
 }
 
+/**
+ * Attach each submission's documents.
+ *
+ * ONE query for every document, not one per submission.
+ *
+ * This used to loop: twenty-eight submissions meant twenty-eight filtered scans, run in
+ * series, and every caller of this function paid for all of them — the loads drawer asks
+ * twice per load, and the factoring queue once per ROW. Worse, it was all-or-nothing: a
+ * single throttled or partially-errored query rejected the whole call, so one bad response
+ * made every driver's paperwork vanish from every screen at once, which is exactly what a
+ * POD that "is not showing on the load" looks like.
+ *
+ * The whole table is a few dozen rows, so fetching it once and grouping in memory is both
+ * faster and incapable of failing halfway.
+ */
 async function attachDocs(
   submissions: DriverSubmissionRecord[],
   limit: number,
 ): Promise<SubmissionWithDocs[]> {
   if (submissions.length === 0) return []
-  const ids = submissions.map((s) => s.id)
   const allDocs: DriverSubmissionDocRecord[] = []
-  for (const submissionId of ids) {
-    const docsResult = await gql<{ listDriverSubmissionDocs: { items: DriverSubmissionDocRecord[] } }>(
-      `query ListDriverSubmissionDocs($filter: ModelDriverSubmissionDocFilterInput, $limit: Int) {
-        listDriverSubmissionDocs(filter: $filter, limit: $limit) {
-          items { ${DOC_FIELDS} }
-        }
-      }`,
-      { filter: { submissionId: { eq: submissionId } }, limit },
-    )
-    allDocs.push(...docsResult.listDriverSubmissionDocs.items)
-  }
+  let nextToken: string | null = null
+  do {
+    const page: { listDriverSubmissionDocs: { items: DriverSubmissionDocRecord[]; nextToken?: string | null } } =
+      await gql(
+        `query ListDriverSubmissionDocs($limit: Int, $nextToken: String) {
+          listDriverSubmissionDocs(limit: $limit, nextToken: $nextToken) {
+            items { ${DOC_FIELDS} }
+            nextToken
+          }
+        }`,
+        { limit, nextToken },
+      )
+    allDocs.push(...page.listDriverSubmissionDocs.items)
+    nextToken = page.listDriverSubmissionDocs.nextToken ?? null
+  } while (nextToken)
   const docsBySubmission = new Map<string, DriverSubmissionDocRecord[]>()
   for (const doc of allDocs) {
     const list = docsBySubmission.get(doc.submissionId) ?? []

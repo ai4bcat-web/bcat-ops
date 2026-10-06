@@ -779,7 +779,19 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
             updatedAt: nowIso(),
           }
           await ddb.send(new PutCommand({ TableName: CUSTOMER_TABLE, Item: customer }))
-          // Link the load so the next PRO from this broker resolves directly.
+        }
+
+        /*
+         * Point the load at that customer, whichever branch produced it.
+         *
+         * This used to run only when a NEW customer was created. A broker already in the
+         * directory was matched by NAME, the MC was written to that record — and the load
+         * still pointed at nothing, so readiness (which reads the customer via
+         * load.customerId) never saw the MC. Typing the right number changed the directory
+         * and left the row looking exactly as it had, which reads as "editing the MC does
+         * not work".
+         */
+        if (trim(load.customerId) !== customer.id) {
           await ddb.send(
             new UpdateCommand({
               TableName: LOAD_TABLE,
