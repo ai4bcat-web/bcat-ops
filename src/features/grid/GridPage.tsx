@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   useReactTable, getCoreRowModel, getSortedRowModel,
   getFilteredRowModel, flexRender,
@@ -17,6 +17,11 @@ import { MobileLoadAgenda } from '@/features/calendar/MobileLoadAgenda'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { useAppStore } from '@/store/useAppStore'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
+import { DriverFilterMenu } from '@/components/DriverFilterMenu'
+import {
+  allSelectableDriverIds, loadVisibleForDrivers,
+  readStoredDriverIds, writeStoredDriverIds, DRIVER_FILTER_KEYS,
+} from '@/lib/driverFilter'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
@@ -105,18 +110,51 @@ export function GridPage() {
   const [groupByDay, setGroupByDay] = useState(false)
   const [showColMenu, setShowColMenu] = useState(false)
 
+  /*
+   * Whose loads to show — one driver, one fleet, or everybody.
+   *
+   * null is "nothing chosen", which is NOT "chosen nothing": the default is derived
+   * below rather than written into state, so an empty grid can only ever be something a
+   * person asked for. Unlike the calendar, the default here is EVERYONE — this page is
+   * the full record of the freight, and one that quietly omitted a fleet would be a page
+   * you cannot trust to be complete.
+   */
+  const [chosenDriverIds, setChosenDriverIds] = useState<string[] | null>(
+    () => readStoredDriverIds(DRIVER_FILTER_KEYS.loads),
+  )
+  const setVisibleDrivers = useCallback((ids: string[]) => {
+    setChosenDriverIds(ids)
+    writeStoredDriverIds(DRIVER_FILTER_KEYS.loads, ids)
+  }, [])
+  const visibleDriverIdSet = useMemo(
+    () => new Set(chosenDriverIds ?? allSelectableDriverIds(drivers)),
+    [chosenDriverIds, drivers],
+  )
+
   const driverName = (id: string | null) => id ? (drivers.find((d) => d.id === id)?.name ?? '—') : 'Unassigned'
+
+  /*
+   * The driver filter runs BEFORE the tabs, so the KPI tiles count what the grid shows.
+   * Tiles that disagreed with the rows under them would make the filter look broken.
+   *
+   * Until the roster arrives there is no way to tell an Ivan driver from an
+   * owner-operator, so nothing is filtered by driver and the grid never flashes empty.
+   */
+  const driverFiltered = useMemo(() => {
+    if (drivers.length === 0) return loads
+    return loads.filter((l) => loadVisibleForDrivers(l, visibleDriverIdSet))
+  }, [loads, drivers.length, visibleDriverIdSet])
 
   // Tab-filtered data
   const tabFiltered = useMemo(() => {
     switch (tab) {
-      case 'ready':      return loads.filter((l) => l.readyToInvoice)
-      case 'notReady':   return loads.filter((l) => !l.readyToInvoice)
-      case 'unassigned': return loads.filter((l) => !l.pickupDriverId)
-      case 'split':      return loads.filter((l) => isSplitLoad(l))
-      default:           return loads
+      case 'ready':      return driverFiltered.filter((l) => l.readyToInvoice)
+      case 'notReady':   return driverFiltered.filter((l) => !l.readyToInvoice)
+      case 'unassigned': return driverFiltered.filter((l) => !l.pickupDriverId)
+      case 'split':      return driverFiltered.filter((l) => isSplitLoad(l))
+      default:           return driverFiltered
     }
-  }, [loads, tab])
+  }, [driverFiltered, tab])
 
   // Comprehensive search across ALL load fields (shared with calendar + top-bar search).
   const searched = useMemo(() => {
@@ -128,12 +166,12 @@ export function GridPage() {
 
   // Counts for tab badges
   const counts = useMemo(() => ({
-    all:        loads.length,
-    ready:      loads.filter((l) => l.readyToInvoice).length,
-    notReady:   loads.filter((l) => !l.readyToInvoice).length,
-    unassigned: loads.filter((l) => !l.pickupDriverId).length,
-    split:      loads.filter((l) => isSplitLoad(l)).length,
-  }), [loads])
+    all:        driverFiltered.length,
+    ready:      driverFiltered.filter((l) => l.readyToInvoice).length,
+    notReady:   driverFiltered.filter((l) => !l.readyToInvoice).length,
+    unassigned: driverFiltered.filter((l) => !l.pickupDriverId).length,
+    split:      driverFiltered.filter((l) => isSplitLoad(l)).length,
+  }), [driverFiltered])
 
   const columns = useMemo<ColumnDef<Load>[]>(() => [
     {
@@ -499,6 +537,13 @@ export function GridPage() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+
+        {/* Whose loads: one driver, one fleet, or everybody. */}
+        <DriverFilterMenu
+          drivers={drivers}
+          visibleDriverIds={visibleDriverIdSet}
+          onChange={setVisibleDrivers}
+        />
 
         {/* Column visibility toggle */}
         <div style={{ position: 'relative' }}>

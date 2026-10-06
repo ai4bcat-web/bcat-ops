@@ -1,8 +1,8 @@
 import { ChevronLeft, ChevronRight, Plus, X, CheckCircle2, CircleDashed, HelpCircle, SplitSquareHorizontal, Search, AlertCircle } from 'lucide-react'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { useAppStore } from '@/store/useAppStore'
-import { DriverFilterMenu } from './DriverFilterMenu'
-import type { FilterableDriver } from '@/lib/calendarDrivers'
+import { DriverFilterMenu } from '@/components/DriverFilterMenu'
+import type { FilterableDriver } from '@/lib/driverFilter'
 import type { ViewMode } from '@/types'
 
 interface CalendarToolbarProps {

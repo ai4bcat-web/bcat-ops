@@ -1,20 +1,26 @@
 /**
- * Which drivers' loads the calendar shows.
+ * Whose loads a board shows.
  *
- * The board has two kinds of driver on it and they are planned differently. Ivan's own
- * drivers are dispatched from this calendar — that is what it is for. Owner-operators
- * (the Amazon fleet) bring their own work and are settled from the owner-operator page;
- * their loads on the calendar are noise most of the time and signal occasionally, so
- * they are hidden by default and can be switched on per driver.
+ * Two kinds of driver run here and they are planned and paid differently. Ivan's own
+ * drivers are dispatched from the calendar — that is what it is for. Owner-operators
+ * (the Amazon fleet) bring their own work and are settled from the owner-operator page.
  *
  * "Ivan driver" is not a stored flag. It is everyone who is not an owner-operator, and
  * two fields can say someone is: `fleetGroup: 'AMAZON'` and
  * `driverType: 'OWNER_OPERATOR'`. Either is enough — they are meant to agree, and when
- * they disagree the safer read is the one that hides the load, because a stray
- * owner-operator load on the dispatch board is less confusing than an Ivan load
- * silently missing from it.
+ * they disagree the safer read is OWNER_OP, because a stray owner-operator load on the
+ * dispatch board is less confusing than an Ivan load silently missing from it.
  *
- * Pure: no store, no storage, no clock.
+ * The two pages that filter by this want opposite defaults, which is why the default is
+ * never baked in here:
+ *
+ *  - the CALENDAR is a dispatch board, so it opens on Ivan's drivers and owner-operator
+ *    loads are switched on when someone wants them;
+ *  - the LOADS page is the full record of the freight, so it opens on everybody. A page
+ *    that silently omitted a fleet would be a page you cannot trust to be complete.
+ *
+ * Pure: no store, no clock. The one exception is the localStorage pair at the bottom,
+ * which is guarded and falls back to "nothing chosen".
  */
 import { getStops } from './stops'
 import type { Driver, Load, Stop } from '../types'
@@ -109,4 +115,43 @@ export function driverFilterSummary(
 
   if (shown.length === 1) return shown[0].name
   return `${shown.length} drivers`
+}
+
+
+/** Everyone the picker offers — the Loads page default, where omitting a fleet would lie. */
+export function allSelectableDriverIds(drivers: FilterableDriver[]): string[] {
+  return selectableDrivers(drivers).map((d) => d.id)
+}
+
+/*
+ * Whose loads are shown is a working preference, not data: it lives in this browser so
+ * someone who hid the owner-operators does not have to hide them again after a refresh.
+ * Each page keeps its own key, because the calendar and the loads page are answering
+ * different questions and a shared selection would surprise on both.
+ *
+ * Every access is guarded. A private window or blocked site data simply falls back to
+ * null — "nothing chosen" — and the page applies its own default.
+ */
+export const DRIVER_FILTER_KEYS = {
+  calendar: 'bcat.calendar.visibleDrivers',
+  loads: 'bcat.loads.visibleDrivers',
+} as const
+
+export function readStoredDriverIds(key: string): string[] | null {
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : null
+  } catch {
+    return null
+  }
+}
+
+export function writeStoredDriverIds(key: string, ids: string[]): void {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(ids))
+  } catch {
+    // Nothing to do: the filter still works for this session.
+  }
 }

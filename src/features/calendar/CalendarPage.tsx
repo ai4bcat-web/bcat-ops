@@ -11,35 +11,11 @@ import { CalendarErrorBoundary } from './CalendarErrorBoundary'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
-import { defaultVisibleDriverIds, loadVisibleForDrivers } from '@/lib/calendarDrivers'
+import {
+  defaultVisibleDriverIds, loadVisibleForDrivers,
+  readStoredDriverIds, writeStoredDriverIds, DRIVER_FILTER_KEYS,
+} from '@/lib/driverFilter'
 import type { ViewMode, Load } from '@/types'
-
-/**
- * Whose loads are shown is a working preference, not data: it lives in this browser so a
- * dispatcher who hid the owner-operators does not have to hide them again after a
- * refresh. Every access is guarded — a private window or blocked site data simply falls
- * back to the default, which is Ivan's own drivers.
- */
-const DRIVER_FILTER_KEY = 'bcat.calendar.visibleDrivers'
-
-function readStoredDriverIds(): string[] | null {
-  try {
-    const raw = window.localStorage.getItem(DRIVER_FILTER_KEY)
-    if (!raw) return null
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : null
-  } catch {
-    return null
-  }
-}
-
-function writeStoredDriverIds(ids: string[]): void {
-  try {
-    window.localStorage.setItem(DRIVER_FILTER_KEY, JSON.stringify(ids))
-  } catch {
-    // Nothing to do: the filter still works for this session.
-  }
-}
 
 const VIEW_CONFIG: Record<ViewMode, { navDays: number }> = {
   'day':   { navDays: 1  }, // single current day
@@ -69,14 +45,14 @@ export function CalendarPage() {
    * is derived below rather than written into state, so an empty selection can only ever
    * be something a person asked for.
    */
-  const [chosenDriverIds, setChosenDriverIds] = useState<string[] | null>(readStoredDriverIds)
+  const [chosenDriverIds, setChosenDriverIds] = useState<string[] | null>(() => readStoredDriverIds(DRIVER_FILTER_KEYS.calendar))
 
   const [currentView, setCurrentView] = useState<ViewMode>('day')
   const [startDate, setStartDate]     = useState<Date>(() => new Date())
 
   const setVisibleDrivers = useCallback((ids: string[]) => {
     setChosenDriverIds(ids)
-    writeStoredDriverIds(ids)
+    writeStoredDriverIds(DRIVER_FILTER_KEYS.calendar, ids)
   }, [])
 
   /** The selection in force: whatever was chosen, else Ivan's own drivers. */

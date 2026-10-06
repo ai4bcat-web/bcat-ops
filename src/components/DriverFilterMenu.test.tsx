@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { DriverFilterMenu } from './DriverFilterMenu'
-import { defaultVisibleDriverIds, type FilterableDriver } from '@/lib/calendarDrivers'
+import { defaultVisibleDriverIds, type FilterableDriver } from '@/lib/driverFilter'
 
 const driver = (over: Partial<FilterableDriver>): FilterableDriver =>
   ({ id: 'd', name: 'Driver', active: true, ...over } as FilterableDriver)

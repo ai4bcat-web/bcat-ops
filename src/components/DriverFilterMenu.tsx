@@ -24,7 +24,7 @@ import {
   DRIVER_GROUP_LABEL,
   type DriverGroup,
   type FilterableDriver,
-} from '@/lib/calendarDrivers'
+} from '@/lib/driverFilter'
 
 interface Props {
   drivers: FilterableDriver[]

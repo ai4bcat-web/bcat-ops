@@ -6,9 +6,9 @@
  * places; this page exists to answer "whose paperwork is missing", and putting money on it
  * would only invite it to be read as a settlement, which Ivan's drivers do not have.
  */
-import { driverGroupOf } from '@/lib/calendarDrivers'
+import { driverGroupOf } from '@/lib/driverFilter'
 import { driverProgramOf } from '@/lib/driverProgram'
-import { loadDriverIds } from '@/lib/calendarDrivers'
+import { loadDriverIds } from '@/lib/driverFilter'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 import type { Driver, Load } from '@/types'
 

@@ -70,9 +70,27 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
-    // Rate confirmations and PODs uploaded by drivers via the driver-app-api Lambda
-    // presigned-PUT flow. Drivers never hold S3 credentials; staff review/delete only.
+    /*
+     * Rate confirmations and PODs uploaded by drivers via the driver-app-api Lambda
+     * presigned-PUT flow, and by staff uploading on a driver's behalf. Drivers never hold
+     * S3 credentials — they are in their own user pool and reach the bucket only through
+     * that Lambda — so everyone holding credentials here is staff.
+     *
+     * `allow.authenticated` is NOT redundant with the group grant below, and leaving it
+     * off is what broke this prefix: staff whose only Cognito groups are the `page-*`
+     * permission groups have no group ROLE attached, so Cognito falls back to the plain
+     * authenticated role — which had no grant here at all. The result was an
+     * AccessDenied on s3:GetObject when someone outside ADMIN/DISPATCHER opened a POD,
+     * even though the app had already decided they could see the page it was on. Every
+     * other prefix in this file grants authenticated; this one was the outlier, and the
+     * outlier was the bug.
+     *
+     * Delete stays with the staff groups. Nothing in the browser deletes these objects —
+     * removing a POD clears the DynamoDB rows and deliberately leaves the file as the
+     * record of what arrived at a dock — so there is no flow to widen it for.
+     */
     'driver-docs/*': [
+      allow.authenticated.to(['read', 'write']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
   })

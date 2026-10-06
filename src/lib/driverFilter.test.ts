@@ -7,9 +7,10 @@ import {
   loadDriverIds,
   loadVisibleForDrivers,
   driverFilterSummary,
+  allSelectableDriverIds,
   DRIVER_GROUP_LABEL,
   type FilterableDriver,
-} from './calendarDrivers'
+} from './driverFilter'
 import type { Load } from '@/types'
 
 const driver = (over: Partial<FilterableDriver> = {}): FilterableDriver => ({
@@ -158,5 +159,28 @@ describe('driverFilterSummary', () => {
   it('says plainly when nothing is selected', () => {
     // An empty board needs an explanation, not a count of zero.
     expect(driverFilterSummary(ALL, visible())).toBe('No drivers')
+  })
+})
+
+describe('allSelectableDriverIds — the Loads page default', () => {
+  it('includes BOTH fleets, because that page is the full record of the freight', () => {
+    // The calendar opens on Ivan's drivers; the loads page must not, or it would quietly
+    // omit every owner-operator load from the page people audit the month against.
+    const ids = allSelectableDriverIds(ALL)
+    expect(ids).toContain('ivan-1')
+    expect(ids).toContain('oo-1')
+    expect(ids).toContain('oo-2')
+  })
+
+  it('is a superset of the calendar default', () => {
+    const all = new Set(allSelectableDriverIds(ALL))
+    for (const id of defaultVisibleDriverIds(ALL)) expect(all.has(id)).toBe(true)
+    expect(all.size).toBeGreaterThan(defaultVisibleDriverIds(ALL).length)
+  })
+
+  it('leaves out brokers and inactive people, same as the picker', () => {
+    const ids = allSelectableDriverIds(ALL)
+    expect(ids).not.toContain('bk-1')
+    expect(ids).not.toContain('x-1')
   })
 })
