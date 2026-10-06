@@ -178,3 +178,44 @@ describe('when OTR answers with no body at all', () => {
     expect((await client(impl).createInvoice(PAYLOAD)).invoiceId).toBe(25520749)
   })
 })
+
+describe('the broker check that gates a submit', () => {
+  /** A fetch that answers the token call, then the broker-check with `reply`. */
+  function stubBroker(reply: { status: number; body: unknown }) {
+    const impl = vi.fn(async (url: string) => {
+      if (String(url).endsWith('/auth/token')) {
+        return new Response(JSON.stringify({ access_token: 'tok', expires_in: 7199 }), { status: 200 })
+      }
+      const body = typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)
+      return new Response(body === '' ? null : body, { status: reply.status })
+    })
+    return impl
+  }
+
+  it('reports NOT FOUND rather than throwing, so the submit can act on it', async () => {
+    /*
+     * The live case: MC 2577587 on PRO 14519. OTR has no such broker, and a create with it
+     * returns 204 and silently does nothing — so knowing this BEFORE creating is what turns
+     * a dead end into "try another MC".
+     */
+    const r = await client(stubBroker({ status: 404, body: { Message: 'not found', ResponseStatus: 404 } }))
+      .brokerCheck({ brokerMc: '2577587' })
+    expect(r.decision).toBe('NOT FOUND')
+    expect(r.message).toMatch(/2577587/)
+  })
+
+  it('keeps NOT FOUND distinct from NOT APPROVED', async () => {
+    // Different problems with different fixes: one needs a new MC, the other a phone call.
+    const r = await client(stubBroker({ status: 200, body: { message: 'Not Approved' } }))
+      .brokerCheck({ brokerMc: '730061' })
+    expect(r.decision).toBe('NOT APPROVED')
+  })
+
+  it('still throws on a transport failure, which is indeterminate', async () => {
+    // A 500 says nothing about the MC. The submit treats this as unknown and proceeds —
+    // refusing to invoice every time OTR has a bad minute would hold up good loads.
+    await expect(
+      client(stubBroker({ status: 500, body: 'boom' })).brokerCheck({ brokerMc: '730061' }),
+    ).rejects.toThrow(/Broker check failed/)
+  })
+})

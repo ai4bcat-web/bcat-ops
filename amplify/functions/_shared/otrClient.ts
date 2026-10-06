@@ -43,7 +43,13 @@ export const OTR_DOC_TYPE = {
 export type OtrDocType = (typeof OTR_DOC_TYPE)[keyof typeof OTR_DOC_TYPE]
 
 /** Broker approval decisions. A 402 on create means the MC was never approved. */
-export type BrokerDecision = 'APPROVED' | 'CALL OFFICE' | 'NOT APPROVED' | 'UNKNOWN'
+/**
+ * NOT FOUND is distinct from NOT APPROVED, and the difference decides whether a submit may
+ * proceed. "Not approved" is OTR declining a broker they know; "not found" is OTR having no
+ * such MC at all, which is what makes a create return 204 and silently do nothing.
+ */
+export type BrokerDecision =
+  | 'APPROVED' | 'CALL OFFICE' | 'NOT APPROVED' | 'NOT FOUND' | 'UNKNOWN'
 
 /**
  * Invoice statuses OTR reports. Mirrored onto the queue row so the board in
@@ -364,6 +370,21 @@ export class OtrClient {
       headers: await this.authedHeaders({ Accept: 'application/json' }),
     })
     const text = await res.text()
+    /*
+     * 404 means OTR has no such broker — a fact about the MC, not a failure of the call.
+     *
+     * Returned rather than thrown because the submit path needs to ACT on it: an MC OTR
+     * cannot resolve is exactly the case where create answers 204 and creates nothing, so
+     * knowing it here is what lets the submit stop before it reaches that.
+     */
+    if (res.status === 404) {
+      return {
+        decision: 'NOT FOUND',
+        message: `OTR has no broker with MC ${opts.brokerMc ?? opts.brokerDot}`,
+        brokerName: null,
+        raw: safeJson(text) ?? text,
+      }
+    }
     if (!res.ok) {
       // 402 here means the MC itself is invalid — a data problem, not a transport one.
       throw new OtrError(`Broker check failed (${res.status})`, res.status, text)

@@ -851,7 +851,12 @@ const schema = a.schema({
       // Broker approval from OTR's /broker-check, checked BEFORE submit so an
       // unapproved MC shows on the row instead of failing with a 402.
       brokerMcChecked:   a.string(),
-      brokerCheckResult: a.enum(['APPROVED', 'CALL_OFFICE', 'NOT_APPROVED', 'UNKNOWN']),
+      /*
+       * NOT_FOUND is distinct from NOT_APPROVED on purpose. "Not approved" is OTR declining
+       * a broker they know; "not found" is OTR having no such MC at all — which is the case
+       * that makes a create return 204 and silently do nothing, so it blocks the submit.
+       */
+      brokerCheckResult: a.enum(['APPROVED', 'CALL_OFFICE', 'NOT_APPROVED', 'NOT_FOUND', 'UNKNOWN']),
       brokerCheckedAt:   a.datetime(),
       // Set once the invoice exists at OTR. otrInvoiceId is their identifier and
       // is required by every document upload and status read.

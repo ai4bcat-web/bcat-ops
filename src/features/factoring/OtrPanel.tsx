@@ -340,11 +340,21 @@ export function OtrPanel({ item, onChanged }: Props) {
       {item.brokerCheckResult && (
         <p
           className={`flex items-center gap-1.5 text-xs ${
-            item.brokerCheckResult === 'APPROVED' ? 'text-emerald-700' : 'text-amber-700'
+            item.brokerCheckResult === 'APPROVED'
+              ? 'text-emerald-700'
+              : item.brokerCheckResult === 'NOT_FOUND'
+                ? 'text-red-700'
+                : 'text-amber-700'
           }`}
         >
           <ShieldCheck className="size-3.5" />
-          Broker {item.brokerMcChecked}: {item.brokerCheckResult.replace('_', ' ').toLowerCase()}
+          {/*
+            NOT_FOUND is spelled out rather than left as "not found", because it is the one
+            result that stops a submit and the fix is a different MC, not a phone call.
+          */}
+          {item.brokerCheckResult === 'NOT_FOUND'
+            ? `OTR has no broker with MC ${item.brokerMcChecked} — try another MC`
+            : `Broker ${item.brokerMcChecked}: ${item.brokerCheckResult.replace('_', ' ').toLowerCase()}`}
         </p>
       )}
 

@@ -886,6 +886,47 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         }
 
         const client = otr()
+
+        /*
+         * Check the broker BEFORE creating anything, and stop if OTR has never heard of it.
+         *
+         * An MC that OTR cannot resolve does not produce an error on create — it produces a
+         * 204 with an empty body, which creates no invoice and explains nothing. PRO 14519
+         * hit exactly that with MC 2577587. Asking first turns a dead end into a sentence
+         * naming the field to fix.
+         *
+         * Only a definitive NOT FOUND stops the submit. A broker check that fails for any
+         * other reason — OTR down, a timeout, a shape we do not model — is indeterminate,
+         * and refusing to invoice on an indeterminate answer would hold up perfectly good
+         * loads every time OTR has a bad minute. Unknown lets it through; create is still
+         * the thing that decides.
+         */
+        const mc = String(payload.BrokerMC ?? '').trim()
+        if (mc) {
+          try {
+            const check = await client.brokerCheck({ brokerMc: mc })
+            if (check.decision === 'NOT FOUND') {
+              await updateItem(String(item.id), {
+                brokerCheckedAt: nowIso(),
+                brokerMcChecked: mc,
+                brokerCheckResult: 'NOT_FOUND',
+                otrError: `OTR has no broker with MC ${mc}`,
+              })
+              return fail(
+                `OTR has no broker with MC ${mc}, so this invoice cannot be created — it ` +
+                  `would be accepted and silently dropped. Check the MC on the customer ` +
+                  `record and try another one.`,
+              )
+            }
+          } catch (err) {
+            // Indeterminate, not negative. Log it and let the submit proceed.
+            console.warn('[otr-actions] broker pre-check inconclusive; submitting anyway', {
+              mc,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+
         const created = await client.createInvoice(payload as unknown as OtrInvoicePayload)
 
         // Documents are best-effort: the invoice already exists at OTR, so a failed

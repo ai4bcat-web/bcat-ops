@@ -393,7 +393,7 @@ export type OtrInvoiceStatus =
   | 'OTR Follow-Up'
   | 'Paid'
 
-export type BrokerCheckResult = 'APPROVED' | 'CALL_OFFICE' | 'NOT_APPROVED' | 'UNKNOWN'
+export type BrokerCheckResult = 'APPROVED' | 'CALL_OFFICE' | 'NOT_APPROVED' | 'UNKNOWN' | 'NOT_FOUND'
 
 export interface FactoringItem {
   /** Stable identifier — the literal PRO number, preserving leading zeroes. */
