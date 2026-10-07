@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD } from './ownerOperatorTrips'
+import { ownerOpTripsFor, OWNER_OP_FIRST_PERIOD, ratePerMile } from './ownerOperatorTrips'
 
 const driverId = 'driver-1'
 
@@ -89,5 +89,33 @@ describe('ownerOpTripsFor', () => {
 describe('OWNER_OP_FIRST_PERIOD', () => {
   it('is pinned to 2026-09-27', () => {
     expect(OWNER_OP_FIRST_PERIOD).toBe('2026-09-27')
+  })
+})
+
+/**
+ * One $/mi rule for the staff page and the driver app, so the two never show an owner
+ * operator different numbers for the same load.
+ */
+describe('ratePerMile', () => {
+  it('divides freight by miles to the cent', () => {
+    expect(ratePerMile(1400, 371)).toBe(3.77)
+    expect(ratePerMile(1210, 464)).toBe(2.61)
+  })
+
+  it('is null — not $0.00, not Infinity — when the miles are missing or zero', () => {
+    // "$0.00/mi" reads as a load that paid nothing. That is a claim, not an absence.
+    expect(ratePerMile(1400, 0)).toBeNull()
+    expect(ratePerMile(1400, null)).toBeNull()
+    expect(ratePerMile(1400, undefined)).toBeNull()
+  })
+
+  it('is null when there is no freight to divide', () => {
+    expect(ratePerMile(null, 371)).toBeNull()
+    expect(ratePerMile(undefined, 371)).toBeNull()
+  })
+
+  it('refuses nonsense rather than returning NaN', () => {
+    expect(ratePerMile(Number.NaN, 371)).toBeNull()
+    expect(ratePerMile(1400, -5)).toBeNull()
   })
 })

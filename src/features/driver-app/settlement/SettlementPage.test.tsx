@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import '@testing-library/jest-dom/vitest'
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Settlement, SettlementWeek } from '../driverApi'
@@ -62,6 +63,7 @@ const baseSettlement: Settlement = {
       destination: 'Indianapolis, IN',
       miles: 185,
       rate: 3.5,
+      freight: 647.5,
       amount: 647.5,
     },
     {
@@ -72,10 +74,14 @@ const baseSettlement: Settlement = {
       destination: 'Columbus, OH',
       miles: 175,
       rate: 3.5,
+      freight: 612.5,
       amount: 612.5,
     },
   ],
   grossPay: 1260,
+  driverAmount: 1260,
+  payPercent: 1,
+  heldFreight: 0,
   deductions: [
     { label: 'Fuel', amount: 120 },
     { label: 'Toll refund', amount: -15 },
@@ -325,5 +331,62 @@ describe('pay week selection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'This week' }))
     await waitFor(() => expect(screen.queryByText('Viewing a past pay week')).toBeNull())
+  })
+})
+
+/**
+ * Gross and driver pay on the phone, the way the desktop shows them.
+ *
+ * An owner operator is paid a percentage, so the number they most want to check is the one
+ * it was taken from. The app used to show only the share; now each row carries the freight,
+ * the miles and the $/mi beside the pay, and the list ends with the same two totals the
+ * desktop footer prints.
+ */
+describe('freight and rate beside the pay', () => {
+  beforeEach(() => { resetMocks() })
+
+  it('shows each load\'s freight, miles and $/mi', async () => {
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+    await screen.findByText('LOAD-101')
+    expect(screen.getAllByText('$647.50').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText(/185 mi · \$3\.50\/mi/)).toBeInTheDocument()
+    expect(screen.getByText(/175 mi · \$3\.50\/mi/)).toBeInTheDocument()
+  })
+
+  it('ends the list with the freight total and driver share, like the desktop footer', async () => {
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+    await screen.findByText('LOAD-101')
+    const totals = screen.getByTestId('shipment-totals')
+    expect(totals).toHaveTextContent('Freight total / driver share (100%)')
+    expect(totals).toHaveTextContent('$1,260.00')
+    expect(totals).not.toHaveTextContent(/excludes/)
+  })
+
+  it('says what the totals exclude when a load is held for its POD', async () => {
+    driverApiMocks.fetchSettlement.mockResolvedValue({
+      ...baseSettlement,
+      trips: [
+        baseSettlement.trips[0],
+        { ...baseSettlement.trips[1], onThisCheck: false, heldReason: 'NO_POD', heldLabel: 'POD required',
+          factoring: { podPresent: false, rateconPresent: true } },
+      ],
+      grossPay: 647.5, driverAmount: 647.5, heldFreight: 612.5,
+    } as unknown as typeof baseSettlement)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+    await screen.findByText('LOAD-101')
+    const totals = screen.getByTestId('shipment-totals')
+    expect(totals).toHaveTextContent('excludes $612.50 held for POD')
+    expect(totals).toHaveTextContent('$647.50')
+    // The held row still shows what it would pay, labelled, rather than $0.
+    expect(screen.getByText('POD required')).toBeInTheDocument()
+  })
+
+  it('shows no totals row when the API did not send them (an older build)', async () => {
+    const { driverAmount: _d, payPercent: _p, heldFreight: _h, ...older } = baseSettlement
+    driverApiMocks.fetchSettlement.mockResolvedValue(older as typeof baseSettlement)
+    render(<MemoryRouter><SettlementPage /></MemoryRouter>)
+    await screen.findByText('LOAD-101')
+    // Summing the rows here would be a second total that could disagree with the cheque.
+    expect(screen.queryByTestId('shipment-totals')).toBeNull()
   })
 })

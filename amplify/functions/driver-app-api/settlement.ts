@@ -19,6 +19,7 @@ import {
 } from '../../../src/lib/driverPay'
 import { matchedFuelForCard, sumFuel } from '../../../src/lib/driverFuel'
 import { tripHoldReason, PAY_HOLD_LABEL, type PayHoldReason } from '../../../src/lib/payHold'
+import { ratePerMile } from '../../../src/lib/ownerOperatorTrips'
 import { creditLineLabel } from '../../../src/lib/payCredits'
 import { weekStartOfISO, weekLabel } from '../../../src/features/driver-pay/week'
 
@@ -30,6 +31,14 @@ export interface SettlementTrip {
   destination?: string | null
   miles?: number | null
   rate?: number | null
+  /**
+   * The gross freight on the load, in dollars — what the broker pays.
+   *
+   * The phone used to receive only `amount` (the driver's share) and `rate` (per mile),
+   * so an owner operator could not see the figure their percentage was taken from. The
+   * desktop page has always shown Freight beside Driver Amount; the app now does too.
+   */
+  freight: number
   /** What this load pays, whether or not it is on this check. */
   amount: number
   /** False when the load is listed but not paid on this check — see heldReason. */
@@ -83,7 +92,14 @@ export interface Settlement {
   weekStart: string
   weekLabel: string
   trips: SettlementTrip[]
+  /** Σ freight of the loads ON this check, in dollars. The desktop calls this "Freight total". */
   grossPay: number
+  /** Σ driver share of the loads on this check — the desktop's "driver share" column total. */
+  driverAmount: number
+  /** The driver's percentage, so the footer can say "driver share (88%)" like the desktop. */
+  payPercent: number
+  /** Σ freight of the loads held OFF this check, so the footer can say what it excludes. */
+  heldFreight: number
   deductions: SettlementLine[]
   credits: SettlementLine[]
   debits: SettlementLine[]
@@ -175,8 +191,8 @@ function safeNumber(n: unknown): number {
 
 function tripRate(trip: RawAmazonTrip): number | null {
   if (trip.ratePerMile != null && Number.isFinite(trip.ratePerMile)) return trip.ratePerMile
-  if (trip.miles && trip.freightAmount) return round2(trip.freightAmount / trip.miles)
-  return null
+  // The same rule the staff page uses, so phone and desktop show the same $/mi.
+  return ratePerMile(trip.freightAmount, trip.miles)
 }
 
 function round2(n: number): number {
@@ -323,6 +339,7 @@ export function buildSettlement(
         destination: t.destination ?? null,
         miles: t.miles ?? null,
         rate: tripRate(t),
+        freight: t.freightAmount,
         /*
          * The pay this load earns, ALWAYS — held or not.
          *
@@ -340,6 +357,11 @@ export function buildSettlement(
         heldLabel: holdReasons.has(t.id) ? PAY_HOLD_LABEL[holdReasons.get(t.id)!] : null,
       })),
     grossPay: statement.gross,
+    driverAmount: statement.driverAmount,
+    payPercent: statement.payPercent,
+    // What the totals leave out, named: the desktop footer says "excludes $X held for
+    // POD", and a total that silently omits loads reads as money that does not exist.
+    heldFreight: round2(trips.filter((t) => heldTripIds.has(t.id)).reduce((n, t) => n + (t.freightAmount ?? 0), 0)),
     // Always listed, even at $0 on a week with no loads: a driver who never sees the
     // line has no way to know the fee exists, and its absence reads as an error.
     deductions: [{ label: FACTORING_FEE_LABEL, amount: statement.factoringFee }, ...deductionLines],

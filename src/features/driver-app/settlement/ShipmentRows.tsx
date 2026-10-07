@@ -141,7 +141,23 @@ function DocCell({
   )
 }
 
-export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readOnly?: boolean }) {
+export function ShipmentRows({
+  trips, readOnly = false,
+  grossFreight, driverAmount, payPercent, heldFreight,
+}: {
+  trips: Trip[]
+  readOnly?: boolean
+  /**
+   * The on-check totals, exactly as the server computed them for the cheque. Passed in
+   * rather than summed here so the footer can never disagree with the check amount
+   * underneath it — the desktop page shows statement.gross and statement.driverAmount,
+   * and this shows the same two numbers.
+   */
+  grossFreight?: number
+  driverAmount?: number
+  payPercent?: number
+  heldFreight?: number
+}) {
   const navigate = useNavigate()
   const docs = useTripDocs()
   const [open, setOpen] = useState<{ doc: TripDoc; kind: SubmissionKind; shipment: string } | null>(null)
@@ -168,11 +184,20 @@ export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readO
         * gets its own line under the shipment instead, with room for a label on each
         * action rather than two initials in a header.
         */}
+      {/*
+        Freight AND pay, the way the desktop shows them.
+
+        The app used to show pay alone. An owner operator is paid a percentage, so the
+        number they most want to check is the one it was taken from — and with only the
+        share on screen they had to ring the office to ask what the load actually paid.
+        Miles ride under the freight, as the desktop puts them side by side.
+      */}
       <div
         role="row"
-        className="grid grid-cols-[1fr_auto] gap-2 border-b border-border px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
+        className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"
       >
         <span role="columnheader">Shipment</span>
+        <span role="columnheader" className="text-right">Freight</span>
         <span role="columnheader" className="text-right">Pay</span>
       </div>
 
@@ -190,7 +215,7 @@ export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readO
             role="row"
             className={`border-b border-border/60 px-3 py-2.5 ${held ? 'bg-amber-50/60' : ''}`}
           >
-            <div className="grid grid-cols-[1fr_auto] items-start gap-2">
+            <div className="grid grid-cols-[1fr_auto_auto] items-start gap-3">
             <div role="cell" className="min-w-0">
               <p className="truncate font-semibold text-card-foreground">{shipment}</p>
               <p className="truncate text-xs text-muted-foreground">
@@ -209,18 +234,35 @@ export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readO
               )}
             </div>
 
+            {/* Gross freight, with the miles under it — the two the desktop puts side by side. */}
+            <span role="cell" className="whitespace-nowrap text-right tabular-nums">
+              <span className="block text-card-foreground">
+                {trip.freight != null ? money(trip.freight) : '—'}
+              </span>
+              {(trip.miles != null || trip.rate != null) && (
+                <span className="block text-xs text-muted-foreground">
+                  {[
+                    trip.miles != null ? `${trip.miles.toLocaleString('en-US')} mi` : null,
+                    trip.rate != null ? `${money(trip.rate)}/mi` : null,
+                  ].filter(Boolean).join(' · ')}
+                </span>
+              )}
+            </span>
+
             {/*
               The figure shows whether or not the load is on this check — it is what the
               driver most wants to know — but a held one is muted and labelled so it can
               never be mistaken for money arriving in this week's bank.
             */}
-            <span
-              role="cell"
-              className={`whitespace-nowrap text-right font-semibold tabular-nums ${
-                held ? 'text-muted-foreground' : 'text-card-foreground'
-              }`}
-            >
-              {money(trip.amount)}
+            <span role="cell" className="whitespace-nowrap text-right tabular-nums">
+              <span className={`block font-semibold ${held ? 'text-muted-foreground' : 'text-card-foreground'}`}>
+                {money(trip.amount)}
+              </span>
+              {held && trip.heldLabel && (
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                  {trip.heldLabel}
+                </span>
+              )}
             </span>
             </div>
 
@@ -250,6 +292,34 @@ export function ShipmentRows({ trips, readOnly = false }: { trips: Trip[]; readO
           </div>
         )
       })}
+
+      {/*
+        The totals row, as the desktop prints it: freight total and driver share for the
+        loads ON this check, and a plain statement of what was left out. Shown only when
+        the server sent the figures — an older API has none, and inventing them from the
+        rows would be a second sum that could disagree with the cheque.
+      */}
+      {trips.length > 0 && grossFreight != null && driverAmount != null && (
+        <div
+          role="row"
+          data-testid="shipment-totals"
+          className="grid grid-cols-[1fr_auto_auto] items-start gap-3 bg-muted/40 px-3 py-2.5 text-sm font-bold"
+        >
+          <span role="cell" className="min-w-0">
+            <span className="block">
+              {/* payPercent arrives as a fraction (0.88), the same shape the staff page formats. */}
+              Freight total / driver share{payPercent != null ? ` (${Math.round(payPercent * 100)}%)` : ''}
+            </span>
+            {!!heldFreight && heldFreight > 0 && (
+              <span className="block text-xs font-semibold text-amber-800">
+                excludes {money(heldFreight)} held for POD
+              </span>
+            )}
+          </span>
+          <span role="cell" className="whitespace-nowrap text-right tabular-nums">{money(grossFreight)}</span>
+          <span role="cell" className="whitespace-nowrap text-right tabular-nums">{money(driverAmount)}</span>
+        </div>
+      )}
 
       {open && (
         <DocPreviewSheet

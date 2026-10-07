@@ -141,8 +141,13 @@ export interface SettlementTrip {
   origin?: string | null
   destination?: string | null
   miles?: number | null
+  /** Rate per mile, not the freight. */
   rate?: number | null
+  /** Gross freight on the load, dollars. Optional only so a fixture or an older API still types. */
+  freight?: number | null
   amount: number
+  /** False when listed but not paid on this check. Older APIs omit it; treat missing as on-check. */
+  onThisCheck?: boolean
   factoring?: FactoringFields | null
 }
 
@@ -155,7 +160,13 @@ export interface Settlement {
   weekStart: string
   weekLabel: string
   trips: SettlementTrip[]
+  /** Σ freight on this check — the desktop's "Freight total". */
   grossPay: number
+  /** Σ driver share on this check. Optional: an older API does not send it. */
+  driverAmount?: number
+  payPercent?: number
+  /** Σ freight held off this check, so the footer can say what it excludes. */
+  heldFreight?: number
   deductions: SettlementLine[]
   credits: SettlementLine[]
   debits: SettlementLine[]

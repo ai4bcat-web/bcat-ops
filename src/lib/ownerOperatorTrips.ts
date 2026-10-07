@@ -86,6 +86,20 @@ function addDays(periodStart: string, days: number): string {
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 /**
+ * Dollars per mile for one load, or null when it cannot be said.
+ *
+ * ONE definition, used by the staff pay page and the driver app's settlement API, so the
+ * figure an owner operator sees on their phone is the figure the office sees on the
+ * desktop. Null rather than 0 or Infinity when miles are missing or zero: "$0.00/mi" reads
+ * as a load that paid nothing, and that is a claim, not an absence.
+ */
+export function ratePerMile(freight: number | null | undefined, miles: number | null | undefined): number | null {
+  if (freight == null || miles == null) return null
+  if (!Number.isFinite(freight) || !Number.isFinite(miles) || miles <= 0) return null
+  return round2(freight / miles)
+}
+
+/**
  * Load ids arrive dirty from the TMS import: 53 production loads carry the literal
  * string 'N/A' in `tmsId` rather than null, and `aljexId` is padded ("14452  ").
  * Treating 'N/A' as a real id would label every one of those loads identically on a

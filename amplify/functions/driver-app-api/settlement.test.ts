@@ -346,6 +346,65 @@ describe('a POD gates pay', () => {
     expect(s.trips[0].heldReason).toBeNull()
   })
 
+  /*
+   * Gross and driver pay, the way the desktop shows them.
+   *
+   * The phone used to receive only the driver's share and a $/mi figure, so an owner
+   * operator could not see the freight their percentage was taken from. The desktop has
+   * always shown Freight beside Driver Amount; the API now sends both, plus the totals
+   * the desktop footer prints, computed HERE so the footer can never disagree with the
+   * cheque underneath it.
+   */
+  it('sends the gross freight on every trip, held or not', () => {
+    const s = build([
+      trip({ id: 'a', freightAmount: 1210, factoring: factoring({ podPresent: true }) }),
+      trip({ id: 'b', freightAmount: 1400, factoring: factoring({ podPresent: false, blocked: true }) }),
+    ])
+    expect(s.trips.map((t) => t.freight)).toEqual([1210, 1400])
+  })
+
+  it('sends the totals the desktop footer prints — freight total, driver share, percent', () => {
+    const s = build([
+      trip({ id: 'a', freightAmount: 1210, factoring: factoring({ podPresent: true }) }),
+      trip({ id: 'b', freightAmount: 1900, factoring: factoring({ podPresent: true }) }),
+    ])
+    expect(s.grossPay).toBe(3110)
+    expect(s.driverAmount).toBeCloseTo(3110 * 0.88, 2)
+    // A fraction, as calcDriverPay keeps it and the staff page's pct() formats it.
+    expect(s.payPercent).toBe(0.88)
+  })
+
+  it('names what the totals leave out: the freight held for a POD', () => {
+    const s = build([
+      trip({ id: 'a', freightAmount: 1210, factoring: factoring({ podPresent: true }) }),
+      trip({ id: 'b', freightAmount: 1400, factoring: factoring({ podPresent: false, blocked: true }) }),
+      trip({ id: 'c', freightAmount: 2900, factoring: factoring({ podPresent: false, blocked: true }) }),
+    ])
+    // The desktop reads "excludes $4,300.00 held for POD" on exactly this week.
+    expect(s.heldFreight).toBe(4300)
+    expect(s.grossPay).toBe(1210)
+  })
+
+  it('counts an undelivered load in the held freight too', () => {
+    const s = build([
+      trip({ id: 'a', freightAmount: 1210, factoring: factoring({ podPresent: true }) }),
+      trip({ id: 'later', freightAmount: 500, shipmentDate: '2099-01-01', factoring: factoring({ podPresent: false, blocked: true }) }),
+    ])
+    expect(s.trips.find((t) => t.id === 'later')?.heldReason).toBe('NOT_DELIVERED')
+    expect(s.heldFreight).toBe(500)
+    expect(s.grossPay).toBe(1210)
+  })
+
+  it('derives $/mi from freight and miles with the same rule as the staff page', () => {
+    const s = build([trip({ freightAmount: 1400, miles: 371, factoring: factoring({ podPresent: true }) })])
+    expect(s.trips[0].rate).toBe(3.77)
+  })
+
+  it('has no $/mi when there are no miles, rather than $0.00 or Infinity', () => {
+    const s = build([trip({ freightAmount: 1400, miles: 0, factoring: factoring({ podPresent: true }) })])
+    expect(s.trips[0].rate).toBeNull()
+  })
+
   it('does not hold a load over a missing rate confirmation', () => {
     // A rate con blocks invoicing at OTR, but the POD proves the work was done.
     const s = build([trip({ factoring: factoring({ rateconPresent: false, blocked: true }) })])

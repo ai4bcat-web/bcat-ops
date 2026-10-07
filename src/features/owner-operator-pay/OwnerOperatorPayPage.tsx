@@ -8,7 +8,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useOwnerOperatorPay, type OwnerOperatorPayRow } from '@/hooks/useOwnerOperatorPay'
-import { OWNER_OP_FIRST_PERIOD } from '@/lib/ownerOperatorTrips'
+import { OWNER_OP_FIRST_PERIOD, ratePerMile } from '@/lib/ownerOperatorTrips'
 import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { mileageDeductionLine } from '@/lib/mileageDeduction'
@@ -258,7 +258,7 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   L.push([
     'PRO #', 'PO #', 'Load ID', 'Customer', 'Broker MC', 'Invoice amount', 'Invoice date',
     'Origin city', 'Origin state', 'Origin ZIP', 'Dest city', 'Dest state', 'Dest ZIP',
-    'POD', 'Rate confirmation', 'Miles', 'Freight', 'Driver Amount', 'On this check',
+    'POD', 'Rate confirmation', 'Miles', 'Rate/mi', 'Freight', 'Driver Amount', 'On this check',
   ].map(q).join(','))
   const heldReasonById = new Map(row.heldTrips.map((h) => [h.trip.id, h.reason]))
   for (const t of row.trips) {
@@ -269,17 +269,17 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
       csvField(t, 'FromCity'), csvField(t, 'FromState'), csvField(t, 'FromZip'),
       csvField(t, 'ToCity'), csvField(t, 'ToState'), csvField(t, 'ToZip'),
       csvDoc(t, 'POD'), csvDoc(t, 'Rate confirmation'),
-      t.miles ?? '', t.freightAmount,
+      t.miles ?? '', ratePerMile(t.freightAmount, t.miles) ?? '', t.freightAmount,
       // A held load's pay is not on this check, so the column shows 0 rather than a
       // figure someone could total up and expect to see in the driver's bank.
       heldReasonById.has(t.id) ? 0 : tripPayAmount(t.freightAmount, row.setting),
       heldReasonById.has(t.id) ? `Held — ${PAY_HOLD_LABEL[heldReasonById.get(t.id)!]}` : 'Yes',
     ].map(q).join(','))
   }
-  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Freight total'), q(row.statement.gross)].join(','))
-  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
+  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Freight total'), q(row.statement.gross)].join(','))
+  L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Driver share'), q(row.statement.driverAmount)].join(','))
   if (row.heldFreight > 0) {
-    L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Held for POD (not paid)'), q(row.heldFreight)].join(','))
+    L.push(['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', q('Held for POD (not paid)'), q(row.heldFreight)].join(','))
   }
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
@@ -570,6 +570,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             <th style={TH}>POD sent</th>
             <th style={TH}>Rate con</th>
             <th style={TH}>Miles</th>
+            <th style={TH}>Rate/mi</th>
             <th style={TH}>Freight</th>
             <th style={TH}>Driver Amount</th>
           </tr></thead>
@@ -611,6 +612,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
                 <td style={{ ...TD, whiteSpace: 'nowrap', color: 'var(--ds-t3)' }}>{podSentLabel(t)}</td>
                 <td style={TD}><OtrDoc trip={t} kind="Rate confirmation" driver={driver} staffEmail={staffEmail} onUploaded={onRefresh} /></td>
                 <td style={TD}>{t.miles != null ? t.miles.toLocaleString('en-US') : '—'}</td>
+                <td style={TD}>{ratePerMile(t.freightAmount, t.miles) != null ? `${money(ratePerMile(t.freightAmount, t.miles)!)}/mi` : '—'}</td>
                 <td style={TD}>{money(t.freightAmount)}</td>
                 <td style={{ ...TD, fontWeight: 600 }}>
                   {held
@@ -621,7 +623,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
             )})}
             {trips.length > 0 && (
               <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)', fontWeight: 700 }}>
-                <td style={{ ...TD, textAlign: 'left' }} colSpan={18}>
+                <td style={{ ...TD, textAlign: 'left' }} colSpan={19}>
                   Freight total / driver share ({pct(setting.payPercent)})
                   {row.heldFreight > 0 && (
                     <span style={{ ...MISSING, fontWeight: 600, marginLeft: 8 }}>

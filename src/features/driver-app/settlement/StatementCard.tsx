@@ -72,7 +72,14 @@ export function StatementCard({ settlement, readOnly = false }: StatementCardPro
         <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Shipments · {settlement.trips.length}
         </p>
-        <ShipmentRows trips={settlement.trips as TripWithFactoring[]} readOnly={readOnly} />
+        <ShipmentRows
+          trips={settlement.trips as TripWithFactoring[]}
+          readOnly={readOnly}
+          grossFreight={settlement.grossPay}
+          driverAmount={settlement.driverAmount}
+          payPercent={settlement.payPercent}
+          heldFreight={settlement.heldFreight}
+        />
       </div>
 
       {/* Deductions */}
