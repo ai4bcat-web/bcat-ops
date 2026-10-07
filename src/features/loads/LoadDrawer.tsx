@@ -35,6 +35,7 @@ import {
   formatDateInput, fromDateInput, formatDateShort, apptHasTime, PENDING_LABEL,
 } from '@/lib/date'
 import { toast } from 'sonner'
+import { proConflict } from '@/lib/proConflict'
 import type { ApptType, Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 import type { TenderPrefill } from '@/lib/intakeTender'
@@ -710,6 +711,7 @@ function NewLoadDialog({
   watch,
   setValue,
   mode = 'create',
+  saving = false,
   aljexId,
   onDelete,
   tender,
@@ -726,6 +728,8 @@ function NewLoadDialog({
   watch: ReturnType<typeof useForm<LoadFormValues>>['watch']
   setValue: ReturnType<typeof useForm<LoadFormValues>>['setValue']
   mode?: 'create' | 'edit'
+  /** A save is in flight: the button goes dead so a double-click cannot create twice. */
+  saving?: boolean
   aljexId?: string
   onDelete?: () => void
   /** What intake parsed off the tender, including any document it carried. */
@@ -1206,8 +1210,8 @@ function NewLoadDialog({
             <Button variant="outline" className="h-9 px-5" onClick={onClose} type="button">
               Cancel
             </Button>
-            <Button type="submit" form="new-load-form" className="h-9 px-5">
-              {mode === 'edit' ? 'Save Changes' : 'Create Load'}
+            <Button type="submit" form="new-load-form" className="h-9 px-5" disabled={saving}>
+              {saving ? 'Saving…' : mode === 'edit' ? 'Save Changes' : 'Create Load'}
             </Button>
           </div>
         </div>
@@ -1315,7 +1319,7 @@ export function LoadDrawer() {
 
   const {
     register, control, handleSubmit, reset, watch, setValue,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<LoadFormValues>({
     /*
      * The MC/ZIP rules apply only to a customer we factor — see loadSchemaFor. A
@@ -1460,13 +1464,32 @@ export function LoadDrawer() {
 
   const onClose = () => setSelectedLoad(null)
 
+  // One save at a time. react-hook-form reports isSubmitting (the button reads it), but a
+  // second click can land before that re-render — and two creates 98 ms apart is exactly
+  // how 14578 ended up twice in production.
+  const saveInFlight = useRef(false)
+
   const onSubmit = async (values: LoadFormValues) => {
-    const duplicate = loads.find(
-      (l) => l.aljexId === values.aljexId && l.id !== load?.id
-    )
-    if (duplicate) {
+    if (saveInFlight.current) return
+    saveInFlight.current = true
+    try {
+      await saveLoad(values)
+    } finally {
+      saveInFlight.current = false
+    }
+  }
+
+  const saveLoad = async (values: LoadFormValues) => {
+    const conflict = proConflict(loads, values.aljexId, isCreate ? null : load)
+    if (conflict.kind === 'block') {
       toast.error(`Pro # ${values.aljexId} is already used on another load`)
       return
+    }
+    if (conflict.kind === 'warn') {
+      // Pre-existing duplicate: never lock the load over it, but make sure somebody knows.
+      toast.warning(`Two loads share Pro # ${values.aljexId}`, {
+        description: 'Saved anyway. One of them should be deleted so paperwork lands on the right one.',
+      })
     }
     const userEmail = user?.email ?? 'dispatch'
     // Build the canonical stops array; the store derives the legacy pickup/delivery
@@ -1603,6 +1626,7 @@ export function LoadDrawer() {
         watch={watch}
         setValue={setValue}
         mode={isCreate ? 'create' : 'edit'}
+        saving={isSubmitting}
         aljexId={load?.aljexId}
         onDelete={!isCreate ? handleDelete : undefined}
         tender={createPreFill?.tender ?? null}
