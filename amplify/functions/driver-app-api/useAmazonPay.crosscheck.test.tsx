@@ -236,6 +236,9 @@ describe('useAmazonPay vs buildSettlement cross-check', () => {
       {
         payPercent: setting.payPercent,
         expensesBeforePercent: setting.expensesBeforePercent,
+        // The handler hands buildSettlement the whole setting row; the pay group is what
+        // decides there is no factoring fee on an Amazon statement.
+        payGroup: setting.payGroup,
         fuelCardNumber: setting.fuelCardNumber,
         fixedExpenses: setting.fixedExpenses,
         rateHistory: setting.rateHistory,

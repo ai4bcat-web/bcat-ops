@@ -5,7 +5,7 @@ import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
 import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
+import { calcDriverPay, factoringFeePctFor, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { errorText } from '@/lib/errorText'
 
@@ -178,7 +178,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
 
         const st = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.freightAmount, status: t.status })),
-          effectivePayRate(setting, periodStart), // pinned window if one covers this week
+          { ...effectivePayRate(setting, periodStart), factoringFeePct: factoringFeePctFor('AMAZON') }, // pinned window if one covers this week; Amazon is never factored
           ded,
           driverCredits,
           [...fixedDebits, ...driverDebits],

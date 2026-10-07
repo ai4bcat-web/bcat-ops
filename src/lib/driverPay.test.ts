@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { calcDriverPay, tripPayAmount, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
+import { calcDriverPay, factoringFeePctFor, tripPayAmount, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel } from './driverPay'
 import type { PayTripInput, PayDeductionInput, PayCreditInput, PayRateOverride, FixedExpenseInput } from './driverPay'
 
 const addDays = (iso: string, days: number): string => {
@@ -63,7 +63,35 @@ describe('calcDriverPay — verified against production pay sheets (plus the 2% 
   })
 })
 
-describe('factoring fee — every statement pays 2% of gross', () => {
+describe('factoring fee — Amazon is never factored', () => {
+  it('is 0% for the Amazon pay group and 2% for everyone who goes through the factor', () => {
+    expect(factoringFeePctFor('AMAZON')).toBe(0)
+    expect(factoringFeePctFor('OWNER_OPERATOR')).toBe(0.02)
+    expect(factoringFeePctFor('BOX_TRUCK')).toBe(0.02)
+    expect(factoringFeePctFor(null)).toBe(0.02)
+  })
+
+  it('an Amazon statement carries no fee: the check is the full % of gross minus expenses', () => {
+    const r = calcDriverPay(
+      tripsTotaling(2_000),
+      { payPercent: 0.88, expensesBeforePercent: false, factoringFeePct: factoringFeePctFor('AMAZON') },
+      ded(100),
+    )
+    expect(r.factoringFeePct).toBe(0)
+    expect(r.factoringFee).toBe(0)
+    expect(r.totalDeductions).toBe(100)
+    expect(r.checkAmount).toBeCloseTo(0.88 * 2_000 - 100, 2)
+  })
+
+  it('the same freight through the factor pays $40 more in deductions', () => {
+    const amazon = calcDriverPay(tripsTotaling(2_000), { payPercent: 0.88, expensesBeforePercent: false, factoringFeePct: 0 }, ded(100))
+    const factored = calcDriverPay(tripsTotaling(2_000), { payPercent: 0.88, expensesBeforePercent: false }, ded(100))
+    expect(factored.factoringFeePct).toBe(0.02)
+    expect(factored.checkAmount).toBeCloseTo(amazon.checkAmount - 40, 2)
+  })
+})
+
+describe('factoring fee — a factored statement pays 2% of gross', () => {
   it('charges exactly 2% of gross as its own deduction line', () => {
     const r = calcDriverPay(tripsTotaling(1_234.56), { payPercent: 0.88, expensesBeforePercent: false }, [])
     expect(r.factoringFee).toBeCloseTo(24.69, 2)

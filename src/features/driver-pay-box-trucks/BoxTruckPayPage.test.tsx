@@ -24,7 +24,7 @@ const setting = { id: 's1', driverId: 'd1', payPercent: 0.3, expensesBeforePerce
 function statement(over: Partial<DriverPayStatement> = {}): DriverPayStatement {
   return {
     gross: 0, payPercent: 0.3, expensesBeforePercent: true, driverAmount: 0,
-    totalDeductions: 0, factoringFee: 0, subtotal: 0, totalCredits: 0, totalDebits: 0,
+    totalDeductions: 0, factoringFee: 0, factoringFeePct: 0.02, subtotal: 0, totalCredits: 0, totalDebits: 0,
     payBeforeCredits: 0, checkAmount: 0, ...over,
   } as DriverPayStatement
 }

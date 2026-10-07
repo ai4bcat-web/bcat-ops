@@ -11,7 +11,7 @@ import {
 } from '@/lib/apiClient'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
-import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
+import { calcDriverPay, factoringFeePctFor, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
 import { matchedFuelForCard, sumFuel, normalizeCard, effectiveFuelCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
@@ -196,7 +196,8 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
         // After-split fixed charges are debits too, so they cost the driver the whole dollar.
         const statement = calcDriverPay(
           driverTrips.map((t) => ({ freightAmount: t.freightAmount, status: t.status })),
-          { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent },
+          // Amazon pays the company directly: nothing on this statement is factored.
+          { payPercent: setting.payPercent, expensesBeforePercent: setting.expensesBeforePercent, factoringFeePct: factoringFeePctFor('AMAZON') },
           ded,
           driverCredits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode })),
           [...fixedDebits, ...driverDebits.map((c) => ({ label: creditLineLabel(c), amount: c.amount, reasonCode: c.reasonCode }))],

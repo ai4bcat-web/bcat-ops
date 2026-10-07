@@ -157,13 +157,20 @@ export async function buildPayStatementPdf(row: DriverPayRow, periodStart: strin
   y += 14
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(10)
-  // The 2% fee is charged on every statement, so it is printed even at $0.00 — a line
-  // that silently disappears reads as a missing charge to whoever audits the statement.
-  doc.setTextColor(55, 65, 81)
-  doc.text(FACTORING_FEE_LABEL, M, y)
-  doc.setTextColor(220, 38, 38)
-  doc.text(`(${money(statement.factoringFee)})`, W - M, y, { align: 'right' })
-  y += 15
+  // Where the fee applies it is printed even at $0.00 — a line that silently disappears
+  // reads as a missing charge to whoever audits the statement. An Amazon statement is
+  // never factored and prints no fee line.
+  if (statement.factoringFeePct > 0) {
+    doc.setTextColor(55, 65, 81)
+    doc.text(FACTORING_FEE_LABEL, M, y)
+    doc.setTextColor(220, 38, 38)
+    doc.text(`(${money(statement.factoringFee)})`, W - M, y, { align: 'right' })
+    y += 15
+  } else if (deductions.length === 0) {
+    doc.setTextColor(107, 114, 128)
+    doc.text('No deductions.', M, y)
+    y += 15
+  }
   for (const d of deductions) {
     doc.setTextColor(55, 65, 81)
     doc.text(d.label, M, y)

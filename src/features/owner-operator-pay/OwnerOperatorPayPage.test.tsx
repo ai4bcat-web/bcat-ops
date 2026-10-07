@@ -67,6 +67,7 @@ function baseStatement(over: Partial<DriverPayStatement> = {}): DriverPayStateme
     driverAmount: 0,
     totalDeductions: 0,
     factoringFee: 0,
+    factoringFeePct: 0.02,
     subtotal: 0,
     totalCredits: 0,
     totalDebits: 0,

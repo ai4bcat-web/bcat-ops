@@ -35,16 +35,19 @@ function drawnStrings(doc: jsPDF): string[] {
 const driver = { id: 'd1', name: 'Zero Week', active: true, colorKey: 'driver-1' } as Driver
 const setting = { id: 's1', driverId: 'd1', payPercent: 0.42, expensesBeforePercent: true } as DriverPaySetting
 
+/** A factored statement (owner-operator / box-truck): the fee line applies. */
 const emptyStatement: DriverPayStatement = {
   gross: 0, payPercent: 0.42, expensesBeforePercent: true, driverAmount: 0,
-  totalDeductions: 0, factoringFee: 0, subtotal: 0, totalCredits: 0, totalDebits: 0,
+  totalDeductions: 0, factoringFee: 0, factoringFeePct: 0.02, subtotal: 0, totalCredits: 0, totalDebits: 0,
   payBeforeCredits: 0, checkAmount: 0,
 } as DriverPayStatement
+/** An Amazon statement: never factored, no fee line. */
+const amazonStatement: DriverPayStatement = { ...emptyStatement, factoringFeePct: 0 }
 
 const amazonRow = {
   driver, setting, baseSetting: setting, trips: [], fuel: 0, fuelTxns: [],
   deductions: [], oneOffs: [], credits: [], debits: [], fixedDebits: [],
-  statement: emptyStatement, duplicateTripIds: new Set<string>(),
+  statement: amazonStatement, duplicateTripIds: new Set<string>(),
 } as DriverPayRow
 
 const boxRow = {
@@ -54,8 +57,15 @@ const boxRow = {
 } as BoxTruckPayRow
 
 describe('pay statement PDFs', () => {
-  it('prints the factoring fee at $0.00 on an Amazon week with no trips', async () => {
+  it('prints NO factoring fee on an Amazon week — Amazon freight is never factored', async () => {
     const drawn = drawnStrings(await buildPayStatementPdf(amazonRow, '2026-09-20'))
+    expect(drawn).not.toContain(FACTORING_FEE_LABEL)
+    expect(drawn).toContain('No deductions.')
+  })
+
+  it('prints the factoring fee at $0.00 on a factored week with no trips', async () => {
+    const factored = { ...amazonRow, statement: emptyStatement } as DriverPayRow
+    const drawn = drawnStrings(await buildPayStatementPdf(factored, '2026-09-20'))
     const at = drawn.indexOf(FACTORING_FEE_LABEL)
     expect(at).toBeGreaterThanOrEqual(0)
     expect(drawn[at + 1]).toBe('($0.00)')
@@ -69,7 +79,7 @@ describe('pay statement PDFs', () => {
     expect(drawn[at + 1]).toBe('($0.00)')
   })
 
-  it('still prints the fee when the week was paid', async () => {
+  it('still prints the fee when a factored week was paid', async () => {
     const paid = { ...amazonRow, statement: { ...emptyStatement, gross: 1000, factoringFee: 20, totalDeductions: 20 } } as DriverPayRow
     const drawn = drawnStrings(await buildPayStatementPdf(paid, '2026-09-20'))
     const at = drawn.indexOf(FACTORING_FEE_LABEL)

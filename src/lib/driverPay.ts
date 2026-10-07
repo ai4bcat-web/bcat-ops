@@ -27,18 +27,30 @@ export interface PayTripInput {
 }
 
 /**
- * Factoring fee — every statement pays it, so the company's factor advances the driver's
- * settlement. Charged on the statement GROSS (not on the driver's share) and shown as its
- * own deduction line. The one definition: everyone imports these.
+ * Factoring fee — charged when the company's factor advances the driver's settlement.
+ * Charged on the statement GROSS (not on the driver's share) and shown as its own
+ * deduction line. The one definition: everyone imports these.
+ *
+ * Amazon freight is never factored — Amazon pays the company directly — so an Amazon
+ * settlement carries no fee at all (decided 7 Oct 2026). Owner-operator brokerage and
+ * box-truck freight go through the factor and pay it. The pay group decides, in one
+ * place, so a page or a PDF never has to know which freight is which.
  */
 export const FACTORING_FEE_PCT = 0.02
 export const FACTORING_FEE_LABEL = 'Factoring fee (2%)'
+
+/** The fee rate a settlement in this pay group pays on its gross. */
+export function factoringFeePctFor(payGroup: string | null | undefined): number {
+  return payGroup === 'AMAZON' ? 0 : FACTORING_FEE_PCT
+}
 
 export interface DriverPaySettingInput {
   /** Driver's keep fraction, 0..1 (e.g. 0.42, 0.88). */
   payPercent: number
   /** True → keep% applies AFTER expenses (Chad); false → % of gross then minus expenses. */
   expensesBeforePercent: boolean
+  /** Fee rate on gross; see factoringFeePctFor. Omitted = the standard fee. */
+  factoringFeePct?: number
 }
 
 /**
@@ -267,8 +279,10 @@ export interface DriverPayStatement {
   driverAmount:          number
   /** Σ deductions, INCLUDING the factoring fee line below. */
   totalDeductions:       number
-  /** The 2% factoring fee charged on gross — already included in totalDeductions. */
+  /** The factoring fee charged on gross — already included in totalDeductions. */
   factoringFee:          number
+  /** The rate that fee was charged at; 0 means this statement carries no fee line. */
+  factoringFeePct:       number
   /** mode-true: gross − deductions (the pre-% subtotal); mode-false: pay after deductions. */
   subtotal:              number
   totalCredits:          number   // Σ credits — added to the check at 100%
@@ -294,10 +308,11 @@ export function calcDriverPay(
   debits: PayDebitInput[] = [],
 ): DriverPayStatement {
   const gross = round2(trips.reduce((s, t) => s + (t.freightAmount || 0), 0))
-  // Every statement carries the factoring fee, computed on its own gross so it flows to
-  // Amazon, owner-operator, box-truck and the driver PWA identically. Callers list it first
-  // so the printed lines sum to totalDeductions.
-  const factoringFee = round2(gross * FACTORING_FEE_PCT)
+  // The fee is computed on the statement's own gross so it flows to owner-operator,
+  // box-truck and the driver PWA identically; an Amazon caller passes 0 and gets none.
+  // Callers list it first so the printed lines sum to totalDeductions.
+  const factoringFeePct = setting.factoringFeePct ?? FACTORING_FEE_PCT
+  const factoringFee = round2(gross * factoringFeePct)
   const totalDeductions = round2(
     factoringFee + deductions.reduce((s, d) => s + (d.amount || 0), 0),
   )
@@ -326,6 +341,7 @@ export function calcDriverPay(
     driverAmount,
     totalDeductions,
     factoringFee,
+    factoringFeePct,
     subtotal,
     totalCredits,
     totalDebits,

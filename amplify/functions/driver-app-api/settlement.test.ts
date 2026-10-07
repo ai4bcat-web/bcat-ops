@@ -184,7 +184,23 @@ describe('buildSettlement', () => {
     expect(settlement.weekLabel).toBe(weekLabel(periodStart))
   })
 
-  it('still lists the factoring fee on a week with no loads', () => {
+  it('charges an Amazon driver no factoring fee — no line, and the check is higher by it', () => {
+    // Roy et al.: Amazon pays the company directly, nothing is factored. Gross 1500 at 88%
+    // minus the same fixed expenses, but without the $30 fee an owner operator would pay.
+    const amazon = buildSettlement(periodStart, trips, { ...makeSetting(), payGroup: 'AMAZON' }, [], [], [], [])
+    const factored = buildSettlement(periodStart, trips, { ...makeSetting(), payGroup: 'OWNER_OPERATOR' }, [], [], [], [])
+    expect(amazon.deductions.find((d) => d.label === FACTORING_FEE_LABEL)).toBeUndefined()
+    expect(factored.deductions.find((d) => d.label === FACTORING_FEE_LABEL)?.amount).toBe(30)
+    // The printed lines still sum to the statement total, and the check is 88% of gross
+    // minus exactly those lines — nothing hidden.
+    const sum = (lines: { amount: number }[]) => lines.reduce((s, d) => s + d.amount, 0)
+    expect(amazon.checkAmount).toBeCloseTo(
+      0.88 * 1500 - sum(amazon.deductions) + sum(amazon.credits) - sum(amazon.debits),
+      2,
+    )
+  })
+
+  it('still lists the factoring fee on a factored week with no loads', () => {
     // A driver opening an empty week must still see the fee exists; a missing line
     // reads as "the app lost my deductions" rather than "nothing was factored".
     const settlement = buildSettlement(periodStart, [], makeSetting(), [], [], [], [])

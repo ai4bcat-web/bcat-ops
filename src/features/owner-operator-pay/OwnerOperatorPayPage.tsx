@@ -283,8 +283,8 @@ function statementCsv(row: OwnerOperatorPayRow, periodStart: string): string {
   }
   L.push(''); L.push([q('Deductions'), q('Amount')].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
-  // Charged on every settlement, so the line is exported even when it is $0.00.
-  L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
+  // Listed even at $0.00 where the fee applies (the statement decides).
+  if (row.statement.factoringFeePct > 0) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
     L.push(''); L.push([q('Credits'), q('Amount')].join(','))
@@ -667,11 +667,13 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
               including the $0.00 of a week with no loads, where leaving it out reads as
               "they forgot it". It comes out of calcDriverPay rather than row.deductions,
               hence its own row above the total. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
-            <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
-            <span style={{ width: 16 }} />
-          </div>
+          {statement.factoringFeePct > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+              <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+              <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+              <span style={{ width: 16 }} />
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 700, borderTop: '1px solid var(--ds-border)', marginTop: 4, paddingTop: 6 }}>
             <span style={{ flex: 1, color: 'var(--ds-t1)' }}>Total deductions</span>
             <span style={{ color: '#dc2626', fontVariantNumeric: 'tabular-nums' }}>({money(statement.totalDeductions)})</span>

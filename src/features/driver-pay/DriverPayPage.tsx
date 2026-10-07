@@ -58,8 +58,8 @@ function statementCsv(row: DriverPayRow, periodStart: string): string {
   L.push(['', '', '', '', '', q('Gross'), q(row.statement.gross), '', q(`Driver ${pct(row.setting.payPercent)}`), q(row.statement.driverAmount)].join(','))
   L.push('')
   L.push([q('Deductions'), q('Amount')].join(','))
-  // Charged on every statement, so the line is exported even when it is $0.00.
-  L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
+  // Listed even at $0.00 where the fee applies; an Amazon statement has no fee line.
+  if (row.statement.factoringFeePct > 0) L.push([q(FACTORING_FEE_LABEL), q(row.statement.factoringFee)].join(','))
   for (const d of row.deductions) L.push([q(d.label), q(d.amount)].join(','))
   L.push([q('Total deductions'), q(row.statement.totalDeductions)].join(','))
   if (row.credits.length) {
@@ -586,16 +586,18 @@ function StatementCard({ row, periodStart, onAddTrip, onImport, onAddDeduction, 
       <div style={{ padding: '12px 16px', borderTop: '1px solid var(--ds-border)' }}>
         <div style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Deductions</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {/* The 2% fee is charged on every statement, so the line is always listed —
-              including the $0.00 of a period with no loads, where leaving it out reads
-              as "they forgot it". */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
-            <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
-            <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
-            <span style={{ width: 16 }} />
-          </div>
+          {/* Where the fee applies it is always listed — including the $0.00 of a period
+              with no loads, where leaving it out reads as "they forgot it". Amazon freight
+              is never factored, so an Amazon statement has no fee line (factoringFeePct 0). */}
+          {statement.factoringFeePct > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5 }}>
+              <span style={{ flex: 1, color: 'var(--ds-t2)' }}>{FACTORING_FEE_LABEL}</span>
+              <span style={{ color: statement.factoringFee > 0 ? '#dc2626' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>({money(statement.factoringFee)})</span>
+              <span style={{ width: 16 }} />
+            </div>
+          )}
           {row.deductions.length === 0 && (
-            <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>No other deductions. Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
+            <div style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>{statement.factoringFeePct > 0 ? 'No other deductions.' : 'No deductions.'} Fixed expenses come from Settings; fuel pulls from the card automatically.</div>
           )}
           {row.deductions.map((d, i) => {
             const oneOff = oneOffs.find((o) => o.label === d.label && o.amount === d.amount)

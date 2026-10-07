@@ -33,7 +33,8 @@ const setting = { id: 's1', driverId: 'd1', payPercent: 0.42, expensesBeforePerc
 function statement(over: Partial<DriverPayStatement> = {}): DriverPayStatement {
   return {
     gross: 0, payPercent: 0.42, expensesBeforePercent: true, driverAmount: 0,
-    totalDeductions: 0, factoringFee: 0, subtotal: 0, totalCredits: 0, totalDebits: 0,
+    // Amazon: never factored, so the statement carries no fee line.
+    totalDeductions: 0, factoringFee: 0, factoringFeePct: 0, subtotal: 0, totalCredits: 0, totalDebits: 0,
     payBeforeCredits: 0, checkAmount: 0, ...over,
   } as DriverPayStatement
 }
@@ -76,28 +77,32 @@ function csvFromExportClick(): Promise<string> {
 beforeEach(() => { vi.clearAllMocks() })
 
 describe('DriverPayPage deductions', () => {
-  it('lists the factoring fee at $0.00 on a week with no trips', () => {
+  it('shows NO factoring fee line on an Amazon week with no trips — Amazon is never factored', () => {
     useAmazonPayMock.mockReturnValue(payState([row()]))
     render(<DriverPayPage />)
 
-    expect(screen.getByText(FACTORING_FEE_LABEL).parentElement).toHaveTextContent('($0.00)')
+    expect(screen.queryByText(FACTORING_FEE_LABEL)).toBeNull()
+    expect(screen.getByText(/No deductions\./)).toBeInTheDocument()
   })
 
-  it('lists the factoring fee alongside the week’s other deductions', () => {
+  it('lists the week’s other deductions without a factoring fee', () => {
     useAmazonPayMock.mockReturnValue(payState([row({
       deductions: [{ label: 'INSURANCE (weekly)', amount: 400 }],
-      statement: statement({ gross: 2000, factoringFee: 40, totalDeductions: 440, driverAmount: 655.2, checkAmount: 655.2 }),
+      statement: statement({ gross: 2000, totalDeductions: 400, driverAmount: 672, checkAmount: 672 }),
     })]))
     render(<DriverPayPage />)
 
-    expect(screen.getByText(FACTORING_FEE_LABEL).parentElement).toHaveTextContent('($40.00)')
+    expect(screen.queryByText(FACTORING_FEE_LABEL)).toBeNull()
     expect(screen.getByText('INSURANCE (weekly)')).toBeInTheDocument()
+    expect(screen.getByText('Total deductions').parentElement).toHaveTextContent('($400.00)')
   })
 
-  it('exports the factoring fee line even when it is $0.00', async () => {
+  it('exports no factoring fee line for an Amazon statement', async () => {
     useAmazonPayMock.mockReturnValue(payState([row()]))
     render(<DriverPayPage />)
 
-    expect(await csvFromExportClick()).toContain('"Factoring fee (2%)","0"')
+    const csv = await csvFromExportClick()
+    expect(csv).not.toContain('Factoring fee')
+    expect(csv).toContain('"Total deductions","0"')
   })
 })

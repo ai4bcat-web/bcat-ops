@@ -8,6 +8,7 @@
 
 import {
   calcDriverPay,
+  factoringFeePctFor,
   tripPayAmount,
   effectivePayRate,
   effectiveFixedExpenses,
@@ -134,6 +135,8 @@ export interface RawAmazonTrip {
 export interface RawDriverPaySetting {
   payPercent: number
   expensesBeforePercent: boolean
+  /** Decides the factoring fee: Amazon freight is never factored. */
+  payGroup?: string | null
   fuelCardNumber?: string | null
   fuelCardHistory?: unknown
   fixedExpenses?: unknown
@@ -322,7 +325,7 @@ export function buildSettlement(
 
   const statement = calcDriverPay(
     tripInputs,
-    rateModel as DriverPaySettingInput,
+    { ...(rateModel as DriverPaySettingInput), factoringFeePct: factoringFeePctFor(setting.payGroup) },
     deductionLines,
     myCredits,
     [...fixedDebits, ...myDebits],
@@ -368,9 +371,13 @@ export function buildSettlement(
     // What the totals leave out, named: the desktop footer says "excludes $X held for
     // POD", and a total that silently omits loads reads as money that does not exist.
     heldFreight: round2(trips.filter((t) => heldTripIds.has(t.id)).reduce((n, t) => n + (t.freightAmount ?? 0), 0)),
-    // Always listed, even at $0 on a week with no loads: a driver who never sees the
-    // line has no way to know the fee exists, and its absence reads as an error.
-    deductions: [{ label: FACTORING_FEE_LABEL, amount: statement.factoringFee }, ...deductionLines],
+    // Where the fee applies it is always listed, even at $0 on a week with no loads: a
+    // driver who never sees the line has no way to know the fee exists, and its absence
+    // reads as an error. An Amazon driver's statement has no such line at all.
+    deductions: [
+      ...(statement.factoringFeePct > 0 ? [{ label: FACTORING_FEE_LABEL, amount: statement.factoringFee }] : []),
+      ...deductionLines,
+    ],
     credits: myCredits,
     debits: [...fixedDebits, ...myDebits],
     checkAmount: statement.checkAmount,
