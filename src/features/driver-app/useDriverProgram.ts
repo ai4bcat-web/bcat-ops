@@ -1,87 +1,99 @@
 /**
- * Which program this driver is on, from the server.
+ * Which program this driver is on, from /me, fetched once per app load and shared.
  *
- * Fetched rather than inferred: the client has the driver's token and nothing else, and
- * which fleet someone runs in is the server's to say. Held in a module-level cache so the
- * shell, the landing redirect and the tab bar all read one answer and the app does not ask
- * three times on every launch.
+ * Module-level rather than context so the tab bar, the landing redirect and the scanner
+ * all read the same answer without re-fetching, and so a cold relaunch mid-scan (iOS
+ * discards the web view behind the file picker) does not race three copies of the call.
  *
- * `null` means "not known yet" and callers must wait on it — rendering the settlement tab
- * and then swapping it for paperwork a moment later shows an Ivan driver a pay page they
- * are not supposed to have, however briefly.
+ * A FAILED /me is an error, not a default. It used to fall back to SETTLEMENT, which for an
+ * Ivan driver meant: the Settlement tab, a settlement page, a 409 "this driver has
+ * paperwork, not a settlement", and a Retry button that retried the wrong thing. Jason
+ * sat at that screen for a day while the real refusal — whatever it was — never reached
+ * anyone. Now the failure is shown as itself, with the server's own message, and Retry
+ * retries /me.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer } from 'react'
 import { fetchMe, type DriverPm, type DriverProfile } from './driverApi'
 import type { DriverProgram } from '@/lib/driverProgram'
 
 let cached: DriverProgram | null = null
-/*
- * The rest of the profile from the same call.
- *
- * Kept beside the program so the PM line does not cost a second /me on every launch — it
- * rides along on the request the shell already makes. Separate from `cached` because the
- * program has a fail-safe default and the profile does not: a failed call leaves this null,
- * which reads as "nothing to show" rather than a made-up truck.
- */
 let cachedProfile: DriverProfile | null = null
+let lastError: string | null = null
+let inflight: Promise<void> | null = null
+const listeners = new Set<() => void>()
 
-/** Cleared on sign-out so the next driver on this device is not given the last one's page. */
+function notify(): void {
+  listeners.forEach((l) => l())
+}
+
+function load(): Promise<void> {
+  if (inflight) return inflight
+  inflight = fetchMe()
+    .then(
+      (me) => {
+        cachedProfile = me
+        cached = me.program ?? 'SETTLEMENT'
+        lastError = null
+      },
+      (err: unknown) => {
+        lastError = err instanceof Error && err.message ? err.message : 'Could not load your profile.'
+      },
+    )
+    .finally(() => {
+      inflight = null
+      notify()
+    })
+  return inflight
+}
+
+/** Forget everything — on sign-out, so the next driver on this phone starts clean. */
 export function clearCachedProgram(): void {
   cached = null
   cachedProfile = null
+  lastError = null
 }
 
-/**
- * This driver's truck PM line, or null when there is nothing to say.
- *
- * Null covers every quiet case — no truck assigned, the profile call failed, an API that
- * predates the field — because all of them mean the same thing to the screen.
- */
-export function useDriverPm(): DriverPm | null {
-  const [pm, setPm] = useState<DriverPm | null>(cachedProfile?.pm ?? null)
+export interface DriverProgramStatus {
+  /** null while loading, and when the load failed. */
+  program: DriverProgram | null
+  /** The server's message when /me failed; null while loading or once it succeeded. */
+  error: string | null
+  retry: () => void
+}
+
+export function useDriverProgramStatus(): DriverProgramStatus {
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
 
   useEffect(() => {
-    // Already cached: useState above took it at mount, so there is nothing to set here.
-    // Setting it anyway is a synchronous setState inside an effect, which cascades renders.
-    if (cachedProfile) return
-    let stale = false
-    fetchMe()
-      .then((me) => {
-        cachedProfile = me
-        if (!stale) setPm(me.pm ?? null)
-      })
-      .catch(() => { /* the PM line is a nicety; a failed call simply shows nothing */ })
-    return () => { stale = true }
+    listeners.add(rerender)
+    if (!cached && !lastError) void load()
+    return () => { listeners.delete(rerender) }
   }, [])
 
-  return pm
+  return {
+    program: cached,
+    error: cached ? null : lastError,
+    retry: () => {
+      lastError = null
+      notify()
+      void load()
+    },
+  }
 }
 
 export function useDriverProgram(): DriverProgram | null {
-  const [program, setProgram] = useState<DriverProgram | null>(cached)
+  return useDriverProgramStatus().program
+}
+
+export function useDriverPm(): DriverPm | null {
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
 
   useEffect(() => {
-    if (cached) return
-    let stale = false
-    fetchMe()
-      .then((me) => {
-        cachedProfile = me
-        if (stale) return
-        cached = me.program ?? 'SETTLEMENT'
-        setProgram(cached)
-      })
-      .catch(() => {
-        /*
-         * A driver whose profile call fails still gets their app. Defaulting to the
-         * settlement matches driverProgramOf's own fail-safe: never silently take an owner
-         * operator's pay page away because one request dropped on a bad connection.
-         */
-        if (stale) return
-        cached = 'SETTLEMENT'
-        setProgram(cached)
-      })
-    return () => { stale = true }
+    listeners.add(rerender)
+    if (!cachedProfile && !lastError) void load()
+    return () => { listeners.delete(rerender) }
   }, [])
 
-  return program
+  // The PM line is a nicety; a failed call simply shows nothing.
+  return cachedProfile?.pm ?? null
 }

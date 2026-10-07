@@ -50,7 +50,7 @@ import { RequirePage, RequireOwner, LandingRedirect } from '@/components/Require
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
 import { useDriverAuth } from '@/features/driver-app/useDriverAuth'
 import { DriverApp, ScanPage, SubmissionsPage, SettlementPage, PaperworkPage, TimeClockPage, AccountPage } from '@/features/driver-app/DriverApp'
-import { useDriverProgram } from '@/features/driver-app/useDriverProgram'
+import { useDriverProgramStatus } from '@/features/driver-app/useDriverProgram'
 import type { DriverProgram } from '@/lib/driverProgram'
 import DriverLoginPage from '@/features/driver-app/DriverLoginPage'
 import DriverSignupPage from '@/features/driver-app/DriverSignupPage'
@@ -80,14 +80,55 @@ function DriverLanding({ program }: { program: DriverProgram }) {
   return <Navigate to={intent ? scanIntentPath(intent) : home} replace />
 }
 
+/**
+ * /me failed, so we do not know which app to show this driver — and must not guess.
+ * The server's own message is shown because it is the only clue anyone has: "Driver not
+ * found" means their driver profile does not carry the email they signed in with, which
+ * dispatch fixes in a minute once they know.
+ */
+function DriverProfileError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { user, signOut } = useDriverAuth()
+  return (
+    <div className="flex h-screen flex-col items-center justify-center gap-4 bg-[#0b1220] px-6 text-center text-white">
+      <p className="text-lg font-semibold">We couldn't load your driver profile</p>
+      <p className="text-slate-300">{message}</p>
+      {user?.email && (
+        <p className="text-sm text-slate-400">
+          Signed in as <span className="font-medium text-slate-200">{user.email}</span>. If this keeps
+          happening, ask dispatch to check that email on your driver profile.
+        </p>
+      )}
+      <div className="mt-2 flex gap-3">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="rounded-xl bg-[#1ea8f3] px-5 py-2.5 font-semibold text-white"
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={() => void signOut()}
+          className="rounded-xl border border-slate-600 px-5 py-2.5 font-semibold text-slate-200"
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function DriverRoutes() {
   const { loading, isAuthenticated } = useDriverAuth()
-  const program = useDriverProgram()
+  const { program, error, retry } = useDriverProgramStatus()
 
   // Wait for the program before painting the shell: see useDriverProgram for why an Ivan
   // driver must never be shown the settlement tab even for a frame.
-  if (loading || (isAuthenticated && program === null)) {
+  if (loading || (isAuthenticated && program === null && !error)) {
     return <DriverLoading />
+  }
+  if (isAuthenticated && program === null && error) {
+    return <DriverProfileError message={error} onRetry={retry} />
   }
 
   return (

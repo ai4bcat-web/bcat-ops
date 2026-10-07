@@ -573,7 +573,14 @@ async function loadVerifiedDriver(event: FnUrlEvent): Promise<VerifiedCaller> {
   const email = normalizeEmail(claims.email ?? '')
   if (!email) throw new ApiError(401, 'Token missing email')
   const resolved = await resolveDriverAndSetting(email)
-  if (!resolved) throw new ApiError(401, 'Driver not found')
+  if (!resolved) {
+    // The one refusal a driver cannot fix from their side: their Cognito account is fine
+    // but no active Driver row carries this email. Logged so dispatch can see WHO was
+    // turned away — on 7 Oct an Ivan driver spent a day at a Retry screen and nothing on
+    // the server said why.
+    console.warn('[driver-app-api] sign-in refused: no active driver with this email', { email })
+    throw new ApiError(401, 'Driver not found')
+  }
   return { ...resolved, impersonatedBy: null }
 }
 
@@ -2129,6 +2136,8 @@ export const handler = async (event: FnUrlEvent) => {
     }
 
     if (method === 'GET' && path === '/me') {
+      const program = driverProgramOf({ ...driver, payGroup: setting.payGroup })
+      console.log('[driver-app-api] me', { driverId: driver.id, driverName: driver.name, program })
       return reply(200, {
         driverId: driver.id,
         name: driver.name,
@@ -2138,7 +2147,7 @@ export const handler = async (event: FnUrlEvent) => {
         payGroup: setting.payGroup ?? 'AMAZON',
         // Which page this driver gets: a settlement, or paperwork with no money on it.
         // The app routes on this rather than on payGroup — see src/lib/driverProgram.ts.
-        program: driverProgramOf({ ...driver, payGroup: setting.payGroup }),
+        program,
         active: driver.active !== false,
         // null for a driver with no truck assigned; the app simply omits the line.
         pm: await pmForDriver(driver),
@@ -2812,6 +2821,9 @@ export const handler = async (event: FnUrlEvent) => {
     return reply(404, { error: 'Not found' })
   } catch (err) {
     if (err instanceof ApiError) {
+      // Every refusal, with the path. 4xx used to leave no trace at all, which made a
+      // driver's "Retry" screen impossible to diagnose from here.
+      console.warn('[driver-app-api] refused', { status: err.status, path: event.rawPath ?? '', error: err.message })
       return reply(err.status, { error: err.message })
     }
     console.error('[driver-app-api] unhandled error', err)
