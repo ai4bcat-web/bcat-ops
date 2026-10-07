@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useAppStore } from '@/store/useAppStore'
 import { apptOutstanding, requiresApptProofs } from '@/lib/apptQueue'
-import { revenueByFleet, type RevenueSplit } from '@/lib/revenueByFleet'
+import { revenueByFleet, loadsByFleet, type RevenueSplit, type LoadsSplit } from '@/lib/revenueByFleet'
 import type { Driver, Load } from '@/types'
 
 export type DateRangeKey = 'today' | 'this-week' | 'this-month' | 'this-quarter' | 'this-year'
@@ -24,6 +24,8 @@ export interface DashboardMetrics {
   revenue: number          // sum of load.rate in cents
   /** The same revenue, split by which fleet earned it. Parts always add to `revenue`. */
   revenueSplit: RevenueSplit
+  /** The same loads, split by which fleet ran them. Parts always add to `totalLoads`. */
+  loadsSplit: LoadsSplit
   revenueDelta: number     // revenue − previous-period revenue (cents)
   revenueConnected: boolean // false when all rates are null
   brokerLoads: number         // count of broker-covered loads in range
@@ -151,6 +153,7 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
      * breakdown end up disagreeing.
      */
     const revenueSplit     = revenueByFleet(current, drivers)
+    const loadsSplit       = loadsByFleet(current, drivers)
     const prevRevenue      = previous.reduce((sum, l) => sum + (l.rate ?? 0), 0)
     const revenueConnected = current.some((l) => l.rate != null && l.rate > 0)
     const revenueConnectedPrev = previous.some((l) => l.rate != null && l.rate > 0)
@@ -215,6 +218,7 @@ export function useDashboardMetrics(rangeKey: DateRangeKey): DashboardMetrics {
       needsAppt,
       revenue,
       revenueSplit,
+      loadsSplit,
       revenueDelta,
       revenueConnected,
       brokerLoads,

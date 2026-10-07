@@ -3,7 +3,7 @@
  * about whose load is whose. Those are the two ways a split like this goes quietly wrong.
  */
 import { describe, it, expect } from 'vitest'
-import { revenueByFleet, fleetBucketOf, loadFleetBucket, type FleetDriver } from './revenueByFleet'
+import { revenueByFleet, loadsByFleet, fleetBucketOf, loadFleetBucket, type FleetDriver } from './revenueByFleet'
 import { driverGroupOf } from './driverFilter'
 import type { Driver, Load } from '../types'
 
@@ -120,5 +120,40 @@ describe('revenueByFleet', () => {
     const s = revenueByFleet([], [])
     expect(s.total).toBe(0)
     expect(s.unrated).toBe(0)
+  })
+})
+
+describe('loadsByFleet — the Total Loads breakdown', () => {
+  const split = (loads: Load[]) => loadsByFleet(loads, DRIVERS)
+  const count = (s: ReturnType<typeof loadsByFleet>, id: string) => s.byBucket.find((b) => b.bucket === id)!.loads
+
+  it('counts loads per fleet', () => {
+    const s = split([load(1, 'ivan'), load(1, 'ivan'), load(1, 'amz'), load(1, 'box')])
+    expect(count(s, 'IVAN')).toBe(2)
+    expect(count(s, 'OWNER_OP')).toBe(1)
+    expect(count(s, 'BOX_TRUCK')).toBe(1)
+  })
+
+  it('counts a load with NO rate — it is still a load somebody ran', () => {
+    // This is why it is not derived from the revenue split, which skips unrated loads.
+    const s = split([load(null, 'ivan'), load(0, 'amz'), load(100, 'box')])
+    expect(s.total).toBe(3)
+    expect(count(s, 'IVAN')).toBe(1)
+    expect(count(s, 'OWNER_OP')).toBe(1)
+  })
+
+  it('always adds up to the headline, including broker and driverless loads', () => {
+    const s = split([load(1, 'ivan'), load(null, 'bk'), load(1, null), load(1, 'deleted-driver')])
+    expect(s.byBucket.reduce((n, b) => n + b.loads, 0)).toBe(s.total)
+    expect(s.total).toBe(4)
+    expect(count(s, 'BROKER')).toBe(1)
+    expect(count(s, 'UNASSIGNED')).toBe(2)
+  })
+
+  it('keeps the same order and labels as the revenue split', () => {
+    const r = revenueByFleet([], DRIVERS)
+    const l = loadsByFleet([], DRIVERS)
+    expect(l.byBucket.map((b) => b.bucket)).toEqual(r.byBucket.map((b) => b.bucket))
+    expect(l.byBucket.map((b) => b.label)).toEqual(r.byBucket.map((b) => b.label))
   })
 })

@@ -91,3 +91,15 @@ describe('needsAppt — Batory only', () => {
     expect(metrics().needsAppt).toBe(0)
   })
 })
+
+describe('loadsSplit — always adds to totalLoads', () => {
+  it('reconciles even when loads have no rate', () => {
+    state.loads = [
+      unbooked({ id: 'l1', customer: 'A', pickupDriverId: 'd1', rate: null } as Partial<Load>),
+      unbooked({ id: 'l2', customer: 'B', pickupDriverId: null, rate: 50000 } as Partial<Load>),
+    ]
+    const m = metrics()
+    expect(m.loadsSplit.total).toBe(m.totalLoads)
+    expect(m.loadsSplit.byBucket.reduce((n, b) => n + b.loads, 0)).toBe(m.totalLoads)
+  })
+})

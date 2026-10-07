@@ -13,7 +13,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { useDashboardMetrics, type DateRangeKey } from '@/hooks/useDashboardMetrics'
 import { useFactoringItems } from '@/hooks/useFactoringItems'
 import { factoringTotals, type FactoringTotals } from '@/lib/factoringTotals'
-import type { RevenueSplit } from '@/lib/revenueByFleet'
+import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
@@ -340,6 +340,76 @@ function RevenueCard({ split, delta, deltaDir, sublabel, connected }: {
   )
 }
 
+
+/**
+ * Total loads, and which fleet ran them — the same shape as the revenue card beside it,
+ * so the two read as one picture. A count of 60 says nothing about whether the owner
+ * operators carried the month or Ivan's drivers did; the rows do.
+ *
+ * The breakdown counts every load, rated or not, so it always adds to the headline.
+ */
+function LoadsCard({ split, delta, deltaDir, sublabel }: {
+  split: LoadsSplit
+  delta: string
+  deltaDir: 'up' | 'down' | 'neutral'
+  sublabel: string
+}) {
+  const shown = split.byBucket.filter((b) => b.loads > 0)
+  return (
+    <div style={{ background: 'var(--ds-surface)', borderRadius: 12, border: '1px solid var(--ds-border)',
+      boxShadow: 'var(--sh-sm)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: -40, right: -40, width: 140, height: 140, borderRadius: '50%',
+        background: '#1ea8f3', filter: 'blur(60px)', opacity: 0.18, pointerEvents: 'none' }} />
+      <div style={{ padding: '16px 18px', position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+            Total Loads
+          </div>
+          <div style={{ width: 30, height: 30, borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ds-t2)' }}>
+            <Package size={15} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+          <div style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.1,
+            color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+            {split.total}
+          </div>
+          <DualDeltaBadge delta={delta} dir={deltaDir} />
+        </div>
+
+        {split.total > 0 && (
+          <div style={{ display: 'flex', height: 6, borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
+            {shown.map((b) => (
+              <div
+                key={b.bucket}
+                title={`${b.label}: ${b.loads}`}
+                style={{ width: `${(b.loads / split.total) * 100}%`, background: FLEET_COLORS[b.bucket] }}
+              />
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {shown.length === 0 && <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>{sublabel}</div>}
+          {shown.map((b) => (
+            <div key={b.bucket} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>
+                <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: FLEET_COLORS[b.bucket], flexShrink: 0 }} />
+                {b.label}
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>
+                {b.loads}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function IconBtn({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
     <button title={label} style={{
@@ -393,7 +463,6 @@ export function DashboardPage() {
   )
 
   // Sparklines from real load-by-day data
-  const loadsSpark = useMemo(() => metrics.loadsByDay.map((d) => d.count), [metrics.loadsByDay])
 
   // Load status counts from store (for donut)
   const statusCounts = useMemo(() => {
@@ -458,16 +527,11 @@ export function DashboardPage() {
 
         {/* ── KPI strip ────────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(5, minmax(0, 1fr))', gap: 16 }}>
-          <KpiCard
-            label="Total Loads"
-            value={metrics.totalLoads}
-            sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
+          <LoadsCard
+            split={metrics.loadsSplit}
             delta={metrics.totalLoadsDelta > 0 ? `+${metrics.totalLoadsDelta}` : String(metrics.totalLoadsDelta)}
             deltaDir={metrics.totalLoadsDelta > 0 ? 'up' : metrics.totalLoadsDelta < 0 ? 'down' : 'neutral'}
-            spark={loadsSpark.length >= 2 ? loadsSpark : undefined}
-            sparkColor="#1ea8f3"
-            accent="#1ea8f3"
-            icon={<Package size={15} />}
+            sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
           />
           {/*
             The factoring queue in money, not a derived "past delivery not invoiced" guess.

@@ -113,3 +113,41 @@ export function revenueByFleet(
     unrated,
   }
 }
+
+export interface FleetLoads {
+  bucket: FleetBucket
+  label: string
+  loads: number
+}
+
+export interface LoadsSplit {
+  byBucket: FleetLoads[]
+  total: number
+}
+
+/**
+ * How many loads each fleet ran — EVERY load, whether or not it has a rate.
+ *
+ * Not derived from revenueByFleet on purpose. That one skips a load with no rate, which is
+ * right for a dollar figure and wrong for a count: a load with the rate still blank is
+ * still a load somebody ran. Counting through the revenue split would have left the Total
+ * Loads headline disagreeing with its own breakdown by exactly the unrated loads.
+ *
+ * Same buckets, same attribution and same order as the revenue split, so the two cards
+ * on the dashboard read as one picture.
+ */
+export function loadsByFleet(
+  loads: Pick<Load, 'pickupDriverId' | 'deliveryDriverId'>[],
+  drivers: FleetDriver[],
+): LoadsSplit {
+  const byId = new Map(drivers.map((d) => [d.id, d]))
+  const counts = new Map<FleetBucket, number>()
+  for (const load of loads) {
+    const bucket = loadFleetBucket(load, byId)
+    counts.set(bucket, (counts.get(bucket) ?? 0) + 1)
+  }
+  return {
+    byBucket: ORDER.map((bucket) => ({ bucket, label: FLEET_BUCKET_LABEL[bucket], loads: counts.get(bucket) ?? 0 })),
+    total: loads.length,
+  }
+}
