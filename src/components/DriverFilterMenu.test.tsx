@@ -60,16 +60,17 @@ describe('DriverFilterMenu', () => {
         onChange={vi.fn()}
       />,
     )
-    expect(screen.getByRole('button', { name: 'Drivers shown: Ivan + brokered' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Drivers shown: All drivers' })).toBeInTheDocument()
   })
 
-  it('shows Ivan drivers checked and owner operators unchecked by default', () => {
+  it('shows EVERY driver checked by default — Ivan and owner operators alike', () => {
+    // The board used to open with owner operators off, and kept producing "why isn't this
+    // load on the calendar?" from anyone who did not know a filter was on.
     open(defaultVisibleDriverIds(DRIVERS))
 
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Alvaro' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Bruno' })).toHaveAttribute('aria-checked', 'true')
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Chad' })).toHaveAttribute('aria-checked', 'false')
-    expect(screen.getByRole('menuitemcheckbox', { name: 'Dina' })).toHaveAttribute('aria-checked', 'false')
+    for (const name of ['Alvaro', 'Bruno', 'Chad', 'Dina']) {
+      expect(screen.getByRole('menuitemcheckbox', { name })).toHaveAttribute('aria-checked', 'true')
+    }
   })
 
   it('OFFERS the broker pseudo-drivers, in their own group', () => {

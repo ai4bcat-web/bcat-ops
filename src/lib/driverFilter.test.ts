@@ -84,15 +84,16 @@ describe('who is offered in the picker', () => {
 })
 
 describe('the default selection', () => {
-  it('shows Ivan drivers AND brokered loads, and hides owner operators', () => {
-    // Brokered belongs in the default: NEED TO COVER is freight with nobody on it yet,
-    // which is the most urgent thing a dispatch board can show.
-    expect(defaultVisibleDriverIds(ALL)).toEqual(['ivan-1', 'ivan-2', 'bk-1'])
+  it('shows EVERY driver — Ivan, brokered and owner operators alike', () => {
+    // A board that hides freight by default is one people learn not to trust; "why isn't
+    // PRO X on the calendar?" was the question it kept producing.
+    const ids = defaultVisibleDriverIds(ALL)
+    expect(ids).toEqual(expect.arrayContaining(['ivan-1', 'ivan-2', 'bk-1', 'oo-1', 'oo-2']))
+    expect(ids).not.toContain('x-1')   // inactive stays out, as everywhere
   })
 
-  it('is empty rather than everything when there are no Ivan or brokered drivers', () => {
-    // Defaulting to "all" here would quietly put every owner-operator load on the board.
-    expect(defaultVisibleDriverIds([AMZ, OO])).toEqual([])
+  it('is the same list the loads page opens on', () => {
+    expect(defaultVisibleDriverIds(ALL)).toEqual(allSelectableDriverIds(ALL))
   })
 })
 
@@ -148,8 +149,12 @@ describe('loadVisibleForDrivers', () => {
 })
 
 describe('driverFilterSummary', () => {
-  it('names the default state rather than counting it', () => {
+  it('names the dispatch-only view rather than counting it', () => {
     expect(driverFilterSummary(ALL, visible('ivan-1', 'ivan-2', 'bk-1'))).toBe('Ivan + brokered')
+  })
+
+  it('reads All drivers in the default state', () => {
+    expect(driverFilterSummary(ALL, new Set(defaultVisibleDriverIds(ALL)))).toBe('All drivers')
   })
 
   it('says all drivers when everyone is shown', () => {
@@ -181,10 +186,8 @@ describe('allSelectableDriverIds — the Loads page default', () => {
     expect(ids).toContain('oo-2')
   })
 
-  it('is a superset of the calendar default', () => {
-    const all = new Set(allSelectableDriverIds(ALL))
-    for (const id of defaultVisibleDriverIds(ALL)) expect(all.has(id)).toBe(true)
-    expect(all.size).toBeGreaterThan(defaultVisibleDriverIds(ALL).length)
+  it('matches the calendar default, now that both open on everybody', () => {
+    expect(new Set(allSelectableDriverIds(ALL))).toEqual(new Set(defaultVisibleDriverIds(ALL)))
   })
 
   it('includes brokered and leaves out inactive people, same as the picker', () => {

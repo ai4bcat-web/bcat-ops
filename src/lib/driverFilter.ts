@@ -11,13 +11,11 @@
  * they disagree the safer read is OWNER_OP, because a stray owner-operator load on the
  * dispatch board is less confusing than an Ivan load silently missing from it.
  *
- * The two pages that filter by this want opposite defaults, which is why the default is
- * never baked in here:
- *
- *  - the CALENDAR is a dispatch board, so it opens on Ivan's drivers and owner-operator
- *    loads are switched on when someone wants them;
- *  - the LOADS page is the full record of the freight, so it opens on everybody. A page
- *    that silently omitted a fleet would be a page you cannot trust to be complete.
+ * Both pages that filter by this now open on EVERYBODY. The calendar used to open on
+ * Ivan's drivers alone — reasoned from what dispatch does most — and that kept producing
+ * "why isn't this load on the calendar?" from anyone who did not know a filter was on. A
+ * board that hides freight by default is one people learn not to trust; narrowing it is a
+ * single click on a group header, which is the cheap direction.
  *
  * Pure: no store, no clock. The one exception is the localStorage pair at the bottom,
  * which is guarded and falls back to "nothing chosen".
@@ -73,19 +71,17 @@ export function driversInGroup<T extends FilterableDriver>(drivers: T[], group: 
 }
 
 /**
- * The default selection: Ivan's own drivers AND the brokered loads.
+ * The default selection: EVERY driver.
  *
- * Brokered belongs in the default even though it is not a person. A load marked BROKER
- * NEED TO COVER is freight with nobody on it yet — the most urgent thing the board can
- * show — and one marked BROKER COVERED still moves on a day somebody is planning around.
- * Owner-operators stay out by default for the reason at the top of this file: they bring
- * their own work and are settled elsewhere.
+ * It used to open on Ivan's drivers and the brokered loads, with owner-operators switched
+ * off. That was reasoned from what dispatch does most, and it kept producing the same
+ * support question — "why isn't PRO X on the calendar?" — from anyone who did not know a
+ * filter was on. A board that hides freight by default is a board people learn not to
+ * trust, and the one-click group toggles make narrowing it cheap for anyone who wants to.
+ * So the calendar now opens showing everything, the same as the loads page.
  */
 export function defaultVisibleDriverIds(drivers: FilterableDriver[]): string[] {
-  return [
-    ...driversInGroup(drivers, 'IVAN'),
-    ...driversInGroup(drivers, 'BROKER'),
-  ].map((d) => d.id)
+  return allSelectableDriverIds(drivers)
 }
 
 /** Every driver id on a load, across its stops and the legacy mirrored fields. */
@@ -132,7 +128,8 @@ export function driverFilterSummary(
   const allIvan = ivan.length > 0 && ivan.every((d) => visibleDriverIds.has(d.id))
   const allBrokers = brokers.every((d) => visibleDriverIds.has(d.id))
   const noOwnerOps = ownerOps.every((d) => !visibleDriverIds.has(d.id))
-  // The default deserves its own words; a bare count would read as an odd custom state.
+  // The dispatch-only view deserves its own words; a bare count would read as an odd
+  // custom state to the person who chose it.
   if (allIvan && allBrokers && noOwnerOps && shown.length === ivan.length + brokers.length) {
     return 'Ivan + brokered'
   }
