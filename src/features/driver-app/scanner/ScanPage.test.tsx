@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import '@testing-library/jest-dom/vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import ScanPage from './ScanPage'
@@ -47,6 +48,7 @@ const apiMocks = vi.hoisted(() => {
     submitPod: vi.fn(),
     fetchSubmissions: vi.fn(),
     fetchCurrentLoad: vi.fn(),
+    attachSubmissionToLoad: vi.fn(),
     DriverApiError,
     ResumableDriverApiError,
   }
@@ -190,5 +192,60 @@ describe('ScanPage', () => {
     await waitFor(() => expect(input.value).toBe('13364'))
     fireEvent.change(input, { target: { value: 'OTHER-LOAD' } })
     expect(input.value).toBe('OTHER-LOAD')
+  })
+})
+
+/**
+ * The Ivan paperwork page hands a load over as `ref` (the PRO) and `loadId`; the
+ * owner-operator settlement hands it over as `pro`. Both have to land the driver straight on
+ * the camera with the PRO filled in, and an Ivan scan has to end up LINKED to its load —
+ * it used to arrive unattached, because this screen only ever read `pro`.
+ */
+describe('ScanPage — the Ivan paperwork hand-off', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    apiMocks.fetchSubmissions.mockResolvedValue([])
+    apiMocks.fetchCurrentLoad.mockResolvedValue(null)
+    apiMocks.submitStandalonePod.mockResolvedValue('sub-1')
+    apiMocks.attachSubmissionToLoad.mockResolvedValue({ submissionId: 'sub-1', loadId: 'load-9', proNumber: '14565' })
+  })
+
+  it('opens straight on the camera with the PRO filled in, and links the POD to the load', async () => {
+    renderAt('/driver/scan?kind=pod&ref=14565&loadId=load-9')
+
+    // No "which load?" picker — the load came with us.
+    expect(screen.queryByText(/Choose a load for this POD/i)).toBeNull()
+    fireEvent.click(await screen.findByTestId('capture-done'))
+
+    await screen.findByRole('button', { name: /Send to office/i })
+    expect(screen.getByLabelText(/Reference #|PRO/i)).toHaveValue('14565')
+    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+
+    await waitFor(() => expect(apiMocks.attachSubmissionToLoad).toHaveBeenCalledWith('sub-1', 'load-9'))
+    expect(apiMocks.submitStandalonePod.mock.calls[0][0].referenceNumber).toBe('14565')
+    // Linked, so the success copy must not call it unattached.
+    await screen.findByText(/sent|received|office/i)
+    expect(screen.queryByText(/no load number/i)).toBeNull()
+  })
+
+  it('still counts as sent when the link step fails — the pages are already with the office', async () => {
+    apiMocks.attachSubmissionToLoad.mockRejectedValue(new apiMocks.DriverApiError(500, 'nope'))
+    renderAt('/driver/scan?kind=pod&ref=14565&loadId=load-9')
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    await screen.findByRole('button', { name: /Send to office/i })
+    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+    await waitFor(() => expect(apiMocks.attachSubmissionToLoad).toHaveBeenCalled())
+    // Not the error screen.
+    await waitFor(() => expect(screen.queryByText(/could not send your pages/i)).toBeNull())
+    expect(apiMocks.submitStandalonePod).toHaveBeenCalledTimes(1)
+  })
+
+  it('never calls the link step on the owner-operator path, which has no load id', async () => {
+    renderAt('/driver/scan?kind=pod&pro=14538')
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    await screen.findByRole('button', { name: /Send to office/i })
+    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+    await waitFor(() => expect(apiMocks.submitStandalonePod).toHaveBeenCalledTimes(1))
+    expect(apiMocks.attachSubmissionToLoad).not.toHaveBeenCalled()
   })
 })

@@ -60,3 +60,19 @@ describe('scan intent', () => {
     Object.defineProperty(window, 'sessionStorage', original)
   })
 })
+
+describe('scan intent — the Ivan hand-off', () => {
+  beforeEach(() => sessionStorage.clear())
+
+  it('carries the load id through a relaunch, so the resumed scan still links to it', () => {
+    rememberScanIntent({ kind: 'pod', pro: '14565', loadId: 'load-9' })
+    const intent = readScanIntent()
+    expect(intent?.loadId).toBe('load-9')
+    expect(scanIntentPath(intent!)).toBe('/driver/scan?kind=pod&pro=14565&loadId=load-9')
+  })
+
+  it('leaves loadId off the path when there was none — the owner-operator shape', () => {
+    rememberScanIntent({ kind: 'pod', pro: '14538' })
+    expect(scanIntentPath(readScanIntent()!)).toBe('/driver/scan?kind=pod&pro=14538')
+  })
+})

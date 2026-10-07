@@ -25,6 +25,8 @@ export interface ScanIntent {
   kind: 'pod' | 'ratecon'
   pro?: string
   submissionId?: string
+  /** The load the Ivan paperwork page handed over, so the resumed scan still links to it. */
+  loadId?: string
   /** Epoch ms, so a stale intent can be ignored rather than acted on. */
   at: number
 }
@@ -58,6 +60,7 @@ export function readScanIntent(now = Date.now()): ScanIntent | null {
       kind: parsed.kind,
       pro: typeof parsed.pro === 'string' ? parsed.pro : undefined,
       submissionId: typeof parsed.submissionId === 'string' ? parsed.submissionId : undefined,
+      loadId: typeof parsed.loadId === 'string' ? parsed.loadId : undefined,
       at: parsed.at,
     }
   } catch {
@@ -70,5 +73,6 @@ export function scanIntentPath(intent: ScanIntent): string {
   const params = new URLSearchParams({ kind: intent.kind })
   if (intent.pro) params.set('pro', intent.pro)
   if (intent.submissionId) params.set('submissionId', intent.submissionId)
+  if (intent.loadId) params.set('loadId', intent.loadId)
   return `/driver/scan?${params.toString()}`
 }

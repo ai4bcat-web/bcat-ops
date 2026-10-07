@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
+  attachSubmissionToLoad,
   DriverApiError,
   fetchCurrentLoad,
   fetchSubmissions,
@@ -49,13 +50,23 @@ export default function ScanPage() {
    * settlement. It answers the only question the picker screen was there to ask, so with
    * it the scanner opens straight on the camera.
    */
-  const initialPro = (searchParams.get('pro') ?? '').trim()
+  /*
+   * Two apps hand a load to this screen two different ways, and both have to work.
+   *
+   * The owner-operator settlement sends `pro`. The Ivan paperwork page sends `ref` — which
+   * IS the PRO, see PaperworkLoad.reference — and the load's `id` as `loadId`. This screen
+   * only ever read `pro`, so an Ivan driver who tapped Send POD on a load was dropped into
+   * the generic "which load?" picker with nothing filled in, and the load link was thrown
+   * away: their POD arrived unattached unless whatever they typed happened to match.
+   */
+  const initialPro = (searchParams.get('pro') ?? searchParams.get('ref') ?? '').trim()
+  const initialLoadId = (searchParams.get('loadId') ?? '').trim() || null
 
   const initialPhase: Phase = useMemo(() => {
     if (initialKind === 'RATECON') return 'capture'
-    if (initialKind === 'POD') return initialSubmissionId || initialPro ? 'capture' : 'select'
+    if (initialKind === 'POD') return initialSubmissionId || initialPro || initialLoadId ? 'capture' : 'select'
     return 'choose'
-  }, [initialKind, initialSubmissionId, initialPro])
+  }, [initialKind, initialSubmissionId, initialPro, initialLoadId])
 
   const [phase, setPhase] = useState<Phase>(initialPhase)
   const [kind, setKind] = useState<SubmissionKind | null>(initialKind)
@@ -103,8 +114,9 @@ export default function ScanPage() {
       kind: initialKind === 'POD' ? 'pod' : 'ratecon',
       pro: initialPro || undefined,
       submissionId: initialSubmissionId || undefined,
+      loadId: initialLoadId || undefined,
     })
-  }, [initialKind, initialPro, initialSubmissionId])
+  }, [initialKind, initialPro, initialSubmissionId, initialLoadId])
 
   useEffect(() => {
     let cancelled = false
@@ -183,14 +195,28 @@ export default function ScanPage() {
       } else if (selectedSubmissionId) {
         await submitPod(selectedSubmissionId, pages, { resume: !!resumeFromId })
       } else {
-        await submitStandalonePod({
+        const submissionId = await submitStandalonePod({
           pages,
           referenceNumber: referenceNumber.trim() || undefined,
           note: note.trim() || undefined,
           resumeFromId: resumeFromId ?? undefined,
         })
+        /*
+         * Came from a specific load: link the POD to it on the server, which checks that
+         * both are this driver's. This is what makes the POD count against THAT load on
+         * the office's screens. Best-effort — the pages are already sent, and a POD that
+         * reached the office with its PRO typed in beats one that never left the phone
+         * because a second request failed.
+         */
+        if (initialLoadId) {
+          try {
+            await attachSubmissionToLoad(submissionId, initialLoadId)
+          } catch {
+            // The PRO is on the submission; the office can link it from the queue.
+          }
+        }
       }
-      setSentUnattached(kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim())
+      setSentUnattached(kind === 'POD' && !selectedSubmissionId && !referenceNumber.trim() && !initialLoadId)
       setResumeFromId(null)
       // Done with it: a relaunch must not drop them back into a job they finished.
       forgetScanIntent()
@@ -208,7 +234,7 @@ export default function ScanPage() {
     } finally {
       setBusy(false)
     }
-  }, [kind, pages, referenceNumber, note, resumeFromId, selectedSubmissionId])
+  }, [kind, pages, referenceNumber, note, resumeFromId, selectedSubmissionId, initialLoadId])
 
   const reset = useCallback(() => {
     setKind(null)
