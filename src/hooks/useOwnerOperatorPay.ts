@@ -39,7 +39,7 @@ import {
   type PayDebitInput,
 } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
-import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
+import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
 import { ownerOpTripsFor, ownerOpWeekAtOrAfterFirst, type OwnerOpTrip, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
 import { otrSettlementReadiness } from '@/lib/otrSettlementFields'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
@@ -290,7 +290,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
         // boundary is a fixed date: through Amazon's last week they stay on the Amazon
         // statement and move here afterwards. periodStart is clamped to the first
         // owner-operator week above, so every week rendered here owns its charges.
-        const fuelTxns = matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end)
+        const fuelTxns = matchedFuelForCard(fuelTxs, effectiveFuelCard(setting, periodStart), periodStart, end)
         const fuel = sumFuel(fuelTxns)
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
@@ -302,7 +302,7 @@ export function useOwnerOperatorPay(rawPeriodStart: string): OwnerOperatorPaySta
 
         const ded: PayDeductionInput[] = [
           ...fixed.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
-          ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
+          ...(fuel > 0 ? [{ label: `Fuel (card ${effectiveFuelCard(setting, periodStart) ?? ''})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 

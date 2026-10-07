@@ -17,7 +17,7 @@ import {
   type FixedExpenseInput,
   type PayRateOverride,
 } from '../../../src/lib/driverPay'
-import { matchedFuelForCard, sumFuel } from '../../../src/lib/driverFuel'
+import { matchedFuelForCard, sumFuel, effectiveFuelCard, type FuelCardWindow } from '../../../src/lib/driverFuel'
 import { tripHoldReason, PAY_HOLD_LABEL, type PayHoldReason } from '../../../src/lib/payHold'
 import { ratePerMile } from '../../../src/lib/ownerOperatorTrips'
 import { creditLineLabel } from '../../../src/lib/payCredits'
@@ -135,6 +135,7 @@ export interface RawDriverPaySetting {
   payPercent: number
   expensesBeforePercent: boolean
   fuelCardNumber?: string | null
+  fuelCardHistory?: unknown
   fixedExpenses?: unknown
   rateHistory?: unknown
 }
@@ -209,6 +210,10 @@ export function buildSettlement(
   fuelTransactions: RawFuelTransaction[],
 ): Settlement {
   const end = periodEnd(periodStart)
+  const weekCard = effectiveFuelCard(
+    { fuelCardNumber: setting.fuelCardNumber, fuelCardHistory: parseJsonArray<FuelCardWindow>(setting.fuelCardHistory) },
+    periodStart,
+  )
   const rateModel = effectivePayRate(
     {
       payPercent: safeNumber(setting.payPercent),
@@ -262,7 +267,8 @@ export function buildSettlement(
   const fuel = sumFuel(
     matchedFuelForCard(
       fuelTransactions,
-      setting.fuelCardNumber,
+      // The card for THIS week — a swapped card must not re-match already-paid weeks.
+      weekCard,
       periodStart,
       end,
     ),
@@ -276,7 +282,7 @@ export function buildSettlement(
     ...fixed
       .filter((f) => !f.afterPercent)
       .map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
-    ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber ?? ''})`, amount: fuel }] : []),
+    ...(fuel > 0 ? [{ label: `Fuel (card ${weekCard ?? ''})`, amount: fuel }] : []),
     ...deductions.map((d) => ({ label: d.label, amount: safeNumber(d.amount) })),
   ]
 

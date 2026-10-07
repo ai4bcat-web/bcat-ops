@@ -2547,6 +2547,8 @@ export interface DriverPaySetting {
   expensesBeforePercent: boolean
   email?:                string | null
   fuelCardNumber?:       string | null
+  /** Dated card windows — see FuelCardWindow in src/lib/driverFuel.ts. */
+  fuelCardHistory?:      import('./driverFuel').FuelCardWindow[] | null
   fixedExpenses?:        FixedExpense[] | null
   /** Pinned past rate windows — see PayRateOverride in src/lib/driverPay.ts. */
   rateHistory?:          import('./driverPay').PayRateOverride[] | null
@@ -2556,15 +2558,17 @@ export interface DriverPaySetting {
   updatedAt:             string
 }
 
-const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fixedExpenses rateHistory active notes createdAt updatedAt`
+const PAY_SETTING_FIELDS = `id driverId payGroup payPercent expensesBeforePercent email fuelCardNumber fuelCardHistory fixedExpenses rateHistory active notes createdAt updatedAt`
 
-function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown }): DriverPaySetting {
+function normalizePaySetting(raw: DriverPaySetting & { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }): DriverPaySetting {
   const v = unwrapJson(raw.fixedExpenses)
   const h = unwrapJson(raw.rateHistory)
+  const c = unwrapJson(raw.fuelCardHistory)
   return {
     ...raw,
     fixedExpenses: Array.isArray(v) ? v as FixedExpense[] : [],
     rateHistory: Array.isArray(h) ? h as DriverPaySetting['rateHistory'] : [],
+    fuelCardHistory: Array.isArray(c) ? c as DriverPaySetting['fuelCardHistory'] : [],
   }
 }
 
@@ -2575,10 +2579,11 @@ export async function listDriverPaySettings(): Promise<DriverPaySetting[]> {
   return (result.data.listDriverPaySettings.items ?? []).map(normalizePaySetting)
 }
 
-function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown }>(input: T): T {
+function serializePaySetting<T extends { fixedExpenses?: unknown; rateHistory?: unknown; fuelCardHistory?: unknown }>(input: T): T {
   let out: T = input
   if (out.fixedExpenses != null) out = { ...out, fixedExpenses: JSON.stringify(out.fixedExpenses) }
   if (out.rateHistory != null) out = { ...out, rateHistory: JSON.stringify(out.rateHistory) }
+  if (out.fuelCardHistory != null) out = { ...out, fuelCardHistory: JSON.stringify(out.fuelCardHistory) }
   return out
 }
 

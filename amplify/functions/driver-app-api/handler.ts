@@ -216,6 +216,7 @@ interface DriverPaySettingRow {
   expensesBeforePercent: boolean
   email?: string | null
   fuelCardNumber?: string | null
+  fuelCardHistory?: unknown
   fixedExpenses?: unknown
   rateHistory?: unknown
 }

@@ -366,6 +366,10 @@ const schema = a.schema({
       expensesBeforePercent: a.boolean().required(), // true = % applied AFTER expenses (Chad)
       email:                 a.string(),             // where the weekly report is sent
       fuelCardNumber:        a.string(),             // EFS card prefix → pulls weekly fuel
+      // Dated card windows [{ from, until, cardNumber }] — pay weeks starting in
+      // [from, until) match THAT card instead of fuelCardNumber, so swapping a driver's
+      // card never rewrites the fuel on already-paid weeks. Same shape as rateHistory.
+      fuelCardHistory:       a.json(),
       // Dated expense revisions [{ label, amount, from, until, revisionId, expenseId,
       // recordedAt/By, endedAt/By }] — prorated by calendar day per settlement; a change
       // ends the old revision and appends a new one, so history is never rewritten.

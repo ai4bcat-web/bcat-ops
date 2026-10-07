@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { matchedFuelForCard, sumFuel, isFuelTx } from './driverFuel'
+import { matchedFuelForCard, sumFuel, isFuelTx, effectiveFuelCard } from './driverFuel'
 import type { FuelTransaction } from '@/lib/apiClient'
 
 function tx(p: Partial<FuelTransaction>): FuelTransaction {
@@ -55,5 +55,39 @@ describe('matchedFuelForCard', () => {
     expect(isFuelTx({ itemCategory: 'OTHER', fuelType: 'ULSD' })).toBe(false)
     expect(isFuelTx({ itemCategory: 'FUEL', fuelType: 'SCLE' })).toBe(true)
     expect(isFuelTx({ itemCategory: undefined, fuelType: 'DEFD' })).toBe(true)
+  })
+})
+
+/**
+ * A swapped fuel card must not rewrite paid history. Chad moves from 00056 to 00106 for
+ * the week starting 2026-10-04; every week before that still matches 00056.
+ */
+describe('effectiveFuelCard — pinned card windows', () => {
+  const setting = {
+    fuelCardNumber: '00106',
+    fuelCardHistory: [{ from: '1970-01-01', until: '2026-10-04', cardNumber: '00056' }],
+  }
+
+  it('matches last week against the OLD card', () => {
+    expect(effectiveFuelCard(setting, '2026-09-27')).toBe('00056')
+  })
+
+  it('matches this week and onward against the NEW card', () => {
+    expect(effectiveFuelCard(setting, '2026-10-04')).toBe('00106')
+    expect(effectiveFuelCard(setting, '2026-10-11')).toBe('00106')
+  })
+
+  it('is half-open: the boundary week belongs to the new card', () => {
+    expect(effectiveFuelCard(setting, '2026-10-03')).toBe('00056')
+    expect(effectiveFuelCard(setting, '2026-10-04')).toBe('00106')
+  })
+
+  it('falls back to the current card when there is no history', () => {
+    expect(effectiveFuelCard({ fuelCardNumber: '00049' }, '2026-10-04')).toBe('00049')
+    expect(effectiveFuelCard({ fuelCardNumber: '00049', fuelCardHistory: null }, '2020-01-01')).toBe('00049')
+  })
+
+  it('is null when a driver has no card at all', () => {
+    expect(effectiveFuelCard({ fuelCardNumber: null }, '2026-10-04')).toBeNull()
   })
 })

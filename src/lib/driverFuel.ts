@@ -88,3 +88,33 @@ export function matchedFuelForCard<T extends FuelTxLike>(
 export function sumFuel(txns: Pick<FuelTxLike, 'amount'>[]): number {
   return Math.round(txns.reduce((s, t) => s + (t.amount || 0), 0) * 100) / 100
 }
+
+/**
+ * A fuel card pinned to a range of pay weeks.
+ *
+ * `from`/`until` are pay-week starts (YYYY-MM-DD), half-open like PayRateOverride: weeks
+ * starting in [from, until) matched this card. Same convention as rateHistory and for the
+ * same reason — a driver's fuel is derived live from the setting, so simply overwriting
+ * fuelCardNumber when a card is swapped would re-match every past week against the new
+ * card and silently zero the fuel on statements that were already paid.
+ */
+export interface FuelCardWindow {
+  from: string
+  until: string
+  cardNumber: string
+}
+
+/**
+ * Which card a pay week's fuel is matched against.
+ *
+ * The pinned window for that week wins; otherwise the current card. Chad on 2026-10-04:
+ * weeks before it match 00056 from a window, weeks from it on match 00106 from the base
+ * field — and last week's statement does not change.
+ */
+export function effectiveFuelCard(
+  setting: { fuelCardNumber?: string | null; fuelCardHistory?: FuelCardWindow[] | null },
+  periodStart: string,
+): string | null {
+  const hit = (setting.fuelCardHistory ?? []).find((w) => w.from <= periodStart && periodStart < w.until)
+  return hit ? hit.cardNumber : (setting.fuelCardNumber ?? null)
+}

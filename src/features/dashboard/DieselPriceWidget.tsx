@@ -86,9 +86,12 @@ export function DieselPriceWidget({ perTruck = false }: { perTruck?: boolean } =
     listDriverPaySettings()
       .then((settings) => {
         if (!alive) return
+        // Current card AND every pinned past card: a swapped card's old fills are still
+        // the owner operator's, and must not start counting as company diesel.
         const cards = settings
-          .filter((s) => (s.payGroup ?? 'AMAZON') === 'AMAZON' && s.active !== false && s.fuelCardNumber)
-          .map((s) => normalizeCard(s.fuelCardNumber))
+          .filter((s) => (s.payGroup ?? 'AMAZON') === 'AMAZON' && s.active !== false)
+          .flatMap((s) => [s.fuelCardNumber, ...(s.fuelCardHistory ?? []).map((w) => w.cardNumber)])
+          .map((c) => normalizeCard(c))
           .filter(Boolean)
         setAmazonCards(new Set(cards))
       })

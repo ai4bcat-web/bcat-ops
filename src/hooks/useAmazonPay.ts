@@ -12,7 +12,7 @@ import {
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type DriverPayStatement, type PayDeductionInput, type PayDebitInput } from '@/lib/driverPay'
-import { matchedFuelForCard, sumFuel, normalizeCard } from '@/lib/driverFuel'
+import { matchedFuelForCard, sumFuel, normalizeCard, effectiveFuelCard } from '@/lib/driverFuel'
 import { creditLineLabel } from '@/lib/payCredits'
 import { duplicateTripIds as dupIdsForWeek } from '@/lib/tripDedup'
 import { compareByOrder } from '@/lib/calendarOrder'
@@ -167,7 +167,7 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
 
         // Fuel pulled live from the driver's EFS card for this 7-day window —
         // real fuel only, de-duplicated, itemized (see matchedFuelForCard).
-        const fuelTxns = carriesCharges ? matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end) : []
+        const fuelTxns = carriesCharges ? matchedFuelForCard(fuelTxs, effectiveFuelCard(setting, periodStart), periodStart, end) : []
         const fuel = sumFuel(fuelTxns)
 
         const oneOffs = carriesCharges
@@ -181,7 +181,7 @@ export function useAmazonPay(requestedWeek: string | null): AmazonPayState {
 
         const ded: PayDeductionInput[] = [
           ...fixed.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
-          ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
+          ...(fuel > 0 ? [{ label: `Fuel (card ${effectiveFuelCard(setting, periodStart) ?? ''})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 

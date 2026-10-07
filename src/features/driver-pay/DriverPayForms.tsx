@@ -634,6 +634,18 @@ export function SettingsModal({ driver, existing, onSave, onClose }: { driver: D
         <Field l="Driver email"><input style={input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="driver@example.com" /></Field>
       </div>
 
+      {(existing?.fuelCardHistory?.length ?? 0) > 0 && (
+        <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t3)', marginBottom: 4 }}>Pinned past fuel cards</div>
+          {existing!.fuelCardHistory!.map((w, i) => (
+            <div key={i} style={{ fontSize: 11.5, color: 'var(--ds-t2)' }}>
+              weeks {w.from === '1970-01-01' ? 'before' : `${w.from} →`} {w.until}: card {w.cardNumber}
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: 'var(--ds-t3)', marginTop: 4 }}>Those weeks keep matching their card — the field above only changes weeks outside the pinned windows.</div>
+        </div>
+      )}
+
       {(existing?.rateHistory?.length ?? 0) > 0 && (
         <div style={{ marginTop: 12, padding: '8px 10px', borderRadius: 8, background: 'var(--ds-bg)', border: '1px solid var(--ds-border)' }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-t3)', marginBottom: 4 }}>Pinned past rate windows</div>

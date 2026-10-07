@@ -5,7 +5,7 @@ import type { Load } from '@/types'
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
-import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
+import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { ownerOpTripsFor, isOwnerOperatorGroup } from '@/lib/ownerOperatorTrips'
@@ -66,7 +66,7 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
         if (driverTrips.length === 0) continue
         const end = periodEnd(periodStart)
 
-        const fuel = sumFuel(matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end))
+        const fuel = sumFuel(matchedFuelForCard(fuelTxs, effectiveFuelCard(setting, periodStart), periodStart, end))
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
         const fixed = effectiveFixedExpenses(setting.fixedExpenses, periodStart, end)
@@ -76,7 +76,7 @@ export function useOwnerOperatorProfitability(): OwnerOperatorProfitabilityState
 
         const ded = [
           ...fixed.filter((f) => !f.afterPercent).map((f) => ({ label: fixedExpenseLineLabel(f), amount: f.amount })),
-          ...(fuel > 0 ? [{ label: `Fuel (card ${setting.fuelCardNumber})`, amount: fuel }] : []),
+          ...(fuel > 0 ? [{ label: `Fuel (card ${effectiveFuelCard(setting, periodStart) ?? ''})`, amount: fuel }] : []),
           ...oneOffs.map((o) => ({ label: o.label, amount: o.amount })),
         ]
 

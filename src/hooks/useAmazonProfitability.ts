@@ -4,7 +4,7 @@ import type { AmazonTrip, DriverPaySetting, DriverPayDeduction, DriverPayCredit 
 import { useFuelTransactions } from './useFuelTransactions'
 import { useDrivers } from './useDrivers'
 import { periodEnd } from './useAmazonPay'
-import { matchedFuelForCard, sumFuel } from '@/lib/driverFuel'
+import { matchedFuelForCard, sumFuel, effectiveFuelCard } from '@/lib/driverFuel'
 import { calcDriverPay, effectivePayRate, effectiveFixedExpenses, fixedExpenseLineLabel, type PayDebitInput } from '@/lib/driverPay'
 import { creditLineLabel } from '@/lib/payCredits'
 import { errorText } from '@/lib/errorText'
@@ -156,7 +156,7 @@ export function useAmazonProfitability(): AmazonProfitabilityState {
         if (driverTrips.length === 0) continue
 
         // Fuel for the window — real fuel only, de-duplicated (shared helper).
-        const fuel = sumFuel(matchedFuelForCard(fuelTxs, setting.fuelCardNumber, periodStart, end))
+        const fuel = sumFuel(matchedFuelForCard(fuelTxs, effectiveFuelCard(setting, periodStart), periodStart, end))
 
         const oneOffs = deductions.filter((x) => x.driverId === setting.driverId && x.periodStart === periodStart)
 
