@@ -22,6 +22,16 @@ interface DriverDocUploadDialogProps {
   drivers: Driver[]
   preselectedDriver?: Driver | null
   preselectedKind?: SubmissionKind
+  /**
+   * The load this upload is for, when opened from one.
+   *
+   * Without it the dialog created a submission with no load and no PRO, and nothing
+   * afterwards could find it again: the next upload for the same load started a second
+   * submission, and the factoring queue got two POD documents for one shipment. With it,
+   * the PRO is filled in, the load id travels with the pages, and a later batch joins
+   * the first.
+   */
+  load?: { id: string; aljexId?: string | null } | null
   onSubmitted: (submission: SubmissionWithDocs) => void
   staffEmail: string
 }
@@ -36,13 +46,15 @@ export function DriverDocUploadDialog({
   drivers,
   preselectedDriver,
   preselectedKind,
+  load,
   onSubmitted,
   staffEmail,
 }: DriverDocUploadDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const loadPro = (load?.aljexId ?? '').trim()
   const [selectedDriverId, setSelectedDriverId] = useState<string>(preselectedDriver?.id ?? '')
   const [kind, setKind] = useState<SubmissionKind>(preselectedKind ?? 'RATECON')
-  const [referenceNumber, setReferenceNumber] = useState('')
+  const [referenceNumber, setReferenceNumber] = useState(loadPro)
   const [note, setNote] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
@@ -67,7 +79,7 @@ export function DriverDocUploadDialog({
   const resetForm = () => {
     setSelectedDriverId(preselectedDriver?.id ?? '')
     setKind(preselectedKind ?? 'RATECON')
-    setReferenceNumber('')
+    setReferenceNumber(loadPro)
     setNote('')
     setFiles([])
     if (fileInputRef.current) fileInputRef.current.value = ''
@@ -97,6 +109,7 @@ export function DriverDocUploadDialog({
         submittedByEmail: staffEmail,
         referenceNumber,
         note,
+        loadId: load?.id,
       })
       toast.success(`${kind === 'RATECON' ? 'Rate confirmation' : 'POD'} uploaded for ${selectedDriver.name}`)
       onSubmitted(submission)
@@ -156,7 +169,7 @@ export function DriverDocUploadDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="reference">Reference # (optional)</Label>
+            <Label htmlFor="reference">{load ? 'PRO #' : 'Reference # (optional)'}</Label>
             <Input
               id="reference"
               value={referenceNumber}
@@ -164,6 +177,11 @@ export function DriverDocUploadDialog({
               placeholder="Load / VRID / PRO #"
               disabled={uploading}
             />
+            {load && (
+              <p className="text-xs text-muted-foreground">
+                Pages uploaded here join any POD already on this load, as one document.
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">

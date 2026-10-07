@@ -51,7 +51,7 @@ describe('paperworkFor', () => {
   it('is red when nothing is on file', () => {
     const index = buildPodIndex({ jobsdoneLoadIds: [], submissions: [] })
     expect(paperworkFor(index, load())).toEqual({
-      pod: { has: false, ref: null }, ratecon: { has: false, ref: null },
+      pod: { has: false, ref: null, pages: null }, ratecon: { has: false, ref: null },
     })
   })
 
@@ -131,5 +131,20 @@ describe('paperworkFor — where the document actually is', () => {
     const cell = paperworkFor(index, load()).pod
     expect(cell.has).toBe(true)
     expect(cell.ref).toBeNull()
+  })
+})
+
+describe('paperworkFor — how many pages', () => {
+  it('carries the POD page count onto the cell', () => {
+    const index = buildPodIndex({
+      jobsdoneLoadIds: [],
+      submissions: [{ loadId: 'l1', referenceNumber: '14517', hasPodDoc: true, podPageCount: 3 }],
+    })
+    expect(paperworkFor(index, load()).pod.pages).toBe(3)
+  })
+
+  it('leaves pages unset on a rate confirmation — only PODs are counted', () => {
+    const index = buildPodIndex({ jobsdoneLoadIds: [], submissions: [], rateconLoadIds: ['l1'] })
+    expect(paperworkFor(index, load()).ratecon.pages).toBeUndefined()
   })
 })

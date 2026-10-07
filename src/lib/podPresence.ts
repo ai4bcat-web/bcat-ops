@@ -45,6 +45,12 @@ export interface PodSubmissionLike {
   hasRateconDoc?: boolean
   /** S3 key of the finished POD — the merged PDF where there is one. */
   podKey?: string | null
+  /**
+   * How many POD pages this submission holds. The grid shows it beside the tick, because
+   * "POD on file" and "all three pages of the POD on file" are different answers and the
+   * office has been chasing the difference by opening every load.
+   */
+  podPageCount?: number | null
   /** S3 key of the finished rate confirmation. */
   rateconKey?: string | null
   /**
@@ -82,6 +88,13 @@ export interface PodIndex {
    * re-sent today does not make a load that was papered a fortnight ago look late.
    */
   podAt: { byLoadId: Map<string, string>; byPro: Map<string, string> }
+  /**
+   * How many POD pages are on file per load, by id and by PRO. The LARGEST count wins
+   * when two submissions claim the same load: the fuller document is the one the queue
+   * will send, and under-reporting pages is what sends somebody looking for a page that
+   * is already there.
+   */
+  podPages: { byLoadId: Map<string, number>; byPro: Map<string, number> }
 }
 
 /**
@@ -123,6 +136,11 @@ export function buildPodIndex(input: {
     if (loadId && key) ratecon.refByLoadId.set(loadId, { kind: 's3', key })
   }
   const podAt = { byLoadId: new Map<string, string>(), byPro: new Map<string, string>() }
+  const podPages = { byLoadId: new Map<string, number>(), byPro: new Map<string, number>() }
+  const notePages = (map: Map<string, number>, key: string, n: number | null | undefined) => {
+    if (!n || n < 1) return
+    if ((map.get(key) ?? 0) < n) map.set(key, n)
+  }
 
   /** Keep the earliest timestamp seen for a key. */
   function noteArrival(map: Map<string, string>, key: string, at: string | null | undefined): void {
@@ -156,10 +174,20 @@ export function buildPodIndex(input: {
     if (s.hasPodDoc) {
       if (loadId) noteArrival(podAt.byLoadId, loadId, s.podUploadedAt)
       if (pro) noteArrival(podAt.byPro, pro, s.podUploadedAt)
+      if (loadId) notePages(podPages.byLoadId, loadId, s.podPageCount)
+      if (pro) notePages(podPages.byPro, pro, s.podPageCount)
     }
   }
 
-  return { pod, ratecon, podAt }
+  return { pod, ratecon, podAt, podPages }
+}
+
+/** How many POD pages are on file for this load, or null when no store could say. */
+export function podPageCount(index: PodIndex, load: PodLoadLike): number | null {
+  const byId = index.podPages.byLoadId.get(load.id)
+  if (byId) return byId
+  const pro = normalizePro(load.aljexId)
+  return (pro && index.podPages.byPro.get(pro)) || null
 }
 
 /** When this load's POD arrived, or null when nothing is on file (or nothing recorded it). */

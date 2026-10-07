@@ -1776,6 +1776,7 @@ export function LoadDrawer() {
           drivers={drivers}
           preselectedDriver={deliveryDriver}
           preselectedKind="POD"
+          load={{ id: load.id, aljexId: load.aljexId }}
           staffEmail={user?.email ?? ''}
           onSubmitted={() => {
             toast.success(`POD uploaded for ${deliveryDriver.name}`)

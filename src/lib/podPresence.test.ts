@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePro, buildPodIndex, loadHasPod, loadHasRatecon, type PodSubmissionLike } from './podPresence'
+import { normalizePro, buildPodIndex, podPageCount, loadHasPod, loadHasRatecon, type PodSubmissionLike } from './podPresence'
 
 const sub = (over: Partial<PodSubmissionLike> = {}): PodSubmissionLike =>
   ({ hasPodDoc: true, ...over })
@@ -111,5 +111,41 @@ describe('loadHasRatecon', () => {
     })
     expect(loadHasPod(i, { id: 'load-4' })).toBe(true)
     expect(loadHasRatecon(i, { id: 'load-4' })).toBe(true)
+  })
+})
+
+/**
+ * How many pages of the POD are on file — said beside the tick, because "POD on file" and
+ * "all three pages of the POD on file" are different answers.
+ */
+describe('podPageCount', () => {
+  it('counts the pages a submission carries, by load id', () => {
+    const i = buildPodIndex({ jobsdoneLoadIds: [], submissions: [
+      { loadId: 'l1', hasPodDoc: true, podPageCount: 3 },
+    ] })
+    expect(podPageCount(i, { id: 'l1' })).toBe(3)
+  })
+
+  it('finds it by the PRO the driver typed, padded or labelled', () => {
+    const i = buildPodIndex({ jobsdoneLoadIds: [], submissions: [
+      { loadId: null, referenceNumber: 'PRO 14565', hasPodDoc: true, podPageCount: 2 },
+    ] })
+    expect(podPageCount(i, { id: 'x', aljexId: '14565  ' })).toBe(2)
+  })
+
+  it('reports the FULLER document when two submissions claim one load', () => {
+    // The fuller one is what the queue sends; under-reporting sends somebody looking for a
+    // page that is already there.
+    const i = buildPodIndex({ jobsdoneLoadIds: [], submissions: [
+      { loadId: 'l1', hasPodDoc: true, podPageCount: 1 },
+      { loadId: 'l1', hasPodDoc: true, podPageCount: 4 },
+    ] })
+    expect(podPageCount(i, { id: 'l1' })).toBe(4)
+  })
+
+  it('is null when nothing could count — never 0, which would read as an empty POD', () => {
+    const i = buildPodIndex({ jobsdoneLoadIds: ['l1'], submissions: [] })
+    expect(podPageCount(i, { id: 'l1' })).toBeNull()
+    expect(podPageCount(i, { id: 'nothing' })).toBeNull()
   })
 })

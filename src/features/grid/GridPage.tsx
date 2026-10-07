@@ -109,14 +109,27 @@ function PaperworkDot({
       </Tooltip>
     )
   }
+  // "3 pages" is said wherever the tick is, because "POD on file" and "all three pages of
+  // the POD on file" are different answers, and opening every load to tell them apart is
+  // what the office was doing.
+  const pages = cell.pages && cell.pages > 1 ? `${cell.pages} pages` : ''
+  const pagesChip = pages ? (
+    <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+      {cell.pages}p
+    </span>
+  ) : null
+
   // On file but no store could say where — the tick is still true, it just cannot open.
   if (!cell.ref) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <CheckCircle2 className="size-4 text-emerald-600" aria-label={`${label} on file`} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <CheckCircle2 className="size-4 text-emerald-600" aria-label={`${label} on file`} />
+            {pagesChip}
+          </span>
         </TooltipTrigger>
-        <TooltipContent>{label} on file — open the load to view it</TooltipContent>
+        <TooltipContent>{label} on file{pages ? ` · ${pages}` : ''} — open the load to view it</TooltipContent>
       </Tooltip>
     )
   }
@@ -135,10 +148,11 @@ function PaperworkDot({
           }}
         >
           <CheckCircle2 className="size-4 text-emerald-600" />
+          {pagesChip}
           <Eye className="size-3 opacity-70" />
         </button>
       </TooltipTrigger>
-      <TooltipContent>{label} on file — click to view or download</TooltipContent>
+      <TooltipContent>{label} on file{pages ? ` · ${pages}` : ''} — click to view or download</TooltipContent>
     </Tooltip>
   )
 }

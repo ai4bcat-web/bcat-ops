@@ -6,6 +6,7 @@
 
 import { generateClient } from 'aws-amplify/data'
 import { queueDriverDocScan } from './podsClient'
+import { normalizePro } from './podPresence'
 import { uploadData, getUrl } from 'aws-amplify/storage'
 
 const client = generateClient()
@@ -245,14 +246,34 @@ async function attachDocs(
  *  1. Same driver + matching referenceNumber (case-insensitive, trimmed).
  *  2. Most recent submission for the driver that already has RATECON docs and no POD docs.
  */
+/**
+ * Which existing submission a new POD page belongs on, so pages for one load end up in
+ * ONE document rather than two.
+ *
+ * Three rules, strongest first.
+ *
+ *  1. The same LOAD. A submission already linked to this load id is this load's, whatever
+ *     anyone typed in the reference box.
+ *  2. The same PRO, compared the way the rest of the app compares PROs — normalizePro —
+ *     rather than as raw strings. The live table stores them padded ("14565  ") and people
+ *     type "PRO 14565" and "pro#14565" for the same load; a raw comparison treated each of
+ *     those as a different shipment, created a fresh submission, and the factoring queue got
+ *     a second POD document for a load that already had one.
+ *  3. A rate-con-only submission with no POD yet, which is the pre-POD shape of a load.
+ */
 export function pickSubmissionForPod(
   submissions: SubmissionWithDocs[],
   referenceNumber?: string,
+  loadId?: string | null,
 ): DriverSubmissionRecord | null {
   const sorted = [...submissions].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const ref = referenceNumber?.trim()
-  if (ref) {
-    const match = sorted.find((s) => (s.referenceNumber?.trim() ?? '').toLowerCase() === ref.toLowerCase())
+  if (loadId) {
+    const sameLoad = sorted.find((s) => (s.loadId ?? '') === loadId)
+    if (sameLoad) return sameLoad
+  }
+  const pro = normalizePro(referenceNumber)
+  if (pro) {
+    const match = sorted.find((s) => normalizePro(s.referenceNumber) === pro)
     if (match) return match
   }
   const withRatecon = sorted.find((s) => {
@@ -358,7 +379,7 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
 
   if (input.kind === 'POD') {
     const candidates = await listDriverSubmissionsByDriver(input.driver.id)
-    const existing = pickSubmissionForPod(candidates, input.referenceNumber)
+    const existing = pickSubmissionForPod(candidates, input.referenceNumber, input.loadId)
     if (existing) {
       return staffAddPodToSubmission(existing.id, input)
     }
@@ -409,9 +430,22 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
  * Add POD pages to an existing driver submission. Used by the staff upload flow when
  * a driver already has a matching RATECON submission.
  */
+/**
+ * Add POD pages to a submission that already exists.
+ *
+ * Two things this has to get right that it used to get wrong.
+ *
+ * Page numbers CONTINUE from what is already there. They used to restart at 1 for every
+ * batch, and the merge orders pages by number, so a second batch interleaved with the
+ * first — page one, page one, page two, page two. Pages added later are later pages.
+ *
+ * The load and PRO are written onto the submission if it lacks them. A submission created
+ * from the load drawer carried neither, and nothing afterwards could ever find it again —
+ * the next upload for that load started a second submission instead of joining this one.
+ */
 export async function staffAddPodToSubmission(
   submissionId: string,
-  input: Omit<StaffUploadDriverDocInput, 'kind' | 'referenceNumber' | 'note' | 'loadId'>,
+  input: Omit<StaffUploadDriverDocInput, 'kind' | 'note'>,
 ): Promise<SubmissionWithDocs> {
   const error = driverDocValidationError(input.files)
   if (error) throw new Error(error)
@@ -426,12 +460,44 @@ export async function staffAddPodToSubmission(
   if (!existing.getDriverSubmission) {
     throw new Error('Submission not found')
   }
-  const submission = existing.getDriverSubmission
+  let submission = existing.getDriverSubmission
+
+  const fillLoadId = !submission.loadId && input.loadId ? input.loadId : null
+  const fillRef = !normalizePro(submission.referenceNumber) && normalizePro(input.referenceNumber)
+    ? input.referenceNumber!.trim()
+    : null
+  if (fillLoadId || fillRef) {
+    const updated = await gql<{ updateDriverSubmission: DriverSubmissionRecord }>(
+      `mutation UpdateDriverSubmission($input: UpdateDriverSubmissionInput!) {
+        updateDriverSubmission(input: $input) { ${SUBMISSION_FIELDS} }
+      }`,
+      {
+        input: {
+          id: submission.id,
+          ...(fillLoadId ? { loadId: fillLoadId, status: 'LINKED' } : {}),
+          ...(fillRef ? { referenceNumber: fillRef } : {}),
+          updatedAt: now,
+        },
+      },
+    )
+    submission = updated.updateDriverSubmission
+  }
+
+  // The pages already on this submission, so new ones take the numbers after them.
+  const priorPages = await gql<{ listDriverSubmissionDocs: { items: Array<{ kind: string; pageNumber?: number | null }> } }>(
+    `query PriorPodPages($filter: ModelDriverSubmissionDocFilterInput, $limit: Int) {
+      listDriverSubmissionDocs(filter: $filter, limit: $limit) { items { kind pageNumber } }
+    }`,
+    { filter: { submissionId: { eq: submission.id } }, limit: 1000 },
+  )
+  const lastPage = priorPages.listDriverSubmissionDocs.items
+    .filter((d) => d.kind === 'POD')
+    .reduce((max, d) => Math.max(max, Number(d.pageNumber ?? 0)), 0)
 
   const docs: DriverSubmissionDocRecord[] = []
   for (let i = 0; i < input.files.length; i++) {
     const file = input.files[i]
-    const pageNumber = i + 1
+    const pageNumber = lastPage + i + 1
     const key = driverDocKey(input.driver.id, submission.id, 'POD', pageNumber, extForFile(file))
     await uploadDriverDocFile(key, file)
     const doc = await createDriverSubmissionDoc({

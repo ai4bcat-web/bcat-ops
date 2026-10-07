@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto'
+import { orderPages } from './scan/pages'
 import {
   DynamoDBClient,
   DeleteItemCommand,
@@ -1908,9 +1909,10 @@ export async function finalizeDriverDocsAction(
   }
 
   try {
-    const docs = (await scanTable(DRIVER_SUBMISSION_DOC_TABLE))
-      .filter((d) => String(d.submissionId) === submissionId && String(d.kind) === kind)
-      .sort((a, b) => Number(a.pageNumber ?? 0) - Number(b.pageNumber ?? 0))
+    const docs = orderPages(
+      (await scanTable(DRIVER_SUBMISSION_DOC_TABLE))
+        .filter((d) => String(d.submissionId) === submissionId && String(d.kind) === kind),
+    )
     if (!docs.length) return { submissionId, kind, pages: 0, error: 'no pages to combine' }
 
     const sources = await Promise.all(

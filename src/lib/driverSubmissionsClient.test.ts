@@ -255,6 +255,8 @@ describe('driverSubmissionsClient', () => {
             updatedAt: null,
           },
         },
+        // Adding pages first asks what is already on the submission, so numbering continues.
+        { listDriverSubmissionDocs: { items: [] } },
         {
           createDriverSubmissionDoc: {
             id: 'doc-pod',
@@ -417,6 +419,8 @@ describe('driverSubmissionsClient', () => {
             updatedAt: null,
           },
         },
+        // Adding pages first asks what is already on the submission, so numbering continues.
+        { listDriverSubmissionDocs: { items: [] } },
         {
           createDriverSubmissionDoc: {
             id: 'doc-pod',
@@ -524,5 +528,96 @@ describe('cleaning and merging on upload', () => {
     for (const call of mockUploadData.mock.calls) {
       expect((call[0] as { options?: { contentType?: string } }).options?.contentType).toBe('image/jpeg')
     }
+  })
+})
+
+/**
+ * Pages for one load must land in ONE submission, or the factoring queue gets two POD
+ * documents for a single shipment. These pin the three ways that used to go wrong.
+ */
+describe('pickSubmissionForPod — one load, one document', () => {
+  const base = { driverId: 'drv-1', driverName: 'Roy', status: 'NEW', source: 'STAFF', docs: [] } as const
+
+  it('joins the submission already linked to the same LOAD, whatever the reference says', () => {
+    const existing = [
+      { ...base, id: 'linked', loadId: 'load-9', referenceNumber: null, createdAt: '2026-10-01T00:00:00Z' },
+      { ...base, id: 'other', loadId: 'load-2', referenceNumber: '14565', createdAt: '2026-10-02T00:00:00Z' },
+    ] as unknown as SubmissionWithDocs[]
+    expect(pickSubmissionForPod(existing, '14565', 'load-9')?.id).toBe('linked')
+  })
+
+  it('matches a padded PRO to a labelled one — "14565  " is "PRO 14565"', () => {
+    // The live table pads PROs and people type "PRO 14565". A raw string compare called
+    // these different shipments and started a second submission.
+    const existing = [
+      { ...base, id: 'padded', loadId: null, referenceNumber: '14565  ', createdAt: '2026-10-01T00:00:00Z' },
+    ] as unknown as SubmissionWithDocs[]
+    expect(pickSubmissionForPod(existing, 'PRO 14565')?.id).toBe('padded')
+    expect(pickSubmissionForPod(existing, 'pro#14565')?.id).toBe('padded')
+  })
+
+  it('still falls back to a rate-con-only submission when neither load nor PRO match', () => {
+    const existing = [
+      { ...base, id: 'rc-only', loadId: null, referenceNumber: 'ZZZ', createdAt: '2026-10-01T00:00:00Z',
+        docs: [{ kind: 'RATECON' } as DriverSubmissionDocRecord] },
+    ] as unknown as SubmissionWithDocs[]
+    expect(pickSubmissionForPod(existing, '14565', 'load-x')?.id).toBe('rc-only')
+  })
+})
+
+describe('staffAddPodToSubmission — later pages are later pages', () => {
+  it('continues page numbers after the pages already there, and back-fills load + PRO', async () => {
+    setupUpload()
+    const calls: GraphQlCall[] = []
+    setupGraphql(calls, [
+      // 1. the submission we are adding to — created from the drawer with no load, no PRO
+      { getDriverSubmission: { id: 'sub-1', driverId: 'drv-1', driverName: 'Roy', status: 'NEW',
+        source: 'STAFF', loadId: null, referenceNumber: null, createdAt: NOW } },
+      // 2. the back-fill write
+      { updateDriverSubmission: { id: 'sub-1', driverId: 'drv-1', driverName: 'Roy', status: 'LINKED',
+        source: 'STAFF', loadId: 'load-9', referenceNumber: '14565', createdAt: NOW } },
+      // 3. what is already on it: two POD pages
+      { listDriverSubmissionDocs: { items: [
+        { kind: 'POD', pageNumber: 1 }, { kind: 'POD', pageNumber: 2 }, { kind: 'RATECON', pageNumber: 1 },
+      ] } },
+      // 4-5. the two new pages
+      { createDriverSubmissionDoc: { id: 'd3', submissionId: 'sub-1', kind: 'POD', pageNumber: 3 } },
+      { createDriverSubmissionDoc: { id: 'd4', submissionId: 'sub-1', kind: 'POD', pageNumber: 4 } },
+    ])
+
+    await staffAddPodToSubmission('sub-1', {
+      driver: { id: 'drv-1', name: 'Roy', email: null },
+      files: [makeFile('p3.jpg', 'image/jpeg'), makeFile('p4.jpg', 'image/jpeg')],
+      submittedByEmail: 'ryne@bcatcorp.com',
+      referenceNumber: '14565',
+      loadId: 'load-9',
+    })
+
+    const update = calls.find((c) => c.query.includes('updateDriverSubmission('))
+    expect(update?.variables).toMatchObject({ input: { id: 'sub-1', loadId: 'load-9', referenceNumber: '14565', status: 'LINKED' } })
+
+    const created = calls.filter((c) => c.query.includes('createDriverSubmissionDoc'))
+    const pages = created.map((c) => (c.variables.input as { pageNumber: number }).pageNumber)
+    // 3 and 4 — not 1 and 2 again, which the merge would have interleaved with the first batch.
+    expect(pages).toEqual([3, 4])
+  })
+
+  it('leaves a submission that already has its load and PRO alone', async () => {
+    setupUpload()
+    const calls: GraphQlCall[] = []
+    setupGraphql(calls, [
+      { getDriverSubmission: { id: 'sub-2', driverId: 'drv-1', driverName: 'Roy', status: 'LINKED',
+        source: 'PWA', loadId: 'load-9', referenceNumber: '14565', createdAt: NOW } },
+      { listDriverSubmissionDocs: { items: [{ kind: 'POD', pageNumber: 1 }] } },
+      { createDriverSubmissionDoc: { id: 'd2', submissionId: 'sub-2', kind: 'POD', pageNumber: 2 } },
+    ])
+    await staffAddPodToSubmission('sub-2', {
+      driver: { id: 'drv-1', name: 'Roy', email: null },
+      files: [makeFile('p2.jpg', 'image/jpeg')],
+      submittedByEmail: 'ryne@bcatcorp.com',
+      referenceNumber: 'PRO 14565',
+      loadId: 'load-9',
+    })
+    expect(calls.some((c) => c.query.includes('updateDriverSubmission('))).toBe(false)
   })
 })

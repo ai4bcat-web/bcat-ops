@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { listPods } from '@/lib/podsClient'
 import { listDriverSubmissions } from '@/lib/driverSubmissionsClient'
 import {
-  buildPodIndex, loadHasPod, loadHasRatecon, loadPodRef, loadRateconRef,
+  buildPodIndex, loadHasPod, loadHasRatecon, loadPodRef, loadRateconRef, podPageCount,
   type DocRef, type PodIndex, type PodSubmissionLike,
 } from '@/lib/podPresence'
 import type { Load } from '@/types'
@@ -82,6 +82,7 @@ export function useLoadPaperwork(loads: Load[]): LoadPaperwork {
           // single page — a cell that opens the first page beats one that opens nothing.
           podKey: s.combinedPodKey ?? newestKey(s, 'POD'),
           rateconKey: s.combinedRateconKey ?? newestKey(s, 'RATECON'),
+          podPageCount: s.docs.filter((d) => d.kind === 'POD').length,
         }))
       } catch (err) {
         console.warn('[useLoadPaperwork] could not read driver submissions', err)
@@ -129,6 +130,8 @@ export interface PaperworkCell {
   has: boolean | null
   /** Where to open it. Null with has===true means on file but this store could not say where. */
   ref: DocRef | null
+  /** How many pages, when a store could count them. Only ever set for a POD. */
+  pages?: number | null
 }
 
 /** Convenience so the grid cells read as a question rather than an index lookup. */
@@ -138,7 +141,7 @@ export function paperworkFor(
 ): { pod: PaperworkCell; ratecon: PaperworkCell } {
   if (!index) return { pod: { has: null, ref: null }, ratecon: { has: null, ref: null } }
   return {
-    pod: { has: loadHasPod(index, load), ref: loadPodRef(index, load) },
+    pod: { has: loadHasPod(index, load), ref: loadPodRef(index, load), pages: podPageCount(index, load) },
     ratecon: { has: loadHasRatecon(index, load), ref: loadRateconRef(index, load) },
   }
 }
