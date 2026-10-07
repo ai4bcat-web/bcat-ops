@@ -10,6 +10,13 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      /*
+       * Registered from app code (src/lib/swUpdate.ts), not by the plugin's injected
+       * one-liner. The one-liner only calls register(); it never asks for updates and
+       * never notices when a new worker takes control. Doing it ourselves is what lets the
+       * page check on every foreground and reload itself when the worker changes.
+       */
+      injectRegister: null,
       scope: '/driver',
       manifest: {
         name: 'BCAT Driver',
@@ -31,7 +38,24 @@ export default defineConfig({
         // The staff SPA bundle is several MB. Precaching it would force a driver on a
         // phone to download the entire office app before the PWA installs, so precache
         // only the shell and let the JS land in the cache on first use instead.
-        globPatterns: ['**/*.{css,html,ico,png,svg,webmanifest,woff2}'],
+        /*
+         * No `html` in here, deliberately.
+         *
+         * The shell used to be precached, and that is how a phone ends up one reload
+         * behind forever: the OLD worker answers the navigation with its cached
+         * index.html, the new worker installs in the background, and fresh HTML only
+         * arrives on the visit after. Jason opened the app on 6 Oct and got a tab bar from
+         * before the Ivan program existed. The shell is served by the NetworkFirst rule
+         * below and nothing else; precaching it alongside was a second, stale copy.
+         */
+        globPatterns: ['**/*.{css,ico,png,svg,webmanifest,woff2}'],
+        /*
+         * A companion script that runs INSIDE the worker and reloads open tabs the moment
+         * a new build takes over. It is the one thing that can reach a phone running old
+         * code, because the browser installs the new worker regardless of what the page
+         * is running. See public/sw-reload.js.
+         */
+        importScripts: ['sw-reload.js'],
         navigateFallbackDenylist: [/^\/(?!driver)/],
         /*
          * The shell comes from the NETWORK first, and from the cache only when there is
