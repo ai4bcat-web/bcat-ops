@@ -56,6 +56,9 @@ const apiMocks = vi.hoisted(() => {
 
 vi.mock('@/features/driver-app/driverApi', () => apiMocks)
 
+const programMock = vi.hoisted(() => ({ program: 'SETTLEMENT' as 'SETTLEMENT' | 'PAPERWORK' }))
+vi.mock('../useDriverProgram', () => ({ useDriverProgram: () => programMock.program }))
+
 // PagePicker does real file reads and canvas work. Replace it with a simple control that just
 // fires onDone with a fixed set of pages when the driver taps "Capture".
 vi.mock('./PagePicker', () => ({
@@ -223,9 +226,36 @@ describe('ScanPage — the Ivan paperwork hand-off', () => {
 
     await waitFor(() => expect(apiMocks.attachSubmissionToLoad).toHaveBeenCalledWith('sub-1', 'load-9'))
     expect(apiMocks.submitStandalonePod.mock.calls[0][0].referenceNumber).toBe('14565')
-    // Linked, so the success copy must not call it unattached.
-    await screen.findByText(/sent|received|office/i)
-    expect(screen.queryByText(/no load number/i)).toBeNull()
+    // Linked, so the success copy must not describe it as waiting to be attached.
+    await screen.findByRole('heading', { name: 'Sent!' })
+    expect(screen.getByText(/The office has been notified/)).toBeInTheDocument()
+    expect(screen.queryByText(/will attach it to your load/)).toBeNull()
+  })
+
+  it('sends an Ivan driver back to their loads, not to a settlement they do not have', async () => {
+    // /driver/settlement answers 409 for an Ivan driver — the error screen with a Retry
+    // button that Jason hit. "Done" has to go to each program's own home.
+    programMock.program = 'PAPERWORK'
+    try {
+      renderAt('/driver/scan?kind=pod&ref=14565&loadId=load-9')
+      fireEvent.click(await screen.findByTestId('capture-done'))
+      await screen.findByRole('button', { name: /Send to office/i })
+      fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+      await screen.findByRole('heading', { name: 'Sent!' })
+      expect(screen.getByRole('button', { name: 'Back to my loads' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Back to my settlement/ })).toBeNull()
+    } finally {
+      programMock.program = 'SETTLEMENT'
+    }
+  })
+
+  it('keeps the settlement as home for an owner operator', async () => {
+    renderAt('/driver/scan?kind=pod&pro=14538')
+    fireEvent.click(await screen.findByTestId('capture-done'))
+    await screen.findByRole('button', { name: /Send to office/i })
+    fireEvent.click(screen.getByRole('button', { name: /Send to office/i }))
+    await screen.findByRole('heading', { name: 'Sent!' })
+    expect(screen.getByRole('button', { name: 'Back to my settlement' })).toBeInTheDocument()
   })
 
   it('still counts as sent when the link step fails — the pages are already with the office', async () => {

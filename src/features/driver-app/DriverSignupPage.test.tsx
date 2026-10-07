@@ -209,7 +209,8 @@ describe('the last screen', () => {
     // Navigation is the driver's choice, taken after auth state has settled — and it lands
     // on the settlement, which is the only page the app has.
     fireEvent.click(screen.getByRole('button', { name: 'Open the driver app' }))
-    expect(navigate).toHaveBeenCalledWith('/driver/settlement')
+    // The landing route picks the program's home; a fixed settlement hop 409s for Ivan.
+    expect(navigate).toHaveBeenCalledWith('/driver')
   })
 
   it('says the password is set when only the sign-in fails', async () => {

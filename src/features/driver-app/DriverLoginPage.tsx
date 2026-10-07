@@ -81,7 +81,9 @@ export default function DriverLoginPage() {
     setLoading(true)
     try {
       await signIn(email.trim(), password)
-      navigate('/driver/settlement')
+      // /driver, not /driver/settlement: the landing route sends each program to its own
+      // home. An Ivan driver sent straight to the settlement got a 409 and a Retry button.
+      navigate('/driver')
     } catch (err) {
       setError(humanizeLoginError(err instanceof Error ? err.message : 'Sign in failed.'))
     } finally {

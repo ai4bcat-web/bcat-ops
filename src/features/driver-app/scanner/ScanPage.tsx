@@ -30,6 +30,7 @@ import {
   type SubmissionSummary,
 } from '../driverApi'
 import { PagePicker } from './PagePicker'
+import { useDriverProgram } from '../useDriverProgram'
 
 type Phase = 'choose' | 'select' | 'capture' | 'review' | 'submitting' | 'success' | 'error'
 
@@ -37,6 +38,14 @@ export default function ScanPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const isMobile = useIsMobile()
+  /*
+   * Where "done" goes. An Ivan driver has no settlement — the server answers that route
+   * with a 409 — so sending them there after a scan landed them on an error screen with a
+   * Retry button. Each program goes back to its own home.
+   */
+  const program = useDriverProgram()
+  const homePath = program === 'PAPERWORK' ? '/driver/paperwork' : '/driver/settlement'
+  const homeLabel = program === 'PAPERWORK' ? 'Back to my loads' : 'Back to my settlement'
 
   const initialKind: SubmissionKind | null = useMemo(() => {
     const raw = searchParams.get('kind')
@@ -299,8 +308,8 @@ export default function ScanPage() {
           POD (delivery receipt)
         </Button>
 
-        <Button variant="ghost" className="mt-4" onClick={() => navigate('/driver/settlement')}>
-          Back to my settlement
+        <Button variant="ghost" className="mt-4" onClick={() => navigate(homePath)}>
+          {homeLabel}
         </Button>
       </div>
     )
@@ -429,7 +438,7 @@ export default function ScanPage() {
           } else {
             // Backing out on purpose is not an interruption to resume.
             forgetScanIntent()
-            navigate('/driver/settlement')
+            navigate(homePath)
           }
         }}
       />
@@ -564,8 +573,8 @@ export default function ScanPage() {
             : 'The office has been notified. You can add POD pages later from My loads.'}
         </p>
         <div className="mt-8 flex w-full max-w-xs flex-col gap-3">
-          <Button size="lg" className="h-14 w-full" onClick={() => navigate('/driver/settlement')}>
-            Back to my settlement
+          <Button size="lg" className="h-14 w-full" onClick={() => navigate(homePath)}>
+            {homeLabel}
           </Button>
           <Button variant="outline" size="lg" className="h-14 w-full" onClick={reset}>
             Scan another
