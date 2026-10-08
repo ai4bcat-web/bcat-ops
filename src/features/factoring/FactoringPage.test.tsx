@@ -108,7 +108,7 @@ describe('required fields on the row', () => {
   it('says so plainly when the row has never been prepared', () => {
     setup([item()])
     expect(screen.getByText('Not prepared yet')).toBeInTheDocument()
-    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })
 

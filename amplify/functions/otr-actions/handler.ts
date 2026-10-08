@@ -148,6 +148,30 @@ async function getCustomer(id?: string | null): Promise<Row | null> {
   return (r.Item as Row) ?? null
 }
 
+/** The broker record already carrying this MC, if any — digits compared, so 0592002 and 592002 agree. */
+async function findCustomerByMc(mc: string): Promise<Row | null> {
+  const want = mc.replace(/\D/g, '').replace(/^0+/, '')
+  if (!want) return null
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const r = await ddb.send(
+      new ScanCommand({
+        TableName: CUSTOMER_TABLE,
+        ProjectionExpression: 'id, #n, normalizedName, mcNumber, mcNameVerified, aliases',
+        ExpressionAttributeNames: { '#n': 'name' },
+        ExclusiveStartKey,
+      }),
+    )
+    const hit = (r.Items ?? []).find((i) => {
+      const got = String((i as Row).mcNumber ?? '').replace(/\D/g, '').replace(/^0+/, '')
+      return !!got && got === want
+    })
+    if (hit) return hit as Row
+    ExclusiveStartKey = r.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return null
+}
+
 /** Find a customer by booked name, matching on the normalized form. */
 async function findCustomerByName(name: string): Promise<Row | null> {
   const norm = normalizeName(name)
@@ -471,12 +495,17 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
      * Everything else on the row is genuinely unknown, but the PRO is not — the Aljex
      * invoice email that created this row names it in its subject and it is the row's own
      * id. Passing it through is why 14529 showed "Invoice number (PRO)" as missing while
-     * sitting in a row titled 14529.
+     * sitting in a row titled 14529. Nor is the broker, once an MC has been entered on
+     * the row: setMc records the customer on the item itself for exactly this case.
      */
+    const customer = await getCustomer(item.customerId as string | undefined)
     return {
       readiness: assembleOtrInvoice({
         load: {},
         proNumber: trim(item.proNumber) || trim(item.id) || null,
+        customerMcNumber: customer?.mcNumber as string | undefined,
+        customerName: customer?.name as string | undefined,
+        customerNameVerified: customer?.mcNameVerified === true,
         manual: (item.otrManualFields as ManualOverrides) ?? null,
         submissionDate: today(),
       }),
@@ -745,35 +774,65 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         const item = await getFactoringItem(String(input.id))
         if (!item) return fail('factoring item not found')
 
-        const { load } = await buildReadiness(item)
-        if (!load) return fail('resolve the load before setting a broker MC')
+        /*
+         * OTR first. It is the one lookup that can NAME the broker behind an MC, and the
+         * name it answers with is the one they will bill under. A row whose load was never
+         * built in BCAT Ops (14529 on 8 Oct) used to be refused here outright — "resolve
+         * the load before setting a broker MC" — while OTR's own portal found the company
+         * from the same nine digits. The MC is the fact; the load is optional context.
+         */
+        let check: Awaited<ReturnType<OtrClient['brokerCheck']>> | null = null
+        try {
+          check = await otr().brokerCheck({ brokerMc: mc })
+          console.log('[otr-actions] broker-check reply', { mc, raw: check.raw })
+        } catch (err) {
+          // OTR unreachable is not a reason to lose the MC the person just typed.
+          console.warn('[otr-actions] broker-check failed during setMc; saving the MC unverified', { mc, err })
+        }
+        if (check?.decision === 'NOT FOUND') {
+          return fail(`OTR has no broker with MC ${mc} — check the number`)
+        }
+        const otrName = check?.brokerName ?? null
 
-        let customer = await getCustomer(load.customerId as string | undefined)
-        if (!customer && load.customer) customer = await findCustomerByName(String(load.customer))
+        const { load } = await buildReadiness(item)
+
+        // The broker record: the one already carrying this MC, else the load's customer,
+        // else a name match, else a new record named by OTR (or, failing that, the load).
+        let customer = await findCustomerByMc(mc)
+        if (!customer) customer = await getCustomer(load?.customerId as string | undefined)
+        if (!customer && load?.customer) customer = await findCustomerByName(String(load.customer))
 
         if (customer) {
+          const rename = !!otrName && trim(customer.name) !== otrName
           await ddb.send(
             new UpdateCommand({
               TableName: CUSTOMER_TABLE,
               Key: { id: customer.id },
-              UpdateExpression: 'SET mcNumber = :mc, updatedAt = :u',
-              ExpressionAttributeValues: { ':mc': mc, ':u': nowIso() },
+              UpdateExpression: rename
+                ? 'SET mcNumber = :mc, #n = :n, normalizedName = :nn, mcNameVerified = :v, updatedAt = :u'
+                : otrName
+                  ? 'SET mcNumber = :mc, mcNameVerified = :v, updatedAt = :u'
+                  : 'SET mcNumber = :mc, updatedAt = :u',
+              ...(rename ? { ExpressionAttributeNames: { '#n': 'name' } } : {}),
+              ExpressionAttributeValues: {
+                ':mc': mc, ':u': nowIso(),
+                ...(rename ? { ':n': otrName, ':nn': normalizeName(otrName!) } : {}),
+                ...(otrName ? { ':v': true } : {}),
+              },
             }),
           )
+          if (rename) customer = { ...customer, name: otrName, mcNameVerified: true }
         } else {
-          const name = String(load.customer ?? '').trim()
-          if (!name) return fail('load has no customer name to create a directory record from')
+          const name = otrName ?? String(load?.customer ?? '').trim()
+          if (!name) return fail('OTR did not name this broker and the row has no load to take a name from')
           customer = {
             id: randomUUID(),
             name,
             normalizedName: normalizeName(name),
             mcNumber: mc,
-            /*
-             * The name here came off the LOAD, not from the MC. Saying so is the whole
-             * point: this record is one person typing an MC next to a name somebody else
-             * booked, and nothing has checked that they describe the same company.
-             */
-            mcNameVerified: false,
+            // True only when OTR itself named the broker for this MC; a name lifted off the
+            // load is somebody's booking, not a lookup.
+            mcNameVerified: !!otrName,
             active: true,
             createdAt: nowIso(),
             updatedAt: nowIso(),
@@ -782,16 +841,11 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         }
 
         /*
-         * Point the load at that customer, whichever branch produced it.
-         *
-         * This used to run only when a NEW customer was created. A broker already in the
-         * directory was matched by NAME, the MC was written to that record — and the load
-         * still pointed at nothing, so readiness (which reads the customer via
-         * load.customerId) never saw the MC. Typing the right number changed the directory
-         * and left the row looking exactly as it had, which reads as "editing the MC does
-         * not work".
+         * Point the load at that customer, whichever branch produced it. A broker already
+         * in the directory was once matched by NAME, the MC written to that record — and
+         * the load still pointed at nothing, so readiness never saw the MC.
          */
-        if (trim(load.customerId) !== customer.id) {
+        if (load && trim(load.customerId) !== customer.id) {
           await ddb.send(
             new UpdateCommand({
               TableName: LOAD_TABLE,
@@ -802,9 +856,20 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           )
         }
 
+        // The row remembers its broker itself, so a row with no load still assembles.
+        await updateItem(String(item.id), {
+          customerId: customer.id,
+          ...(check
+            ? { brokerMcChecked: mc, brokerCheckResult: check.decision.replace(' ', '_'), brokerCheckedAt: nowIso() }
+            : {}),
+          otrError: null,
+        })
+
         const { readiness } = await buildReadiness(await getFactoringItem(String(item.id)) as Row)
         await updateItem(String(item.id), { otrReadiness: readiness })
-        return ok({ customerId: customer.id, mcNumber: mc, readiness })
+        return ok({
+          customerId: customer.id, mcNumber: mc, brokerName: otrName, decision: check?.decision ?? null, readiness,
+        })
       }
 
       /** Ask OTR whether the broker is approved. Never submits. */

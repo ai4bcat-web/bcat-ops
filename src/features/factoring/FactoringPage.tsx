@@ -244,7 +244,7 @@ function CustomerCell({ item }: { item: FactoringItem }) {
   if (!name) {
     return (
       <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }} title="Open the row to enter it">
-        \u2014
+        {'\u2014'}
       </span>
     )
   }

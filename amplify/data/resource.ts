@@ -856,6 +856,9 @@ const schema = a.schema({
       // Last assembled readiness, cached so the queue renders without
       // re-deriving: { ready, payload, sources, missingFields, missingDocuments }.
       otrReadiness:    a.json(),
+      // The broker this row bills, set when an MC is entered on the row. Lets a row
+      // whose load was never built still name its customer and carry the MC.
+      customerId:      a.string(),
       // Broker approval from OTR's /broker-check, checked BEFORE submit so an
       // unapproved MC shows on the row instead of failing with a 402.
       brokerMcChecked:   a.string(),
