@@ -46,7 +46,7 @@ import {
   lastApptAt,
   recentLoadsForDriver,
 } from '../../../src/lib/driverJourney'
-import type { Load } from '../../../src/types'
+import type { Load, Stop } from '../../../src/types'
 import { isEligiblePayGroup } from './scope'
 import { deliveredWindowEnd } from './deliveredWindow'
 
@@ -69,6 +69,8 @@ import {
   STANDARD_DAY_MINUTES, type TimeClockRow,
 } from '../../../src/lib/timeClock'
 import { isOvernightLoad } from '../../../src/lib/overnightLoads'
+import { getStops } from '../../../src/lib/stops'
+import { chicagoDateStr } from '../../../src/lib/date'
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
@@ -903,8 +905,8 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'paperwork' && segments[1] === 'weeks') {
     return { path: '/paperwork/weeks' }
   }
-  if (segments[0] === 'paperwork' && segments[1] === 'time') {
-    return { path: '/paperwork/time' }
+  if (segments[0] === 'paperwork' && segments[1] === 'detention') {
+    return { path: '/paperwork/detention' }
   }
   if (segments[0] === 'settlement' && segments[1] === 'weeks') {
     return { path: '/settlement/weeks' }
@@ -2314,12 +2316,28 @@ export const handler = async (event: FnUrlEvent) => {
         ? deliveredWindowEnd(weekStartOfISO(new Date().toISOString().slice(0, 10)), new Date())
         : deliveredWindowEnd(weekStart, new Date())
 
-      const candidates = await scan<PaperworkLoadLike>(
+      /*
+       * The week view also takes a load by its PICKUP: a run that loads today and delivers
+       * tomorrow is today's work — its pickup is on the day sheet and may sit in
+       * detention — even though its delivery is still ahead. The history list stays on
+       * deliveries, which is what a past week is made of.
+       */
+      const byDelivery = await scan<PaperworkLoadLike>(
         LOAD_TABLE_NAME,
         'deliveryAppt >= :start AND deliveryAppt < :endEx',
         {},
         { ':start': windowStart, ':endEx': windowEndEx },
       )
+      const byPickup = path === '/paperwork/weeks'
+        ? []
+        : await scan<PaperworkLoadLike>(
+            LOAD_TABLE_NAME,
+            'pickupAppt >= :start AND pickupAppt < :endEx',
+            {},
+            { ':start': windowStart, ':endEx': windowEndEx },
+          )
+      const seen = new Set<string>()
+      const candidates = [...byDelivery, ...byPickup].filter((l) => !seen.has(l.id) && seen.add(l.id))
       const mine = candidates.filter((l) => driverIsOnPaperworkLoad(l, driverId))
 
       // POD pages and recorded times for exactly these loads.
@@ -2363,47 +2381,56 @@ export const handler = async (event: FnUrlEvent) => {
         return reply(200, { weeks })
       }
 
-      return reply(200, { weekStart, loads: built, ...summarize(built) })
+      // The POD counts are owed only on loads that have delivered; a load taken by its
+      // pickup today still has its delivery ahead and cannot be missing a POD yet.
+      const delivered = built.filter((l) => String(l.deliveryAppt ?? '').slice(0, 10) < windowEndEx)
+      return reply(200, {
+        weekStart,
+        // Chicago, like the appointments: a driver at 11pm is still on today's sheet.
+        today: chicagoDateStr(new Date()),
+        loads: built,
+        ...summarize(delivered),
+        loadCount: built.length,
+      })
     }
 
-    /* Times the driver recorded for a dock they sat at. */
-    if (method === 'POST' && path === '/paperwork/time') {
-      if (!DRIVER_LOAD_TIME_TABLE) return reply(503, { error: 'Time recording is not configured' })
-      const body = JSON.parse(event.body || '{}') as {
-        loadId?: string; leg?: string; timeIn?: string | null; timeOut?: string | null; notes?: string | null
-      }
+    /* The driver flags (or clears) detention at one stop. */
+    if (method === 'POST' && path === '/paperwork/detention') {
+      if (!DRIVER_LOAD_TIME_TABLE) return reply(503, { error: 'Detention flags are not configured' })
+      const body = JSON.parse(event.body || '{}') as { loadId?: string; stopId?: string; detention?: unknown }
       const loadId = (body.loadId ?? '').trim()
-      const leg = (body.leg ?? '').trim().toUpperCase()
+      const stopId = (body.stopId ?? '').trim()
       if (!loadId) return reply(400, { error: 'loadId is required' })
-      if (leg !== 'PICKUP' && leg !== 'DELIVERY') return reply(400, { error: 'leg must be PICKUP or DELIVERY' })
+      if (!stopId) return reply(400, { error: 'stopId is required' })
+      if (typeof body.detention !== 'boolean') return reply(400, { error: 'detention must be true or false' })
 
       /*
-       * A driver may only record times against a load they are actually on. Without this
-       * check the loadId is caller-supplied and anyone's clock could be written onto
-       * anyone's load.
+       * A driver may only flag a stop on a load they are actually on. Without this check
+       * the loadId is caller-supplied and anyone's flag could be written onto anyone's load.
        */
       const found = await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))
       const load = found.Item as PaperworkLoadLike | undefined
       if (!load || !driverIsOnPaperworkLoad(load, driverId)) {
         return reply(404, { error: 'load not found' })
       }
+      const stop = (getStops(load as unknown as Load) as Stop[]).find((s) => s.id === stopId)
+      if (!stop) return reply(404, { error: 'stop not found on this load' })
 
-      const id = `${driverId}#${loadId}#${leg}`
+      const id = `${driverId}#${loadId}#${stopId}`
       const now = nowIso()
       const existing = await ddb.send(new GetCommand({ TableName: DRIVER_LOAD_TIME_TABLE, Key: { id } }))
       await ddb.send(new PutCommand({
         TableName: DRIVER_LOAD_TIME_TABLE,
         Item: {
-          id, loadId, driverId, leg,
-          timeIn: (body.timeIn ?? '').trim() || null,
-          timeOut: (body.timeOut ?? '').trim() || null,
-          notes: (body.notes ?? '').trim() || null,
+          id, loadId, driverId, stopId,
+          leg: String(stop.type ?? '').toUpperCase(),
+          detention: body.detention,
           createdAt: (existing.Item?.createdAt as string | undefined) ?? now,
           updatedAt: now,
           updatedBy: driver.email ?? driverId,
         },
       }))
-      return reply(200, { ok: true, loadId, leg })
+      return reply(200, { ok: true, loadId, stopId, detention: body.detention })
     }
 
     /*

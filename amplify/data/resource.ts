@@ -494,10 +494,14 @@ const schema = a.schema({
     .model({
       loadId:    a.string().required(),
       driverId:  a.string().required(),
-      leg:       a.string().required(),  // 'PICKUP' | 'DELIVERY'
-      // Local wall-clock times as the driver read them, 'YYYY-MM-DDTHH:mm'. Deliberately
-      // NOT instants: a driver reports "I got there at 08:15", and converting that
-      // through a timezone we are guessing at is how an hour goes missing from a claim.
+      leg:       a.string().required(),  // 'PICKUP' | 'DELIVERY' — the stop's type
+      // The stop the flag belongs to (Stop.id inside Load.stops). One row per stop.
+      stopId:    a.string(),
+      // The driver flagged detention at this stop: two hours or more past the appointment.
+      // The in/out times live on the BOL, where the customer signs for them.
+      detention: a.boolean(),
+      // Retired 2026-10-08: the app no longer collects the clock itself. Kept so old rows
+      // still read; nothing writes them.
       timeIn:    a.string(),
       timeOut:   a.string(),
       notes:     a.string(),

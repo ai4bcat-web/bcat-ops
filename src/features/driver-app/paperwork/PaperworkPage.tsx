@@ -17,12 +17,13 @@ import {
 } from '@/components/ui/select'
 import {
   fetchPaperwork, fetchPaperworkWeeks,
-  type Paperwork, type PaperworkLoad, type PaperworkWeek,
+  type Paperwork, type PaperworkWeek,
 } from '../driverApi'
 import { PaperworkRows } from './PaperworkRows'
-import { LoadTimesSheet } from './LoadTimesSheet'
+import { TodayStops } from './TodayStops'
 import { UnattachedPods } from '../UnattachedPods'
 import { sundayOf, weekLabel } from '@/features/driver-pay/week'
+import { chicagoDateStr } from '@/lib/date'
 import { errorText } from '@/lib/errorText'
 import { useDriverPm } from '../useDriverProgram'
 import { PmGauge } from './PmGauge'
@@ -52,7 +53,6 @@ export function PaperworkPage() {
   const [error, setError] = useState<string | null>(null)
   const [weeksRetryKey, setWeeksRetryKey] = useState(0)
   const [weekRetryKey, setWeekRetryKey] = useState(0)
-  const [times, setTimes] = useState<{ load: PaperworkLoad; leg: 'PICKUP' | 'DELIVERY' } | null>(null)
 
   const currentWeekStart = sundayOf()
 
@@ -91,6 +91,12 @@ export function PaperworkPage() {
 
   const reload = useCallback(() => setWeekRetryKey((k) => k + 1), [])
 
+  const sendPod = useCallback(
+    (load: { id: string; reference: string }) =>
+      navigate(`/driver/scan?kind=pod&ref=${encodeURIComponent(load.reference)}&loadId=${encodeURIComponent(load.id)}`),
+    [navigate],
+  )
+
   const loadingWeeks = weeks === null && error === null
   const loadingWeek = selected != null && week?.weekStart !== selected && error === null
 
@@ -121,6 +127,25 @@ export function PaperworkPage() {
       <h1 className="mb-4 text-xl font-bold text-foreground">Dashboard</h1>
 
       <PmLine />
+
+      {/*
+        Today first. The week below is the record; this is the work — every pickup and
+        delivery on today's sheet, with the detention box and, at a delivery, the POD
+        button. Only on the week in progress: a past week has no "today" in it.
+      */}
+      {week && week.weekStart === selected && selected === currentWeekStart && (
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Today
+          </h2>
+          <TodayStops
+            loads={week.loads}
+            today={week.today ?? chicagoDateStr(new Date())}
+            onSendPod={sendPod}
+            onChange={reload}
+          />
+        </section>
+      )}
 
       {weekOptions && weekOptions.length > 0 && (
         <div className="mb-4">
@@ -205,11 +230,7 @@ export function PaperworkPage() {
       )}
 
       {!loadingWeek && week && week.weekStart === selected && !error && (
-        <PaperworkRows
-          loads={week.loads}
-          onSendPod={(load) => navigate(`/driver/scan?kind=pod&ref=${encodeURIComponent(load.reference)}&loadId=${encodeURIComponent(load.id)}`)}
-          onRecordTimes={(load, leg) => setTimes({ load, leg })}
-        />
+        <PaperworkRows loads={week.loads} onSendPod={sendPod} />
       )}
 
       {/* Paperwork for a load the office has not built yet still has to have a way out. */}
@@ -225,14 +246,6 @@ export function PaperworkPage() {
         </Button>
       </div>
 
-      {times && (
-        <LoadTimesSheet
-          load={times.load}
-          leg={times.leg}
-          onClose={() => setTimes(null)}
-          onSaved={reload}
-        />
-      )}
     </div>
   )
 }

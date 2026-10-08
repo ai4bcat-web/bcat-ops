@@ -12,7 +12,7 @@
  *               and offers to replace it.
  *   on file     said quietly. A green tick nobody needs to read is the goal.
  */
-import { AlertTriangle, Camera, Check, ClipboardList, Clock, FileWarning, Moon } from 'lucide-react'
+import { AlertTriangle, Camera, Check, ClipboardList, FileWarning, Moon } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { PaperworkLoad } from '../driverApi'
@@ -137,11 +137,9 @@ function Chip({ children }: { children: React.ReactNode }) {
 export function PaperworkRows({
   loads,
   onSendPod,
-  onRecordTimes,
 }: {
   loads: PaperworkLoad[]
   onSendPod: (load: PaperworkLoad) => void
-  onRecordTimes: (load: PaperworkLoad, leg: 'PICKUP' | 'DELIVERY') => void
 }) {
   // Which rows have their duty log open. Per row, so opening one does not fetch the rest.
   const [openLogs, setOpenLogs] = useState<Set<string>>(new Set())
@@ -159,10 +157,11 @@ export function PaperworkRows({
   return (
     <ul className="flex flex-col gap-3">
       {loads.map((load) => {
-        const times = [load.pickupTimes, load.deliveryTimes]
-        const billable = times.some((t) => t.billable)
+        // Stops the driver flagged as detention, named by type so "pickup" and "delivery"
+        // read the way the office talks about them.
+        const flagged = load.stops.filter((s) => s.detention)
         return (
-          <li key={load.id} className="rounded-xl border border-border bg-muted/40 p-4">
+          <li key={load.id} className="rounded-xl border border-border bg-card p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-base font-bold text-foreground">{load.reference}</p>
@@ -271,38 +270,20 @@ export function PaperworkRows({
               </p>
             )}
 
-            {billable && (
-              <p className="mt-3 text-sm font-semibold text-amber-400">
-                Detention recorded
-                {load.pickupTimes.billable && load.pickupTimes.hours !== null && ` · pickup ${load.pickupTimes.hours}h`}
-                {load.deliveryTimes.billable && load.deliveryTimes.hours !== null && ` · delivery ${load.deliveryTimes.hours}h`}
+            {flagged.length > 0 && (
+              <p className="mt-3 text-sm font-semibold text-amber-300">
+                Detention flagged · {flagged.map((s) => s.type.toLowerCase()).join(', ')} — times on the BOL
               </p>
             )}
 
-            <div className="mt-4 flex flex-wrap gap-2">
+            <div className="mt-4">
               <Button
-                className="h-12 flex-1 gap-2 text-base font-semibold"
+                className="h-12 w-full gap-2 text-base font-semibold"
                 variant={load.pod.present && load.pod.legibility === 'OK' ? 'outline' : 'default'}
                 onClick={() => onSendPod(load)}
               >
                 <Camera className="h-4 w-4" aria-hidden="true" />
                 {load.pod.present ? 'Replace POD' : 'Send POD'}
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12 gap-2 text-sm"
-                onClick={() => onRecordTimes(load, 'PICKUP')}
-              >
-                <Clock className="h-4 w-4" aria-hidden="true" />
-                Pickup times
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12 gap-2 text-sm"
-                onClick={() => onRecordTimes(load, 'DELIVERY')}
-              >
-                <Clock className="h-4 w-4" aria-hidden="true" />
-                Delivery times
               </Button>
             </div>
           </li>

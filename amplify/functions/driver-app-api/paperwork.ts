@@ -22,6 +22,7 @@ import {
   assessEld, SHORT_HAUL_AIR_MILES, WORK_REPORTING_LOCATION, type EldStatus,
 } from '../../../src/lib/eldRadius'
 import { isOvernightLoad } from '../../../src/lib/overnightLoads'
+import { chicagoDateStr } from '../../../src/lib/date'
 
 /** Enough of a load to describe it to the driver hauling it. */
 /*
@@ -81,11 +82,24 @@ export interface PaperworkLoadLike {
 }
 
 export interface PaperworkStop {
+  /** The stop's own id — what a detention flag is keyed on. */
+  id: string
   type: string
+  sequence: number
   name: string | null
   city: string | null
   state: string | null
   appt: string | null
+  /** exact / range / fcfs / tbd — so the app never prints 12:00 AM for "no time yet". */
+  apptType: string | null
+  apptEnd: string | null
+  /** The Chicago calendar day of the appointment, YYYY-MM-DD; what "today" is judged on. */
+  date: string | null
+  /**
+   * The driver flagged detention at this stop: they were there two hours or more past
+   * the appointment. The in/out times live on the BOL, not here — see DETENTION_FREE_HOURS.
+   */
+  detention: boolean
 }
 
 export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'
@@ -96,16 +110,6 @@ export interface PaperworkPod {
   /** Worst legibility across the pages — one bad page makes the POD bad. */
   legibility: PodLegibility
   notes: string | null
-}
-
-export interface PaperworkTimes {
-  timeIn: string | null
-  timeOut: string | null
-  notes: string | null
-  /** Hours between in and out, or null when either is missing. */
-  hours: number | null
-  /** True once the gap is worth billing. The app asks for times past this. */
-  billable: boolean
 }
 
 export interface PaperworkLoad {
@@ -126,8 +130,6 @@ export interface PaperworkLoad {
   status: string | null
   stops: PaperworkStop[]
   pod: PaperworkPod
-  pickupTimes: PaperworkTimes
-  deliveryTimes: PaperworkTimes
   eld: PaperworkEld
   /** An over-the-road run — to or from Iowa. See src/lib/overnight.ts. */
   overnight: boolean
@@ -173,17 +175,24 @@ export interface PaperworkWeek {
   overnightCents: number
 }
 
-/** Detention starts after two free hours, which is what the app prompts on. */
+/**
+ * Detention starts two hours after the appointment time. The rule is stated to the driver
+ * on every stop; the driver answers yes or no, and writes the in/out times on the BOL where
+ * the customer signs for them. The app used to collect the clock itself (DriverLoadTime
+ * timeIn/timeOut), which asked a driver to type at a dock what they had already written
+ * on paper — dropped 8 Oct 2026 in favour of the one box.
+ */
 export const DETENTION_FREE_HOURS = 2
 
-/** A row as stored by DriverLoadTime. */
+/** A row as stored by DriverLoadTime: one per stop the driver flagged. */
 export interface LoadTimeRow {
   loadId: string
   driverId: string
+  /** PICKUP / DELIVERY — the stop's type, for the office's benefit. */
   leg: string
-  timeIn?: string | null
-  timeOut?: string | null
-  notes?: string | null
+  /** The stop this flag is for. */
+  stopId?: string | null
+  detention?: boolean | null
 }
 
 /** A POD page as stored by DriverSubmissionDoc, plus its submission's load linkage. */
@@ -230,47 +239,34 @@ export function worstLegibility(values: Array<string | null | undefined>): PodLe
   return 'UNKNOWN'
 }
 
-export function describeTimes(row: LoadTimeRow | undefined): PaperworkTimes {
-  const timeIn = row?.timeIn?.trim() || null
-  const timeOut = row?.timeOut?.trim() || null
-  let hours: number | null = null
-  if (timeIn && timeOut) {
-    const a = Date.parse(`${timeIn}:00Z`)
-    const b = Date.parse(`${timeOut}:00Z`)
-    // Out before in means the driver crossed midnight; a negative gap is never the answer.
-    if (Number.isFinite(a) && Number.isFinite(b)) {
-      const raw = (b - a) / 3_600_000
-      hours = Math.round((raw < 0 ? raw + 24 : raw) * 100) / 100
-    }
-  }
-  return {
-    timeIn,
-    timeOut,
-    notes: row?.notes?.trim() || null,
-    hours,
-    billable: hours !== null && hours > DETENTION_FREE_HOURS,
-  }
+/** Has the driver flagged detention at this stop? Absent row, or an unflagged one, is no. */
+export function stopDetention(rows: LoadTimeRow[], stopId: string): boolean {
+  return rows.some((r) => r.stopId === stopId && r.detention === true)
 }
 
 export function buildPaperworkLoad(
   load: PaperworkLoadLike,
   podDocs: PodDocRow[],
-  times: LoadTimeRow[],
+  flags: LoadTimeRow[],
 ): PaperworkLoad {
-  const stops = (getStops(load as unknown as Load) as Stop[]).map((s) => ({
+  const stops: PaperworkStop[] = (getStops(load as unknown as Load) as Stop[]).map((s, i) => ({
+    id: s.id,
     type: String(s.type ?? ''),
+    sequence: typeof s.sequence === 'number' ? s.sequence : i,
     name: s.name?.trim() || null,
     // `city` on a stop is a display string ("Chicago, IL"); the address holds the parts.
     city: s.address?.city?.trim() || s.city?.trim() || null,
     state: s.address?.state?.trim() || null,
     appt: s.appt ?? null,
+    apptType: s.apptType ?? null,
+    apptEnd: s.apptEnd ?? null,
+    date: s.appt ? chicagoDateStr(s.appt) || null : null,
+    detention: stopDetention(flags, s.id),
   }))
 
   const pages = podDocs.filter((d) => (d.kind ?? '').toUpperCase() === 'POD')
   const legibility = worstLegibility(pages.map((d) => d.legibility))
   const notes = pages.map((d) => d.legibilityNotes?.trim()).find(Boolean) ?? null
-
-  const byLeg = (leg: string) => times.find((t) => t.leg === leg)
 
   /*
    * Over-the-road is decided from the same places the ELD check uses, so the two cannot
@@ -304,8 +300,6 @@ export function buildPaperworkLoad(
       legibility: pages.length ? legibility : 'UNKNOWN',
       notes: pages.length ? notes : null,
     },
-    pickupTimes: describeTimes(byLeg('PICKUP')),
-    deliveryTimes: describeTimes(byLeg('DELIVERY')),
     eld: assessLoadEld(stops, load),
     overnight,
     // Belt and braces: the rate is read only inside this branch, so a load that is not

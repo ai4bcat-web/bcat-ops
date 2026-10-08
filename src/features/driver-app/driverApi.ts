@@ -442,11 +442,19 @@ export function punchTimeClock(
  */
 
 export interface PaperworkStop {
+  id: string
   type: string
+  sequence: number
   name: string | null
   city: string | null
   state: string | null
   appt: string | null
+  apptType: string | null
+  apptEnd: string | null
+  /** Chicago calendar day of the appointment, YYYY-MM-DD. */
+  date: string | null
+  /** The driver flagged detention here — two hours or more past the appointment. */
+  detention: boolean
 }
 
 export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'
@@ -456,14 +464,6 @@ export interface PaperworkPod {
   pages: number
   legibility: PodLegibility
   notes: string | null
-}
-
-export interface PaperworkTimes {
-  timeIn: string | null
-  timeOut: string | null
-  notes: string | null
-  hours: number | null
-  billable: boolean
 }
 
 /** Whether the run needs records of duty status — the 150 air-mile rule. */
@@ -493,8 +493,6 @@ export interface PaperworkLoad {
   status: string | null
   stops: PaperworkStop[]
   pod: PaperworkPod
-  pickupTimes: PaperworkTimes
-  deliveryTimes: PaperworkTimes
   /*
    * Optional because the app is a PWA: a cached bundle can meet an API that predates this
    * field, and a new bundle can be served a response from one. Absent is treated as "we
@@ -514,6 +512,8 @@ export interface PaperworkLoad {
 
 export interface Paperwork {
   weekStart: string
+  /** The Chicago calendar day the API considers today — what the day sheet is built on. */
+  today?: string
   loads: PaperworkLoad[]
   loadCount: number
   podsMissing: number
@@ -543,14 +543,13 @@ export async function fetchPaperwork(weekStart: string): Promise<Paperwork> {
   return request<Paperwork>(`/paperwork?week=${encodeURIComponent(weekStart)}`)
 }
 
-export async function saveLoadTimes(input: {
+/** Flag or clear detention at one stop. The in/out times go on the BOL, not here. */
+export async function setStopDetention(input: {
   loadId: string
-  leg: 'PICKUP' | 'DELIVERY'
-  timeIn: string | null
-  timeOut: string | null
-  notes?: string | null
+  stopId: string
+  detention: boolean
 }): Promise<void> {
-  await request('/paperwork/time', { method: 'POST', body: JSON.stringify(input) })
+  await request('/paperwork/detention', { method: 'POST', body: JSON.stringify(input) })
 }
 
 export async function fetchSettlementWeeks(): Promise<SettlementWeek[]> {

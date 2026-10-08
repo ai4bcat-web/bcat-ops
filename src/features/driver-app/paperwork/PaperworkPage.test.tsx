@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom'
 const api = {
   fetchPaperwork: vi.fn(),
   fetchPaperworkWeeks: vi.fn(),
-  saveLoadTimes: vi.fn(),
+  setStopDetention: vi.fn(),
   fetchSubmissions: vi.fn(),
   fetchRecentLoads: vi.fn(),
   // The PM line on the home screen reads the driver's profile.
@@ -35,8 +35,6 @@ function load(over: Record<string, unknown> = {}) {
     status: 'DELIVERED',
     stops: [],
     pod: { present: false, pages: 0, legibility: 'UNKNOWN', notes: null },
-    pickupTimes: { timeIn: null, timeOut: null, notes: null, hours: null, billable: false },
-    deliveryTimes: { timeIn: null, timeOut: null, notes: null, hours: null, billable: false },
     ...over,
   }
 }
@@ -145,23 +143,79 @@ describe('Ivan paperwork', () => {
     await waitFor(() => expect(api.fetchPaperwork).toHaveBeenCalledWith('2026-10-04'), { timeout: 5000 })
   })
 
-  it('offers to record times at both ends of the load', async () => {
+  it('no longer asks the driver to type in and out times', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /Pickup times/ })).toBeTruthy(), { timeout: 5000 })
-    expect(screen.getByRole('button', { name: /Delivery times/ })).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByRole('button', { name: /Pickup times/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Delivery times/ })).toBeNull()
   })
 
-  it('shows recorded detention on the row', async () => {
+  it('shows a flagged stop on the week row', async () => {
     api.fetchPaperwork.mockResolvedValue({
-      weekStart: '2026-10-04',
-      loads: [load({
-        deliveryTimes: { timeIn: '2026-10-06T08:00', timeOut: '2026-10-06T11:30', notes: null, hours: 3.5, billable: true },
-      })],
+      weekStart: '2026-10-04', today: '2026-10-07',
+      loads: [load({ stops: [stop('st-de', 'delivery', '2026-10-06', { detention: true })] })],
       loadCount: 1, podsMissing: 1, podsIllegible: 0,
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText(/Detention recorded/)).toBeTruthy(), { timeout: 5000 })
-    expect(screen.getByText(/delivery 3.5h/)).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(/Detention flagged · delivery/)).toBeTruthy(), { timeout: 5000 })
+  })
+})
+
+function stop(id: string, type: 'pickup' | 'delivery', date: string, over: Record<string, unknown> = {}) {
+  return {
+    id, type, sequence: type === 'pickup' ? 0 : 1, name: type === 'pickup' ? 'Batory Oakley' : 'Eagle Foods',
+    city: 'Chicago', state: 'IL', appt: `${date}T17:00:00.000Z`, apptType: 'exact', apptEnd: null,
+    date, detention: false, ...over,
+  }
+}
+
+describe("today's sheet", () => {
+  function todayWeek(loads: unknown[]) {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04', today: '2026-10-07', loads, loadCount: loads.length, podsMissing: 0, podsIllegible: 0,
+    })
+  }
+
+  it("lists today's pickups and deliveries, and nothing from another day", async () => {
+    todayWeek([
+      load({ id: 'l-a', reference: '14570', stops: [stop('a-pu', 'pickup', '2026-10-07'), stop('a-de', 'delivery', '2026-10-08')] }),
+      load({ id: 'l-b', reference: '14571', stops: [stop('b-pu', 'pickup', '2026-10-06'), stop('b-de', 'delivery', '2026-10-07')] }),
+    ])
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    // One pickup (14570's) and one delivery (14571's) are today's work.
+    expect(screen.getAllByText('Pickup')).toHaveLength(1)
+    expect(screen.getAllByText('Delivery')).toHaveLength(1)
+  })
+
+  it('puts a detention box on every stop, and the POD button on deliveries only', async () => {
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07'), stop('st-de', 'delivery', '2026-10-07')] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2)
+    expect(screen.getAllByText(/2 hours or longer from your appointment time/)).toHaveLength(2)
+    expect(screen.getAllByText(/in and out times on the BOL/)).toHaveLength(2)
+    // Today's sheet: one Send POD, on the delivery. (The week list below has its own.)
+    const section = screen.getByText('Today').parentElement!
+    expect(section.querySelectorAll('button')).toHaveLength(1)
+    expect(section.textContent).toMatch(/Send POD/)
+  })
+
+  it('flags detention at the stop the driver ticked', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.setStopDetention.mockResolvedValue(undefined)
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07'), stop('st-de', 'delivery', '2026-10-07')] })])
+    renderPage()
+    await waitFor(() => expect(screen.getAllByRole('checkbox')).toHaveLength(2), { timeout: 5000 })
+    fireEvent.click(screen.getAllByRole('checkbox')[1])
+    await waitFor(() => expect(api.setStopDetention).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-de', detention: true }))
+    await waitFor(() => expect(screen.getByText(/Detention — flagged/)).toBeTruthy())
+  })
+
+  it('says so when nothing is scheduled today', async () => {
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-05'), stop('st-de', 'delivery', '2026-10-06')] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/No pickups or deliveries scheduled today/)).toBeTruthy(), { timeout: 5000 })
   })
 })
 
@@ -178,7 +232,7 @@ describe('rendering inside the staff View-as-driver frame', () => {
     const files = [
       'src/features/driver-app/paperwork/PaperworkPage.tsx',
       'src/features/driver-app/paperwork/PaperworkRows.tsx',
-      'src/features/driver-app/paperwork/LoadTimesSheet.tsx',
+      'src/features/driver-app/paperwork/TodayStops.tsx',
     ]
     for (const f of files) {
       const src = readFileSync(f, 'utf8')

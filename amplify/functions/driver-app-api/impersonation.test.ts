@@ -208,7 +208,7 @@ describe('impersonation', () => {
     })
 
     it('still cannot be written to while impersonated', async () => {
-      const res = await handler(event('POST', '/paperwork/time', { 'x-bcat-impersonate-driver': 'drv-ivan' }))
+      const res = await handler(event('POST', '/paperwork/detention', { 'x-bcat-impersonate-driver': 'drv-ivan' }))
       expect(res.statusCode).toBe(403)
     })
   })

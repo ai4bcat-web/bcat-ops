@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildPaperworkLoad,
-  describeTimes,
+  stopDetention,
   driverIsOnPaperworkLoad,
   referenceOf,
   summarize,
@@ -115,49 +115,43 @@ describe('POD status on the load list', () => {
   })
 })
 
-describe('detention times the driver enters', () => {
-  it('is empty until the driver fills it in', () => {
-    const t = describeTimes(undefined)
-    expect(t).toEqual({ timeIn: null, timeOut: null, notes: null, hours: null, billable: false })
+describe('the detention flag the driver sets at a stop', () => {
+  // Two stops, each with its own id, as every load built from stops carries them.
+  const twoStops = () => load({
+    stops: [
+      { id: 'st-pu', type: 'pickup', sequence: 0, name: 'Batory Oakley', city: 'Chicago, IL', appt: '2026-10-05T17:00:00.000Z', apptType: 'exact', driverId: DRIVER },
+      { id: 'st-de', type: 'delivery', sequence: 1, name: 'Eagle Foods', city: 'Waukegan, IL', appt: '2026-10-06T05:00:00.000Z', apptType: 'tbd', driverId: DRIVER },
+    ],
   })
 
-  it('computes the gap and calls it billable past the free hours', () => {
-    const t = describeTimes({ loadId: 'l', driverId: DRIVER, leg: 'DELIVERY', timeIn: '2026-10-06T08:00', timeOut: '2026-10-06T11:30' })
-    expect(t.hours).toBe(3.5)
-    expect(t.billable).toBe(true)
+  it('is off until the driver flags it', () => {
+    expect(stopDetention([], 'st-pu')).toBe(false)
+    const p = buildPaperworkLoad(twoStops(), [], [])
+    expect(p.stops.map((s) => s.detention)).toEqual([false, false])
   })
 
-  it('does not call a short wait billable', () => {
-    const t = describeTimes({ loadId: 'l', driverId: DRIVER, leg: 'DELIVERY', timeIn: '2026-10-06T08:00', timeOut: '2026-10-06T09:30' })
-    expect(t.hours).toBe(1.5)
-    expect(t.billable).toBe(false)
+  it('keeps pickup and delivery flags apart — keyed on the stop, not the load', () => {
+    const p = buildPaperworkLoad(twoStops(), [], [
+      { loadId: 'load-1', driverId: DRIVER, leg: 'PICKUP', stopId: 'st-pu', detention: true },
+      { loadId: 'load-1', driverId: DRIVER, leg: 'DELIVERY', stopId: 'st-de', detention: false },
+    ])
+    expect(p.stops.find((s) => s.id === 'st-pu')?.detention).toBe(true)
+    expect(p.stops.find((s) => s.id === 'st-de')?.detention).toBe(false)
+  })
+
+  it('a cleared flag reads as no detention', () => {
+    expect(stopDetention([{ loadId: 'l', driverId: DRIVER, leg: 'PICKUP', stopId: 's', detention: false }], 's')).toBe(false)
+  })
+
+  it('states the rule the driver is asked to apply', () => {
     expect(DETENTION_FREE_HOURS).toBe(2)
   })
 
-  it('handles a wait that crosses midnight rather than reporting negative hours', () => {
-    // A driver sitting at a dock from 22:00 to 01:00 waited three hours, not minus 21.
-    const t = describeTimes({ loadId: 'l', driverId: DRIVER, leg: 'DELIVERY', timeIn: '2026-10-06T22:00', timeOut: '2026-10-06T01:00' })
-    expect(t.hours).toBe(3)
-    expect(t.billable).toBe(true)
-  })
-
-  it('keeps pickup and delivery waits apart', () => {
-    const p = buildPaperworkLoad(load(), [], [
-      { loadId: 'load-1', driverId: DRIVER, leg: 'PICKUP', timeIn: '2026-10-05T06:00', timeOut: '2026-10-05T09:15' },
-      { loadId: 'load-1', driverId: DRIVER, leg: 'DELIVERY', timeIn: '2026-10-06T14:00', timeOut: '2026-10-06T14:30' },
-    ])
-    expect(p.pickupTimes.hours).toBe(3.25)
-    expect(p.pickupTimes.billable).toBe(true)
-    expect(p.deliveryTimes.hours).toBe(0.5)
-    expect(p.deliveryTimes.billable).toBe(false)
-  })
-
-  it('keeps a recorded wait even when it is under the threshold', () => {
-    // The driver's account of the clock is the record. Discarding the short ones would
-    // throw away the evidence for the load somebody later disputes.
-    const t = describeTimes({ loadId: 'l', driverId: DRIVER, leg: 'PICKUP', timeIn: '2026-10-05T10:00', timeOut: '2026-10-05T10:20', notes: 'waved straight in' })
-    expect(t.timeIn).toBe('2026-10-05T10:00')
-    expect(t.notes).toBe('waved straight in')
+  it('puts each stop on its Chicago calendar day, with the appointment type the app prints', () => {
+    const p = buildPaperworkLoad(twoStops(), [], [])
+    // 17:00Z on 5 Oct is noon Chicago; 05:00Z on 6 Oct is midnight Chicago — still the 6th.
+    expect(p.stops[0]).toMatchObject({ id: 'st-pu', date: '2026-10-05', apptType: 'exact', sequence: 0 })
+    expect(p.stops[1]).toMatchObject({ id: 'st-de', date: '2026-10-06', apptType: 'tbd', sequence: 1 })
   })
 })
 

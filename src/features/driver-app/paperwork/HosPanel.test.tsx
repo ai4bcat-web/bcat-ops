@@ -98,11 +98,9 @@ describe('when the panel is offered at all', () => {
       pickupAppt: null, origin: 'A', destination: 'B', miles: null, trailerNumber: null,
       commodity: null, weight: null, pieces: null, notes: null, status: null, stops: [],
       pod: { present: true, pages: 1, legibility: 'OK', notes: null },
-      pickupTimes: { timeIn: null, timeOut: null, notes: null, hours: null, billable: false },
-      deliveryTimes: { timeIn: null, timeOut: null, notes: null, hours: null, billable: false },
       eld: { status: 'REQUIRED', required: true, farthestMiles: 201, farthestCity: 'X', label: 'ELD logs required' },
     }
-    render(<PaperworkRows loads={[load as never]} onSendPod={vi.fn()} onRecordTimes={vi.fn()} />)
+    render(<PaperworkRows loads={[load as never]} onSendPod={vi.fn()} />)
     expect(api.fetchHosDay).not.toHaveBeenCalled()
 
     api.fetchHosDay.mockResolvedValue({ date: '2026-10-01', linked: true, day: DAY })
@@ -117,11 +115,9 @@ describe('when the panel is offered at all', () => {
       pickupAppt: null, origin: 'A', destination: 'B', miles: null, trailerNumber: null,
       commodity: null, weight: null, pieces: null, notes: null, status: null, stops: [],
       pod: { present: true, pages: 1, legibility: 'OK', notes: null },
-      pickupTimes: { timeIn: null, timeOut: null, notes: null, hours: null, billable: false },
-      deliveryTimes: { timeIn: null, timeOut: null, notes: null, hours: null, billable: false },
       eld: { status: 'NOT_REQUIRED', required: false, farthestMiles: 40, farthestCity: 'X', label: 'No ELD logs required' },
     }
-    render(<PaperworkRows loads={[load as never]} onSendPod={vi.fn()} onRecordTimes={vi.fn()} />)
+    render(<PaperworkRows loads={[load as never]} onSendPod={vi.fn()} />)
     // The exemption spares them the record; offering a log panel invites worry about
     // paperwork that does not exist.
     expect(screen.queryByText('Show my logs for this day')).toBeNull()
