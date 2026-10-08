@@ -23,6 +23,7 @@ vi.mock('@/store/useAppStore', () => ({
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('./OtrPanel', () => ({ OtrPanel: () => <div data-testid="otr-panel" /> }))
+vi.mock('./ManualInvoicePanel', () => ({ ManualInvoicePanel: () => <div data-testid="manual-panel" /> }))
 // The drawer the PRO column opens. Its own behaviour is covered by LoadDrawer's tests;
 // here it would only drag the whole load form into a test about the queue.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
@@ -64,8 +65,8 @@ describe('filters', () => {
     setup([item()])
     const labels = screen.getAllByRole('button')
       .map((b) => b.textContent?.replace(/\d+$/, '').trim())
-      .filter((t) => ['Need to factor', 'Pending with OTR', 'All', 'Factored'].includes(t ?? ''))
-    expect(labels).toEqual(['Need to factor', 'Pending with OTR', 'All', 'Factored'])
+      .filter((t) => ['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'].includes(t ?? ''))
+    expect(labels).toEqual(['Need to factor', 'Pending with OTR', 'Invoice manually', 'All', 'Factored', 'Invoiced manually'])
   })
 
   it('opens on Need to factor, not All', () => {
@@ -249,5 +250,27 @@ describe('paging through the queue', () => {
     setup(many(3))
     fireEvent.change(screen.getByPlaceholderText(/Search/i), { target: { value: 'zzzzzz' } })
     expect(screen.queryByText(/of 3$/)).not.toBeInTheDocument()
+  })
+})
+
+describe('invoicing by hand', () => {
+  it('flags a No Buy broker on the row and files it under Invoice manually', () => {
+    setup([
+      item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR' }),
+      item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY', brokerCheckResult: 'NO_BUY', brokerMcChecked: '592002' }),
+    ])
+    expect(screen.queryByText('B2')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /^Invoice manually/ }))
+    expect(screen.getByText('B2')).toBeInTheDocument()
+    expect(screen.getByText('NO BUY')).toBeInTheDocument()
+    expect(screen.queryByText('A1')).not.toBeInTheDocument()
+  })
+
+  it('opens a manual row to its checklist, not the OTR editor', () => {
+    setup([item({ id: 'b', proNumber: 'B2', status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' })])
+    fireEvent.click(screen.getByRole('button', { name: /^Invoice manually/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Open the steps for PRO B2/ }))
+    expect(screen.getByTestId('manual-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('otr-panel')).not.toBeInTheDocument()
   })
 })

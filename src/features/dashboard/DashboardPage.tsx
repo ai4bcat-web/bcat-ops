@@ -188,6 +188,7 @@ function FactoringCard({ totals, loading, onOpen }: {
   const rows: { label: string; bucket: FactoringTotals['needToFactor']; color: string }[] = [
     { label: 'Need to factor', bucket: totals.needToFactor, color: '#b45309' },
     { label: 'Pending with OTR', bucket: totals.pendingWithOtr, color: '#1d4ed8' },
+    { label: 'Invoice manually', bucket: totals.manualInvoice, color: '#be185d' },
     { label: 'Factored', bucket: totals.factored, color: '#15803d' },
   ]
   const unvalued = rows.reduce((n, r) => n + r.bucket.unvalued, 0)

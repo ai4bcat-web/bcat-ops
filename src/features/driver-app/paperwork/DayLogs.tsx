@@ -1,33 +1,52 @@
 /**
- * The driver's own duty log for the day on screen, on demand.
+ * Whether today needs ELD logs — said at the top of the day, every day.
  *
- * Only offered when logs are actually required by something that day — on a short-haul
- * day there is no record to keep, so a log panel would be inviting a driver to worry
- * about paperwork the exemption spares them. Fetched only when opened: one Motive call
- * per day the driver actually looks at.
+ * The 150 air-mile rule: a day with any pickup or delivery outside the radius from
+ * Pleasant Prairie needs records of duty status; a day kept inside it does not. The
+ * driver should know which BEFORE they roll, so this sits above the stops, and it says
+ * "no logs needed" out loud on a local day rather than going quiet — silence reads as
+ * "nobody checked". UNKNOWN (a stop that could not be placed) gets its own amber state
+ * rather than being folded into "not required": the point of surfacing it is that
+ * somebody looks. The driver's own log for the day is one tap away when logs are required.
  */
 import { useState } from 'react'
-import { AlertTriangle, ClipboardList } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ClipboardList } from 'lucide-react'
 import type { PaperworkLoad } from '../driverApi'
 import { HosPanel } from './HosPanel'
+import { SHORT_HAUL_AIR_MILES, WORK_REPORTING_LOCATION } from '@/lib/eldRadius'
+import { dayEldState } from './dayEld'
 
-export function DayLogs({ loads, date }: { loads: PaperworkLoad[]; date: string }) {
+export function DayLogs({ loads, date, isToday = true }: { loads: PaperworkLoad[]; date: string; isToday?: boolean }) {
   const [open, setOpen] = useState(false)
-  // UNKNOWN gets its own "check" state rather than being folded into "not required" —
-  // the point of surfacing it is that somebody looks. NOT_REQUIRED says nothing: a "no
-  // logs needed" line on every local day would be noise on a sheet that is mostly local.
+  const state = dayEldState(loads)
+  if (state === 'NO_DATA') return null
+  const day = isToday ? 'today' : 'this day'
   const flagged = loads.filter((l) => l.eld && l.eld.status !== 'NOT_REQUIRED')
-  if (flagged.length === 0) return null
-  const required = flagged.some((l) => l.eld?.status === 'REQUIRED')
+
+  if (state === 'NOT_REQUIRED') {
+    return (
+      <div className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+        <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>
+          <span className="font-bold">No ELD logs needed {day}.</span>
+          {loads.length > 0
+            ? ` Every stop is within ${SHORT_HAUL_AIR_MILES} air miles of ${WORK_REPORTING_LOCATION.name}.`
+            : ' Nothing scheduled.'}
+        </span>
+      </div>
+    )
+  }
+
+  const required = state === 'REQUIRED'
   const tone = required ? 'border-sky-400/40 bg-sky-500/10 text-sky-100' : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
   return (
-    <div className={`mt-4 rounded-xl border p-4 ${tone}`}>
-      <p className="flex items-center gap-2 text-sm font-bold">
-        {required ? <ClipboardList className="h-4 w-4 shrink-0" aria-hidden="true" /> : <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />}
-        {required ? 'ELD logs required' : 'Check ELD'}
+    <div className={`mb-4 rounded-xl border p-4 ${tone}`}>
+      <p className="flex items-center gap-2 text-base font-bold">
+        {required ? <ClipboardList className="h-5 w-5 shrink-0" aria-hidden="true" /> : <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />}
+        {required ? `ELD logs required ${day}` : `Check ELD ${day}`}
       </p>
       {flagged.map((l) => (
-        <p key={l.id} className="mt-1 text-sm opacity-90">{l.eld?.label}</p>
+        <p key={l.id} className="mt-1 text-sm opacity-90">{l.reference} · {l.eld?.label}</p>
       ))}
       {required && (
         <button

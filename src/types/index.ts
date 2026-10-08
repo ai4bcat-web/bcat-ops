@@ -389,7 +389,14 @@ export interface IntakeItem {
 
 
 /** ARCHIVED is out of the working queue but not destroyed — see the FactoringPage filter. */
-export type FactoringItemStatus = 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED' | 'ARCHIVED'
+/**
+ * MANUAL_INVOICE: OTR will not buy this broker (or somebody chose to bill it direct), so
+ * the invoice goes out by hand — see src/lib/manualInvoice.ts for the steps.
+ * INVOICED_MANUALLY: every step done; the invoice is with the broker's AP.
+ */
+export type FactoringItemStatus =
+  | 'NEED_TO_FACTOR' | 'PENDING_WITH_OTR' | 'FACTORED' | 'ARCHIVED'
+  | 'MANUAL_INVOICE' | 'INVOICED_MANUALLY'
 
 /** OTR's own invoice statuses, mirrored onto the row so the queue shows their board. */
 export type OtrInvoiceStatus =
@@ -402,7 +409,14 @@ export type OtrInvoiceStatus =
   | 'OTR Follow-Up'
   | 'Paid'
 
-export type BrokerCheckResult = 'APPROVED' | 'CALL_OFFICE' | 'NOT_APPROVED' | 'UNKNOWN' | 'NOT_FOUND'
+export type BrokerCheckResult = 'APPROVED' | 'CALL_OFFICE' | 'NOT_APPROVED' | 'UNKNOWN' | 'NOT_FOUND' | 'NO_BUY'
+
+export interface ManualStepMark { at: string; by: string }
+export interface ManualInvoiceSteps {
+  billToUpdated?: ManualStepMark | null
+  pdfExported?: ManualStepMark | null
+  emailed?: ManualStepMark | null
+}
 
 export interface FactoringItem {
   /** Stable identifier — the literal PRO number, preserving leading zeroes. */
@@ -438,6 +452,16 @@ export interface FactoringItem {
   otrStatusSyncedAt?: string | null
   otrDocsUploaded?: { pod?: string; rateConfirmation?: string } | null
   otrError?: string | null
+  /** The broker this row bills, once an MC named it. */
+  customerId?: string | null
+  // ── Invoicing by hand (status MANUAL_INVOICE / INVOICED_MANUALLY) ─────────
+  /** Why it left the OTR queue: OTR's No Buy, or a person's choice. */
+  manualReason?: 'NO_BUY' | 'MANUAL' | null
+  /** Which of the manual steps are done, by whom and when. See src/lib/manualInvoice.ts. */
+  manualSteps?: ManualInvoiceSteps | null
+  /** The broker's accounts-payable address the invoice goes to. */
+  apEmail?: string | null
+  manualInvoicedAt?: string | null
 }
 
 

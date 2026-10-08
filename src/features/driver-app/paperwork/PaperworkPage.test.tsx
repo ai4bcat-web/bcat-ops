@@ -362,7 +362,7 @@ describe('the ELD badge on a load', () => {
       loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 1,
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText('ELD logs required')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText(/ELD logs required today/)).toBeTruthy(), { timeout: 5000 })
     // And the reason, so the driver can check it against the run they actually made.
     expect(screen.getByText(/201 air miles from Pleasant Prairie, WI/)).toBeTruthy()
   })
@@ -385,8 +385,10 @@ describe('the ELD badge on a load', () => {
      * local. Matched on the badge and the explanation specifically: the week summary strip
      * carries an "ELD logs" count label, which is a different thing and should stay.
      */
-    expect(screen.queryByText('ELD logs required')).toBeNull()
-    expect(screen.queryByText('Check ELD')).toBeNull()
+    expect(screen.queryByText(/ELD logs required/)).toBeNull()
+    expect(screen.queryByText(/Check ELD/)).toBeNull()
+    // Said out loud, at the top: silence would read as "nobody checked".
+    expect(screen.getByText(/No ELD logs needed today/)).toBeTruthy()
   })
 
   it('asks the driver to check when a stop could not be placed', async () => {
@@ -401,7 +403,7 @@ describe('the ELD badge on a load', () => {
       loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 0,
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText('Check ELD')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText(/Check ELD today/)).toBeTruthy(), { timeout: 5000 })
     expect(screen.getByText(/could not locate CTSI WAREHOUSE/)).toBeTruthy()
   })
 
@@ -409,8 +411,9 @@ describe('the ELD badge on a load', () => {
     // A cached PWA bundle can meet an older API. Absent must not read as "no logs needed".
     renderPage()
     await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
-    expect(screen.queryByText('ELD logs required')).toBeNull()
-    expect(screen.queryByText('Check ELD')).toBeNull()
+    expect(screen.queryByText(/ELD logs required/)).toBeNull()
+    expect(screen.queryByText(/Check ELD/)).toBeNull()
+    expect(screen.queryByText(/No ELD logs needed/)).toBeNull()
   })
 })
 

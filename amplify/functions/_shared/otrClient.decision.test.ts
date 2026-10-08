@@ -7,8 +7,8 @@ describe('decisionFrom — the verdict wherever OTR put it', () => {
     expect(decisionFrom(raw, '')).toBe('APPROVED')
   })
 
-  it('a NoBuy broker is not approved, whatever the test result says', () => {
-    expect(decisionFrom({ BrokerTestResult: 'Approved', NoBuy: true }, '')).toBe('NOT APPROVED')
+  it('a NoBuy broker is NO BUY, whatever the test result says — it is invoiced by hand', () => {
+    expect(decisionFrom({ BrokerTestResult: 'Approved', NoBuy: true }, '')).toBe('NO BUY')
   })
 
   it('still reads the v1 message when that is all there is', () => {

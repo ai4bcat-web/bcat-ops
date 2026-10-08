@@ -77,6 +77,29 @@ export function setBrokerMc(
   return otrAction('setMc', { id, mcNumber })
 }
 
+/** Take the row out of the OTR queue to be billed by hand. */
+export function markManualInvoice(id: string, apEmail?: string): Promise<{ status: string }> {
+  return otrAction('manualInvoice', { id, ...(apEmail ? { apEmail } : {}) })
+}
+
+/** Put a manually-invoiced row back in the OTR queue. */
+export function returnToOtrQueue(id: string): Promise<{ status: string }> {
+  return otrAction('returnToOtr', { id })
+}
+
+export function setApEmail(id: string, apEmail: string): Promise<{ apEmail: string | null }> {
+  return otrAction('setApEmail', { id, apEmail })
+}
+
+/** Tick or clear one of the manual-invoice steps. */
+export function setManualStep(
+  id: string,
+  step: string,
+  done: boolean,
+): Promise<{ status: string; progress: { done: number; total: number; complete: boolean } }> {
+  return otrAction('manualStep', { id, step, done })
+}
+
 /** Ask OTR whether the broker is approved. Never submits. */
 export function checkBroker(
   id: string,

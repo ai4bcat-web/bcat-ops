@@ -33,6 +33,9 @@ export interface FactoringTotals {
   needToFactor: BucketTotal
   pendingWithOtr: BucketTotal
   factored: BucketTotal
+  /** Billed by hand because OTR will not buy the broker (or by choice); still owed. */
+  manualInvoice: BucketTotal
+  invoicedManually: BucketTotal
   /** Everything still owed to us: waiting to send, plus sent and not yet paid. */
   outstandingAmount: number
   outstandingCount: number
@@ -58,6 +61,7 @@ export function factoringTotals(
   const rateById = new Map<string, number | null | undefined>(loads.map((l) => [l.id, l.rate]))
   const buckets: Record<string, BucketTotal> = {
     NEED_TO_FACTOR: EMPTY(), PENDING_WITH_OTR: EMPTY(), FACTORED: EMPTY(),
+    MANUAL_INVOICE: EMPTY(), INVOICED_MANUALLY: EMPTY(),
   }
 
   for (const item of items) {
@@ -73,12 +77,17 @@ export function factoringTotals(
   const needToFactor = buckets.NEED_TO_FACTOR
   const pendingWithOtr = buckets.PENDING_WITH_OTR
   const factored = buckets.FACTORED
+  const manualInvoice = buckets.MANUAL_INVOICE
+  const invoicedManually = buckets.INVOICED_MANUALLY
 
   return {
     needToFactor,
     pendingWithOtr,
     factored,
-    outstandingAmount: needToFactor.amount + pendingWithOtr.amount,
-    outstandingCount: needToFactor.count + pendingWithOtr.count,
+    manualInvoice,
+    invoicedManually,
+    // A manual invoice not yet sent is still money owed; one sent by hand is out of our hands like a factored one.
+    outstandingAmount: needToFactor.amount + pendingWithOtr.amount + manualInvoice.amount,
+    outstandingCount: needToFactor.count + pendingWithOtr.count + manualInvoice.count,
   }
 }

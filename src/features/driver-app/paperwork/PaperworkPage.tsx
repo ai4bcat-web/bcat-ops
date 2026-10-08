@@ -172,9 +172,10 @@ export function PaperworkPage() {
             </p>
           )}
 
-          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onChange={reload} />
+          {/* Logs or no logs, before anything else: the one thing to know before rolling. */}
+          <DayLogs loads={dayLoads} date={day} isToday={isToday} />
 
-          <DayLogs loads={dayLoads} date={day} />
+          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onChange={reload} />
         </>
       )}
 

@@ -49,7 +49,7 @@ export type OtrDocType = (typeof OTR_DOC_TYPE)[keyof typeof OTR_DOC_TYPE]
  * such MC at all, which is what makes a create return 204 and silently do nothing.
  */
 export type BrokerDecision =
-  | 'APPROVED' | 'CALL OFFICE' | 'NOT APPROVED' | 'NOT FOUND' | 'UNKNOWN'
+  | 'APPROVED' | 'CALL OFFICE' | 'NOT APPROVED' | 'NOT FOUND' | 'NO BUY' | 'UNKNOWN'
 
 /**
  * Invoice statuses OTR reports. Mirrored onto the queue row so the board in
@@ -855,7 +855,9 @@ export function brokerNameFrom(raw: unknown): string | null {
 export function decisionFrom(raw: unknown, message: string): BrokerDecision {
   if (raw && typeof raw === 'object') {
     const lower = new Map(Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k.toLowerCase(), v]))
-    if (lower.get('nobuy') === true) return 'NOT APPROVED'
+    // Its own verdict, not folded into NOT APPROVED: a No Buy broker still gets invoiced,
+    // by hand, and the queue needs to know that is why.
+    if (lower.get('nobuy') === true) return 'NO BUY'
     for (const key of ['brokertestresult', 'decision', 'result', 'status']) {
       const v = lower.get(key)
       if (typeof v === 'string' && v.trim()) {

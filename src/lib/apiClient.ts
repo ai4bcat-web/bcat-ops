@@ -657,6 +657,7 @@ const FACTORING_ITEM_FIELDS = `
   otrInvoiceId otrSubmittedAt otrSubmittedBy
   otrStatus otrScheduleId otrAmount otrStatusSyncedAt
   otrDocsUploaded otrError
+  customerId manualReason manualSteps apEmail manualInvoicedAt
 `
 
 /**
@@ -665,7 +666,7 @@ const FACTORING_ITEM_FIELDS = `
  * A column that will not parse is dropped rather than thrown: one malformed cached
  * readiness must not blank the whole factoring queue.
  */
-const FACTORING_JSON_FIELDS = ['otrManualFields', 'otrReadiness', 'otrDocsUploaded'] as const
+const FACTORING_JSON_FIELDS = ['otrManualFields', 'otrReadiness', 'otrDocsUploaded', 'manualSteps'] as const
 
 function parseFactoringJson(item: FactoringItem): FactoringItem {
   const out = { ...item } as unknown as Record<string, unknown>

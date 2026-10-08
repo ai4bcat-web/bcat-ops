@@ -51,6 +51,8 @@ export function totalsByStatus(
     PENDING_WITH_OTR: { ...EMPTY_TOTAL },
     FACTORED: { ...EMPTY_TOTAL },
     ARCHIVED: { ...EMPTY_TOTAL },
+    MANUAL_INVOICE: { ...EMPTY_TOTAL },
+    INVOICED_MANUALLY: { ...EMPTY_TOTAL },
   }
 
   for (const item of items) {

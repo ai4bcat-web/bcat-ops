@@ -29,6 +29,8 @@ import {
   type OtrReadiness,
 } from '../../../src/lib/otrInvoice'
 import { normalizeName } from '../../../src/lib/tmsDirectory'
+import { isManualStepId, manualProgress, withManualStep } from '../../../src/lib/manualInvoice'
+import type { ManualInvoiceSteps } from '../../../src/types'
 import { localStatusFor } from '../../../src/lib/otrInvoiceStatus'
 import { normalizePro } from '../../../src/lib/podPresence'
 import {
@@ -564,6 +566,16 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
   return { readiness, load }
 }
 
+/**
+ * What a No Buy verdict does to a row: moves it out of the OTR queue to be invoiced by
+ * hand, once. A row already with OTR, or already being worked by hand, is left where it is.
+ */
+function noBuyFlag(item: Row, decision: string | null): Record<string, unknown> {
+  if (decision !== 'NO BUY') return {}
+  if (item.status !== 'NEED_TO_FACTOR') return {}
+  return { status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' }
+}
+
 async function updateItem(id: string, fields: Record<string, unknown>) {
   const entries = Object.entries(fields).filter(([, v]) => v !== undefined)
   if (!entries.length) return
@@ -862,6 +874,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           ...(check
             ? { brokerMcChecked: mc, brokerCheckResult: check.decision.replace(' ', '_'), brokerCheckedAt: nowIso() }
             : {}),
+          ...noBuyFlag(item, check?.decision ?? null),
           otrError: null,
         })
 
@@ -870,6 +883,72 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         return ok({
           customerId: customer.id, mcNumber: mc, brokerName: otrName, decision: check?.decision ?? null, readiness,
         })
+      }
+
+      /**
+       * Take a row out of the OTR queue to be billed by hand — the choice, where No Buy
+       * is the automatic version of the same move.
+       */
+      case 'manualInvoice': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        if (item.status === 'PENDING_WITH_OTR' || item.status === 'FACTORED') {
+          return fail('this invoice is already with OTR')
+        }
+        await updateItem(String(item.id), {
+          status: 'MANUAL_INVOICE',
+          manualReason: item.manualReason === 'NO_BUY' ? 'NO_BUY' : 'MANUAL',
+          ...(trim(input.apEmail) ? { apEmail: trim(input.apEmail) } : {}),
+          otrError: null,
+        })
+        return ok({ status: 'MANUAL_INVOICE' })
+      }
+
+      /** Back into the OTR queue — a row routed by hand, or a No Buy that OTR reversed. */
+      case 'returnToOtr': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        if (item.status !== 'MANUAL_INVOICE' && item.status !== 'INVOICED_MANUALLY') {
+          return fail('this row is not being invoiced manually')
+        }
+        await updateItem(String(item.id), { status: 'NEED_TO_FACTOR', manualReason: null, manualInvoicedAt: null })
+        return ok({ status: 'NEED_TO_FACTOR' })
+      }
+
+      /** The broker's AP address — where the manual invoice is sent. */
+      case 'setApEmail': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        const apEmail = trim(input.apEmail)
+        if (apEmail && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(apEmail)) return fail('that does not look like an email address')
+        await updateItem(String(item.id), { apEmail: apEmail || null })
+        return ok({ apEmail: apEmail || null })
+      }
+
+      /**
+       * Tick or clear one manual step. The third tick finishes the row; clearing any
+       * step on a finished row reopens it. Who and when are stamped on the step so the
+       * row can say who sent it.
+       */
+      case 'manualStep': {
+        const item = await getFactoringItem(String(input.id))
+        if (!item) return fail('factoring item not found')
+        if (item.status !== 'MANUAL_INVOICE' && item.status !== 'INVOICED_MANUALLY') {
+          return fail('this row is not being invoiced manually')
+        }
+        const step = input.step
+        if (!isManualStepId(step)) return fail('unknown step')
+        const done = input.done === true
+        const prevRaw = item.manualSteps
+        const prev = (typeof prevRaw === 'string' ? JSON.parse(prevRaw) : prevRaw) as ManualInvoiceSteps | null
+        const steps = withManualStep(prev, step, done, { at: nowIso(), by: actor })
+        const progress = manualProgress(steps)
+        await updateItem(String(item.id), {
+          manualSteps: steps,
+          status: progress.complete ? 'INVOICED_MANUALLY' : 'MANUAL_INVOICE',
+          manualInvoicedAt: progress.complete ? nowIso() : null,
+        })
+        return ok({ steps, progress, status: progress.complete ? 'INVOICED_MANUALLY' : 'MANUAL_INVOICE' })
       }
 
       /** Ask OTR whether the broker is approved. Never submits. */
@@ -925,6 +1004,7 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           brokerMcChecked: mc,
           brokerCheckResult: decision.replace(' ', '_'),
           brokerCheckedAt: nowIso(),
+          ...noBuyFlag(item, decision),
           otrError: null,
         })
 
@@ -982,6 +1062,19 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         if (mc) {
           try {
             const check = await client.brokerCheck({ brokerMc: mc })
+            if (check.decision === 'NO BUY') {
+              await updateItem(String(item.id), {
+                brokerCheckedAt: nowIso(),
+                brokerMcChecked: mc,
+                brokerCheckResult: 'NO_BUY',
+                ...noBuyFlag(item, 'NO BUY'),
+                otrError: `OTR will not buy from MC ${mc}`,
+              })
+              return fail(
+                `OTR will not buy from this broker (No Buy), so it cannot be factored. The row ` +
+                  `has moved to Invoice manually — bill it direct from there.`,
+              )
+            }
             if (check.decision === 'NOT FOUND') {
               await updateItem(String(item.id), {
                 brokerCheckedAt: nowIso(),

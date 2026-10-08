@@ -18,14 +18,17 @@ import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
+import { ManualInvoicePanel } from './ManualInvoicePanel'
 
 // ── Status labels ────────────────────────────────────────────────────────────
 
 const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
-  NEED_TO_FACTOR:   'Need to factor',
-  PENDING_WITH_OTR: 'Pending with OTR',
-  FACTORED:         'Factored',
-  ARCHIVED:         'Archived',
+  NEED_TO_FACTOR:    'Need to factor',
+  PENDING_WITH_OTR:  'Pending with OTR',
+  MANUAL_INVOICE:    'Invoice manually',
+  FACTORED:          'Factored',
+  INVOICED_MANUALLY: 'Invoiced manually',
+  ARCHIVED:          'Archived',
 }
 
 /**
@@ -33,7 +36,7 @@ const FACTORING_STATUS_LABEL: Record<FactoringItemStatus, string> = {
  * then everything, then what is finished. "Need to factor" is the default because an empty
  * queue there is the only state worth celebrating.
  */
-const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'ALL', 'FACTORED', 'ARCHIVED'] as const
+const FILTER_ORDER = ['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'MANUAL_INVOICE', 'ALL', 'FACTORED', 'INVOICED_MANUALLY', 'ARCHIVED'] as const
 type FilterKey = (typeof FILTER_ORDER)[number]
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -283,15 +286,32 @@ function CustomerCell({ item }: { item: FactoringItem }) {
 const STATUS_CAUSE: Record<FactoringItemStatus, string> = {
   NEED_TO_FACTOR: 'Not submitted yet. Press Submit to OTR on the row to send it.',
   PENDING_WITH_OTR: 'Submitted to OTR. This clears when their board says Paid.',
+  MANUAL_INVOICE: 'Going out by hand — OTR will not buy this broker, or it was routed here on purpose. Open the row for the steps.',
   FACTORED: 'OTR has paid this invoice.',
+  INVOICED_MANUALLY: 'Sent to the broker’s AP by hand; every step on the row is done.',
   ARCHIVED: 'Taken out of the queue by hand. Nothing was deleted — set a status to bring it back.',
 }
 
 const STATUS_TONE: Record<FactoringItemStatus, { bg: string; fg: string; border: string }> = {
   NEED_TO_FACTOR: { bg: '#fef3c7', fg: '#b45309', border: '#fcd34d' },
   PENDING_WITH_OTR: { bg: '#dbeafe', fg: '#1d4ed8', border: '#93c5fd' },
+  MANUAL_INVOICE: { bg: '#fce7f3', fg: '#be185d', border: '#f9a8d4' },
   FACTORED: { bg: '#dcfce7', fg: '#15803d', border: '#86efac' },
+  INVOICED_MANUALLY: { bg: '#ede9fe', fg: '#6d28d9', border: '#c4b5fd' },
   ARCHIVED: { bg: '#f1f5f9', fg: '#64748b', border: '#cbd5e1' },
+}
+
+/** OTR knows this broker and will not buy its paper. Said on the row, not only in the panel. */
+function NoBuyFlag({ item }: { item: FactoringItem }) {
+  if (item.brokerCheckResult !== 'NO_BUY') return null
+  return (
+    <span
+      title={`OTR will not buy from MC ${item.brokerMcChecked ?? ''} — invoice manually`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: '#fce7f3', color: '#be185d', border: '1px solid #f9a8d4', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}
+    >
+      NO BUY
+    </span>
+  )
 }
 
 function StatusBadge({ item }: { item: FactoringItem }) {
@@ -343,7 +363,9 @@ export function FactoringPage() {
     ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
     NEED_TO_FACTOR: items.filter((i) => i.status === 'NEED_TO_FACTOR').length,
     PENDING_WITH_OTR: items.filter((i) => i.status === 'PENDING_WITH_OTR').length,
+    MANUAL_INVOICE: items.filter((i) => i.status === 'MANUAL_INVOICE').length,
     FACTORED: items.filter((i) => i.status === 'FACTORED').length,
+    INVOICED_MANUALLY: items.filter((i) => i.status === 'INVOICED_MANUALLY').length,
     ARCHIVED: items.filter((i) => i.status === 'ARCHIVED').length,
   }), [items])
 
@@ -538,7 +560,11 @@ export function FactoringPage() {
                         <button
                           onClick={() => toggleExpanded(item.id)}
                           aria-expanded={expanded.has(item.id)}
-                          aria-label={`${expanded.has(item.id) ? 'Hide' : 'Edit'} the OTR fields for PRO ${item.proNumber}`}
+                          aria-label={
+                            item.status === 'MANUAL_INVOICE' || item.status === 'INVOICED_MANUALLY'
+                              ? `${expanded.has(item.id) ? 'Hide' : 'Open'} the steps for PRO ${item.proNumber}`
+                              : `${expanded.has(item.id) ? 'Hide' : 'Edit'} the OTR fields for PRO ${item.proNumber}`
+                          }
                           title={item.subject || undefined}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 8, border: 'none',
@@ -617,6 +643,7 @@ export function FactoringPage() {
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <StatusBadge item={item} />
+                          <NoBuyFlag item={item} />
                           {pendingIds.has(item.id) && (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           )}
@@ -642,7 +669,9 @@ export function FactoringPage() {
                       {expanded.has(item.id) && (
                         <tr>
                           <td colSpan={canDelete ? 10 : 9} style={{ padding: '0 16px 14px' }}>
-                            <OtrPanel item={item} onChanged={refresh} />
+                            {item.status === 'MANUAL_INVOICE' || item.status === 'INVOICED_MANUALLY'
+                              ? <ManualInvoicePanel item={item} onChanged={refresh} />
+                              : <OtrPanel item={item} onChanged={refresh} />}
                           </td>
                         </tr>
                       )}

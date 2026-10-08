@@ -838,7 +838,9 @@ const schema = a.schema({
        * queue was reset to a clean slate: the history is worth keeping, and a status is
        * reversible in a way a delete is not.
        */
-      status:     a.enum(['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED', 'ARCHIVED']),
+      // MANUAL_INVOICE: OTR said No Buy (or a person chose direct billing); the invoice goes
+      // out by hand through the steps in src/lib/manualInvoice.ts. INVOICED_MANUALLY: done.
+      status:     a.enum(['NEED_TO_FACTOR', 'PENDING_WITH_OTR', 'FACTORED', 'ARCHIVED', 'MANUAL_INVOICE', 'INVOICED_MANUALLY']),
       subject:    a.string().required(),
       fromEmail:  a.string().required(),
       /** Who the invoice email was delivered to. The queue only accepts the factoring group. */
@@ -867,7 +869,9 @@ const schema = a.schema({
        * a broker they know; "not found" is OTR having no such MC at all — which is the case
        * that makes a create return 204 and silently do nothing, so it blocks the submit.
        */
-      brokerCheckResult: a.enum(['APPROVED', 'CALL_OFFICE', 'NOT_APPROVED', 'NOT_FOUND', 'UNKNOWN']),
+      // NO_BUY: OTR knows the broker and will not factor its paper. Flagged, and the row
+      // moves to MANUAL_INVOICE on its own.
+      brokerCheckResult: a.enum(['APPROVED', 'CALL_OFFICE', 'NOT_APPROVED', 'NOT_FOUND', 'UNKNOWN', 'NO_BUY']),
       brokerCheckedAt:   a.datetime(),
       // Set once the invoice exists at OTR. otrInvoiceId is their identifier and
       // is required by every document upload and status read.
@@ -881,6 +885,11 @@ const schema = a.schema({
       otrScheduleId:   a.string(),
       otrAmount:       a.integer(), // cents, as submitted
       otrStatusSyncedAt: a.datetime(),
+      // ── Invoicing by hand ─────────────────────────────────────────────────
+      manualReason:     a.string(),    // 'NO_BUY' | 'MANUAL'
+      manualSteps:      a.json(),      // ManualInvoiceSteps — see src/lib/manualInvoice.ts
+      apEmail:          a.string(),    // the broker's AP address the invoice goes to
+      manualInvoicedAt: a.datetime(),
       // Which documents reached OTR, so a partial upload is visible.
       otrDocsUploaded: a.json(), // { pod?: string, rateConfirmation?: string }
       // Last failure from OTR, surfaced on the row rather than only in logs.

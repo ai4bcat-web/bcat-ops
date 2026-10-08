@@ -28,7 +28,7 @@ import {
   type OtrRequiredField,
 } from '@/lib/otrInvoice'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
-import { assembleInvoice, checkBroker, setBrokerMc, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
+import { assembleInvoice, checkBroker, markManualInvoice, setBrokerMc, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
 import { setFactoringManualFields } from '@/lib/apiClient'
 import { FactoringDocCell } from './FactoringDocCell'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -412,6 +412,19 @@ export function OtrPanel({ item, onChanged }: Props) {
           )}
           Submit to OTR
         </Button>
+
+        {/* Billing it direct is always an option; No Buy is the version OTR chooses for us. */}
+        {item.status === 'NEED_TO_FACTOR' && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy !== null}
+            title="Take this row out of the OTR queue and bill the broker directly, with the steps to do it"
+            onClick={() => run('manual', () => markManualInvoice(item.id), 'Moved to Invoice manually')}
+          >
+            Invoice manually instead
+          </Button>
+        )}
       </div>
     </div>
   )
