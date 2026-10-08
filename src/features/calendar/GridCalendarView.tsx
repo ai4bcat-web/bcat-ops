@@ -15,6 +15,7 @@ import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { computeMoveDates, computeStopMove } from '@/lib/calendarMoves'
 import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
 import { requiresApptProofs } from '@/lib/apptQueue'
+import { PodMark } from './CalendarPaperwork'
 import type { Load, Driver, ViewMode, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
 import { apptWorkflowStatus, endStatus, statusLabel, STATUS_META, STATUS_TONE_COLORS, canSetChangeNeeded, type EffectiveApptStatus } from '@/lib/apptStatus'
@@ -298,7 +299,8 @@ function LoadCard({
       onDragEnd={onDragEnd}
       onClick={(e) => {
         if (e.shiftKey || e.ctrlKey || e.metaKey) { onSelect(load.id, e); return }
-        useAppStore.getState().setSelectedLoad(load.id, 'edit')
+        // The full detail, PODs included — the same panel the loads page opens.
+        useAppStore.getState().setSelectedLoad(load.id, 'view')
       }}
     >
 
@@ -310,6 +312,8 @@ function LoadCard({
         <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)', flexShrink: 0, whiteSpace: 'nowrap' }}>
           {load.aljexId || '—'}
         </span>
+        {/* POD, on the delivery card: a tick to open it, a cross when it is still owed. */}
+        {isFinalDest && <PodMark load={load} size={12} />}
         {/* Secondary IDs float right and truncate before touching the Pro# */}
         {load.tmsId && (
           <span style={{ fontSize: 9.5, color: 'var(--ds-t3)', whiteSpace: 'nowrap', flexShrink: 1, overflow: 'hidden', textOverflow: 'ellipsis', marginLeft: 'auto' }}>

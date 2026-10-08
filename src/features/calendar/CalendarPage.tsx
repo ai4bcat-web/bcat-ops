@@ -8,6 +8,7 @@ import { PlannerView } from './PlannerView'
 import { GridCalendarView } from './GridCalendarView'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { CalendarErrorBoundary } from './CalendarErrorBoundary'
+import { CalendarPaperworkProvider } from './CalendarPaperwork'
 import { DriverAvailabilityModal } from './DriverAvailabilityModal'
 import { formatDateShort, getMondayOf, addDays } from '@/lib/date'
 import { buildLoadHaystack, loadMatchesQuery } from '@/lib/loadSearch'
@@ -246,6 +247,7 @@ export function CalendarPage() {
         <CalendarErrorBoundary>
           {/* Mobile uses the SAME day/week/month views as desktop (they scroll
               horizontally on narrow screens) so it looks and populates identically. */}
+          <CalendarPaperworkProvider loads={visibleLoads}>
           {currentView === 'day' ? (
             <PlannerView
               loads={visibleLoads}
@@ -263,6 +265,7 @@ export function CalendarPage() {
               availabilities={availabilities}
             />
           )}
+          </CalendarPaperworkProvider>
         </CalendarErrorBoundary>
       </div>
 

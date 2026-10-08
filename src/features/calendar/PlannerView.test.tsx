@@ -18,6 +18,20 @@ vi.mock('@/store/useAppStore', () => ({
     sel({ setSelectedLoad: vi.fn(), currentUserEmail: 'ryne@bcatcorp.com' }),
 }))
 
+const podIndexMock = vi.hoisted(() => ({ index: null as unknown }))
+vi.mock('@/hooks/useLoadPaperwork', () => ({
+  useLoadPaperwork: () => ({ index: podIndexMock.index, known: true, loading: false, refresh: vi.fn() }),
+  // The test index is a plain map of load id → cell; the real one is a PodIndex.
+  paperworkFor: (index: Record<string, { has: boolean | null; pages?: number }> | null, load: { id: string }) => ({
+    pod: index ? { ...index[load.id], ref: index[load.id]?.has ? { kind: 's3', key: 'k' } : null } : { has: null, ref: null },
+    ratecon: { has: null, ref: null },
+  }),
+}))
+vi.mock('@/lib/openPaperwork', () => ({ resolveDoc: vi.fn().mockResolvedValue({ url: 'https://x/pod.pdf', contentType: 'application/pdf' }) }))
+vi.mock('@/features/documents/DocumentPreview', () => ({
+  DocumentPreview: ({ title }: { title: string }) => <div data-testid="preview">{title}</div>,
+}))
+
 vi.mock('@/lib/apiClient', () => ({
   notifyApptNeeded: vi.fn().mockResolvedValue('1699999999.000100'),
   createApptMoveTask: vi.fn().mockResolvedValue({ id: 'task-1' }),
@@ -77,5 +91,40 @@ describe('PlannerView NEED RUBEN chip', () => {
     expect(delivery?.apptStatus).toBe('need_request')
     expect(delivery?.appt).toBe(fromDateTimeInput('2026-08-21T14:30'))
     expect(delivery?.apptType).toBe('exact')
+  })
+})
+
+const { CalendarPaperworkProvider } = await import('./CalendarPaperwork')
+
+describe('POD column', () => {
+  const week = new Date('2026-08-17T12:00:00Z')
+  const days = [new Date('2026-08-21T12:00:00Z')]
+
+  it('marks the delivery row red when no POD is in, green with a page count when it is, and opens it', async () => {
+    podIndexMock.index = { l1: { has: false }, l2: { has: true, pages: 3 } }
+    const loads = [
+      batoryLoad({ id: 'l1', aljexId: '14570' }),
+      batoryLoad({ id: 'l2', aljexId: '14571' }),
+    ]
+    render(
+      <CalendarPaperworkProvider loads={loads}>
+        <PlannerView loads={loads} drivers={[]} weekStart={week} days={days} availabilities={[]} />
+      </CalendarPaperworkProvider>,
+    )
+    expect(screen.getByText('POD')).toBeTruthy()
+    // One mark per load, on its delivery row — the pickup row carries none.
+    expect(screen.getAllByLabelText('POD missing')).toHaveLength(1)
+    const onFile = screen.getByLabelText(/POD on file · 3 pages/)
+    expect(onFile).toBeTruthy()
+    fireEvent.click(onFile)
+    await waitFor(() => expect(screen.getByTestId('preview').textContent).toBe('POD · PRO 14571'))
+  })
+
+  it('reads as unknown, never missing, before the stores have answered', () => {
+    podIndexMock.index = null
+    const loads = [batoryLoad({ id: 'l1', aljexId: '14570' })]
+    render(<PlannerView loads={loads} drivers={[]} weekStart={week} days={days} availabilities={[]} />)
+    expect(screen.queryByLabelText('POD missing')).toBeNull()
+    expect(screen.getAllByLabelText('POD: still loading').length).toBeGreaterThan(0)
   })
 })
