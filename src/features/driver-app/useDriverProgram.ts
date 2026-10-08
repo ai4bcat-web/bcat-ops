@@ -13,7 +13,7 @@
  * retries /me.
  */
 import { useEffect, useReducer } from 'react'
-import { fetchMe, type DriverPm, type DriverProfile } from './driverApi'
+import { fetchMe, type DriverPm, type DriverProfile, type DriverTruck } from './driverApi'
 import type { DriverProgram } from '@/lib/driverProgram'
 
 let cached: DriverProgram | null = null
@@ -83,6 +83,26 @@ export function useDriverProgramStatus(): DriverProgramStatus {
 
 export function useDriverProgram(): DriverProgram | null {
   return useDriverProgramStatus().program
+}
+
+/** The truck on the driver's profile, and a way to record a new pick without a refetch. */
+export function useDriverTruck(): { truck: DriverTruck | null; loaded: boolean; setTruck: (t: DriverTruck) => void } {
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
+
+  useEffect(() => {
+    listeners.add(rerender)
+    if (!cachedProfile && !lastError) void load()
+    return () => { listeners.delete(rerender) }
+  }, [])
+
+  return {
+    truck: cachedProfile?.truck ?? null,
+    loaded: cachedProfile !== null,
+    setTruck: (t) => {
+      if (cachedProfile) cachedProfile = { ...cachedProfile, truck: t }
+      notify()
+    },
+  }
 }
 
 export function useDriverPm(): DriverPm | null {

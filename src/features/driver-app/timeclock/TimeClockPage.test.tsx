@@ -6,8 +6,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
-const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn() }
+const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn() }
 vi.mock('../driverApi', () => api)
+const { clearCachedProgram } = await import('../useDriverProgram')
 
 const { TimeClockPage } = await import('./TimeClockPage')
 
@@ -43,6 +44,10 @@ function respond(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks()
   api.punchTimeClock.mockResolvedValue({ ok: true })
+  // The clock-in path asks which truck first; a driver already in one goes straight through.
+  clearCachedProgram()
+  api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Jason Smith', program: 'PAPERWORK', truck: { id: 'eq-3114', unitNumber: '3114' } })
+  api.fetchTrucks.mockResolvedValue([{ id: 'eq-3114', unitNumber: '3114', eld: true, holder: null, yours: true }])
   respond()
 })
 
@@ -261,5 +266,22 @@ describe('overnight loads on the time clock', () => {
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText('14999')).toBeTruthy())
     expect(screen.getByText('—')).toBeTruthy()
+  })
+})
+
+describe('the truck at clock-in', () => {
+  it('asks which truck before the first punch of the day when none is set', async () => {
+    const { waitFor: wf } = await import('@testing-library/react')
+    clearCachedProgram()
+    api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Jason Smith', program: 'PAPERWORK', truck: null })
+    api.selectTruck.mockResolvedValue({ truck: { id: 'eq-3114', unitNumber: '3114' } })
+    render(<TimeClockPage />)
+    const clockIn = await screen.findByRole('button', { name: /Clock in/ })
+    await wf(() => expect(api.fetchMe).toHaveBeenCalled())
+    fireEvent.click(clockIn)
+    expect(api.punchTimeClock).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: /Truck 3114/ }))
+    await wf(() => expect(api.selectTruck).toHaveBeenCalledWith('eq-3114'))
+    await wf(() => expect(api.punchTimeClock).toHaveBeenCalledWith('IN', undefined))
   })
 })

@@ -21,6 +21,8 @@ import {
 import { fetchTimeClock, punchTimeClock, type TimeClockResponse } from '../driverApi'
 import { minutesLabel, PAID_HOLIDAYS } from '@/lib/timeClock'
 import { errorText } from '@/lib/errorText'
+import { useDriverTruck } from '../useDriverProgram'
+import { TruckPickerDialog } from '../TruckPicker'
 
 /** Cents to "$1,500.00" — a figure a driver checks against what they were paid. */
 function money(cents: number): string {
@@ -55,6 +57,9 @@ export function TimeClockPage() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Clocking in is the start of the day: the moment to say which truck, if not said yet.
+  const { truck, loaded: truckLoaded } = useDriverTruck()
+  const [pickTruck, setPickTruck] = useState(false)
 
   /*
    * No synchronous setLoading here: this runs from an effect on mount, and a setState in an
@@ -136,7 +141,10 @@ export function TimeClockPage() {
           variant={openShift ? 'outline' : 'default'}
           disabled={busy || readOnly}
           title={readOnly ? 'You are viewing this driver\u2019s app; only they can punch their clock' : undefined}
-          onClick={() => void punch(openShift ? 'OUT' : 'IN')}
+          onClick={() => {
+            if (!openShift && truckLoaded && !truck) { setPickTruck(true); return }
+            void punch(openShift ? 'OUT' : 'IN')
+          }}
         >
           <Clock className="mr-2 h-5 w-5" aria-hidden="true" />
           {busy ? 'Working…' : openShift ? 'Clock out' : 'Clock in'}
@@ -157,6 +165,8 @@ export function TimeClockPage() {
           </p>
         )}
       </div>
+
+      <TruckPickerDialog open={pickTruck} onClose={() => setPickTruck(false)} onPicked={() => void punch('IN')} />
 
       {data.weeks.length > 0 && (
         <div className="mb-4">

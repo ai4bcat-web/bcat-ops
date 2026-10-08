@@ -12,6 +12,8 @@ const api = {
   fetchRecentLoads: vi.fn(),
   // The PM line on the home screen reads the driver's profile.
   fetchMe: vi.fn(),
+  fetchTrucks: vi.fn(),
+  selectTruck: vi.fn(),
 }
 vi.mock('../driverApi', () => api)
 

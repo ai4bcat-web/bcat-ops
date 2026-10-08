@@ -97,6 +97,31 @@ export interface DriverProfile {
    * that predates the field. Absent and null both mean "show nothing".
    */
   pm?: DriverPm | null
+  /** The truck the driver is in, or null until they pick one. Optional: older API. */
+  truck?: DriverTruck | null
+}
+
+export interface DriverTruck {
+  id: string
+  unitNumber: string
+}
+
+export interface TruckChoice extends DriverTruck {
+  /** Has a Motive gateway — picking it is what puts the ELD logs on this driver's name. */
+  eld: boolean
+  /** Who is in it now, if anyone. */
+  holder: string | null
+  yours: boolean
+}
+
+export async function fetchTrucks(): Promise<TruckChoice[]> {
+  const out = await request<{ trucks: TruckChoice[] }>('/trucks')
+  return out.trucks
+}
+
+/** I am in this truck today. */
+export async function selectTruck(truckId: string): Promise<{ truck: DriverTruck }> {
+  return request('/me/truck', { method: 'POST', body: JSON.stringify({ truckId }) })
 }
 
 /** Mirrors pmStatus() in src/lib/pmDue.ts, plus the truck's unit number. */

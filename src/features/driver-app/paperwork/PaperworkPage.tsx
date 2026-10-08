@@ -24,6 +24,7 @@ import { errorText } from '@/lib/errorText'
 import { useDriverPm } from '../useDriverProgram'
 import { PmGauge } from './PmGauge'
 import { stopsForDay } from './daySheet'
+import { TruckLine } from '../TruckPicker'
 
 /**
  * When this driver's truck is next due a PM.
@@ -100,6 +101,9 @@ export function PaperworkPage() {
   return (
     <div className="mx-auto w-full max-w-md px-4 py-5">
       <h1 className="mb-4 text-xl font-bold text-foreground">Dashboard</h1>
+
+      {/* First thing in the morning: which truck, so the ELD and the map follow the driver. */}
+      <TruckLine />
 
       <PmLine />
 

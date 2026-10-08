@@ -915,6 +915,12 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'paperwork' && segments[1] === 'stop-event') {
     return { path: '/paperwork/stop-event' }
   }
+  if (segments[0] === 'trucks' && !segments[1]) {
+    return { path: '/trucks' }
+  }
+  if (segments[0] === 'me' && segments[1] === 'truck') {
+    return { path: '/me/truck' }
+  }
   if (segments[0] === 'settlement' && segments[1] === 'weeks') {
     return { path: '/settlement/weeks' }
   }
@@ -1608,6 +1614,29 @@ async function completeSubmission(
  * recorded, or one Motive has not reported on — comes back as UNKNOWN with a reason,
  * because those are states somebody should fix rather than hide.
  */
+interface EquipmentRow {
+  id: string
+  type?: string | null
+  unitNumber?: string | null
+  active?: boolean | null
+  assignedDriverId?: string | null
+  eldSource?: string | null
+  motiveVehicleNumber?: string | null
+}
+
+/** The truck on the driver's row, as the app names it. Null when none is assigned. */
+async function truckForDriver(driver: DriverRow): Promise<{ id: string; unitNumber: string } | null> {
+  const truckId = (driver.assignedTruckId ?? '').trim()
+  if (!truckId || !EQUIPMENT_TABLE) return null
+  try {
+    const truck = (await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: truckId } }))).Item as EquipmentRow | undefined
+    return truck ? { id: truck.id, unitNumber: String(truck.unitNumber ?? '').trim() } : null
+  } catch (err) {
+    console.error('[driver-app-api] could not read the driver\'s truck', { truckId, err })
+    return null
+  }
+}
+
 /** The latest ELD fix for the driver's assigned truck, or null when there is none. */
 async function truckFixForDriver(driver: DriverRow): Promise<LatLng | null> {
   const truckId = (driver.assignedTruckId ?? '').trim()
@@ -2196,7 +2225,82 @@ export const handler = async (event: FnUrlEvent) => {
         active: driver.active !== false,
         // null for a driver with no truck assigned; the app simply omits the line.
         pm: await pmForDriver(driver),
+        // The truck they are in — what the ELD fix, the PM line and dispatch all key on.
+        truck: await truckForDriver(driver),
       })
+    }
+
+    /*
+     * The trucks a driver can pick from at the start of the day. Every active truck, who
+     * is in it now, and whether it has a Motive gateway — the point of picking is that the
+     * ELD logs land on the right name.
+     */
+    if (method === 'GET' && path === '/trucks') {
+      if (!EQUIPMENT_TABLE) return reply(503, { error: 'Trucks are not configured' })
+      const [trucks, roster] = await Promise.all([
+        scan<EquipmentRow>(EQUIPMENT_TABLE, '#t = :truck', { '#t': 'type' }, { ':truck': 'truck' }),
+        scan<DriverRow>(DRIVER_TABLE),
+      ])
+      const nameById = new Map(roster.map((d) => [d.id, d.name]))
+      const list = trucks
+        .filter((t) => t.active !== false && (t.unitNumber ?? '').trim())
+        .map((t) => ({
+          id: t.id,
+          unitNumber: String(t.unitNumber).trim(),
+          eld: (t.eldSource ?? '').toLowerCase() === 'motive' && !!(t.motiveVehicleNumber ?? '').trim(),
+          holder: t.assignedDriverId ? (nameById.get(t.assignedDriverId) ?? null) : null,
+          yours: t.assignedDriverId === driver.id,
+        }))
+        .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
+      return reply(200, { trucks: list })
+    }
+
+    /*
+     * The driver says which truck they are in. One driver per truck and one truck per
+     * driver, written on both sides — the same assignment the office makes from the fleet
+     * page, so the dashboard, the PM line and the ELD match all read the same answer.
+     */
+    if (method === 'POST' && path === '/me/truck') {
+      if (!EQUIPMENT_TABLE) return reply(503, { error: 'Trucks are not configured' })
+      const body = JSON.parse(event.body || '{}') as { truckId?: string }
+      const truckId = (body.truckId ?? '').trim()
+      if (!truckId) return reply(400, { error: 'truckId is required' })
+      const truck = (await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: truckId } }))).Item as EquipmentRow | undefined
+      if (!truck || truck.type !== 'truck' || truck.active === false) return reply(404, { error: 'truck not found' })
+
+      const now = nowIso()
+      const roster = await scan<DriverRow>(DRIVER_TABLE)
+      // Whoever had this truck gives it up; whatever else this driver had is released.
+      const previousHolders = roster.filter((d) => d.assignedTruckId === truckId && d.id !== driver.id)
+      const otherTrucks = (await scan<EquipmentRow>(EQUIPMENT_TABLE, 'assignedDriverId = :me', {}, { ':me': driver.id }))
+        .filter((t) => t.id !== truckId)
+      await Promise.all([
+        ddb.send(new UpdateCommand({
+          TableName: DRIVER_TABLE, Key: { id: driver.id },
+          UpdateExpression: 'SET assignedTruckId = :t, updatedAt = :u',
+          ExpressionAttributeValues: { ':t': truckId, ':u': now },
+        })),
+        ddb.send(new UpdateCommand({
+          TableName: EQUIPMENT_TABLE, Key: { id: truckId },
+          UpdateExpression: 'SET assignedDriverId = :d, updatedAt = :u',
+          ExpressionAttributeValues: { ':d': driver.id, ':u': now },
+        })),
+        ...previousHolders.map((d) => ddb.send(new UpdateCommand({
+          TableName: DRIVER_TABLE, Key: { id: d.id },
+          UpdateExpression: 'SET assignedTruckId = :n, updatedAt = :u',
+          ExpressionAttributeValues: { ':n': null, ':u': now },
+        }))),
+        ...otherTrucks.map((t) => ddb.send(new UpdateCommand({
+          TableName: EQUIPMENT_TABLE, Key: { id: t.id },
+          UpdateExpression: 'SET assignedDriverId = :n, updatedAt = :u',
+          ExpressionAttributeValues: { ':n': null, ':u': now },
+        }))),
+      ])
+      console.log('[driver-app-api] truck picked', {
+        driverId: driver.id, driverName: driver.name, truckId, unitNumber: truck.unitNumber,
+        released: { drivers: previousHolders.map((d) => d.name), trucks: otherTrucks.map((t) => t.unitNumber) },
+      })
+      return reply(200, { truck: { id: truck.id, unitNumber: String(truck.unitNumber ?? '').trim() } })
     }
 
     /*

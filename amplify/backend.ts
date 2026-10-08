@@ -365,6 +365,18 @@ driverApiFn.addToRolePolicy(
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [driverApiLoadTable.tableArn] }),
 )
+/*
+ * A driver picks the truck they are in at the start of the day, so the ELD fix and the
+ * logs line up with the right person. That is the two-sided assignment the office
+ * writes (Driver.assignedTruckId + Equipment.assignedDriverId), and nothing else on
+ * either row — the handler updates exactly those attributes.
+ */
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:UpdateItem'],
+    resources: [driverApiDriverTable.tableArn, driverApiEquipmentTable.tableArn],
+  }),
+)
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] }),
 )
