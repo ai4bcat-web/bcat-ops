@@ -59,6 +59,9 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
   const [ready, setReady] = useState(false)
   const [busy, setBusy] = useState(false)
   const [shot, setShot] = useState<Shot | null>(null)
+  // Unreadable shots in a row. Three means the camera is not going to get there — a
+  // scratched lens, a dark dock — and the driver needs another way in, not a fourth try.
+  const [rejects, setRejects] = useState(0)
   const [found, setFound] = useState(false)
   /*
    * A FRAME has arrived — not merely a stream.
@@ -230,10 +233,12 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       rctx.putImageData(rgba, 0, 0)
 
       const page = await preparePage(render, `scan-${Date.now()}.jpg`)
+      const readability = assessReadability(out)
+      setRejects((n) => (readability.problem ? n + 1 : 0))
       setShot({
         page,
         previewUrl: URL.createObjectURL(page.blob),
-        readability: assessReadability(out),
+        readability,
         cropped,
       })
     } catch (err) {
@@ -269,13 +274,32 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
         </div>
 
         <div className="space-y-3 bg-background p-4" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 1rem)' }}>
-          {shot.readability.problem && (
-            <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <p>{shot.readability.problem} You can still send it.</p>
-            </div>
-          )}
-          {!shot.cropped && (
+          {/*
+            Not readable is not sendable. A POD nobody can read is worse than none — the
+            driver believes they are done and the office finds out at invoicing. So the
+            only way forward from an unreadable shot is another shot, with the reason said
+            plainly. After three in a row the file picker is offered as the way out.
+          */}
+          {shot.readability.problem ? (
+            <>
+              <div className="flex items-start gap-2 rounded-xl border border-red-400/60 bg-red-500/15 p-3 text-sm text-red-100">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                <p>
+                  <span className="block text-base font-bold">This page can’t be read — please retake it.</span>
+                  {shot.readability.problem}
+                </p>
+              </div>
+              <Button type="button" size="lg" className="h-14 w-full gap-2 text-base font-bold" onClick={discard}>
+                <RotateCcw className="h-5 w-5" /> Retake
+              </Button>
+              {rejects >= 3 && (
+                <Button type="button" variant="outline" size="lg" className="h-12 w-full text-base" onClick={onClose}>
+                  Still can’t get it? Upload a photo instead
+                </Button>
+              )}
+            </>
+          ) : null}
+          {!shot.readability.problem && !shot.cropped && (
             <p className="text-sm text-muted-foreground">
               No page edges found, so the whole picture was kept. Put the page on a darker
               surface with all four corners showing and it will crop itself.
@@ -287,6 +311,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
             BOL is the normal case, so "add another page" is the big one; Done is right
             there for the single-page POD so nobody hunts for how to finish.
           */}
+          {!shot.readability.problem && (
           <div className="flex gap-3">
             <Button type="button" variant="outline" size="lg" className="h-14 gap-2 px-4 text-base" onClick={discard}>
               <RotateCcw className="h-5 w-5" /> Retake
@@ -301,7 +326,8 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
               <Plus className="h-5 w-5" /> {remaining > 1 ? 'Add another page' : 'Keep it'}
             </Button>
           </div>
-          {onDone && (
+          )}
+          {!shot.readability.problem && onDone && (
             <Button
               type="button"
               size="lg"

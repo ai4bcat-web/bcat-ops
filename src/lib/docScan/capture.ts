@@ -94,9 +94,10 @@ export interface Readability {
  * fixable afterwards. The server scores legibility too, but that score arrives after the
  * truck has left.
  *
- * The thresholds are deliberately forgiving. A POD that is merely poor still has to go
- * through; refusing it would leave the driver with no way to submit at all, which is worse
- * than a hard-to-read scan. These warn, they do not block.
+ * The thresholds are deliberately forgiving, because the camera now REFUSES a shot that
+ * fails them (ScanCamera: retake only, with the file picker as the way out after three).
+ * A false "unreadable" here costs a driver a retake; a false "fine" costs the office a POD
+ * nobody can read at invoicing. Err toward passing a merely poor page.
  */
 export function assessReadability(frame: GrayFrame): Readability {
   const { data, width, height } = frame
