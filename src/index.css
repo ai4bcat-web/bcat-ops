@@ -123,6 +123,41 @@
   --radius: 0.375rem;
 }
 
+/* ── Dark token set — the driver app ────────────────────────────────────────
+   The driver PWA is a dark shell (#0b1220). Its pages are built from the same semantic
+   tokens as the staff app, which until 8 Oct 2026 only had LIGHT values: a driver got
+   #6b7588 "muted" text on a mid-grey card and white figures on a white card — Jason's
+   Hours screen was half invisible. One `dark` class on the shell resolves every token to
+   a value picked for that ground; the pages themselves do not change.
+   Contrast targets on #0b1220: foreground 15:1, muted-foreground 8:1. */
+.dark {
+  color-scheme: dark;
+
+  --primary:              #1ea8f3;
+  --primary-foreground:   #ffffff;
+  --ring:                 #1ea8f3;
+
+  --background:           #0b1220;
+  --foreground:           #f1f5f9;
+  --card:                 #141f36;
+  --card-foreground:      #f1f5f9;
+  --popover:              #141f36;
+  --popover-foreground:   #f1f5f9;
+
+  --secondary:            #1c2942;
+  --secondary-foreground: #f1f5f9;
+  --muted:                #1c2942;
+  --muted-foreground:     #aab7cb;
+  --accent:               #1c2942;
+  --accent-foreground:    #f1f5f9;
+
+  --destructive:             #ef4444;
+  --destructive-foreground:  #ffffff;
+
+  --border: #2e3d5b;
+  --input:  #3d4d6d;
+}
+
 /* Tailwind v4 puts utilities in @layer utilities; an UN-layered rule outranks every layer
    regardless of specificity, so this reset must live in @layer base or `p-*`/`m-*`
    utilities never apply. (Preflight already resets these; kept for the explicit box-sizing.) */

@@ -106,7 +106,7 @@ export function UnattachedPods({
   if (pods.length === 0) return null
 
   return (
-    <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-4">
+    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
       <div className="flex items-start gap-2">
         <Link2 className="mt-0.5 size-4 shrink-0 text-amber-700" />
         <div className="min-w-0">

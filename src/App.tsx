@@ -57,7 +57,7 @@ import DriverSignupPage from '@/features/driver-app/DriverSignupPage'
 
 function DriverLoading() {
   return (
-    <div className="flex h-screen items-center justify-center bg-[#0b1220] text-white">
+    <div className="dark flex h-screen items-center justify-center bg-background text-foreground">
       <Loader2 className="h-8 w-8 animate-spin text-[#1ea8f3]" />
     </div>
   )
@@ -89,7 +89,7 @@ function DriverLanding({ program }: { program: DriverProgram }) {
 function DriverProfileError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const { user, signOut } = useDriverAuth()
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 bg-[#0b1220] px-6 text-center text-white">
+    <div className="dark flex h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground">
       <p className="text-lg font-semibold">We couldn't load your driver profile</p>
       <p className="text-slate-300">{message}</p>
       {user?.email && (

@@ -167,7 +167,7 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
       </div>
 
       {atMax && (
-        <p className="mt-3 text-sm text-amber-700">
+        <p className="mt-3 text-sm text-amber-300">
           That is the most pages we can send at once ({MAX_SCAN_PAGES}).
         </p>
       )}

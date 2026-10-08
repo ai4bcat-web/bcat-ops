@@ -158,7 +158,7 @@ export function PaperworkPage() {
           </div>
           <div>
             <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">PODs needed</dt>
-            <dd className={`text-lg font-bold tabular-nums ${week.podsMissing > 0 ? 'text-amber-600' : 'text-foreground'}`}>
+            <dd className={`text-lg font-bold tabular-nums ${week.podsMissing > 0 ? 'text-amber-300' : 'text-foreground'}`}>
               {week.podsMissing}
             </dd>
           </div>
@@ -173,13 +173,13 @@ export function PaperworkPage() {
       {week && week.weekStart === selected && (week.podsMissing > 0 || week.podsIllegible > 0) && (
         <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
           {week.podsMissing > 0 && (
-            <p className="flex items-center gap-2 text-sm font-semibold text-amber-700">
+            <p className="flex items-center gap-2 text-sm font-semibold text-amber-200">
               <Camera className="h-4 w-4 shrink-0" aria-hidden="true" />
               {week.podsMissing} load{week.podsMissing === 1 ? '' : 's'} still need a POD
             </p>
           )}
           {week.podsIllegible > 0 && (
-            <p className="flex items-center gap-2 text-sm font-semibold text-red-700">
+            <p className="flex items-center gap-2 text-sm font-semibold text-red-200">
               <FileWarning className="h-4 w-4 shrink-0" aria-hidden="true" />
               {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} cannot be read — please resend
             </p>
@@ -189,7 +189,7 @@ export function PaperworkPage() {
 
       {error && (
         <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
-          <p className="font-medium text-red-600">{error}</p>
+          <p className="font-medium text-red-300">{error}</p>
           <Button onClick={reload} variant="outline" className="mt-3 h-10 gap-2" aria-label="Retry">
             <RefreshCcw className="h-4 w-4" aria-hidden="true" />
             Retry

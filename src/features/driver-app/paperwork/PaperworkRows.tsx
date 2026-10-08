@@ -32,7 +32,7 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
   const { pod } = load
   if (!pod.present) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-600">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300">
         <Camera className="h-3.5 w-3.5" aria-hidden="true" />
         POD needed
       </span>
@@ -40,14 +40,14 @@ function PodBadge({ load }: { load: PaperworkLoad }) {
   }
   if (pod.legibility === 'UNREADABLE' || pod.legibility === 'LOW') {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-600">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-2.5 py-1 text-xs font-semibold text-red-300">
         <FileWarning className="h-3.5 w-3.5" aria-hidden="true" />
         {pod.legibility === 'UNREADABLE' ? 'POD unreadable' : 'POD hard to read'}
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-semibold text-emerald-300">
       <Check className="h-3.5 w-3.5" aria-hidden="true" />
       POD on file{pod.pages > 1 ? ` · ${pod.pages} pages` : ''}
     </span>
@@ -81,7 +81,7 @@ function EldBadge({ load }: { load: PaperworkLoad }) {
   if (eld.status === 'REQUIRED') {
     return (
       <span
-        className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-semibold text-sky-700"
+        className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-semibold text-sky-300"
         title={eld.label}
       >
         <ClipboardList className="h-3.5 w-3.5" aria-hidden="true" />
@@ -92,7 +92,7 @@ function EldBadge({ load }: { load: PaperworkLoad }) {
   if (eld.status === 'UNKNOWN') {
     return (
       <span
-        className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-600"
+        className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-300"
         title={eld.label}
       >
         <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
@@ -170,7 +170,7 @@ export function PaperworkRows({
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {load.overnight && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 px-2.5 py-1 text-xs font-semibold text-indigo-300">
                     <Moon className="h-3.5 w-3.5" aria-hidden="true" />
                     Overnight
                   </span>
@@ -226,8 +226,8 @@ export function PaperworkRows({
             */}
             {load.overnight && load.rateCents != null && (
               <p className="mt-3 flex items-baseline justify-between rounded-lg bg-indigo-500/10 px-3 py-2">
-                <span className="text-sm font-medium text-indigo-900">Overnight rate</span>
-                <span className="text-base font-bold tabular-nums text-indigo-900">
+                <span className="text-sm font-medium text-indigo-100">Overnight rate</span>
+                <span className="text-base font-bold tabular-nums text-indigo-100">
                   {money(load.rateCents)}
                 </span>
               </p>
@@ -235,7 +235,7 @@ export function PaperworkRows({
 
             {/* Why logs are required, named so the driver can check it against the run. */}
             {load.eld && load.eld.status !== 'NOT_REQUIRED' && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg bg-sky-500/10 p-3 text-sm text-sky-800">
+              <p className="mt-3 flex items-start gap-2 rounded-lg bg-sky-500/10 p-3 text-sm text-sky-200">
                 <ClipboardList className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{load.eld.label}</span>
               </p>
@@ -265,7 +265,7 @@ export function PaperworkRows({
 
             {/* Why a POD was rejected, in words the driver can act on. */}
             {load.pod.notes && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-700">
+              <p className="mt-3 flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{load.pod.notes}. Please send a new photo.</span>
               </p>

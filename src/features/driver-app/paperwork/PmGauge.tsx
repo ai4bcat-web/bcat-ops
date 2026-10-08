@@ -34,9 +34,9 @@ export function PmGauge({ pm }: { pm: DriverPm }) {
 
   const tone =
     pm.state === 'OVERDUE'
-      ? { bar: 'bg-red-500', text: 'text-red-700', ring: 'border-red-500/30 bg-red-500/10' }
+      ? { bar: 'bg-red-500', text: 'text-red-300', ring: 'border-red-500/30 bg-red-500/10' }
       : pm.state === 'DUE_SOON'
-        ? { bar: 'bg-amber-500', text: 'text-amber-700', ring: 'border-amber-500/30 bg-amber-500/10' }
+        ? { bar: 'bg-amber-500', text: 'text-amber-300', ring: 'border-amber-500/30 bg-amber-500/10' }
         : { bar: 'bg-emerald-500', text: 'text-foreground', ring: 'border-border bg-muted/40' }
 
   return (

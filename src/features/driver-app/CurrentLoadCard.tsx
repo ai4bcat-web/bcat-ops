@@ -55,7 +55,7 @@ export function CurrentLoadCard() {
   if (error) {
     return (
       <div className="flex items-start gap-2 rounded-xl border border-[var(--ds-border)] p-4 text-sm">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-300" />
         <div className="flex-1">
           <p className="text-foreground">{error}</p>
           {/* Accessible name is specific: this card sits above the submissions
@@ -124,7 +124,7 @@ export function CurrentLoadCard() {
 
       {/* The one thing the driver owes, and what happens if it is missing. */}
       {podIn ? (
-        <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-700">
+        <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-300">
           <CheckCircle2 className="size-3.5" />
           POD is in. Nothing else needed from you.
         </p>

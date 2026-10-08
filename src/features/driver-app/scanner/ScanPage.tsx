@@ -524,7 +524,7 @@ export default function ScanPage() {
           </div>
 
           {resumeFromId && (
-            <p className="text-sm text-amber-600">
+            <p className="text-sm text-amber-300">
               Retrying a previous upload. We will not create a second submission.
             </p>
           )}
@@ -596,7 +596,7 @@ export default function ScanPage() {
         Your photos are still here — you do not need to re-shoot them.
       </p>
       {resumeFromId && (
-        <p className="mt-2 text-sm text-amber-600">
+        <p className="mt-2 text-sm text-amber-300">
           We will retry the same submission so nothing is duplicated.
         </p>
       )}

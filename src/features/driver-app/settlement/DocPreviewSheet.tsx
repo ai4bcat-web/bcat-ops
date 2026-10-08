@@ -76,7 +76,7 @@ export function DocPreviewSheet({
       <div className="flex-1 overflow-auto bg-muted/40">
         {error ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-            <AlertTriangle className="h-6 w-6 text-amber-600" />
+            <AlertTriangle className="h-6 w-6 text-amber-300" />
             <p className="text-sm text-foreground">{error}</p>
           </div>
         ) : !url ? (
@@ -149,7 +149,7 @@ export function DocPreviewSheet({
           variant="outline"
           size="sm"
           disabled={busy !== null}
-          className="text-red-600"
+          className="text-red-400"
           onClick={() => {
             const warning =
               kind === 'POD'

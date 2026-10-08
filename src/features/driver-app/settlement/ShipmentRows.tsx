@@ -213,7 +213,7 @@ export function ShipmentRows({
           <div
             key={trip.id}
             role="row"
-            className={`border-b border-border/60 px-3 py-2.5 ${held ? 'bg-amber-50/60' : ''}`}
+            className={`border-b border-border/60 px-3 py-2.5 ${held ? 'bg-amber-500/10' : ''}`}
           >
             <div className="grid grid-cols-[1fr_auto_auto] items-start gap-3">
             <div role="cell" className="min-w-0">
@@ -225,7 +225,7 @@ export function ShipmentRows({
                   : ''}
               </p>
               {held && (
-                <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-amber-800">
+                <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-amber-300">
                   <AlertTriangle className="h-3 w-3" />
                   {trip.heldReason === 'NOT_DELIVERED'
                     ? 'Not delivered yet — pays on a later check'
@@ -259,7 +259,7 @@ export function ShipmentRows({
                 {money(trip.amount)}
               </span>
               {held && trip.heldLabel && (
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                <span className="block text-[10px] font-bold uppercase tracking-wide text-amber-300">
                   {trip.heldLabel}
                 </span>
               )}
@@ -311,7 +311,7 @@ export function ShipmentRows({
               Freight total / driver share{payPercent != null ? ` (${Math.round(payPercent * 100)}%)` : ''}
             </span>
             {!!heldFreight && heldFreight > 0 && (
-              <span className="block text-xs font-semibold text-amber-800">
+              <span className="block text-xs font-semibold text-amber-300">
                 excludes {money(heldFreight)} held for POD
               </span>
             )}

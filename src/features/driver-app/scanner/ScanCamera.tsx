@@ -246,7 +246,7 @@ export function ScanCamera({ onCapture, onClose, remaining }: ScanCameraProps) {
   if (error) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background p-6 text-center">
-        <AlertTriangle className="h-8 w-8 text-amber-600" />
+        <AlertTriangle className="h-8 w-8 text-amber-300" />
         <p className="text-base">{error}</p>
         <Button type="button" size="lg" onClick={onClose}>Back</Button>
       </div>

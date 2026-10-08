@@ -134,7 +134,7 @@ export default function DriverLoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0b1220] text-white flex flex-col justify-center px-6 py-12">
+    <div className="dark min-h-screen bg-background text-foreground flex flex-col justify-center px-6 py-12">
       <div className="mx-auto w-full max-w-sm">
         <div className="mb-10 text-center">
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1ea8f3]">

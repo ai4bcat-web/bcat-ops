@@ -56,7 +56,7 @@ function TabButton({
 
 export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram }) {
   return (
-    <div className="flex h-dvh flex-col bg-[#0b1220] text-white">
+    <div className="dark flex h-dvh flex-col bg-background text-foreground">
       {/* Only Ivan's employees punch a clock, so only they can have one running. */}
       <OnTheClockBar enabled={program === 'PAPERWORK'} />
       {/*

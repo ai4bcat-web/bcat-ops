@@ -118,13 +118,21 @@ export function TimeClockPage() {
     <div className="mx-auto w-full max-w-md px-4 py-5">
       <h1 className="mb-4 text-xl font-bold text-foreground">Time clock</h1>
 
-      {/* The button, and the only thing most visits are for. */}
-      <div className="mb-5 rounded-xl border border-border bg-muted/40 p-4">
-        <p className="text-sm text-muted-foreground">
-          {openShift ? `Clocked in at ${clockLabel(openShift.clockInAt)}` : 'Not clocked in'}
+      {/* The button, and the only thing most visits are for. The card itself says which
+          state the driver is in — green while on the clock — so it reads from across the
+          cab before a single word does. */}
+      <div className={`mb-5 rounded-xl border p-4 ${openShift ? 'border-emerald-400/50 bg-emerald-500/15' : 'border-border bg-card'}`}>
+        <p className={`flex items-center gap-2 text-base font-semibold ${openShift ? 'text-emerald-200' : 'text-foreground'}`}>
+          {openShift && (
+            <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            </span>
+          )}
+          {openShift ? `On the clock since ${clockLabel(openShift.clockInAt)}` : 'Not clocked in'}
         </p>
         <Button
-          className="mt-3 h-14 w-full text-base font-semibold"
+          className={`mt-3 h-16 w-full text-lg font-bold ${openShift ? 'border-emerald-400/60 bg-background text-foreground hover:bg-emerald-500/10' : ''}`}
           variant={openShift ? 'outline' : 'default'}
           disabled={busy || readOnly}
           title={readOnly ? 'You are viewing this driver\u2019s app; only they can punch their clock' : undefined}
@@ -144,7 +152,7 @@ export function TimeClockPage() {
            * not left wondering why today still reads 0h while they are standing there
            * working. See rowMinutes in src/lib/timeClock.ts.
            */
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="mt-2 text-sm text-emerald-100/80">
             Today&rsquo;s hours are counted once you clock out.
           </p>
         )}
@@ -170,17 +178,17 @@ export function TimeClockPage() {
         </div>
       )}
 
-      <div className="mb-4 rounded-xl border border-border bg-background p-4">
+      <div className="mb-4 rounded-xl border border-border bg-card p-4">
         <div className="flex items-baseline justify-between">
-          <p className="text-sm font-semibold text-foreground">Week total</p>
-          <p className="text-2xl font-bold tabular-nums text-foreground">
+          <p className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Week total</p>
+          <p className="text-3xl font-bold tabular-nums text-foreground">
             {minutesLabel(week.totalMinutes)}
           </p>
         </div>
-        <dl className="mt-2 grid grid-cols-3 gap-2 text-xs">
-          <div><dt className="text-muted-foreground">Worked</dt><dd className="font-semibold">{minutesLabel(week.workedMinutes)}</dd></div>
-          <div><dt className="text-muted-foreground">Holiday</dt><dd className="font-semibold">{minutesLabel(week.holidayMinutes)}</dd></div>
-          <div><dt className="text-muted-foreground">PTO</dt><dd className="font-semibold">{minutesLabel(week.ptoMinutes)}</dd></div>
+        <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-border pt-3">
+          <div><dt className="text-xs text-muted-foreground">Worked</dt><dd className="text-base font-bold tabular-nums text-foreground">{minutesLabel(week.workedMinutes)}</dd></div>
+          <div><dt className="text-xs text-muted-foreground">Holiday</dt><dd className="text-base font-bold tabular-nums text-foreground">{minutesLabel(week.holidayMinutes)}</dd></div>
+          <div><dt className="text-xs text-muted-foreground">PTO</dt><dd className="text-base font-bold tabular-nums text-foreground">{minutesLabel(week.ptoMinutes)}</dd></div>
         </dl>
       </div>
 
@@ -192,29 +200,29 @@ export function TimeClockPage() {
         difference. Scoped to the same Monday-to-Sunday week as the card above it.
       */}
       {data.overnight && data.overnight.loads.length > 0 && (
-        <section className="mb-4 rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4">
+        <section className="mb-4 rounded-xl border border-indigo-400/40 bg-indigo-500/15 p-4">
           <div className="flex items-baseline justify-between">
-            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-indigo-900">
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-indigo-100">
               <Moon className="h-4 w-4" aria-hidden="true" /> Overnight loads
             </h2>
-            <p className="text-lg font-bold tabular-nums text-indigo-900">
+            <p className="text-lg font-bold tabular-nums text-indigo-100">
               {money(data.overnight.grossCents)}
             </p>
           </div>
-          <p className="mt-0.5 text-xs text-indigo-900/70">
+          <p className="mt-0.5 text-xs text-indigo-200/80">
             {data.overnight.loads.length} run{data.overnight.loads.length === 1 ? '' : 's'} this
             period &middot; gross
           </p>
           <ul className="mt-2.5 flex flex-col gap-1.5">
             {data.overnight.loads.map((l) => (
               <li key={l.id} className="flex items-baseline justify-between gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate text-indigo-900">
+                <span className="min-w-0 flex-1 truncate text-indigo-100">
                   <span className="font-semibold">{l.reference}</span>
                   {l.origin || l.destination
                     ? ` · ${[l.origin, l.destination].filter(Boolean).join(' → ')}`
                     : ''}
                 </span>
-                <span className="shrink-0 font-semibold tabular-nums text-indigo-900">
+                <span className="shrink-0 font-semibold tabular-nums text-indigo-100">
                   {l.rateCents != null ? money(l.rateCents) : '—'}
                 </span>
               </li>
@@ -224,16 +232,33 @@ export function TimeClockPage() {
       )}
 
       <ul className="flex flex-col gap-2">
-        {week.days.map((d) => (
-          <li key={d.date} className="rounded-lg border border-border bg-muted/30 p-3">
+        {week.days.map((d) => {
+          // Today stands out so the driver finds their own day without reading dates; a
+          // day with hours on it reads brighter than an empty one.
+          const isToday = d.date === data.today
+          const hasHours = d.open || d.totalMinutes > 0
+          return (
+          <li
+            key={d.date}
+            className={`rounded-lg border p-3 ${isToday ? 'border-primary/70 bg-primary/10' : 'border-border bg-card'}`}
+          >
             <div className="flex items-baseline justify-between">
-              <p className="text-sm font-semibold text-foreground">{dayLabel(d.date)}</p>
-              <p className="text-sm font-semibold tabular-nums">
-                {d.open ? 'On the clock' : minutesLabel(d.totalMinutes)}
+              <p className="text-base font-semibold text-foreground">
+                {dayLabel(d.date)}
+                {isToday && <span className="ml-2 text-xs font-semibold uppercase tracking-wide text-primary">Today</span>}
               </p>
+              {d.open ? (
+                <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-sm font-bold text-emerald-200">
+                  On the clock
+                </span>
+              ) : (
+                <p className={`text-base font-bold tabular-nums ${hasHours ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {minutesLabel(d.totalMinutes)}
+                </p>
+              )}
             </div>
             {d.rows.map((r) => (
-              <p key={r.id} className="mt-1 text-xs text-muted-foreground">
+              <p key={r.id} className="mt-1 text-sm text-muted-foreground">
                 {r.kind === 'WORK'
                   ? `${clockLabel(r.clockInAt)} – ${r.clockOutAt ? clockLabel(r.clockOutAt) : 'now'}`
                   : r.kind === 'HOLIDAY' ? 'Paid holiday' : 'PTO'}
@@ -243,7 +268,8 @@ export function TimeClockPage() {
               </p>
             ))}
           </li>
-        ))}
+          )
+        })}
       </ul>
 
       {isThisWeek && (
