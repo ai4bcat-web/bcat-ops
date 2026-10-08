@@ -204,15 +204,15 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       const ctx = canvas.getContext('2d', { willReadFrequently: true })
       if (!ctx) throw new Error('Could not read the camera frame')
       ctx.drawImage(video, 0, 0, w, h)
-      const rgba = ctx.getImageData(0, 0, w, h).data
+      const pixels = ctx.getImageData(0, 0, w, h).data
 
       /*
        * No page found is not a failure. The driver pressed the shutter, so they want this
        * frame; keep it whole rather than refusing, and say it was not cropped so they can
        * judge for themselves whether to retake.
        */
-      const result = scanFrameColor({ data: rgba, width: w, height: h })
-      const out = result?.gray ?? toGray(rgba, w, h)
+      const result = scanFrameColor({ data: pixels, width: w, height: h })
+      const out = result?.gray ?? toGray(pixels, w, h)
       const cropped = !!result
 
       const render = document.createElement('canvas')
