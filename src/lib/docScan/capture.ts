@@ -14,6 +14,7 @@
  * No DOM beyond canvas, so every function here is testable without a browser.
  */
 import { findDocumentBoundary, warpPerspective, type Quad } from './geometry'
+import { findPaperQuad } from './paperMask'
 
 /** Longest edge the detector works at. Full-resolution edge detection is pointlessly slow. */
 const DETECT_EDGE = 480
@@ -168,6 +169,53 @@ export function enhanceForReading(frame: GrayFrame): GrayFrame {
     out[i] = v < 0 ? 0 : v > 255 ? 255 : v
   }
   return { data: out, width, height }
+}
+
+export interface ColorFrame {
+  /** RGBA, as getImageData hands it over. */
+  data: Uint8ClampedArray | Uint8Array
+  width: number
+  height: number
+}
+
+/** Nearest-neighbour RGBA downscale, for the detector only. */
+export function downscaleColor(frame: ColorFrame, width: number, height: number): ColorFrame {
+  const out = new Uint8ClampedArray(width * height * 4)
+  const xr = frame.width / width
+  const yr = frame.height / height
+  for (let y = 0; y < height; y++) {
+    const sy = Math.min(frame.height - 1, (y * yr) | 0)
+    for (let x = 0; x < width; x++) {
+      const sx = Math.min(frame.width - 1, (x * xr) | 0)
+      const si = (sy * frame.width + sx) * 4
+      const oi = (y * width + x) * 4
+      out[oi] = frame.data[si]; out[oi + 1] = frame.data[si + 1]; out[oi + 2] = frame.data[si + 2]; out[oi + 3] = 255
+    }
+  }
+  return { data: out, width, height }
+}
+
+/**
+ * Find the page in a colour frame: by paper colour first (see paperMask.ts), by edges
+ * when colour cannot separate it — a white page on a white desk.
+ */
+export function detectPageColor(frame: ColorFrame): DetectedPage | null {
+  const paper = findPaperQuad(frame.data, frame.width, frame.height)
+  if (paper) return paper
+  return detectPage(toGray(frame.data, frame.width, frame.height))
+}
+
+/** scanFrame for a colour frame: the colour detector, then the same flatten-and-clean. */
+export function scanFrameColor(full: ColorFrame): { gray: GrayFrame; quad: Quad } | null {
+  const factor = Math.max(full.width, full.height) / DETECT_EDGE
+  const small = factor > 1 ? downscaleColor(full, Math.round(full.width / factor), Math.round(full.height / factor)) : full
+  const found = detectPageColor(small)
+  if (!found) return null
+  const quad = factor > 1 ? scaleQuad(found.quad, full.width / small.width) : found.quad
+  const gray = toGray(full.data, full.width, full.height)
+  const { width, height } = outputSize(quad)
+  const warped = warpPerspective(gray.data, gray.width, gray.height, quad, width, height)
+  return { gray: enhanceForReading({ data: warped, width, height }), quad }
 }
 
 /** Everything in one step: detect, flatten, clean. Null when no page could be found. */

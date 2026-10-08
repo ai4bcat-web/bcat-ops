@@ -44,7 +44,7 @@ function cross(o: Point, a: Point, b: Point): number {
   return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
 }
 
-function convexHull(points: Point[]): Point[] {
+export function convexHull(points: Point[]): Point[] {
   if (points.length <= 3) return points.slice()
   const sorted = points.slice().sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x))
   const lower: Point[] = []
@@ -67,7 +67,7 @@ function convexHull(points: Point[]): Point[] {
   return lower.concat(upper)
 }
 
-function polygonArea(poly: Point[]): number {
+export function polygonArea(poly: Point[]): number {
   let area = 0
   for (let i = 0; i < poly.length; i++) {
     const j = (i + 1) % poly.length
@@ -79,7 +79,7 @@ function polygonArea(poly: Point[]): number {
 /**
  * Douglas–Peucker polyline simplification.
  */
-function simplifyPolygon(points: Point[], epsilon: number): Point[] {
+export function simplifyPolygon(points: Point[], epsilon: number): Point[] {
   if (points.length <= 2) return points.slice()
   let dmax = 0
   let index = 0
@@ -107,7 +107,7 @@ function pointLineDistance(p: Point, a: Point, b: Point): number {
   return hypot(p.x - proj.x, p.y - proj.y)
 }
 
-function orderQuad(corners: Point[]): Quad {
+export function orderQuad(corners: Point[]): Quad {
   const byY = corners.slice().sort((a, b) => a.y - b.y)
   const top = byY[0]
   const top2 = byY[1]
@@ -422,7 +422,7 @@ export function findDocumentBoundary(
   return { corners: fullCorners, confidence }
 }
 
-function bestQuadrilateral(hull: Point[]): Point[] {
+export function bestQuadrilateral(hull: Point[]): Point[] {
   let best: Point[] = []
   let bestArea = 0
   const n = hull.length

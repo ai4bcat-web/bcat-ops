@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { scanFrame, toGray, assessReadability, type Readability } from '@/lib/docScan/capture'
+import { scanFrameColor, toGray, assessReadability, type Readability } from '@/lib/docScan/capture'
 import { preparePage } from './imagePrep'
 import type { PendingPage } from '../driverApi'
 
@@ -158,8 +158,8 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       const ctx = canvas.getContext('2d', { willReadFrequently: true })
       if (!ctx) return
       ctx.drawImage(video, 0, 0, w, h)
-      const gray = toGray(ctx.getImageData(0, 0, w, h).data, w, h)
-      const result = scanFrame(gray)
+      // Colour, not gray: the page is found by being the one uncoloured thing in shot.
+      const result = scanFrameColor({ data: ctx.getImageData(0, 0, w, h).data, width: w, height: h })
 
       // Draw the outline over the preview, in the preview's own pixels.
       overlay.width = overlay.clientWidth
@@ -204,15 +204,15 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       const ctx = canvas.getContext('2d', { willReadFrequently: true })
       if (!ctx) throw new Error('Could not read the camera frame')
       ctx.drawImage(video, 0, 0, w, h)
-      const gray = toGray(ctx.getImageData(0, 0, w, h).data, w, h)
+      const rgba = ctx.getImageData(0, 0, w, h).data
 
       /*
        * No page found is not a failure. The driver pressed the shutter, so they want this
        * frame; keep it whole rather than refusing, and say it was not cropped so they can
        * judge for themselves whether to retake.
        */
-      const result = scanFrame(gray)
-      const out = result?.gray ?? gray
+      const result = scanFrameColor({ data: rgba, width: w, height: h })
+      const out = result?.gray ?? toGray(rgba, w, h)
       const cropped = !!result
 
       const render = document.createElement('canvas')
