@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
+  submitMisc,
   attachSubmissionToLoad,
   DriverApiError,
   fetchCurrentLoad,
@@ -51,6 +52,7 @@ export default function ScanPage() {
     const raw = searchParams.get('kind')
     if (raw === 'ratecon') return 'RATECON'
     if (raw === 'pod') return 'POD'
+    if (raw === 'misc') return 'MISC'
     return null
   }, [searchParams])
   const initialSubmissionId = searchParams.get('submissionId')
@@ -70,9 +72,14 @@ export default function ScanPage() {
    */
   const initialPro = (searchParams.get('pro') ?? searchParams.get('ref') ?? '').trim()
   const initialLoadId = (searchParams.get('loadId') ?? '').trim() || null
+  /** The stop a photo upload was started from, so the office sees "Pickup — Batory Oakley". */
+  const initialStopId = (searchParams.get('stopId') ?? '').trim() || null
+  const initialStopLabel = (searchParams.get('stopLabel') ?? '').trim() || null
 
   const initialPhase: Phase = useMemo(() => {
     if (initialKind === 'RATECON') return 'capture'
+    // Photos go straight to the camera: there is nothing to choose, they are for the stop they were started from.
+    if (initialKind === 'MISC') return 'capture'
     if (initialKind === 'POD') return initialSubmissionId || initialPro || initialLoadId ? 'capture' : 'select'
     return 'choose'
   }, [initialKind, initialSubmissionId, initialPro, initialLoadId])
@@ -120,12 +127,14 @@ export default function ScanPage() {
   useEffect(() => {
     if (!initialKind) return
     rememberScanIntent({
-      kind: initialKind === 'POD' ? 'pod' : 'ratecon',
+      kind: initialKind === 'POD' ? 'pod' : initialKind === 'MISC' ? 'misc' : 'ratecon',
       pro: initialPro || undefined,
       submissionId: initialSubmissionId || undefined,
       loadId: initialLoadId || undefined,
+      stopId: initialStopId || undefined,
+      stopLabel: initialStopLabel || undefined,
     })
-  }, [initialKind, initialPro, initialSubmissionId, initialLoadId])
+  }, [initialKind, initialPro, initialSubmissionId, initialLoadId, initialStopId, initialStopLabel])
 
   useEffect(() => {
     let cancelled = false
@@ -201,6 +210,18 @@ export default function ScanPage() {
           note: note.trim() || undefined,
           resumeFromId: resumeFromId ?? undefined,
         })
+      } else if (kind === 'MISC') {
+        const submissionId = await submitMisc({
+          pages,
+          referenceNumber: referenceNumber.trim() || undefined,
+          note: note.trim() || undefined,
+          stopId: initialStopId ?? undefined,
+          stopLabel: initialStopLabel ?? undefined,
+          resumeFromId: resumeFromId ?? undefined,
+        })
+        if (initialLoadId) {
+          try { await attachSubmissionToLoad(submissionId, initialLoadId) } catch { /* the PRO is on it; the office can link it */ }
+        }
       } else if (selectedSubmissionId) {
         await submitPod(selectedSubmissionId, pages, { resume: !!resumeFromId })
       } else {
@@ -425,6 +446,7 @@ export default function ScanPage() {
     return (
       <PagePicker
         initialPages={pages}
+        photos={kind === 'MISC'}
         onDone={handleCaptureDone}
         onCancel={() => {
           /*
@@ -458,11 +480,28 @@ export default function ScanPage() {
             <ArrowLeft className="h-6 w-6" />
           </Button>
           <h1 className="text-lg font-semibold">
-            Review {kind === 'RATECON' ? 'rate confirmation' : 'POD'}
+            Review {kind === 'RATECON' ? 'rate confirmation' : kind === 'MISC' ? 'photos' : 'POD'}
           </h1>
         </div>
 
         <div className="space-y-4">
+          {kind === 'MISC' && (
+            <>
+              <div className="rounded-lg border border-border bg-card p-3 text-sm">
+                <span className="font-medium">For:</span>{' '}
+                {[referenceNumber.trim() ? `PRO ${referenceNumber.trim()}` : null, initialStopLabel].filter(Boolean).join(' · ') || 'this load'}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="note">What is it? (optional)</Label>
+                <Textarea
+                  id="note"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="e.g. seal number, damaged pallet, gate pass"
+                />
+              </div>
+            </>
+          )}
           {kind === 'RATECON' && (
             <>
               <div className="space-y-2">
@@ -568,9 +607,11 @@ export default function ScanPage() {
         <CheckCircle2 className="h-16 w-16 text-emerald-500" aria-hidden="true" />
         <h2 className="mt-4 text-2xl font-bold">Sent!</h2>
         <p className="mt-2 max-w-xs text-slate-600">
-          {sentUnattached
-            ? 'The office has it and will attach it to your load. Nothing else for you to do.'
-            : 'The office has been notified. You can add POD pages later from My loads.'}
+          {kind === 'MISC'
+            ? 'The office can see your photos on the load.'
+            : sentUnattached
+              ? 'The office has it and will attach it to your load. Nothing else for you to do.'
+              : 'The office has been notified. You can add POD pages later from My loads.'}
         </p>
         <div className="mt-8 flex w-full max-w-xs flex-col gap-3">
           <Button size="lg" className="h-14 w-full" onClick={() => navigate(homePath)}>

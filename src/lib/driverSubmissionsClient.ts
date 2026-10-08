@@ -21,7 +21,7 @@ async function gql<T>(query: string, variables?: Record<string, unknown>): Promi
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
-export type SubmissionKind = 'RATECON' | 'POD'
+export type SubmissionKind = 'RATECON' | 'POD' | 'MISC'
 export type SubmissionSource = 'PWA' | 'EMAIL' | 'STAFF'
 export type SubmissionStatus = 'NEW' | 'NOTIFIED' | 'LINKED' | 'ARCHIVED'
 
@@ -420,8 +420,8 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
 
   // Queued, not awaited. Cleaning is OCR plus image work and the merge waits on all of it,
   // which is seconds of spinner for someone who has already done their part. The pages are
-  // stored and readable now; the finished PDF appears shortly after.
-  await queueDriverDocScan(submission.id, input.kind)
+  // stored and readable now; the finished PDF appears shortly after. Photos are kept as taken.
+  if (input.kind !== 'MISC') await queueDriverDocScan(submission.id, input.kind)
 
   return { ...submission, docs }
 }
@@ -631,5 +631,5 @@ async function addDocsToSubmission(
       }),
     )
   }
-  await queueDriverDocScan(submissionId, kind)
+  if (kind !== 'MISC') await queueDriverDocScan(submissionId, kind)
 }

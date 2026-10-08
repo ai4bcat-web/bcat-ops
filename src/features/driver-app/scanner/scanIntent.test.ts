@@ -26,6 +26,14 @@ describe('scan intent', () => {
     expect(scanIntentPath(readScanIntent()!)).toBe('/driver/scan?kind=pod&submissionId=sub-1')
   })
 
+  it('carries the stop a photo upload was started from', () => {
+    rememberScanIntent({ kind: 'misc', pro: '14578', loadId: 'L1', stopId: 'st-pu', stopLabel: 'Pickup — Batory Oakley' })
+    const intent = readScanIntent()
+    expect(intent).toMatchObject({ kind: 'misc', stopId: 'st-pu', stopLabel: 'Pickup — Batory Oakley' })
+    expect(scanIntentPath(intent!)).toContain('kind=misc')
+    expect(scanIntentPath(intent!)).toContain('stopId=st-pu')
+  })
+
   it('forgets it once the send is done', () => {
     // Or the next launch would drop them back into a job they finished.
     rememberScanIntent({ kind: 'pod', pro: '14538' })

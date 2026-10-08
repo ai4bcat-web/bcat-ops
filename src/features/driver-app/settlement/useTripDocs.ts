@@ -18,11 +18,17 @@ import { normalizePro } from '@/lib/podPresence'
 export interface TripDoc {
   submissionId: string
   document: SubmissionDocument
+  /** Where a photo was taken, when the driver sent it from a stop. */
+  stopId?: string | null
+  stopLabel?: string | null
+  note?: string | null
 }
 
 export interface TripDocIndex {
   /** The finished document of this kind for a shipment, or null if none is on file here. */
   find: (kind: SubmissionKind, loadId: string | null | undefined, pro: string | null | undefined) => TripDoc | null
+  /** Every document of a kind on a shipment — photos are many, a POD is one. */
+  findAll: (kind: SubmissionKind, loadId: string | null | undefined, pro: string | null | undefined) => TripDoc[]
   loading: boolean
   refresh: () => void
 }
@@ -65,5 +71,19 @@ export function useTripDocs(): TripDocIndex {
     [subs],
   )
 
-  return { find, loading: subs === null, refresh }
+  const findAll = useCallback(
+    (kind: SubmissionKind, loadId: string | null | undefined, pro: string | null | undefined): TripDoc[] => {
+      const out: TripDoc[] = []
+      for (const sub of subs ?? []) {
+        if (!matches(sub, loadId, pro)) continue
+        for (const document of (sub.documents ?? []).filter((d) => d.kind === kind)) {
+          out.push({ submissionId: sub.id, document, stopId: sub.stopId ?? null, stopLabel: sub.stopLabel ?? null, note: sub.note ?? null })
+        }
+      }
+      return out
+    },
+    [subs],
+  )
+
+  return { find, findAll, loading: subs === null, refresh }
 }

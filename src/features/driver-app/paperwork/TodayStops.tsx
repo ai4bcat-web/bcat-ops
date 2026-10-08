@@ -18,7 +18,7 @@
  * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
 import { useState } from 'react'
-import { Camera, Check, Eye, FileWarning, Loader2, LogOut, MapPin, Navigation, PackageOpen, Truck } from 'lucide-react'
+import { Camera, Check, Eye, FileWarning, Image, Loader2, LogOut, MapPin, Navigation, PackageOpen, Paperclip, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useTripDocs, type TripDoc } from '../settlement/useTripDocs'
@@ -185,12 +185,15 @@ export function TodayStops({
   loads,
   today,
   onSendPod,
+  onAddPhotos,
   onChange,
 }: {
   loads: PaperworkLoad[]
   /** The day on screen — today, or one the driver paged back to. */
   today: string
   onSendPod: (load: PaperworkLoad) => void
+  /** Photos or other paperwork from this stop: a seal, damage, a gate pass. */
+  onAddPhotos?: (load: PaperworkLoad, stop: PaperworkStop) => void
   /** A flag or event changed; the page refreshes its copy of the week. */
   onChange: () => void
 }) {
@@ -199,7 +202,7 @@ export function TodayStops({
   const [busyKey, setBusyKey] = useState<string | null>(null)
   // The documents the driver has sent, so a delivered load can show its POD back to them.
   const docs = useTripDocs()
-  const [viewing, setViewing] = useState<{ doc: TripDoc; load: PaperworkLoad } | null>(null)
+  const [viewing, setViewing] = useState<{ doc: TripDoc; load: PaperworkLoad; kind: 'POD' | 'MISC' } | null>(null)
   const keyOf = (it: TodayStop) => `${it.load.id}#${it.stop.id}`
   const patch = (it: TodayStop, p: Partial<PaperworkStop>) =>
     setPatches((all) => ({ ...all, [keyOf(it)]: { ...all[keyOf(it)], ...p } }))
@@ -246,6 +249,8 @@ export function TodayStops({
         const delivery = isDelivery(stop)
         const podOk = load.pod.present && load.pod.legibility === 'OK'
         const podDoc = delivery ? docs.find('POD', load.id, load.reference) : null
+        // Photos sent from THIS stop; one sent with no stop (older build) shows on every stop of the load.
+        const photos = docs.findAll('MISC', load.id, load.reference).filter((d) => !d.stopId || d.stopId === stop.id)
         const showEta = delivery && !!stop.etaAt && !stop.arrivedAt && !stop.departedAt
         return (
           <li
@@ -313,7 +318,7 @@ export function TodayStops({
             />
 
             {delivery && (
-              <PodStatus load={load} doc={podDoc} onView={() => podDoc && setViewing({ doc: podDoc, load })} />
+              <PodStatus load={load} doc={podDoc} onView={() => podDoc && setViewing({ doc: podDoc, load, kind: 'POD' })} />
             )}
 
             {delivery && (stop.departedAt || load.pod.present) && (
@@ -326,6 +331,37 @@ export function TodayStops({
                 {load.pod.present ? 'Replace POD' : 'Send POD'}
               </Button>
             )}
+
+            {/* Anything else from this stop: a seal, a damaged pallet, a gate pass, a scale ticket. */}
+            {onAddPhotos && (
+              <div className="mt-3">
+                {photos.length > 0 && (
+                  <ul className="mb-2 flex flex-col gap-1">
+                    {photos.map((d, i) => (
+                      <li key={`${d.submissionId}#${d.document.docId}`}>
+                        <button
+                          type="button"
+                          onClick={() => setViewing({ doc: d, load, kind: 'MISC' })}
+                          className="flex w-full items-center gap-2 rounded-lg bg-background/50 px-3 py-2 text-left text-sm"
+                        >
+                          <Image className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                          <span className="min-w-0 flex-1 truncate text-foreground">{d.note?.trim() || `Photo ${i + 1}`}</span>
+                          <Eye className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Button
+                  variant="outline"
+                  className="h-11 w-full gap-2 text-sm font-semibold"
+                  onClick={() => onAddPhotos(load, stop)}
+                >
+                  <Paperclip className="h-4 w-4" aria-hidden="true" />
+                  {photos.length > 0 ? 'Add more photos / docs' : 'Add photos / docs'}
+                </Button>
+              </div>
+            )}
           </li>
         )
       })}
@@ -333,7 +369,7 @@ export function TodayStops({
       {viewing && (
         <DocPreviewSheet
           doc={viewing.doc}
-          kind="POD"
+          kind={viewing.kind}
           shipment={viewing.load.reference}
           onClose={() => setViewing(null)}
           onReplace={() => { setViewing(null); docs.refresh(); onSendPod(viewing.load) }}

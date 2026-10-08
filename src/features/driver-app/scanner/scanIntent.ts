@@ -22,11 +22,14 @@ const KEY = 'bcat.driver.scanIntent'
 const FRESH_FOR_MS = 15 * 60 * 1000
 
 export interface ScanIntent {
-  kind: 'pod' | 'ratecon'
+  kind: 'pod' | 'ratecon' | 'misc'
   pro?: string
   submissionId?: string
   /** The load the Ivan paperwork page handed over, so the resumed scan still links to it. */
   loadId?: string
+  /** The stop a misc upload was taken at. */
+  stopId?: string
+  stopLabel?: string
   /** Epoch ms, so a stale intent can be ignored rather than acted on. */
   at: number
 }
@@ -54,13 +57,15 @@ export function readScanIntent(now = Date.now()): ScanIntent | null {
     const raw = sessionStorage.getItem(KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<ScanIntent>
-    if (parsed.kind !== 'pod' && parsed.kind !== 'ratecon') return null
+    if (parsed.kind !== 'pod' && parsed.kind !== 'ratecon' && parsed.kind !== 'misc') return null
     if (typeof parsed.at !== 'number' || now - parsed.at > FRESH_FOR_MS) return null
     return {
       kind: parsed.kind,
       pro: typeof parsed.pro === 'string' ? parsed.pro : undefined,
       submissionId: typeof parsed.submissionId === 'string' ? parsed.submissionId : undefined,
       loadId: typeof parsed.loadId === 'string' ? parsed.loadId : undefined,
+      stopId: typeof parsed.stopId === 'string' ? parsed.stopId : undefined,
+      stopLabel: typeof parsed.stopLabel === 'string' ? parsed.stopLabel : undefined,
       at: parsed.at,
     }
   } catch {
@@ -74,5 +79,7 @@ export function scanIntentPath(intent: ScanIntent): string {
   if (intent.pro) params.set('pro', intent.pro)
   if (intent.submissionId) params.set('submissionId', intent.submissionId)
   if (intent.loadId) params.set('loadId', intent.loadId)
+  if (intent.stopId) params.set('stopId', intent.stopId)
+  if (intent.stopLabel) params.set('stopLabel', intent.stopLabel)
   return `/driver/scan?${params.toString()}`
 }

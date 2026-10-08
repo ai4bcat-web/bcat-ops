@@ -91,7 +91,8 @@ import {
   type OwnerOpLoadLike,
   type OwnerOpTrip,
 } from '../../../src/lib/ownerOperatorTrips'
-import { notifyRateconSubmitted, notifyPodAdded, RATECON_SUBJECT_PREFIX, type SubmissionNotice, type ThreadRefs } from './notify'
+import { notifyRateconSubmitted, notifyPodAdded,
+  notifyMiscAdded, RATECON_SUBJECT_PREFIX, type SubmissionNotice, type ThreadRefs } from './notify'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
@@ -228,6 +229,8 @@ interface DriverPaySettingRow {
 }
 
 interface DriverSubmissionRow {
+  stopId?: string | null
+  stopLabel?: string | null
   id: string
   driverId: string
   driverName: string
@@ -280,9 +283,15 @@ interface PendingPage {
   s3Key: string
 }
 
+/** What a submission can carry. MISC is photos or other paperwork from a stop — kept as-is, never merged or cleaned. */
+type DocKind = 'RATECON' | 'POD' | 'MISC'
+const DOC_KINDS: readonly DocKind[] = ['RATECON', 'POD', 'MISC']
+function isDocKind(v: unknown): v is DocKind { return typeof v === 'string' && (DOC_KINDS as readonly string[]).includes(v) }
+
 interface PendingUploads {
   RATECON?: PendingPage[]
   POD?: PendingPage[]
+  MISC?: PendingPage[]
 }
 
 interface UploadTarget {
@@ -1088,7 +1097,7 @@ async function querySubmissionByExternalMessageId(gmailMessageId: string): Promi
  *  it is not part of the index key. */
 async function listSubmissionDocs(
   submissionId: string,
-  kind: 'RATECON' | 'POD',
+  kind: DocKind,
 ): Promise<DriverSubmissionDocRow[]> {
   const docs: DriverSubmissionDocRow[] = []
   let lastKey: Record<string, unknown> | undefined
@@ -1177,7 +1186,7 @@ function extFromContentType(contentType: string): string {
 async function presignedPutTargets(
   driverId: string,
   submissionId: string,
-  kind: 'RATECON' | 'POD',
+  kind: DocKind,
   pages: PendingPage[],
 ): Promise<{ targets: UploadTarget[]; pagesWithKeys: PendingPage[] }> {
   const timestamp = Date.now()
@@ -1240,7 +1249,7 @@ async function getOwnedDoc(
 
 async function appendPendingUploads(
   submissionId: string,
-  kind: 'RATECON' | 'POD',
+  kind: DocKind,
   pages: PendingPage[],
 ) {
   await ddb.send(
@@ -1403,7 +1412,7 @@ async function openPodSubmissionFor(
 async function persistDocs(
   submissionId: string,
   driverId: string,
-  kind: 'RATECON' | 'POD',
+  kind: DocKind,
   pages: PendingPage[],
 ): Promise<DriverSubmissionDocRow[]> {
   const now = nowIso()
@@ -1420,8 +1429,9 @@ async function persistDocs(
     uploadedAt: now,
     // PENDING from the moment it is stored. The cleanup is queued rather than awaited, so
     // without this a page sits with no status at all and every screen has to guess whether
-    // it is waiting on something or simply never going to be cleaned.
-    scanStatus: 'PENDING',
+    // it is waiting on something or simply never going to be cleaned. A MISC photo is
+    // never cleaned — a picture of a damaged pallet is not a page to deskew.
+    scanStatus: kind === 'MISC' ? 'ORIGINAL_ONLY' : 'PENDING',
     createdAt: now,
     updatedAt: now,
   }))
@@ -1460,11 +1470,12 @@ async function fetchS3Bytes(s3Key: string, expectedByteSize: number): Promise<Bu
 
 async function notifyForKind(
   submission: DriverSubmissionRow,
-  kind: 'RATECON' | 'POD',
+  kind: DocKind,
   pages: PendingPage[],
 ): Promise<{ refs: Partial<ThreadRefs>; errors: string[] }> {
   const attachments: SubmissionNotice['attachments'] = []
-  for (const page of pages) {
+  // Misc photos are announced, not attached — nothing downstream wants the bytes in an email.
+  for (const page of kind === 'MISC' ? [] : pages) {
     try {
       const bytes = await fetchS3Bytes(page.s3Key, page.byteSize)
       attachments.push({ fileName: page.fileName, contentType: page.contentType, bytes })
@@ -1486,6 +1497,13 @@ async function notifyForKind(
       const result = await notifyRateconSubmitted(notice)
       return { refs: result.refs, errors: result.error ? [result.error] : [] }
     }
+    if (kind === 'MISC') {
+      const result = await notifyMiscAdded({
+        driverName: submission.driverName, referenceNumber: submission.referenceNumber, note: submission.note,
+        count: pages.length, stopLabel: submission.stopLabel ?? null,
+      })
+      return { refs: {}, errors: result.error ? [result.error] : [] }
+    }
     const parentRefs: Partial<ThreadRefs> = {
       slackChannelId: submission.slackChannelId ?? undefined,
       slackMessageTs: submission.slackMessageTs ?? undefined,
@@ -1502,11 +1520,11 @@ async function notifyForKind(
 async function completeSubmission(
   driverId: string,
   submissionId: string,
-  kind: 'RATECON' | 'POD',
+  kind: DocKind,
 ): Promise<{ ok: boolean; error?: string }> {
   const submission = await getOwnedSubmission(submissionId, driverId)
   const pending = submission.pendingUploads ?? {}
-  const pages = kind === 'RATECON' ? (pending.RATECON ?? []) : (pending.POD ?? [])
+  const pages = pending[kind] ?? []
 
   if (pages.length === 0) {
     // Nothing left to upload for this leg; a previous successful notify may already exist.
@@ -1515,8 +1533,9 @@ async function completeSubmission(
 
   const docs = await persistDocs(submissionId, driverId, kind, pages)
   // Clean up the scan the same way a texted POD is cleaned, then merge the pages into one
-  // PDF. Best-effort: the pages are already stored and readable on their own.
-  await requestScanCleanup(docs, submissionId, kind)
+  // PDF. Best-effort: the pages are already stored and readable on their own. Misc photos
+  // are kept exactly as taken.
+  if (kind !== 'MISC') await requestScanCleanup(docs, submissionId, kind)
   const { refs, errors } = await notifyForKind(submission, kind, pages)
   const now = nowIso()
 
@@ -2774,6 +2793,8 @@ export const handler = async (event: FnUrlEvent) => {
           referenceNumber: s.referenceNumber ?? null,
           note: s.note ?? null,
           loadId: s.loadId ?? null,
+          stopId: s.stopId ?? null,
+          stopLabel: s.stopLabel ?? null,
           createdAt: s.createdAt,
           notifiedAt: s.notifiedAt ?? null,
           docs:
@@ -2801,7 +2822,7 @@ export const handler = async (event: FnUrlEvent) => {
               const pages = (docsBySubmission.get(s.id) ?? []).filter((d) => d.kind === kind)
               if (!key && pages.length === 0) return null
               return {
-                kind,
+                kind: kind as DocKind,
                 /* `combined-POD` addresses the merged PDF in the doc-url route; a loose
                    page falls back to its own id until the merge produces one. */
                 docId: key ? `combined-${kind}` : pages[0].id,
@@ -2811,15 +2832,22 @@ export const handler = async (event: FnUrlEvent) => {
                 combined: !!key,
               }
             })
-            .filter((d): d is NonNullable<typeof d> => d !== null),
+            .filter((d): d is NonNullable<typeof d> => d !== null)
+            // Misc photos are never merged: each one is its own document.
+            .concat(
+              (docsBySubmission.get(s.id) ?? [])
+                .filter((d) => d.kind === 'MISC')
+                .sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))
+                .map((d) => ({ kind: 'MISC' as const, docId: d.id, pageCount: 1, enhanced: false, contentType: d.contentType ?? '', combined: false })),
+            ),
         }))
       return reply(200, { submissions: summaries })
     }
 
     if (method === 'GET' && path === '/submissions/:id/uploads' && id) {
       const kind = event.queryStringParameters?.kind ?? ''
-      if (kind !== 'RATECON' && kind !== 'POD') {
-        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      if (!isDocKind(kind)) {
+        return reply(400, { error: "kind must be 'RATECON', 'POD' or 'MISC'" })
       }
       const submission = await getOwnedSubmission(id, driverId)
       const pages = submission.pendingUploads?.[kind] ?? []
@@ -2829,8 +2857,8 @@ export const handler = async (event: FnUrlEvent) => {
     if (method === 'POST' && path === '/submissions') {
       const body = parseBody(event)
       const kind = getString(body, 'kind') ?? 'RATECON'
-      if (kind !== 'RATECON' && kind !== 'POD') {
-        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      if (!isDocKind(kind)) {
+        return reply(400, { error: "kind must be 'RATECON', 'POD' or 'MISC'" })
       }
       const validation = validatePages(assertArrayField(body, 'pages'))
       if (!validation.ok) return reply(400, { error: validation.error })
@@ -2870,6 +2898,8 @@ export const handler = async (event: FnUrlEvent) => {
             referenceNumber,
             ...(resolvedLoadId ? { loadId: resolvedLoadId } : {}),
             note: getStringOrNull(body, 'note'),
+            // Where a MISC submission was taken, so the office sees "Pickup — Batory Oakley".
+            ...(kind === 'MISC' ? { stopId: getStringOrNull(body, 'stopId'), stopLabel: getStringOrNull(body, 'stopLabel') } : {}),
             createdAt: now,
             updatedAt: now,
             pendingUploads: { [kind]: pagesWithKeys } satisfies PendingUploads,
@@ -2894,8 +2924,8 @@ export const handler = async (event: FnUrlEvent) => {
     if (method === 'POST' && path === '/submissions/:id/complete' && id) {
       const body = parseBody(event)
       const kind = getString(body, 'kind') ?? ''
-      if (kind !== 'RATECON' && kind !== 'POD') {
-        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      if (!isDocKind(kind)) {
+        return reply(400, { error: "kind must be 'RATECON', 'POD' or 'MISC'" })
       }
       const result = await completeSubmission(driverId, id, kind)
       return reply(200, result.error ? { ok: true, error: result.error } : { ok: true })
@@ -2939,8 +2969,8 @@ export const handler = async (event: FnUrlEvent) => {
      */
     if (method === 'DELETE' && path === '/submissions/:id/docs' && id) {
       const kind = event.queryStringParameters?.kind ?? ''
-      if (kind !== 'RATECON' && kind !== 'POD') {
-        return reply(400, { error: "kind must be 'RATECON' or 'POD'" })
+      if (!isDocKind(kind)) {
+        return reply(400, { error: "kind must be 'RATECON', 'POD' or 'MISC'" })
       }
       await getOwnedSubmission(id, driverId)
       const docs = await scan<DriverSubmissionDocRow>(
@@ -2956,19 +2986,21 @@ export const handler = async (event: FnUrlEvent) => {
         )
       }
       // The merged PDF has nothing behind it now; leaving the pointer set would keep the
-      // document "present" to every readiness check in the system.
-      await ddb.send(
-        new UpdateCommand({
-          TableName: DRIVER_SUBMISSION_TABLE,
-          Key: { id },
-          UpdateExpression: 'REMOVE #k SET #u = :u',
-          ExpressionAttributeNames: {
-            '#k': kind === 'POD' ? 'combinedPodKey' : 'combinedRateconKey',
-            '#u': 'updatedAt',
-          },
-          ExpressionAttributeValues: { ':u': nowIso() },
-        }),
-      )
+      // document "present" to every readiness check in the system. (Misc photos have none.)
+      if (kind !== 'MISC') {
+        await ddb.send(
+          new UpdateCommand({
+            TableName: DRIVER_SUBMISSION_TABLE,
+            Key: { id },
+            UpdateExpression: 'REMOVE #k SET #u = :u',
+            ExpressionAttributeNames: {
+              '#k': kind === 'POD' ? 'combinedPodKey' : 'combinedRateconKey',
+              '#u': 'updatedAt',
+            },
+            ExpressionAttributeValues: { ':u': nowIso() },
+          }),
+        )
+      }
       return reply(200, { removed: doomed.length })
     }
 

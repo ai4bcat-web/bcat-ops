@@ -296,6 +296,23 @@ export async function notifyRateconSubmitted(n: SubmissionNotice): Promise<Notif
  * No email. The document reaches the office through the load, the settlement and the
  * factoring queue, all of which read the file itself rather than a notification about it.
  */
+/**
+ * Photos or other paperwork from a stop — a damaged pallet, a seal, a gate pass. Not a
+ * POD and not a rate con, so no email and no thread: one line in the PODs channel so the
+ * office knows it is on the load.
+ */
+export async function notifyMiscAdded(
+  n: Pick<SubmissionNotice, 'driverName' | 'referenceNumber' | 'note'> & { count: number; stopLabel?: string | null },
+): Promise<NotifyResult> {
+  const channel = process.env.INTAKE_PODS_CHANNEL_ID ?? 'C0C6ZT55R0T'
+  const what = `${n.count} ${n.count === 1 ? 'photo/document' : 'photos/documents'}`
+  const where = n.stopLabel ? ` · ${n.stopLabel}` : ''
+  const pro = n.referenceNumber ? ` for PRO ${n.referenceNumber}` : ''
+  const note = n.note ? ` — ${n.note}` : ''
+  const r = await postSlack(channel, `📎 ${n.driverName} sent ${what}${pro}${where}${note}`)
+  return r.ok ? { refs: {} } : { refs: {}, error: r.error }
+}
+
 export async function notifyPodAdded(n: SubmissionNotice, refs: Partial<ThreadRefs>): Promise<NotifyResult> {
   const channel = process.env.INTAKE_PODS_CHANNEL_ID ?? 'C0C6ZT55R0T'
   const slackResult = await postSlack(channel, buildPodSlackText(n.driverName, n.referenceNumber, n.note))

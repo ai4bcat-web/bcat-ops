@@ -54,9 +54,14 @@ export interface ScanCameraProps {
   onDone?: (lastPage: PendingPage | null) => void
   /** Drop the page most recently kept, without leaving the camera. */
   onUndoLast?: () => void
+  /**
+   * Refuse an unreadable shot (POD, rate con). Off for photos — a picture of a damaged
+   * pallet has no text to read, and the readability check would only get in the way.
+   */
+  strict?: boolean
 }
 
-export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone, onUndoLast }: ScanCameraProps) {
+export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone, onUndoLast, strict = true }: ScanCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const workRef = useRef<HTMLCanvasElement | null>(null)
@@ -314,7 +319,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
             only way forward from an unreadable shot is another shot, with the reason said
             plainly. After three in a row the file picker is offered as the way out.
           */}
-          {shot.readability.problem ? (
+          {strict && shot.readability.problem ? (
             <>
               <div className="flex items-start gap-2 rounded-xl border border-red-400/60 bg-red-500/15 p-3 text-sm text-red-100">
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
@@ -334,7 +339,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
             </>
           ) : null}
           {/* The outline is a guess; the driver can see whether it was right. */}
-          {!shot.readability.problem && shot.cropped && shot.whole && (
+          {!(strict && shot.readability.problem) && shot.cropped && shot.whole && (
             <button
               type="button"
               onClick={useWhole}
@@ -344,7 +349,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
               Crop looks wrong? Use the whole photo
             </button>
           )}
-          {!shot.readability.problem && !shot.cropped && (
+          {!(strict && shot.readability.problem) && !shot.cropped && (
             <p className="text-sm text-muted-foreground">
               No page edges found, so the whole picture was kept. Put the page on a darker
               surface with all four corners showing and it will crop itself.
@@ -356,7 +361,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
             BOL is the normal case, so "add another page" is the big one; Done is right
             there for the single-page POD so nobody hunts for how to finish.
           */}
-          {!shot.readability.problem && (
+          {!(strict && shot.readability.problem) && (
           <div className="flex gap-3">
             <Button type="button" variant="outline" size="lg" className="h-14 gap-2 px-4 text-base" onClick={discard}>
               <RotateCcw className="h-5 w-5" /> Retake
@@ -372,7 +377,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
             </Button>
           </div>
           )}
-          {!shot.readability.problem && onDone && (
+          {!(strict && shot.readability.problem) && onDone && (
             <Button
               type="button"
               size="lg"

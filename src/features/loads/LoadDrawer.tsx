@@ -1787,6 +1787,7 @@ export function LoadDrawer() {
                 <div className="pt-4 border-t border-border mt-4 space-y-3">
                   <LoadPods loadId={load.id} />
                   <LoadDriverDocs loadId={load.id} proNumber={load.aljexId} kind="POD" />
+                  <LoadDriverDocs loadId={load.id} proNumber={load.aljexId} kind="MISC" />
                 </div>
               )}
             </div>

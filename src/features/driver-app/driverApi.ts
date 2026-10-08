@@ -79,7 +79,8 @@ export class ResumableDriverApiError extends DriverApiError {
 
 // ── Wire types ───────────────────────────────────────────────────────────────
 
-export type SubmissionKind = 'RATECON' | 'POD'
+/** MISC: photos or other paperwork from a stop — kept as taken, never merged. */
+export type SubmissionKind = 'RATECON' | 'POD' | 'MISC'
 export type SubmissionStatus = 'NEW' | 'NOTIFIED' | 'LINKED' | 'ARCHIVED'
 
 export interface DriverProfile {
@@ -238,6 +239,9 @@ export interface SubmissionSummary {
   referenceNumber?: string | null
   note?: string | null
   loadId?: string | null
+  /** Where a MISC submission was taken. */
+  stopId?: string | null
+  stopLabel?: string | null
   createdAt: string
   notifiedAt?: string | null
   docs: SubmissionDoc[]
@@ -693,6 +697,8 @@ export async function createSubmission(input: {
   pages: PendingPage[]
   referenceNumber?: string
   note?: string
+  stopId?: string
+  stopLabel?: string
   resumeFromId?: string
 }): Promise<CreateSubmissionResponse> {
   if (input.resumeFromId) {
@@ -708,6 +714,8 @@ export async function createSubmission(input: {
       kind: input.kind,
       referenceNumber: input.referenceNumber,
       note: input.note,
+      stopId: input.stopId,
+      stopLabel: input.stopLabel,
       pages: pageMeta(input.pages),
     }),
   })
@@ -755,6 +763,29 @@ export async function submitStandalonePod(input: {
     await completeSubmission(submissionId, 'POD')
   } catch (err) {
     throw wrapWithResume(err, submissionId, 'POD')
+  }
+  return submissionId
+}
+
+/**
+ * Photos or other paperwork from a stop: a seal, a damaged pallet, a gate pass, a scale
+ * ticket. Each upload is its own submission, kept as taken, announced once in Slack.
+ */
+export async function submitMisc(input: {
+  pages: PendingPage[]
+  referenceNumber?: string
+  note?: string
+  stopId?: string
+  stopLabel?: string
+  resumeFromId?: string
+}): Promise<string> {
+  const { pages } = input
+  const { submissionId, uploads } = await createSubmission({ kind: 'MISC', ...input, pages })
+  try {
+    await Promise.all(uploads.map((t, i) => putPage(t, pages[i])))
+    await completeSubmission(submissionId, 'MISC')
+  } catch (err) {
+    throw wrapWithResume(err, submissionId, 'MISC')
   }
   return submissionId
 }

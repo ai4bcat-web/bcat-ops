@@ -455,6 +455,10 @@ const schema = a.schema({
       loadId:            a.string(),            // null until staff links the built load
       referenceNumber:   a.string(),            // scanned or driver-entered load/VRID reference
       note:              a.string(),            // optional free text from the driver
+      // Which stop a MISC submission (photos, other paperwork) was taken at, when the
+      // driver sent it from a stop on their day sheet. Absent on PODs and rate cons.
+      stopId:            a.string(),
+      stopLabel:         a.string(),            // "Pickup — Batory Oakley", for the office
       slackChannelId:    a.string(),            // captured from the parent Slack post
       slackMessageTs:    a.string(),            // parent ts — POD replies use this as thread_ts
       emailMessageId:    a.string(),            // RFC-822 msg id of the parent email, with angle brackets

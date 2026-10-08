@@ -70,9 +70,9 @@ export function LoadDriverDocs({
 }: {
   loadId: string | null | undefined
   proNumber: string | null | undefined
-  kind: 'POD' | 'RATECON'
+  kind: 'POD' | 'RATECON' | 'MISC'
 }) {
-  const { pods, ratecons, loading, error, refresh } = useLoadDriverDocs(loadId, proNumber)
+  const { pods, ratecons, misc, loading, error, refresh } = useLoadDriverDocs(loadId, proNumber)
   const user = useAuthUser()
   const [previewing, setPreviewing] = useState<string | null>(null)
   const [scanning, setScanning] = useState<string | null>(null)
@@ -85,6 +85,7 @@ export function LoadDriverDocs({
    * the work is handed off and the row polls until it lands.
    */
   async function runScan(doc: LoadDriverDoc): Promise<void> {
+    if (kind === 'MISC') return // a photo is kept as taken; there is nothing to clean up
     setScanning(doc.submissionId)
     try {
       await queueDriverDocScan(doc.submissionId, kind)
@@ -96,7 +97,7 @@ export function LoadDriverDocs({
       setScanning(null)
     }
   }
-  const docs = kind === 'POD' ? pods : ratecons
+  const docs = kind === 'POD' ? pods : kind === 'RATECON' ? ratecons : misc
   const open = docs.find((d) => d.id === previewing) ?? null
 
   if (error) {
@@ -110,13 +111,13 @@ export function LoadDriverDocs({
   // Nothing sent is the normal case and needs no words; the upload control is right there.
   if (loading || docs.length === 0) return null
 
-  const label = kind === 'POD' ? 'POD' : 'Rate confirmation'
+  const label = kind === 'POD' ? 'POD' : kind === 'RATECON' ? 'Rate confirmation' : 'Photo'
 
   return (
     <div className="space-y-1.5">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         <FileText className="size-3" />
-        {kind === 'POD' ? 'Sent by the driver' : 'Rate con sent by the driver'}
+        {kind === 'POD' ? 'Sent by the driver' : kind === 'RATECON' ? 'Rate con sent by the driver' : 'Photos & other documents from the driver'}
         <span className="font-normal normal-case tracking-normal">({docs.length})</span>
       </p>
       <ul className="space-y-1.5">
@@ -159,8 +160,8 @@ export function LoadDriverDocs({
                   <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                 )}
               </button>
-              {/* Not scanned, or still loose pages: offer to put it right from here. */}
-              {needsScanning(doc) && (
+              {/* Not scanned, or still loose pages: offer to put it right from here. (A photo is not a page.) */}
+              {kind !== 'MISC' && needsScanning(doc) && (
                 <button
                   type="button"
                   disabled={scanning === doc.submissionId}
@@ -188,7 +189,7 @@ export function LoadDriverDocs({
           subtitle={[open.driverName, describe(open)].filter(Boolean).join(' · ')}
           url={open.url}
           contentType={open.contentType}
-          downloadName={`${kind === 'POD' ? 'POD' : 'RateCon'}-${proNumber || open.submissionId.slice(-6)}`}
+          downloadName={`${kind === 'POD' ? 'POD' : kind === 'RATECON' ? 'RateCon' : 'Photo'}-${proNumber || open.submissionId.slice(-6)}`}
           accept={DRIVER_DOC_ACCEPT}
           onReplace={async (files) => {
             await replaceDriverDocs({

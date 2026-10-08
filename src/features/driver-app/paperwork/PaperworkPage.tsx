@@ -77,6 +77,15 @@ export function PaperworkPage() {
     [navigate],
   )
 
+  const addPhotos = useCallback(
+    (load: { id: string; reference: string }, stop: { id: string; type: string; name: string | null }) => {
+      const label = `${stop.type.toLowerCase() === 'delivery' ? 'Delivery' : 'Pickup'}${stop.name ? ` — ${stop.name}` : ''}`
+      const q = new URLSearchParams({ kind: 'misc', ref: load.reference, loadId: load.id, stopId: stop.id, stopLabel: label })
+      navigate(`/driver/scan?${q.toString()}`)
+    },
+    [navigate],
+  )
+
   const loaded = week !== null && week.weekStart === weekStart
   const loading = !loaded && error === null
   const isToday = day === today
@@ -179,7 +188,7 @@ export function PaperworkPage() {
           {/* Logs or no logs, before anything else: the one thing to know before rolling. */}
           <DayLogs loads={dayLoads} date={day} isToday={isToday} />
 
-          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onChange={reload} />
+          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onAddPhotos={addPhotos} onChange={reload} />
         </>
       )}
 

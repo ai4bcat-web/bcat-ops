@@ -16,7 +16,7 @@ import { fetchDocUrl, removeSubmissionDocs, type SubmissionKind } from '../drive
 import { downloadPodAsPdf } from '@/lib/podDownload'
 import type { TripDoc } from './useTripDocs'
 
-const LABEL: Record<SubmissionKind, string> = { POD: 'POD', RATECON: 'Rate confirmation' }
+const LABEL: Record<SubmissionKind, string> = { POD: 'POD', RATECON: 'Rate confirmation', MISC: 'Photo' }
 
 export function DocPreviewSheet({
   doc, kind, shipment, onClose, onReplace, onAddPages, onRemoved,

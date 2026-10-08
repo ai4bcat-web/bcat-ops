@@ -315,6 +315,24 @@ describe("today's sheet", () => {
     expect(screen.queryByText('Delivery')).toBeNull()
   })
 
+  it('offers photos / other documents on every stop, and opens the camera for that stop', async () => {
+    const { fireEvent, render: r } = await import('@testing-library/react')
+    const { Routes, Route, useLocation } = await import('react-router-dom')
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07'), stop('st-de', 'delivery', '2026-10-07')] })])
+    const Scanner = () => { const loc = useLocation(); return <div>SCANNER {loc.search}</div> }
+    r(
+      <MemoryRouter>
+        <Routes>
+          <Route path="/driver/scan" element={<Scanner />} />
+          <Route path="*" element={<PaperworkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Add photos \/ docs/ })).toHaveLength(2), { timeout: 5000 })
+    fireEvent.click(screen.getAllByRole('button', { name: /Add photos \/ docs/ })[0])
+    await waitFor(() => expect(screen.getByText(/SCANNER/).textContent).toMatch(/kind=misc.*loadId=load-1.*stopId=st-pu.*stopLabel=Pickup/))
+  })
+
   it('says so when nothing is scheduled today', async () => {
     todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-05'), stop('st-de', 'delivery', '2026-10-06')] })])
     renderPage()

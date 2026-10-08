@@ -31,9 +31,11 @@ interface PagePickerProps {
   onCancel?: () => void
   /** Pages already added, e.g. preserved after a failed upload retry. */
   initialPages?: PendingPage[]
+  /** Photos rather than paperwork: the camera keeps the outline but stops judging legibility. */
+  photos?: boolean
 }
 
-export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerProps) {
+export function PagePicker({ onDone, onCancel, initialPages = [], photos = false }: PagePickerProps) {
   const libraryInputRef = useRef<HTMLInputElement>(null)
 
   const [pages, setPages] = useState<PendingPage[]>(initialPages)
@@ -202,6 +204,7 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
 
       {scanning && (
         <ScanCamera
+          strict={!photos}
           remaining={MAX_SCAN_PAGES - pages.length}
           captured={pages.length}
           onClose={() => setScanning(false)}

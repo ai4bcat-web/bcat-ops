@@ -45,6 +45,8 @@ export interface LoadDriverDoc extends DriverSubmissionDocRecord {
 export interface LoadDriverDocs {
   pods: LoadDriverDoc[]
   ratecons: LoadDriverDoc[]
+  /** Photos and other paperwork a driver sent from a stop. Never merged; one row each. */
+  misc: LoadDriverDoc[]
   loading: boolean
   error: string | null
   refresh: () => void
@@ -208,6 +210,7 @@ const docs = useMemo<LoadDriverDoc[]>(
   return {
     pods: docs.filter((d) => d.kind === 'POD'),
     ratecons: docs.filter((d) => d.kind === 'RATECON'),
+    misc: docs.filter((d) => d.kind === 'MISC'),
     loading: subs === null,
     error,
     refresh,

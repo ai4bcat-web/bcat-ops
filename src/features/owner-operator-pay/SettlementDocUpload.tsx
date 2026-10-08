@@ -49,7 +49,7 @@ interface Props {
   onUploaded: () => void
 }
 
-const LABEL: Record<SubmissionKind, string> = { POD: 'POD', RATECON: 'Rate con' }
+const LABEL: Record<SubmissionKind, string> = { POD: 'POD', RATECON: 'Rate con', MISC: 'Photo' }
 
 
 export function SettlementDocUpload({
