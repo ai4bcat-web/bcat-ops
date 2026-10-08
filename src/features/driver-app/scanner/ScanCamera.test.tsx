@@ -97,6 +97,20 @@ describe('ScanCamera — the viewfinder', () => {
     expect(await screen.findByText(/Last page/i)).toBeInTheDocument()
   })
 
+  it('offers Done beside the shutter once a page is in hand, and sends nothing extra', async () => {
+    const onDone = vi.fn()
+    render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} captured={2} onDone={onDone} />)
+    const done = await screen.findByRole('button', { name: /Done \(2\)/ })
+    done.click()
+    expect(onDone).toHaveBeenCalledWith(null)
+  })
+
+  it('has no Done before anything has been taken', async () => {
+    render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} captured={0} onDone={vi.fn()} />)
+    await screen.findByRole('button', { name: /Take the photo/i })
+    expect(screen.queryByRole('button', { name: /Done/ })).toBeNull()
+  })
+
   it('keeps the shutter disabled until a frame has actually arrived', async () => {
     render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} />)
     const shutter = await screen.findByRole('button', { name: /Take the photo/i })

@@ -92,7 +92,7 @@ describe('the duty log panel', () => {
 describe('when the panel is offered at all', () => {
   it('is not fetched until the driver asks for it', async () => {
     // One Motive call per load actually opened, not a dozen on every page load.
-    const { PaperworkRows } = await import('./PaperworkRows')
+    const { DayLogs } = await import('./DayLogs')
     const load = {
       id: 'l1', reference: '14538', customer: 'C', deliveryAppt: '2026-10-01T15:00:00Z',
       pickupAppt: null, origin: 'A', destination: 'B', miles: null, trailerNumber: null,
@@ -100,7 +100,7 @@ describe('when the panel is offered at all', () => {
       pod: { present: true, pages: 1, legibility: 'OK', notes: null },
       eld: { status: 'REQUIRED', required: true, farthestMiles: 201, farthestCity: 'X', label: 'ELD logs required' },
     }
-    render(<PaperworkRows loads={[load as never]} onSendPod={vi.fn()} />)
+    render(<DayLogs loads={[load as never]} date="2026-10-01" />)
     expect(api.fetchHosDay).not.toHaveBeenCalled()
 
     api.fetchHosDay.mockResolvedValue({ date: '2026-10-01', linked: true, day: DAY })
@@ -109,7 +109,7 @@ describe('when the panel is offered at all', () => {
   })
 
   it('is not offered on a short-haul load', async () => {
-    const { PaperworkRows } = await import('./PaperworkRows')
+    const { DayLogs } = await import('./DayLogs')
     const load = {
       id: 'l2', reference: '14539', customer: 'C', deliveryAppt: '2026-10-01T15:00:00Z',
       pickupAppt: null, origin: 'A', destination: 'B', miles: null, trailerNumber: null,
@@ -117,7 +117,7 @@ describe('when the panel is offered at all', () => {
       pod: { present: true, pages: 1, legibility: 'OK', notes: null },
       eld: { status: 'NOT_REQUIRED', required: false, farthestMiles: 40, farthestCity: 'X', label: 'No ELD logs required' },
     }
-    render(<PaperworkRows loads={[load as never]} onSendPod={vi.fn()} />)
+    render(<DayLogs loads={[load as never]} date="2026-10-01" />)
     // The exemption spares them the record; offering a log panel invites worry about
     // paperwork that does not exist.
     expect(screen.queryByText('Show my logs for this day')).toBeNull()

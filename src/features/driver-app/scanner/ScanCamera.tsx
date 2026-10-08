@@ -18,7 +18,7 @@
  * all is a worse outcome than one who sends a poor photograph of it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle } from 'lucide-react'
+import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { scanFrame, toGray, assessReadability, type Readability } from '@/lib/docScan/capture'
 import { preparePage } from './imagePrep'
@@ -40,9 +40,16 @@ export interface ScanCameraProps {
   onClose: () => void
   /** Shown on the shutter bar so the driver knows how many more they may add. */
   remaining: number
+  /** Pages already taken this session, so Done can say how many are going. */
+  captured?: number
+  /**
+   * All pages are in: send them. Carries the page on screen when pressed from the
+   * review step, so the last shot is not lost between "keep it" and "done".
+   */
+  onDone?: (lastPage: PendingPage | null) => void
 }
 
-export function ScanCamera({ onCapture, onClose, remaining }: ScanCameraProps) {
+export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone }: ScanCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const workRef = useRef<HTMLCanvasElement | null>(null)
@@ -275,19 +282,36 @@ export function ScanCamera({ onCapture, onClose, remaining }: ScanCameraProps) {
             </p>
           )}
 
+          {/*
+            Keep it and shoot the next page, or keep it and send everything. A multi-page
+            BOL is the normal case, so "add another page" is the big one; Done is right
+            there for the single-page POD so nobody hunts for how to finish.
+          */}
           <div className="flex gap-3">
-            <Button type="button" variant="outline" size="lg" className="h-14 flex-1 gap-2 text-base" onClick={discard}>
+            <Button type="button" variant="outline" size="lg" className="h-14 gap-2 px-4 text-base" onClick={discard}>
               <RotateCcw className="h-5 w-5" /> Retake
             </Button>
             <Button
               type="button"
               size="lg"
               className="h-14 flex-1 gap-2 text-base font-semibold"
+              disabled={remaining <= 1 && !onDone}
               onClick={() => { onCapture(shot.page); discard() }}
             >
-              <Check className="h-5 w-5" /> Use it
+              <Plus className="h-5 w-5" /> {remaining > 1 ? 'Add another page' : 'Keep it'}
             </Button>
           </div>
+          {onDone && (
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              className="h-14 w-full gap-2 text-base font-semibold"
+              onClick={() => { const page = shot.page; discard(); onDone(page) }}
+            >
+              <Check className="h-5 w-5" /> Done{captured > 0 ? ` — send ${captured + 1} pages` : ''}
+            </Button>
+          )}
         </div>
       </div>
     )
@@ -319,15 +343,28 @@ export function ScanCamera({ onCapture, onClose, remaining }: ScanCameraProps) {
         <p className="text-xs text-white/60">
           {remaining > 0 ? `${remaining} more page${remaining === 1 ? '' : 's'} can be added` : 'Last page'}
         </p>
-        <button
-          type="button"
-          aria-label="Take the photo"
-          disabled={!hasFrame || busy}
-          onClick={() => void capture()}
-          className="flex h-[72px] w-[72px] items-center justify-center rounded-full border-4 border-white bg-white/20 disabled:opacity-40"
-        >
-          {busy ? <Loader2 className="h-7 w-7 animate-spin text-white" /> : <Camera className="h-7 w-7 text-white" />}
-        </button>
+        <div className="flex w-full items-center justify-center gap-6">
+          <button
+            type="button"
+            aria-label="Take the photo"
+            disabled={!hasFrame || busy}
+            onClick={() => void capture()}
+            className="flex h-[72px] w-[72px] items-center justify-center rounded-full border-4 border-white bg-white/20 disabled:opacity-40"
+          >
+            {busy ? <Loader2 className="h-7 w-7 animate-spin text-white" /> : <Camera className="h-7 w-7 text-white" />}
+          </button>
+          {/* Pages are in hand: a way to finish without first closing the camera. */}
+          {onDone && captured > 0 && (
+            <Button
+              type="button"
+              size="lg"
+              className="h-12 gap-2 px-5 text-base font-semibold"
+              onClick={() => onDone(null)}
+            >
+              <Check className="h-5 w-5" /> Done ({captured})
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   )

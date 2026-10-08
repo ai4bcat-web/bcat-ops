@@ -34,7 +34,7 @@ function load(over: Record<string, unknown> = {}) {
     pieces: 22,
     notes: 'Dock 7',
     status: 'DELIVERED',
-    stops: [],
+    stops: [stop('st-pu', 'pickup', '2026-10-07'), stop('st-de', 'delivery', '2026-10-07')],
     pod: { present: false, pages: 0, legibility: 'UNKNOWN', notes: null },
     ...over,
   }
@@ -48,7 +48,7 @@ beforeEach(() => {
     { weekStart: '2026-10-04', loadCount: 1, podsMissing: 1, podsIllegible: 0 },
   ])
   api.fetchPaperwork.mockResolvedValue({
-    weekStart: '2026-10-04', loads: [load()], loadCount: 1, podsMissing: 1, podsIllegible: 0,
+    weekStart: '2026-10-04', today: '2026-10-07', loads: [load()], loadCount: 1, podsMissing: 1, podsIllegible: 0,
   })
   api.fetchSubmissions.mockResolvedValue([])
   api.fetchRecentLoads.mockResolvedValue([])
@@ -66,23 +66,17 @@ function renderPage() {
   return render(<MemoryRouter><PaperworkPage /></MemoryRouter>)
 }
 
-describe('Ivan paperwork', () => {
-  it('lists the week’s loads with their details', async () => {
+describe('Ivan paperwork — the day sheet', () => {
+  it("opens on today and shows that day's stops with the load's details", async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
-    expect(screen.getByText('Wayfinder Logistics')).toBeTruthy()
-    // The lane is two labelled lines rather than one joined string: on a phone a long pair
-    // wrapped to three lines and which end was which stopped being obvious.
-    expect(screen.getByText('From')).toBeTruthy()
-    expect(screen.getByText('Chicago, IL')).toBeTruthy()
-    expect(screen.getByText('To')).toBeTruthy()
-    expect(screen.getByText('Indianapolis, IN')).toBeTruthy()
-    // The rest are chips, carrying their units so they read without a label.
-    expect(screen.getByText('185 mi')).toBeTruthy()
-    expect(screen.getByText('Trailer TRL-42')).toBeTruthy()
-    expect(screen.getByText('Paper goods')).toBeTruthy()
-    expect(screen.getByText('41,000 lb')).toBeTruthy()
-    expect(screen.getByText('22 pcs')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    // Tue, Oct 7 2026 — fetched as the week of Sun Oct 4.
+    expect(api.fetchPaperwork).toHaveBeenCalledWith('2026-10-04')
+    expect(screen.getByText(/Wed, Oct 7/)).toBeTruthy()
+    expect(screen.getByText('Batory Oakley')).toBeTruthy()
+    expect(screen.getByText('Eagle Foods')).toBeTruthy()
+    expect(screen.getAllByText('14538').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Wayfinder Logistics').length).toBeGreaterThan(0)
   })
 
   it('shows no rate and no settlement anywhere on the page', async () => {
@@ -92,73 +86,107 @@ describe('Ivan paperwork', () => {
      * nothing for the UI to accidentally render.
      */
     const { container } = renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
     const text = container.textContent ?? ''
     expect(text).not.toMatch(/\$/)
     expect(text).not.toMatch(/rate\b/i)
     expect(text).not.toMatch(/deduction|gross|check amount|settlement/i)
   })
 
-  it('says which loads still need a POD', async () => {
+  it('steps back a day and shows only that day; forward stops at today', async () => {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04', today: '2026-10-07',
+      loads: [
+        load({ id: 'l-mon', reference: '14570', stops: [stop('m-pu', 'pickup', '2026-10-06'), stop('m-de', 'delivery', '2026-10-06')] }),
+        load({ id: 'l-tue', reference: '14571', stops: [stop('t-pu', 'pickup', '2026-10-07')] }),
+      ],
+      loadCount: 2, podsMissing: 0, podsIllegible: 0,
+    })
     renderPage()
-    await waitFor(() => expect(screen.getByText('POD needed')).toBeTruthy(), { timeout: 5000 })
-    expect(screen.getByText(/1 load still need a POD/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Send POD/ })).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getAllByText('14571')).toHaveLength(1)
+    expect(screen.queryByText('14570')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Next day' })).toHaveProperty('disabled', true)
+
+    const { fireEvent } = await import('@testing-library/react')
+    fireEvent.click(screen.getByRole('button', { name: 'Previous day' }))
+    await waitFor(() => expect(screen.getByText(/Tue, Oct 6/)).toBeTruthy())
+    expect(screen.queryByText('Today')).toBeNull()
+    expect(screen.getAllByText('14570')).toHaveLength(2) // its pickup and its delivery
+    expect(screen.queryByText('14571')).toBeNull()
+    // Same week: no second fetch.
+    expect(api.fetchPaperwork).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next day' }))
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy())
   })
 
-  it('flags a POD that cannot be read, and says what was wrong with it', async () => {
-    // Worse than a missing POD: the driver believes they are done.
+  it('fetches the other week when paging crosses into it', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    api.fetchPaperwork.mockResolvedValue({ weekStart: '2026-09-27', loads: [], loadCount: 0, podsMissing: 0, podsIllegible: 0 })
+    for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole('button', { name: 'Previous day' }))
+    await waitFor(() => expect(api.fetchPaperwork).toHaveBeenLastCalledWith('2026-09-27'))
+    await waitFor(() => expect(screen.getByText(/Sat, Oct 3/)).toBeTruthy())
+  })
+
+  it('jumps to a picked day from the calendar, never past today', async () => {
+    const { fireEvent } = await import('@testing-library/react')
     api.fetchPaperwork.mockResolvedValue({
-      weekStart: '2026-10-04',
-      loads: [load({
-        pod: { present: true, pages: 2, legibility: 'UNREADABLE', notes: 'the photo is blurry — hold still and tap to focus' },
-      })],
+      weekStart: '2026-10-04', today: '2026-10-07',
+      loads: [load({ id: 'l-sun', reference: '14560', stops: [stop('s-de', 'delivery', '2026-10-04')] })],
+      loadCount: 1, podsMissing: 0, podsIllegible: 0,
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    fireEvent.change(screen.getByLabelText('Day'), { target: { value: '2026-10-04' } })
+    await waitFor(() => expect(screen.getByText(/Sun, Oct 4/)).toBeTruthy())
+    expect(screen.getByText('14560')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('Day'), { target: { value: '2026-10-09' } })
+    expect(screen.getByText(/Sun, Oct 4/)).toBeTruthy()
+  })
+
+  it("says what the week still owes, so Tuesday's missed POD is not lost by Friday", async () => {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04', today: '2026-10-07', loads: [load()], loadCount: 1, podsMissing: 1, podsIllegible: 0,
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/1 load this week still needs a POD/)).toBeTruthy(), { timeout: 5000 })
+  })
+
+  it('flags a POD that cannot be read on the delivery, and says what was wrong with it', async () => {
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04', today: '2026-10-07',
+      loads: [load({ pod: { present: true, pages: 2, legibility: 'UNREADABLE', notes: 'the photo is blurry — hold still and tap to focus' } })],
       loadCount: 1, podsMissing: 0, podsIllegible: 1,
     })
     renderPage()
     await waitFor(() => expect(screen.getByText('POD unreadable')).toBeTruthy(), { timeout: 5000 })
     expect(screen.getByText(/blurry/)).toBeTruthy()
-    expect(screen.getByText(/1 POD cannot be read/)).toBeTruthy()
-    // And the way to fix it is on the row.
     expect(screen.getByRole('button', { name: /Replace POD/ })).toBeTruthy()
   })
 
-  it('stays quiet when the POD is on file and readable', async () => {
+  it('offers the POD back to the driver once one is on file', async () => {
     api.fetchPaperwork.mockResolvedValue({
-      weekStart: '2026-10-04',
+      weekStart: '2026-10-04', today: '2026-10-07',
       loads: [load({ pod: { present: true, pages: 3, legibility: 'OK', notes: null } })],
       loadCount: 1, podsMissing: 0, podsIllegible: 0,
     })
+    api.fetchSubmissions.mockResolvedValue([{
+      id: 'sub-1', status: 'SENT', loadId: 'load-1', referenceNumber: '14538', createdAt: '2026-10-07T18:00:00Z', docs: [],
+      documents: [{ kind: 'POD', docId: 'combined-POD', pageCount: 3, enhanced: true, contentType: 'application/pdf', combined: true }],
+    }])
     renderPage()
     await waitFor(() => expect(screen.getByText(/POD on file · 3 pages/)).toBeTruthy(), { timeout: 5000 })
-    expect(screen.queryByText(/still need a POD/)).toBeNull()
-    expect(screen.queryByText(/cannot be read/)).toBeNull()
-  })
-
-  it('defaults to the current week and offers history', async () => {
-    api.fetchPaperworkWeeks.mockResolvedValue([
-      { weekStart: '2026-09-27', loadCount: 4, podsMissing: 0, podsIllegible: 0 },
-    ])
-    renderPage()
-    // The week in progress, even though the API listed only the one before it.
-    await waitFor(() => expect(api.fetchPaperwork).toHaveBeenCalledWith('2026-10-04'), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: /View POD \(3 pages\)/ })).toBeTruthy())
   })
 
   it('no longer asks the driver to type in and out times', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByRole('button', { name: /Pickup times/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Delivery times/ })).toBeNull()
-  })
-
-  it('shows a flagged stop on the week row', async () => {
-    api.fetchPaperwork.mockResolvedValue({
-      weekStart: '2026-10-04', today: '2026-10-07',
-      loads: [load({ stops: [stop('st-de', 'delivery', '2026-10-06', { detention: true })] })],
-      loadCount: 1, podsMissing: 1, podsIllegible: 0,
-    })
-    renderPage()
-    await waitFor(() => expect(screen.getByText(/Detention flagged · delivery/)).toBeTruthy(), { timeout: 5000 })
   })
 })
 
@@ -197,10 +225,9 @@ describe("today's sheet", () => {
     expect(screen.getAllByText(/2 hours or longer from your appointment time/)).toHaveLength(2)
     expect(screen.getAllByText(/in and out times on the BOL/)).toHaveLength(2)
     // Each card leads with its status button; the POD button appears once delivered.
-    const section = screen.getByText('Today').parentElement!
-    const names = [...section.querySelectorAll('button')].map((b) => b.textContent?.trim())
-    expect(names).toEqual(['On site at pickup', 'On site at delivery'])
-    expect(section.textContent).not.toMatch(/Send POD/)
+    expect(screen.getByRole('button', { name: 'On site at pickup' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'On site at delivery' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Send POD/ })).toBeNull()
   })
 
   it('flags detention at the stop the driver ticked', async () => {
@@ -305,8 +332,8 @@ describe('rendering inside the staff View-as-driver frame', () => {
     const { readFileSync } = await import('node:fs')
     const files = [
       'src/features/driver-app/paperwork/PaperworkPage.tsx',
-      'src/features/driver-app/paperwork/PaperworkRows.tsx',
       'src/features/driver-app/paperwork/TodayStops.tsx',
+      'src/features/driver-app/paperwork/DayLogs.tsx',
     ]
     for (const f of files) {
       const src = readFileSync(f, 'utf8')
@@ -315,7 +342,7 @@ describe('rendering inside the staff View-as-driver frame', () => {
   })
 
   it('shows the error message rather than an empty card', async () => {
-    api.fetchPaperworkWeeks.mockRejectedValue(new Error('Driver has no active pay setting'))
+    api.fetchPaperwork.mockRejectedValue(new Error('Driver has no active pay setting'))
     renderPage()
     await waitFor(() => expect(screen.getByText('Driver has no active pay setting')).toBeTruthy(), { timeout: 5000 })
     expect(screen.getByRole('button', { name: /Retry/ })).toBeTruthy()
@@ -352,7 +379,7 @@ describe('the ELD badge on a load', () => {
       loadCount: 1, podsMissing: 1, podsIllegible: 0, eldRequired: 0,
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
     /*
      * A "no logs needed" chip on every local load would be noise — this list is mostly
      * local. Matched on the badge and the explanation specifically: the week summary strip
@@ -381,7 +408,7 @@ describe('the ELD badge on a load', () => {
   it('says nothing when the API predates the field', async () => {
     // A cached PWA bundle can meet an older API. Absent must not read as "no logs needed".
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByText('ELD logs required')).toBeNull()
     expect(screen.queryByText('Check ELD')).toBeNull()
   })
@@ -424,7 +451,7 @@ describe('the PM line on the home screen', () => {
     // An empty gauge on a page about paperwork is noise.
     withPm(null)
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByText(/Next PM|PM overdue|PM due|not scheduled/)).toBeNull()
   })
 
@@ -434,13 +461,13 @@ describe('the PM line on the home screen', () => {
       program: 'PAPERWORK', active: true,
     })
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByText(/Next PM|PM overdue|PM due|not scheduled/)).toBeNull()
   })
 
   it('does not take the page down when the profile call fails', async () => {
     api.fetchMe.mockRejectedValue(new Error('offline'))
     renderPage()
-    await waitFor(() => expect(screen.getByText('14538')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
   })
 })

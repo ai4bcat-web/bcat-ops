@@ -203,11 +203,20 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
       {scanning && (
         <ScanCamera
           remaining={MAX_SCAN_PAGES - pages.length}
+          captured={pages.length}
           onClose={() => setScanning(false)}
           onCapture={(page) => {
             // Stays open on purpose: a multi-page POD is the normal case, and closing
             // after every shot would make the driver reopen the camera for page two.
             setPages((prev) => (prev.length >= MAX_SCAN_PAGES ? prev : [...prev, page]))
+          }}
+          onDone={(lastPage) => {
+            // Done in the camera IS done: send what is in hand, including the shot on
+            // screen, without a second Done on this page.
+            const all = lastPage && pages.length < MAX_SCAN_PAGES ? [...pages, lastPage] : pages
+            setPages(all)
+            setScanning(false)
+            if (all.length > 0) onDone(all)
           }}
         />
       )}

@@ -18,9 +18,11 @@
  * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
 import { useState } from 'react'
-import { Camera, Check, Loader2, LogOut, MapPin, Navigation, PackageOpen, Truck } from 'lucide-react'
+import { Camera, Check, Eye, FileWarning, Loader2, LogOut, MapPin, Navigation, PackageOpen, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { useTripDocs, type TripDoc } from '../settlement/useTripDocs'
+import { DocPreviewSheet } from '../settlement/DocPreviewSheet'
 import { apptTimeLabel } from '@/lib/date'
 import { errorText } from '@/lib/errorText'
 import { recordStopEvent, setStopDetention, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
@@ -76,6 +78,37 @@ function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: To
         </span>
       </span>
     </label>
+  )
+}
+
+/** Where the POD stands, said once on the delivery card. Three states, not the same problem. */
+function PodStatus({ load, doc, onView }: { load: PaperworkLoad; doc: TripDoc | null; onView: () => void }) {
+  const { pod } = load
+  if (!pod.present && !doc) return null
+  const bad = pod.legibility === 'UNREADABLE' || pod.legibility === 'LOW'
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      {bad ? (
+        <p className="flex items-start gap-2 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">
+          <FileWarning className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>
+            <span className="font-semibold">{pod.legibility === 'UNREADABLE' ? 'POD unreadable' : 'POD hard to read'}</span>
+            {pod.notes ? ` — ${pod.notes}. Please send a new photo.` : ' — please send a new photo.'}
+          </span>
+        </p>
+      ) : (
+        <p className="flex items-center gap-2 text-sm text-emerald-200">
+          <Check className="h-4 w-4" aria-hidden="true" />
+          POD on file{pod.pages > 1 ? ` · ${pod.pages} pages` : ''}
+        </p>
+      )}
+      {doc && (
+        <Button variant="outline" className="h-12 w-full gap-2 text-base font-semibold" onClick={onView}>
+          <Eye className="h-5 w-5" aria-hidden="true" />
+          View POD{doc.document.pageCount > 1 ? ` (${doc.document.pageCount} pages)` : ''}
+        </Button>
+      )}
+    </div>
   )
 }
 
@@ -155,6 +188,7 @@ export function TodayStops({
   onChange,
 }: {
   loads: PaperworkLoad[]
+  /** The day on screen — today, or one the driver paged back to. */
   today: string
   onSendPod: (load: PaperworkLoad) => void
   /** A flag or event changed; the page refreshes its copy of the week. */
@@ -163,6 +197,9 @@ export function TodayStops({
   // What the driver just did, applied on top of the week until the refetch lands.
   const [patches, setPatches] = useState<Record<string, Partial<PaperworkStop>>>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  // The documents the driver has sent, so a delivered load can show its POD back to them.
+  const docs = useTripDocs()
+  const [viewing, setViewing] = useState<{ doc: TripDoc; load: PaperworkLoad } | null>(null)
   const keyOf = (it: TodayStop) => `${it.load.id}#${it.stop.id}`
   const patch = (it: TodayStop, p: Partial<PaperworkStop>) =>
     setPatches((all) => ({ ...all, [keyOf(it)]: { ...all[keyOf(it)], ...p } }))
@@ -208,6 +245,7 @@ export function TodayStops({
         const { load, stop } = item
         const delivery = isDelivery(stop)
         const podOk = load.pod.present && load.pod.legibility === 'OK'
+        const podDoc = delivery ? docs.find('POD', load.id, load.reference) : null
         const showEta = delivery && !!stop.etaAt && !stop.arrivedAt && !stop.departedAt
         return (
           <li
@@ -274,7 +312,11 @@ export function TodayStops({
               }}
             />
 
-            {delivery && stop.departedAt && (
+            {delivery && (
+              <PodStatus load={load} doc={podDoc} onView={() => podDoc && setViewing({ doc: podDoc, load })} />
+            )}
+
+            {delivery && (stop.departedAt || load.pod.present) && (
               <Button
                 className="mt-3 h-12 w-full gap-2 text-base font-semibold"
                 variant={podOk ? 'outline' : 'default'}
@@ -287,6 +329,18 @@ export function TodayStops({
           </li>
         )
       })}
+
+      {viewing && (
+        <DocPreviewSheet
+          doc={viewing.doc}
+          kind="POD"
+          shipment={viewing.load.reference}
+          onClose={() => setViewing(null)}
+          onReplace={() => { setViewing(null); docs.refresh(); onSendPod(viewing.load) }}
+          onAddPages={() => { setViewing(null); onSendPod(viewing.load) }}
+          onRemoved={() => { setViewing(null); docs.refresh(); onChange() }}
+        />
+      )}
     </ul>
   )
 }

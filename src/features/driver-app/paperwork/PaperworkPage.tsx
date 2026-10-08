@@ -1,32 +1,29 @@
 /**
  * Ivan paperwork — the driver's home when they are on Ivan's own fleet.
  *
- * Same shape as the owner operators' settlement so there is one app to explain, and
- * deliberately none of its money: no rate, no deductions, no check. What it adds is the
- * two things an employee driver actually needs — what is still missing, and somewhere to
- * put the clock when they sat at a dock.
+ * One day at a time. The sheet is the pickups and deliveries on the day shown — today
+ * when the app opens — each with its status, its detention box and, at a delivery, the
+ * POD. Back and forward step a day; the calendar jumps to one, to find the POD from a
+ * particular delivery. Never past today: a driver has no paperwork for a load they have
+ * not run yet, and the API does not hand those out.
  *
- * Defaults to the current week and pages back through history, same as the settlement.
+ * Same app as the owner operators' settlement so there is one app to explain, and
+ * deliberately none of its money: no rate, no deductions, no check.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Camera, FileWarning, Loader2, RefreshCcw, Truck } from 'lucide-react'
+import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2, RefreshCcw, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
-import {
-  fetchPaperwork, fetchPaperworkWeeks,
-  type Paperwork, type PaperworkWeek,
-} from '../driverApi'
-import { PaperworkRows } from './PaperworkRows'
+import { fetchPaperwork, type Paperwork } from '../driverApi'
 import { TodayStops } from './TodayStops'
+import { DayLogs } from './DayLogs'
 import { UnattachedPods } from '../UnattachedPods'
-import { sundayOf, weekLabel } from '@/features/driver-pay/week'
+import { weekStartOfISO } from '@/features/driver-pay/week'
 import { chicagoDateStr } from '@/lib/date'
 import { errorText } from '@/lib/errorText'
 import { useDriverPm } from '../useDriverProgram'
 import { PmGauge } from './PmGauge'
+import { stopsForDay } from './daySheet'
 
 /**
  * When this driver's truck is next due a PM.
@@ -34,62 +31,44 @@ import { PmGauge } from './PmGauge'
  * On the home screen rather than buried in Account, because the point is that a driver sees
  * it without going looking. Overdue is red and due-soon amber; a PM that is simply a long
  * way off still shows, quietly, so "when is my next PM" always has an answer here.
- *
- * Nothing renders when there is no truck assigned or the profile has not loaded — an empty
- * gauge on a page about paperwork is just noise.
  */
 function PmLine() {
   const pm = useDriverPm()
-  // Nothing to show for a driver with no truck assigned, or before the profile lands.
   if (!pm) return null
   return <PmGauge pm={pm} />
 }
 
+/** "Tue, Oct 7" from a YYYY-MM-DD. */
+function dayLabel(day: string): string {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC',
+  })
+}
+
+function shiftDay(day: string, n: number): string {
+  return new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10)
+}
+
 export function PaperworkPage() {
   const navigate = useNavigate()
-  const [weeks, setWeeks] = useState<PaperworkWeek[] | null>(null)
-  const [selectedWeekStart, setSelectedWeekStart] = useState<string | null>(null)
+  const today = useMemo(() => chicagoDateStr(new Date()), [])
+  const [day, setDay] = useState(today)
   const [week, setWeek] = useState<Paperwork | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [weeksRetryKey, setWeeksRetryKey] = useState(0)
-  const [weekRetryKey, setWeekRetryKey] = useState(0)
+  const [retryKey, setRetryKey] = useState(0)
+  const dateInput = useRef<HTMLInputElement>(null)
 
-  const currentWeekStart = sundayOf()
-
-  // The week in progress is always offered, even before anything delivers in it.
-  const weekOptions = useMemo(() => {
-    if (!weeks) return weeks
-    if (weeks.some((w) => w.weekStart === currentWeekStart)) return weeks
-    return [{ weekStart: currentWeekStart, loadCount: 0, podsMissing: 0, podsIllegible: 0 }, ...weeks]
-  }, [weeks, currentWeekStart])
-
-  const selected =
-    selectedWeekStart ??
-    weekOptions?.find((w) => w.weekStart === currentWeekStart)?.weekStart ??
-    weekOptions?.[0]?.weekStart ??
-    null
-
+  // The sheet is built from the week that holds the day; stepping within a week is free.
+  const weekStart = weekStartOfISO(day)
   useEffect(() => {
     let stale = false
-    fetchPaperworkWeeks()
-      .then((list) => {
-        if (stale) return
-        setWeeks([...list].sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1)))
-      })
-      .catch((err) => { if (!stale) setError(errorText(err)) })
-    return () => { stale = true }
-  }, [weeksRetryKey])
-
-  useEffect(() => {
-    if (!selected) return
-    let stale = false
-    fetchPaperwork(selected)
+    fetchPaperwork(weekStart)
       .then((w) => { if (!stale) { setWeek(w); setError(null) } })
       .catch((err) => { if (!stale) setError(errorText(err)) })
     return () => { stale = true }
-  }, [selected, weekRetryKey])
+  }, [weekStart, retryKey])
 
-  const reload = useCallback(() => setWeekRetryKey((k) => k + 1), [])
+  const reload = useCallback(() => setRetryKey((k) => k + 1), [])
 
   const sendPod = useCallback(
     (load: { id: string; reference: string }) =>
@@ -97,24 +76,20 @@ export function PaperworkPage() {
     [navigate],
   )
 
-  const loadingWeeks = weeks === null && error === null
-  const loadingWeek = selected != null && week?.weekStart !== selected && error === null
+  const loaded = week !== null && week.weekStart === weekStart
+  const loading = !loaded && error === null
+  const isToday = day === today
+  const dayLoads = useMemo(
+    () => (loaded ? [...new Set(stopsForDay(week.loads, day).map((i) => i.load))] : []),
+    [loaded, week, day],
+  )
 
-  if (loadingWeeks) {
-    return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 p-6 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
-        <p>Loading your week…</p>
-      </div>
-    )
-  }
-
-  if (error && weeks === null) {
+  if (error && !loaded) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 p-6 text-center">
         <AlertCircle className="h-10 w-10 text-destructive" aria-hidden="true" />
         <p className="font-medium text-foreground">{error}</p>
-        <Button onClick={() => { setError(null); setWeeks(null); setWeeksRetryKey((k) => k + 1) }} className="h-11 gap-2 px-6">
+        <Button onClick={() => { setError(null); reload() }} className="h-11 gap-2 px-6">
           <RefreshCcw className="h-4 w-4" aria-hidden="true" />
           Retry
         </Button>
@@ -128,109 +103,79 @@ export function PaperworkPage() {
 
       <PmLine />
 
-      {/*
-        Today first. The week below is the record; this is the work — every pickup and
-        delivery on today's sheet, with the detention box and, at a delivery, the POD
-        button. Only on the week in progress: a past week has no "today" in it.
-      */}
-      {week && week.weekStart === selected && selected === currentWeekStart && (
-        <section className="mb-5">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Today
-          </h2>
-          <TodayStops
-            loads={week.loads}
-            today={week.today ?? chicagoDateStr(new Date())}
-            onSendPod={sendPod}
-            onChange={reload}
-          />
-        </section>
-      )}
+      {/* The day, and the three ways to change it: back, forward, pick. */}
+      <div className="mb-4 flex items-center gap-2">
+        <Button
+          variant="outline"
+          className="h-12 w-12 shrink-0 p-0"
+          aria-label="Previous day"
+          onClick={() => setDay((d) => shiftDay(d, -1))}
+        >
+          <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+        </Button>
+        <button
+          type="button"
+          className="flex h-12 min-w-0 flex-1 flex-col items-center justify-center rounded-md border border-input bg-card px-2"
+          aria-label="Pick a day"
+          onClick={() => {
+            const el = dateInput.current
+            if (!el) return
+            if (typeof el.showPicker === 'function') el.showPicker()
+            else el.click()
+          }}
+        >
+          <span className="flex items-center gap-1.5 text-base font-bold leading-tight text-foreground">
+            <CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />
+            {isToday ? 'Today' : dayLabel(day)}
+          </span>
+          <span className="text-xs text-muted-foreground">{isToday ? dayLabel(day) : 'tap to pick a day'}</span>
+        </button>
+        <input
+          ref={dateInput}
+          type="date"
+          aria-label="Day"
+          className="sr-only"
+          value={day}
+          max={today}
+          onChange={(e) => { if (e.target.value && e.target.value <= today) setDay(e.target.value) }}
+        />
+        <Button
+          variant="outline"
+          className="h-12 w-12 shrink-0 p-0"
+          aria-label="Next day"
+          disabled={isToday || day > today}
+          onClick={() => setDay((d) => shiftDay(d, 1))}
+        >
+          <ChevronRight className="h-5 w-5" aria-hidden="true" />
+        </Button>
+      </div>
 
-      {weekOptions && weekOptions.length > 0 && (
-        <div className="mb-4">
-          <label htmlFor="pw-week" className="mb-1.5 block text-sm font-medium text-muted-foreground">
-            Week
-          </label>
-          <Select value={selected ?? ''} onValueChange={setSelectedWeekStart}>
-            <SelectTrigger id="pw-week" className="h-12 w-full text-base">
-              <SelectValue placeholder="Choose a week" />
-            </SelectTrigger>
-            <SelectContent>
-              {weekOptions.map((w) => (
-                <SelectItem key={w.weekStart} value={w.weekStart} className="text-base">
-                  {weekLabel(w.weekStart)}
-                  {w.weekStart === currentWeekStart ? ' · This week' : ''} ·{' '}
-                  {w.loadCount} load{w.loadCount === 1 ? '' : 's'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {/*
-        The week at a glance, always — not only when something is wrong.
-        The alert box below says what is outstanding; this says what the week IS, so a
-        driver opening a clean week sees "6 loads, all PODs in" rather than a bare list and
-        no confirmation that nothing is owed.
-      */}
-      {week && week.weekStart === selected && (
-        <dl className="mb-4 grid grid-cols-3 gap-2 rounded-xl border border-border bg-muted/40 p-3 text-center">
-          <div>
-            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">Loads</dt>
-            <dd className="text-lg font-bold tabular-nums text-foreground">{week.loadCount}</dd>
-          </div>
-          <div>
-            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">PODs needed</dt>
-            <dd className={`text-lg font-bold tabular-nums ${week.podsMissing > 0 ? 'text-amber-300' : 'text-foreground'}`}>
-              {week.podsMissing}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">ELD logs</dt>
-            <dd className="text-lg font-bold tabular-nums text-foreground">{week.eldRequired ?? 0}</dd>
-          </div>
-        </dl>
-      )}
-
-      {/* What is outstanding, before the list. The reason to open the page at all. */}
-      {week && week.weekStart === selected && (week.podsMissing > 0 || week.podsIllegible > 0) && (
-        <div className="mb-4 flex flex-col gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-          {week.podsMissing > 0 && (
-            <p className="flex items-center gap-2 text-sm font-semibold text-amber-200">
-              <Camera className="h-4 w-4 shrink-0" aria-hidden="true" />
-              {week.podsMissing} load{week.podsMissing === 1 ? '' : 's'} still need a POD
-            </p>
-          )}
-          {week.podsIllegible > 0 && (
-            <p className="flex items-center gap-2 text-sm font-semibold text-red-200">
-              <FileWarning className="h-4 w-4 shrink-0" aria-hidden="true" />
-              {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} cannot be read — please resend
-            </p>
-          )}
-        </div>
-      )}
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-500/20 bg-red-500/5 p-4 text-center">
-          <p className="font-medium text-red-300">{error}</p>
-          <Button onClick={reload} variant="outline" className="mt-3 h-10 gap-2" aria-label="Retry">
-            <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-            Retry
-          </Button>
-        </div>
-      )}
-
-      {loadingWeek && (
+      {loading && (
         <div className="flex flex-col items-center justify-center gap-3 py-10 text-muted-foreground">
           <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
-          <p>Loading loads…</p>
+          <p>Loading your day…</p>
         </div>
       )}
 
-      {!loadingWeek && week && week.weekStart === selected && !error && (
-        <PaperworkRows loads={week.loads} onSendPod={sendPod} />
+      {loaded && (
+        <>
+          {/* What the week still owes, so a missed POD from Tuesday is not lost by Friday. */}
+          {week.podsMissing > 0 && (
+            <p className="mb-3 text-sm font-semibold text-amber-200">
+              {week.podsMissing} load{week.podsMissing === 1 ? '' : 's'} this week still need{week.podsMissing === 1 ? 's' : ''} a POD
+              {week.podsIllegible > 0 ? ` · ${week.podsIllegible} cannot be read` : ''}
+            </p>
+          )}
+          {week.podsMissing === 0 && week.podsIllegible > 0 && (
+            <p className="mb-3 text-sm font-semibold text-red-200">
+              {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} this week cannot be read — please resend
+            </p>
+          )}
+
+          <TodayStops loads={week.loads} today={day} onSendPod={sendPod} onChange={reload} />
+
+          <DayLogs loads={dayLoads} date={day} />
+        </>
       )}
 
       {/* Paperwork for a load the office has not built yet still has to have a way out. */}
@@ -245,7 +190,6 @@ export function PaperworkPage() {
           Send paperwork for another load
         </Button>
       </div>
-
     </div>
   )
 }

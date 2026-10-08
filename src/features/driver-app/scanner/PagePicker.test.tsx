@@ -15,6 +15,19 @@ import { MAX_SCAN_PAGES } from '../driverApi'
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
+// The real camera needs a media pipeline jsdom does not have. This stand-in exposes the
+// two things the picker wires: a captured page, and Done pressed from inside the camera.
+vi.mock('./ScanCamera', () => ({
+  ScanCamera: (props: { onCapture: (p: unknown) => void; onDone?: (p: unknown) => void; captured?: number }) => (
+    <div data-testid="camera">
+      <span>captured {props.captured ?? 0}</span>
+      <button type="button" onClick={() => props.onCapture({ fileName: 'shot-1.jpg', contentType: 'image/jpeg', byteSize: 10, blob: new Blob(['a']) })}>cam-add</button>
+      <button type="button" onClick={() => props.onDone?.({ fileName: 'shot-2.jpg', contentType: 'image/jpeg', byteSize: 10, blob: new Blob(['b']) })}>cam-done-with-page</button>
+      <button type="button" onClick={() => props.onDone?.(null)}>cam-done</button>
+    </div>
+  ),
+}))
+
 // preparePage normalizes images through a canvas, which jsdom cannot do.
 vi.mock('./imagePrep', () => ({
   // prepareFile decides for itself whether a file can be downscaled, and falls back to the
@@ -121,6 +134,26 @@ describe('PagePicker', () => {
     await waitFor(() => expect(screen.getByText(`${MAX_SCAN_PAGES} pages ready`)).toBeInTheDocument())
     expect(screen.getByText(/most pages we can send at once/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Upload the document/ })).toBeDisabled()
+  })
+
+  it('Done inside the camera sends every page, including the shot on screen', async () => {
+    const onDone = vi.fn()
+    render(<PagePicker onDone={onDone} onCancel={vi.fn()} busy={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /Scan it with the camera/ }))
+    fireEvent.click(screen.getByText('cam-add'))
+    await waitFor(() => expect(screen.getByText('captured 1')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('cam-done-with-page'))
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
+    expect(onDone.mock.calls[0][0].map((p: { fileName: string }) => p.fileName)).toEqual(['shot-1.jpg', 'shot-2.jpg'])
+    expect(screen.queryByTestId('camera')).toBeNull()
+  })
+
+  it('Done inside the camera with nothing in hand sends nothing', () => {
+    const onDone = vi.fn()
+    render(<PagePicker onDone={onDone} onCancel={vi.fn()} busy={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /Scan it with the camera/ }))
+    fireEvent.click(screen.getByText('cam-done'))
+    expect(onDone).not.toHaveBeenCalled()
   })
 
   it('can be backed out of', () => {
