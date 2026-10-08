@@ -110,6 +110,36 @@ describe('the driver column', () => {
     }
   })
 
+  it('sorts by any column, flips on a second tap, and remembers the choice', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    appStoreState.equipment = [
+      baseTruck({ id: 'eq-1', unitNumber: '001', assignedDriverId: 'drv-b' } as Partial<Equipment>),
+      baseTruck({ id: 'eq-2', unitNumber: '002', assignedDriverId: 'drv-a' } as Partial<Equipment>),
+    ]
+    appStoreState.drivers = [
+      { id: 'drv-a', name: 'Alvin Ortiz', active: true, fleetGroup: 'LOCAL', assignedTruckId: 'eq-2' } as unknown as Driver,
+      { id: 'drv-b', name: 'Zed Carter', active: true, fleetGroup: 'LOCAL', assignedTruckId: 'eq-1' } as unknown as Driver,
+    ]
+    listTruckLocationsMock.mockResolvedValue([
+      baseLocation({ truckId: 'eq-1', unitNumber: '001', locatedAt: '2026-09-30T12:00:00Z' }),
+      baseLocation({ truckId: 'eq-2', unitNumber: '002', locatedAt: '2026-09-30T13:00:00Z' }),
+    ])
+    render(<TruckMapWidget />)
+    await waitFor(() => expect(screen.getByText('002')).toBeInTheDocument())
+    const unitsInOrder = () => [...document.querySelectorAll('[style*="font-family: var(--font-mono)"]')].map((el) => el.textContent?.trim())
+    expect(unitsInOrder()).toEqual(['001', '002'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Driver' }))
+    expect(unitsInOrder()).toEqual(['002', '001']) // Alvin (002) before Zed (001)
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Driver' }))
+    expect(unitsInOrder()).toEqual(['001', '002']) // flipped
+    expect(JSON.parse(localStorage.getItem('bcat.dashboard.fleetSort') ?? '{}')).toEqual({ key: 'driver', dir: 'desc' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Updated' }))
+    expect(unitsInOrder()).toEqual(['001', '002']) // oldest fix first
+    localStorage.removeItem('bcat.dashboard.fleetSort')
+  })
+
   it('names an owner operator as one', async () => {
     appStoreState.equipment = [baseTruck({ id: 'eq-9', unitNumber: '009', assignedDriverId: 'drv-roy' } as Partial<Equipment>)]
     appStoreState.drivers = [{ id: 'drv-roy', name: 'Roy Workman', active: true, fleetGroup: 'AMAZON', driverType: 'OWNER_OPERATOR', assignedTruckId: 'eq-9' } as unknown as Driver]

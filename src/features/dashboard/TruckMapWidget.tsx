@@ -23,6 +23,23 @@ const DRIVER_KIND: Record<FleetBucket, string | null> = {
 
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
+/** The columns a dispatcher can sort the table on. */
+type SortKey = 'unit' | 'location' | 'driver' | 'load' | 'status' | 'updated'
+const SORT_STORAGE_KEY = 'bcat.dashboard.fleetSort'
+
+function readSort(): { key: SortKey; dir: 'asc' | 'desc' } {
+  try {
+    const raw = localStorage.getItem(SORT_STORAGE_KEY)
+    if (raw) {
+      const v = JSON.parse(raw) as { key?: string; dir?: string }
+      if (v.key && ['unit', 'location', 'driver', 'load', 'status', 'updated'].includes(v.key)) {
+        return { key: v.key as SortKey, dir: v.dir === 'desc' ? 'desc' : 'asc' }
+      }
+    }
+  } catch { /* storage unavailable or malformed: fall through to the default */ }
+  return { key: 'unit', dir: 'asc' }
+}
+
 /**
  * Pull "City, ST" out of the location description.
  * e.g. "4.5 mi NE of Tucson, AZ" → "Tucson, AZ"; "Tucson, AZ" → "Tucson, AZ".
@@ -112,6 +129,57 @@ export function TruckMapWidget() {
       canonicalUnit(a.unitNumber).localeCompare(canonicalUnit(b.unitNumber), undefined, { numeric: true }))
   }, [locations, equipment])
 
+  /*
+   * Everything a row shows, worked out once per refresh rather than inside the render
+   * loop — the sort needs the same facts (driver, status, ETA) the cells do.
+   */
+  const entries = useMemo(() => rows.map((loc) => {
+    const stale = now - new Date(loc.locatedAt).getTime() > STALE_MS
+    const motion = motionLabel(loc, stale)
+    const unit = canonicalUnit(loc.unitNumber)
+    // Match this Motive truck to a fleet truck by (canonical) unit number — works
+    // whether the location's truckId is an Equipment id or a `motive:<n>` fallback.
+    const equip = equipment.find((e) => e.type === 'truck' && e.unitNumber === unit)
+    const assigned = equip ? driverForTruck(equip.id, drivers) : undefined
+    // What this driver is hauling right now — the same selection the PWA uses.
+    const currentLoad = assigned ? currentLoadForDriver(loads, assigned.id, now) : null
+    const age = fixAge(loc.locatedAt, now)
+    const kind = assigned ? DRIVER_KIND[fleetBucketOf(assigned)] : null
+    // What the driver last reported from the app, and where they are headed.
+    const lastEvent = currentLoad ? lastStopEvent(currentLoad) : null
+    const eta = currentLoad ? pendingDeliveryEta(currentLoad) : null
+    return { loc, stale, motion, unit, equip, assigned, currentLoad, age, kind, lastEvent, eta }
+  }), [rows, equipment, drivers, loads, now])
+
+  const [sort, setSort] = useState(readSort)
+  const toggleSort = (key: SortKey) => setSort((s) => {
+    const next = s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' as const : 'asc' as const } : { key, dir: 'asc' as const }
+    try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(next)) } catch { /* fine without */ }
+    return next
+  })
+
+  const sorted = useMemo(() => {
+    const dir = sort.dir === 'asc' ? 1 : -1
+    const text = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+    // Status sorts by what the driver last reported, most recent first on "desc"; rows
+    // with nothing reported go last either way, so the live ones are what you see.
+    const cmp = (a: typeof entries[number], b: typeof entries[number]): number => {
+      switch (sort.key) {
+        case 'unit': return text(a.unit, b.unit)
+        case 'location': return text(cityState(a.loc), cityState(b.loc))
+        case 'driver': return text(a.assigned?.name ?? '\uffff', b.assigned?.name ?? '\uffff')
+        case 'load': return text(a.currentLoad?.aljexId ?? '\uffff', b.currentLoad?.aljexId ?? '\uffff')
+        case 'status': {
+          if (!!a.lastEvent !== !!b.lastEvent) return a.lastEvent ? -1 * dir : 1 * dir
+          if (a.lastEvent && b.lastEvent) return text(a.lastEvent.at, b.lastEvent.at)
+          return text(a.motion.text, b.motion.text)
+        }
+        case 'updated': return text(a.loc.locatedAt, b.loc.locatedAt)
+      }
+    }
+    return [...entries].sort((a, b) => cmp(a, b) * dir)
+  }, [entries, sort])
+
   const freshest = useMemo(() => {
     if (rows.length === 0) return null
     return rows.reduce((a, b) => (a.locatedAt > b.locatedAt ? a : b)).locatedAt
@@ -141,31 +209,35 @@ export function TruckMapWidget() {
         ) : (
           <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
-            {/* Header row */}
+            {/* Header row: every column sorts; tap again to flip. */}
             <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
-              <div>Unit</div>
-              <div>Location</div>
-              <div>Driver</div>
-              <div>Load</div>
-              <div>Status</div>
-              <div style={{ textAlign: 'right' }}>Updated</div>
+              {([
+                ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['updated', 'Updated'],
+              ] as Array<[SortKey, string]>).map(([key, label]) => {
+                const active = sort.key === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => toggleSort(key)}
+                    aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    aria-label={`Sort by ${label}`}
+                    style={{
+                      all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                      justifyContent: key === 'updated' ? 'flex-end' : 'flex-start',
+                      color: active ? 'var(--ds-t1)' : 'inherit', fontWeight: active ? 700 : 600,
+                      letterSpacing: 'inherit', textTransform: 'inherit', fontSize: 'inherit',
+                    }}
+                  >
+                    {label}
+                    {active && <span aria-hidden style={{ fontSize: 9 }}>{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+                  </button>
+                )
+              })}
             </div>
 
-            {rows.map((loc) => {
-              const stale = now - new Date(loc.locatedAt).getTime() > STALE_MS
-              const { text: motionText, moving } = motionLabel(loc, stale)
-              const unit = canonicalUnit(loc.unitNumber)
-              // Match this Motive truck to a fleet truck by (canonical) unit number — works
-              // whether the location's truckId is an Equipment id or a `motive:<n>` fallback.
-              const equip = equipment.find((e) => e.type === 'truck' && e.unitNumber === unit)
-              const assigned = equip ? driverForTruck(equip.id, drivers) : undefined
-              // What this driver is hauling right now — the same selection the PWA uses.
-              const currentLoad = assigned ? currentLoadForDriver(loads, assigned.id, now) : null
-              const age = fixAge(loc.locatedAt, now)
-              const kind = assigned ? DRIVER_KIND[fleetBucketOf(assigned)] : null
-              // What the driver last reported from the app, and where they are headed.
-              const lastEvent = currentLoad ? lastStopEvent(currentLoad) : null
-              const eta = currentLoad ? pendingDeliveryEta(currentLoad) : null
+            {sorted.map(({ loc, stale, motion, unit, equip, assigned, currentLoad, age, kind, lastEvent, eta }) => {
+              const { text: motionText, moving } = motion
               return (
                 <div
                   key={loc.truckId}
