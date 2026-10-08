@@ -318,6 +318,10 @@ export interface Load {
   customer?: string | null  // customer/broker name
   customerId?: string | null
   customerApptWorkflow?: 'NONE' | 'BATORY' | null // resolved from Customer at read time; never persisted
+  /** ELD oversight — the fleet manager confirmed logs were kept for a run outside the radius. */
+  eldLogsReviewedAt?: string | null
+  eldLogsReviewedBy?: string | null
+  eldLogsNote?: string | null
   colorKey?: ColorKey | null  // load's own color swatch
   daySlot?: number | null     // MANUAL number badge — independent label, no effect on order
   sortOrder?: number | null   // persisted drag-reorder position within a day (hidden; drives sort)

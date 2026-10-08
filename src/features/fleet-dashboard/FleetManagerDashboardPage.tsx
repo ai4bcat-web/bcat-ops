@@ -14,6 +14,8 @@ import { MaintenanceTasksWidget } from './MaintenanceTasksWidget'
 import { PmDueWidget } from './PmDueWidget'
 import { FaultCodesWidget } from './FaultCodesWidget'
 import { DotDueWidget } from './DotDueWidget'
+import { EldLogsWidget } from './EldLogsWidget'
+import { LoadDrawer } from '@/features/loads/LoadDrawer'
 
 // ── Time-off labels ─────────────────────────────────────────────────────────────
 const TIME_OFF_META: Record<'FULL_DAY_OFF' | 'EARLY_START' | 'LATE_START', { label: string; bg: string; fg: string }> = {
@@ -169,6 +171,9 @@ export function FleetManagerDashboardPage() {
         {/* Open engine fault codes from the same Motive feed the PM tracker reads */}
         <FaultCodesWidget />
 
+        {/* Runs that left the 150 air-mile radius, and whether their ELD logs were checked */}
+        <EldLogsWidget />
+
         {/* Repair spend by month (filterable by equipment + date) */}
         <RepairSpendWidget />
 
@@ -187,6 +192,8 @@ export function FleetManagerDashboardPage() {
         {/* Fuel / diesel price — filterable by truck */}
         <DieselPriceWidget perTruck />
       </div>
+      {/* A PRO in the ELD widget opens the load, PODs and all. */}
+      <LoadDrawer />
     </div>
   )
 }

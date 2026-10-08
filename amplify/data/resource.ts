@@ -48,6 +48,11 @@ const schema = a.schema({
       sortOrder:       a.float(),    // persisted drag-reorder position within a day (hidden; drives sort)
       notes:           a.string(),   // short free-text notes
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
+      // ELD oversight: a run outside the 150 air-mile radius needs logs, and somebody has
+      // to confirm they were kept. Set from the fleet manager dashboard. See src/lib/eldMonitor.ts.
+      eldLogsReviewedAt: a.datetime(),
+      eldLogsReviewedBy: a.string(),
+      eldLogsNote:       a.string(),
       unscheduled:     a.boolean(),  // true = orphan (no firm date) → parked in the calendar's Unscheduled lane
       // Phase 1: link loads to the directory Customer. The `customer` string remains the
       // booked-name snapshot; customerId is the authoritative link. Backfill sets both.

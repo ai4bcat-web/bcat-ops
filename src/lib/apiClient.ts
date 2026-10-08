@@ -39,12 +39,14 @@ let loadsHaveHot = true
 let loadsHaveStops = true
 let loadsHaveSortOrder = true
 let loadsHaveCustomerId = true
+let loadsHaveEldReview = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
   if (loadsHaveStops) f += ' stops'
   if (loadsHaveSortOrder) f += ' sortOrder'
   if (loadsHaveCustomerId) f += ' customerId'
+  if (loadsHaveEldReview) f += ' eldLogsReviewedAt eldLogsReviewedBy eldLogsNote'
   return f
 }
 
@@ -109,7 +111,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -117,6 +119,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     stops: /'stops'/i.test(msg),
     sortOrder: /'sortOrder'/i.test(msg),
     customerId: /'customerId'/i.test(msg),
+    eldReview: /'(eldLogsReviewedAt|eldLogsReviewedBy|eldLogsNote)'/i.test(msg),
   }
 }
 
@@ -150,6 +153,10 @@ export async function listLoads(): Promise<Load[]> {
       if (loadsHaveCustomerId && u.customerId) {
         console.warn("[apiClient] backend has no 'customerId' field yet — querying loads without it until deploy")
         loadsHaveCustomerId = false; changed = true
+      }
+      if (loadsHaveEldReview && u.eldReview) {
+        console.warn("[apiClient] backend has no ELD review fields yet — querying loads without them until deploy")
+        loadsHaveEldReview = false; changed = true
       }
       if (!changed) throw err
     }
