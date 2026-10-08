@@ -94,3 +94,40 @@ export function withEta(stops: Stop[], stopId: string, etaAt: string, basis: 'mo
 export function stopsOf(load: Load): Stop[] {
   return getStops(load)
 }
+
+export interface LastStopEvent {
+  event: StopEvent
+  stopType: Stop['type']
+  stopName: string | null
+  at: string
+  /** The words dispatch uses: On site at pickup / Departed pickup / On site at delivery / Delivered. */
+  label: string
+}
+
+/** The most recent facility event the driver reported on this load, or null if none. */
+export function lastStopEvent(load: Load): LastStopEvent | null {
+  let best: LastStopEvent | null = null
+  for (const s of getStops(load)) {
+    const candidates: Array<[StopEvent, string | null | undefined]> = [['ARRIVED', s.arrivedAt], ['DEPARTED', s.departedAt]]
+    for (const [event, at] of candidates) {
+      if (!at || Number.isNaN(Date.parse(at))) continue
+      if (best && at <= best.at) continue
+      const delivery = s.type === 'delivery'
+      best = {
+        event, stopType: s.type, stopName: s.name?.trim() || null, at,
+        label: event === 'ARRIVED'
+          ? (delivery ? 'On site at delivery' : 'On site at pickup')
+          : (delivery ? 'Delivered' : 'Departed pickup'),
+      }
+    }
+  }
+  return best
+}
+
+/** The ETA still ahead of the truck: the first delivery with one that has not been reached. */
+export function pendingDeliveryEta(load: Load): { etaAt: string; basis: 'motive' | 'appt' } | null {
+  const s = getStops(load)
+    .filter((st) => st.type === 'delivery' && st.etaAt && !st.arrivedAt && !st.departedAt)
+    .sort((a, b) => a.sequence - b.sequence)[0]
+  return s?.etaAt ? { etaAt: s.etaAt, basis: s.etaBasis ?? 'appt' } : null
+}

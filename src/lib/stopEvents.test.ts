@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
-  ETA_MIN_MINUTES,
+  lastStopEvent, pendingDeliveryEta, ETA_MIN_MINUTES,
 } from './stopEvents'
 import type { Load, Stop } from '../types'
 
@@ -107,5 +107,34 @@ describe('withEta', () => {
     const out = withEta(stops, 'de', '2026-10-08T16:05:00.000Z', 'motive', NOW)
     expect(out[1]).toMatchObject({ etaAt: '2026-10-08T16:05:00.000Z', etaBasis: 'motive', etaUpdatedAt: NOW })
     expect(out[0].etaAt).toBeUndefined()
+  })
+})
+
+describe('lastStopEvent — what the dashboard shows for the driver', () => {
+  it('is the latest stamp across both events and both stops, in dispatch words', () => {
+    const { load: l, stops } = load('2026-10-08T20:00:00.000Z')
+    const s1 = applyStopEvent(stops, 'pu', 'ARRIVED', '2026-10-08T14:00:00.000Z')
+    expect(lastStopEvent({ ...l, stops: s1 } as Load)).toMatchObject({ label: 'On site at pickup', at: '2026-10-08T14:00:00.000Z' })
+    const s2 = applyStopEvent(s1, 'pu', 'DEPARTED', '2026-10-08T15:00:00.000Z')
+    expect(lastStopEvent({ ...l, stops: s2 } as Load)?.label).toBe('Departed pickup')
+    const s3 = applyStopEvent(s2, 'de', 'ARRIVED', '2026-10-08T16:00:00.000Z')
+    expect(lastStopEvent({ ...l, stops: s3 } as Load)?.label).toBe('On site at delivery')
+    const s4 = applyStopEvent(s3, 'de', 'DEPARTED', '2026-10-08T16:30:00.000Z')
+    expect(lastStopEvent({ ...l, stops: s4 } as Load)).toMatchObject({ label: 'Delivered', at: '2026-10-08T16:30:00.000Z' })
+  })
+
+  it('is null when the driver has reported nothing', () => {
+    const { load: l } = load('2026-10-08T20:00:00.000Z')
+    expect(lastStopEvent(l)).toBeNull()
+  })
+})
+
+describe('pendingDeliveryEta', () => {
+  it('is the ETA on the delivery still ahead, and gone once the truck is on site', () => {
+    const { load: l, stops } = load('2026-10-08T20:00:00.000Z')
+    const rolling = withEta(stops, 'de', '2026-10-08T16:05:00.000Z', 'motive', NOW)
+    expect(pendingDeliveryEta({ ...l, stops: rolling } as Load)).toEqual({ etaAt: '2026-10-08T16:05:00.000Z', basis: 'motive' })
+    const arrived = applyStopEvent(rolling, 'de', 'ARRIVED', '2026-10-08T16:00:00.000Z')
+    expect(pendingDeliveryEta({ ...l, stops: arrived } as Load)).toBeNull()
   })
 })

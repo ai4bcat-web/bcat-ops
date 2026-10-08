@@ -14,6 +14,7 @@ const listTruckLocationsMock = vi.hoisted(() => vi.fn<() => Promise<TruckLocatio
 const appStoreState = vi.hoisted(() => ({
   equipment: [] as Equipment[],
   drivers: [] as Driver[],
+  loads: [] as unknown[],
   assignTruckToDriver: vi.fn(),
   addEquipment: vi.fn(),
 }))
@@ -76,6 +77,46 @@ beforeEach(() => {
   fleetMiniMapProps.length = 0
   appStoreState.equipment = []
   appStoreState.drivers = []
+  appStoreState.loads = []
+})
+
+describe('the driver column', () => {
+  it("shows what kind of driver is in the seat, their last reported status with its time, and the ETA", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date('2026-10-08T16:00:00Z'))
+    try {
+      appStoreState.equipment = [baseTruck({ id: 'eq-3114', unitNumber: '3114', assignedDriverId: 'drv-jason' } as Partial<Equipment>)]
+      appStoreState.drivers = [
+        { id: 'drv-jason', name: 'Jason Smith', active: true, fleetGroup: 'LOCAL', driverType: 'COMPANY', assignedTruckId: 'eq-3114' } as unknown as Driver,
+      ]
+      appStoreState.loads = [{
+        id: 'L1', aljexId: '14578', pickupAppt: '2026-10-08T13:00:00.000Z', deliveryAppt: '2026-10-08T20:00:00.000Z',
+        originCity: 'Chicago, IL', destinationCity: 'Waukegan, IL', pickupDriverId: 'drv-jason', deliveryDriverId: 'drv-jason',
+        stops: [
+          { id: 'pu', type: 'pickup', sequence: 0, name: 'Batory Oakley', city: 'Chicago, IL', appt: '2026-10-08T13:00:00.000Z', driverId: 'drv-jason', arrivedAt: '2026-10-08T14:12:00.000Z', departedAt: '2026-10-08T15:40:00.000Z' },
+          { id: 'de', type: 'delivery', sequence: 1, name: 'Eagle Foods', city: 'Waukegan, IL', appt: '2026-10-08T20:00:00.000Z', driverId: 'drv-jason', etaAt: '2026-10-08T16:05:00.000Z', etaBasis: 'motive' },
+        ],
+      }]
+      listTruckLocationsMock.mockResolvedValue([baseLocation({ truckId: 'eq-3114', unitNumber: '3114', locatedAt: '2026-10-08T15:55:00Z', motion: 'MOVING', speed: 41 })])
+
+      render(<TruckMapWidget />)
+      await waitFor(() => expect(screen.getByText('Ivan local')).toBeInTheDocument())
+      // 15:40Z is 10:40 Chicago; the ETA 16:05Z is 11:05.
+      expect(screen.getByText('Departed pickup')).toBeInTheDocument()
+      expect(screen.getByText(/10:40/)).toBeInTheDocument()
+      expect(screen.getByText(/ETA 11:05/)).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('names an owner operator as one', async () => {
+    appStoreState.equipment = [baseTruck({ id: 'eq-9', unitNumber: '009', assignedDriverId: 'drv-roy' } as Partial<Equipment>)]
+    appStoreState.drivers = [{ id: 'drv-roy', name: 'Roy Workman', active: true, fleetGroup: 'AMAZON', driverType: 'OWNER_OPERATOR', assignedTruckId: 'eq-9' } as unknown as Driver]
+    listTruckLocationsMock.mockResolvedValue([baseLocation({ truckId: 'eq-9', unitNumber: '009' })])
+    render(<TruckMapWidget />)
+    await waitFor(() => expect(screen.getByText('Owner operator')).toBeInTheDocument())
+  })
 })
 
 describe('TruckMapWidget', () => {

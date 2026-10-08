@@ -8,6 +8,18 @@ import { driverForTruck } from '@/lib/assignments'
 import { canonicalUnit } from '@/lib/fleetGroups'
 import { FleetMiniMap } from './FleetMiniMap'
 import { currentLoadForDriver, laneLabel, fixAge } from '@/lib/driverJourney'
+import { lastStopEvent, pendingDeliveryEta } from '@/lib/stopEvents'
+import { fleetBucketOf, type FleetBucket } from '@/lib/revenueByFleet'
+import { formatTime } from '@/lib/date'
+
+/** What kind of driver is in the seat, in the words the office uses. */
+const DRIVER_KIND: Record<FleetBucket, string | null> = {
+  OWNER_OP: 'Owner operator',
+  IVAN: 'Ivan local',
+  BOX_TRUCK: 'Box truck',
+  BROKER: 'Broker',
+  UNASSIGNED: null,
+}
 
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
@@ -130,7 +142,7 @@ export function TruckMapWidget() {
           <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
             {/* Header row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 110px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               <div>Unit</div>
               <div>Location</div>
               <div>Driver</div>
@@ -150,11 +162,15 @@ export function TruckMapWidget() {
               // What this driver is hauling right now — the same selection the PWA uses.
               const currentLoad = assigned ? currentLoadForDriver(loads, assigned.id, now) : null
               const age = fixAge(loc.locatedAt, now)
+              const kind = assigned ? DRIVER_KIND[fleetBucketOf(assigned)] : null
+              // What the driver last reported from the app, and where they are headed.
+              const lastEvent = currentLoad ? lastStopEvent(currentLoad) : null
+              const eta = currentLoad ? pendingDeliveryEta(currentLoad) : null
               return (
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 110px auto', gap: 12,
+                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px auto', gap: 12,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -193,6 +209,11 @@ export function TruckMapWidget() {
                         <Plus size={12} /> Add to fleet
                       </button>
                     )}
+                    {kind && (
+                      <div style={{ marginTop: 3, fontSize: 10.5, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>
+                        {kind}
+                      </div>
+                    )}
                   </div>
 
                   {/* Current load: the lane and the PRO. */}
@@ -212,9 +233,31 @@ export function TruckMapWidget() {
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, whiteSpace: 'nowrap', color: moving ? '#15803d' : 'var(--ds-t3)' }}>
-                    <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: moving ? '#22c55e' : '#94a3b8' }} />
-                    {motionText}
+                  {/*
+                    The driver's own word first — what they last tapped in the app and when —
+                    then the ETA they are rolling toward. The ELD motion state is the fallback
+                    for a driver who has reported nothing on this load.
+                  */}
+                  <div style={{ minWidth: 0, fontSize: 12, whiteSpace: 'nowrap' }}>
+                    {lastEvent ? (
+                      <>
+                        <div style={{ color: 'var(--ds-t1)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis' }}
+                             title={lastEvent.stopName ? `${lastEvent.label} — ${lastEvent.stopName}` : lastEvent.label}>
+                          {lastEvent.label}
+                          <span style={{ color: 'var(--ds-t3)', fontWeight: 400 }}> · {formatTime(lastEvent.at)}</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: eta ? '#15803d' : 'var(--ds-t3)' }}>
+                          {eta
+                            ? `ETA ${formatTime(eta.etaAt)}${eta.basis === 'appt' ? ' (appt)' : ''}`
+                            : motionText}
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: moving ? '#15803d' : 'var(--ds-t3)' }}>
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: moving ? '#22c55e' : '#94a3b8' }} />
+                        {motionText}
+                      </div>
+                    )}
                   </div>
                   <div style={{ textAlign: 'right', color: 'var(--ds-t3)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <span style={{ color: age.stale ? '#b45309' : 'inherit', fontWeight: age.stale ? 600 : 400 }}
