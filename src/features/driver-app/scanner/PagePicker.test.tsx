@@ -18,12 +18,13 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 // The real camera needs a media pipeline jsdom does not have. This stand-in exposes the
 // two things the picker wires: a captured page, and Done pressed from inside the camera.
 vi.mock('./ScanCamera', () => ({
-  ScanCamera: (props: { onCapture: (p: unknown) => void; onDone?: (p: unknown) => void; captured?: number }) => (
+  ScanCamera: (props: { onCapture: (p: unknown) => void; onDone?: (p: unknown) => void; onUndoLast?: () => void; captured?: number }) => (
     <div data-testid="camera">
       <span>captured {props.captured ?? 0}</span>
       <button type="button" onClick={() => props.onCapture({ fileName: 'shot-1.jpg', contentType: 'image/jpeg', byteSize: 10, blob: new Blob(['a']) })}>cam-add</button>
       <button type="button" onClick={() => props.onDone?.({ fileName: 'shot-2.jpg', contentType: 'image/jpeg', byteSize: 10, blob: new Blob(['b']) })}>cam-done-with-page</button>
       <button type="button" onClick={() => props.onDone?.(null)}>cam-done</button>
+      <button type="button" onClick={() => props.onUndoLast?.()}>cam-undo</button>
     </div>
   ),
 }))
@@ -146,6 +147,16 @@ describe('PagePicker', () => {
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1))
     expect(onDone.mock.calls[0][0].map((p: { fileName: string }) => p.fileName)).toEqual(['shot-1.jpg', 'shot-2.jpg'])
     expect(screen.queryByTestId('camera')).toBeNull()
+  })
+
+  it('Retake last page inside the camera drops the page just kept', async () => {
+    render(<PagePicker onDone={vi.fn()} onCancel={vi.fn()} busy={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /Scan it with the camera/ }))
+    fireEvent.click(screen.getByText('cam-add'))
+    fireEvent.click(screen.getByText('cam-add'))
+    await waitFor(() => expect(screen.getByText('captured 2')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('cam-undo'))
+    await waitFor(() => expect(screen.getByText('captured 1')).toBeInTheDocument())
   })
 
   it('Done inside the camera with nothing in hand sends nothing', () => {

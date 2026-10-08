@@ -72,6 +72,22 @@ describe('findPaperQuad', () => {
     expect(found!.confidence).toBe('high')
   })
 
+  it('keeps a folded page whole — the crease must not split it into the bigger half', () => {
+    const page: Rect = { x: 40, y: 30, w: 240, h: 340 }
+    const rgba = scene(320, 400, (x, y) => {
+      if (!inside({ x, y }, page)) return BG
+      // A sharp fold across the middle: a dark band 6px wide, as a crease photographs up close.
+      const mid = page.y + page.h / 2
+      if (Math.abs(y - mid) <= 3) return [70, 68, 66]
+      return PAPER
+    })
+    const found = findPaperQuad(rgba, 320, 400)
+    expect(found).not.toBeNull()
+    const q = found!.quad
+    expect(near(q.topLeft, page.x, page.y)).toBe(true)
+    expect(near(q.bottomRight, page.x + page.w - 1, page.y + page.h - 1)).toBe(true)
+  })
+
   it('finds a page straight on a dark seat too', () => {
     const page: Rect = { x: 50, y: 40, w: 220, h: 300 }
     const rgba = scene(320, 400, (x, y) => (inside({ x, y }, page) ? PAPER : BG))

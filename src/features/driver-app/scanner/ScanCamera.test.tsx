@@ -105,6 +105,15 @@ describe('ScanCamera — the viewfinder', () => {
     expect(onDone).toHaveBeenCalledWith(null)
   })
 
+  it('offers to drop the last page kept, without leaving the camera', async () => {
+    const onUndoLast = vi.fn()
+    render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} captured={1} onUndoLast={onUndoLast} />)
+    const undo = await screen.findByRole('button', { name: /Retake last page/ })
+    undo.click()
+    expect(onUndoLast).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /Take the photo/i })).toBeInTheDocument()
+  })
+
   it('has no Done before anything has been taken', async () => {
     render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} captured={0} onDone={vi.fn()} />)
     await screen.findByRole('button', { name: /Take the photo/i })

@@ -18,9 +18,9 @@
  * all is a worse outcome than one who sends a poor photograph of it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus } from 'lucide-react'
+import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus, Maximize2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { scanFrameColor, toGray, assessReadability, type Readability } from '@/lib/docScan/capture'
+import { scanFrameColor, toGray, assessReadability, enhanceForReading, type Readability } from '@/lib/docScan/capture'
 import { preparePage } from './imagePrep'
 import type { PendingPage } from '../driverApi'
 
@@ -33,6 +33,11 @@ interface Shot {
   readability: Readability
   /** False when no page outline was found and the whole frame was kept instead. */
   cropped: boolean
+  /**
+   * The same frame uncropped, kept alongside a cropped shot so a wrong outline — half a
+   * folded page, a clipboard edge — is one tap from fixed instead of a retake.
+   */
+  whole: { page: PendingPage; previewUrl: string; readability: Readability } | null
 }
 
 export interface ScanCameraProps {
@@ -47,9 +52,11 @@ export interface ScanCameraProps {
    * review step, so the last shot is not lost between "keep it" and "done".
    */
   onDone?: (lastPage: PendingPage | null) => void
+  /** Drop the page most recently kept, without leaving the camera. */
+  onUndoLast?: () => void
 }
 
-export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone }: ScanCameraProps) {
+export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone, onUndoLast }: ScanCameraProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
   const workRef = useRef<HTMLCanvasElement | null>(null)
@@ -215,31 +222,44 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
        * judge for themselves whether to retake.
        */
       const result = scanFrameColor({ data: pixels, width: w, height: h })
-      const out = result?.gray ?? toGray(pixels, w, h)
+      const wholeGray = toGray(pixels, w, h)
+      const out = result?.gray ?? wholeGray
       const cropped = !!result
 
-      const render = document.createElement('canvas')
-      render.width = out.width
-      render.height = out.height
-      const rctx = render.getContext('2d')
-      if (!rctx) throw new Error('Could not build the scan')
-      const rgba = rctx.createImageData(out.width, out.height)
-      for (let i = 0; i < out.data.length; i++) {
-        rgba.data[i * 4] = out.data[i]
-        rgba.data[i * 4 + 1] = out.data[i]
-        rgba.data[i * 4 + 2] = out.data[i]
-        rgba.data[i * 4 + 3] = 255
+      const toCanvas = (g: { data: Uint8Array; width: number; height: number }) => {
+        const render = document.createElement('canvas')
+        render.width = g.width
+        render.height = g.height
+        const rctx = render.getContext('2d')
+        if (!rctx) throw new Error('Could not build the scan')
+        const rgba = rctx.createImageData(g.width, g.height)
+        for (let i = 0; i < g.data.length; i++) {
+          rgba.data[i * 4] = g.data[i]
+          rgba.data[i * 4 + 1] = g.data[i]
+          rgba.data[i * 4 + 2] = g.data[i]
+          rgba.data[i * 4 + 3] = 255
+        }
+        rctx.putImageData(rgba, 0, 0)
+        return render
       }
-      rctx.putImageData(rgba, 0, 0)
 
-      const page = await preparePage(render, `scan-${Date.now()}.jpg`)
+      const stamp = Date.now()
+      const page = await preparePage(toCanvas(out), `scan-${stamp}.jpg`)
       const readability = assessReadability(out)
+      // The uncropped frame, cleaned the same way, in case the outline was wrong.
+      let whole: Shot['whole'] = null
+      if (cropped) {
+        const wholeClean = enhanceForReading(wholeGray)
+        const wholePage = await preparePage(toCanvas(wholeClean), `scan-${stamp}-full.jpg`)
+        whole = { page: wholePage, previewUrl: URL.createObjectURL(wholePage.blob), readability: assessReadability(wholeClean) }
+      }
       setRejects((n) => (readability.problem ? n + 1 : 0))
       setShot({
         page,
         previewUrl: URL.createObjectURL(page.blob),
         readability,
         cropped,
+        whole,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That shot could not be processed — try again.')
@@ -249,10 +269,24 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
   }, [busy])
 
   const discard = useCallback(() => {
-    setShot((s) => { if (s) URL.revokeObjectURL(s.previewUrl); return null })
+    setShot((s) => {
+      if (s) { URL.revokeObjectURL(s.previewUrl); if (s.whole) URL.revokeObjectURL(s.whole.previewUrl) }
+      return null
+    })
   }, [])
 
-  useEffect(() => () => { if (shot) URL.revokeObjectURL(shot.previewUrl) }, [shot])
+  /** Swap the cropped result for the whole frame: the outline missed, the photo did not. */
+  const useWhole = useCallback(() => {
+    setShot((s) => {
+      if (!s?.whole) return s
+      URL.revokeObjectURL(s.previewUrl)
+      return { page: s.whole.page, previewUrl: s.whole.previewUrl, readability: s.whole.readability, cropped: false, whole: null }
+    })
+  }, [])
+
+  useEffect(() => () => {
+    if (shot) { URL.revokeObjectURL(shot.previewUrl); if (shot.whole) URL.revokeObjectURL(shot.whole.previewUrl) }
+  }, [shot])
 
   // ── Error ─────────────────────────────────────────────────────────────────
   if (error) {
@@ -299,6 +333,17 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
               )}
             </>
           ) : null}
+          {/* The outline is a guess; the driver can see whether it was right. */}
+          {!shot.readability.problem && shot.cropped && shot.whole && (
+            <button
+              type="button"
+              onClick={useWhole}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary"
+            >
+              <Maximize2 className="h-4 w-4" aria-hidden="true" />
+              Crop looks wrong? Use the whole photo
+            </button>
+          )}
           {!shot.readability.problem && !shot.cropped && (
             <p className="text-sm text-muted-foreground">
               No page edges found, so the whole picture was kept. Put the page on a darker
@@ -391,6 +436,12 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
             </Button>
           )}
         </div>
+        {/* The last page kept was wrong: drop it here, shoot it again, never leave the camera. */}
+        {onUndoLast && captured > 0 && (
+          <button type="button" onClick={onUndoLast} className="text-sm font-semibold text-white/80 underline underline-offset-2">
+            Retake last page
+          </button>
+        )}
       </div>
     </div>
   )

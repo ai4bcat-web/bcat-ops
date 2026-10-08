@@ -210,6 +210,7 @@ export function PagePicker({ onDone, onCancel, initialPages = [] }: PagePickerPr
             // after every shot would make the driver reopen the camera for page two.
             setPages((prev) => (prev.length >= MAX_SCAN_PAGES ? prev : [...prev, page]))
           }}
+          onUndoLast={() => setPages((prev) => prev.slice(0, -1))}
           onDone={(lastPage) => {
             // Done in the camera IS done: send what is in hand, including the shot on
             // screen, without a second Done on this page.

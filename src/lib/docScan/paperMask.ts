@@ -23,8 +23,14 @@ import {
 
 /** Above this a pixel is coloured — clipboard, seat, dash — not paper. (0 = grey, 1 = pure hue.) */
 export const PAPER_MAX_SATURATION = 0.25
-/** Paper must be at least this bright relative to the frame's bright reference (p95). Shadowed paper passes. */
-export const PAPER_MIN_VALUE_RATIO = 0.45
+/** Paper must be at least this bright relative to the frame's bright reference (p95). Shadowed paper and the dark line of a fold pass. */
+export const PAPER_MIN_VALUE_RATIO = 0.38
+/**
+ * How wide a gap the close step bridges, as a share of the short edge. A fold held up to
+ * the camera is a dark crease a few pixels wide at detection size; without bridging it,
+ * the page came back as the larger of its two halves (Jason, 8 Oct).
+ */
+export const PAPER_BRIDGE_RATIO = 1 / 40
 /** Smaller than this share of the frame is not the page the driver is holding up. */
 export const PAPER_MIN_AREA_RATIO = 0.12
 
@@ -55,13 +61,21 @@ export function paperMask(rgba: Uint8ClampedArray | Uint8Array, w: number, h: nu
   return mask
 }
 
+/*
+ * Outside the frame counts as paper. Otherwise every erode pulls a blob back from the
+ * frame edge by its radius, and "the page runs out of shot" — which the caller detects by
+ * the blob touching the edge — could never be seen once the close step grew wide enough
+ * to bridge a fold.
+ */
 function erode(mask: Uint8Array, w: number, h: number, r: number): Uint8Array {
   const out = new Uint8Array(w * h)
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (!mask[y * w + x]) continue
     let keep = 1
     for (let dy = -r; dy <= r && keep; dy++) for (let dx = -r; dx <= r; dx++) {
       const nx = x + dx, ny = y + dy
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h || !mask[ny * w + nx]) { keep = 0; break }
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
+      if (!mask[ny * w + nx]) { keep = 0; break }
     }
     out[y * w + x] = keep
   }
@@ -122,10 +136,12 @@ export interface PaperQuad {
  */
 export function findPaperQuad(rgba: Uint8ClampedArray | Uint8Array, w: number, h: number): PaperQuad | null {
   let mask = paperMask(rgba, w, h)
-  // Open to shed stray bright specks, close to swallow the text and the fold lines.
+  // Open to shed stray bright specks, then close wide enough to swallow the text, the
+  // fold lines and a crease shadow, so the page stays one blob.
   const r = Math.max(1, Math.round(Math.min(w, h) / 160))
+  const bridge = Math.max(r * 2, Math.round(Math.min(w, h) * PAPER_BRIDGE_RATIO))
   mask = dilate(erode(mask, w, h, r), w, h, r)
-  mask = erode(dilate(mask, w, h, r * 2), w, h, r * 2)
+  mask = erode(dilate(mask, w, h, bridge), w, h, bridge)
 
   const comp = largestComponent(mask, w, h)
   if (!comp || comp.size < w * h * PAPER_MIN_AREA_RATIO) return null
