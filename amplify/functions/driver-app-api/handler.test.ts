@@ -675,6 +675,7 @@ describe('driver-app-api handler', () => {
         active: true,
         // No truck assigned to this fixture driver, so there is no PM to report.
         pm: null,
+        truck: null,
       })
     })
   })
