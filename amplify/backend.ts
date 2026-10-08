@@ -356,6 +356,15 @@ driverApiFn.addToRolePolicy(
     resources: driverApiWritableArns,
   }),
 )
+/*
+ * The one write the driver API makes outside its own tables: a driver's arrived/departed
+ * taps and the ETA they imply are stamped onto the load's stops — the record the loads
+ * board derives its lifecycle from. UpdateItem only, on the Load table only; the handler
+ * rewrites nothing but `stops` and the audit fields, and refuses a load the driver is not on.
+ */
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [driverApiLoadTable.tableArn] }),
+)
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] }),
 )

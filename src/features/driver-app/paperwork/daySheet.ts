@@ -11,12 +11,16 @@ export interface TodayStop {
   stop: PaperworkStop
 }
 
-/** Every stop on today's sheet, in appointment order — pickups and deliveries alike. */
+/**
+ * Every stop on today's sheet, in appointment order — pickups and deliveries alike.
+ * Only the driver's own: on a load where somebody else delivers, their delivery is not
+ * this driver's to mark.
+ */
 export function stopsForDay(loads: PaperworkLoad[], today: string): TodayStop[] {
   const out: TodayStop[] = []
   for (const load of loads) {
     for (const stop of load.stops) {
-      if (stop.date === today) out.push({ load, stop })
+      if (stop.date === today && stop.yours) out.push({ load, stop })
     }
   }
   return out.sort((a, b) =>

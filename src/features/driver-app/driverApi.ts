@@ -455,6 +455,13 @@ export interface PaperworkStop {
   date: string | null
   /** The driver flagged detention here — two hours or more past the appointment. */
   detention: boolean
+  /** This stop is the viewing driver's to work. */
+  yours: boolean
+  arrivedAt: string | null
+  departedAt: string | null
+  /** Expected arrival once the pickup is departed: from the truck (motive) or the appointment. */
+  etaAt: string | null
+  etaBasis: 'motive' | 'appt' | null
 }
 
 export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'
@@ -479,6 +486,9 @@ export interface PaperworkEld {
 export interface PaperworkLoad {
   id: string
   reference: string
+  /** The customer's PO — the load's "TMS ID / PO". */
+  poNumber?: string | null
+  pickupNumber?: string | null
   customer: string | null
   deliveryAppt: string | null
   pickupAppt: string | null
@@ -541,6 +551,16 @@ export async function fetchPaperworkWeeks(): Promise<PaperworkWeek[]> {
 
 export async function fetchPaperwork(weekStart: string): Promise<Paperwork> {
   return request<Paperwork>(`/paperwork?week=${encodeURIComponent(weekStart)}`)
+}
+
+export type StopEvent = 'ARRIVED' | 'DEPARTED'
+
+/** On site at / departed one of the driver's stops. Returns the stamp and any ETA it set. */
+export async function recordStopEvent(input: { loadId: string; stopId: string; event: StopEvent }): Promise<{
+  at: string
+  eta: { stopId: string; etaAt: string; basis: 'motive' | 'appt' } | null
+}> {
+  return request('/paperwork/stop-event', { method: 'POST', body: JSON.stringify(input) })
 }
 
 /** Flag or clear detention at one stop. The in/out times go on the BOL, not here. */

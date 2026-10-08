@@ -32,7 +32,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
-import { formatDateTime } from '@/lib/date'
+import { formatDateTime, formatTime } from '@/lib/date'
+import { getStops } from '@/lib/stops'
 import { cn } from '@/lib/utils'
 import type { Load } from '@/types'
 import { toast } from 'sonner'
@@ -480,8 +481,21 @@ export function GridPage() {
       // Sorted by lifecycle position, not alphabetically: "At delivery" before "Delivered"
       // is the order a dispatcher thinks in, and A-before-D is noise.
       accessorFn: (row) => LOAD_STATUSES.findIndex((s) => s.id === (statusById.get(row.id) ?? 'planned')),
-      cell: ({ row }) => <StatusChip id={statusById.get(row.original.id) ?? 'planned'} />,
-      size: 130,
+      cell: ({ row }) => {
+        const id = statusById.get(row.original.id) ?? 'planned'
+        // The driver departed the pickup: the delivery's ETA (from the truck, or the
+        // appointment when another driver delivers) rides next to the chip.
+        const eta = id === 'in_transit'
+          ? getStops(row.original).filter((s) => s.type === 'delivery' && s.etaAt && !s.arrivedAt).map((s) => s.etaAt!)[0]
+          : undefined
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <StatusChip id={id} />
+            {eta && <span style={{ fontSize: 11, color: 'var(--ds-t2)', whiteSpace: 'nowrap' }}>ETA {formatTime(eta)}</span>}
+          </span>
+        )
+      },
+      size: 170,
     },
     {
       accessorKey: 'pickupAppt',

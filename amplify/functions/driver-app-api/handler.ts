@@ -71,6 +71,10 @@ import {
 import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 import { getStops } from '../../../src/lib/stops'
 import { chicagoDateStr } from '../../../src/lib/date'
+import { locateCity } from '../../../src/lib/eldRadius'
+import {
+  applyStopEvent, estimateEta, planDeliveryEta, withEta, type LatLng, type StopEvent,
+} from '../../../src/lib/stopEvents'
 import {
   buildPaperworkLoad,
   driverIsOnPaperworkLoad,
@@ -908,6 +912,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'paperwork' && segments[1] === 'detention') {
     return { path: '/paperwork/detention' }
   }
+  if (segments[0] === 'paperwork' && segments[1] === 'stop-event') {
+    return { path: '/paperwork/stop-event' }
+  }
   if (segments[0] === 'settlement' && segments[1] === 'weeks') {
     return { path: '/settlement/weeks' }
   }
@@ -1601,6 +1608,42 @@ async function completeSubmission(
  * recorded, or one Motive has not reported on — comes back as UNKNOWN with a reason,
  * because those are states somebody should fix rather than hide.
  */
+/** The latest ELD fix for the driver's assigned truck, or null when there is none. */
+async function truckFixForDriver(driver: DriverRow): Promise<LatLng | null> {
+  const truckId = (driver.assignedTruckId ?? '').trim()
+  if (!truckId || !TRUCK_LOCATION_TABLE) return null
+  try {
+    const loc = (await ddb.send(new GetCommand({ TableName: TRUCK_LOCATION_TABLE, Key: { truckId } }))).Item as
+      | { lat?: unknown; lon?: unknown } | undefined
+    return typeof loc?.lat === 'number' && typeof loc?.lon === 'number' ? { lat: loc.lat, lng: loc.lon } : null
+  } catch (err) {
+    console.error('[driver-app-api] could not read the truck fix', { truckId, err })
+    return null
+  }
+}
+
+/**
+ * Where a stop is: the directory location's geocode when the stop is linked to one,
+ * else the city centroid. Null when neither places it — the ETA then falls back to
+ * the appointment rather than guess.
+ */
+async function stopCoords(stop: Stop | undefined): Promise<LatLng | null> {
+  if (!stop) return null
+  if (stop.locationId && LOCATION_TABLE_NAME) {
+    try {
+      const loc = (await ddb.send(new GetCommand({ TableName: LOCATION_TABLE_NAME, Key: { id: stop.locationId } }))).Item as
+        | { lat?: unknown; lng?: unknown } | undefined
+      if (typeof loc?.lat === 'number' && typeof loc?.lng === 'number') return { lat: loc.lat, lng: loc.lng }
+    } catch (err) {
+      console.error('[driver-app-api] could not read the stop location', { locationId: stop.locationId, err })
+    }
+  }
+  const city = stop.address?.city && stop.address?.state
+    ? `${stop.address.city}, ${stop.address.state}`
+    : stop.city
+  return locateCity(city) ?? null
+}
+
 async function pmForDriver(
   driver: DriverRow,
 ): Promise<(PmStatus & { truckNumber: string | null }) | null> {
@@ -2362,8 +2405,27 @@ export const handler = async (event: FnUrlEvent) => {
       }
 
       const built = mine
-        .map((l) => buildPaperworkLoad(l, docsForLoad(l), times.filter((t) => t.loadId === l.id)))
+        .map((l) => buildPaperworkLoad(l, docsForLoad(l), times.filter((t) => t.loadId === l.id), driverId))
         .sort((a, b) => String(a.deliveryAppt ?? '').localeCompare(String(b.deliveryAppt ?? '')))
+
+      /*
+       * A Motive-based ETA is re-run from the truck's latest fix on every read, so the
+       * number the driver (and dispatch) sees tracks the truck rather than the moment the
+       * pickup was departed. Only while rolling: once arrived, the ETA is history.
+       */
+      if (path === '/paperwork') {
+        const fix = await truckFixForDriver(driver)
+        if (fix) {
+          for (const l of built) {
+            for (const st of l.stops) {
+              if (st.etaBasis !== 'motive' || st.arrivedAt || st.departedAt || !st.yours) continue
+              const raw = mine.find((x) => x.id === l.id)
+              const dest = raw ? await stopCoords((getStops(raw as unknown as Load) as Stop[]).find((s) => s.id === st.id)) : null
+              if (dest) st.etaAt = estimateEta(fix, dest, nowIso())
+            }
+          }
+        }
+      }
 
       if (path === '/paperwork/weeks') {
         // One row per week that has work in it, plus the week in progress, newest first.
@@ -2392,6 +2454,63 @@ export const handler = async (event: FnUrlEvent) => {
         ...summarize(delivered),
         loadCount: built.length,
       })
+    }
+
+    /*
+     * The driver reports a facility event — on site, or departed — at one of their stops.
+     * Stamped on the load's stop itself, which is what the loads board derives the
+     * lifecycle from, so dispatch sees the load move the moment the driver taps.
+     */
+    if (method === 'POST' && path === '/paperwork/stop-event') {
+      const body = JSON.parse(event.body || '{}') as { loadId?: string; stopId?: string; event?: string }
+      const loadId = (body.loadId ?? '').trim()
+      const stopId = (body.stopId ?? '').trim()
+      const ev = (body.event ?? '').trim().toUpperCase()
+      if (!loadId) return reply(400, { error: 'loadId is required' })
+      if (!stopId) return reply(400, { error: 'stopId is required' })
+      if (ev !== 'ARRIVED' && ev !== 'DEPARTED') return reply(400, { error: 'event must be ARRIVED or DEPARTED' })
+
+      const found = await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))
+      const load = found.Item as (PaperworkLoadLike & { updatedAt?: string }) | undefined
+      if (!load || !driverIsOnPaperworkLoad(load, driverId)) {
+        return reply(404, { error: 'load not found' })
+      }
+      const stops = getStops(load as unknown as Load) as Stop[]
+      const stop = stops.find((s) => s.id === stopId)
+      if (!stop) return reply(404, { error: 'stop not found on this load' })
+
+      const now = nowIso()
+      let next = applyStopEvent(stops, stopId, ev as StopEvent, now)
+      let eta: { stopId: string; etaAt: string; basis: 'motive' | 'appt' } | null = null
+
+      // Leaving the pickup is when the delivery ETA becomes worth stating.
+      if (ev === 'DEPARTED' && stop.type === 'pickup') {
+        const plan = planDeliveryEta(load as unknown as Load, next, stop, driverId, now)
+        if (plan.kind === 'motive') {
+          const [fix, dest] = await Promise.all([truckFixForDriver(driver), stopCoords(plan.stop)])
+          // No fix or no coordinates: fall back to the appointment rather than say nothing.
+          const etaAt = fix && dest ? estimateEta(fix, dest, now) : plan.stop.appt
+          if (etaAt) eta = { stopId: plan.stop.id, etaAt, basis: fix && dest ? 'motive' : 'appt' }
+        } else if (plan.kind === 'appt' && plan.stop.appt) {
+          eta = { stopId: plan.stop.id, etaAt: plan.stop.appt, basis: 'appt' }
+        }
+        if (eta) next = withEta(next, eta.stopId, eta.etaAt, eta.basis, now)
+      }
+
+      // Only `stops` and the audit fields change; the condition keeps a concurrent staff
+      // edit from being overwritten with a stale copy.
+      await ddb.send(new UpdateCommand({
+        TableName: LOAD_TABLE_NAME,
+        Key: { id: loadId },
+        UpdateExpression: 'SET stops = :stops, updatedAt = :now, updatedBy = :by',
+        ConditionExpression: load.updatedAt ? 'updatedAt = :prev' : 'attribute_not_exists(updatedAt)',
+        ExpressionAttributeValues: {
+          ':stops': next, ':now': now, ':by': driver.email ?? driverId,
+          ...(load.updatedAt ? { ':prev': load.updatedAt } : {}),
+        },
+      }))
+      console.log('[driver-app-api] stop event', { driverId, loadId, stopId, event: ev, eta })
+      return reply(200, { ok: true, loadId, stopId, event: ev, at: now, eta })
     }
 
     /* The driver flags (or clears) detention at one stop. */

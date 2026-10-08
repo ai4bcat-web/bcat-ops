@@ -237,6 +237,15 @@ export interface Stop {
   address?: Address | null
   arrivedAt?: string | null  // actual facility events only — never inferred from the appointment
   departedAt?: string | null
+  /**
+   * When the truck is expected here, set when the driver departs the pickup. 'motive' is
+   * computed from the truck's ELD fix (same driver, delivering today); 'appt' means a
+   * different driver delivers today or tomorrow and the appointment is the estimate. See
+   * src/lib/stopEvents.ts.
+   */
+  etaAt?: string | null
+  etaBasis?: 'motive' | 'appt' | null
+  etaUpdatedAt?: string | null
   appt: string               // ISO UTC (or FCFS/TBD date at 00:00)
   apptType?: ApptType        // default 'exact'
   apptEnd?: string           // ISO UTC — end of window (range only)

@@ -12,14 +12,18 @@
  * Built from the week's loads: every stop whose appointment falls on today (Chicago), in
  * appointment order, pickups and deliveries alike. A load that loads today and delivers
  * tomorrow shows its pickup today and its delivery tomorrow.
+ *
+ * Each card also carries the stop's progress — on site, departed, delivered — reported
+ * with one tap and stamped on the load for dispatch (src/lib/stopEvents.ts), and, on a
+ * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
 import { useState } from 'react'
-import { Camera, Check, Loader2, PackageOpen, Truck } from 'lucide-react'
+import { Camera, Check, Loader2, LogOut, MapPin, Navigation, PackageOpen, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { apptTimeLabel } from '@/lib/date'
 import { errorText } from '@/lib/errorText'
-import { setStopDetention, type PaperworkLoad } from '../driverApi'
+import { recordStopEvent, setStopDetention, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
 
 import { DETENTION_HOURS, isDelivery, stopsForDay, type TodayStop } from './daySheet'
 
@@ -75,6 +79,75 @@ function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: To
   )
 }
 
+/** "9:12 AM" in Chicago, for a stamp the driver just made. */
+function clock(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? ''
+    : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Chicago' })
+}
+
+function StatusPill({ tone, children }: { tone: 'sky' | 'emerald' | 'slate'; children: React.ReactNode }) {
+  const cls = tone === 'emerald'
+    ? 'bg-emerald-400/20 text-emerald-100'
+    : tone === 'sky' ? 'bg-sky-400/20 text-sky-100' : 'bg-muted text-muted-foreground'
+  return <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-bold ${cls}`}>{children}</span>
+}
+
+/**
+ * The stop's status and the one button that moves it on.
+ *   pickup:    On site at pickup → Departed
+ *   delivery:  On site at delivery → Delivered (which also opens the POD scanner)
+ */
+function StopProgress({
+  item,
+  busy,
+  onEvent,
+}: {
+  item: TodayStop
+  busy: boolean
+  onEvent: (event: StopEvent) => void
+}) {
+  const { stop } = item
+  const delivery = isDelivery(stop)
+  if (stop.departedAt) {
+    return (
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <StatusPill tone={delivery ? 'emerald' : 'sky'}>
+          <Check className="h-4 w-4" aria-hidden="true" />
+          {delivery ? 'Delivered' : 'Departed'} {clock(stop.departedAt)}
+        </StatusPill>
+      </div>
+    )
+  }
+  if (stop.arrivedAt) {
+    return (
+      <div className="mt-3 flex flex-col gap-2">
+        <StatusPill tone={delivery ? 'emerald' : 'sky'}>
+          <MapPin className="h-4 w-4" aria-hidden="true" />
+          On site since {clock(stop.arrivedAt)}
+        </StatusPill>
+        <Button className="h-14 w-full gap-2 text-base font-bold" disabled={busy} onClick={() => onEvent('DEPARTED')}>
+          {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : delivery ? <Camera className="h-5 w-5" aria-hidden="true" /> : <LogOut className="h-5 w-5" aria-hidden="true" />}
+          {delivery ? 'Delivered — send POD' : 'Departed'}
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <Button
+      variant="outline"
+      className="mt-3 h-14 w-full gap-2 text-base font-bold"
+      disabled={busy}
+      onClick={() => onEvent('ARRIVED')}
+    >
+      {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <MapPin className="h-5 w-5" aria-hidden="true" />}
+      {delivery ? 'On site at delivery' : 'On site at pickup'}
+    </Button>
+  )
+}
+
 export function TodayStops({
   loads,
   today,
@@ -84,14 +157,42 @@ export function TodayStops({
   loads: PaperworkLoad[]
   today: string
   onSendPod: (load: PaperworkLoad) => void
-  /** A flag changed; the page refreshes its copy of the week. */
+  /** A flag or event changed; the page refreshes its copy of the week. */
   onChange: () => void
 }) {
-  const [overrides, setOverrides] = useState<Record<string, boolean>>({})
-  const items = stopsForDay(loads, today).map((it) => {
-    const key = `${it.load.id}#${it.stop.id}`
-    return key in overrides ? { ...it, stop: { ...it.stop, detention: overrides[key] } } : it
-  })
+  // What the driver just did, applied on top of the week until the refetch lands.
+  const [patches, setPatches] = useState<Record<string, Partial<PaperworkStop>>>({})
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const keyOf = (it: TodayStop) => `${it.load.id}#${it.stop.id}`
+  const patch = (it: TodayStop, p: Partial<PaperworkStop>) =>
+    setPatches((all) => ({ ...all, [keyOf(it)]: { ...all[keyOf(it)], ...p } }))
+
+  const items = stopsForDay(loads, today).map((it) =>
+    keyOf(it) in patches ? { ...it, stop: { ...it.stop, ...patches[keyOf(it)] } } : it)
+
+  async function sendEvent(item: TodayStop, event: StopEvent) {
+    const key = keyOf(item)
+    setBusyKey(key)
+    try {
+      const res = await recordStopEvent({ loadId: item.load.id, stopId: item.stop.id, event })
+      patch(item, event === 'ARRIVED' ? { arrivedAt: res.at } : { departedAt: res.at })
+      if (res.eta) {
+        // The delivery this ETA is for may be on today's sheet too.
+        const target = items.find((x) => x.load.id === item.load.id && x.stop.id === res.eta!.stopId)
+        if (target) patch(target, { etaAt: res.eta.etaAt, etaBasis: res.eta.basis })
+      }
+      onChange()
+      if (event === 'DEPARTED' && isDelivery(item.stop)) {
+        onSendPod(item.load)
+      } else {
+        toast.success(event === 'ARRIVED' ? 'Marked on site' : 'Marked departed')
+      }
+    } catch (err) {
+      toast.error(errorText(err))
+    } finally {
+      setBusyKey(null)
+    }
+  }
 
   if (items.length === 0) {
     return (
@@ -107,9 +208,10 @@ export function TodayStops({
         const { load, stop } = item
         const delivery = isDelivery(stop)
         const podOk = load.pod.present && load.pod.legibility === 'OK'
+        const showEta = delivery && !!stop.etaAt && !stop.arrivedAt && !stop.departedAt
         return (
           <li
-            key={`${load.id}#${stop.id}`}
+            key={keyOf(item)}
             className={`rounded-xl border p-4 ${delivery ? 'border-emerald-400/40 bg-emerald-500/10' : 'border-sky-400/40 bg-sky-500/10'}`}
           >
             <div className="flex items-start justify-between gap-3">
@@ -133,22 +235,48 @@ export function TodayStops({
               </div>
             </div>
 
-            <p className="mt-2 text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground">{load.reference}</span>
-              {load.customer ? ` · ${load.customer}` : ''}
-            </p>
+            {/* The numbers the shipper and the office will ask for, in the order they ask. */}
+            <dl className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-background/50 px-3 py-2">
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">BCAT PRO #</dt>
+                <dd className="text-base font-bold tabular-nums text-foreground">{load.reference}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">PO #</dt>
+                <dd className="truncate text-base font-bold tabular-nums text-foreground">{load.poNumber || '—'}</dd>
+              </div>
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">PU #</dt>
+                <dd className="truncate text-base font-bold tabular-nums text-foreground">{load.pickupNumber || '—'}</dd>
+              </div>
+            </dl>
+            {load.customer && <p className="mt-1.5 text-sm text-muted-foreground">{load.customer}</p>}
+
+            {showEta && (
+              <p className="mt-3 flex items-center gap-2 rounded-lg bg-background/50 px-3 py-2 text-sm">
+                <Navigation className="h-4 w-4 shrink-0 text-emerald-300" aria-hidden="true" />
+                <span className="text-foreground">
+                  <span className="font-bold">ETA {clock(stop.etaAt)}</span>
+                  <span className="text-muted-foreground">
+                    {stop.etaBasis === 'motive' ? ' · from your truck’s location' : ' · the appointment time'}
+                  </span>
+                </span>
+              </p>
+            )}
+
+            <StopProgress item={item} busy={busyKey === keyOf(item)} onEvent={(ev) => void sendEvent(item, ev)} />
 
             <DetentionBox
               item={item}
               onChange={(next) => {
-                setOverrides((o) => ({ ...o, [`${next.load.id}#${next.stop.id}`]: next.stop.detention }))
+                patch(next, { detention: next.stop.detention })
                 onChange()
               }}
             />
 
-            {delivery && (
+            {delivery && stop.departedAt && (
               <Button
-                className="mt-3 h-14 w-full gap-2 text-base font-bold"
+                className="mt-3 h-12 w-full gap-2 text-base font-semibold"
                 variant={podOk ? 'outline' : 'default'}
                 onClick={() => onSendPod(load)}
               >

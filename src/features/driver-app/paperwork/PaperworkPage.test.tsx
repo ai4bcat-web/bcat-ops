@@ -7,6 +7,7 @@ const api = {
   fetchPaperwork: vi.fn(),
   fetchPaperworkWeeks: vi.fn(),
   setStopDetention: vi.fn(),
+  recordStopEvent: vi.fn(),
   fetchSubmissions: vi.fn(),
   fetchRecentLoads: vi.fn(),
   // The PM line on the home screen reads the driver's profile.
@@ -165,7 +166,7 @@ function stop(id: string, type: 'pickup' | 'delivery', date: string, over: Recor
   return {
     id, type, sequence: type === 'pickup' ? 0 : 1, name: type === 'pickup' ? 'Batory Oakley' : 'Eagle Foods',
     city: 'Chicago', state: 'IL', appt: `${date}T17:00:00.000Z`, apptType: 'exact', apptEnd: null,
-    date, detention: false, ...over,
+    date, detention: false, yours: true, arrivedAt: null, departedAt: null, etaAt: null, etaBasis: null, ...over,
   }
 }
 
@@ -195,10 +196,11 @@ describe("today's sheet", () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(2)
     expect(screen.getAllByText(/2 hours or longer from your appointment time/)).toHaveLength(2)
     expect(screen.getAllByText(/in and out times on the BOL/)).toHaveLength(2)
-    // Today's sheet: one Send POD, on the delivery. (The week list below has its own.)
+    // Each card leads with its status button; the POD button appears once delivered.
     const section = screen.getByText('Today').parentElement!
-    expect(section.querySelectorAll('button')).toHaveLength(1)
-    expect(section.textContent).toMatch(/Send POD/)
+    const names = [...section.querySelectorAll('button')].map((b) => b.textContent?.trim())
+    expect(names).toEqual(['On site at pickup', 'On site at delivery'])
+    expect(section.textContent).not.toMatch(/Send POD/)
   })
 
   it('flags detention at the stop the driver ticked', async () => {
@@ -210,6 +212,78 @@ describe("today's sheet", () => {
     fireEvent.click(screen.getAllByRole('checkbox')[1])
     await waitFor(() => expect(api.setStopDetention).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-de', detention: true }))
     await waitFor(() => expect(screen.getByText(/Detention — flagged/)).toBeTruthy())
+  })
+
+  it('shows the BCAT PRO #, the PO # and the PU # on every card', async () => {
+    todayWeek([load({ poNumber: '212775896', pickupNumber: '1750128', stops: [stop('st-pu', 'pickup', '2026-10-07')] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText('BCAT PRO #')).toBeTruthy(), { timeout: 5000 })
+    const card = screen.getByText('BCAT PRO #').closest('li')!
+    expect(card.textContent).toMatch(/14538/)
+    expect(card.textContent).toMatch(/PO #\s*212775896/)
+    expect(card.textContent).toMatch(/PU #\s*1750128/)
+  })
+
+  it('walks a pickup from On site to Departed, stamping each on the load', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.recordStopEvent.mockResolvedValueOnce({ at: '2026-10-07T14:12:00.000Z', eta: null })
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07')] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /On site at pickup/ })).toBeTruthy(), { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: /On site at pickup/ }))
+    await waitFor(() => expect(api.recordStopEvent).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-pu', event: 'ARRIVED' }))
+    await waitFor(() => expect(screen.getByText(/On site since 9:12 AM/)).toBeTruthy())
+    api.recordStopEvent.mockResolvedValueOnce({ at: '2026-10-07T15:40:00.000Z', eta: { stopId: 'st-de', etaAt: '2026-10-07T16:05:00.000Z', basis: 'motive' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Departed$/ }))
+    await waitFor(() => expect(api.recordStopEvent).toHaveBeenLastCalledWith({ loadId: 'load-1', stopId: 'st-pu', event: 'DEPARTED' }))
+    await waitFor(() => expect(screen.getByText(/Departed 10:40 AM/)).toBeTruthy())
+  })
+
+  it('Delivered sends the event and opens the POD scanner for that load', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const { Routes, Route, useLocation } = await import('react-router-dom')
+    api.recordStopEvent.mockResolvedValueOnce({ at: '2026-10-07T19:10:00.000Z', eta: null })
+    todayWeek([load({ stops: [stop('st-de', 'delivery', '2026-10-07', { arrivedAt: '2026-10-07T18:30:00.000Z' })] })])
+    const Scanner = () => { const loc = useLocation(); return <div>SCANNER {loc.search}</div> }
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="/driver/scan" element={<Scanner />} />
+          <Route path="*" element={<PaperworkPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: /Delivered — send POD/ })).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByRole('button', { name: /On site at delivery/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Delivered — send POD/ }))
+    await waitFor(() => expect(api.recordStopEvent).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-de', event: 'DEPARTED' }))
+    // Straight into the scanner, on this load.
+    await waitFor(() => expect(screen.getByText(/SCANNER/).textContent).toMatch(/kind=pod.*ref=14538.*loadId=load-1/))
+  })
+
+  it('shows the ETA on a delivery the driver is rolling toward, and says where it came from', async () => {
+    todayWeek([load({ stops: [
+      stop('st-pu', 'pickup', '2026-10-07', { departedAt: '2026-10-07T15:40:00.000Z' }),
+      stop('st-de', 'delivery', '2026-10-07', { etaAt: '2026-10-07T16:05:00.000Z', etaBasis: 'motive' }),
+    ] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/ETA 11:05 AM/)).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText(/from your truck/)).toBeTruthy()
+  })
+
+  it('says the appointment is the estimate when another driver delivers', async () => {
+    todayWeek([load({ stops: [stop('st-de', 'delivery', '2026-10-07', { etaAt: '2026-10-07T17:00:00.000Z', etaBasis: 'appt' })] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/ETA 12:00 PM/)).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText(/the appointment time/)).toBeTruthy()
+  })
+
+  it("does not put another driver's delivery on this driver's sheet", async () => {
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07'), stop('st-de', 'delivery', '2026-10-07', { yours: false })] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getAllByText('Pickup')).toHaveLength(1)
+    expect(screen.queryByText('Delivery')).toBeNull()
   })
 
   it('says so when nothing is scheduled today', async () => {

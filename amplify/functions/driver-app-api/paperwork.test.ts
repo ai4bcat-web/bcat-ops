@@ -147,6 +147,31 @@ describe('the detention flag the driver sets at a stop', () => {
     expect(DETENTION_FREE_HOURS).toBe(2)
   })
 
+  it('carries the PO (the TMS ID / PO field) and the pickup number for the driver', () => {
+    const p = buildPaperworkLoad(load({ tmsId: '212775896', pickupNumber: '1750128' }), [], [])
+    expect(p.poNumber).toBe('212775896')
+    expect(p.pickupNumber).toBe('1750128')
+  })
+
+  it("marks which stops are the viewing driver's, and passes their events and ETA through", () => {
+    const l = load({
+      stops: [
+        { id: 'st-pu', type: 'pickup', sequence: 0, name: 'A', city: 'Chicago, IL', appt: '2026-10-05T17:00:00.000Z', driverId: DRIVER, arrivedAt: '2026-10-05T16:50:00.000Z', departedAt: '2026-10-05T17:30:00.000Z' },
+        { id: 'st-de', type: 'delivery', sequence: 1, name: 'B', city: 'Waukegan, IL', appt: '2026-10-05T20:00:00.000Z', driverId: 'drv-other', etaAt: '2026-10-05T20:00:00.000Z', etaBasis: 'appt' },
+      ],
+    })
+    const p = buildPaperworkLoad(l, [], [], DRIVER)
+    expect(p.stops[0]).toMatchObject({ yours: true, arrivedAt: '2026-10-05T16:50:00.000Z', departedAt: '2026-10-05T17:30:00.000Z' })
+    expect(p.stops[1]).toMatchObject({ yours: false, etaAt: '2026-10-05T20:00:00.000Z', etaBasis: 'appt' })
+    // Nobody looking: nothing is anybody's.
+    expect(buildPaperworkLoad(l, [], []).stops.every((s) => !s.yours)).toBe(true)
+  })
+
+  it("a stop with no driver on it is the viewer's when they are the only driver on the load", () => {
+    const p = buildPaperworkLoad(twoStops(), [], [], DRIVER)
+    expect(p.stops.map((s) => s.yours)).toEqual([true, true])
+  })
+
   it('puts each stop on its Chicago calendar day, with the appointment type the app prints', () => {
     const p = buildPaperworkLoad(twoStops(), [], [])
     // 17:00Z on 5 Oct is noon Chicago; 05:00Z on 6 Oct is midnight Chicago — still the 6th.

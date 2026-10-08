@@ -58,6 +58,7 @@ export interface PaperworkLoadLike {
   id: string
   aljexId?: string | null
   tmsId?: string | null
+  pickupNumber?: string | null
   customer?: string | null
   miles?: number | null
   pickupAppt?: string | null
@@ -100,6 +101,14 @@ export interface PaperworkStop {
    * the appointment. The in/out times live on the BOL, not here — see DETENTION_FREE_HOURS.
    */
   detention: boolean
+  /** Is this stop the viewing driver's to work? Their own, or the only driver on the load. */
+  yours: boolean
+  /** Facility events the driver reported from the app. See src/lib/stopEvents.ts. */
+  arrivedAt: string | null
+  departedAt: string | null
+  /** Expected arrival, once the pickup has been departed; null until then or when unknown. */
+  etaAt: string | null
+  etaBasis: 'motive' | 'appt' | null
 }
 
 export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'
@@ -116,6 +125,10 @@ export interface PaperworkLoad {
   id: string
   /** What the driver and the office both call it — the PRO. */
   reference: string
+  /** The customer's PO — the "TMS ID / PO" field on the load. */
+  poNumber: string | null
+  /** The pickup number the shipper issued. */
+  pickupNumber: string | null
   customer: string | null
   deliveryAppt: string | null
   pickupAppt: string | null
@@ -239,6 +252,20 @@ export function worstLegibility(values: Array<string | null | undefined>): PodLe
   return 'UNKNOWN'
 }
 
+/**
+ * Whose stop this is: the stop's own driver, the legacy pickup/delivery field for its
+ * type, else the only driver on the load — the same reading delivererOf uses for the ETA.
+ */
+export function stopOwner(load: PaperworkLoadLike, stops: Stop[], stop: Stop): string | null {
+  if (stop.driverId) return stop.driverId
+  const legacy = stop.type === 'pickup' ? load.pickupDriverId : load.deliveryDriverId
+  if (legacy) return legacy
+  const drivers = new Set(stops.map((s) => s.driverId).filter((d): d is string => !!d))
+  if (load.pickupDriverId) drivers.add(load.pickupDriverId)
+  if (load.deliveryDriverId) drivers.add(load.deliveryDriverId)
+  return drivers.size === 1 ? [...drivers][0] : null
+}
+
 /** Has the driver flagged detention at this stop? Absent row, or an unflagged one, is no. */
 export function stopDetention(rows: LoadTimeRow[], stopId: string): boolean {
   return rows.some((r) => r.stopId === stopId && r.detention === true)
@@ -248,8 +275,11 @@ export function buildPaperworkLoad(
   load: PaperworkLoadLike,
   podDocs: PodDocRow[],
   flags: LoadTimeRow[],
+  /** Who is looking: decides `yours` on each stop. Absent = nobody's. */
+  viewerDriverId?: string | null,
 ): PaperworkLoad {
-  const stops: PaperworkStop[] = (getStops(load as unknown as Load) as Stop[]).map((s, i) => ({
+  const rawStops = getStops(load as unknown as Load) as Stop[]
+  const stops: PaperworkStop[] = rawStops.map((s, i) => ({
     id: s.id,
     type: String(s.type ?? ''),
     sequence: typeof s.sequence === 'number' ? s.sequence : i,
@@ -262,6 +292,11 @@ export function buildPaperworkLoad(
     apptEnd: s.apptEnd ?? null,
     date: s.appt ? chicagoDateStr(s.appt) || null : null,
     detention: stopDetention(flags, s.id),
+    yours: !!viewerDriverId && stopOwner(load, rawStops, s) === viewerDriverId,
+    arrivedAt: s.arrivedAt ?? null,
+    departedAt: s.departedAt ?? null,
+    etaAt: s.etaAt ?? null,
+    etaBasis: s.etaBasis ?? null,
   }))
 
   const pages = podDocs.filter((d) => (d.kind ?? '').toUpperCase() === 'POD')
@@ -281,6 +316,8 @@ export function buildPaperworkLoad(
   return {
     id: load.id,
     reference: referenceOf(load),
+    poNumber: load.tmsId?.trim() || null,
+    pickupNumber: load.pickupNumber?.trim() || null,
     customer: load.customer?.trim() || null,
     deliveryAppt: load.deliveryAppt ?? null,
     pickupAppt: load.pickupAppt ?? null,
