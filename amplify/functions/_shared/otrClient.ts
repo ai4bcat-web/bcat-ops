@@ -398,7 +398,7 @@ export class OtrClient {
     }
     const message = (raw as { message?: string } | null)?.message ?? ''
     return {
-      decision: normalizeDecision(message),
+      decision: decisionFrom(raw, message),
       message,
       brokerName: brokerNameFrom(raw),
       raw,
@@ -842,6 +842,29 @@ export function brokerNameFrom(raw: unknown): string | null {
     }
   }
   return null
+}
+
+/**
+ * The verdict, wherever OTR put it.
+ *
+ * v1 said it in `message`. v2 answers a structured record — `BrokerTestResult: 'Approved'`
+ * with a `NoBuy` flag — and no message at all, which read as UNKNOWN on every row (Fox
+ * Transportation, MC 592002, 8 Oct: approved at OTR, "unknown" in the queue). NoBuy wins:
+ * a broker OTR will not buy from is not approved whatever the test result says.
+ */
+export function decisionFrom(raw: unknown, message: string): BrokerDecision {
+  if (raw && typeof raw === 'object') {
+    const lower = new Map(Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k.toLowerCase(), v]))
+    if (lower.get('nobuy') === true) return 'NOT APPROVED'
+    for (const key of ['brokertestresult', 'decision', 'result', 'status']) {
+      const v = lower.get(key)
+      if (typeof v === 'string' && v.trim()) {
+        const d = normalizeDecision(v)
+        if (d !== 'UNKNOWN') return d
+      }
+    }
+  }
+  return normalizeDecision(message)
 }
 
 export function normalizeDecision(message: string): BrokerDecision {
