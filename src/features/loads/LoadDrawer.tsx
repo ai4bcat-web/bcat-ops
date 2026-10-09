@@ -20,7 +20,8 @@ import { useAuth } from '@/hooks/useAuth'
 import { LoadPods } from '@/features/pods/LoadPods'
 import { LoadDriverDocs } from './LoadDriverDocs'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
-import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm } from '@/lib/apiClient'
+import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm, createLocation } from '@/lib/apiClient'
+import { matchStopLocation, locationInputForStop } from '@/lib/locationAutoSave'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
 import { loadSchemaFor, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
@@ -121,6 +122,8 @@ function tenderStopForms(
    * it did before appointment prefill existed; only the appointment is left for a person.
    */
   skipAppointments = false,
+  /** The directory, so a facility seen before arrives already linked — hours, notes and all. */
+  locations: LocationRecord[] = [],
 ): StopFormValue[] {
   const ordered = [
     ...tender.stops.filter((s) => s.type === 'pickup'),
@@ -141,6 +144,16 @@ function tenderStopForms(
      */
     const when = skipAppointments ? '' : (st.dateStr ?? preDate ?? '')
     const time = skipAppointments ? undefined : st.time
+    const address = {
+      ...base.address,
+      street: st.street ?? null,
+      city: st.city ?? null,
+      state: st.state ?? null,
+      zip: st.zip ?? null,
+    }
+    // A place we have filed before is linked at prefill, so the stop opens with the record
+    // the office already keeps — the point of filing it the first time.
+    const known = matchStopLocation({ type: st.type, name: st.name, city: cityState, address }, locations)
     return {
       ...base,
       sequence: i,
@@ -148,13 +161,8 @@ function tenderStopForms(
       apptType: time ? ('exact' as const) : base.apptType,
       ...(st.name ? { name: st.name } : {}),
       ...(cityState ? { city: cityState } : {}),
-      address: {
-        ...base.address,
-        street: st.street ?? null,
-        city: st.city ?? null,
-        state: st.state ?? null,
-        zip: st.zip ?? null,
-      },
+      address: known ? bookedAddressSnapshot(known) : address,
+      ...(known ? { locationId: known.id } : {}),
     }
   })
 }
@@ -1371,7 +1379,7 @@ export function LoadDrawer() {
         aljexId: '', tmsId: tender?.reference ?? '',
         pickupNumber: tender?.pickupNumber ?? '',
         stops: tender
-          ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory)
+          ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory, formDirectory.locations)
           : emptyStopForms(preDate, createPreFill?.driverId ?? null),
         readyToInvoice: false,
         /*
@@ -1479,6 +1487,42 @@ export function LoadDrawer() {
     }
   }
 
+  /*
+   * Every stop leaves with a directory location on it.
+   *
+   * A stop the dispatcher linked keeps its link. One they only typed is matched to the
+   * directory (same name in the same city, or the same street) and, when nothing matches,
+   * filed as a new location — so the next tender from that shipper arrives knowing its
+   * hours, its dock notes and what drivers said about it. Filing is best-effort: a
+   * directory hiccup must never stop a load from saving.
+   */
+  const linkStopsToDirectory = async (stops: Stop[]): Promise<Stop[]> => {
+    let filed = 0
+    let locations = formDirectory.locations
+    const out: Stop[] = []
+    for (const stop of stops) {
+      if (stop.locationId || !(stop.name ?? '').trim()) { out.push(stop); continue }
+      const known = matchStopLocation(stop, locations)
+      if (known) { out.push({ ...stop, locationId: known.id, address: stop.address ?? bookedAddressSnapshot(known) }); continue }
+      const input = locationInputForStop(stop)
+      if (!input) { out.push(stop); continue }
+      try {
+        const created = await createLocation(input)
+        locations = [...locations, created]
+        filed++
+        out.push({ ...stop, locationId: created.id })
+      } catch (err) {
+        console.warn('[LoadDrawer] could not file the stop as a location', { name: stop.name, err })
+        out.push(stop)
+      }
+    }
+    if (filed > 0) {
+      void formDirectory.refresh()
+      toast.message(`${filed} new location${filed === 1 ? '' : 's'} filed in the directory`)
+    }
+    return out
+  }
+
   const saveLoad = async (values: LoadFormValues) => {
     const conflict = proConflict(loads, values.aljexId, isCreate ? null : load)
     if (conflict.kind === 'block') {
@@ -1496,10 +1540,10 @@ export function LoadDrawer() {
     // mirror fields (withDerivedLegacy) — the form never sets them directly.
     const prevStops = load && !isCreate ? getStops(load) : []
     const prevById = new Map(prevStops.map((st) => [st.id, st]))
-    const stops = values.stops.map((s, i) => {
+    const stops = await linkStopsToDirectory(values.stops.map((s, i) => {
       const was = prevById.get(s.id)
       return stopFormToStop(s, i, was && { type: was.apptType, value: formatDateTimeInput(was.appt) }, was)
-    })
+    }))
     // Slack notices are decided BEFORE the save, so the comparison is against what was on
     // screen rather than what we just wrote.
     const notices = apptNotices(stops, prevStops)
@@ -1694,12 +1738,25 @@ export function LoadDrawer() {
                   const where = [s.name, s.city].filter(Boolean).join(' · ')
                   const when = apptLabel(s.appt, s.apptType, s.apptEnd)
                   const who = driverName(s.driverId)
+                  const place = s.locationId ? formDirectory.locations.find((l) => l.id === s.locationId) : undefined
+                  const notes = place?.driverNotes ?? []
                   return (
-                    <ReadonlyField
-                      key={s.id}
-                      label={label}
-                      value={[where, when, who !== '—' ? `Driver: ${who}` : null].filter(Boolean).join('  ·  ')}
-                    />
+                    <div key={s.id}>
+                      <ReadonlyField
+                        label={label}
+                        value={[where, when, who !== '—' ? `Driver: ${who}` : null].filter(Boolean).join('  ·  ')}
+                      />
+                      {/* What the directory knows about the place — the reason it is filed. */}
+                      {place && (place.hours || place.dockNotes || notes.length > 0) && (
+                        <div className="-mt-1 mb-2 ml-1 space-y-0.5 text-xs text-muted-foreground">
+                          {place.hours && <div><span className="font-medium text-foreground">Hours:</span> {place.hours}</div>}
+                          {place.dockNotes && <div><span className="font-medium text-foreground">Dock:</span> {place.dockNotes}</div>}
+                          {notes.slice(-3).map((n, i) => (
+                            <div key={i}><span className="font-medium text-foreground">{n.by}:</span> {n.text}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )
                 })
               })()}

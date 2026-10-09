@@ -106,12 +106,22 @@ export interface PaperworkStop {
   detention: boolean
   /** Is this stop the viewing driver's to work? Their own, or the only driver on the load. */
   yours: boolean
+  /** The directory record behind the stop, when it is linked: what the office knows and what drivers said. */
+  location: PaperworkStopLocation | null
   /** Facility events the driver reported from the app. See src/lib/stopEvents.ts. */
   arrivedAt: string | null
   departedAt: string | null
   /** Expected arrival, once the pickup has been departed; null until then or when unknown. */
   etaAt: string | null
   etaBasis: 'motive' | 'appt' | null
+}
+
+export interface PaperworkStopLocation {
+  id: string
+  hours: string | null
+  dockNotes: string | null
+  notes: string | null
+  driverNotes: Array<{ at: string; by: string; text: string }>
 }
 
 export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'
@@ -297,6 +307,8 @@ export function buildPaperworkLoad(
     apptEnd: s.apptEnd ?? null,
     date: s.appt ? chicagoDateStr(s.appt) || null : null,
     detention: stopDetention(flags, s.id),
+    // Filled by the handler from the Location table; the pure builder knows only the id.
+    location: null,
     yours: !!viewerDriverId && stopOwner(load, rawStops, s) === viewerDriverId,
     arrivedAt: s.arrivedAt ?? null,
     departedAt: s.departedAt ?? null,

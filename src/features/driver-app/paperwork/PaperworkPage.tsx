@@ -25,6 +25,7 @@ import { useDriverPm } from '../useDriverProgram'
 import { PmGauge } from './PmGauge'
 import { stopsForDay } from './daySheet'
 import { TruckLine } from '../TruckPicker'
+import { ReportIssue } from '../ReportIssue'
 
 /**
  * When this driver's truck is next due a PM.
@@ -113,6 +114,9 @@ export function PaperworkPage() {
 
       {/* First thing in the morning: which truck, so the ELD and the map follow the driver. */}
       <TruckLine />
+
+      {/* Something wrong with the truck goes to the shop from here, as a task on the unit. */}
+      <ReportIssue />
 
       <PmLine />
 

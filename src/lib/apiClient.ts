@@ -951,7 +951,7 @@ const LOCATION_FIELDS = `
   id name city customerName apptContactName apptContactEmail apptContactPhone notes
   street state zip country lat lng timezone geohash6 placeId geocodedAt geocodeExpiresAt
   facilityType hours apptRule apptLeadTimeHours dockNotes lumperNotes detentionNotes
-  contacts customerIds aliases normalizedName normalizedAddress mergedIntoId mergeJobId active
+  contacts driverNotes customerIds aliases normalizedName normalizedAddress mergedIntoId mergeJobId active
   createdAt updatedAt
 `
 const DIVISION_FIELDS = `

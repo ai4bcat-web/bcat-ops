@@ -51,6 +51,14 @@ export interface LocationContact {
   phone?: string | null
 }
 
+/** One remark a driver left about a facility from the driver app. */
+export interface LocationDriverNote {
+  at: string
+  driverId: string
+  by: string
+  text: string
+}
+
 export interface LocationRecord extends Address {
   id: string
   name: string
@@ -74,6 +82,7 @@ export interface LocationRecord extends Address {
   lumperNotes?: string | null
   detentionNotes?: string | null
   contacts?: LocationContact[] | null
+  driverNotes?: LocationDriverNote[] | null
   customerIds?: string[] | null
   aliases?: string[] | null
   normalizedName?: string | null

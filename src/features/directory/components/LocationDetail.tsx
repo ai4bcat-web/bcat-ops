@@ -55,6 +55,23 @@ export function LocationDetail({ location }: { location: LocationRecord }) {
         )}
       </div>
       <div>
+        {/* What drivers said, newest first. Written from the driver app; read here. */}
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          Driver comments · {(location.driverNotes ?? []).length}
+        </div>
+        {(location.driverNotes ?? []).length === 0 ? (
+          <Note>No driver has left a note about this place yet. They can, from a stop in the driver app.</Note>
+        ) : (
+          <ul style={{ margin: '6px 0 12px', padding: 0, listStyle: 'none', fontSize: 12 }}>
+            {[...(location.driverNotes ?? [])].reverse().map((n, i) => (
+              <li key={i} style={{ padding: '4px 0', borderTop: '1px solid var(--ds-border, #e5e7eb)', color: 'var(--ds-t2)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--ds-t1)' }}>{n.by}</span>
+                <span style={{ color: 'var(--ds-t3)' }}> · {formatDateTime(n.at)}</span>
+                <div>{n.text}</div>
+              </li>
+            ))}
+          </ul>
+        )}
         <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--ds-t2)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
           Load history · {history.length}
         </div>

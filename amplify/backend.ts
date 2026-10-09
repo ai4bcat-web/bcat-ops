@@ -294,6 +294,7 @@ const driverApiPodDocumentTable = backend.data.resources.tables['PodDocument']
 // last PM; TruckLocation holds Motive's odometer. Read-only — the app never edits either.
 const driverApiEquipmentTable = backend.data.resources.tables['Equipment']
 const driverApiTruckLocationTable = backend.data.resources.tables['TruckLocation']
+const driverApiMaintenanceTaskTable = backend.data.resources.tables['MaintenanceTask']
 
 // The driver API is internet-facing (Function URL, auth handled in-handler), so it gets
 // read-only access to the roster and pay tables it reports from. Only the two submission
@@ -323,6 +324,8 @@ const driverApiReadOnlyArns = [
   `${driverApiEquipmentTable.tableArn}/index/*`,
   driverApiTruckLocationTable.tableArn,
   `${driverApiTruckLocationTable.tableArn}/index/*`,
+  driverApiMaintenanceTaskTable.tableArn,
+  `${driverApiMaintenanceTaskTable.tableArn}/index/*`,
 ]
 
 const driverApiWritableArns = [
@@ -377,6 +380,14 @@ driverApiFn.addToRolePolicy(
     resources: [driverApiDriverTable.tableArn, driverApiEquipmentTable.tableArn],
   }),
 )
+// A driver's note about a facility is appended to the directory record (driverNotes only).
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:UpdateItem'], resources: [driverApiLocationTable.tableArn] }),
+)
+// A driver reports a truck problem: one new MaintenanceTask on their own unit, nothing else.
+driverApiFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['dynamodb:PutItem'], resources: [driverApiMaintenanceTaskTable.tableArn] }),
+)
 driverApiFn.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] }),
 )
@@ -399,6 +410,7 @@ driverApiFn.addEnvironment('LOCATION_TABLE_NAME', driverApiLocationTable.tableNa
 driverApiFn.addEnvironment('POD_DOCUMENT_TABLE_NAME', driverApiPodDocumentTable.tableName)
 driverApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', driverApiEquipmentTable.tableName)
 driverApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', driverApiTruckLocationTable.tableName)
+driverApiFn.addEnvironment('MAINTENANCE_TASK_TABLE_NAME', driverApiMaintenanceTaskTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_DEDUCTION_TABLE_NAME', driverApiDeductionTable.tableName)
 driverApiFn.addEnvironment('DRIVER_PAY_CREDIT_TABLE_NAME', driverApiCreditTable.tableName)
 driverApiFn.addEnvironment('FUEL_TRANSACTION_TABLE_NAME', driverApiFuelTxTable.tableName)

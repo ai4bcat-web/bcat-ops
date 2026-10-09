@@ -111,6 +111,7 @@ const LOCATION_TABLE_NAME = process.env.LOCATION_TABLE_NAME ?? ''
 const POD_DOCUMENT_TABLE_NAME = process.env.POD_DOCUMENT_TABLE_NAME ?? ''
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME ?? ''
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME ?? ''
+const MAINTENANCE_TASK_TABLE = process.env.MAINTENANCE_TASK_TABLE_NAME ?? ''
 const MOTIVE_API_KEY = process.env.MOTIVE_API_KEY ?? ''
 const MOTIVE_BASE = 'https://api.gomotive.com/v1'
 const TIME_CLOCK_TABLE = process.env.TIME_CLOCK_TABLE_NAME ?? ''
@@ -927,6 +928,12 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'trucks' && !segments[1]) {
     return { path: '/trucks' }
   }
+  if (segments[0] === 'paperwork' && segments[1] === 'location-note') {
+    return { path: '/paperwork/location-note' }
+  }
+  if (segments[0] === 'maintenance-tasks' && !segments[1]) {
+    return { path: '/maintenance-tasks' }
+  }
   if (segments[0] === 'me' && segments[1] === 'truck') {
     return { path: '/me/truck' }
   }
@@ -1643,6 +1650,18 @@ interface EquipmentRow {
   motiveVehicleNumber?: string | null
 }
 
+interface MaintenanceTaskRow {
+  id: string
+  equipmentId: string
+  title: string
+  priority?: string | null
+  status?: string | null
+  notes?: string | null
+  dueDate?: string | null
+  completedDate?: string | null
+  createdAt: string
+}
+
 /** The truck on the driver's row, as the app names it. Null when none is assigned. */
 async function truckForDriver(driver: DriverRow): Promise<{ id: string; unitNumber: string } | null> {
   const truckId = (driver.assignedTruckId ?? '').trim()
@@ -2250,6 +2269,64 @@ export const handler = async (event: FnUrlEvent) => {
     }
 
     /*
+     * The maintenance tasks on the driver's truck — what they reported and what the shop
+     * has open on that unit — so a driver can see their report was received and whether
+     * it is done. Same rows the office's Maintenance page shows for the unit.
+     */
+    if (method === 'GET' && path === '/maintenance-tasks') {
+      if (!MAINTENANCE_TASK_TABLE) return reply(503, { error: 'Maintenance is not configured' })
+      const truck = await truckForDriver(driver)
+      if (!truck) return reply(200, { truck: null, tasks: [] })
+      const rows = await scan<MaintenanceTaskRow>(MAINTENANCE_TASK_TABLE, 'equipmentId = :e', {}, { ':e': truck.id })
+      const tasks = rows
+        .map((t) => ({
+          id: t.id, title: t.title, priority: t.priority ?? 'med', status: t.status ?? 'upcoming',
+          notes: t.notes ?? null, dueDate: t.dueDate ?? null, completedDate: t.completedDate ?? null,
+          createdAt: t.createdAt, reportedByMe: (t.notes ?? '').includes(`[driver:${driver.id}]`),
+        }))
+        .sort((a, b) => (a.status === b.status ? b.createdAt.localeCompare(a.createdAt) : a.status === 'upcoming' ? -1 : 1))
+      return reply(200, { truck, tasks })
+    }
+
+    /*
+     * A driver reports a problem with their truck. It becomes an ordinary maintenance task
+     * on the unit — the same row the office creates from the Maintenance page — tagged in
+     * its notes with who reported it, so the shop sees it where it already looks.
+     */
+    if (method === 'POST' && path === '/maintenance-tasks') {
+      if (!MAINTENANCE_TASK_TABLE) return reply(503, { error: 'Maintenance is not configured' })
+      const body = JSON.parse(event.body || '{}') as { title?: string; notes?: string; priority?: string; truckId?: string }
+      const title = (body.title ?? '').trim().slice(0, 200)
+      if (!title) return reply(400, { error: 'say what the problem is' })
+      const priority = body.priority === 'high' || body.priority === 'low' ? body.priority : 'med'
+      let truck: { id: string; unitNumber: string } | null = null
+      if (body.truckId) {
+        const picked = (await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: body.truckId.trim() } }))).Item as EquipmentRow | undefined
+        if (picked && picked.active !== false) truck = { id: picked.id, unitNumber: String(picked.unitNumber ?? '').trim() }
+      } else {
+        truck = await truckForDriver(driver)
+      }
+      if (!truck) return reply(400, { error: 'Pick your truck first, so the shop knows which unit' })
+      const now = nowIso()
+      const details = (body.notes ?? '').trim().slice(0, 2000)
+      const task = {
+        __typename: 'MaintenanceTask',
+        id: `task-${Date.now()}-${randomUUID().slice(0, 8)}`,
+        equipmentId: truck.id,
+        title,
+        priority,
+        status: 'upcoming',
+        autoDot: false,
+        notes: `Reported by ${driver.name} from the driver app on ${now.slice(0, 10)}.${details ? `\n${details}` : ''}\n[driver:${driver.id}]`,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await ddb.send(new PutCommand({ TableName: MAINTENANCE_TASK_TABLE, Item: task, ConditionExpression: 'attribute_not_exists(id)' }))
+      console.log('[driver-app-api] maintenance task reported', { driverId, truck: truck.unitNumber, title, priority })
+      return reply(200, { task: { id: task.id, title, priority, status: 'upcoming', createdAt: now, truck: { id: truck.id, unitNumber: String(truck.unitNumber ?? '').trim() } } })
+    }
+
+    /*
      * The trucks a driver can pick from at the start of the day. Every active truck, who
      * is in it now, and whether it has a Motive gateway — the point of picking is that the
      * ELD logs land on the right name.
@@ -2536,25 +2613,40 @@ export const handler = async (event: FnUrlEvent) => {
        * lives on the Location record. The driver needs the street, so fill it from there.
        */
       if (path === '/paperwork' && LOCATION_TABLE_NAME) {
-        const cache = new Map<string, { street?: string | null; city?: string | null; state?: string | null; zip?: string | null } | null>()
+        type LocRow = { street?: string | null; city?: string | null; state?: string | null; zip?: string | null; hours?: string | null; dockNotes?: string | null; notes?: string | null; driverNotes?: unknown }
+        const cache = new Map<string, LocRow | null>()
         for (const l of built) {
           const raw = mine.find((x) => x.id === l.id)
           const rawStops = raw ? (getStops(raw as unknown as Load) as Stop[]) : []
           for (const st of l.stops) {
-            if (st.street) continue
             const locationId = rawStops.find((s) => s.id === st.id)?.locationId
             if (!locationId) continue
             if (!cache.has(locationId)) {
               try {
-                cache.set(locationId, ((await ddb.send(new GetCommand({ TableName: LOCATION_TABLE_NAME, Key: { id: locationId } }))).Item ?? null) as never)
+                cache.set(locationId, ((await ddb.send(new GetCommand({ TableName: LOCATION_TABLE_NAME, Key: { id: locationId } }))).Item ?? null) as LocRow | null)
               } catch { cache.set(locationId, null) }
             }
             const loc = cache.get(locationId)
             if (!loc) continue
-            st.street = loc.street?.trim() || null
-            st.city = st.city ?? (loc.city?.trim() || null)
-            st.state = st.state ?? (loc.state?.trim() || null)
-            st.zip = st.zip ?? (loc.zip?.trim() || null)
+            if (!st.street) {
+              st.street = loc.street?.trim() || null
+              st.city = st.city ?? (loc.city?.trim() || null)
+              st.state = st.state ?? (loc.state?.trim() || null)
+              st.zip = st.zip ?? (loc.zip?.trim() || null)
+            }
+            // Hours, dock notes and what other drivers said — the reason the place is on file.
+            const rawNotes = typeof loc.driverNotes === 'string' ? JSON.parse(loc.driverNotes) : loc.driverNotes
+            st.location = {
+              id: locationId,
+              hours: loc.hours?.trim() || null,
+              dockNotes: loc.dockNotes?.trim() || null,
+              notes: loc.notes?.trim() || null,
+              driverNotes: Array.isArray(rawNotes)
+                ? (rawNotes as Array<{ at?: string; by?: string; text?: string }>)
+                    .filter((n) => n && typeof n.text === 'string')
+                    .map((n) => ({ at: String(n.at ?? ''), by: String(n.by ?? ''), text: String(n.text) }))
+                : [],
+            }
           }
         }
       }
@@ -2662,6 +2754,38 @@ export const handler = async (event: FnUrlEvent) => {
       }))
       console.log('[driver-app-api] stop event', { driverId, loadId, stopId, event: ev, eta })
       return reply(200, { ok: true, loadId, stopId, event: ev, at: now, eta })
+    }
+
+    /*
+     * A driver leaves a note about a place — the gate code, which dock, who to ask for.
+     * Appended to the directory record so the next driver sent there reads it, and the
+     * office sees it on the location. Only for a stop on a load this driver is on.
+     */
+    if (method === 'POST' && path === '/paperwork/location-note') {
+      if (!LOCATION_TABLE_NAME) return reply(503, { error: 'The directory is not configured' })
+      const body = JSON.parse(event.body || '{}') as { loadId?: string; locationId?: string; text?: string }
+      const loadId = (body.loadId ?? '').trim()
+      const locationId = (body.locationId ?? '').trim()
+      const text = (body.text ?? '').trim().slice(0, 1000)
+      if (!loadId) return reply(400, { error: 'loadId is required' })
+      if (!locationId) return reply(400, { error: 'locationId is required' })
+      if (!text) return reply(400, { error: 'say something first' })
+      const found = await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))
+      const load = found.Item as PaperworkLoadLike | undefined
+      if (!load || !driverIsOnPaperworkLoad(load, driverId)) return reply(404, { error: 'load not found' })
+      if (!(getStops(load as unknown as Load) as Stop[]).some((s) => s.locationId === locationId)) {
+        return reply(404, { error: 'that place is not a stop on this load' })
+      }
+      const note = { at: nowIso(), driverId, by: driver.name, text }
+      await ddb.send(new UpdateCommand({
+        TableName: LOCATION_TABLE_NAME,
+        Key: { id: locationId },
+        UpdateExpression: 'SET driverNotes = list_append(if_not_exists(driverNotes, :empty), :note), updatedAt = :u',
+        ConditionExpression: 'attribute_exists(id)',
+        ExpressionAttributeValues: { ':empty': [], ':note': [note], ':u': nowIso() },
+      }))
+      console.log('[driver-app-api] location note', { driverId, locationId, loadId })
+      return reply(200, { ok: true, note: { at: note.at, by: note.by, text: note.text } })
     }
 
     /* The driver flags (or clears) detention at one stop. */

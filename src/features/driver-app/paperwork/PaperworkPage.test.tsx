@@ -8,6 +8,9 @@ const api = {
   fetchPaperworkWeeks: vi.fn(),
   setStopDetention: vi.fn(),
   recordStopEvent: vi.fn(),
+  addLocationNote: vi.fn(),
+  listMaintenanceTasks: vi.fn(),
+  reportMaintenanceTask: vi.fn(),
   fetchSubmissions: vi.fn(),
   fetchRecentLoads: vi.fn(),
   // The PM line on the home screen reads the driver's profile.
@@ -54,6 +57,7 @@ beforeEach(() => {
   })
   api.fetchSubmissions.mockResolvedValue([])
   api.fetchRecentLoads.mockResolvedValue([])
+  api.listMaintenanceTasks.mockResolvedValue({ truck: null, tasks: [] })
   // useDriverPm caches the profile at module level — clear it or one test's truck leaks
   // into the next, which is also the real sign-out requirement.
   clearCachedProgram()
@@ -333,6 +337,23 @@ describe("today's sheet", () => {
     await waitFor(() => expect(screen.getByText(/SCANNER/).textContent).toMatch(/kind=misc.*loadId=load-1.*stopId=st-pu.*stopLabel=Pickup/))
   })
 
+  it("shows the place's hours and what other drivers said, and lets this driver add a note", async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.addLocationNote.mockResolvedValue({ note: { at: '2026-10-07T20:00:00Z', by: 'Jason Smith', text: 'Gate code 4411' } })
+    todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-07', {
+      location: { id: 'loc-1', hours: 'Mon–Fri 6am–3pm', dockNotes: 'Check in at the guard shack', notes: null, driverNotes: [{ at: '2026-10-01T12:00:00Z', by: 'Chuck Best', text: 'Use dock 4' }] },
+    })] })])
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/Mon–Fri 6am–3pm/)).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText(/Check in at the guard shack/)).toBeTruthy()
+    expect(screen.getByText(/Use dock 4/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Add a note about this place/ }))
+    fireEvent.change(screen.getByLabelText(/Note about Batory Oakley/), { target: { value: 'Gate code 4411' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
+    await waitFor(() => expect(api.addLocationNote).toHaveBeenCalledWith({ loadId: 'load-1', locationId: 'loc-1', text: 'Gate code 4411' }))
+    await waitFor(() => expect(screen.getByText(/Gate code 4411/)).toBeTruthy())
+  })
+
   it('says so when nothing is scheduled today', async () => {
     todayWeek([load({ stops: [stop('st-pu', 'pickup', '2026-10-05'), stop('st-de', 'delivery', '2026-10-06')] })])
     renderPage()
@@ -492,5 +513,26 @@ describe('the PM line on the home screen', () => {
     api.fetchMe.mockRejectedValue(new Error('offline'))
     renderPage()
     await waitFor(() => expect(screen.getAllByText('14538')[0]).toBeTruthy(), { timeout: 5000 })
+  })
+})
+
+describe('reporting a truck problem', () => {
+  it('shows open issues on the truck and sends a new report to the shop', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Jason Smith', email: 'j@x.com', payGroup: 'LOCAL', program: 'PAPERWORK', active: true, pm: null, truck: { id: 'eq-3114', unitNumber: '3114' } })
+    api.listMaintenanceTasks.mockResolvedValue({ truck: { id: 'eq-3114', unitNumber: '3114' }, tasks: [
+      { id: 't1', title: 'Low beam out', priority: 'med', status: 'upcoming', notes: '', dueDate: null, completedDate: null, createdAt: '2026-10-06T12:00:00Z', reportedByMe: true },
+      { id: 't2', title: 'Oil change', priority: 'low', status: 'upcoming', notes: '', dueDate: null, completedDate: null, createdAt: '2026-10-05T12:00:00Z', reportedByMe: false },
+    ] })
+    api.reportMaintenanceTask.mockResolvedValue({ task: { id: 't3', title: 'Brakes squeal', priority: 'high', status: 'upcoming', createdAt: '2026-10-07T12:00:00Z', truck: { id: 'eq-3114', unitNumber: '3114' } } })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('2 open')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.getByText('Low beam out')).toBeTruthy()
+    expect(screen.queryByText('Oil change')).toBeNull() // the shop's own task is counted, not listed as the driver's
+    fireEvent.click(screen.getByRole('button', { name: /Report a problem/ }))
+    fireEvent.change(await screen.findByLabelText('The problem'), { target: { value: 'Brakes squeal' } })
+    fireEvent.click(screen.getByRole('button', { name: /Urgent/ }))
+    fireEvent.click(screen.getByRole('button', { name: /Send to the shop/ }))
+    await waitFor(() => expect(api.reportMaintenanceTask).toHaveBeenCalledWith({ title: 'Brakes squeal', notes: undefined, priority: 'high', truckId: 'eq-3114' }))
   })
 })

@@ -18,14 +18,14 @@
  * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
 import { useState } from 'react'
-import { Camera, Check, Eye, FileWarning, Image, Loader2, LogOut, MapPin, Navigation, PackageOpen, Paperclip, Truck } from 'lucide-react'
+import { Camera, Check, Clock, Eye, FileWarning, Image, Loader2, LogOut, MapPin, MessageSquare, Navigation, PackageOpen, Paperclip, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useTripDocs, type TripDoc } from '../settlement/useTripDocs'
 import { DocPreviewSheet } from '../settlement/DocPreviewSheet'
 import { apptTimeLabel } from '@/lib/date'
 import { errorText } from '@/lib/errorText'
-import { recordStopEvent, setStopDetention, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
+import { addLocationNote, recordStopEvent, setStopDetention, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
 
 import { DETENTION_HOURS, isDelivery, stopsForDay, type TodayStop } from './daySheet'
 
@@ -107,6 +107,79 @@ function PodStatus({ load, doc, onView }: { load: PaperworkLoad; doc: TripDoc | 
           <Eye className="h-5 w-5" aria-hidden="true" />
           View POD{doc.document.pageCount > 1 ? ` (${doc.document.pageCount} pages)` : ''}
         </Button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * What the office and other drivers know about this place, and a way to add to it.
+ * Hours and dock notes come from the directory; the comments are other drivers'.
+ */
+function PlaceNotes({ item, onAdded }: { item: TodayStop; onAdded: (note: { at: string; by: string; text: string }) => void }) {
+  const [text, setText] = useState('')
+  const [writing, setWriting] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const loc = item.stop.location
+  if (!loc) return null
+  const notes = loc.driverNotes ?? []
+
+  async function send() {
+    if (!text.trim()) return
+    setBusy(true)
+    try {
+      const res = await addLocationNote({ loadId: item.load.id, locationId: loc!.id, text: text.trim() })
+      onAdded(res.note)
+      setText('')
+      setWriting(false)
+      toast.success('Noted — the next driver here will see it')
+    } catch (err) {
+      toast.error(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-border bg-background/50 p-3 text-sm">
+      {loc.hours && (
+        <p className="flex items-start gap-2 text-foreground">
+          <Clock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span><span className="font-semibold">Hours:</span> {loc.hours}</span>
+        </p>
+      )}
+      {loc.dockNotes && <p className="mt-1 text-muted-foreground"><span className="font-semibold text-foreground">Dock:</span> {loc.dockNotes}</p>}
+      {loc.notes && <p className="mt-1 text-muted-foreground">{loc.notes}</p>}
+      {notes.length > 0 && (
+        <ul className="mt-2 flex flex-col gap-1">
+          {notes.slice(-5).map((n, i) => (
+            <li key={`${n.at}-${i}`} className="flex items-start gap-2 text-muted-foreground">
+              <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span><span className="font-semibold text-foreground">{n.by}:</span> {n.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {writing ? (
+        <div className="mt-2 flex flex-col gap-2">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Gate code, which dock, who to ask for…"
+            aria-label={`Note about ${item.stop.name ?? 'this place'}`}
+            className="min-h-[72px] w-full rounded-md border border-input bg-background p-2 text-sm text-foreground"
+          />
+          <div className="flex gap-2">
+            <Button className="h-10 flex-1 font-semibold" disabled={busy || !text.trim()} onClick={() => void send()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : 'Save note'}
+            </Button>
+            <Button variant="outline" className="h-10" disabled={busy} onClick={() => { setWriting(false); setText('') }}>Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setWriting(true)} className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+          <MessageSquare className="h-4 w-4" aria-hidden="true" /> Add a note about this place
+        </button>
       )}
     </div>
   )
@@ -321,6 +394,11 @@ export function TodayStops({
                 </span>
               </p>
             )}
+
+            <PlaceNotes
+              item={item}
+              onAdded={(note) => patch(item, { location: item.stop.location ? { ...item.stop.location, driverNotes: [...(item.stop.location.driverNotes ?? []), note] } : null })}
+            />
 
             <StopProgress item={item} busy={busyKey === keyOf(item)} onEvent={(ev) => void sendEvent(item, ev)} />
 

@@ -484,6 +484,14 @@ export interface PaperworkStop {
   apptEnd: string | null
   /** Chicago calendar day of the appointment, YYYY-MM-DD. */
   date: string | null
+  /** The directory record behind the stop: hours, dock notes, what drivers said. */
+  location?: {
+    id: string
+    hours: string | null
+    dockNotes: string | null
+    notes: string | null
+    driverNotes: Array<{ at: string; by: string; text: string }>
+  } | null
   /** The driver flagged detention here — two hours or more past the appointment. */
   detention: boolean
   /** This stop is the viewing driver's to work. */
@@ -592,6 +600,37 @@ export async function recordStopEvent(input: { loadId: string; stopId: string; e
   eta: { stopId: string; etaAt: string; basis: 'motive' | 'appt' } | null
 }> {
   return request('/paperwork/stop-event', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export interface DriverMaintenanceTask {
+  id: string
+  title: string
+  priority: 'high' | 'med' | 'low'
+  status: 'upcoming' | 'complete'
+  notes: string | null
+  dueDate: string | null
+  completedDate: string | null
+  createdAt: string
+  reportedByMe: boolean
+}
+
+/** The maintenance tasks open on the driver's truck, theirs and the shop's. */
+export async function listMaintenanceTasks(): Promise<{ truck: DriverTruck | null; tasks: DriverMaintenanceTask[] }> {
+  return request('/maintenance-tasks')
+}
+
+/** Report a problem with the truck. Becomes a task on the unit for the shop. */
+export async function reportMaintenanceTask(input: { title: string; notes?: string; priority?: 'high' | 'med' | 'low'; truckId?: string }): Promise<{
+  task: { id: string; title: string; priority: string; status: string; createdAt: string; truck: DriverTruck }
+}> {
+  return request('/maintenance-tasks', { method: 'POST', body: JSON.stringify(input) })
+}
+
+/** Leave a note about a place for the next driver and the office. */
+export async function addLocationNote(input: { loadId: string; locationId: string; text: string }): Promise<{
+  note: { at: string; by: string; text: string }
+}> {
+  return request('/paperwork/location-note', { method: 'POST', body: JSON.stringify(input) })
 }
 
 /** Flag or clear detention at one stop. The in/out times go on the BOL, not here. */

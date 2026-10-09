@@ -700,6 +700,9 @@ const schema = a.schema({
       lumperNotes: a.string(),
       detentionNotes: a.string(),
       contacts:    a.json(),          // LocationContact[]
+      // What drivers say about the place — gate, dock, who to ask for — written from the
+      // driver app (list_append by driver-app-api); staff edits never touch this field.
+      driverNotes: a.json(),          // LocationDriverNote[]
       customerIds: a.string().array(), // linked customers (many-to-many)
       aliases:     a.string().array(),
       normalizedName:    a.string(),   // dedupe by cleaned facility name

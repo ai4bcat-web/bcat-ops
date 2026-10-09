@@ -218,7 +218,12 @@ function makeMessage(overrides = {}) {
     getFrom() { return this.from; },
     getDate() { return this.date; },
     getPlainBody() { return plainBody; },
-    getAttachments() { return this.attachments; },
+    getAttachments(opts) {
+      // Gmail drops inline images when asked to; the bridge asks, because GmailAttachment
+      // has no content-disposition accessor to filter on afterwards.
+      const inline = opts && opts.includeInlineImages === false;
+      return inline ? this.attachments.filter((a) => a.disposition !== 'inline') : this.attachments;
+    },
     getThread() { return this._thread; },
   };
 }
