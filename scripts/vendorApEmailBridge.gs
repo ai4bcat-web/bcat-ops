@@ -332,12 +332,14 @@ function vendorApBuildPreparePayload_(message, cfg) {
 }
 
 function vendorApCollectAttachments_(message) {
-  const raw = message.getAttachments();
+  // Real attachments only: inline images (signatures, logos) are excluded by Gmail here,
+  // because GmailAttachment has no content-disposition accessor to check afterwards —
+  // calling one threw on the very first invoice (9 Oct 2026) and nothing ever reached the queue.
+  const raw = message.getAttachments({ includeInlineImages: false, includeAttachments: true });
   const out = [];
   for (let i = 0; i < raw.length; i++) {
     const att = raw[i];
     if (!att) continue;
-    if (att.getContentDisposition() === 'inline') continue;
     const size = att.getSize();
     if (!size || size <= 0) continue;
     out.push(att);
