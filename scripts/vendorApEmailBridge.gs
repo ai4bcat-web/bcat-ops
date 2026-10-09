@@ -16,6 +16,10 @@ const VENDOR_AP_PAGE_SIZE = 25;
 const VENDOR_AP_MAX_RUNTIME_MS = 5 * 60 * 1000 - 30000; // 30 s headroom
 const VENDOR_AP_MAX_BODY_CHARS = 50000;
 const VENDOR_AP_BODY_TRUNCATION_INDICATOR = '\n\n[truncated]';
+// The production intake URL. A script property overrides it, but this project already
+// holds more than 50 properties (one ack per processed email), which makes the settings
+// page read-only — so the URL ships in the file rather than depend on a property write.
+const VENDOR_AP_DEFAULT_URL = 'https://lf3reflylo37vreepaw2dg63cq0wgvvc.lambda-url.us-east-1.on.aws/';
 
 /**
  * Run once after pasting into the project. Validates config, creates the review
@@ -116,7 +120,7 @@ function processVendorApEmails() {
 function vendorApGetConfig_() {
   const props = PropertiesService.getScriptProperties();
   return {
-    url: props.getProperty('VENDOR_AP_WEBHOOK_URL'),
+    url: props.getProperty('VENDOR_AP_WEBHOOK_URL') || VENDOR_AP_DEFAULT_URL,
     secret: props.getProperty('VENDOR_AP_WEBHOOK_SECRET') || vendorApGlobalSecret_(),
   };
 }
