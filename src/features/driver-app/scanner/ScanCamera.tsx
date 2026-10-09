@@ -145,6 +145,23 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
     }
   }, [])
 
+  /*
+   * Back from the review: the <video> is a fresh element, the stream is not.
+   *
+   * Review replaces the viewfinder, so when the driver keeps a page and comes back, a new
+   * <video> mounts with no srcObject — black, while the camera light stays on. Every
+   * driver read that as "the camera won't open again" and left the scanner to get it
+   * back. The stream is still in streamRef; hand it to the new element.
+   */
+  useEffect(() => {
+    if (shot) return
+    const v = videoRef.current
+    const s = streamRef.current
+    if (!v || !s || v.srcObject === s) return
+    v.srcObject = s
+    void v.play().catch(() => {})
+  }, [shot])
+
   /** A scratch canvas, reused — allocating one per frame churns memory on a phone. */
   const workCanvas = () => {
     if (!workRef.current) workRef.current = document.createElement('canvas')

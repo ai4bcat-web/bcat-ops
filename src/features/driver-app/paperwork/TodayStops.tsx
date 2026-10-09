@@ -266,9 +266,24 @@ export function TodayStops({
                   {delivery ? 'Delivery' : 'Pickup'}
                 </span>
                 <p className="mt-2 text-lg font-bold leading-tight text-foreground">{stop.name ?? 'Stop'}</p>
-                <p className="text-sm text-muted-foreground">
-                  {[stop.city, stop.state].filter(Boolean).join(', ') || '—'}
-                </p>
+                {/* The address, as a tap-to-navigate link: the driver is going there. */}
+                {(() => {
+                  const line1 = stop.street?.trim() || ''
+                  const line2 = [[stop.city, stop.state].filter(Boolean).join(', '), stop.zip].filter(Boolean).join(' ')
+                  const query = [stop.name, line1, line2].filter(Boolean).join(', ')
+                  return (
+                    <a
+                      href={`https://maps.apple.com/?q=${encodeURIComponent(query)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-0.5 block text-sm text-muted-foreground underline-offset-2 hover:underline"
+                      aria-label={`Navigate to ${query}`}
+                    >
+                      {line1 && <span className="block text-foreground">{line1}</span>}
+                      <span className="block">{line2 || '—'}</span>
+                    </a>
+                  )
+                })()}
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-2xl font-bold tabular-nums text-foreground">

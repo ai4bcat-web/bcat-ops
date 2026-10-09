@@ -88,8 +88,11 @@ export interface PaperworkStop {
   type: string
   sequence: number
   name: string | null
+  /** Street line, when the stop or its directory location carries one. */
+  street: string | null
   city: string | null
   state: string | null
+  zip: string | null
   appt: string | null
   /** exact / range / fcfs / tbd — so the app never prints 12:00 AM for "no time yet". */
   apptType: string | null
@@ -284,9 +287,11 @@ export function buildPaperworkLoad(
     type: String(s.type ?? ''),
     sequence: typeof s.sequence === 'number' ? s.sequence : i,
     name: s.name?.trim() || null,
+    street: s.address?.street?.trim() || null,
     // `city` on a stop is a display string ("Chicago, IL"); the address holds the parts.
     city: s.address?.city?.trim() || s.city?.trim() || null,
     state: s.address?.state?.trim() || null,
+    zip: s.address?.zip?.trim() || null,
     appt: s.appt ?? null,
     apptType: s.apptType ?? null,
     apptEnd: s.apptEnd ?? null,

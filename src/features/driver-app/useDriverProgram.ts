@@ -99,8 +99,11 @@ export function useDriverTruck(): { truck: DriverTruck | null; loaded: boolean; 
     truck: cachedProfile?.truck ?? null,
     loaded: cachedProfile !== null,
     setTruck: (t) => {
+      // Shown at once, then confirmed: the PM line and the truck both come off the profile,
+      // so re-read it rather than leave the old truck's PM on screen until a relaunch.
       if (cachedProfile) cachedProfile = { ...cachedProfile, truck: t }
       notify()
+      void load()
     },
   }
 }

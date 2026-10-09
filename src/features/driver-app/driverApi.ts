@@ -475,8 +475,10 @@ export interface PaperworkStop {
   type: string
   sequence: number
   name: string | null
+  street?: string | null
   city: string | null
   state: string | null
+  zip?: string | null
   appt: string | null
   apptType: string | null
   apptEnd: string | null

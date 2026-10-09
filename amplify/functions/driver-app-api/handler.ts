@@ -2532,6 +2532,34 @@ export const handler = async (event: FnUrlEvent) => {
         .sort((a, b) => String(a.deliveryAppt ?? '').localeCompare(String(b.deliveryAppt ?? '')))
 
       /*
+       * A stop booked from the directory often carries only the facility name; the street
+       * lives on the Location record. The driver needs the street, so fill it from there.
+       */
+      if (path === '/paperwork' && LOCATION_TABLE_NAME) {
+        const cache = new Map<string, { street?: string | null; city?: string | null; state?: string | null; zip?: string | null } | null>()
+        for (const l of built) {
+          const raw = mine.find((x) => x.id === l.id)
+          const rawStops = raw ? (getStops(raw as unknown as Load) as Stop[]) : []
+          for (const st of l.stops) {
+            if (st.street) continue
+            const locationId = rawStops.find((s) => s.id === st.id)?.locationId
+            if (!locationId) continue
+            if (!cache.has(locationId)) {
+              try {
+                cache.set(locationId, ((await ddb.send(new GetCommand({ TableName: LOCATION_TABLE_NAME, Key: { id: locationId } }))).Item ?? null) as never)
+              } catch { cache.set(locationId, null) }
+            }
+            const loc = cache.get(locationId)
+            if (!loc) continue
+            st.street = loc.street?.trim() || null
+            st.city = st.city ?? (loc.city?.trim() || null)
+            st.state = st.state ?? (loc.state?.trim() || null)
+            st.zip = st.zip ?? (loc.zip?.trim() || null)
+          }
+        }
+      }
+
+      /*
        * A Motive-based ETA is re-run from the truck's latest fix on every read, so the
        * number the driver (and dispatch) sees tracks the truck rather than the moment the
        * pickup was departed. Only while rolling: once arrived, the ETA is history.
