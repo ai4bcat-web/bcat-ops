@@ -572,7 +572,9 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
  */
 function noBuyFlag(item: Row, decision: string | null): Record<string, unknown> {
   if (decision !== 'NO BUY') return {}
-  if (item.status !== 'NEED_TO_FACTOR') return {}
+  // Not yet sent, or sent and now refused: either way it is billed by hand from here.
+  // A paid invoice is left alone, and one already being worked by hand keeps its steps.
+  if (item.status !== 'NEED_TO_FACTOR' && item.status !== 'PENDING_WITH_OTR') return {}
   return { status: 'MANUAL_INVOICE', manualReason: 'NO_BUY' }
 }
 
@@ -892,16 +894,21 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
       case 'manualInvoice': {
         const item = await getFactoringItem(String(input.id))
         if (!item) return fail('factoring item not found')
-        if (item.status === 'PENDING_WITH_OTR' || item.status === 'FACTORED') {
-          return fail('this invoice is already with OTR')
-        }
+        if (item.status === 'FACTORED') return fail('OTR has already paid this invoice')
+        /*
+         * A submitted invoice OTR then refused — their board says Issue, the portal or an
+         * email says No Buy, and the API carries no reason — is moved by the person who
+         * read the refusal. The OTR invoice id stays on the row for the record.
+         */
+        const reason = trim(input.reason) === 'NO_BUY' ? 'NO_BUY' : (item.manualReason === 'NO_BUY' ? 'NO_BUY' : 'MANUAL')
         await updateItem(String(item.id), {
           status: 'MANUAL_INVOICE',
-          manualReason: item.manualReason === 'NO_BUY' ? 'NO_BUY' : 'MANUAL',
+          manualReason: reason,
+          ...(reason === 'NO_BUY' ? { brokerCheckResult: 'NO_BUY', brokerCheckedAt: nowIso() } : {}),
           ...(trim(input.apEmail) ? { apEmail: trim(input.apEmail) } : {}),
           otrError: null,
         })
-        return ok({ status: 'MANUAL_INVOICE' })
+        return ok({ status: 'MANUAL_INVOICE', reason })
       }
 
       /** Back into the OTR queue — a row routed by hand, or a No Buy that OTR reversed. */

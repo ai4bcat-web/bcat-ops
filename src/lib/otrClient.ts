@@ -77,9 +77,9 @@ export function setBrokerMc(
   return otrAction('setMc', { id, mcNumber })
 }
 
-/** Take the row out of the OTR queue to be billed by hand. */
-export function markManualInvoice(id: string, apEmail?: string): Promise<{ status: string }> {
-  return otrAction('manualInvoice', { id, ...(apEmail ? { apEmail } : {}) })
+/** Take the row out of the OTR queue to be billed by hand. NO_BUY says OTR refused the broker. */
+export function markManualInvoice(id: string, opts: { apEmail?: string; reason?: 'NO_BUY' | 'MANUAL' } = {}): Promise<{ status: string }> {
+  return otrAction('manualInvoice', { id, ...(opts.apEmail ? { apEmail: opts.apEmail } : {}), ...(opts.reason ? { reason: opts.reason } : {}) })
 }
 
 /** Put a manually-invoiced row back in the OTR queue. */

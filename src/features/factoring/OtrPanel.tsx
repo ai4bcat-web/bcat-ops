@@ -425,6 +425,22 @@ export function OtrPanel({ item, onChanged }: Props) {
             Invoice manually instead
           </Button>
         )}
+        {/*
+          * OTR refused a submitted invoice. Their API carries no reason — the No Buy shows
+          * in their portal or an email — so the person who read it moves the row.
+          */}
+        {item.status === 'PENDING_WITH_OTR' && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-pink-700"
+            disabled={busy !== null}
+            title="OTR will not buy this broker's paper: flag it No Buy and bill the broker directly"
+            onClick={() => run('manual', () => markManualInvoice(item.id, { reason: 'NO_BUY' }), 'Flagged No Buy — moved to Invoice manually')}
+          >
+            OTR won’t buy it — invoice manually
+          </Button>
+        )}
       </div>
     </div>
   )
