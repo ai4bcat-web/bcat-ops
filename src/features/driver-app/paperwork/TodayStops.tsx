@@ -18,7 +18,8 @@
  * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
 import { paperworkStatusLine } from '@/lib/paperworkLocation'
-import { EndOfDayPaperworkDialog, type WhereItem } from './PaperworkGates'
+import { EndOfDayPaperworkDialog, TrailerDialog, type WhereItem } from './PaperworkGates'
+import { useDriverProfile } from '../useDriverProgram'
 import { useState } from 'react'
 import { Camera, Check, Clock, Eye, FileWarning, Image, Loader2, LogOut, MapPin, MessageSquare, Navigation, PackageOpen, Paperclip, Truck, FileText } from 'lucide-react'
 import { toast } from 'sonner'
@@ -280,6 +281,9 @@ export function TodayStops({
   const [viewing, setViewing] = useState<{ doc: TripDoc; load: PaperworkLoad; kind: 'POD' | 'MISC' } | null>(null)
   // A pickup card's "where is the paperwork" question, asked early rather than at clock-out.
   const [whereFor, setWhereFor] = useState<WhereItem | null>(null)
+  // Ivan local drivers name the trailer as they leave a pickup; the dialog then sends the event.
+  const trailerRequired = useDriverProfile()?.trailerRequired === true
+  const [trailerFor, setTrailerFor] = useState<TodayStop | null>(null)
   const keyOf = (it: TodayStop) => `${it.load.id}#${it.stop.id}`
   const patch = (it: TodayStop, p: Partial<PaperworkStop>) =>
     setPatches((all) => ({ ...all, [keyOf(it)]: { ...all[keyOf(it)], ...p } }))
@@ -287,11 +291,11 @@ export function TodayStops({
   const items = stopsForDay(loads, today).map((it) =>
     keyOf(it) in patches ? { ...it, stop: { ...it.stop, ...patches[keyOf(it)] } } : it)
 
-  async function sendEvent(item: TodayStop, event: StopEvent) {
+  async function sendEvent(item: TodayStop, event: StopEvent, trailer?: string) {
     const key = keyOf(item)
     setBusyKey(key)
     try {
-      const res = await recordStopEvent({ loadId: item.load.id, stopId: item.stop.id, event })
+      const res = await recordStopEvent({ loadId: item.load.id, stopId: item.stop.id, event, ...(trailer ? { trailer } : {}) })
       patch(item, event === 'ARRIVED' ? { arrivedAt: res.at } : { departedAt: res.at })
       if (res.eta) {
         // The delivery this ETA is for may be on today's sheet too.
@@ -371,10 +375,15 @@ export function TodayStops({
             </div>
 
             {/* The numbers the shipper and the office will ask for, in the order they ask. */}
-            <dl className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-background/50 px-3 py-2">
+            <dl className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-background/50 px-3 py-2">
               <div>
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">BCAT PRO #</dt>
                 <dd className="text-base font-bold tabular-nums text-foreground">{load.reference}</dd>
+              </div>
+              {/* The trailer named at the pickup rides with the load to the delivery. */}
+              <div>
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Trailer</dt>
+                <dd className="truncate text-base font-bold tabular-nums text-foreground">{load.trailerNumber || '—'}</dd>
               </div>
               <div>
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">PO #</dt>
@@ -404,7 +413,7 @@ export function TodayStops({
               onAdded={(note) => patch(item, { location: item.stop.location ? { ...item.stop.location, driverNotes: [...(item.stop.location.driverNotes ?? []), note] } : null })}
             />
 
-            <StopProgress item={item} busy={busyKey === keyOf(item)} onEvent={(ev) => void sendEvent(item, ev)} />
+            <StopProgress item={item} busy={busyKey === keyOf(item)} onEvent={(ev) => { if (ev === 'DEPARTED' && !delivery && trailerRequired) setTrailerFor(item); else void sendEvent(item, ev) }} />
 
             {/* Where the paperwork is: answered at clock-out for a pickup, confirmed at clock-in for a delivery. */}
             {(paperworkStatusLine(load.paperworkLocation) || (!delivery && stop.departedAt)) && (
@@ -471,6 +480,7 @@ export function TodayStops({
         )
       })}
 
+      {trailerFor ? <TrailerDialog key={keyOf(trailerFor)} item={trailerFor} onClose={() => setTrailerFor(null)} onPick={(t) => { setTrailerFor(null); void sendEvent(trailerFor, 'DEPARTED', t) }} /> : null}
       {whereFor ? <EndOfDayPaperworkDialog items={[whereFor]} truckUnit={null} onClose={() => setWhereFor(null)} onDone={() => { setWhereFor(null); onChange() }} /> : null}
 
       {viewing && (

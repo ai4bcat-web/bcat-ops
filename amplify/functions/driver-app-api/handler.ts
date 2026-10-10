@@ -66,7 +66,7 @@ function weekEndExclusive(periodStart: string): string {
  * the one just gone; a year of history on a phone is scrolling, not information.
  */
 const PAPERWORK_HISTORY_START = '2026-09-01'
-import { driverProgramOf, timeClockFor } from '../../../src/lib/driverProgram'
+import { driverProgramOf, timeClockFor, trailerRequiredOnPickup } from '../../../src/lib/driverProgram'
 import { normalizePaperworkLocation, paperworkLocationLabel, type PaperworkLocation } from '../../../src/lib/paperworkLocation'
 import { parsePaperworkLocation } from './paperwork'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
@@ -2326,6 +2326,8 @@ export const handler = async (event: FnUrlEvent) => {
         dispatchPhone: await dispatchPhone(),
         // Whether the Hours tab shows: Ivan's own fleet, or a staff override on the file.
         timeClock: timeClockFor({ fleetGroup: driver.fleetGroup, driverType: driver.driverType, payGroup: setting.payGroup, ivanApp: driver.ivanApp, timeClock: driver.timeClock }),
+        // Must say which trailer they used when leaving a pickup (Ivan local, not box trucks).
+        trailerRequired: trailerRequiredOnPickup({ ...driver, payGroup: setting.payGroup }),
       })
     }
 
@@ -2766,10 +2768,11 @@ export const handler = async (event: FnUrlEvent) => {
      * lifecycle from, so dispatch sees the load move the moment the driver taps.
      */
     if (method === 'POST' && path === '/paperwork/stop-event') {
-      const body = JSON.parse(event.body || '{}') as { loadId?: string; stopId?: string; event?: string }
+      const body = JSON.parse(event.body || '{}') as { loadId?: string; stopId?: string; event?: string; trailer?: string }
       const loadId = (body.loadId ?? '').trim()
       const stopId = (body.stopId ?? '').trim()
       const ev = (body.event ?? '').trim().toUpperCase()
+      const trailer = (body.trailer ?? '').trim().slice(0, 20)
       if (!loadId) return reply(400, { error: 'loadId is required' })
       if (!stopId) return reply(400, { error: 'stopId is required' })
       if (ev !== 'ARRIVED' && ev !== 'DEPARTED') return reply(400, { error: 'event must be ARRIVED or DEPARTED' })
@@ -2782,6 +2785,13 @@ export const handler = async (event: FnUrlEvent) => {
       const stops = getStops(load as unknown as Load) as Stop[]
       const stop = stops.find((s) => s.id === stopId)
       if (!stop) return reply(404, { error: 'stop not found on this load' })
+      // Leaving a pickup: Ivan's local drivers must say which trailer carries the load.
+      const leavingPickup = ev === 'DEPARTED' && stop.type === 'pickup'
+      // The driver row alone decides here (fleet / ivanApp); the app, which also knows the pay
+      // group, asks first, so this is the backstop for a stale bundle, not the whole rule.
+      if (leavingPickup && !trailer && trailerRequiredOnPickup(driver)) {
+        return reply(400, { error: 'Which trailer did you use? Enter the trailer number.' })
+      }
 
       const now = nowIso()
       let next = applyStopEvent(stops, stopId, ev as StopEvent, now)
@@ -2803,13 +2813,15 @@ export const handler = async (event: FnUrlEvent) => {
 
       // Only `stops` and the audit fields change; the condition keeps a concurrent staff
       // edit from being overwritten with a stale copy.
+      const setTrailer = leavingPickup && trailer
       await ddb.send(new UpdateCommand({
         TableName: LOAD_TABLE_NAME,
         Key: { id: loadId },
-        UpdateExpression: 'SET stops = :stops, updatedAt = :now, updatedBy = :by',
+        UpdateExpression: `SET stops = :stops, updatedAt = :now, updatedBy = :by${setTrailer ? ', trailerNumber = :trailer' : ''}`,
         ConditionExpression: load.updatedAt ? 'updatedAt = :prev' : 'attribute_not_exists(updatedAt)',
         ExpressionAttributeValues: {
           ':stops': next, ':now': now, ':by': driver.email ?? driverId,
+          ...(setTrailer ? { ':trailer': trailer } : {}),
           ...(load.updatedAt ? { ':prev': load.updatedAt } : {}),
         },
       }))
@@ -2820,7 +2832,8 @@ export const handler = async (event: FnUrlEvent) => {
         const place = [stop.name?.trim(), stop.city?.trim()].filter(Boolean).join(', ')
         const pro = (load as { aljexId?: string | null }).aljexId?.trim()
         const etaText = eta ? ` · ETA ${new Date(eta.etaAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} at delivery` : ''
-        await postDriverStatus(driver, `${label}${place ? ` · ${place}` : ''}${pro ? ` · PRO ${pro}` : ''}${etaText}`, now)
+        const trailerText = setTrailer ? ` · trailer ${trailer}` : ''
+        await postDriverStatus(driver, `${label}${place ? ` · ${place}` : ''}${pro ? ` · PRO ${pro}` : ''}${trailerText}${etaText}`, now)
       }
       return reply(200, { ok: true, loadId, stopId, event: ev, at: now, eta })
     }

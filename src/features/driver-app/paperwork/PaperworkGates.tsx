@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { setPaperworkLocation, confirmPaperwork, type PaperworkLoad } from '../driverApi'
 import type { PaperworkPlace } from '@/lib/paperworkLocation'
+import type { TodayStop } from './daySheet'
 
 /*
  * The two paperwork questions around the clock.
@@ -131,6 +132,32 @@ export function StartOfDayPaperworkDialog({ items, onClose, onDone }: ConfirmPro
           <Button variant="outline" className="h-14 text-base font-semibold" disabled={busy} onClick={() => void answer('MISSING')}><HelpCircle className="mr-2 h-5 w-5" /> I can't find it</Button>
           {busy ? <div className="flex justify-center"><Loader2 className="h-5 w-5 animate-spin" /></div> : null}
         </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Leaving a pickup: which trailer is the load on? Required for Ivan's local drivers. */
+export function TrailerDialog({ item, onClose, onPick }: { item: TodayStop; onClose: () => void; onPick: (trailer: string) => void }) {
+  const [trailer, setTrailer] = useState(item.load.trailerNumber ?? '')
+  const go = () => {
+    const t = trailer.trim()
+    if (!t) { toast.error('Enter the trailer number'); return }
+    onPick(t)
+  }
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Which trailer?</DialogTitle>
+          <DialogDescription className="text-muted-foreground">
+            PRO {item.load.reference}{item.stop.name ? ` · leaving ${item.stop.name}` : ''}. The trailer this load is on.
+          </DialogDescription>
+        </DialogHeader>
+        <input id="pickup-trailer" value={trailer} onChange={(e) => setTrailer(e.target.value)} placeholder="Trailer number" inputMode="numeric" autoFocus
+          onKeyDown={(e) => { if (e.key === 'Enter') go() }}
+          className="h-12 w-full rounded-md border border-input bg-background px-3 text-center font-mono text-xl text-foreground" />
+        <Button className="h-14 text-base font-bold" onClick={go}><Container className="mr-2 h-5 w-5" /> Departed with this trailer</Button>
       </DialogContent>
     </Dialog>
   )

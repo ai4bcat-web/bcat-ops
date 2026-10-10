@@ -66,3 +66,13 @@ export function timeClockFor(driver: ProgramInputs): boolean {
   if (driver.timeClock === true || driver.timeClock === false) return driver.timeClock
   return driver.fleetGroup === 'LOCAL' || (driver.fleetGroup == null && driver.payGroup === 'LOCAL')
 }
+
+/**
+ * Must this driver say which trailer they used when they leave a pickup? Ivan's local
+ * drivers swap trailers all day and the office needs to know which one carries the load;
+ * box trucks are one unit, and owner operators are not on this app at all.
+ */
+export function trailerRequiredOnPickup(driver: ProgramInputs): boolean {
+  if (driverProgramOf(driver) !== 'PAPERWORK') return false
+  return driver.fleetGroup !== 'BOX_TRUCK'
+}

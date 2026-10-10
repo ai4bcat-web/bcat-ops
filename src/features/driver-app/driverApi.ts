@@ -104,6 +104,8 @@ export interface DriverProfile {
   dispatchPhone?: string | null
   /** Hours tab on? Ivan's fleet by default; staff can override on the driver file. Optional: older API. */
   timeClock?: boolean | null
+  /** Must name the trailer when leaving a pickup (Ivan local drivers). Optional: older API. */
+  trailerRequired?: boolean | null
 }
 
 export interface DriverTruck {
@@ -601,7 +603,7 @@ export async function fetchPaperwork(weekStart: string): Promise<Paperwork> {
 export type StopEvent = 'ARRIVED' | 'DEPARTED'
 
 /** On site at / departed one of the driver's stops. Returns the stamp and any ETA it set. */
-export async function recordStopEvent(input: { loadId: string; stopId: string; event: StopEvent }): Promise<{
+export async function recordStopEvent(input: { loadId: string; stopId: string; event: StopEvent; trailer?: string | null }): Promise<{
   at: string
   eta: { stopId: string; etaAt: string; basis: 'motive' | 'appt' } | null
 }> {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { driverProgramOf, timeClockFor } from './driverProgram'
+import { driverProgramOf, timeClockFor, trailerRequiredOnPickup } from './driverProgram'
 
 describe('driverProgramOf', () => {
   it('gives Ivan’s own fleet the paperwork page', () => {
@@ -46,5 +46,15 @@ describe('staff overrides', () => {
     expect(timeClockFor({ fleetGroup: 'LOCAL', timeClock: false })).toBe(false)
     expect(timeClockFor({ fleetGroup: 'AMAZON', timeClock: true })).toBe(true)
     expect(timeClockFor({ payGroup: 'LOCAL' })).toBe(true)
+  })
+})
+
+describe('trailerRequiredOnPickup', () => {
+  it('asks Ivan local drivers for the trailer, never box trucks or owner operators', () => {
+    expect(trailerRequiredOnPickup({ fleetGroup: 'LOCAL' })).toBe(true)
+    expect(trailerRequiredOnPickup({ payGroup: 'LOCAL' })).toBe(true)
+    expect(trailerRequiredOnPickup({ fleetGroup: 'BOX_TRUCK' })).toBe(false)
+    expect(trailerRequiredOnPickup({ fleetGroup: 'AMAZON', ivanApp: true })).toBe(true)
+    expect(trailerRequiredOnPickup({ fleetGroup: 'AMAZON' })).toBe(false)
   })
 })
