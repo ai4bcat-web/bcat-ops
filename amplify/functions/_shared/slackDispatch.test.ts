@@ -146,12 +146,13 @@ describe('mirroring', () => {
     expect(await mirrorOutbound({ slack: slack.client, store: store.asStore(), settings: null }, linked, m, 'Jenny')).toBeNull()
     expect(slack.calls).toHaveLength(0)
   })
-  it('mirrors a page send with the sender name', async () => {
+  it('mirrors a page send with the sender name and uploads its pictures', async () => {
     const c = await store.createConversation({ phone: '+18475550100' })
     const linked = await store.updateConversation(c.id, { set: { slackChannelId: 'C9' } })
-    const m = await store.putMessage({ conversationId: c.id, phone: c.phone, direction: 'OUT', kind: 'SMS', at: '2026-10-10T15:00:00Z', body: 'Door 4', via: 'app', sentBy: 'jenny@bcatcorp.com' })
+    const m = await store.putMessage({ conversationId: c.id, phone: c.phone, direction: 'OUT', kind: 'MMS', at: '2026-10-10T15:00:00Z', body: 'Door 4', via: 'app', sentBy: 'jenny@bcatcorp.com', media: [{ key: 'dispatch-media/out/abc.jpg', contentType: 'image/jpeg' }] })
     const slack = fakeSlack()
-    await mirrorOutbound({ slack: slack.client, store: store.asStore(), settings: null }, linked, m, 'Jenny')
-    expect(slack.calls[0].params.text).toBe('💬 *Jenny* (BCAT Ops): Door 4')
+    await mirrorOutbound({ slack: slack.client, store: store.asStore(), settings: null }, linked, m, 'Jenny', async () => ({ bytes: new Uint8Array(5), contentType: 'image/jpeg' }))
+    expect(slack.calls[0].params.text).toBe('💬 *Jenny* (BCAT Ops): Door 4 _(+1 attachment)_')
+    expect(slack.uploads).toEqual([{ channel: 'C9', filename: 'abc.jpg', bytes: 5 }])
   })
 })

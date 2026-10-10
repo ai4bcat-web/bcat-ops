@@ -247,10 +247,21 @@ export async function mirrorInbound(deps: SlackBridgeDeps, conversation: Dispatc
   return posted.ts
 }
 
-/** Mirror something staff sent from the page (never for messages that came from Slack). */
-export async function mirrorOutbound(deps: SlackBridgeDeps, conversation: DispatchConversation, message: DispatchMessage, senderName: string): Promise<string | null> {
+/** Mirror something staff sent from the page, attachments included (never for messages that came from Slack). */
+export async function mirrorOutbound(deps: SlackBridgeDeps, conversation: DispatchConversation, message: DispatchMessage, senderName: string, readMedia?: MediaFetcher): Promise<string | null> {
   if (message.via === 'slack' || !conversation.slackChannelId) return null
-  const posted = await deps.slack.call<{ ts: string }>('chat.postMessage', { channel: conversation.slackChannelId, text: formatOutbound(message, senderName) })
+  const channel = conversation.slackChannelId
+  const posted = await deps.slack.call<{ ts: string }>('chat.postMessage', { channel, text: formatOutbound(message, senderName) })
+  for (const m of message.media ?? []) {
+    if (!readMedia) break
+    try {
+      const got = await readMedia(m.key)
+      const name = m.key.split('/').pop() ?? 'file'
+      await deps.slack.upload({ channel, filename: name, bytes: got.bytes, title: name })
+    } catch (err) {
+      console.warn('[slack-dispatch] outbound upload failed', m.key, String(err))
+    }
+  }
   await deps.store.updateMessage(message.id, { slackTs: posted.ts }).catch(() => undefined)
   return posted.ts
 }

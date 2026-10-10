@@ -200,6 +200,19 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
     console.log('[intake] EMAIL full event payload:', JSON.stringify(ev))
   }
 
+  // A driver's dispatch channel: hand the whole event to the bridge and stop here. This
+  // runs before the thread-reply filter on purpose: a reply typed under a message in a
+  // driver channel is still a text to the driver. The bridge drops bots and edits itself.
+  if (ev.type === 'message' && !ev.bot_id && DISPATCH_SLACK_BRIDGE_FUNCTION_NAME && await isDispatchChannel(ev.channel as string)) {
+    try {
+      await lambda.send(new InvokeCommand({ FunctionName: DISPATCH_SLACK_BRIDGE_FUNCTION_NAME, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify({ event: ev })) }))
+      console.log('[intake] dispatch channel → bridge', ev.channel)
+    } catch (err) {
+      console.error('[intake] bridge invoke failed', String(err))
+    }
+    return { statusCode: 200, body: 'ok' }
+  }
+
   // Skip edits, deletes, and other noise subtypes.
   // email and file_share are intentionally allowed.
   const SKIP_SUBTYPES = new Set(['message_changed', 'message_deleted', 'channel_join', 'channel_leave', 'bot_message', 'thread_broadcast'])
@@ -216,16 +229,6 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   }
 
   const channelId = ev.channel as string
-  // A driver's dispatch channel: hand the whole event to the bridge and stop here.
-  if (DISPATCH_SLACK_BRIDGE_FUNCTION_NAME && await isDispatchChannel(channelId)) {
-    try {
-      await lambda.send(new InvokeCommand({ FunctionName: DISPATCH_SLACK_BRIDGE_FUNCTION_NAME, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify({ event: ev })) }))
-      console.log('[intake] dispatch channel → bridge', channelId)
-    } catch (err) {
-      console.error('[intake] bridge invoke failed', String(err))
-    }
-    return { statusCode: 200, body: 'ok' }
-  }
   const msgTs     = ev.ts      as string
   const text      = (ev.text   as string) ?? ''
   const userId    = (ev.user   as string) ?? ''

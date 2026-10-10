@@ -69,6 +69,12 @@ describe('Slack → driver', () => {
     expect(sent[0].mediaUrls).toEqual(['https://signed/dispatch-media/out/slack-F77.jpg'])
     expect([...store.messages.values()][0].kind).toBe('MMS')
   })
+  it('texts a reply typed inside a Slack thread too', async () => {
+    await channelled()
+    const r = await handleSlackEvent({ type: 'message', channel: 'C9', user: 'U2', ts: '1.21', thread_ts: '1.1', text: 'Also bring the BOL' }, deps())
+    expect(r.outcome).toBe('sent')
+    expect(sent[0].body).toBe('Also bring the BOL')
+  })
   it('keeps // messages as internal notes and never texts them', async () => {
     await channelled()
     const r = await handleSlackEvent({ type: 'message', channel: 'C9', user: 'U2', ts: '1.3', text: '// broker says 3pm' }, deps())

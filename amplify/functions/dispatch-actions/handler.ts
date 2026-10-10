@@ -10,7 +10,7 @@ import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConf
 import { sendMessage } from '../_shared/twilio'
 import { sendDispatchText, MEDIA_PREFIX } from '../_shared/dispatchSend'
 import { slackClient } from '../_shared/slackApi'
-import { mirrorOutbound, renameSlackChannel, createSlackChannel, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps } from '../_shared/slackDispatch'
+import { mirrorOutbound, renameSlackChannel, createSlackChannel, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
 import {
   toE164Strict, matchDriverByPhone, normalizeSettings,
   type DispatchConversation, type DispatchMessage, type DispatchSettings,
@@ -46,6 +46,8 @@ export interface Deps {
   now: () => Date
   /** Slack bridge pieces, absent when no bot token is configured. */
   slack?: SlackBridgeDeps['slack']
+  /** Reads a dispatch-media object so page attachments can be uploaded into Slack. */
+  readMedia?: MediaFetcher
 }
 
 export interface Caller { email: string; isAdmin: boolean; isOwner: boolean }
@@ -202,7 +204,7 @@ async function mirrorToSlack(deps: Deps, conversation: DispatchConversation, mes
   const bridge = await slackBridge(deps)
   if (!bridge) return conversation
   try {
-    await mirrorOutbound(bridge, conversation, message, staffLabel(email))
+    await mirrorOutbound(bridge, conversation, message, staffLabel(email), deps.readMedia)
     return (await deps.store.getConversation(conversation.id)) ?? conversation
   } catch (err) {
     console.warn('[dispatch-actions] slack mirror failed', String(err))
@@ -283,6 +285,10 @@ export const handler = async (event: AppSyncEvent) => {
     },
     now: () => new Date(),
     slack: SLACK_BOT_TOKEN ? slackClient(SLACK_BOT_TOKEN) : undefined,
+    readMedia: async (key) => {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
+      return { bytes: await obj.Body!.transformToByteArray(), contentType: obj.ContentType ?? 'application/octet-stream' }
+    },
   }
   const result = await runAction(action, input, caller, deps)
   return JSON.stringify(result ?? {})
