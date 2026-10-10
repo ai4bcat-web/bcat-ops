@@ -24,6 +24,8 @@ const WEBHOOK_URL = (process.env.WEBHOOK_URL ?? '').replace(/\/+$/, '')
 const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const PAGE_GROUP = 'page-dispatch'
+const ADMIN_ONLY = new Set<Action>(['assign', 'link', 'saveSettings'])
+const ADMIN_ONLY_LABEL: Partial<Record<Action, string>> = { assign: 'assign conversations', link: 'change who a number belongs to', saveSettings: 'change Dispatch settings' }
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? ''
 const MAX_NOTE = 4000
 const MAX_LABEL = 80
@@ -96,7 +98,8 @@ export function authorize(action: Action, identity: AppSyncIdentity | null | und
   const isOwner = email === OWNER_EMAIL
   const isAdmin = groups.includes('ADMIN')
   if (!isOwner && !isAdmin && !groups.includes(PAGE_GROUP)) throw new Error(`Forbidden: ${action} requires the Dispatch page`)
-  if (action === 'saveSettings' && !isOwner && !isAdmin) throw new Error('Forbidden: only an admin can change Dispatch settings')
+  // Who a thread belongs to, which driver a number is, and the settings are admin calls.
+  if (ADMIN_ONLY.has(action) && !isOwner && !isAdmin) throw new Error(`Forbidden: only an admin can ${ADMIN_ONLY_LABEL[action] ?? action}`)
   return { email, isAdmin, isOwner }
 }
 

@@ -49,9 +49,13 @@ describe('authorize', () => {
     expect(() => authorize('send', null, 'x')).toThrow(/missing identity/)
     expect(() => authorize('send', id([]), '')).toThrow(/resolve/)
   })
-  it('keeps settings to admins', () => {
+  it('keeps settings, assignment and relinking to admins', () => {
     expect(() => authorize('saveSettings', id(['page-dispatch']), 'jenny@bcatcorp.com')).toThrow(/admin/)
+    expect(() => authorize('assign', id(['page-dispatch']), 'jenny@bcatcorp.com')).toThrow(/only an admin can assign/)
+    expect(() => authorize('link', id(['page-dispatch']), 'jenny@bcatcorp.com')).toThrow(/only an admin can change who/)
+    expect(authorize('send', id(['page-dispatch']), 'jenny@bcatcorp.com').email).toBe('jenny@bcatcorp.com')
     expect(authorize('saveSettings', id(['ADMIN']), 'x@bcatcorp.com').isAdmin).toBe(true)
+    expect(authorize('assign', id([]), 'ryne@bcatcorp.com').isOwner).toBe(true)
   })
   it('parses the AWSJSON input', () => {
     expect(parseInput('{"a":1}')).toEqual({ a: 1 })

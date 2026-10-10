@@ -40,6 +40,8 @@ export function DispatchPage() {
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
 
   const me = user?.email?.toLowerCase() ?? ''
+  // Assigning, relinking a number and the settings are admin-only; the Lambda enforces it too.
+  const canManage = isAdmin || isOwner
   const counts = useMemo(() => ({
     OPEN: d.conversations.filter((c) => c.status !== 'ARCHIVED').length,
     UNREAD: d.conversations.filter((c) => c.status !== 'ARCHIVED' && (c.unreadCount ?? 0) > 0).length,
@@ -170,7 +172,7 @@ export function DispatchPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
-          <DropdownMenu>
+          {canManage ? <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 gap-1.5"><UserCheck className="size-3.5" />{isMobile ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}</Button>
             </DropdownMenuTrigger>
@@ -181,10 +183,10 @@ export function DispatchPage() {
               {assignees.filter((a) => a !== me && a !== selected.assignedTo && !selectedDispatchers.includes(a)).map((a) => <DropdownMenuItem key={a} onClick={() => void act('assign', () => d.assign(selected.id, a))}>{a}</DropdownMenuItem>)}
               {selected.assignedTo ? <DropdownMenuItem onClick={() => void act('unassign', () => d.assign(selected.id, null))}>Unassign</DropdownMenuItem> : null}
             </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5" title={selected.driverId ? 'Change who this number belongs to' : 'Link this number to a driver'} onClick={() => setLinking(selected)}>
+          </DropdownMenu> : null}
+          {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title={selected.driverId ? 'Change who this number belongs to' : 'Link this number to a driver'} onClick={() => setLinking(selected)}>
             <UserPlus className="size-3.5" />{isMobile ? '' : (selected.driverId ? 'Relink' : 'Link driver')}
-          </Button>
+          </Button> : null}
           {d.status?.slackBridge ? (selected.slackChannelId ? (
             <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild title={`#${selected.slackChannelName ?? 'channel'} in Slack`}>
               <a href={`https://bcatcorp.slack.com/archives/${selected.slackChannelId}`} target="_blank" rel="noreferrer"><Hash className="size-3.5" />{isMobile ? '' : (selected.slackChannelName ?? 'Slack')}<ExternalLink className="size-3" /></a>
