@@ -205,7 +205,7 @@ export function IvanDriverAppPage() {
                   {row.unclassified && (
                     <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '4px 0 0', color: '#b45309', fontSize: 11 }}>
                       <AlertTriangle size={11} style={{ marginTop: 2, flexShrink: 0 }} />
-                      <span>No fleet set — the app still shows them a settlement. Set it to Local in Files → Drivers.</span>
+                      <span>No fleet set — the app still shows them a settlement. In Files → Drivers set the fleet to Local or Box truck, or switch on Ivan driver app.</span>
                     </p>
                   )}
                 </div>

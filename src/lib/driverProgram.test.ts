@@ -35,11 +35,14 @@ describe('staff overrides', () => {
   it('forces the Ivan app for a box truck driver or Zak when ivanApp is set', () => {
     expect(driverProgramOf({ fleetGroup: 'BOX_TRUCK', ivanApp: true })).toBe('PAPERWORK')
     expect(driverProgramOf({ fleetGroup: 'AMAZON', driverType: 'OWNER_OPERATOR', ivanApp: true })).toBe('PAPERWORK')
-    expect(driverProgramOf({ fleetGroup: 'BOX_TRUCK', ivanApp: null })).toBe('SETTLEMENT')
+    // Box truck is the Ivan app by default now, with the clock off (see timeClockFor).
+    expect(driverProgramOf({ fleetGroup: 'BOX_TRUCK', ivanApp: null })).toBe('PAPERWORK')
+    expect(driverProgramOf({ fleetGroup: 'BOX_TRUCK', driverType: 'OWNER_OPERATOR' })).toBe('PAPERWORK')
   })
   it('gives the clock to Ivan local by default and lets staff flip it either way', () => {
     expect(timeClockFor({ fleetGroup: 'LOCAL' })).toBe(true)
-    expect(timeClockFor({ fleetGroup: 'BOX_TRUCK', ivanApp: true })).toBe(false)
+    expect(timeClockFor({ fleetGroup: 'BOX_TRUCK' })).toBe(false)
+    expect(timeClockFor({ fleetGroup: 'BOX_TRUCK', timeClock: true })).toBe(true)
     expect(timeClockFor({ fleetGroup: 'LOCAL', timeClock: false })).toBe(false)
     expect(timeClockFor({ fleetGroup: 'AMAZON', timeClock: true })).toBe(true)
     expect(timeClockFor({ payGroup: 'LOCAL' })).toBe(true)

@@ -396,15 +396,15 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                     {knownDispatchers.map((e) => <option key={e} value={e} />)}
                   </datalist>
                   {/* App settings: which app, and whether they punch a clock. Fleet decides unless overridden. */}
-                  <Field label="Ivan driver app" hint="on for box truck drivers or anyone outside Ivan's fleet who should get the paperwork app">
+                  <Field label="Ivan driver app" hint="Local and Box truck fleets get it by fleet; switch on for anyone else">
                     <Controller name="ivanApp" control={control} render={({ field }) => (
                       <div className="flex items-center gap-3">
                         <Switch checked={field.value === true} onCheckedChange={(v) => field.onChange(v ? true : null)} />
-                        <span className="text-xs text-muted-foreground">{field.value === true ? 'Forced on' : 'By fleet (Ivan local only)'}</span>
+                        <span className="text-xs text-muted-foreground">{field.value === true ? 'Forced on' : 'By fleet (Ivan local and box truck)'}</span>
                       </div>
                     )} />
                   </Field>
-                  <Field label="Time clock" hint="Hours tab in the app; off for box truck drivers and Zak">
+                  <Field label="Time clock" hint="Hours tab in the app; by fleet means on for Ivan local, off for box truck">
                     <Controller name="timeClock" control={control} render={({ field }) => (
                       <div className="flex items-center gap-3">
                         <ToggleGroup type="single" value={field.value === true ? 'on' : field.value === false ? 'off' : 'auto'} onValueChange={(v) => v && field.onChange(v === 'on' ? true : v === 'off' ? false : null)}>
