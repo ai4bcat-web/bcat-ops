@@ -11,6 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { useVendorPayables } from '@/hooks/useVendorPayables'
+import { findVendorApDuplicates } from '@/lib/vendorApDuplicates'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAppStore } from '@/store/useAppStore'
@@ -781,6 +782,10 @@ export function VendorApPage() {
     DONE: items.filter((i) => i.status === 'DONE').length,
   }), [items])
 
+  // The same bill twice: later copies go red so an admin can delete them.
+
+  const duplicates = useMemo(() => findVendorApDuplicates(items), [items])
+
   const filtered = useMemo(() => {
     return items
       .filter((item) => activeTab === 'ALL' || item.status === activeTab)
@@ -962,12 +967,17 @@ export function VendorApPage() {
           {filtered.map((item) => (
             <tr
               key={item.id}
-              style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer' }}
+              style={{ borderBottom: '1px solid var(--ds-border)', cursor: 'pointer', background: duplicates.has(item.id) ? 'var(--ds-red-bg)' : undefined, boxShadow: duplicates.has(item.id) ? 'inset 3px 0 0 var(--ds-red)' : undefined }}
               className="hover:bg-[var(--ds-bg)] transition-colors"
               onClick={() => openDetails(item)}
             >
               <td style={{ padding: '14px 16px', maxWidth: 200 }}>
                 <div className="truncate font-medium text-foreground">{item.vendor || '—'}</div>
+                {duplicates.has(item.id) ? (
+                  <div className="text-[11px] font-semibold text-red-600" title={`Same ${duplicates.get(item.id)!.reason} as an earlier row. Delete this one.`}>
+                    Duplicate · same {duplicates.get(item.id)!.reason}
+                  </div>
+                ) : null}
               </td>
               <td style={{ padding: '14px 16px', maxWidth: 160 }}>
                 <div className="truncate text-muted-foreground">{item.invoiceNumber || '—'}</div>
