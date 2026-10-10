@@ -13,8 +13,8 @@
  *   3. Buys the number (default: the first SMS+voice+MMS number in the Elk Grove rate
  *      center) unless the account already owns one named "BCAT Ops Dispatch".
  *   4. Adds it to the Messaging Service that carries the verified 10DLC campaign.
- *   5. Points the number's SMS and voice webhooks at the deployed Lambda URL, found
- *      from the CloudFormation outputs when --webhook is not given.
+ *   5. Points the number's SMS and voice webhooks at the deployed Lambda's Function URL,
+ *      looked up from the deployed function when --webhook is not given.
  *   6. Stores DISPATCH_NUMBER and a WEBHOOK_SECRET (kept if one exists) in SSM.
  *
  * Nothing here prints a credential.
@@ -31,7 +31,7 @@ const POOL = args.pool ?? 'us-east-1_IbPKPNJC9'
 const PARAM_PATH = `/bcat/dispatch/${POOL}`
 const MESSAGING_SERVICE = args['messaging-service'] ?? 'MG5a211ecd4944170ffb98c45c777310ea'   // "Mixed A2P" service, campaign QE2c68… VERIFIED
 const FRIENDLY = 'BCAT Ops Dispatch'
-const APP_STACK_PREFIX = 'amplify-d3dejqzs77khq6-main-'
+const APP_FN_PREFIX = 'amplify-d3dejqzs77khq6-ma'
 
 const aws = (...a) => execFileSync('aws', a, { encoding: 'utf8' })
 const log = (m) => console.log(`• ${m}`)
@@ -117,9 +117,9 @@ async function main() {
   // ── 5. webhooks ─────────────────────────────────────────────────────────
   let webhook = args.webhook
   if (!webhook) {
-    const stacks = JSON.parse(aws('cloudformation', 'describe-stacks', '--query', `Stacks[?starts_with(StackName, '${APP_STACK_PREFIX}')].Outputs[]`, '--output', 'json'))
-    webhook = stacks.find((o) => o?.OutputKey === 'DispatchTwilioWebhookFunctionUrl')?.OutputValue
-    if (!webhook) throw new Error('Could not find DispatchTwilioWebhookFunctionUrl in CloudFormation outputs; is the deploy finished? Pass --webhook <url>.')
+    const fn = aws('lambda', 'list-functions', '--query', `Functions[?starts_with(FunctionName, '${APP_FN_PREFIX}') && contains(FunctionName, 'dispatchtwiliowebhook')].FunctionName | [0]`, '--output', 'text').trim()
+    if (!fn || fn === 'None') throw new Error('The dispatch-twilio-webhook Lambda is not deployed yet; wait for the Amplify build or pass --webhook <url>.')
+    webhook = aws('lambda', 'get-function-url-config', '--function-name', fn, '--query', 'FunctionUrl', '--output', 'text').trim()
   }
   webhook = webhook.replace(/\/+$/, '')
   const secret = getParam('WEBHOOK_SECRET') || randomBytes(24).toString('base64url')
