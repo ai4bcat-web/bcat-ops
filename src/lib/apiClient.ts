@@ -2912,6 +2912,12 @@ export async function listDispatchMessages(conversationId: string): Promise<Disp
   return rows
 }
 
+/** Every message across every conversation, for the cost report. */
+export async function listAllDispatchMessages(): Promise<DispatchMessage[]> {
+  const rows = await listAll<DispatchMessage>('listDispatchMessages', DISPATCH_MESSAGE_FIELDS, 1000)
+  return rows.map((r) => unwrapJsonFields(r, ['media']))
+}
+
 export type DispatchAction =
   | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel'
   | 'status' | 'getSettings' | 'saveSettings' | 'listStaff' | 'slackInvite'

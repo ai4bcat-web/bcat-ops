@@ -3,6 +3,7 @@ import { FleetProfitabilitySection } from '@/features/fleet-profitability/FleetP
 import { MonthlyFleetPL } from '@/features/fleet-profitability/MonthlyFleetPL'
 import { CombinedMonthlyProfit } from './CombinedMonthlyProfit'
 import { FleetExpensesCard } from './FleetExpensesCard'
+import { DispatchCostsCard } from './DispatchCostsCard'
 import { useIsMobile } from '@/hooks/useIsMobile'
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
@@ -43,6 +44,7 @@ export function FinancesPage() {
 
         <SectionHeading>Expenses</SectionHeading>
         <FleetExpensesCard />
+        <DispatchCostsCard />
       </div>
     </div>
   )
