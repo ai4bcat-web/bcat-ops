@@ -2328,6 +2328,8 @@ export const handler = async (event: FnUrlEvent) => {
         timeClock: timeClockFor({ fleetGroup: driver.fleetGroup, driverType: driver.driverType, payGroup: setting.payGroup, ivanApp: driver.ivanApp, timeClock: driver.timeClock }),
         // Must say which trailer they used when leaving a pickup (Ivan local, not box trucks).
         trailerRequired: trailerRequiredOnPickup({ ...driver, payGroup: setting.payGroup }),
+        // Ivan's own local fleet: the app opens on tomorrow's sheet from 8 PM for them.
+        ivanLocal: trailerRequiredOnPickup({ ...driver, payGroup: setting.payGroup }),
       })
     }
 

@@ -20,6 +20,8 @@ import { DayLogs } from './DayLogs'
 import { UnattachedPods } from '../UnattachedPods'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 import { chicagoDateStr } from '@/lib/date'
+import { defaultSheetDay } from './sheetDay'
+import { useDriverProfile } from '../useDriverProgram'
 import { errorText } from '@/lib/errorText'
 import { useDriverPm } from '../useDriverProgram'
 import { PmGauge } from './PmGauge'
@@ -54,7 +56,18 @@ function shiftDay(day: string, n: number): string {
 export function PaperworkPage() {
   const navigate = useNavigate()
   const today = useMemo(() => chicagoDateStr(new Date()), [])
+  // Ivan's local drivers open on tomorrow's sheet from 8 PM; everyone else on today.
+  const ivanLocal = useDriverProfile()?.ivanLocal === true
+  const opening = useMemo(() => defaultSheetDay(new Date(), ivanLocal), [ivanLocal])
   const [day, setDay] = useState(today)
+  const [openedOnTomorrow, setOpenedOnTomorrow] = useState(false)
+  useEffect(() => {
+    // The profile arrives after first paint; move to tomorrow once, when it says Ivan local.
+    if (opening.isTomorrow && !openedOnTomorrow) {
+      const t = setTimeout(() => { setDay(opening.day); setOpenedOnTomorrow(true) }, 0)
+      return () => clearTimeout(t)
+    }
+  }, [opening, openedOnTomorrow])
   const [week, setWeek] = useState<Paperwork | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)

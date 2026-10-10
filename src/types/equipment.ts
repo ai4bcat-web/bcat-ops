@@ -32,6 +32,8 @@ export interface Equipment {
   eldSource?: EldSource         // 'motive' (auto-sync) | 'manual' (own ELD); default motive
   eldSerialNumber?: string      // own-ELD device serial (manual trucks)
   motiveVehicleNumber?: string | null // Motive vehicle # when it differs from unitNumber (ELD carried over from a retired truck)
+  /** Motive Share Live Location link for this truck, pasted once from Fleet View. */
+  trackingUrl?: string | null
   fleetGroup?: FleetGroup | null // LOCAL (Ivan) | AMAZON — source of truth for profitability grouping
   lastPmDate?: string           // YYYY-MM-DD of the last preventive-maintenance service
   lastPmMileage?: number        // odometer (mi) at the last PM — next PM due at +25k

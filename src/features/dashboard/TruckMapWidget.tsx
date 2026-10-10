@@ -3,6 +3,7 @@ import { formatDistanceToNow, formatDistanceToNowStrict } from 'date-fns'
 import { MapPin, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { TrackingLinkCell } from './TrackingLinkCell'
 import { useAppStore } from '@/store/useAppStore'
 import { driverForTruck } from '@/lib/assignments'
 import { canonicalUnit } from '@/lib/fleetGroups'
@@ -24,7 +25,7 @@ const DRIVER_KIND: Record<FleetBucket, string | null> = {
 const STALE_MS = 2 * 60 * 60 * 1000   // dim trucks not reporting for >2h
 
 /** The columns a dispatcher can sort the table on. */
-type SortKey = 'unit' | 'location' | 'driver' | 'load' | 'status' | 'updated'
+type SortKey = 'unit' | 'location' | 'driver' | 'load' | 'status' | 'tracking' | 'updated'
 const SORT_STORAGE_KEY = 'bcat.dashboard.fleetSort'
 
 function readSort(): { key: SortKey; dir: 'asc' | 'desc' } {
@@ -174,6 +175,7 @@ export function TruckMapWidget() {
           if (a.lastEvent && b.lastEvent) return text(a.lastEvent.at, b.lastEvent.at)
           return text(a.motion.text, b.motion.text)
         }
+        case 'tracking': return Number(!!b.equip?.trackingUrl) - Number(!!a.equip?.trackingUrl) || text(a.unit, b.unit)
         case 'updated': return text(a.loc.locatedAt, b.loc.locatedAt)
       }
     }
@@ -210,9 +212,9 @@ export function TruckMapWidget() {
           <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               {([
-                ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['updated', 'Updated'],
+                ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
                 const active = sort.key === key
                 return (
@@ -242,7 +244,7 @@ export function TruckMapWidget() {
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px auto', gap: 12,
+                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', gap: 12,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -331,6 +333,8 @@ export function TruckMapWidget() {
                       </div>
                     )}
                   </div>
+                  {/* Motive share link, pasted once, copied on every call with a customer. */}
+                  <TrackingLinkCell equip={equip} unit={unit} />
                   <div style={{ textAlign: 'right', color: 'var(--ds-t3)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <span style={{ color: age.stale ? '#b45309' : 'inherit', fontWeight: age.stale ? 600 : 400 }}
                           title={age.stale ? 'No fresh ELD fix — this position may be out of date' : undefined}>

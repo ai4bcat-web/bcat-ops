@@ -106,6 +106,8 @@ export interface DriverProfile {
   timeClock?: boolean | null
   /** Must name the trailer when leaving a pickup (Ivan local drivers). Optional: older API. */
   trailerRequired?: boolean | null
+  /** One of Ivan's own local drivers (not box truck, not owner operator). Optional: older API. */
+  ivanLocal?: boolean | null
 }
 
 export interface DriverTruck {

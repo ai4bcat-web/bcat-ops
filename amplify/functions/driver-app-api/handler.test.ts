@@ -686,6 +686,7 @@ describe('driver-app-api handler', () => {
         // AMAZON pay group, no fleet: a settlement driver with no clock.
         timeClock: false,
         trailerRequired: false,
+        ivanLocal: false,
       })
     })
   })

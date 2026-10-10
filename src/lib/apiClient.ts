@@ -2072,7 +2072,7 @@ const EQUIPMENT_FIELDS = `
   ownership insured active
   dotInspectionDate iftaExpirationDate irpExpirationDate insuranceExpirationDate bobtailInsuranceDate
   assignedDriverId fleetManagerAssignee onTollwayAccount fuelCardNumbers
-  eldSource eldSerialNumber motiveVehicleNumber fleetGroup lastPmDate lastPmMileage notes
+  eldSource eldSerialNumber motiveVehicleNumber fleetGroup lastPmDate lastPmMileage notes trackingUrl
   createdAt updatedAt
 `
 
