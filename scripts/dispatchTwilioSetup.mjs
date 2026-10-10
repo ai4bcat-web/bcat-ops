@@ -117,8 +117,10 @@ async function main() {
   // ── 5. webhooks ─────────────────────────────────────────────────────────
   let webhook = args.webhook
   if (!webhook) {
-    const fn = aws('lambda', 'list-functions', '--query', `Functions[?starts_with(FunctionName, '${APP_FN_PREFIX}') && contains(FunctionName, 'dispatchtwiliowebhook')].FunctionName | [0]`, '--output', 'text').trim()
-    if (!fn || fn === 'None') throw new Error('The dispatch-twilio-webhook Lambda is not deployed yet; wait for the Amplify build or pass --webhook <url>.')
+    // list-functions pages; each page prints its own line (or "None"), so take the first real name.
+    const fn = aws('lambda', 'list-functions', '--query', `Functions[?starts_with(FunctionName, '${APP_FN_PREFIX}') && contains(FunctionName, 'dispatchtwiliowebhook')].FunctionName`, '--output', 'text')
+      .split(/\s+/).find((x) => x && x !== 'None')
+    if (!fn) throw new Error('The dispatch-twilio-webhook Lambda is not deployed yet; wait for the Amplify build or pass --webhook <url>.')
     webhook = aws('lambda', 'get-function-url-config', '--function-name', fn, '--query', 'FunctionUrl', '--output', 'text').trim()
   }
   webhook = webhook.replace(/\/+$/, '')
