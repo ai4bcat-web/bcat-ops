@@ -2,6 +2,7 @@ import { Phone, Voicemail, Image as ImageIcon, StickyNote } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useDrivers } from '@/hooks/useDrivers'
 import { conversationColor, initialsOf } from './conversationColor'
+import { groupByFleet } from './fleetSections'
 import { conversationTitle, prettyPhone, type DispatchConversation } from '@/lib/dispatch'
 import { listTime, staffName } from './dispatchUi'
 
@@ -26,9 +27,17 @@ export function ConversationList({ rows, selectedId, onSelect, now }: Props) {
   if (rows.length === 0) {
     return <div style={{ padding: 24, fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center' }}>No conversations here.</div>
   }
+  const sections = groupByFleet(rows, drivers)
   return (
+    <div>
+      {sections.map((section) => (
+        <section key={section.key} aria-label={section.label}>
+          <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderBottom: '1px solid var(--ds-border-soft)' }}>
+            <span>{section.label} <span style={{ fontWeight: 500 }}>· {section.rows.length}</span></span>
+            {section.unread ? <span style={{ color: 'var(--ds-blue)' }}>{section.unread} unread</span> : null}
+          </div>
     <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-      {rows.map((c) => {
+      {section.rows.map((c) => {
         const unread = (c.unreadCount ?? 0) > 0
         const active = c.id === selectedId
         const title = conversationTitle(c)
@@ -70,5 +79,8 @@ export function ConversationList({ rows, selectedId, onSelect, now }: Props) {
         )
       })}
     </ul>
+        </section>
+      ))}
+    </div>
   )
 }
