@@ -52,6 +52,7 @@ export async function loadDispatchConfig(ssm: SSMClient = new SSMClient({}), pat
     next = page.NextToken
   } while (next)
   const value = configFromParams(params)
-  cached = { at: Date.now(), value }
+  // Never cache "not set up": the moment the setup script fills the path, the next call sees it.
+  cached = value ? { at: Date.now(), value } : null
   return value
 }
