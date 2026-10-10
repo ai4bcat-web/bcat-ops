@@ -49,6 +49,7 @@ describe('formatting', () => {
     expect(formatInbound({ kind: 'CALL', status: 'missed' })).toBe('📵 Missed call')
     expect(formatInbound({ kind: 'CALL', status: 'answered', callDurationSec: 61 })).toBe('📞 Call answered (1:01)')
     expect(formatInbound({ kind: 'VOICEMAIL', callDurationSec: 30, transcript: 'call me' })).toContain('_call me_')
+    expect(formatInbound({ kind: 'STATUS', body: 'Departed pickup · Batory' })).toBe('📍 Departed pickup · Batory')
   })
   it('labels what staff sent from the page, and what bounced', () => {
     expect(formatOutbound({ kind: 'SMS', body: 'Go to door 4' }, 'Jenny')).toBe('💬 *Jenny* (BCAT Ops): Go to door 4')

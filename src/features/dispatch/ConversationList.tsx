@@ -1,4 +1,4 @@
-import { Phone, Voicemail, Image as ImageIcon, StickyNote } from 'lucide-react'
+import { Phone, Voicemail, Image as ImageIcon, StickyNote, MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useDrivers } from '@/hooks/useDrivers'
 import { conversationColor, initialsOf } from './conversationColor'
@@ -11,6 +11,8 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string) => void
   now: Date
+  /** Where the driver is and when they are due, when known. */
+  subline?: (c: DispatchConversation) => string | null
 }
 
 function KindIcon({ kind }: { kind: string | null | undefined }) {
@@ -19,10 +21,11 @@ function KindIcon({ kind }: { kind: string | null | undefined }) {
   if (kind === 'VOICEMAIL') return <Voicemail className={cls} />
   if (kind === 'MMS') return <ImageIcon className={cls} />
   if (kind === 'NOTE') return <StickyNote className={cls} />
+  if (kind === 'STATUS') return <MapPin className={cls} style={{ color: 'var(--ds-green)' }} />
   return null
 }
 
-export function ConversationList({ rows, selectedId, onSelect, now }: Props) {
+export function ConversationList({ rows, selectedId, onSelect, now, subline }: Props) {
   const { drivers } = useDrivers()
   if (rows.length === 0) {
     return <div style={{ padding: 24, fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center' }}>No conversations here.</div>
@@ -70,6 +73,7 @@ export function ConversationList({ rows, selectedId, onSelect, now }: Props) {
                   {c.lastDirection === 'OUT' && c.lastKind !== 'NOTE' ? `${staffName(c.lastSentBy) || 'Sent'}: ` : ''}{c.lastPreview ?? (isDriver ? prettyPhone(c.phone) : 'New conversation')}
                 </span>
               </span>
+              {subline?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📍 {subline(c)}</span> : null}
               <span style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                 {c.assignedTo ? <span title={c.assignedTo} style={{ fontSize: 10, color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px' }}>{staffName(c.assignedTo)}</span> : null}
                 {unread ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: color.border, color: '#fff', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{c.unreadCount}</span> : null}

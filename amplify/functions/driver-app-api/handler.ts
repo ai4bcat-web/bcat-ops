@@ -24,6 +24,10 @@ import {
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
+import { DynamoDBClient as DispatchDynamo } from '@aws-sdk/client-dynamodb'
+import { DispatchStore, tablesFromEnv as dispatchTablesFromEnv, recordDriverStatus } from '../_shared/dispatchStore'
+import { slackClient } from '../_shared/slackApi'
+import { mirrorInbound, slackMirrorEnabled } from '../_shared/slackDispatch'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { CognitoJwtVerifier } from 'aws-jwt-verify'
 import {
@@ -106,6 +110,28 @@ const s3 = new S3Client({})
 const ssm = new SSMClient({})
 const DISPATCH_PARAM_PATH = process.env.DISPATCH_PARAM_PATH ?? ''
 let dispatchPhoneCache: { at: number; value: string | null } | null = null
+/*
+ * What the driver just reported, as a line in their Dispatch conversation (and their Slack
+ * channel when they have one), so the office sees "On site at pickup · Batory" in the same
+ * thread as their texts. Best effort: a failure here never fails the status update itself.
+ */
+const dispatchDynamo = new DispatchDynamo({})
+const SLACK_BOT_TOKEN_FOR_DISPATCH = process.env.SLACK_BOT_TOKEN ?? ''
+async function postDriverStatus(driver: DriverRow, text: string, at: string): Promise<void> {
+  const tables = dispatchTablesFromEnv()
+  if (!tables.conversations || !tables.messages) return
+  try {
+    const store = new DispatchStore(dispatchDynamo, tables)
+    const r = await recordDriverStatus(store, { id: driver.id, name: driver.name, phone: driver.phone ?? '', active: driver.active }, text, at)
+    if (!r || !r.conversation.slackChannelId || !SLACK_BOT_TOKEN_FOR_DISPATCH) return
+    const settings = await store.getSettings().catch(() => null)
+    if (!slackMirrorEnabled(settings)) return
+    await mirrorInbound({ slack: slackClient(SLACK_BOT_TOKEN_FOR_DISPATCH), store, settings }, r.conversation, r.message, () => Promise.reject(new Error('no media')))
+  } catch (err) {
+    console.warn('[driver-app-api] dispatch status not recorded', String(err))
+  }
+}
+
 async function dispatchPhone(): Promise<string | null> {
   if (dispatchPhoneCache && Date.now() - dispatchPhoneCache.at < 5 * 60 * 1000) return dispatchPhoneCache.value
   if (!DISPATCH_PARAM_PATH) return null
@@ -226,6 +252,7 @@ interface DriverRow {
   name: string
   active: boolean
   email?: string | null
+  phone?: string | null
   // Which fleet they run in. These two decide whether the app shows a settlement or
   // paperwork — see src/lib/driverProgram.ts for why pay group is NOT the input.
   fleetGroup?: string | null
@@ -2778,6 +2805,14 @@ export const handler = async (event: FnUrlEvent) => {
         },
       }))
       console.log('[driver-app-api] stop event', { driverId, loadId, stopId, event: ev, eta })
+      {
+        const delivery = stop.type === 'delivery'
+        const label = ev === 'ARRIVED' ? (delivery ? 'On site at delivery' : 'On site at pickup') : (delivery ? 'Delivered' : 'Departed pickup')
+        const place = [stop.name?.trim(), stop.city?.trim()].filter(Boolean).join(', ')
+        const pro = (load as { aljexId?: string | null }).aljexId?.trim()
+        const etaText = eta ? ` · ETA ${new Date(eta.etaAt).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })} at delivery` : ''
+        await postDriverStatus(driver, `${label}${place ? ` · ${place}` : ''}${pro ? ` · PRO ${pro}` : ''}${etaText}`, now)
+      }
       return reply(200, { ok: true, loadId, stopId, event: ev, at: now, eta })
     }
 
@@ -3105,6 +3140,11 @@ export const handler = async (event: FnUrlEvent) => {
         return reply(400, { error: "kind must be 'RATECON', 'POD' or 'MISC'" })
       }
       const result = await completeSubmission(driverId, id, kind)
+      if (kind === 'POD' && !result.error) {
+        const sub = (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as { stopLabel?: string | null; proNumber?: string | null; aljexId?: string | null } | undefined
+        const pro = (sub?.proNumber ?? sub?.aljexId ?? '').trim()
+        await postDriverStatus(driver, `POD sent${sub?.stopLabel ? ` · ${sub.stopLabel}` : ''}${pro ? ` · PRO ${pro}` : ''}`, nowIso())
+      }
       return reply(200, result.error ? { ok: true, error: result.error } : { ok: true })
     }
 

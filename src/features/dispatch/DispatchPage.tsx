@@ -8,6 +8,9 @@ import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDispatch } from '@/hooks/useDispatch'
 import { useDrivers } from '@/hooks/useDrivers'
+import { useAppStore } from '@/store/useAppStore'
+import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { whereaboutsOf, whereaboutsLine } from './driverWhereabouts'
 import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
@@ -38,6 +41,21 @@ export function DispatchPage() {
   const [defaultInvites, setDefaultInvites] = useState<string[] | null>(null)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
+  // Where each truck is, for the location line under a driver: refreshed every minute.
+  const loads = useAppStore((s) => s.loads)
+  const equipment = useAppStore((s) => s.equipment)
+  const [locations, setLocations] = useState<TruckLocation[]>([])
+  useEffect(() => {
+    let alive = true
+    const tick = () => { if (document.visibilityState === 'visible') listTruckLocations().then((rows) => { if (alive) setLocations(rows) }).catch(() => undefined) }
+    const first = setTimeout(tick, 0)
+    const t = setInterval(tick, 60_000)
+    return () => { alive = false; clearTimeout(first); clearInterval(t) }
+  }, [])
+  const subline = (c: DispatchConversation): string | null => {
+    const driver = c.driverId ? drivers.find((x) => x.id === c.driverId) : null
+    return whereaboutsLine(whereaboutsOf(driver, loads, equipment, locations, now.getTime()))
+  }
 
   const me = user?.email?.toLowerCase() ?? ''
   // Assigning, relinking a number and the settings are admin-only; the Lambda enforces it too.
@@ -61,6 +79,7 @@ export function DispatchPage() {
   const selectedDriver = selected?.driverId ? drivers.find((x) => x.id === selected.driverId) ?? null : null
   const selectedColor = selected ? conversationColor(selected, drivers) : null
   const selectedDispatchers = dispatchersOf(selectedDriver)
+  const selectedWhere = selected ? whereaboutsLine(whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime())) : null
 
   // Opening a conversation with unread messages marks it read for the whole team.
   useEffect(() => {
@@ -149,7 +168,7 @@ export function DispatchPage() {
         ) : d.error && d.conversations.length === 0 ? (
           <div style={{ padding: 16, fontSize: 13, color: 'var(--ds-red)' }}>{d.error}</div>
         ) : (
-          <ConversationList rows={rows} selectedId={d.selectedId} onSelect={d.select} now={now} />
+          <ConversationList rows={rows} selectedId={d.selectedId} onSelect={d.select} now={now} subline={subline} />
         )}
       </div>
     </div>
@@ -167,6 +186,7 @@ export function DispatchPage() {
             <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
+            {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {selectedDispatchers.length ? <span title={selectedDispatchers.join(', ')}>· Dispatcher {staffName(selectedDispatchers[0])}{selectedDispatchers[1] ? ` (backup ${staffName(selectedDispatchers[1])})` : ''}</span> : null}
             {selected.assignedTo ? <span>· {selected.assignedTo === me ? 'Yours' : `With ${staffName(selected.assignedTo)}`}</span> : null}
           </div>

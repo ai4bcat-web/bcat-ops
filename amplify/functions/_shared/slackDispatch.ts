@@ -67,6 +67,8 @@ export function formatInbound(m: Pick<DispatchMessage, 'kind' | 'body' | 'media'
       return '📞 Calling dispatch…'
     case 'VOICEMAIL':
       return m.transcript ? `🎙️ Voicemail (${formatDuration(m.callDurationSec)}): _${m.transcript}_` : `🎙️ Voicemail (${formatDuration(m.callDurationSec)}) — transcript coming`
+    case 'STATUS':
+      return `📍 ${(m.body ?? '').trim()}`
     default: {
       const text = (m.body ?? '').trim()
       const n = m.media?.length ?? 0

@@ -676,7 +676,9 @@ const dispatchParamArn = Stack.of(dispatchWebhookFn).formatArn({
 })
 const dispatchTableArns = [dispatchConversationTable.tableArn, dispatchMessageTable.tableArn, dispatchSettingsTable.tableArn]
 
-for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn]) {
+// driverApiFn is in the list because the driver app's stop events and POD sends are
+// written into the driver's conversation (recordDriverStatus) and mirrored to Slack.
+for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, driverApiFn]) {
   fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
   fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
   fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)

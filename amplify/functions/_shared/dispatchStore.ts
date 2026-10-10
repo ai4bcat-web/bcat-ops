@@ -12,7 +12,7 @@ import {
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomUUID } from 'node:crypto'
 import type { DispatchConversation, DispatchDriver, DispatchKind, DispatchMedia, DispatchMessage, DispatchSettings } from '../../../src/lib/dispatch'
-import { messagePreview, dispatchersOf } from '../../../src/lib/dispatch'
+import { messagePreview, dispatchersOf, toE164Strict, matchDriverByPhone } from '../../../src/lib/dispatch'
 
 export const CONVERSATIONS_BY_PHONE = 'dispatchConversationsByPhone'
 export const MESSAGES_BY_CONVERSATION = 'dispatchMessagesByConversationIdAndAt'
@@ -339,4 +339,17 @@ export function messageRow(input: {
     errorCode: input.errorCode ?? null,
     errorMessage: input.errorMessage ?? null,
   }
+}
+
+/**
+ * A driver-app status update (on site, departed, delivered, POD sent) as a line in the
+ * driver's conversation. Never counts as unread: it is the driver reporting, not asking.
+ */
+export async function recordDriverStatus(store: DispatchStore, driver: DispatchDriver, text: string, at: string): Promise<{ conversation: DispatchConversation; message: DispatchMessage } | null> {
+  const phone = driver.phone ? toE164Strict(driver.phone) : null
+  if (!phone) return null
+  const { conversation } = await store.ensureConversation(phone, [driver], (ds, p) => matchDriverByPhone(ds, p))
+  const message = await store.putMessage(messageRow({ conversationId: conversation.id, phone, direction: 'IN', kind: 'STATUS', at, body: text, status: 'received' }))
+  const updated = await store.touchConversation(conversation.id, message, { unread: 'keep' })
+  return { conversation: updated, message }
 }

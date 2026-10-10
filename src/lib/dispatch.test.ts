@@ -61,6 +61,7 @@ describe('display', () => {
     expect(messagePreview({ kind: 'VOICEMAIL', direction: 'IN', callDurationSec: 34 })).toBe('Voicemail (0:34)')
     expect(messagePreview({ kind: 'VOICEMAIL', direction: 'IN', body: 'Call me back about the trailer' })).toBe('Voicemail: Call me back about the trailer')
     expect(messagePreview({ kind: 'NOTE', direction: 'OUT', body: 'Told him to wait' })).toBe('Note: Told him to wait')
+    expect(messagePreview({ kind: 'STATUS', direction: 'IN', body: 'On site at pickup · Batory Foods' })).toBe('On site at pickup · Batory Foods')
   })
   it('truncates long texts with an ellipsis', () => {
     const long = 'x'.repeat(150)

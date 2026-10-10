@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { Loader2, Paperclip, Send, Phone, PhoneMissed, PhoneIncoming, Voicemail, StickyNote } from 'lucide-react'
+import { Loader2, Paperclip, Send, Phone, PhoneMissed, PhoneIncoming, Voicemail, StickyNote, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -36,6 +36,17 @@ function CallRow({ m }: { m: DispatchMessage }) {
     <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: missed ? 'var(--ds-red)' : 'var(--ds-t2)', background: 'var(--ds-bg-2)', borderRadius: 999, padding: '4px 10px' }}>
         <Icon className="size-3.5" /> {text} · {bubbleTime(m.at)}
+      </span>
+    </div>
+  )
+}
+
+/** A stop event the driver reported from the app: on site, departed, delivered, POD sent. */
+function StatusRow({ m }: { m: DispatchMessage }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', background: 'var(--ds-green-bg)', border: '1px solid var(--ds-green)', borderRadius: 999, padding: '4px 10px', maxWidth: '90%' }}>
+        <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} /> <span>{m.body}</span> <span style={{ color: 'var(--ds-t3)' }}>· {bubbleTime(m.at)}</span>
       </span>
     </div>
   )
@@ -146,7 +157,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>
               <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{g.label}</span>
             </div>
-            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} accent={accent} getUrl={getUrl} />)}
+            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : m.kind === 'STATUS' ? <StatusRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} accent={accent} getUrl={getUrl} />)}
           </div>
         ))}
       </div>

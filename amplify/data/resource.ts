@@ -1966,7 +1966,10 @@ const schema = a.schema({
       lastKind:      a.string(),
       lastSentBy:    a.string(),              // staff email behind the last OUT message
       unreadCount:   a.integer(),
-      assignedTo:    a.string(),              // staff email
+      assignedTo:    a.string(),              // primary dispatcher (staff email)
+      assignedBackup: a.string(),             // backup dispatcher
+      nudgedFor:     a.datetime(),            // the lastMessageAt a Slack nudge was sent for
+      nudgeStage:    a.integer(),             // 1 = primary pinged, 2 = backup pinged
       lastReadAt:    a.datetime(),
       lastReadBy:    a.string(),
       slackChannelId:   a.string(),           // the driver's own Slack channel (bridge)
@@ -1981,7 +1984,7 @@ const schema = a.schema({
       conversationId:  a.string().required(),
       phone:           a.string().required(),
       direction:       a.enum(['IN', 'OUT']),
-      kind:            a.enum(['SMS', 'MMS', 'CALL', 'VOICEMAIL', 'NOTE']),
+      kind:            a.enum(['SMS', 'MMS', 'CALL', 'VOICEMAIL', 'NOTE', 'STATUS']),   // STATUS: driver-app stop events
       body:            a.string(),
       media:           a.json(),              // [{ key, contentType }] in S3 dispatch-media/
       twilioSid:       a.string(),            // MessageSid / CallSid / RecordingSid

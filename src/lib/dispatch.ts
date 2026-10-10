@@ -8,7 +8,7 @@
  */
 
 export type DispatchDirection = 'IN' | 'OUT'
-export type DispatchKind = 'SMS' | 'MMS' | 'CALL' | 'VOICEMAIL' | 'NOTE'
+export type DispatchKind = 'SMS' | 'MMS' | 'CALL' | 'VOICEMAIL' | 'NOTE' | 'STATUS'
 
 export interface DispatchMedia {
   key: string
@@ -30,7 +30,12 @@ export interface DispatchConversation {
   /** Who sent the last outbound message (staff email), for the list. */
   lastSentBy?: string | null
   unreadCount?: number | null
+  /** Primary dispatcher (staff email). */
   assignedTo?: string | null
+  /** Backup dispatcher, pinged when the primary has not answered either. */
+  assignedBackup?: string | null
+  nudgedFor?: string | null
+  nudgeStage?: number | null
   lastReadAt?: string | null
   lastReadBy?: string | null
   /** The driver's own Slack channel, once the bridge has made it. */
@@ -203,6 +208,8 @@ export function messagePreview(m: Pick<DispatchMessage, 'kind' | 'direction' | '
       return m.body?.trim() ? `Voicemail: ${truncate(m.body.trim(), 80)}` : `Voicemail (${formatDuration(m.callDurationSec)})`
     case 'NOTE':
       return `Note: ${truncate((m.body ?? '').trim(), 80)}`
+    case 'STATUS':
+      return truncate((m.body ?? '').trim(), 120)
     default: {
       const text = (m.body ?? '').trim()
       const n = m.media?.length ?? 0
