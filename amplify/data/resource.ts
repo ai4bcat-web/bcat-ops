@@ -1964,12 +1964,15 @@ const schema = a.schema({
       lastPreview:   a.string(),
       lastDirection: a.enum(['IN', 'OUT']),
       lastKind:      a.string(),
+      lastSentBy:    a.string(),              // staff email behind the last OUT message
       unreadCount:   a.integer(),
       assignedTo:    a.string(),              // staff email
       lastReadAt:    a.datetime(),
       lastReadBy:    a.string(),
+      slackChannelId:   a.string(),           // the driver's own Slack channel (bridge)
+      slackChannelName: a.string(),
     })
-    .secondaryIndexes((index) => [index('phone')])
+    .secondaryIndexes((index) => [index('phone'), index('slackChannelId')])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1990,6 +1993,8 @@ const schema = a.schema({
       callDurationSec: a.integer(),
       recordingKey:    a.string(),
       transcript:      a.string(),
+      via:             a.string(),            // 'app' | 'slack' for OUT
+      slackTs:         a.string(),
     })
     .secondaryIndexes((index) => [
       index('conversationId').sortKeys(['at']),
@@ -2007,6 +2012,8 @@ const schema = a.schema({
       voicemailEnabled: a.boolean(),
       slackChannelId:   a.string(),
       autoReply:        a.string(),
+      slackMirror:      a.boolean(),          // one Slack channel per driver, both ways
+      slackInviteEmails: a.json(),            // staff emails invited into every driver channel
     })
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),

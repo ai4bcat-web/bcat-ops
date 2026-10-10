@@ -8,7 +8,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useDrivers } from '@/hooks/useDrivers'
 import {
-  prettyPhone, toE164Strict, normalizeSettings, DEFAULT_GREETING, DEFAULT_RING_SECONDS, MIN_RING_SECONDS, MAX_RING_SECONDS,
+  prettyPhone, toE164Strict, normalizeSettings, conversationTitle, slackChannelNameFor,
+  DEFAULT_GREETING, DEFAULT_RING_SECONDS, MIN_RING_SECONDS, MAX_RING_SECONDS,
   type DispatchConversation, type DispatchSettings, type DispatchForward,
 } from '@/lib/dispatch'
 
@@ -158,6 +159,8 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
   const [voicemail, setVoicemail] = useState(true)
   const [slack, setSlack] = useState('')
   const [autoReply, setAutoReply] = useState('')
+  const [slackMirror, setSlackMirror] = useState(true)
+  const [slackInvites, setSlackInvites] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -171,12 +174,14 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
       setVoicemail(s?.voicemailEnabled !== false)
       setSlack(s?.slackChannelId ?? '')
       setAutoReply(s?.autoReply ?? '')
+      setSlackMirror(s?.slackMirror !== false)
+      setSlackInvites((s?.slackInviteEmails ?? []).join(', '))
     }).catch((err) => toast.error(err instanceof Error ? err.message : 'Could not load settings')).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [load])
 
   const submit = async () => {
-    const r = normalizeSettings({ forwardTo: forwards, ringSeconds: ring, greeting, voicemailEnabled: voicemail, slackChannelId: slack, autoReply })
+    const r = normalizeSettings({ forwardTo: forwards, ringSeconds: ring, greeting, voicemailEnabled: voicemail, slackChannelId: slack, autoReply, slackMirror, slackInviteEmails: slackInvites.split(/[\s,;]+/).filter(Boolean) })
     if (!r.ok) { toast.error(r.problem.message); return }
     setSaving(true)
     try { await save(r.value); toast.success('Dispatch settings saved'); onClose() } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not save settings') } finally { setSaving(false) }
@@ -224,6 +229,14 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
               <Input id="dispatch-autoreply" placeholder="Got it. BCAT dispatch will reply shortly." value={autoReply} onChange={(e) => setAutoReply(e.target.value)} />
               <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Sent once, the first time a new number texts in.</div>
             </section>
+            <section style={{ display: 'grid', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
+                <input type="checkbox" id="dispatch-slack-mirror" checked={slackMirror} onChange={(e) => setSlackMirror(e.target.checked)} /> One Slack channel per driver, mirrored both ways
+              </label>
+              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Channels are created from the conversation (Create Slack channel) so you pick the name and who is in it. Texts typed in the channel go to the driver.</div>
+              <Label htmlFor="dispatch-slack-invites">Invite these people to every driver channel by default</Label>
+              <Input id="dispatch-slack-invites" placeholder="ryne@bcatcorp.com, dennis@bcatcorp.com" value={slackInvites} onChange={(e) => setSlackInvites(e.target.value)} disabled={!slackMirror} />
+            </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-slack">Slack channel ID for a ping on every inbound text (optional)</Label>
               <Input id="dispatch-slack" placeholder="C0123ABCDEF" value={slack} onChange={(e) => setSlack(e.target.value)} />
@@ -238,4 +251,94 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
       </DialogContent>
     </Dialog>
   )
+}
+
+// ── Slack channel wizard ─────────────────────────────────────────────────────
+
+interface WizardProps {
+  conversation: DispatchConversation
+  /** Default invitees from Dispatch settings. */
+  defaultInvites: string[]
+  onClose: () => void
+  onCreate: (input: { name: string; inviteEmails: string[] }) => Promise<{ url: string | null }>
+}
+
+/** Mounted per conversation: name the channel, confirm who is in it, create. */
+export function SlackChannelWizard({ conversation, defaultInvites, onClose, onCreate }: WizardProps) {
+  const [name, setName] = useState(slackChannelNameFor(conversation))
+  const [invites, setInvites] = useState<string[]>(defaultInvites)
+  const [extra, setExtra] = useState('')
+  const [busy, setBusy] = useState(false)
+  const cleaned = cleanSlackName(name)
+
+  const addExtra = () => {
+    const e = extra.trim().toLowerCase()
+    if (!e) return
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) { toast.error('Enter an email address'); return }
+    if (!invites.includes(e)) setInvites((x) => [...x, e])
+    setExtra('')
+  }
+
+  const submit = async () => {
+    if (!cleaned) { toast.error('Channel names use lowercase letters, numbers and dashes'); return }
+    setBusy(true)
+    try {
+      const r = await onCreate({ name: cleaned, inviteEmails: invites })
+      toast.success(`#${cleaned} is ready`, r.url ? { action: { label: 'Open in Slack', onClick: () => window.open(r.url!, '_blank', 'noreferrer') } } : undefined)
+      onClose()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not create the channel')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Slack channel for {conversationTitle(conversation)}</DialogTitle>
+          <DialogDescription>
+            Everything {conversationTitle(conversation)} texts shows up in this channel, and anything your team types there goes back as a text. Start a Slack message with // to keep it as an internal note.
+          </DialogDescription>
+        </DialogHeader>
+        <div style={{ display: 'grid', gap: 14 }}>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <Label htmlFor="dispatch-slack-name">Channel name</Label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ color: 'var(--ds-t3)' }}>#</span>
+              <Input id="dispatch-slack-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            </div>
+            {cleaned !== name.trim().toLowerCase().replace(/^#/, '') ? <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Will be created as #{cleaned || '…'}</div> : null}
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <Label>Invite</Label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {invites.length === 0 ? <span style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Nobody yet. Add emails below, or set defaults in Dispatch settings.</span> : null}
+              {invites.map((e) => (
+                <span key={e} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, background: 'var(--ds-bg-2)', borderRadius: 999, padding: '3px 8px 3px 10px' }}>
+                  {e}
+                  <button type="button" aria-label={`Remove ${e}`} onClick={() => setInvites((x) => x.filter((y) => y !== e))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)', padding: 0, lineHeight: 1 }}>×</button>
+                </span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Input id="dispatch-slack-extra" placeholder="someone@bcatcorp.com" value={extra} onChange={(e) => setExtra(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExtra() } }} />
+              <Button type="button" variant="outline" onClick={addExtra}><Plus className="size-4" /> Add</Button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>People are matched to Slack by their email. The BCAT bot joins automatically.</div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Not now</Button>
+          <Button onClick={() => void submit()} disabled={busy || !cleaned}>{busy ? <Loader2 className="size-4 animate-spin" /> : null} Create channel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** Mirror of the Lambda's rule, so the wizard previews the real name. */
+function cleanSlackName(raw: string): string {
+  return raw.trim().toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/^#/, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80).replace(/-+$/, '')
 }

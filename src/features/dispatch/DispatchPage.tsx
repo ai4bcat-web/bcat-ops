@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone } from 'lucide-react'
+import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, Hash, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
 import { Thread } from './Thread'
-import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog } from './DispatchDialogs'
+import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard } from './DispatchDialogs'
 import { staffName } from './dispatchUi'
 
 type Tab = 'OPEN' | 'UNREAD' | 'MINE' | 'ARCHIVED'
@@ -33,6 +33,8 @@ export function DispatchPage() {
   const [newOpen, setNewOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [linking, setLinking] = useState<DispatchConversation | null>(null)
+  const [slackWizard, setSlackWizard] = useState<DispatchConversation | null>(null)
+  const [defaultInvites, setDefaultInvites] = useState<string[] | null>(null)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
 
@@ -67,6 +69,19 @@ export function DispatchPage() {
     for (const c of d.conversations) if (c.assignedTo) set.add(c.assignedTo)
     return [...set].sort()
   }, [d.conversations, me])
+
+  // The wizard pre-fills the default invitees from settings; fetched once, on first use.
+  const openSlackWizard = async (c: DispatchConversation) => {
+    if (defaultInvites === null) {
+      try {
+        const s = await d.getSettings()
+        setDefaultInvites(s?.slackInviteEmails ?? (me ? [me] : []))
+      } catch {
+        setDefaultInvites(me ? [me] : [])
+      }
+    }
+    setSlackWizard(c)
+  }
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
     try { await fn() } catch (err) { toast.error(err instanceof Error ? err.message : `Could not ${label}`) }
@@ -156,11 +171,27 @@ export function DispatchPage() {
           <Button variant="outline" size="sm" className="h-8 gap-1.5" title={selected.driverId ? 'Change who this number belongs to' : 'Link this number to a driver'} onClick={() => setLinking(selected)}>
             <UserPlus className="size-3.5" />{isMobile ? '' : (selected.driverId ? 'Relink' : 'Link driver')}
           </Button>
+          {d.status?.slackBridge ? (selected.slackChannelId ? (
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild title={`#${selected.slackChannelName ?? 'channel'} in Slack`}>
+              <a href={`https://bcatcorp.slack.com/archives/${selected.slackChannelId}`} target="_blank" rel="noreferrer"><Hash className="size-3.5" />{isMobile ? '' : (selected.slackChannelName ?? 'Slack')}<ExternalLink className="size-3" /></a>
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Create this driver's Slack channel" onClick={() => void openSlackWizard(selected)}>
+              <Hash className="size-3.5" />{isMobile ? '' : 'Create Slack channel'}
+            </Button>
+          )) : null}
           <Button variant="outline" size="sm" className="h-8" title={selected.status === 'ARCHIVED' ? 'Reopen' : 'Archive'} onClick={() => void act('archive', () => d.setArchived(selected.id, selected.status !== 'ARCHIVED'))}>
             {selected.status === 'ARCHIVED' ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
           </Button>
         </div>
       </div>
+      {d.status?.slackBridge && !selected.slackChannelId && selected.lastDirection === 'IN' ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: 'var(--ds-blue-bg)', borderBottom: '1px solid var(--ds-border)', fontSize: 13 }}>
+          <Hash className="size-4" style={{ color: 'var(--ds-blue)' }} />
+          <span style={{ flex: 1 }}>{conversationTitle(selected)} has no Slack channel yet. Create one so the team can answer from Slack.</span>
+          <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
+        </div>
+      ) : null}
       <Thread
         key={selected.id}
         conversation={selected}
@@ -168,6 +199,7 @@ export function DispatchPage() {
         loading={d.threadLoading}
         now={now}
         canSend={configured}
+        me={me}
         getUrl={d.mediaUrl}
         onSend={(body, files) => d.send({ conversationId: selected.id, body, files })}
         onNote={(body) => d.addNote(selected.id, body)}
@@ -189,6 +221,7 @@ export function DispatchPage() {
       </div>
       {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => { const c = await d.start(input); setTab(c.status === 'ARCHIVED' ? 'ARCHIVED' : 'OPEN'); d.select(c.id); return c }} /> : null}
       {linking ? <LinkNumberDialog key={linking.id} conversation={linking} onClose={() => setLinking(null)} onLink={(input) => d.link(linking.id, input)} /> : null}
+      {slackWizard ? <SlackChannelWizard key={slackWizard.id} conversation={slackWizard} defaultInvites={defaultInvites ?? []} onClose={() => setSlackWizard(null)} onCreate={(input) => d.createSlackChannel(slackWizard.id, input)} /> : null}
       {settingsOpen ? <DispatchSettingsDialog onClose={() => setSettingsOpen(false)} dispatchNumber={d.status?.dispatchNumber ?? null} load={d.getSettings} save={d.saveSettings} /> : null}
     </div>
   )

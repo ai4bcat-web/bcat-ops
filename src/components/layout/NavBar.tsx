@@ -18,6 +18,7 @@ const BADGE_TONE: Record<string, { bg: string; color: string }> = {
   maintenance: { bg: 'var(--ds-red-soft)',         color: '#dc2626' },
   review:      { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
   truckDocs:   { bg: 'var(--ds-red-soft)',          color: '#dc2626' },
+  dispatch:    { bg: 'var(--ds-blue-soft)',         color: '#0369a1' },
 }
 
 function NavBadge({ count, toneKey }: { count: number; toneKey: string }) {

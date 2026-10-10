@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { Loader2, Paperclip, Send, X, Phone, PhoneMissed, PhoneIncoming, Voicemail, StickyNote } from 'lucide-react'
+import { Loader2, Paperclip, Send, Phone, PhoneMissed, PhoneIncoming, Voicemail, StickyNote } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formatDuration, MAX_SMS_BODY, type DispatchConversation, type DispatchMessage } from '@/lib/dispatch'
-import { groupByDay, bubbleTime, deliveryLabel, staffName, acceptFiles, ACCEPTED_MEDIA } from './dispatchUi'
-import { MediaThumb, VoicemailPlayer } from './MediaThumb'
+import { groupByDay, bubbleTime, deliveryLabel, staffName, senderLabel, acceptFiles, ACCEPTED_MEDIA } from './dispatchUi'
+import { MediaThumb, VoicemailPlayer, PendingFilePreview } from './MediaThumb'
 
 interface Props {
   conversation: DispatchConversation
@@ -14,6 +14,8 @@ interface Props {
   loading: boolean
   now: Date
   canSend: boolean
+  /** The signed-in email, so their own sends read as "You". */
+  me: string | null
   getUrl: (key: string) => Promise<string>
   onSend: (body: string, files: File[]) => Promise<void>
   onNote: (body: string) => Promise<void>
@@ -37,11 +39,12 @@ function CallRow({ m }: { m: DispatchMessage }) {
   )
 }
 
-function Bubble({ m, getUrl }: { m: DispatchMessage; getUrl: (key: string) => Promise<string> }) {
+function Bubble({ m, me, getUrl }: { m: DispatchMessage; me: string | null; getUrl: (key: string) => Promise<string> }) {
   const mine = m.direction === 'OUT'
   const note = m.kind === 'NOTE'
   const vm = m.kind === 'VOICEMAIL'
   const delivery = deliveryLabel(m)
+  const sender = senderLabel(m, me)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', margin: '4px 0' }}>
       <div
@@ -54,7 +57,8 @@ function Bubble({ m, getUrl }: { m: DispatchMessage; getUrl: (key: string) => Pr
           fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}
       >
-        {note ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--ds-amber)', marginBottom: 2 }}><StickyNote className="size-3" /> Internal note · {staffName(m.sentBy)}</div> : null}
+        {note ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--ds-amber)', marginBottom: 2 }}><StickyNote className="size-3" /> Internal note · {sender ?? staffName(m.sentBy)}</div>
+          : mine ? <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginBottom: 2 }}>{sender}</div> : null}
         {vm ? (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)' }}><Voicemail className="size-3.5" /> Voicemail · {formatDuration(m.callDurationSec)}</div>
@@ -70,7 +74,6 @@ function Bubble({ m, getUrl }: { m: DispatchMessage; getUrl: (key: string) => Pr
         ) : null}
       </div>
       <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
-        {mine && !note && m.sentBy ? <span>{staffName(m.sentBy)}</span> : null}
         <span>{bubbleTime(m.at)}</span>
         {delivery ? <span style={{ color: TONE_COLOR[delivery.tone] }}>· {delivery.text}</span> : null}
       </div>
@@ -78,7 +81,7 @@ function Bubble({ m, getUrl }: { m: DispatchMessage; getUrl: (key: string) => Pr
   )
 }
 
-export function Thread({ conversation, messages, loading, now, canSend, getUrl, onSend, onNote }: Props) {
+export function Thread({ conversation, messages, loading, now, canSend, me, getUrl, onSend, onNote }: Props) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [mode, setMode] = useState<'text' | 'note'>('text')
@@ -141,20 +144,15 @@ export function Thread({ conversation, messages, loading, now, canSend, getUrl, 
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>
               <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{g.label}</span>
             </div>
-            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} getUrl={getUrl} />)}
+            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} getUrl={getUrl} />)}
           </div>
         ))}
       </div>
 
       <form onSubmit={submit} style={{ borderTop: '1px solid var(--ds-border)', padding: '10px 12px', background: 'var(--ds-surface)' }}>
         {files.length ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-            {files.map((f, i) => (
-              <span key={`${f.name}-${i}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, background: 'var(--ds-bg-2)', borderRadius: 6, padding: '3px 8px' }}>
-                <Paperclip className="size-3" /> {f.name}
-                <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((x) => x.filter((_, j) => j !== i))} style={{ display: 'inline-flex', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--ds-t3)' }}><X className="size-3" /></button>
-              </span>
-            ))}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+            {files.map((f, i) => <PendingFilePreview key={`${f.name}-${f.size}-${i}`} file={f} onRemove={() => setFiles((x) => x.filter((_, j) => j !== i))} />)}
           </div>
         ) : null}
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>

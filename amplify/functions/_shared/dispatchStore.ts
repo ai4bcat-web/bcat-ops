@@ -17,6 +17,7 @@ import { messagePreview } from '../../../src/lib/dispatch'
 export const CONVERSATIONS_BY_PHONE = 'dispatchConversationsByPhone'
 export const MESSAGES_BY_CONVERSATION = 'dispatchMessagesByConversationIdAndAt'
 export const MESSAGES_BY_TWILIO_SID = 'dispatchMessagesByTwilioSid'
+export const CONVERSATIONS_BY_SLACK_CHANNEL = 'dispatchConversationsBySlackChannelId'
 export const SETTINGS_ID = 'default'
 
 export interface DispatchTables {
@@ -53,6 +54,19 @@ export class DispatchStore {
     // Two rows for one number can only come from a race; the oldest is the one messages hang off.
     rows.sort((a, b) => ((a.createdAt ?? '') < (b.createdAt ?? '') ? -1 : 1))
     return rows[0] ?? null
+  }
+
+  async findConversationBySlackChannel(channelId: string): Promise<DispatchConversation | null> {
+    const r = await this.db.send(new QueryCommand({
+      TableName: this.t.conversations,
+      IndexName: CONVERSATIONS_BY_SLACK_CHANNEL,
+      KeyConditionExpression: '#c = :c',
+      ExpressionAttributeNames: { '#c': 'slackChannelId' },
+      ExpressionAttributeValues: marshall({ ':c': channelId }),
+      Limit: 1,
+    }))
+    const item = r.Items?.[0]
+    return item ? (unmarshall(item) as DispatchConversation) : null
   }
 
   async getConversation(id: string): Promise<DispatchConversation | null> {
@@ -150,6 +164,7 @@ export class DispatchStore {
         lastPreview: messagePreview(message),
         lastDirection: message.direction,
         lastKind: message.kind,
+        lastSentBy: message.direction === 'OUT' ? (message.sentBy ?? null) : null,
         status: 'OPEN',
       },
       unreadDelta: opts.unread === 'increment' ? 1 : undefined,
@@ -189,6 +204,20 @@ export class DispatchStore {
       ExpressionAttributeNames: { '#s': 'twilioSid' },
       ExpressionAttributeValues: marshall({ ':s': sid }),
       Limit: 1,
+    }))
+    const item = r.Items?.[0]
+    return item ? (unmarshall(item) as DispatchMessage) : null
+  }
+
+  /** Slack retries events; the ts of the Slack message is the dedup key. Scan-free: recent thread only. */
+  async findMessageBySlackTs(ts: string): Promise<DispatchMessage | null> {
+    // No GSI for a rare lookup: a Slack retry lands within seconds, so the newest rows suffice.
+    const r = await this.db.send(new ScanCommand({
+      TableName: this.t.messages,
+      FilterExpression: '#s = :s',
+      ExpressionAttributeNames: { '#s': 'slackTs' },
+      ExpressionAttributeValues: marshall({ ':s': ts }),
+      Limit: 2000,
     }))
     const item = r.Items?.[0]
     return item ? (unmarshall(item) as DispatchMessage) : null

@@ -40,6 +40,7 @@ import { googleReviews } from './functions/google-reviews/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { dispatchActions } from './functions/dispatch-actions/resource'
 import { dispatchTwilioWebhook } from './functions/dispatch-twilio-webhook/resource'
+import { dispatchSlackBridge } from './functions/dispatch-slack-bridge/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { disputePortalApi } from './functions/dispute-portal-api/resource'
@@ -103,6 +104,7 @@ const backend = defineBackend({
   otrStatusSync,
   dispatchActions,
   dispatchTwilioWebhook,
+  dispatchSlackBridge,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -665,6 +667,7 @@ const dispatchSettingsTable = backend.data.resources.tables['DispatchSettings']
 const dispatchDriverTable = backend.data.resources.tables['Driver']
 const dispatchWebhookFn = backend.dispatchTwilioWebhook.resources.lambda as LambdaFunction
 const dispatchActionsFn = backend.dispatchActions.resources.lambda as LambdaFunction
+const dispatchSlackBridgeFn = backend.dispatchSlackBridge.resources.lambda as LambdaFunction
 const dispatchParamPath = `/bcat/dispatch/${backend.auth.resources.userPool.userPoolId}`
 const dispatchParamArn = Stack.of(dispatchWebhookFn).formatArn({
   service: 'ssm',
@@ -673,7 +676,7 @@ const dispatchParamArn = Stack.of(dispatchWebhookFn).formatArn({
 })
 const dispatchTableArns = [dispatchConversationTable.tableArn, dispatchMessageTable.tableArn, dispatchSettingsTable.tableArn]
 
-for (const fn of [dispatchWebhookFn, dispatchActionsFn]) {
+for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn]) {
   fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
   fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
   fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
@@ -705,6 +708,16 @@ new CfnOutput(dispatchWebhookFn.stack, 'DispatchTwilioWebhookFunctionUrl', {
 })
 // Delivery receipts for outbound texts come back to the webhook.
 dispatchActionsFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
+dispatchSlackBridgeFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
+// Slack → driver: the intake webhook (which already receives every Slack event) recognises
+// a driver channel by the conversation table and hands the event to the bridge.
+webhookFn.addEnvironment('DISPATCH_CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
+webhookFn.addEnvironment('DISPATCH_SLACK_BRIDGE_FUNCTION_NAME', dispatchSlackBridgeFn.functionName)
+webhookFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:Query'],
+  resources: [`${dispatchConversationTable.tableArn}/index/*`],
+}))
+dispatchSlackBridgeFn.grantInvoke(webhookFn)
 dispatchActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 dispatchActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['cognito-idp:AdminGetUser'],

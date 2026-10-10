@@ -156,7 +156,38 @@ describe('settings and status', () => {
     expect(r.settings.forwardTo[0].phone).toBe('+18475550199')
     expect(r.settings.greeting).toBe('Leave it')
     await expect(runAction('saveSettings', { ringSeconds: 2 }, RYNE, deps())).rejects.toThrow(/Ring time/)
-    expect(await runAction('status', {}, JENNY, deps())).toEqual({ configured: true, dispatchNumber: '+12242221305', ringing: 1, voicemailEnabled: true })
+    expect(await runAction('status', {}, JENNY, deps())).toEqual({ configured: true, dispatchNumber: '+12242221305', ringing: 1, voicemailEnabled: true, slackBridge: false })
     expect(await runAction('status', {}, JENNY, deps(null))).toMatchObject({ configured: false, dispatchNumber: null })
+  })
+})
+
+describe('slack channel wizard', () => {
+  it('creates the channel with the chosen name and invitees, recapping the thread', async () => {
+    const c = await store.createConversation({ phone: '+18475550100', driverName: 'Jason Smith' })
+    await store.putMessage({ conversationId: c.id, phone: c.phone, direction: 'IN', kind: 'SMS', at: '2026-10-10T14:00:00Z', body: 'At the gate' })
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = []
+    const slack = {
+      call: async <T,>(method: string, params: Record<string, unknown> = {}) => {
+        calls.push({ method, params })
+        if (method === 'conversations.create') return { ok: true, channel: { id: 'C5', name: String(params.name) } } as T
+        if (method === 'users.lookupByEmail') return { ok: true, user: { id: `U-${params.email}` } } as T
+        return { ok: true, ts: '1.0' } as T
+      },
+      download: async () => ({ bytes: new Uint8Array(0), contentType: 'x' }),
+      upload: async () => 'F',
+    }
+    const r = await runAction('createSlackChannel', { conversationId: c.id, name: 'Jason S', inviteEmails: ['ryne@bcatcorp.com', 'Dennis@bcatcorp.com', 'ryne@bcatcorp.com'] }, JENNY, { ...deps(), slack }) as { conversation: { slackChannelId: string; slackChannelName: string }; url: string }
+    expect(r.conversation.slackChannelId).toBe('C5')
+    expect(r.conversation.slackChannelName).toBe('jason-s')
+    expect(r.url).toBe('https://bcatcorp.slack.com/archives/C5')
+    expect(calls.find((x) => x.method === 'conversations.invite')?.params.users).toBe('U-ryne@bcatcorp.com,U-dennis@bcatcorp.com')
+    expect(String(calls.find((x) => x.method === 'chat.postMessage')?.params.text)).toContain('At the gate')
+  })
+  it('explains when Slack is not connected or the bridge is off', async () => {
+    const c = await store.createConversation({ phone: '+18475550100' })
+    await expect(runAction('createSlackChannel', { conversationId: c.id }, JENNY, deps())).rejects.toThrow(/no bot token/)
+    store.settings = { slackMirror: false }
+    const slack = { call: async <T,>() => ({ ok: true }) as T, download: async () => ({ bytes: new Uint8Array(0), contentType: 'x' }), upload: async () => 'F' }
+    await expect(runAction('createSlackChannel', { conversationId: c.id }, JENNY, { ...deps(), slack })).rejects.toThrow(/turned off/)
   })
 })

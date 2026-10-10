@@ -2865,12 +2865,12 @@ export async function deleteTimeClockEntry(id: string): Promise<void> {
 // ── Dispatch (Twilio texts + calls with drivers) ─────────────────────────────
 
 const DISPATCH_CONVERSATION_FIELDS = `
-  id phone driverId driverName displayName status lastMessageAt lastPreview lastDirection lastKind
-  unreadCount assignedTo lastReadAt lastReadBy createdAt updatedAt
+  id phone driverId driverName displayName status lastMessageAt lastPreview lastDirection lastKind lastSentBy
+  unreadCount assignedTo lastReadAt lastReadBy slackChannelId slackChannelName createdAt updatedAt
 `
 const DISPATCH_MESSAGE_FIELDS = `
   id conversationId phone direction kind body media twilioSid status errorCode errorMessage sentBy at
-  callDurationSec recordingKey transcript createdAt updatedAt
+  callDurationSec recordingKey transcript via slackTs createdAt updatedAt
 `
 
 export async function listDispatchConversations(): Promise<DispatchConversation[]> {
@@ -2898,7 +2898,7 @@ export async function listDispatchMessages(conversationId: string): Promise<Disp
 }
 
 export type DispatchAction =
-  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl'
+  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel'
   | 'status' | 'getSettings' | 'saveSettings'
 
 export async function dispatchAction<T = Record<string, unknown>>(action: DispatchAction, input: object = {}): Promise<T> {
@@ -2907,9 +2907,9 @@ export async function dispatchAction<T = Record<string, unknown>>(action: Dispat
       query: `mutation ManageDispatch($action: String!, $input: AWSJSON) { manageDispatch(action: $action, input: $input) }`,
       variables: { action, input: JSON.stringify(input) },
     }) as { data: { manageDispatch: unknown } }
-    const value = unwrapJson(result.data.manageDispatch) as T & { message?: { media?: unknown }; settings?: { forwardTo?: unknown } }
+    const value = unwrapJson(result.data.manageDispatch) as T & { message?: { media?: unknown }; settings?: { forwardTo?: unknown; slackInviteEmails?: unknown } }
     if (value && typeof value === 'object' && value.message) value.message = unwrapJsonFields(value.message, ['media'])
-    if (value && typeof value === 'object' && value.settings) value.settings = unwrapJsonFields(value.settings, ['forwardTo'])
+    if (value && typeof value === 'object' && value.settings) value.settings = unwrapJsonFields(value.settings, ['forwardTo', 'slackInviteEmails'])
     return value
   } catch (err) {
     throw new Error(graphqlErrorText(err) || 'Dispatch request failed. Refresh and try again.', { cause: err })

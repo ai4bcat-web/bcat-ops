@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   phoneDigits, toE164Strict, prettyPhone, samePhone, matchDriverByPhone, conversationTitle,
   messagePreview, sortThread, sortConversations, conversationMatches, normalizeSettings, callPlan,
-  DEFAULT_GREETING, DEFAULT_RING_SECONDS,
+  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody,
 } from './dispatch'
 
 describe('phones', () => {
@@ -117,5 +117,26 @@ describe('settings', () => {
     expect(plan.voicemail).toBe(true)
     expect(plan.greeting).toBe(DEFAULT_GREETING)
     expect(callPlan(null).ring).toEqual([])
+  })
+})
+
+describe('slack bridge helpers', () => {
+  it('names a channel after the driver, else the label, else the number', () => {
+    expect(slackChannelNameFor({ phone: '+18475550100', driverName: 'Jason Smith' })).toBe('drv-jason-smith')
+    expect(slackChannelNameFor({ phone: '+18475550100', displayName: "Lyons Truck Parts (Chi)" })).toBe('drv-lyons-truck-parts-chi')
+    expect(slackChannelNameFor({ phone: '+18475550100' })).toBe('drv-847-555-0100')
+    expect(slackChannelNameFor({ phone: '+18475550100', driverName: 'José Núñez' })).toBe('drv-jose-nunez')
+  })
+  it('treats // messages as internal notes', () => {
+    expect(slackNoteBody('// told him to wait')).toBe('told him to wait')
+    expect(slackNoteBody('  //   ')).toBeNull()
+    expect(slackNoteBody('on my way')).toBeNull()
+  })
+  it('normalises the Slack settings', () => {
+    const r = normalizeSettings({ slackInviteEmails: ['Ryne@bcatcorp.com', ' jenny@bcatcorp.com ', 'ryne@bcatcorp.com'], slackMirror: false })
+    expect(r.ok && r.value.slackInviteEmails).toEqual(['ryne@bcatcorp.com', 'jenny@bcatcorp.com'])
+    expect(r.ok && r.value.slackMirror).toBe(false)
+    expect(normalizeSettings({}).ok && (normalizeSettings({}) as { ok: true; value: { slackMirror: boolean } }).value.slackMirror).toBe(true)
+    expect(normalizeSettings({ slackInviteEmails: ['not an email'] })).toMatchObject({ ok: false, problem: { field: 'slackInviteEmails' } })
   })
 })

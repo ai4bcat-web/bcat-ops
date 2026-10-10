@@ -6,14 +6,16 @@
  * text must not appear twice in the thread.
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { DispatchStore, tablesFromEnv, messageRow } from '../_shared/dispatchStore'
 import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConfig'
 import {
   parseFormBody, requestUrl, signatureMatches, secretMatches, twiml, EMPTY_TWIML, dialTwiml, whisperTwiml,
   voicemailTwiml, hangupTwiml, fetchTwilioBinary, extensionFor, sendMessage, type FnUrlEvent,
 } from '../_shared/twilio'
-import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation } from '../../../src/lib/dispatch'
+import { slackClient } from '../_shared/slackApi'
+import { mirrorInbound, mirrorDeliveryFailure, mirrorTranscript, slackMirrorEnabled, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
+import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation, type DispatchMessage } from '../../../src/lib/dispatch'
 
 const dynamo = new DynamoDBClient({})
 const s3 = new S3Client({})
@@ -29,8 +31,23 @@ interface Deps {
   fetchBinary: (url: string) => Promise<{ bytes: Uint8Array; contentType: string }>
   /** Absent when no Slack bot token is configured. */
   slack?: (channel: string, text: string) => Promise<void>
+  /** The per-driver channel bridge; absent without a bot token. */
+  slackBridge?: SlackBridgeDeps['slack']
+  readMedia?: MediaFetcher
   sendSms: (to: string, body: string) => Promise<void>
   now: () => Date
+}
+
+/** Mirror into the driver's Slack channel when the bridge is on and the channel exists. Never fatal. */
+async function toSlack(deps: Deps, conversation: DispatchConversation, fn: (bridge: SlackBridgeDeps) => Promise<unknown>): Promise<void> {
+  if (!deps.slackBridge || !conversation.slackChannelId) return
+  const settings = await deps.store.getSettings().catch(() => null)
+  if (!slackMirrorEnabled(settings)) return
+  try {
+    await fn({ slack: deps.slackBridge, store: deps.store, settings })
+  } catch (err) {
+    console.warn('[dispatch-webhook] slack mirror failed', String(err))
+  }
 }
 
 interface Reply { statusCode: number; headers: Record<string, string>; body: string }
@@ -141,6 +158,7 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
     at: deps.now().toISOString(), body: body || null, media: media.length ? media : null, twilioSid: sid, status: 'received',
   }))
   const updated = await store.touchConversation(conversation.id, message, { unread: 'increment' })
+  await toSlack(deps, updated, (b) => mirrorInbound(b, updated, message, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
 
   const settings = await store.getSettings().catch(() => null)
   if (settings?.slackChannelId && deps.slack) {
@@ -163,11 +181,15 @@ async function messageStatus(p: Record<string, string>, deps: Deps): Promise<Rep
   // Receipts can arrive out of order; never let "sent" overwrite "delivered".
   const rank: Record<string, number> = { queued: 1, accepted: 1, sending: 2, sent: 3, delivered: 4, read: 5, undelivered: 4, failed: 4, canceled: 4 }
   if ((rank[status] ?? 0) < (rank[msg.status ?? ''] ?? 0)) return text('ok')
-  await deps.store.updateMessage(msg.id, {
+  const updated = await deps.store.updateMessage(msg.id, {
     status,
     errorCode: p.ErrorCode || null,
     errorMessage: p.ErrorMessage || (p.ErrorCode ? errorHint(p.ErrorCode) : null),
   })
+  if (status === 'failed' || status === 'undelivered') {
+    const c = await deps.store.getConversation(updated.conversationId)
+    if (c) await toSlack(deps, c, (b) => mirrorDeliveryFailure(b, c, updated))
+  }
   return text('ok')
 }
 
@@ -242,7 +264,8 @@ async function afterDial(event: FnUrlEvent, p: Record<string, string>, deps: Dep
   if (outcome === 'completed') {
     if (msg) {
       const updated = await store.updateMessage(msg.id, { status: 'answered', callDurationSec: Number(p.DialCallDuration ?? 0) || 0 })
-      await store.touchConversation(msg.conversationId, updated, { unread: 'keep' })
+      const c = await store.touchConversation(msg.conversationId, updated, { unread: 'keep' })
+      await toSlack(deps, c, (b) => mirrorInbound(b, c, updated, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
     }
     return xml(hangupTwiml())
   }
@@ -251,7 +274,8 @@ async function afterDial(event: FnUrlEvent, p: Record<string, string>, deps: Dep
     const updated = await store.updateMessage(msg.id, { status: plan.voicemail ? 'voicemail' : 'missed' })
     // A missed call is work for someone; a call that rolls to voicemail counts when the
     // voicemail lands, so a hang-up before the beep still shows as missed.
-    await store.touchConversation(msg.conversationId, { ...updated, status: 'missed' }, { unread: 'increment' })
+    const c = await store.touchConversation(msg.conversationId, { ...updated, status: 'missed' }, { unread: 'increment' })
+    await toSlack(deps, c, (b) => mirrorInbound(b, c, { ...updated, status: 'missed' }, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
   }
   if (!plan.voicemail) return xml(hangupTwiml('Nobody could pick up. Please text this number and dispatch will get back to you.'))
   return xml(voicemailTwiml(voicemailPlan(event, plan.greeting, config.webhookSecret)))
@@ -287,7 +311,8 @@ async function recordingReady(p: Record<string, string>, deps: Deps): Promise<Re
     at: deps.now().toISOString(), twilioSid: recordingSid, status: 'received',
     callDurationSec: Number(p.RecordingDuration ?? 0) || 0, recordingKey,
   }))
-  await store.touchConversation(conversation.id, message, { unread: 'increment' })
+  const c = await store.touchConversation(conversation.id, message, { unread: 'increment' })
+  await toSlack(deps, c, (b) => mirrorInbound(b, c, message, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
   return text('ok')
 }
 
@@ -299,8 +324,9 @@ async function transcriptionReady(p: Record<string, string>, deps: Deps): Promis
   if (!transcript) return text('ok')
   const vm = await deps.store.findMessageByTwilioSid(recordingSid)
   if (!vm) return text('voicemail not stored yet', 200)
-  const updated = await deps.store.updateMessage(vm.id, { transcript, body: transcript })
-  await deps.store.touchConversation(vm.conversationId, updated, { unread: 'keep' })
+  const updated: DispatchMessage = await deps.store.updateMessage(vm.id, { transcript, body: transcript })
+  const c = await deps.store.touchConversation(vm.conversationId, updated, { unread: 'keep' })
+  await toSlack(deps, c, (b) => mirrorTranscript(b, c, updated))
   return text('ok')
 }
 
@@ -328,6 +354,12 @@ export const handler = async (event: FnUrlEvent) => {
       })
       const json = await res.json() as { ok?: boolean; error?: string }
       if (!json.ok) throw new Error(json.error ?? 'slack error')
+    },
+    slackBridge: SLACK_BOT_TOKEN ? slackClient(SLACK_BOT_TOKEN) : undefined,
+    readMedia: async (key) => {
+      const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
+      const bytes = await obj.Body!.transformToByteArray()
+      return { bytes, contentType: obj.ContentType ?? 'application/octet-stream' }
     },
     sendSms: async (to, body) => {
       await sendMessage(config, { to, from: config.dispatchNumber, body })

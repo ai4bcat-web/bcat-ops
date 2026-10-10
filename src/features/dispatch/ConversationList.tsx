@@ -53,7 +53,7 @@ export function ConversationList({ rows, selectedId, onSelect, now }: Props) {
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, fontSize: 12, color: unread ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>
                 <KindIcon kind={c.lastKind} />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {c.lastDirection === 'OUT' && c.lastKind !== 'NOTE' ? 'You: ' : ''}{c.lastPreview ?? (isDriver ? prettyPhone(c.phone) : 'New conversation')}
+                  {c.lastDirection === 'OUT' && c.lastKind !== 'NOTE' ? `${staffName(c.lastSentBy) || 'Sent'}: ` : ''}{c.lastPreview ?? (isDriver ? prettyPhone(c.phone) : 'New conversation')}
                 </span>
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>

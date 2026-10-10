@@ -20,6 +20,7 @@ export class FakeDispatchStore {
     return [...this.conversations.values()].filter((c) => c.phone === phone).sort((a, b) => ((a.createdAt ?? '') < (b.createdAt ?? '') ? -1 : 1))[0] ?? null
   }
   async getConversation(id: string) { return this.conversations.get(id) ?? null }
+  async findConversationBySlackChannel(channelId: string) { return [...this.conversations.values()].find((c) => c.slackChannelId === channelId) ?? null }
   async createConversation(input: { phone: string; driverId?: string | null; driverName?: string | null; displayName?: string | null }) {
     const now = this.clock()
     const row: DispatchConversation = { id: randomUUID(), phone: input.phone, driverId: input.driverId ?? null, driverName: input.driverName ?? null, displayName: input.displayName ?? null, status: 'OPEN', unreadCount: 0, lastMessageAt: null, lastPreview: null, lastDirection: null, lastKind: null, assignedTo: null, createdAt: now, updatedAt: now }
@@ -43,7 +44,7 @@ export class FakeDispatchStore {
   }
   async touchConversation(id: string, message: DispatchMessage, opts: { unread: 'increment' | 'clear' | 'keep' }) {
     return this.updateConversation(id, {
-      set: { lastMessageAt: message.at, lastPreview: messagePreview(message), lastDirection: message.direction, lastKind: message.kind, status: 'OPEN' },
+      set: { lastMessageAt: message.at, lastPreview: messagePreview(message), lastDirection: message.direction, lastKind: message.kind, lastSentBy: message.direction === 'OUT' ? (message.sentBy ?? null) : null, status: 'OPEN' },
       unreadDelta: opts.unread === 'increment' ? 1 : undefined,
       unreadTo: opts.unread === 'clear' ? 0 : undefined,
     })
@@ -58,6 +59,7 @@ export class FakeDispatchStore {
   }
   async findMessageByTwilioSid(sid: string) { return [...this.messages.values()].find((m) => m.twilioSid === sid) ?? null }
   async getMessage(id: string) { return this.messages.get(id) ?? null }
+  async findMessageBySlackTs(ts: string) { return [...this.messages.values()].find((m) => m.slackTs === ts) ?? null }
   async updateMessage(id: string, set: Partial<DispatchMessage>) {
     const m = this.messages.get(id)
     if (!m) throw new Error('missing message')
@@ -65,7 +67,7 @@ export class FakeDispatchStore {
     this.messages.set(id, next)
     return next
   }
-  async listMessages(conversationId: string) { return [...this.messages.values()].filter((m) => m.conversationId === conversationId) }
+  async listMessages(conversationId: string, _limit = 500) { return [...this.messages.values()].filter((m) => m.conversationId === conversationId).sort((a, b) => (a.at < b.at ? -1 : 1)) }
   async getSettings() { return this.settings }
   async putSettings(value: DispatchSettings) { this.settings = { id: 'default', ...value, updatedAt: this.clock() }; return this.settings }
   async listDrivers() { return this.drivers }

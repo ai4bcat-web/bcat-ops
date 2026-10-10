@@ -27,10 +27,15 @@ export interface DispatchConversation {
   lastPreview?: string | null
   lastDirection?: DispatchDirection | null
   lastKind?: DispatchKind | string | null
+  /** Who sent the last outbound message (staff email), for the list. */
+  lastSentBy?: string | null
   unreadCount?: number | null
   assignedTo?: string | null
   lastReadAt?: string | null
   lastReadBy?: string | null
+  /** The driver's own Slack channel, once the bridge has made it. */
+  slackChannelId?: string | null
+  slackChannelName?: string | null
   createdAt?: string
   updatedAt?: string
 }
@@ -52,6 +57,10 @@ export interface DispatchMessage {
   callDurationSec?: number | null
   recordingKey?: string | null
   transcript?: string | null
+  /** Where an outbound message was typed: the page, or a driver's Slack channel. */
+  via?: 'app' | 'slack' | null
+  /** Slack message ts when it was typed in, or mirrored to, the driver's channel. */
+  slackTs?: string | null
   createdAt?: string
   updatedAt?: string
 }
@@ -69,8 +78,16 @@ export interface DispatchSettings {
   voicemailEnabled?: boolean | null
   slackChannelId?: string | null
   autoReply?: string | null
+  /** One Slack channel per driver, mirrored both ways. Default on. */
+  slackMirror?: boolean | null
+  /** Staff emails invited into every driver channel as it is created. */
+  slackInviteEmails?: string[] | null
   updatedAt?: string
 }
+
+/** A Slack message starting with this is kept as an internal note, never texted. */
+export const SLACK_NOTE_PREFIX = '//'
+export const MAX_SLACK_INVITES = 25
 
 /** What the voicemail prompt says when the office has not written its own. */
 export const DEFAULT_GREETING =
@@ -234,6 +251,14 @@ export function normalizeSettings(input: Partial<DispatchSettings>): { ok: true;
   if (slack && !/^[CG][A-Z0-9]{6,}$/.test(slack)) {
     return { ok: false, problem: { field: 'slackChannelId', message: 'Slack channel IDs look like C0123ABCDEF' } }
   }
+  const invites: string[] = []
+  for (const raw of input.slackInviteEmails ?? []) {
+    const e = String(raw ?? '').trim().toLowerCase()
+    if (!e) continue
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return { ok: false, problem: { field: 'slackInviteEmails', message: `"${raw}" is not an email address` } }
+    if (!invites.includes(e)) invites.push(e)
+  }
+  if (invites.length > MAX_SLACK_INVITES) return { ok: false, problem: { field: 'slackInviteEmails', message: `At most ${MAX_SLACK_INVITES} people can be auto-invited` } }
   return {
     ok: true,
     value: {
@@ -243,8 +268,29 @@ export function normalizeSettings(input: Partial<DispatchSettings>): { ok: true;
       voicemailEnabled: input.voicemailEnabled !== false,
       slackChannelId: slack || null,
       autoReply: autoReply || null,
+      slackMirror: input.slackMirror !== false,
+      slackInviteEmails: invites,
     },
   }
+}
+
+/**
+ * The Slack channel a driver's conversation lives in: drv-jason-smith, or the number for
+ * a line nobody is linked to yet. Slack allows lowercase letters, digits and dashes, 80 max.
+ */
+export function slackChannelNameFor(c: Pick<DispatchConversation, 'phone' | 'driverName' | 'displayName'>): string {
+  const base = (c.driverName?.trim() || c.displayName?.trim() || '')
+  const slug = base.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const d = phoneDigits(c.phone)
+  const tail = slug || (d ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : 'unknown')
+  return `drv-${tail}`.slice(0, 80).replace(/-+$/, '')
+}
+
+/** Is a Slack message an internal note (never texted)? Returns the note body, or null. */
+export function slackNoteBody(text: string): string | null {
+  const t = text.trim()
+  if (!t.startsWith(SLACK_NOTE_PREFIX)) return null
+  return t.slice(SLACK_NOTE_PREFIX.length).trim() || null
 }
 
 /** What a voice call should do, from the settings as saved. */

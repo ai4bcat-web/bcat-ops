@@ -70,11 +70,18 @@ export function deliveryLabel(m: Pick<DispatchMessage, 'direction' | 'kind' | 's
   }
 }
 
-/** Short name for the signed-in person's email, for "you" vs a teammate. */
+/** Short name for a staff email ("jenny@bcatcorp.com" → "Jenny"); Slack-only users show their id. */
 export function staffName(email: string | null | undefined): string {
   if (!email) return ''
-  const local = email.split('@')[0]
+  const local = email.replace(/^slack:/, '').split('@')[0]
   return local.charAt(0).toUpperCase() + local.slice(1)
+}
+
+/** Who sent an outbound message and from where, as the bubble shows it. */
+export function senderLabel(m: Pick<DispatchMessage, 'direction' | 'sentBy' | 'via'>, me: string | null | undefined): string | null {
+  if (m.direction !== 'OUT') return null
+  const name = m.sentBy && me && m.sentBy.toLowerCase() === me.toLowerCase() ? 'You' : (staffName(m.sentBy) || 'BCAT Ops')
+  return m.via === 'slack' ? `${name} via Slack` : name
 }
 
 export const MAX_UPLOAD_FILES = 5

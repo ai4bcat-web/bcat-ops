@@ -26,10 +26,36 @@ export function MediaThumb({ media, getUrl }: { media: DispatchMedia; getUrl: (k
       </a>
     )
   }
+  if (media.contentType === 'application/pdf') {
+    // A real first-page preview; the click opens the full document.
+    return (
+      <a href={url} target="_blank" rel="noreferrer" title="Open PDF" style={{ display: 'block', width: 200, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ds-border)', background: '#fff' }}>
+        <iframe src={`${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title="PDF preview" style={{ width: 200, height: 240, border: 'none', pointerEvents: 'none', display: 'block' }} />
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '4px 8px', color: 'var(--ds-t2)', borderTop: '1px solid var(--ds-border)' }}><FileText className="size-3.5" /> {media.name ?? 'PDF'} · open</span>
+      </a>
+    )
+  }
   return (
     <a href={url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, textDecoration: 'underline' }}>
       <FileText className="size-4" /> {media.name ?? media.contentType.split('/')[1]?.toUpperCase() ?? 'File'}
     </a>
+  )
+}
+
+/** A file picked in the composer, previewed before it is sent. */
+export function PendingFilePreview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  // Object URL made once per file; revoked when the preview goes away.
+  const [url] = useState(() => URL.createObjectURL(file))
+  useEffect(() => () => URL.revokeObjectURL(url), [url])
+  const isImage = file.type.startsWith('image/')
+  return (
+    <span style={{ position: 'relative', display: 'inline-block', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--ds-border)', background: 'var(--ds-bg-2)' }}>
+      {url && isImage ? <img src={url} alt={file.name} style={{ width: 72, height: 72, objectFit: 'cover', display: 'block' }} />
+        : url && file.type === 'application/pdf' ? <iframe src={`${url}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} title={file.name} style={{ width: 72, height: 72, border: 'none', pointerEvents: 'none', display: 'block', background: '#fff' }} />
+        : <span style={{ width: 72, height: 72, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><FileText className="size-5" /></span>}
+      <span title={file.name} style={{ display: 'block', fontSize: 10, padding: '2px 4px', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--ds-t3)' }}>{file.name}</span>
+      <button type="button" aria-label={`Remove ${file.name}`} onClick={onRemove} style={{ position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: 9, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', cursor: 'pointer', fontSize: 11, lineHeight: '18px', padding: 0 }}>×</button>
+    </span>
   )
 }
 

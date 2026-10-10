@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { listTime, dayLabel, groupByDay, deliveryLabel, staffName, acceptFiles } from './dispatchUi'
+import { listTime, dayLabel, groupByDay, deliveryLabel, staffName, senderLabel, acceptFiles } from './dispatchUi'
 import type { DispatchMessage } from '@/lib/dispatch'
 
 const now = new Date('2026-10-10T20:00:00.000Z')   // 3:00 PM Chicago, a Saturday
@@ -38,7 +38,14 @@ describe('deliveryLabel', () => {
 describe('misc', () => {
   it('names staff from their email', () => {
     expect(staffName('jenny@bcatcorp.com')).toBe('Jenny')
+    expect(staffName('slack:U123')).toBe('U123')
     expect(staffName(null)).toBe('')
+  })
+  it('labels who sent an outbound message, and from where', () => {
+    expect(senderLabel({ direction: 'OUT', sentBy: 'jenny@bcatcorp.com' }, 'ryne@bcatcorp.com')).toBe('Jenny')
+    expect(senderLabel({ direction: 'OUT', sentBy: 'Ryne@bcatcorp.com' }, 'ryne@bcatcorp.com')).toBe('You')
+    expect(senderLabel({ direction: 'OUT', sentBy: 'dennis@bcatcorp.com', via: 'slack' }, 'ryne@bcatcorp.com')).toBe('Dennis via Slack')
+    expect(senderLabel({ direction: 'IN', sentBy: null }, 'ryne@bcatcorp.com')).toBeNull()
   })
   it('accepts pictures and PDFs under 5 MB, up to five, naming the rest', () => {
     const f = (name: string, type: string, size = 1000) => new File([new Uint8Array(size)], name, { type })

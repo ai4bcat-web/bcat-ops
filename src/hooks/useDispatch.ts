@@ -20,6 +20,8 @@ export interface DispatchStatus {
   dispatchNumber: string | null
   ringing: number
   voicemailEnabled: boolean
+  /** Slack bot connected and the per-driver channel bridge switched on. */
+  slackBridge?: boolean
 }
 
 export interface UseDispatchResult {
@@ -40,6 +42,7 @@ export interface UseDispatchResult {
   setArchived: (conversationId: string, archived: boolean) => Promise<void>
   addNote: (conversationId: string, body: string) => Promise<void>
   mediaUrl: (key: string) => Promise<string>
+  createSlackChannel: (conversationId: string, input: { name: string; inviteEmails: string[] }) => Promise<{ conversation: DispatchConversation; url: string | null }>
   getSettings: () => Promise<DispatchSettings | null>
   saveSettings: (settings: Partial<DispatchSettings>) => Promise<DispatchSettings>
 }
@@ -170,6 +173,12 @@ export function useDispatch(): UseDispatchResult {
 
   const mediaUrl = useCallback(async (key: string) => (await dispatchAction<{ url: string }>('mediaUrl', { key })).url, [])
 
+  const createSlackChannel = useCallback(async (conversationId: string, input: { name: string; inviteEmails: string[] }) => {
+    const r = await dispatchAction<{ conversation: DispatchConversation; url: string | null }>('createSlackChannel', { conversationId, ...input })
+    applyConversation(r.conversation)
+    return r
+  }, [applyConversation])
+
   const getSettings = useCallback(async () => (await dispatchAction<{ settings: DispatchSettings | null }>('getSettings')).settings, [])
   const saveSettings = useCallback(async (settings: Partial<DispatchSettings>) => {
     const r = await dispatchAction<{ settings: DispatchSettings }>('saveSettings', settings)
@@ -179,11 +188,11 @@ export function useDispatch(): UseDispatchResult {
 
   return {
     conversations, loading, error, status, selectedId, select: setSelectedId, thread, threadLoading, refresh,
-    send, start, markRead, assign, link, setArchived, addNote, mediaUrl, getSettings, saveSettings,
+    send, start, markRead, assign, link, setArchived, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
   }
 }
 
-/** Unread conversations, for the sidebar badge. Cheap: one list every 30 s while visible. */
+/** Unread messages across open conversations, for the sidebar badge. One list every 30 s while visible. */
 export function useDispatchUnread(enabled: boolean): number {
   const [count, setCount] = useState(0)
   useEffect(() => {
@@ -193,7 +202,7 @@ export function useDispatchUnread(enabled: boolean): number {
       if (document.visibilityState !== 'visible') return
       try {
         const rows = await listDispatchConversations()
-        if (alive) setCount(rows.filter((c) => c.status !== 'ARCHIVED' && (c.unreadCount ?? 0) > 0).length)
+        if (alive) setCount(rows.filter((c) => c.status !== 'ARCHIVED').reduce((n, c) => n + Math.max(0, c.unreadCount ?? 0), 0))
       } catch { /* badge is best-effort */ }
     }
     void tick()

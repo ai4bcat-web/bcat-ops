@@ -1,5 +1,6 @@
 import { createHmac, createHash, timingSafeEqual } from 'crypto'
-import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb'
+import { DynamoDBClient, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { marshall } from '@aws-sdk/util-dynamodb'
 
@@ -23,6 +24,29 @@ interface LambdaFunctionUrlEvent {
 const s3 = new S3Client({})
 const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? ''
+// Dispatch: a message in a driver's #drv-… channel is a text to that driver. The channel
+// id is looked up on the conversation table and the event handed to dispatch-slack-bridge.
+const DISPATCH_CONVERSATION_TABLE_NAME = process.env.DISPATCH_CONVERSATION_TABLE_NAME ?? ''
+const DISPATCH_SLACK_BRIDGE_FUNCTION_NAME = process.env.DISPATCH_SLACK_BRIDGE_FUNCTION_NAME ?? ''
+const lambda = new LambdaClient({})
+
+async function isDispatchChannel(channelId: string): Promise<boolean> {
+  if (!DISPATCH_CONVERSATION_TABLE_NAME || !channelId) return false
+  try {
+    const r = await dynamo.send(new QueryCommand({
+      TableName: DISPATCH_CONVERSATION_TABLE_NAME,
+      IndexName: 'dispatchConversationsBySlackChannelId',
+      KeyConditionExpression: '#c = :c',
+      ExpressionAttributeNames: { '#c': 'slackChannelId' },
+      ExpressionAttributeValues: { ':c': { S: channelId } },
+      Limit: 1,
+    }))
+    return (r.Count ?? 0) > 0
+  } catch (err) {
+    console.warn('[intake] dispatch channel lookup failed', String(err))
+    return false
+  }
+}
 
 /** Documents worth keeping. A tender's rate confirmation is a PDF; screenshots are images. */
 const KEEPABLE = /^(application\/pdf|image\/(jpeg|png|webp|heic|heif))$/i
@@ -192,6 +216,16 @@ export const handler = async (event: LambdaFunctionUrlEvent) => {
   }
 
   const channelId = ev.channel as string
+  // A driver's dispatch channel: hand the whole event to the bridge and stop here.
+  if (DISPATCH_SLACK_BRIDGE_FUNCTION_NAME && await isDispatchChannel(channelId)) {
+    try {
+      await lambda.send(new InvokeCommand({ FunctionName: DISPATCH_SLACK_BRIDGE_FUNCTION_NAME, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify({ event: ev })) }))
+      console.log('[intake] dispatch channel → bridge', channelId)
+    } catch (err) {
+      console.error('[intake] bridge invoke failed', String(err))
+    }
+    return { statusCode: 200, body: 'ok' }
+  }
   const msgTs     = ev.ts      as string
   const text      = (ev.text   as string) ?? ''
   const userId    = (ev.user   as string) ?? ''

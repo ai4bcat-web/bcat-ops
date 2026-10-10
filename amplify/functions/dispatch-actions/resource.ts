@@ -1,4 +1,4 @@
-import { defineFunction } from '@aws-amplify/backend'
+import { defineFunction, secret } from '@aws-amplify/backend'
 
 /**
  * The office's side of Dispatch: one `manageDispatch(action, input)` mutation.
@@ -22,4 +22,8 @@ export const dispatchActions = defineFunction({
   resourceGroupName: 'data',
   timeoutSeconds: 30,
   memoryMB: 512,
+  environment: {
+    // Mirrors page-sent texts into the driver's Slack channel (slack bridge).
+    SLACK_BOT_TOKEN: secret('SLACK_BOT_TOKEN'),
+  },
 })

@@ -7,10 +7,13 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { DispatchStore, tablesFromEnv, messageRow } from '../_shared/dispatchStore'
 import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConfig'
-import { sendMessage, TwilioError } from '../_shared/twilio'
+import { sendMessage } from '../_shared/twilio'
+import { sendDispatchText, MEDIA_PREFIX } from '../_shared/dispatchSend'
+import { slackClient } from '../_shared/slackApi'
+import { mirrorOutbound, renameSlackChannel, createSlackChannel, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps } from '../_shared/slackDispatch'
 import {
-  toE164Strict, matchDriverByPhone, normalizeSettings, MAX_SMS_BODY, MAX_MEDIA_PER_MESSAGE, MAX_MMS_BYTES,
-  type DispatchConversation, type DispatchMessage, type DispatchSettings, type DispatchMedia,
+  toE164Strict, matchDriverByPhone, normalizeSettings,
+  type DispatchConversation, type DispatchMessage, type DispatchSettings,
 } from '../../../src/lib/dispatch'
 
 const dynamo = new DynamoDBClient({})
@@ -21,7 +24,7 @@ const WEBHOOK_URL = (process.env.WEBHOOK_URL ?? '').replace(/\/+$/, '')
 const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const PAGE_GROUP = 'page-dispatch'
-const MEDIA_PREFIX = 'dispatch-media/'
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? ''
 const MAX_NOTE = 4000
 const MAX_LABEL = 80
 
@@ -31,7 +34,7 @@ interface AppSyncIdentity { sub?: string; username?: string; claims?: Record<str
 interface AppSyncEvent { arguments: { action: string; input?: string | Record<string, unknown> | null }; identity?: AppSyncIdentity | null }
 
 export type Action =
-  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl'
+  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel'
   | 'status' | 'getSettings' | 'saveSettings'
 
 export interface Deps {
@@ -41,6 +44,8 @@ export interface Deps {
   presignGet: (key: string, seconds: number) => Promise<string>
   headObject: (key: string) => Promise<{ contentType: string; size: number } | null>
   now: () => Date
+  /** Slack bridge pieces, absent when no bot token is configured. */
+  slack?: SlackBridgeDeps['slack']
 }
 
 export interface Caller { email: string; isAdmin: boolean; isOwner: boolean }
@@ -107,6 +112,7 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
         dispatchNumber: deps.config?.dispatchNumber ?? null,
         ringing: settings?.forwardTo?.length ?? 0,
         voicemailEnabled: settings?.voicemailEnabled !== false,
+        slackBridge: !!deps.slack && slackMirrorEnabled(settings),
       }
     }
     case 'getSettings':
@@ -133,13 +139,18 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
     case 'link': {
       const c = await requireConversation(store, input)
       const driverId = str(input.driverId, 100)
+      let linked: DispatchConversation
       if (driverId) {
         const driver = (await store.listDrivers()).find((d) => d.id === driverId)
         if (!driver) throw new Error('That driver no longer exists')
-        return { conversation: await store.updateConversation(c.id, { set: { driverId: driver.id, driverName: driver.name, displayName: null } }) }
+        linked = await store.updateConversation(c.id, { set: { driverId: driver.id, driverName: driver.name, displayName: null } })
+      } else {
+        const displayName = str(input.displayName, MAX_LABEL) || null
+        linked = await store.updateConversation(c.id, { set: { driverId: null, driverName: null, displayName } })
       }
-      const displayName = str(input.displayName, MAX_LABEL) || null
-      return { conversation: await store.updateConversation(c.id, { set: { driverId: null, driverName: null, displayName } }) }
+      const bridge = await slackBridge(deps)
+      if (bridge) linked = await renameSlackChannel(bridge, linked)
+      return { conversation: linked }
     }
     case 'archive':
     case 'reopen': {
@@ -150,8 +161,9 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       const c = await requireConversation(store, input)
       const body = str(input.body, MAX_NOTE)
       if (!body) throw new Error('Write the note first')
-      const message = await store.putMessage(messageRow({ conversationId: c.id, phone: c.phone, direction: 'OUT', kind: 'NOTE', at: deps.now().toISOString(), body, sentBy: caller.email, status: 'saved' }))
-      const conversation = await store.touchConversation(c.id, message, { unread: 'keep' })
+      const message = await store.putMessage({ ...messageRow({ conversationId: c.id, phone: c.phone, direction: 'OUT', kind: 'NOTE', at: deps.now().toISOString(), body, sentBy: caller.email, status: 'saved' }), via: 'app' })
+      let conversation = await store.touchConversation(c.id, message, { unread: 'keep' })
+      conversation = await mirrorToSlack(deps, conversation, message, caller.email)
       return { message, conversation }
     }
     case 'mediaUrl': {
@@ -159,7 +171,49 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       if (!key.startsWith(MEDIA_PREFIX) || key.includes('..')) throw new Error('Not a dispatch file')
       return { url: await deps.presignGet(key, 3600) }
     }
+    case 'slackUrl': {
+      const c = await requireConversation(store, input)
+      return { url: c.slackChannelId ? slackChannelUrl(c.slackChannelId) : null }
+    }
+    case 'createSlackChannel': {
+      const c = await requireConversation(store, input)
+      if (c.slackChannelId) return { conversation: c, url: slackChannelUrl(c.slackChannelId) }
+      const bridge = await slackBridge(deps)
+      if (!bridge) throw new Error(deps.slack ? 'The Slack bridge is turned off in Dispatch settings' : 'Slack is not connected: no bot token is configured')
+      const name = cleanChannelName(str(input.name, 80))
+      if (str(input.name, 80) && !name) throw new Error('Channel names use lowercase letters, numbers and dashes')
+      const emails = Array.isArray(input.inviteEmails) ? input.inviteEmails.filter((e): e is string => typeof e === 'string').map((e) => e.trim().toLowerCase()).filter(Boolean) : []
+      const recap = await store.listMessages(c.id, 100)
+      const created = await createSlackChannel(bridge, c, { name, inviteEmails: [...new Set(emails)], recap })
+      return { conversation: created, url: created.slackChannelId ? slackChannelUrl(created.slackChannelId) : null }
+    }
   }
+}
+
+async function slackBridge(deps: Deps): Promise<SlackBridgeDeps | null> {
+  if (!deps.slack) return null
+  const settings = await deps.store.getSettings().catch(() => null)
+  if (!slackMirrorEnabled(settings)) return null
+  return { slack: deps.slack, store: deps.store, settings }
+}
+
+/** Mirror a page-sent message into the driver's Slack channel; never fatal for the send. */
+async function mirrorToSlack(deps: Deps, conversation: DispatchConversation, message: DispatchMessage, email: string): Promise<DispatchConversation> {
+  const bridge = await slackBridge(deps)
+  if (!bridge) return conversation
+  try {
+    await mirrorOutbound(bridge, conversation, message, staffLabel(email))
+    return (await deps.store.getConversation(conversation.id)) ?? conversation
+  } catch (err) {
+    console.warn('[dispatch-actions] slack mirror failed', String(err))
+    return conversation
+  }
+}
+
+/** "jenny@bcatcorp.com" → "Jenny". The page shows the same. */
+export function staffLabel(email: string): string {
+  const local = email.split('@')[0] || email
+  return local.charAt(0).toUpperCase() + local.slice(1)
 }
 
 async function requireConversation(store: DispatchStore, input: Record<string, unknown>): Promise<DispatchConversation> {
@@ -196,52 +250,14 @@ async function startConversation(input: Record<string, unknown>, deps: Deps): Pr
 }
 
 async function sendText(input: Record<string, unknown>, caller: Caller, deps: Deps): Promise<{ message: DispatchMessage; conversation: DispatchConversation }> {
-  const { store, config } = deps
-  if (!config) throw new Error('Dispatch is not connected to Twilio yet. Run the setup script first.')
-  const body = str(input.body, MAX_SMS_BODY + 1)
-  if (body.length > MAX_SMS_BODY) throw new Error(`Texts are limited to ${MAX_SMS_BODY} characters`)
+  const body = str(input.body, 20_000)
   const keys = Array.isArray(input.mediaKeys) ? input.mediaKeys.filter((k): k is string => typeof k === 'string') : []
-  if (!body && keys.length === 0) throw new Error('Write something or attach a picture')
-  if (keys.length > MAX_MEDIA_PER_MESSAGE) throw new Error(`At most ${MAX_MEDIA_PER_MESSAGE} pictures per text`)
-
   const conversation = input.conversationId
-    ? await requireConversation(store, input)
+    ? await requireConversation(deps.store, input)
     : await startConversation(input, deps)
-  if (conversation.phone === config.dispatchNumber) throw new Error('That is the dispatch number itself')
-
-  const media: DispatchMedia[] = []
-  const mediaUrls: string[] = []
-  for (const key of keys) {
-    if (!key.startsWith(`${MEDIA_PREFIX}out/`) || key.includes('..')) throw new Error('Attachment is not a dispatch upload')
-    const head = await deps.headObject(key)
-    if (!head) throw new Error('An attachment did not finish uploading. Try again.')
-    if (head.size > MAX_MMS_BYTES) throw new Error('Pictures must be under 5 MB to send as MMS')
-    media.push({ key, contentType: head.contentType })
-    mediaUrls.push(await deps.presignGet(key, 15 * 60))
-  }
-
-  let sent: Awaited<ReturnType<Deps['send']>>
-  try {
-    sent = await deps.send(config, { to: conversation.phone, body: body || undefined, mediaUrls: mediaUrls.length ? mediaUrls : undefined })
-  } catch (err) {
-    const te = err instanceof TwilioError ? err : null
-    const message = await store.putMessage(messageRow({
-      conversationId: conversation.id, phone: conversation.phone, direction: 'OUT', kind: media.length ? 'MMS' : 'SMS',
-      at: deps.now().toISOString(), body: body || null, media: media.length ? media : null, status: 'failed', sentBy: caller.email,
-      errorCode: te?.code != null ? String(te.code) : null, errorMessage: te?.message ?? String(err),
-    }))
-    await store.touchConversation(conversation.id, message, { unread: 'clear' })
-    const refused = new Error(`Twilio refused the text: ${te?.message ?? String(err)}`)
-    ;(refused as Error & { cause?: unknown }).cause = err
-    throw refused
-  }
-  const message = await store.putMessage(messageRow({
-    conversationId: conversation.id, phone: conversation.phone, direction: 'OUT', kind: media.length ? 'MMS' : 'SMS',
-    at: deps.now().toISOString(), body: body || null, media: media.length ? media : null, twilioSid: sent.sid, status: sent.status || 'queued',
-    sentBy: caller.email, errorCode: sent.errorCode ?? null, errorMessage: sent.errorMessage ?? null,
-  }))
-  const updated = await store.touchConversation(conversation.id, message, { unread: 'clear' })
-  return { message, conversation: updated }
+  const result = await sendDispatchText(deps, { conversation, body, mediaKeys: keys, sentBy: caller.email, via: 'app' })
+  const mirrored = await mirrorToSlack(deps, result.conversation, result.message, caller.email)
+  return { message: result.message, conversation: mirrored }
 }
 
 // ── Lambda entry ────────────────────────────────────────────────────────────
@@ -266,6 +282,7 @@ export const handler = async (event: AppSyncEvent) => {
       }
     },
     now: () => new Date(),
+    slack: SLACK_BOT_TOKEN ? slackClient(SLACK_BOT_TOKEN) : undefined,
   }
   const result = await runAction(action, input, caller, deps)
   return JSON.stringify(result ?? {})
