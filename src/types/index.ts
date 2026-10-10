@@ -325,6 +325,8 @@ export interface Load {
   customer?: string | null  // customer/broker name
   customerId?: string | null
   customerApptWorkflow?: 'NONE' | 'BATORY' | null // resolved from Customer at read time; never persisted
+  /** The trailer carrying the load, named by the driver as they leave the pickup. */
+  trailerNumber?: string | null
   /** Where the pickup's paperwork is at end of day, answered in the Ivan app at clock-out. */
   paperworkLocation?: import('../lib/paperworkLocation').PaperworkLocation | null
   /** ELD oversight — the fleet manager confirmed logs were kept for a run outside the radius. */

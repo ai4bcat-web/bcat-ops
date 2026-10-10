@@ -91,6 +91,7 @@ export const loadSchema = z.object({
   aljexId: z.string().min(1, 'Pro # is required'),
   tmsId: z.string().min(1, 'TMS ID / PO is required'),
   pickupNumber: z.string().min(1, 'PU# is required'),
+  trailerNumber: z.string().optional(),
 
   stops: stopsSchema,
   readyToInvoice: z.boolean(),

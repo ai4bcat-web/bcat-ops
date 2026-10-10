@@ -30,7 +30,7 @@ import { requiresApptProofs } from '@/lib/apptQueue'
 import { PodMark } from './CalendarPaperwork'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, pod: 40, tms: 80, pu: 72, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
+const COL = { color: 20, aljex: 60, pod: 40, tms: 80, pu: 72, trailer: 70, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
@@ -645,6 +645,11 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
       <EditableTextCell load={load} field="tmsId"        width={COL.tms} />
       <EditableTextCell load={load} field="pickupNumber" width={COL.pu} />
 
+      {/* Trailer — named by the driver as they leave the pickup; rides with the load to delivery. */}
+      <div className="shrink-0 flex items-center px-1.5 font-mono tabular-nums" style={{ width: COL.trailer, fontSize: 12, color: load.trailerNumber ? 'var(--ds-t1)' : 'var(--ds-t3)' }} title={load.trailerNumber ? `Trailer ${load.trailerNumber}` : 'No trailer yet'}>
+        {load.trailerNumber || '—'}
+      </div>
+
       {/* PU / DE location names — single stop name in multi-stop mode */}
       <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
         {stopMode ? (
@@ -1048,6 +1053,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         <ColHeader width={COL.pod}>POD</ColHeader>
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
+        <ColHeader width={COL.trailer}>Trailer</ColHeader>
         <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
         <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>

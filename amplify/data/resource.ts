@@ -51,6 +51,8 @@ const schema = a.schema({
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       // ELD oversight: a run outside the 150 air-mile radius needs logs, and somebody has
       // to confirm they were kept. Set from the fleet manager dashboard. See src/lib/eldMonitor.ts.
+      // The trailer carrying the load, named by the driver as they leave the pickup.
+      trailerNumber:   a.string(),
       // Where the pickup's paperwork went at end of day: { kind: TRUCK|SHED|TRAILER, unit, at, byDriverId, byName }
       paperworkLocation: a.json(),
       eldLogsReviewedAt: a.datetime(),

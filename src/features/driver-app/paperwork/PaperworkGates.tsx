@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2, Truck, Warehouse, Container, Check, HelpCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { setPaperworkLocation, confirmPaperwork, type PaperworkLoad } from '../driverApi'
+import { setPaperworkLocation, confirmPaperwork, fetchTrailers, type PaperworkLoad, type TrailerChoice } from '../driverApi'
 import type { PaperworkPlace } from '@/lib/paperworkLocation'
 import type { TodayStop } from './daySheet'
 
@@ -137,12 +137,25 @@ export function StartOfDayPaperworkDialog({ items, onClose, onDone }: ConfirmPro
   )
 }
 
-/** Leaving a pickup: which trailer is the load on? Required for Ivan's local drivers. */
+/** Leaving a pickup: which trailer is the load on? A pick-list of the trailers on file. */
 export function TrailerDialog({ item, onClose, onPick }: { item: TodayStop; onClose: () => void; onPick: (trailer: string) => void }) {
-  const [trailer, setTrailer] = useState(item.load.trailerNumber ?? '')
+  const [trailers, setTrailers] = useState<TrailerChoice[] | null>(null)
+  const [choice, setChoice] = useState(item.load.trailerNumber ?? '')
+  const [other, setOther] = useState('')
+  useEffect(() => {
+    let alive = true
+    fetchTrailers().then((rows) => { if (alive) setTrailers(rows) }).catch(() => { if (alive) setTrailers([]) })
+    return () => { alive = false }
+  }, [])
+  const listed = trailers ?? []
+  const onFile = listed.some((t) => t.unitNumber === choice)
+  // The load's current trailer may be one not on file; keep it selectable.
+  const options = item.load.trailerNumber && !listed.some((t) => t.unitNumber === item.load.trailerNumber)
+    ? [{ id: 'current', unitNumber: item.load.trailerNumber, nickname: null }, ...listed]
+    : listed
   const go = () => {
-    const t = trailer.trim()
-    if (!t) { toast.error('Enter the trailer number'); return }
+    const t = (choice === OTHER ? other : choice).trim()
+    if (!t) { toast.error('Pick the trailer') ; return }
     onPick(t)
   }
   return (
@@ -154,11 +167,23 @@ export function TrailerDialog({ item, onClose, onPick }: { item: TodayStop; onCl
             PRO {item.load.reference}{item.stop.name ? ` · leaving ${item.stop.name}` : ''}. The trailer this load is on.
           </DialogDescription>
         </DialogHeader>
-        <input id="pickup-trailer" value={trailer} onChange={(e) => setTrailer(e.target.value)} placeholder="Trailer number" inputMode="numeric" autoFocus
-          onKeyDown={(e) => { if (e.key === 'Enter') go() }}
-          className="h-12 w-full rounded-md border border-input bg-background px-3 text-center font-mono text-xl text-foreground" />
-        <Button className="h-14 text-base font-bold" onClick={go}><Container className="mr-2 h-5 w-5" /> Departed with this trailer</Button>
+        {trailers === null ? <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin" /></div> : (
+          <select id="pickup-trailer" value={onFile || choice === OTHER || choice === '' ? choice : OTHER} onChange={(e) => setChoice(e.target.value)} autoFocus
+            className="h-14 w-full rounded-md border border-input bg-background px-3 font-mono text-xl text-foreground">
+            <option value="">Pick a trailer…</option>
+            {options.map((t) => <option key={t.id} value={t.unitNumber}>{t.unitNumber}{t.nickname ? ` · ${t.nickname}` : ''}</option>)}
+            <option value={OTHER}>Not on the list…</option>
+          </select>
+        )}
+        {choice === OTHER ? (
+          <input id="pickup-trailer-other" value={other} onChange={(e) => setOther(e.target.value)} placeholder="Trailer number" inputMode="numeric" autoFocus
+            onKeyDown={(e) => { if (e.key === 'Enter') go() }}
+            className="h-12 w-full rounded-md border border-input bg-background px-3 text-center font-mono text-xl text-foreground" />
+        ) : null}
+        <Button className="h-14 text-base font-bold" onClick={go} disabled={trailers === null}><Container className="mr-2 h-5 w-5" /> Departed with this trailer</Button>
       </DialogContent>
     </Dialog>
   )
 }
+
+const OTHER = '__other__'

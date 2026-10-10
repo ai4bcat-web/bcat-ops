@@ -123,6 +123,14 @@ export interface TruckChoice extends DriverTruck {
   yours: boolean
 }
 
+export interface TrailerChoice { id: string; unitNumber: string; nickname: string | null }
+
+/** Every active trailer on file, for the pick-list at a pickup. */
+export async function fetchTrailers(): Promise<TrailerChoice[]> {
+  const out = await request<{ trailers: TrailerChoice[] }>('/trailers')
+  return out.trailers
+}
+
 export async function fetchTrucks(): Promise<TruckChoice[]> {
   const out = await request<{ trucks: TruckChoice[] }>('/trucks')
   return out.trucks

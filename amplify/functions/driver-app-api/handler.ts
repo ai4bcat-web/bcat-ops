@@ -985,6 +985,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   if (segments[0] === 'trucks' && !segments[1]) {
     return { path: '/trucks' }
   }
+  if (segments[0] === 'trailers' && !segments[1]) {
+    return { path: '/trailers' }
+  }
   if (segments[0] === 'paperwork' && segments[1] === 'location-note') {
     return { path: '/paperwork/location-note' }
   }
@@ -2396,6 +2399,17 @@ export const handler = async (event: FnUrlEvent) => {
      * is in it now, and whether it has a Motive gateway — the point of picking is that the
      * ELD logs land on the right name.
      */
+    /* The trailers on file, for the pick-list a driver names as they leave a pickup. */
+    if (method === 'GET' && path === '/trailers') {
+      if (!EQUIPMENT_TABLE) return reply(503, { error: 'Trailers are not configured' })
+      const trailers = await scan<EquipmentRow>(EQUIPMENT_TABLE, '#t = :trailer', { '#t': 'type' }, { ':trailer': 'trailer' })
+      const list = trailers
+        .filter((t) => t.active !== false && (t.unitNumber ?? '').trim())
+        .map((t) => ({ id: t.id, unitNumber: String(t.unitNumber).trim(), nickname: (t as { nickname?: string | null }).nickname?.trim() || null }))
+        .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
+      return reply(200, { trailers: list })
+    }
+
     if (method === 'GET' && path === '/trucks') {
       if (!EQUIPMENT_TABLE) return reply(503, { error: 'Trucks are not configured' })
       const [trucks, roster] = await Promise.all([

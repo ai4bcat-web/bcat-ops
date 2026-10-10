@@ -42,6 +42,7 @@ let loadsHaveSortOrder = true
 let loadsHaveCustomerId = true
 let loadsHaveEldReview = true
 let loadsHavePaperworkLocation = true
+let loadsHaveTrailer = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -50,6 +51,7 @@ const loadFields = () => {
   if (loadsHaveCustomerId) f += ' customerId'
   if (loadsHaveEldReview) f += ' eldLogsReviewedAt eldLogsReviewedBy eldLogsNote'
   if (loadsHavePaperworkLocation) f += ' paperworkLocation'
+  if (loadsHaveTrailer) f += ' trailerNumber'
   return f
 }
 
@@ -118,7 +120,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -128,6 +130,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     customerId: /'customerId'/i.test(msg),
     eldReview: /'(eldLogsReviewedAt|eldLogsReviewedBy|eldLogsNote)'/i.test(msg),
     paperworkLocation: /'paperworkLocation'/i.test(msg),
+    trailer: /'trailerNumber'/i.test(msg),
   }
 }
 
@@ -169,6 +172,10 @@ export async function listLoads(): Promise<Load[]> {
       if (loadsHavePaperworkLocation && u.paperworkLocation) {
         console.warn("[apiClient] backend has no paperworkLocation yet — querying loads without it until deploy")
         loadsHavePaperworkLocation = false; changed = true
+      }
+      if (loadsHaveTrailer && u.trailer) {
+        console.warn("[apiClient] backend has no trailerNumber yet — querying loads without it until deploy")
+        loadsHaveTrailer = false; changed = true
       }
       if (!changed) throw err
     }

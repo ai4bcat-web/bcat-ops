@@ -934,6 +934,9 @@ function NewLoadDialog({
                 <Field label="Pickup #" error={errors.pickupNumber?.message}>
                   <Input {...register('pickupNumber')} placeholder="PU-8812" className="h-9" />
                 </Field>
+                <Field label="Trailer" hint="named by the driver as they leave the pickup">
+                  <Input {...register('trailerNumber')} placeholder="5302" className="h-9" />
+                </Field>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Controller
@@ -1337,7 +1340,7 @@ export function LoadDrawer() {
      */
     resolver: zodResolver(factoredAwareSchema),
     defaultValues: {
-      aljexId: '', tmsId: '', pickupNumber: '',
+      aljexId: '', tmsId: '', pickupNumber: '', trailerNumber: '',
       stops: emptyStopForms(), readyToInvoice: false,
       customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
     },
@@ -1350,6 +1353,7 @@ export function LoadDrawer() {
         aljexId: load.aljexId,
         tmsId: load.tmsId,
         pickupNumber: load.pickupNumber,
+        trailerNumber: load.trailerNumber ?? '',
         stops: loadToStopForms(load),
         readyToInvoice:   load.readyToInvoice,
         customer: load.customer ?? '',
@@ -1379,6 +1383,7 @@ export function LoadDrawer() {
          */
         aljexId: '', tmsId: tender?.reference ?? '',
         pickupNumber: tender?.pickupNumber ?? '',
+        trailerNumber: '',
         stops: tender
           ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory, formDirectory.locations)
           : emptyStopForms(preDate, createPreFill?.driverId ?? null),
