@@ -80,7 +80,7 @@ describe('channel lifecycle', () => {
     await store.putMessage({ conversationId: c.id, phone: c.phone, direction: 'IN', kind: 'SMS', at: '2026-10-10T15:00:00Z', body: 'Here' })
     const slack = fakeSlack({
       'conversations.create': { ok: true, channel: { id: 'C9', name: 'drv-jason-smith' } },
-      'users.lookupByEmail': (p) => (p.email === 'ryne@bcatcorp.com' ? { ok: true, user: { id: 'U1' } } : new SlackError('users.lookupByEmail', 'users_not_found')),
+      'users.lookupByEmail': (p: Record<string, unknown>) => (p.email === 'ryne@bcatcorp.com' ? { ok: true, user: { id: 'U1' } } : new SlackError('users.lookupByEmail', 'users_not_found')),
     })
     const out = await createSlackChannel({ slack: slack.client, store: store.asStore(), settings: null }, c, { name: '', inviteEmails: ['ryne@bcatcorp.com', 'nobody@bcatcorp.com'], recap: await store.listMessages(c.id) })
     expect(out.slackChannelId).toBe('C9')
