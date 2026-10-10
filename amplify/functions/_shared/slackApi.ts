@@ -20,10 +20,18 @@ export interface SlackClient {
 
 export function slackClient(token: string, fetchImpl: typeof fetch = fetch): SlackClient {
   const call = async <T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+    // Form-encoded, not JSON: Slack's read methods (users.lookupByEmail, conversations.list,
+    // conversations.members) answer `invalid_arguments` to a JSON body, and every write
+    // method accepts a form. Arrays and objects (files, blocks) go in as JSON strings.
+    const form = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === null) continue
+      form.set(k, typeof v === 'object' ? JSON.stringify(v) : String(v))
+    }
     const res = await fetchImpl(`https://slack.com/api/${method}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(params),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8' },
+      body: form.toString(),
     })
     const json = await res.json() as { ok?: boolean; error?: string } & T
     if (!json.ok) throw new SlackError(method, json.error ?? `http_${res.status}`)

@@ -260,7 +260,7 @@ interface WizardProps {
   /** Default invitees from Dispatch settings. */
   defaultInvites: string[]
   onClose: () => void
-  onCreate: (input: { name: string; inviteEmails: string[] }) => Promise<{ url: string | null }>
+  onCreate: (input: { name: string; inviteEmails: string[] }) => Promise<{ url: string | null; notInvited?: string[] }>
 }
 
 /** Mounted per conversation: name the channel, confirm who is in it, create. */
@@ -285,6 +285,7 @@ export function SlackChannelWizard({ conversation, defaultInvites, onClose, onCr
     try {
       const r = await onCreate({ name: cleaned, inviteEmails: invites })
       toast.success(`#${cleaned} is ready`, r.url ? { action: { label: 'Open in Slack', onClick: () => window.open(r.url!, '_blank', 'noreferrer') } } : undefined)
+      if (r.notInvited?.length) toast.warning(`Not invited (no Slack account with that email): ${r.notInvited.join(', ')}`, { duration: 12_000 })
       onClose()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not create the channel')

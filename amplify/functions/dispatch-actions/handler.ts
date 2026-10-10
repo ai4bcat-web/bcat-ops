@@ -10,7 +10,7 @@ import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConf
 import { sendMessage } from '../_shared/twilio'
 import { sendDispatchText, MEDIA_PREFIX } from '../_shared/dispatchSend'
 import { slackClient } from '../_shared/slackApi'
-import { mirrorOutbound, renameSlackChannel, createSlackChannel, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
+import { mirrorOutbound, renameSlackChannel, createSlackChannel, inviteStaff, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
 import {
   toE164Strict, matchDriverByPhone, normalizeSettings, dispatchersOf,
   type DispatchConversation, type DispatchMessage, type DispatchSettings,
@@ -36,7 +36,7 @@ interface AppSyncIdentity { sub?: string; username?: string; claims?: Record<str
 interface AppSyncEvent { arguments: { action: string; input?: string | Record<string, unknown> | null }; identity?: AppSyncIdentity | null }
 
 export type Action =
-  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel'
+  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel' | 'slackInvite'
   | 'status' | 'getSettings' | 'saveSettings'
 
 export interface Deps {
@@ -181,6 +181,15 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       const c = await requireConversation(store, input)
       return { url: c.slackChannelId ? slackChannelUrl(c.slackChannelId) : null }
     }
+    case 'slackInvite': {
+      const c = await requireConversation(store, input)
+      if (!c.slackChannelId) throw new Error('This conversation has no Slack channel yet')
+      const bridge = await slackBridge(deps)
+      if (!bridge) throw new Error('Slack is not connected')
+      const emails = Array.isArray(input.inviteEmails) ? input.inviteEmails.filter((e): e is string => typeof e === 'string').map((e) => e.trim().toLowerCase()).filter(Boolean) : []
+      if (emails.length === 0) throw new Error('Add at least one email')
+      return { notInvited: await inviteStaff(bridge.slack, c.slackChannelId, [...new Set(emails)]) }
+    }
     case 'createSlackChannel': {
       const c = await requireConversation(store, input)
       if (c.slackChannelId) return { conversation: c, url: slackChannelUrl(c.slackChannelId) }
@@ -190,8 +199,8 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       if (str(input.name, 80) && !name) throw new Error('Channel names use lowercase letters, numbers and dashes')
       const emails = Array.isArray(input.inviteEmails) ? input.inviteEmails.filter((e): e is string => typeof e === 'string').map((e) => e.trim().toLowerCase()).filter(Boolean) : []
       const recap = await store.listMessages(c.id, 100)
-      const created = await createSlackChannel(bridge, c, { name, inviteEmails: [...new Set(emails)], recap })
-      return { conversation: created, url: created.slackChannelId ? slackChannelUrl(created.slackChannelId) : null }
+      const { conversation: created, notInvited } = await createSlackChannel(bridge, c, { name, inviteEmails: [...new Set(emails)], recap })
+      return { conversation: created, url: created.slackChannelId ? slackChannelUrl(created.slackChannelId) : null, notInvited }
     }
   }
 }

@@ -42,7 +42,7 @@ export interface UseDispatchResult {
   setArchived: (conversationId: string, archived: boolean) => Promise<void>
   addNote: (conversationId: string, body: string) => Promise<void>
   mediaUrl: (key: string) => Promise<string>
-  createSlackChannel: (conversationId: string, input: { name: string; inviteEmails: string[] }) => Promise<{ conversation: DispatchConversation; url: string | null }>
+  createSlackChannel: (conversationId: string, input: { name: string; inviteEmails: string[] }) => Promise<{ conversation: DispatchConversation; url: string | null; notInvited?: string[] }>
   getSettings: () => Promise<DispatchSettings | null>
   saveSettings: (settings: Partial<DispatchSettings>) => Promise<DispatchSettings>
 }
@@ -174,7 +174,7 @@ export function useDispatch(): UseDispatchResult {
   const mediaUrl = useCallback(async (key: string) => (await dispatchAction<{ url: string }>('mediaUrl', { key })).url, [])
 
   const createSlackChannel = useCallback(async (conversationId: string, input: { name: string; inviteEmails: string[] }) => {
-    const r = await dispatchAction<{ conversation: DispatchConversation; url: string | null }>('createSlackChannel', { conversationId, ...input })
+    const r = await dispatchAction<{ conversation: DispatchConversation; url: string | null; notInvited?: string[] }>('createSlackChannel', { conversationId, ...input })
     applyConversation(r.conversation)
     return r
   }, [applyConversation])

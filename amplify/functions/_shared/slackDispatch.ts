@@ -126,8 +126,8 @@ export interface CreateChannelInput {
  * Public channel, topic set to the number, recent thread recapped. Returns the updated
  * conversation.
  */
-export async function createSlackChannel(deps: SlackBridgeDeps, conversation: DispatchConversation, input: CreateChannelInput): Promise<DispatchConversation> {
-  if (conversation.slackChannelId) return conversation
+export async function createSlackChannel(deps: SlackBridgeDeps, conversation: DispatchConversation, input: CreateChannelInput): Promise<{ conversation: DispatchConversation; notInvited: string[] }> {
+  if (conversation.slackChannelId) return { conversation, notInvited: [] }
   const { slack, store } = deps
   const want = cleanChannelName(input.name ?? '') || slackChannelNameFor(conversation)
   let channelId: string
@@ -146,10 +146,11 @@ export async function createSlackChannel(deps: SlackBridgeDeps, conversation: Di
     await slack.call('conversations.join', { channel: channelId }).catch(() => undefined)
   }
   await slack.call('conversations.setTopic', { channel: channelId, topic: channelTopic(conversation) }).catch(() => undefined)
-  await inviteStaff(slack, channelId, input.inviteEmails)
+  const notInvited = await inviteStaff(slack, channelId, input.inviteEmails)
   const recap = recapText(conversation, input.recap ?? [])
   if (recap) await slack.call('chat.postMessage', { channel: channelId, text: recap }).catch(() => undefined)
-  return store.updateConversation(conversation.id, { set: { slackChannelId: channelId, slackChannelName: name } })
+  const updated = await store.updateConversation(conversation.id, { set: { slackChannelId: channelId, slackChannelName: name } })
+  return { conversation: updated, notInvited }
 }
 
 function channelTopic(c: DispatchConversation): string {
@@ -190,24 +191,39 @@ async function findChannelByName(slack: SlackClient, name: string): Promise<{ id
   return null
 }
 
-/** Invite the configured staff by email; a missing or already-present member is not an error. */
-export async function inviteStaff(slack: SlackClient, channelId: string, emails: readonly string[]): Promise<void> {
-  const ids: string[] = []
+/**
+ * Invite the configured staff by email. Returns the emails that could not be invited so
+ * the wizard can say so; an already-present member is not a failure.
+ */
+export async function inviteStaff(slack: SlackClient, channelId: string, emails: readonly string[]): Promise<string[]> {
+  const notInvited: string[] = []
+  const ids: Array<{ id: string; email: string }> = []
   for (const email of emails) {
     try {
       const r = await slack.call<{ user: { id: string } }>('users.lookupByEmail', { email })
-      ids.push(r.user.id)
+      ids.push({ id: r.user.id, email })
     } catch (err) {
       console.warn('[slack-dispatch] no Slack user for', email, String(err))
+      notInvited.push(email)
     }
   }
-  if (ids.length === 0) return
+  if (ids.length === 0) return notInvited
   try {
-    await slack.call('conversations.invite', { channel: channelId, users: ids.join(',') })
+    await slack.call('conversations.invite', { channel: channelId, users: ids.map((x) => x.id).join(',') })
   } catch (err) {
-    if (err instanceof SlackError && (err.code === 'already_in_channel' || err.code === 'cant_invite_self')) return
-    console.warn('[slack-dispatch] invite failed', String(err))
+    if (err instanceof SlackError && (err.code === 'already_in_channel' || err.code === 'cant_invite_self')) return notInvited
+    // One bad id fails the whole batch; retry one at a time so the rest still get in.
+    console.warn('[slack-dispatch] batch invite failed, retrying singly', String(err))
+    for (const x of ids) {
+      try {
+        await slack.call('conversations.invite', { channel: channelId, users: x.id })
+      } catch (e2) {
+        if (e2 instanceof SlackError && (e2.code === 'already_in_channel' || e2.code === 'cant_invite_self')) continue
+        notInvited.push(x.email)
+      }
+    }
   }
+  return notInvited
 }
 
 /** Rename after a relink so the channel keeps matching the driver. Best effort. */

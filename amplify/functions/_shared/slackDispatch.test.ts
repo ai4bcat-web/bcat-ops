@@ -82,9 +82,10 @@ describe('channel lifecycle', () => {
       'conversations.create': { ok: true, channel: { id: 'C9', name: 'drv-jason-smith' } },
       'users.lookupByEmail': (p: Record<string, unknown>) => (p.email === 'ryne@bcatcorp.com' ? { ok: true, user: { id: 'U1' } } : new SlackError('users.lookupByEmail', 'users_not_found')),
     })
-    const out = await createSlackChannel({ slack: slack.client, store: store.asStore(), settings: null }, c, { name: '', inviteEmails: ['ryne@bcatcorp.com', 'nobody@bcatcorp.com'], recap: await store.listMessages(c.id) })
+    const { conversation: out, notInvited } = await createSlackChannel({ slack: slack.client, store: store.asStore(), settings: null }, c, { name: '', inviteEmails: ['ryne@bcatcorp.com', 'nobody@bcatcorp.com'], recap: await store.listMessages(c.id) })
     expect(out.slackChannelId).toBe('C9')
     expect(out.slackChannelName).toBe('drv-jason-smith')
+    expect(notInvited).toEqual(['nobody@bcatcorp.com'])
     expect(slack.calls.map((x) => x.method)).toEqual(['conversations.create', 'conversations.setTopic', 'users.lookupByEmail', 'users.lookupByEmail', 'conversations.invite', 'chat.postMessage'])
     expect(slack.calls[0].params).toMatchObject({ name: 'drv-jason-smith', is_private: false })
     expect(slack.calls[4].params).toMatchObject({ channel: 'C9', users: 'U1' })
@@ -97,7 +98,7 @@ describe('channel lifecycle', () => {
       'conversations.create': new SlackError('conversations.create', 'name_taken'),
       'conversations.list': { ok: true, channels: [{ id: 'C7', name: 'jason', is_archived: true }] },
     })
-    const out = await createSlackChannel({ slack: slack.client, store: store.asStore(), settings: null }, c, { name: 'Jason', inviteEmails: [] })
+    const { conversation: out } = await createSlackChannel({ slack: slack.client, store: store.asStore(), settings: null }, c, { name: 'Jason', inviteEmails: [] })
     expect(out.slackChannelId).toBe('C7')
     expect(slack.calls.map((x) => x.method)).toContain('conversations.unarchive')
     expect(slack.calls.map((x) => x.method)).toContain('conversations.join')
@@ -118,7 +119,7 @@ describe('channel lifecycle', () => {
   })
   it('treats already-in-channel as success when inviting', async () => {
     const slack = fakeSlack({ 'users.lookupByEmail': { ok: true, user: { id: 'U1' } }, 'conversations.invite': new SlackError('conversations.invite', 'already_in_channel') })
-    await expect(inviteStaff(slack.client, 'C1', ['ryne@bcatcorp.com'])).resolves.toBeUndefined()
+    await expect(inviteStaff(slack.client, 'C1', ['ryne@bcatcorp.com'])).resolves.toEqual([])
   })
 })
 
