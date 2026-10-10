@@ -84,7 +84,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '' },
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
@@ -123,10 +123,12 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             drugTestDate: driver.drugTestDate ?? '', hireDate: driver.hireDate ?? '',
             assignedTruckId: driver.assignedTruckId ?? null,
             motiveDriverId: driver.motiveDriverId ?? null,
+            dispatcherPrimary: driver.dispatcherPrimary ?? '',
+            dispatcherBackup: driver.dispatcherBackup ?? '',
             assignedTrailerId: driver.assignedTrailerId ?? null,
             fleetGroup: driver.fleetGroup ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '' })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -152,6 +154,12 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     setShouldDeletePhoto(true)
   }
 
+  const allDrivers = useAppStore((st) => st.drivers)
+  // Staff emails already set as somebody's dispatcher, so the next entry is a pick, not a retype.
+  const knownDispatchers = Array.from(new Set(
+    allDrivers.flatMap((d) => [d.dispatcherPrimary ?? '', d.dispatcherBackup ?? '']).map((e) => e.trim().toLowerCase()).filter(Boolean),
+  )).sort()
+
   const onSubmit = async (values: DriverFormValues) => {
     // Auto-assign a color if none chosen
     const colorKeys: ColorKey[] = [
@@ -159,7 +167,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
       'driver-7','driver-8','driver-9','driver-10','driver-11','driver-12',
     ]
     const autoColor = values.colorKey ?? colorKeys[Math.floor(Math.random() * colorKeys.length)]
-    const normalized = { ...values, phone: normalizePhone(values.phone), colorKey: autoColor }
+    const normalized = { ...values, phone: normalizePhone(values.phone), colorKey: autoColor, dispatcherPrimary: values.dispatcherPrimary || null, dispatcherBackup: values.dispatcherBackup || null }
     try {
       let driverId: string
       if (isEdit) {
@@ -372,6 +380,19 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                       )}
                     />
                   </Field>
+                  {/*
+                    * The dedicated dispatcher: a new Dispatch conversation from this driver is
+                    * assigned to them, and both are invited to the driver's Slack channel.
+                    */}
+                  <Field label="Dispatcher" hint="owns this driver's texts and calls on the Dispatch page">
+                    <Input type="email" list="bcat-dispatcher-emails" placeholder="jenny@bcatcorp.com" {...register('dispatcherPrimary')} />
+                  </Field>
+                  <Field label="Backup dispatcher" hint="covers when the dispatcher is out">
+                    <Input type="email" list="bcat-dispatcher-emails" placeholder="dennis@bcatcorp.com" {...register('dispatcherBackup')} />
+                  </Field>
+                  <datalist id="bcat-dispatcher-emails">
+                    {knownDispatchers.map((e) => <option key={e} value={e} />)}
+                  </datalist>
                   </>
                 )}
 

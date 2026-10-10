@@ -33,6 +33,9 @@ export const driverSchema = z.object({
    * Best" and two people called "Jason Smith". See src/lib/motiveDriverMatch.ts.
    */
   motiveDriverId: z.number().int().positive().nullable().optional(),
+  // Dedicated dispatcher and backup: staff emails, blank allowed.
+  dispatcherPrimary: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
+  dispatcherBackup: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])

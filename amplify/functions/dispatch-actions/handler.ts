@@ -12,7 +12,7 @@ import { sendDispatchText, MEDIA_PREFIX } from '../_shared/dispatchSend'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorOutbound, renameSlackChannel, createSlackChannel, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
 import {
-  toE164Strict, matchDriverByPhone, normalizeSettings,
+  toE164Strict, matchDriverByPhone, normalizeSettings, dispatchersOf,
   type DispatchConversation, type DispatchMessage, type DispatchSettings,
 } from '../../../src/lib/dispatch'
 
@@ -145,7 +145,8 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       if (driverId) {
         const driver = (await store.listDrivers()).find((d) => d.id === driverId)
         if (!driver) throw new Error('That driver no longer exists')
-        linked = await store.updateConversation(c.id, { set: { driverId: driver.id, driverName: driver.name, displayName: null } })
+        // Linking to a driver hands the thread to their dispatcher unless someone already has it.
+        linked = await store.updateConversation(c.id, { set: { driverId: driver.id, driverName: driver.name, displayName: null, ...(c.assignedTo ? {} : { assignedTo: dispatchersOf(driver)[0] ?? null }) } })
       } else {
         const displayName = str(input.displayName, MAX_LABEL) || null
         linked = await store.updateConversation(c.id, { set: { driverId: null, driverName: null, displayName } })
@@ -248,7 +249,7 @@ async function startConversation(input: Record<string, unknown>, deps: Deps): Pr
     if (existing.status === 'ARCHIVED') return store.updateConversation(existing.id, { set: { status: 'OPEN' } })
     return existing
   }
-  return store.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null, displayName: driver ? null : (str(input.displayName, MAX_LABEL) || null) })
+  return store.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null, displayName: driver ? null : (str(input.displayName, MAX_LABEL) || null), assignedTo: dispatchersOf(driver)[0] ?? null })
 }
 
 async function sendText(input: Record<string, unknown>, caller: Caller, deps: Deps): Promise<{ message: DispatchMessage; conversation: DispatchConversation }> {

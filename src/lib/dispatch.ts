@@ -139,6 +139,19 @@ export interface DispatchDriver {
   name: string
   phone: string
   active?: boolean | null
+  /** Dedicated dispatcher and backup (staff emails), when set on the driver. */
+  dispatcherPrimary?: string | null
+  dispatcherBackup?: string | null
+}
+
+/** The people who should see a driver's conversation by default: dispatcher, then backup. */
+export function dispatchersOf(d: Pick<DispatchDriver, 'dispatcherPrimary' | 'dispatcherBackup'> | null | undefined): string[] {
+  const out: string[] = []
+  for (const e of [d?.dispatcherPrimary, d?.dispatcherBackup]) {
+    const v = (e ?? '').trim().toLowerCase()
+    if (v && !out.includes(v)) out.push(v)
+  }
+  return out
 }
 
 /**

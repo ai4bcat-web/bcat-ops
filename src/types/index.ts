@@ -36,6 +36,9 @@ export interface Driver {
   onboardingTemplateId?: string | null  // phased onboarding template in effect (e.g. Amazon)
   /** Motive user id, set by staff. Never inferred — see src/lib/motiveDriverMatch.ts. */
   motiveDriverId?: number | null
+  /** Dedicated dispatcher (staff email) and who covers for them. */
+  dispatcherPrimary?: string | null
+  dispatcherBackup?: string | null
   createdAt: string
   updatedAt: string
 }

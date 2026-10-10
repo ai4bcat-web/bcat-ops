@@ -12,7 +12,7 @@ import {
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomUUID } from 'node:crypto'
 import type { DispatchConversation, DispatchDriver, DispatchKind, DispatchMedia, DispatchMessage, DispatchSettings } from '../../../src/lib/dispatch'
-import { messagePreview } from '../../../src/lib/dispatch'
+import { messagePreview, dispatchersOf } from '../../../src/lib/dispatch'
 
 export const CONVERSATIONS_BY_PHONE = 'dispatchConversationsByPhone'
 export const MESSAGES_BY_CONVERSATION = 'dispatchMessagesByConversationIdAndAt'
@@ -74,7 +74,7 @@ export class DispatchStore {
     return r.Item ? (unmarshall(r.Item) as DispatchConversation) : null
   }
 
-  async createConversation(input: { phone: string; driverId?: string | null; driverName?: string | null; displayName?: string | null }): Promise<DispatchConversation> {
+  async createConversation(input: { phone: string; driverId?: string | null; driverName?: string | null; displayName?: string | null; assignedTo?: string | null }): Promise<DispatchConversation> {
     const now = this.now()
     const row: DispatchConversation & { __typename: string } = {
       __typename: 'DispatchConversation',
@@ -89,7 +89,7 @@ export class DispatchStore {
       lastPreview: null,
       lastDirection: null,
       lastKind: null,
-      assignedTo: null,
+      assignedTo: input.assignedTo ?? null,
       createdAt: now,
       updatedAt: now,
     }
@@ -107,7 +107,8 @@ export class DispatchStore {
     if (existing) return { conversation: existing, created: false }
     const driver = match(drivers, phone)
     try {
-      const conversation = await this.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null })
+      // A driver's conversation starts with their dedicated dispatcher, when one is set.
+      const conversation = await this.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null, assignedTo: dispatchersOf(driver)[0] ?? null })
       return { conversation, created: true }
     } catch (err) {
       // Lost a race with a second webhook for the same new number: read theirs.
@@ -292,7 +293,7 @@ export class DispatchStore {
     do {
       const r = await this.db.send(new ScanCommand({
         TableName: this.t.drivers,
-        ProjectionExpression: '#id, #name, #phone, #active',
+        ProjectionExpression: '#id, #name, #phone, #active, dispatcherPrimary, dispatcherBackup',
         ExpressionAttributeNames: { '#id': 'id', '#name': 'name', '#phone': 'phone', '#active': 'active' },
         ExclusiveStartKey: key,
       }))

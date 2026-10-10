@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   phoneDigits, toE164Strict, prettyPhone, samePhone, matchDriverByPhone, conversationTitle,
   messagePreview, sortThread, sortConversations, conversationMatches, normalizeSettings, callPlan,
-  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody, phoneColorSlot,
+  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody, phoneColorSlot, dispatchersOf,
 } from './dispatch'
 
 describe('phones', () => {
@@ -147,5 +147,13 @@ describe('phoneColorSlot', () => {
     const slots = new Set(['+18475550100', '+18475550101', '+18475550102', '+18475550103', '+17735550199'].map((p) => phoneColorSlot(p, 12)))
     expect(slots.size).toBeGreaterThan(1)
     expect(phoneColorSlot('x', 0)).toBe(0)
+  })
+})
+
+describe('dispatchersOf', () => {
+  it('lists the dedicated dispatcher then the backup, cleaned and deduplicated', () => {
+    expect(dispatchersOf({ dispatcherPrimary: ' Jenny@bcatcorp.com ', dispatcherBackup: 'dennis@bcatcorp.com' })).toEqual(['jenny@bcatcorp.com', 'dennis@bcatcorp.com'])
+    expect(dispatchersOf({ dispatcherPrimary: 'x@b.com', dispatcherBackup: 'X@B.COM' })).toEqual(['x@b.com'])
+    expect(dispatchersOf(null)).toEqual([])
   })
 })

@@ -42,7 +42,7 @@ function deps(config: DispatchConfig = CONFIG) {
 
 beforeEach(() => {
   store = new FakeDispatchStore()
-  store.drivers = [{ id: 'd-jason', name: 'Jason Smith', phone: '(847) 555-0100', active: true }]
+  store.drivers = [{ id: 'd-jason', name: 'Jason Smith', phone: '(847) 555-0100', active: true, dispatcherPrimary: 'Jenny@bcatcorp.com', dispatcherBackup: 'dennis@bcatcorp.com' }]
   uploads = []; slackPosts = []; autoReplies = []
   resetCaches()
 })
@@ -79,6 +79,7 @@ describe('inbound texts', () => {
     const [c] = [...store.conversations.values()]
     expect(c.driverId).toBe('d-jason')
     expect(c.driverName).toBe('Jason Smith')
+    expect(c.assignedTo).toBe('jenny@bcatcorp.com')   // his dedicated dispatcher
     expect(c.unreadCount).toBe(1)
     expect(c.lastPreview).toBe('At the dock')
     expect(c.lastDirection).toBe('IN')

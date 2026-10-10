@@ -66,14 +66,18 @@ let driversHaveTrailer = true
 // Same treatment again for the Motive link, so the roster still loads between this deploy
 // and the backend catching up. One unhandled throw here blanks every driver in the app.
 let driversHaveMotive = true
+// And for the dedicated dispatcher pair.
+let driversHaveDispatcher = true
 const driverFields = () => [
   DRIVER_BASE_FIELDS,
   driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
   driversHaveTrailer ? 'assignedTrailerId fleetGroup' : '',
   driversHaveMotive ? 'motiveDriverId' : '',
+  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup' : '',
 ].filter(Boolean).join(' ')
 
 const isMotiveFieldUndefined = (err: unknown) => /motiveDriverId/.test(JSON.stringify(err ?? ''))
+const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)/.test(JSON.stringify(err ?? ''))
 
 function isComplianceFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
@@ -298,6 +302,10 @@ export async function listDrivers(): Promise<Driver[]> {
         console.warn("[apiClient] backend has no motiveDriverId yet — querying drivers without it until deploy")
         driversHaveMotive = false; dropped = true
       }
+      if (driversHaveDispatcher && isDispatcherFieldUndefined(e)) {
+        console.warn("[apiClient] backend has no dispatcherPrimary/dispatcherBackup yet — querying drivers without them until deploy")
+        driversHaveDispatcher = false; dropped = true
+      }
       if (!dropped) break
     }
   }
@@ -344,6 +352,7 @@ export async function updateDriver(
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
   const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
   const { motiveDriverId: _m, ...withoutMotive } = all
+  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ...withoutDispatcher } = all
 
   // The SELECTION matters as much as the input. Building it from `driversHaveTrailer`
   // meant a stale flag returned a driver with fleetGroup/assignedTrailerId missing —
@@ -351,7 +360,7 @@ export async function updateDriver(
   // saved value instantly read as unsaved. Ask for them on the optimistic attempt.
   const run = async (input: Record<string, unknown>, withNewFields: boolean) => {
     const fields = withNewFields
-      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId`
+      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup`
       : driverFields()
     return client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${fields} } }`,
@@ -384,6 +393,12 @@ export async function updateDriver(
       console.warn('[apiClient] backend has no motiveDriverId yet — saving without it')
       driversHaveMotive = false
       const result = await run(withoutMotive, false)
+      return resolveDriverPhotoUrl(result.data.updateDriver)
+    }
+    if (isDispatcherFieldUndefined(err)) {
+      console.warn('[apiClient] backend has no dispatcherPrimary/dispatcherBackup yet — saving without them')
+      driversHaveDispatcher = false
+      const result = await run(withoutDispatcher, false)
       return resolveDriverPhotoUrl(result.data.updateDriver)
     }
     throw err

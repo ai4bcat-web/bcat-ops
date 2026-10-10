@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { DispatchConversation, DispatchDriver, DispatchMessage, DispatchSettings } from '../../../src/lib/dispatch'
-import { messagePreview } from '../../../src/lib/dispatch'
+import { messagePreview, dispatchersOf } from '../../../src/lib/dispatch'
 import type { DispatchStore } from './dispatchStore'
 
 export class FakeDispatchStore {
@@ -21,9 +21,9 @@ export class FakeDispatchStore {
   }
   async getConversation(id: string) { return this.conversations.get(id) ?? null }
   async findConversationBySlackChannel(channelId: string) { return [...this.conversations.values()].find((c) => c.slackChannelId === channelId) ?? null }
-  async createConversation(input: { phone: string; driverId?: string | null; driverName?: string | null; displayName?: string | null }) {
+  async createConversation(input: { phone: string; driverId?: string | null; driverName?: string | null; displayName?: string | null; assignedTo?: string | null }) {
     const now = this.clock()
-    const row: DispatchConversation = { id: randomUUID(), phone: input.phone, driverId: input.driverId ?? null, driverName: input.driverName ?? null, displayName: input.displayName ?? null, status: 'OPEN', unreadCount: 0, lastMessageAt: null, lastPreview: null, lastDirection: null, lastKind: null, assignedTo: null, createdAt: now, updatedAt: now }
+    const row: DispatchConversation = { id: randomUUID(), phone: input.phone, driverId: input.driverId ?? null, driverName: input.driverName ?? null, displayName: input.displayName ?? null, status: 'OPEN', unreadCount: 0, lastMessageAt: null, lastPreview: null, lastDirection: null, lastKind: null, assignedTo: input.assignedTo ?? null, createdAt: now, updatedAt: now }
     this.conversations.set(row.id, row)
     return row
   }
@@ -31,7 +31,7 @@ export class FakeDispatchStore {
     const existing = await this.findConversationByPhone(phone)
     if (existing) return { conversation: existing, created: false }
     const driver = match(drivers, phone)
-    return { conversation: await this.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null }), created: true }
+    return { conversation: await this.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null, assignedTo: dispatchersOf(driver)[0] ?? null }), created: true }
   }
   async updateConversation(id: string, patch: { set?: Partial<DispatchConversation>; unreadDelta?: number; unreadTo?: number }) {
     const c = this.conversations.get(id)

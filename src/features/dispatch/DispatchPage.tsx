@@ -9,7 +9,7 @@ import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDispatch } from '@/hooks/useDispatch'
 import { useDrivers } from '@/hooks/useDrivers'
 import { cn } from '@/lib/utils'
-import { conversationTitle, prettyPhone, sortConversations, conversationMatches, type DispatchConversation } from '@/lib/dispatch'
+import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
 import { Thread } from './Thread'
 import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard } from './DispatchDialogs'
@@ -58,6 +58,7 @@ export function DispatchPage() {
   const selected = d.conversations.find((c) => c.id === d.selectedId) ?? null
   const selectedDriver = selected?.driverId ? drivers.find((x) => x.id === selected.driverId) ?? null : null
   const selectedColor = selected ? conversationColor(selected, drivers) : null
+  const selectedDispatchers = dispatchersOf(selectedDriver)
 
   // Opening a conversation with unread messages marks it read for the whole team.
   useEffect(() => {
@@ -83,6 +84,11 @@ export function DispatchPage() {
       }
     }
     setSlackWizard(c)
+  }
+  // The wizard's invite list: the settings defaults plus this driver's own dispatchers.
+  const wizardInvites = (c: DispatchConversation): string[] => {
+    const driver = c.driverId ? drivers.find((x) => x.id === c.driverId) : undefined
+    return Array.from(new Set([...(defaultInvites ?? []), ...dispatchersOf(driver)]))
   }
 
   const act = async (label: string, fn: () => Promise<unknown>) => {
@@ -159,6 +165,7 @@ export function DispatchPage() {
             <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
+            {selectedDispatchers.length ? <span title={selectedDispatchers.join(', ')}>· Dispatcher {staffName(selectedDispatchers[0])}{selectedDispatchers[1] ? ` (backup ${staffName(selectedDispatchers[1])})` : ''}</span> : null}
             {selected.assignedTo ? <span>· {selected.assignedTo === me ? 'Yours' : `With ${staffName(selected.assignedTo)}`}</span> : null}
           </div>
         </div>
@@ -169,7 +176,9 @@ export function DispatchPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               {me && selected.assignedTo !== me ? <DropdownMenuItem onClick={() => void act('assign', () => d.assign(selected.id, me))}>Take it (me)</DropdownMenuItem> : null}
-              {assignees.filter((a) => a !== me && a !== selected.assignedTo).map((a) => <DropdownMenuItem key={a} onClick={() => void act('assign', () => d.assign(selected.id, a))}>{a}</DropdownMenuItem>)}
+              {selectedDispatchers[0] && selected.assignedTo !== selectedDispatchers[0] ? <DropdownMenuItem onClick={() => void act('assign', () => d.assign(selected.id, selectedDispatchers[0]))}>Dispatcher · {staffName(selectedDispatchers[0])}</DropdownMenuItem> : null}
+              {selectedDispatchers[1] && selected.assignedTo !== selectedDispatchers[1] ? <DropdownMenuItem onClick={() => void act('assign', () => d.assign(selected.id, selectedDispatchers[1]))}>Backup · {staffName(selectedDispatchers[1])}</DropdownMenuItem> : null}
+              {assignees.filter((a) => a !== me && a !== selected.assignedTo && !selectedDispatchers.includes(a)).map((a) => <DropdownMenuItem key={a} onClick={() => void act('assign', () => d.assign(selected.id, a))}>{a}</DropdownMenuItem>)}
               {selected.assignedTo ? <DropdownMenuItem onClick={() => void act('unassign', () => d.assign(selected.id, null))}>Unassign</DropdownMenuItem> : null}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -227,7 +236,7 @@ export function DispatchPage() {
       </div>
       {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => { const c = await d.start(input); setTab(c.status === 'ARCHIVED' ? 'ARCHIVED' : 'OPEN'); d.select(c.id); return c }} /> : null}
       {linking ? <LinkNumberDialog key={linking.id} conversation={linking} onClose={() => setLinking(null)} onLink={(input) => d.link(linking.id, input)} /> : null}
-      {slackWizard ? <SlackChannelWizard key={slackWizard.id} conversation={slackWizard} defaultInvites={defaultInvites ?? []} onClose={() => setSlackWizard(null)} onCreate={(input) => d.createSlackChannel(slackWizard.id, input)} /> : null}
+      {slackWizard ? <SlackChannelWizard key={slackWizard.id} conversation={slackWizard} defaultInvites={wizardInvites(slackWizard)} onClose={() => setSlackWizard(null)} onCreate={(input) => d.createSlackChannel(slackWizard.id, input)} /> : null}
       {settingsOpen ? <DispatchSettingsDialog onClose={() => setSettingsOpen(false)} dispatchNumber={d.status?.dispatchNumber ?? null} load={d.getSettings} save={d.saveSettings} /> : null}
     </div>
   )
