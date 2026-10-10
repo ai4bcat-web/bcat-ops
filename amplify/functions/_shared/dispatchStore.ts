@@ -167,6 +167,8 @@ export class DispatchStore {
         lastKind: message.kind,
         lastSentBy: message.direction === 'OUT' ? (message.sentBy ?? null) : null,
         status: 'OPEN',
+        // Answering resets the "nobody has replied" escalation.
+        ...(opts.unread === 'clear' ? { nudgeStage: 0 } : {}),
       },
       unreadDelta: opts.unread === 'increment' ? 1 : undefined,
       unreadTo: opts.unread === 'clear' ? 0 : undefined,

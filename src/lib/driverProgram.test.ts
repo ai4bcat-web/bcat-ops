@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { driverProgramOf } from './driverProgram'
+import { driverProgramOf, timeClockFor } from './driverProgram'
 
 describe('driverProgramOf', () => {
   it('gives Ivan’s own fleet the paperwork page', () => {
@@ -28,5 +28,20 @@ describe('driverProgramOf', () => {
     // The two disagree in real data. The safer read keeps the settlement.
     expect(driverProgramOf({ driverType: 'OWNER_OPERATOR', payGroup: 'LOCAL' })).toBe('SETTLEMENT')
     expect(driverProgramOf({ fleetGroup: 'AMAZON', payGroup: 'LOCAL' })).toBe('SETTLEMENT')
+  })
+})
+
+describe('staff overrides', () => {
+  it('forces the Ivan app for a box truck driver or Zak when ivanApp is set', () => {
+    expect(driverProgramOf({ fleetGroup: 'BOX_TRUCK', ivanApp: true })).toBe('PAPERWORK')
+    expect(driverProgramOf({ fleetGroup: 'AMAZON', driverType: 'OWNER_OPERATOR', ivanApp: true })).toBe('PAPERWORK')
+    expect(driverProgramOf({ fleetGroup: 'BOX_TRUCK', ivanApp: null })).toBe('SETTLEMENT')
+  })
+  it('gives the clock to Ivan local by default and lets staff flip it either way', () => {
+    expect(timeClockFor({ fleetGroup: 'LOCAL' })).toBe(true)
+    expect(timeClockFor({ fleetGroup: 'BOX_TRUCK', ivanApp: true })).toBe(false)
+    expect(timeClockFor({ fleetGroup: 'LOCAL', timeClock: false })).toBe(false)
+    expect(timeClockFor({ fleetGroup: 'AMAZON', timeClock: true })).toBe(true)
+    expect(timeClockFor({ payGroup: 'LOCAL' })).toBe(true)
   })
 })

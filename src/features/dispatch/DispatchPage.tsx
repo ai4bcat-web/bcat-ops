@@ -3,7 +3,6 @@ import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Searc
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useAuth } from '@/hooks/useAuth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useDispatch } from '@/hooks/useDispatch'
@@ -15,7 +14,7 @@ import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
 import { Thread } from './Thread'
-import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard } from './DispatchDialogs'
+import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard, AssignDialog } from './DispatchDialogs'
 import { staffName } from './dispatchUi'
 import { conversationColor, initialsOf } from './conversationColor'
 
@@ -38,6 +37,7 @@ export function DispatchPage() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [linking, setLinking] = useState<DispatchConversation | null>(null)
   const [slackWizard, setSlackWizard] = useState<DispatchConversation | null>(null)
+  const [assigning, setAssigning] = useState<DispatchConversation | null>(null)
   const [defaultInvites, setDefaultInvites] = useState<string[] | null>(null)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
@@ -63,7 +63,7 @@ export function DispatchPage() {
   const counts = useMemo(() => ({
     OPEN: d.conversations.filter((c) => c.status !== 'ARCHIVED').length,
     UNREAD: d.conversations.filter((c) => c.status !== 'ARCHIVED' && (c.unreadCount ?? 0) > 0).length,
-    MINE: d.conversations.filter((c) => c.status !== 'ARCHIVED' && c.assignedTo === me).length,
+    MINE: d.conversations.filter((c) => c.status !== 'ARCHIVED' && (c.assignedTo === me || c.assignedBackup === me)).length,
     ARCHIVED: d.conversations.filter((c) => c.status === 'ARCHIVED').length,
   }), [d.conversations, me])
 
@@ -71,7 +71,7 @@ export function DispatchPage() {
     if (tab === 'ARCHIVED') return c.status === 'ARCHIVED'
     if (c.status === 'ARCHIVED') return false
     if (tab === 'UNREAD') return (c.unreadCount ?? 0) > 0
-    if (tab === 'MINE') return c.assignedTo === me
+    if (tab === 'MINE') return c.assignedTo === me || c.assignedBackup === me
     return true
   }).filter((c) => conversationMatches(c, query))), [d.conversations, tab, me, query])
 
@@ -86,13 +86,6 @@ export function DispatchPage() {
     if (selected && (selected.unreadCount ?? 0) > 0) d.markRead(selected.id).catch(() => { /* next poll will retry */ })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, selected?.unreadCount])
-
-  const assignees = useMemo(() => {
-    const set = new Set<string>()
-    if (me) set.add(me)
-    for (const c of d.conversations) if (c.assignedTo) set.add(c.assignedTo)
-    return [...set].sort()
-  }, [d.conversations, me])
 
   // The wizard pre-fills the default invitees from settings; fetched once, on first use.
   const openSlackWizard = async (c: DispatchConversation) => {
@@ -187,23 +180,18 @@ export function DispatchPage() {
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
             {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
-            {selectedDispatchers.length ? <span title={selectedDispatchers.join(', ')}>· Dispatcher {staffName(selectedDispatchers[0])}{selectedDispatchers[1] ? ` (backup ${staffName(selectedDispatchers[1])})` : ''}</span> : null}
-            {selected.assignedTo ? <span>· {selected.assignedTo === me ? 'Yours' : `With ${staffName(selected.assignedTo)}`}</span> : null}
+            {(() => {
+              const primary = selected.assignedTo || selectedDispatchers[0] || null
+              const backup = selected.assignedBackup || selectedDispatchers[1] || null
+              if (!primary && !backup) return <span>· No dispatcher yet</span>
+              return <span title={[primary, backup].filter(Boolean).join(', ')}>· Dispatcher {primary ? (primary === me ? 'you' : staffName(primary)) : 'nobody'}{backup ? ` · backup ${backup === me ? 'you' : staffName(backup)}` : ''}</span>
+            })()}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
-          {canManage ? <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5"><UserCheck className="size-3.5" />{isMobile ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}</Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {me && selected.assignedTo !== me ? <DropdownMenuItem onClick={() => void act('assign', () => d.assign(selected.id, me))}>Take it (me)</DropdownMenuItem> : null}
-              {selectedDispatchers[0] && selected.assignedTo !== selectedDispatchers[0] ? <DropdownMenuItem onClick={() => void act('assign', () => d.assign(selected.id, selectedDispatchers[0]))}>Dispatcher · {staffName(selectedDispatchers[0])}</DropdownMenuItem> : null}
-              {selectedDispatchers[1] && selected.assignedTo !== selectedDispatchers[1] ? <DropdownMenuItem onClick={() => void act('assign', () => d.assign(selected.id, selectedDispatchers[1]))}>Backup · {staffName(selectedDispatchers[1])}</DropdownMenuItem> : null}
-              {assignees.filter((a) => a !== me && a !== selected.assignedTo && !selectedDispatchers.includes(a)).map((a) => <DropdownMenuItem key={a} onClick={() => void act('assign', () => d.assign(selected.id, a))}>{a}</DropdownMenuItem>)}
-              {selected.assignedTo ? <DropdownMenuItem onClick={() => void act('unassign', () => d.assign(selected.id, null))}>Unassign</DropdownMenuItem> : null}
-            </DropdownMenuContent>
-          </DropdownMenu> : null}
+          {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Primary and backup dispatcher" onClick={() => setAssigning(selected)}>
+            <UserCheck className="size-3.5" />{isMobile ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}
+          </Button> : null}
           {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title={selected.driverId ? 'Change who this number belongs to' : 'Link this number to a driver'} onClick={() => setLinking(selected)}>
             <UserPlus className="size-3.5" />{isMobile ? '' : (selected.driverId ? 'Relink' : 'Link driver')}
           </Button> : null}
@@ -259,6 +247,7 @@ export function DispatchPage() {
       {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => { const c = await d.start(input); setTab(c.status === 'ARCHIVED' ? 'ARCHIVED' : 'OPEN'); d.select(c.id); return c }} /> : null}
       {linking ? <LinkNumberDialog key={linking.id} conversation={linking} onClose={() => setLinking(null)} onLink={(input) => d.link(linking.id, input)} /> : null}
       {slackWizard ? <SlackChannelWizard key={slackWizard.id} conversation={slackWizard} defaultInvites={wizardInvites(slackWizard)} onClose={() => setSlackWizard(null)} onCreate={(input) => d.createSlackChannel(slackWizard.id, input)} /> : null}
+      {assigning ? <AssignDialog key={assigning.id} conversation={assigning} fromDriver={dispatchersOf(assigning.driverId ? drivers.find((x) => x.id === assigning.driverId) : null)} loadStaff={d.listStaff} onClose={() => setAssigning(null)} onSave={(p, b) => d.assign(assigning.id, p, b)} /> : null}
       {settingsOpen ? <DispatchSettingsDialog onClose={() => setSettingsOpen(false)} dispatchNumber={d.status?.dispatchNumber ?? null} load={d.getSettings} save={d.saveSettings} /> : null}
     </div>
   )

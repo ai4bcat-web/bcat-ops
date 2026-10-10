@@ -39,6 +39,10 @@ export interface Driver {
   /** Dedicated dispatcher (staff email) and who covers for them. */
   dispatcherPrimary?: string | null
   dispatcherBackup?: string | null
+  /** Force the Ivan paperwork app regardless of fleet (box truck drivers, Zak). */
+  ivanApp?: boolean | null
+  /** Hours tab on/off; null = by fleet (Ivan local on, everyone else off). */
+  timeClock?: boolean | null
   createdAt: string
   updatedAt: string
 }

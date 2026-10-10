@@ -102,6 +102,8 @@ export interface DriverProfile {
   truck?: DriverTruck | null
   /** The dispatch number to call or text, E.164; null until Dispatch is set up. Optional: older API. */
   dispatchPhone?: string | null
+  /** Hours tab on? Ivan's fleet by default; staff can override on the driver file. Optional: older API. */
+  timeClock?: boolean | null
 }
 
 export interface DriverTruck {

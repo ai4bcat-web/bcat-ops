@@ -37,7 +37,8 @@ export interface UseDispatchResult {
   send: (input: { conversationId: string; body: string; files?: File[] }) => Promise<void>
   start: (input: { driverId?: string; phone?: string; displayName?: string }) => Promise<DispatchConversation>
   markRead: (conversationId: string) => Promise<void>
-  assign: (conversationId: string, assignedTo: string | null) => Promise<void>
+  assign: (conversationId: string, primary: string | null, backup: string | null) => Promise<void>
+  listStaff: () => Promise<string[]>
   link: (conversationId: string, input: { driverId?: string; displayName?: string }) => Promise<void>
   setArchived: (conversationId: string, archived: boolean) => Promise<void>
   addNote: (conversationId: string, body: string) => Promise<void>
@@ -150,10 +151,12 @@ export function useDispatch(): UseDispatchResult {
     return r.conversation
   }, [applyConversation])
 
-  const assign = useCallback(async (conversationId: string, assignedTo: string | null) => {
-    const r = await dispatchAction<{ conversation: DispatchConversation }>('assign', { conversationId, assignedTo: assignedTo ?? '' })
+  const assign = useCallback(async (conversationId: string, primary: string | null, backup: string | null) => {
+    const r = await dispatchAction<{ conversation: DispatchConversation }>('assign', { conversationId, primary: primary ?? '', backup: backup ?? '' })
     applyConversation(r.conversation)
   }, [applyConversation])
+
+  const listStaff = useCallback(async () => (await dispatchAction<{ staff: string[] }>('listStaff')).staff ?? [], [])
 
   const link = useCallback(async (conversationId: string, input: { driverId?: string; displayName?: string }) => {
     const r = await dispatchAction<{ conversation: DispatchConversation }>('link', { conversationId, ...input })
@@ -188,7 +191,7 @@ export function useDispatch(): UseDispatchResult {
 
   return {
     conversations, loading, error, status, selectedId, select: setSelectedId, thread, threadLoading, refresh,
-    send, start, markRead, assign, link, setArchived, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
+    send, start, markRead, assign, listStaff, link, setArchived, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
   }
 }
 

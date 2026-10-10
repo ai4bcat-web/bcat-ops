@@ -4,7 +4,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
+import { AdminGetUserCommand, CognitoIdentityProviderClient, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider'
 import { DispatchStore, tablesFromEnv, messageRow } from '../_shared/dispatchStore'
 import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConfig'
 import { sendMessage } from '../_shared/twilio'
@@ -37,7 +37,7 @@ interface AppSyncEvent { arguments: { action: string; input?: string | Record<st
 
 export type Action =
   | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel' | 'slackInvite'
-  | 'status' | 'getSettings' | 'saveSettings'
+  | 'status' | 'getSettings' | 'saveSettings' | 'listStaff'
 
 export interface Deps {
   store: DispatchStore
@@ -134,13 +134,17 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
     case 'markRead': {
       const c = await requireConversation(store, input)
       if ((c.unreadCount ?? 0) === 0 && c.lastReadAt) return { conversation: c }
-      return { conversation: await store.updateConversation(c.id, { set: { lastReadAt: deps.now().toISOString(), lastReadBy: caller.email }, unreadTo: 0 }) }
+      return { conversation: await store.updateConversation(c.id, { set: { lastReadAt: deps.now().toISOString(), lastReadBy: caller.email, nudgeStage: 0 }, unreadTo: 0 }) }
     }
     case 'assign': {
+      // Primary and backup dispatcher for this conversation. `assignedTo` alone still works.
       const c = await requireConversation(store, input)
-      const assignedTo = str(input.assignedTo, 200).toLowerCase() || null
-      return { conversation: await store.updateConversation(c.id, { set: { assignedTo } }) }
+      const primary = str(input.primary ?? input.assignedTo, 200).toLowerCase() || null
+      const backup = str(input.backup, 200).toLowerCase() || null
+      return { conversation: await store.updateConversation(c.id, { set: { assignedTo: primary, assignedBackup: backup === primary ? null : backup, nudgeStage: 0, nudgedFor: null } }) }
     }
+    case 'listStaff':
+      return { staff: await listStaff() }
     case 'link': {
       const c = await requireConversation(store, input)
       const driverId = str(input.driverId, 100)
@@ -203,6 +207,29 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       return { conversation: created, url: created.slackChannelId ? slackChannelUrl(created.slackChannelId) : null, notInvited }
     }
   }
+}
+
+/** Everyone with a BCAT Ops login, as dispatcher choices. Cached per container. */
+let staffCache: { at: number; rows: string[] } | null = null
+export async function listStaff(): Promise<string[]> {
+  if (staffCache && Date.now() - staffCache.at < 5 * 60 * 1000) return staffCache.rows
+  const rows: string[] = []
+  let token: string | undefined
+  try {
+    do {
+      const page = await cognito.send(new ListUsersCommand({ UserPoolId: USER_POOL_ID, PaginationToken: token, AttributesToGet: ['email'] }))
+      for (const u of page.Users ?? []) {
+        const email = u.Attributes?.find((a) => a.Name === 'email')?.Value?.toLowerCase().trim()
+        if (email && u.Enabled !== false) rows.push(email)
+      }
+      token = page.PaginationToken
+    } while (token)
+  } catch (err) {
+    console.warn('[dispatch-actions] listStaff failed', String(err))
+  }
+  rows.sort()
+  staffCache = { at: Date.now(), rows }
+  return rows
 }
 
 async function slackBridge(deps: Deps): Promise<SlackBridgeDeps | null> {

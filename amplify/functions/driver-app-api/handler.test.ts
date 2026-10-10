@@ -683,6 +683,8 @@ describe('driver-app-api handler', () => {
         pm: null,
         truck: null,
         dispatchPhone: '+12248756477',
+        // AMAZON pay group, no fleet: a settlement driver with no clock.
+        timeClock: false,
       })
     })
   })

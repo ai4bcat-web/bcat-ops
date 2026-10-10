@@ -66,7 +66,7 @@ function weekEndExclusive(periodStart: string): string {
  * the one just gone; a year of history on a phone is scrolling, not information.
  */
 const PAPERWORK_HISTORY_START = '2026-09-01'
-import { driverProgramOf } from '../../../src/lib/driverProgram'
+import { driverProgramOf, timeClockFor } from '../../../src/lib/driverProgram'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
 import { toHosDay, type HosDay, type MotiveLog } from '../../../src/lib/motiveHos'
 import {
@@ -253,6 +253,8 @@ interface DriverRow {
   active: boolean
   email?: string | null
   phone?: string | null
+  ivanApp?: boolean | null
+  timeClock?: boolean | null
   // Which fleet they run in. These two decide whether the app shows a settlement or
   // paperwork — see src/lib/driverProgram.ts for why pay group is NOT the input.
   fleetGroup?: string | null
@@ -2317,6 +2319,8 @@ export const handler = async (event: FnUrlEvent) => {
         truck: await truckForDriver(driver),
         // The number to call or text dispatch, pinned to the top of the app.
         dispatchPhone: await dispatchPhone(),
+        // Whether the Hours tab shows: Ivan's own fleet, or a staff override on the file.
+        timeClock: timeClockFor({ fleetGroup: driver.fleetGroup, driverType: driver.driverType, payGroup: setting.payGroup, ivanApp: driver.ivanApp, timeClock: driver.timeClock }),
       })
     }
 

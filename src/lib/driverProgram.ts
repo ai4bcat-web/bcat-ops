@@ -28,9 +28,15 @@ export interface ProgramInputs {
   driverType?: string | null
   /** DriverPaySetting.payGroup. 'LOCAL' is Ivan's fleet. */
   payGroup?: string | null
+  /** Staff override: this driver uses the Ivan app whatever their fleet. */
+  ivanApp?: boolean | null
+  /** Staff override for the Hours tab; null = decided by fleet. */
+  timeClock?: boolean | null
 }
 
 export function driverProgramOf(driver: ProgramInputs): DriverProgram {
+  // Staff said so: box truck drivers and Zak run the Ivan app without being Ivan's fleet.
+  if (driver.ivanApp === true) return 'PAPERWORK'
   // Either field naming an owner operator settles it, as on the dispatch board.
   if (driver.fleetGroup === 'AMAZON') return 'SETTLEMENT'
   if (driver.driverType === 'OWNER_OPERATOR') return 'SETTLEMENT'
@@ -47,4 +53,13 @@ export function driverProgramOf(driver: ProgramInputs): DriverProgram {
 export const PROGRAM_TITLE: Record<DriverProgram, string> = {
   SETTLEMENT: 'Settlement',
   PAPERWORK: 'Paperwork',
+}
+
+/**
+ * Does this driver punch a clock in the app? Ivan's own local drivers do; box truck
+ * drivers and owner operators do not, unless staff flip the switch on their file.
+ */
+export function timeClockFor(driver: ProgramInputs): boolean {
+  if (driver.timeClock === true || driver.timeClock === false) return driver.timeClock
+  return driver.fleetGroup === 'LOCAL' || (driver.fleetGroup == null && driver.payGroup === 'LOCAL')
 }

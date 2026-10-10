@@ -84,7 +84,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '' },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null },
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
@@ -125,10 +125,12 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             motiveDriverId: driver.motiveDriverId ?? null,
             dispatcherPrimary: driver.dispatcherPrimary ?? '',
             dispatcherBackup: driver.dispatcherBackup ?? '',
+            ivanApp: driver.ivanApp ?? null,
+            timeClock: driver.timeClock ?? null,
             assignedTrailerId: driver.assignedTrailerId ?? null,
             fleetGroup: driver.fleetGroup ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '' })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -393,6 +395,26 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                   <datalist id="bcat-dispatcher-emails">
                     {knownDispatchers.map((e) => <option key={e} value={e} />)}
                   </datalist>
+                  {/* App settings: which app, and whether they punch a clock. Fleet decides unless overridden. */}
+                  <Field label="Ivan driver app" hint="on for box truck drivers or anyone outside Ivan's fleet who should get the paperwork app">
+                    <Controller name="ivanApp" control={control} render={({ field }) => (
+                      <div className="flex items-center gap-3">
+                        <Switch checked={field.value === true} onCheckedChange={(v) => field.onChange(v ? true : null)} />
+                        <span className="text-xs text-muted-foreground">{field.value === true ? 'Forced on' : 'By fleet (Ivan local only)'}</span>
+                      </div>
+                    )} />
+                  </Field>
+                  <Field label="Time clock" hint="Hours tab in the app; off for box truck drivers and Zak">
+                    <Controller name="timeClock" control={control} render={({ field }) => (
+                      <div className="flex items-center gap-3">
+                        <ToggleGroup type="single" value={field.value === true ? 'on' : field.value === false ? 'off' : 'auto'} onValueChange={(v) => v && field.onChange(v === 'on' ? true : v === 'off' ? false : null)}>
+                          <ToggleGroupItem value="auto">By fleet</ToggleGroupItem>
+                          <ToggleGroupItem value="on">On</ToggleGroupItem>
+                          <ToggleGroupItem value="off">Off</ToggleGroupItem>
+                        </ToggleGroup>
+                      </div>
+                    )} />
+                  </Field>
                   </>
                 )}
 

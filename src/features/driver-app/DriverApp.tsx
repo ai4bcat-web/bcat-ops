@@ -19,6 +19,7 @@ const PaperworkPage = lazy(() => import('./paperwork/PaperworkPage').then((m) =>
 const TimeClockPage = lazy(() => import('./timeclock/TimeClockPage').then((m) => ({ default: m.TimeClockPage })))
 import { OnTheClockBar } from './timeclock/OnTheClockBar'
 import { DispatchBar } from './DispatchBar'
+import { useDriverProfile } from './useDriverProgram'
 const AccountPage = lazy(() => import('./AccountPage').then((m) => ({ default: m.AccountPage })))
 
 function TabButton({
@@ -56,10 +57,13 @@ function TabButton({
 }
 
 export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram }) {
+  // The Hours tab follows the driver file's time-clock setting; an older API that does not
+  // say falls back to "Ivan app means a clock".
+  const timeClock = useDriverProfile()?.timeClock ?? (program === 'PAPERWORK')
   return (
     <div className="dark flex h-dvh flex-col bg-background text-foreground">
       {/* Only Ivan's employees punch a clock, so only they can have one running. */}
-      <OnTheClockBar enabled={program === 'PAPERWORK'} />
+      <OnTheClockBar enabled={timeClock} />
       {/* The dispatch number, one tap from anywhere on the route. */}
       <DispatchBar />
       {/*
@@ -99,7 +103,7 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
           : <TabButton to="/driver/settlement" icon={Wallet} label="Settlement" />}
         {/* The clock is a tab only for Ivan's employees — owner operators do not punch one,
             and a dead tab is worse than no tab. */}
-        {program === 'PAPERWORK' && <TabButton to="/driver/timeclock" icon={Clock} label="Hours" />}
+        {timeClock && <TabButton to="/driver/timeclock" icon={Clock} label="Hours" />}
         <TabButton to="/driver/account" icon={UserCircle} label="Account" />
       </nav>
     </div>

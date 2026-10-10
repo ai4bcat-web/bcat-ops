@@ -41,6 +41,7 @@ import { paychexPaySync } from './functions/paychex-pay-sync/resource'
 import { dispatchActions } from './functions/dispatch-actions/resource'
 import { dispatchTwilioWebhook } from './functions/dispatch-twilio-webhook/resource'
 import { dispatchSlackBridge } from './functions/dispatch-slack-bridge/resource'
+import { dispatchNudge } from './functions/dispatch-nudge/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { disputePortalApi } from './functions/dispute-portal-api/resource'
@@ -105,6 +106,7 @@ const backend = defineBackend({
   dispatchActions,
   dispatchTwilioWebhook,
   dispatchSlackBridge,
+  dispatchNudge,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -668,6 +670,7 @@ const dispatchDriverTable = backend.data.resources.tables['Driver']
 const dispatchWebhookFn = backend.dispatchTwilioWebhook.resources.lambda as LambdaFunction
 const dispatchActionsFn = backend.dispatchActions.resources.lambda as LambdaFunction
 const dispatchSlackBridgeFn = backend.dispatchSlackBridge.resources.lambda as LambdaFunction
+const dispatchNudgeFn = backend.dispatchNudge.resources.lambda as LambdaFunction
 const dispatchParamPath = `/bcat/dispatch/${backend.auth.resources.userPool.userPoolId}`
 const dispatchParamArn = Stack.of(dispatchWebhookFn).formatArn({
   service: 'ssm',
@@ -678,7 +681,7 @@ const dispatchTableArns = [dispatchConversationTable.tableArn, dispatchMessageTa
 
 // driverApiFn is in the list because the driver app's stop events and POD sends are
 // written into the driver's conversation (recordDriverStatus) and mirrored to Slack.
-for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, driverApiFn]) {
+for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, dispatchNudgeFn, driverApiFn]) {
   fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
   fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
   fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
@@ -728,7 +731,8 @@ driverApiFn.addToRolePolicy(new PolicyStatement({
 }))
 dispatchActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 dispatchActionsFn.addToRolePolicy(new PolicyStatement({
-  actions: ['cognito-idp:AdminGetUser'],
+  // AdminGetUser resolves the caller; ListUsers feeds the dispatcher pick-list.
+  actions: ['cognito-idp:AdminGetUser', 'cognito-idp:ListUsers'],
   resources: [backend.auth.resources.userPool.userPoolArn],
 }))
 

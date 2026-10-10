@@ -343,3 +343,63 @@ export function SlackChannelWizard({ conversation, defaultInvites, onClose, onCr
 function cleanSlackName(raw: string): string {
   return raw.trim().toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/^#/, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80).replace(/-+$/, '')
 }
+
+
+// ── Dispatcher assignment ────────────────────────────────────────────────────
+
+interface AssignProps {
+  conversation: DispatchConversation
+  /** Suggested pair from the driver file, shown as the default when the row has none. */
+  fromDriver: string[]
+  loadStaff: () => Promise<string[]>
+  onClose: () => void
+  onSave: (primary: string | null, backup: string | null) => Promise<void>
+}
+
+/** Mounted per conversation: pick the primary and backup dispatcher from everyone in BCAT Ops. */
+export function AssignDialog({ conversation, fromDriver, loadStaff, onClose, onSave }: AssignProps) {
+  const [staff, setStaff] = useState<string[] | null>(null)
+  const [primary, setPrimary] = useState(conversation.assignedTo ?? fromDriver[0] ?? '')
+  const [backup, setBackup] = useState(conversation.assignedBackup ?? fromDriver[1] ?? '')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let alive = true
+    loadStaff().then((rows) => { if (alive) setStaff(rows) }).catch(() => { if (alive) setStaff([]) })
+    return () => { alive = false }
+  }, [loadStaff])
+  const options = Array.from(new Set([...(staff ?? []), primary, backup, ...fromDriver].filter(Boolean))).sort()
+  const submit = async () => {
+    setBusy(true)
+    try { await onSave(primary || null, backup || null); onClose() } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not save') } finally { setBusy(false) }
+  }
+  const select = (id: string, value: string, onChange: (v: string) => void, label: string) => (
+    <div style={{ display: 'grid', gap: 6 }}>
+      <Label htmlFor={id}>{label}</Label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)} className="h-9 w-full rounded-md border border-input bg-white px-3 text-sm">
+        <option value="">Nobody</option>
+        {options.map((e) => <option key={e} value={e}>{e}</option>)}
+      </select>
+    </div>
+  )
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Dispatchers for {conversationTitle(conversation)}</DialogTitle>
+          <DialogDescription>
+            The primary gets a Slack DM when a text from {conversationTitle(conversation)} sits unanswered for 10 minutes; the backup after 20. {staff === null ? 'Loading people…' : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <div style={{ display: 'grid', gap: 12 }}>
+          {select('dispatch-assign-primary', primary, setPrimary, 'Primary dispatcher')}
+          {select('dispatch-assign-backup', backup, setBackup, 'Backup dispatcher')}
+          {fromDriver.length ? <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>On the driver file: {fromDriver.join(', ')}</div> : null}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={() => void submit()} disabled={busy || (!!backup && backup === primary)}>{busy ? <Loader2 className="size-4 animate-spin" /> : null} Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

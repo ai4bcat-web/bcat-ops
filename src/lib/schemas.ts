@@ -36,6 +36,8 @@ export const driverSchema = z.object({
   // Dedicated dispatcher and backup: staff emails, blank allowed.
   dispatcherPrimary: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
   dispatcherBackup: z.string().trim().toLowerCase().email().or(z.literal('')).nullable().optional(),
+  ivanApp: z.boolean().nullable().optional(),
+  timeClock: z.boolean().nullable().optional(),
 })
 
 const apptTypeEnum = z.enum(['exact', 'range', 'fcfs', 'tbd'])
