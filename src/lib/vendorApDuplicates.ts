@@ -27,17 +27,21 @@ function normInvoice(v: string | null | undefined): string {
 export function findVendorApDuplicates(items: readonly VendorPayable[]): Map<string, DuplicateMark> {
   const out = new Map<string, DuplicateMark>()
   const sorted = [...items].sort((a, b) => a.receivedAt.localeCompare(b.receivedAt) || a.id.localeCompare(b.id))
-  const byInvoice = new Map<string, string>()
+  // Invoice numbers are compared across vendor spellings: "Vanguard Truck Leasing" and
+  // "Vanguard Truck Leasing / Interstate Billing Services" are the same payee.
+  const byInvoice = new Map<string, Array<{ id: string; vendor: string }>>()
   const byAmountDate = new Map<string, string>()
+  const sameVendor = (a: string, b: string) => a === b || a.startsWith(b) || b.startsWith(a) || a.includes(b) || b.includes(a)
   for (const it of sorted) {
     const vendor = normVendor(it.vendor)
     if (!vendor) continue
     const inv = normInvoice(it.invoiceNumber)
-    if (inv) {
-      const key = `${vendor}|${inv}`
-      const original = byInvoice.get(key)
-      if (original) { out.set(it.id, { originalId: original, reason: 'invoice number' }); continue }
-      byInvoice.set(key, it.id)
+    if (inv && inv.length >= 3) {
+      const seen = byInvoice.get(inv) ?? []
+      const original = seen.find((x) => sameVendor(x.vendor, vendor))
+      if (original) { out.set(it.id, { originalId: original.id, reason: 'invoice number' }); continue }
+      seen.push({ id: it.id, vendor })
+      byInvoice.set(inv, seen)
     }
     if (it.amount != null && it.invoiceDate) {
       const key = `${vendor}|${it.amount}|${it.invoiceDate}`

@@ -13,6 +13,13 @@ describe('findVendorApDuplicates', () => {
     expect(d.get('bb')).toEqual({ originalId: 'a', reason: 'invoice number' })
     expect(d.has('a')).toBe(false)
   })
+  it('treats a longer spelling of the same vendor as the same payee', () => {
+    const d = findVendorApDuplicates([
+      row('a', { vendor: 'Vanguard Truck Leasing / Interstate Billing Services', invoiceNumber: '60068299', receivedAt: '2026-10-01T00:00:00Z' }),
+      row('bb', { vendor: 'Vanguard Truck Leasing', invoiceNumber: '60068299', receivedAt: '2026-10-02T00:00:00Z' }),
+    ])
+    expect(d.get('bb')?.originalId).toBe('a')
+  })
   it('matches on amount and invoice date when there is no invoice number', () => {
     const d = findVendorApDuplicates([
       row('a', { vendor: 'Pilot', amount: 12345, invoiceDate: '2026-10-01', receivedAt: '2026-10-01T00:00:00Z' }),
