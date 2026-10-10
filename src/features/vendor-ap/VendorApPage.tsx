@@ -124,6 +124,20 @@ function StatusBadge({ status }: { status: VendorPayable['status'] }) {
   )
 }
 
+/** The due date, red once it has passed on an unpaid row, with days to go while it has not. */
+function DueCell({ item, today }: { item: VendorPayable; today: string }) {
+  if (!item.dueDate) return <span className="text-muted-foreground">—</span>
+  const days = Math.round((Date.parse(`${item.dueDate}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000)
+  const open = item.status !== 'DONE'
+  const overdue = open && days < 0
+  return (
+    <div>
+      <div className={overdue ? 'font-semibold text-red-600' : 'text-foreground'}>{item.dueDate}</div>
+      {open ? <div className={`text-[11px] ${overdue ? 'text-red-600' : 'text-muted-foreground'}`}>{overdue ? `${-days} day${days === -1 ? '' : 's'} overdue` : days === 0 ? 'due today' : `in ${days} day${days === 1 ? '' : 's'}`}</div> : null}
+    </div>
+  )
+}
+
 function SourceBadge({ source }: { source: VendorPayable['source'] }) {
   const isMaintenance = source === 'MAINTENANCE'
   return (
@@ -314,6 +328,7 @@ function DetailsDialog({
   const [invoiceNumber, setInvoiceNumber] = useState(item.invoiceNumber ?? '')
   const [amount, setAmount] = useState(item.amount != null ? (item.amount / 100).toFixed(2) : '')
   const [invoiceDate, setInvoiceDate] = useState(item.invoiceDate ?? '')
+  const [dueDate, setDueDate] = useState(item.dueDate ?? '')
   const [description, setDescription] = useState(item.description ?? '')
   const [saving, setSaving] = useState(false)
 
@@ -331,6 +346,7 @@ function DetailsDialog({
         invoiceNumber: invoiceNumber.trim() || null,
         amount: cents,
         invoiceDate: invoiceDate || null,
+        dueDate: dueDate || null,
         description: description.trim() || null,
       })
     } finally {
@@ -383,6 +399,10 @@ function DetailsDialog({
                     <Label htmlFor="ap-date" className="text-xs">Invoice date</Label>
                     <Input id="ap-date" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
                   </div>
+                  <div>
+                    <Label htmlFor="ap-due">Due date</Label>
+                    <Input id="ap-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="ap-description" className="text-xs">Description</Label>
@@ -397,6 +417,7 @@ function DetailsDialog({
                 <Field label="Invoice #" value={item.invoiceNumber || '—'} />
                 <Field label="Amount" value={formatAmount(item.amount)} />
                 <Field label="Invoice date" value={item.invoiceDate || '—'} />
+                <Field label="Due date" value={item.dueDate || '—'} />
               </div>
               {item.description && <div style={{ fontSize: 13, color: 'var(--ds-t2)', marginTop: 8, whiteSpace: 'pre-wrap' }}>{item.description}</div>}
             </Section>
@@ -923,7 +944,7 @@ export function VendorApPage() {
       <table className="w-full text-sm">
         <thead>
           <tr style={{ borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
-            {['Vendor', 'Invoice #', 'Amount', 'Source', 'Received', 'Status', 'Payment method', 'Date', 'Actions'].map((col) => (
+            {['Vendor', 'Invoice #', 'Amount', 'Due', 'Source', 'Received', 'Status', 'Payment method', 'Date', 'Actions'].map((col) => (
               <th
                 key={col}
                 style={{
@@ -953,6 +974,10 @@ export function VendorApPage() {
               </td>
               <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
                 {formatAmount(item.amount)}
+                {item.amount == null && item.extractedAt ? <div className="text-[11px] text-muted-foreground" title={item.extractionNote ?? undefined}>not on invoice</div> : null}
+              </td>
+              <td style={{ padding: '14px 16px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                <DueCell item={item} today={todayIso()} />
               </td>
               <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                 <SourceBadge source={item.source} />

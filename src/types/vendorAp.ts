@@ -19,6 +19,10 @@ export interface VendorPayable {
   invoiceNumber?: string | null
   amount?: number | null // cents; unknown for unreviewed email invoices
   invoiceDate?: string | null
+  /** From the invoice: when payment is due. */
+  dueDate?: string | null
+  extractedAt?: string | null
+  extractionNote?: string | null
   description?: string | null
   fromEmail?: string | null
   emailBody?: string | null
@@ -38,6 +42,7 @@ export interface VendorPayableDetails {
   invoiceNumber?: string | null
   amount?: number | null
   invoiceDate?: string | null
+  dueDate?: string | null
   description?: string | null
 }
 

@@ -18,6 +18,7 @@ import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-
 import { marshall } from '@aws-sdk/util-dynamodb'
 import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 
 const MAX_BODY_BYTES = 1 * 1024 * 1024
 const MAX_EMAIL_BODY_LENGTH = 50_000
@@ -26,6 +27,9 @@ const MAX_SUBJECT_LENGTH = 500
 const MAX_ATTACHMENTS = 50
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const UPLOAD_EXPIRY_SECONDS = 300
+// Reads the invoice for vendor / amount / dates once the row exists. Fire-and-forget.
+const EXTRACT_FUNCTION_NAME = process.env.VENDOR_AP_EXTRACT_FUNCTION_NAME ?? ''
+const lambda = new LambdaClient({})
 
 const PDF_TYPE = 'application/pdf'
 const PNG_TYPE = 'image/png'
@@ -403,6 +407,13 @@ async function handleCommit(payload: CommitPayload, dynamo: DynamoDBClient, s3: 
   }
 
   console.log('[vendor-ap-intake] row created', { rowId, attachments: verified.length })
+  if (EXTRACT_FUNCTION_NAME) {
+    try {
+      await lambda.send(new InvokeCommand({ FunctionName: EXTRACT_FUNCTION_NAME, InvocationType: 'Event', Payload: Buffer.from(JSON.stringify({ id: rowId })) }))
+    } catch (err) {
+      console.warn('[vendor-ap-intake] extractor not invoked', String(err))
+    }
+  }
   return respond(200, { ok: true, duplicate: false, rowId })
 }
 

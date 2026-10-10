@@ -933,6 +933,9 @@ const schema = a.schema({
       invoiceNumber: a.string(),
       amount: a.integer(), // cents; absent until an email invoice is reviewed
       invoiceDate: a.date(),
+      dueDate: a.date(),                 // from the invoice, read by the extractor or typed
+      extractedAt: a.datetime(),         // when the extractor last read the attachments
+      extractionNote: a.string(),        // what it found or why it could not
       description: a.string(),
       fromEmail: a.string(),
       emailBody: a.string(),

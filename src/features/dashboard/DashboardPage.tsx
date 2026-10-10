@@ -17,6 +17,7 @@ import type { RevenueSplit, LoadsSplit } from '@/lib/revenueByFleet'
 import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
+import { VendorApCard } from './VendorApCard'
 import { TruckMapWidget } from './TruckMapWidget'
 import { PerMileWidget } from './PerMileWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
@@ -548,6 +549,8 @@ export function DashboardPage() {
             loading={factoringLoading}
             onOpen={() => navigate('/factoring')}
           />
+          {/* What we owe vendors, beside what we are owed. */}
+          <VendorApCard onOpen={() => navigate('/vendor-ap')} />
           <KpiCard
             label="Batory Appts to Book"
             value={metrics.needsAppt}

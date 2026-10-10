@@ -21,6 +21,7 @@ import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
 import { factoringIntake } from './functions/factoring-intake/resource'
 import { vendorApActions } from './functions/vendor-ap-actions/resource'
 import { vendorApIntake } from './functions/vendor-ap-intake/resource'
+import { vendorApExtract } from './functions/vendor-ap-extract/resource'
 import { apptNeedNotifier } from './functions/appt-need-notifier/resource'
 import { slackStatusNotifier } from './functions/slack-status-notifier/resource'
 import { fuelImport } from './functions/fuel-import/resource'
@@ -70,6 +71,7 @@ const backend = defineBackend({
   factoringIntake,
   vendorApActions,
   vendorApIntake,
+  vendorApExtract,
   apptNeedNotifier,
   slackStatusNotifier,
   fuelImport,
@@ -648,6 +650,17 @@ vendorApIntakeFn.addToRolePolicy(new PolicyStatement({
 }))
 backend.storage.resources.bucket.grantPut(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
 backend.storage.resources.bucket.grantRead(vendorApIntakeFn, 'intake-pdfs/vendor-ap/*')
+// Reads each invoice for vendor / amount / dates; intake hands it the new row's id.
+const vendorApExtractFn = backend.vendorApExtract.resources.lambda as LambdaFunction
+vendorApExtractFn.addEnvironment('TABLE_NAME', vendorApTable.tableName)
+vendorApExtractFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+vendorApExtractFn.addToRolePolicy(new PolicyStatement({
+  actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem', 'dynamodb:Scan'],
+  resources: [vendorApTable.tableArn],
+}))
+backend.storage.resources.bucket.grantRead(vendorApExtractFn, 'intake-pdfs/vendor-ap/*')
+vendorApIntakeFn.addEnvironment('VENDOR_AP_EXTRACT_FUNCTION_NAME', vendorApExtractFn.functionName)
+vendorApExtractFn.grantInvoke(vendorApIntakeFn)
 const vendorApIntakeUrl = new FunctionUrl(vendorApIntakeFn.stack, 'VendorApIntakeUrl', {
   function: vendorApIntakeFn,
   authType: FunctionUrlAuthType.NONE,

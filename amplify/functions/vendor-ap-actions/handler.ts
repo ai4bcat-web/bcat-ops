@@ -410,7 +410,7 @@ async function updateDetailsAction(
     throw new Error(`Unsupported source for update: ${existing.source}`)
   }
 
-  const updates: Partial<Pick<VendorPayable, 'vendor' | 'invoiceNumber' | 'amount' | 'invoiceDate' | 'description'>> = {}
+  const updates: Partial<Pick<VendorPayable, 'vendor' | 'invoiceNumber' | 'amount' | 'invoiceDate' | 'dueDate' | 'description'>> = {}
 
   if ('vendor' in input) updates.vendor = validateNullableString(input.vendor, MAX_VENDOR_LEN)
   if ('invoiceNumber' in input) {
@@ -424,6 +424,9 @@ async function updateDetailsAction(
 
   if (Object.keys(updates).length === 0) {
     throw new Error('No editable fields provided')
+  }
+  if ('dueDate' in input) {
+    updates.dueDate = input.dueDate != null && input.dueDate !== '' ? validateDateString(input.dueDate) : null
   }
 
   const now = nowIso()
