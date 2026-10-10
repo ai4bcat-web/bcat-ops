@@ -98,7 +98,7 @@ export function DispatchPage() {
   const banner = !configured ? (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: `8px ${padX}px`, background: 'var(--ds-amber-bg)', color: 'var(--ds-t1)', fontSize: 13, borderBottom: '1px solid var(--ds-border)' }}>
       <AlertTriangle className="size-4" style={{ color: 'var(--ds-amber)' }} />
-      Twilio is not connected yet. Run <code style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>scripts/dispatchTwilioSetup.mts</code> to buy the number and point it here. Texts cannot be sent until then.
+      Twilio is not connected yet, so texts cannot be sent. Ask Ryne to run the Dispatch setup (scripts/dispatchTwilioSetup.mjs).
     </div>
   ) : null
 
