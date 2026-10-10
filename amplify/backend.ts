@@ -637,6 +637,11 @@ vendorApActionsFn.addToRolePolicy(new PolicyStatement({
 // Access tokens carry no email; the Lambda resolves the caller via AdminGetUser
 // (same as userManagement) for the owner check and the `paidBy` audit field.
 vendorApActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+// Payment confirmations to vendors: from the verified bcatcorp.com sender, replies and a
+// copy to the AP mailbox.
+vendorApActionsFn.addEnvironment('FROM_ADDRESS', 'noreply@bcatcorp.com')
+vendorApActionsFn.addEnvironment('CONFIRM_CC', 'vendorpayments@bcatcorp.com')
+vendorApActionsFn.addToRolePolicy(new PolicyStatement({ actions: ['ses:SendEmail'], resources: ['*'] }))
 vendorApActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['cognito-idp:AdminGetUser'],
   resources: [backend.auth.resources.userPool.userPoolArn],

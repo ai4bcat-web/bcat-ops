@@ -11,6 +11,8 @@ const send = vi.hoisted(() => {
 })
 
 const cognitoSend = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-sesv2', () => ({ SESv2Client: class { send = async () => ({}) }, SendEmailCommand: class { constructor(public input: unknown) {} } }))
+
 vi.mock('@aws-sdk/client-cognito-identity-provider', () => {
   class CognitoIdentityProviderClient {
     send = cognitoSend
@@ -321,7 +323,7 @@ describe('SEND_MAINTENANCE', () => {
       description: 'Parts',
       attachments: [],
       receivedAt: '2026-05-15T00:00:00.000Z',
-      paymentMethod: 'Zelle',
+      paymentMethod: 'ACH',
       paymentDate: '2026-05-16',
       paidBy: 'admin@bcatcorp.com',
       paidAt: '2026-05-16T00:00:00.000Z',
@@ -341,7 +343,7 @@ describe('SEND_MAINTENANCE', () => {
 
     expect(result.duplicate).toBe(true)
     expect(result.item.status).toBe('DONE')
-    expect(result.item.paymentMethod).toBe('Zelle')
+    expect(result.item.paymentMethod).toBe('ACH')
     expect(result.item.paymentDate).toBe('2026-05-16')
   })
 
@@ -590,17 +592,15 @@ describe('COMPLETE', () => {
     paymentDate: '',
   }
 
-  it('requires paymentDate', async () => {
+  it('rejects a malformed paymentDate, and a method outside ACH / Check / Credit card', async () => {
     send.mockResolvedValueOnce({ Item: existingAp() })
     await expect(
-      handler(
-        event({
-          action: 'COMPLETE',
-          id: 'maintenance:m-1',
-          input: { expectedUpdatedAt: '2026-05-15T00:00:00.000Z', paymentMethod: 'Check' },
-        }),
-      ),
+      handler(event({ action: 'COMPLETE', id: 'maintenance:m-1', input: { expectedUpdatedAt: '2026-05-15T00:00:00.000Z', paymentMethod: 'Check', paymentDate: '05/16/2026' } })),
     ).rejects.toThrow('Date must be YYYY-MM-DD')
+    send.mockResolvedValueOnce({ Item: existingAp() })
+    await expect(
+      handler(event({ action: 'COMPLETE', id: 'maintenance:m-1', input: { expectedUpdatedAt: '2026-05-15T00:00:00.000Z', paymentMethod: 'Venmo' } })),
+    ).rejects.toThrow('paymentMethod must be one of ACH, Check, Credit card')
   })
 
   it('requires non-empty trimmed paymentMethod', async () => {
@@ -671,7 +671,7 @@ describe('COMPLETE', () => {
   it('refuses conflicting source already paid by someone else', async () => {
     send
       .mockResolvedValueOnce({ Item: existingAp() })
-      .mockResolvedValueOnce({ Item: marshall({ ...source, paymentMethod: 'Zelle', paymentDate: '2026-05-16' }) })
+      .mockResolvedValueOnce({ Item: marshall({ ...source, paymentMethod: 'ACH', paymentDate: '2026-05-16' }) })
 
     await expect(
       handler(
@@ -704,7 +704,7 @@ describe('COMPLETE', () => {
       .mockResolvedValueOnce({
         Item: existingAp({
           status: 'DONE',
-          paymentMethod: 'Wire',
+          paymentMethod: 'ACH',
           paymentDate: '2026-05-17',
           paidBy: 'admin@bcatcorp.com',
           paidAt: '2026-05-16T00:00:00Z',
@@ -717,14 +717,14 @@ describe('COMPLETE', () => {
         id: 'maintenance:m-1',
         input: {
           expectedUpdatedAt: '2026-05-15T00:00:00.000Z',
-          paymentMethod: 'Wire',
+          paymentMethod: 'ACH',
           paymentDate: '2026-05-17',
         },
       }),
     )
 
     expect(result.item.status).toBe('DONE')
-    expect(result.item.paymentMethod).toBe('Wire')
+    expect(result.item.paymentMethod).toBe('ACH')
     expect(result.item.paymentDate).toBe('2026-05-17')
   })
 
@@ -906,7 +906,7 @@ describe('REOPEN', () => {
   it('prevents reopen when source payment changed externally', async () => {
     send
       .mockResolvedValueOnce({ Item: existingDoneAp() })
-      .mockResolvedValueOnce({ Item: marshall({ ...sourcePaid, paymentMethod: 'Zelle' }) })
+      .mockResolvedValueOnce({ Item: marshall({ ...sourcePaid, paymentMethod: 'ACH' }) })
 
     await expect(
       handler(

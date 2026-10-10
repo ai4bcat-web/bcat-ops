@@ -21,6 +21,10 @@ export interface VendorPayable {
   invoiceDate?: string | null
   /** From the invoice: when payment is due. */
   dueDate?: string | null
+  /** Where the payment confirmation goes; blank means the email's sender. */
+  vendorEmail?: string | null
+  confirmationSentAt?: string | null
+  confirmationSentTo?: string | null
   extractedAt?: string | null
   extractionNote?: string | null
   description?: string | null
@@ -43,11 +47,18 @@ export interface VendorPayableDetails {
   amount?: number | null
   invoiceDate?: string | null
   dueDate?: string | null
+  vendorEmail?: string | null
   description?: string | null
 }
 
+export type VendorPaymentMethod = 'ACH' | 'Check' | 'Credit card'
+export const VENDOR_PAYMENT_METHODS: VendorPaymentMethod[] = ['ACH', 'Check', 'Credit card']
+
 export interface VendorPayment {
-  paymentMethod: string
-  paymentDate: string
+  paymentMethod: VendorPaymentMethod | string
+  /** Defaults to today in Chicago when omitted; the server stamps paidAt with the exact time. */
+  paymentDate?: string
   paymentReference?: string | null
+  /** Email the vendor a confirmation (when an address is on file). Default true. */
+  notifyVendor?: boolean
 }

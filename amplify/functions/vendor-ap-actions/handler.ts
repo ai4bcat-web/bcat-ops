@@ -9,6 +9,8 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
+import { paymentConfirmationEmail } from '../../../src/lib/paymentConfirmation'
 import type { VendorPayable, VendorPayableStatus } from '../../../src/types/vendorAp'
 
 const dynamo = new DynamoDBClient({})
@@ -20,6 +22,20 @@ const cognito = new CognitoIdentityProviderClient({})
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
+// Payment confirmations to vendors. From/cc are wired in backend.ts.
+const ses = new SESv2Client({})
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? ''
+const CONFIRM_CC = process.env.CONFIRM_CC ?? ''
+const PAYER_NAME = 'BCAT Corp'
+const PAYMENT_METHODS = ['ACH', 'Check', 'Credit card']
+
+function chicagoToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
+}
+
+function looksLikeEmail(v: unknown): v is string {
+  return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
+}
 
 const MAX_VENDOR_LEN = 255
 const MAX_INVOICE_NUMBER_LEN = 100
@@ -410,7 +426,7 @@ async function updateDetailsAction(
     throw new Error(`Unsupported source for update: ${existing.source}`)
   }
 
-  const updates: Partial<Pick<VendorPayable, 'vendor' | 'invoiceNumber' | 'amount' | 'invoiceDate' | 'dueDate' | 'description'>> = {}
+  const updates: Partial<Pick<VendorPayable, 'vendor' | 'invoiceNumber' | 'amount' | 'invoiceDate' | 'dueDate' | 'vendorEmail' | 'description'>> = {}
 
   if ('vendor' in input) updates.vendor = validateNullableString(input.vendor, MAX_VENDOR_LEN)
   if ('invoiceNumber' in input) {
@@ -427,6 +443,11 @@ async function updateDetailsAction(
   }
   if ('dueDate' in input) {
     updates.dueDate = input.dueDate != null && input.dueDate !== '' ? validateDateString(input.dueDate) : null
+  }
+  if ('vendorEmail' in input) {
+    const v = typeof input.vendorEmail === 'string' ? input.vendorEmail.trim().toLowerCase() : ''
+    if (v && !looksLikeEmail(v)) throw new Error('vendorEmail must be an email address')
+    updates.vendorEmail = v || null
   }
 
   const now = nowIso()
@@ -475,8 +496,10 @@ async function completeAction(
   const expectedUpdatedAt = assertDefined(input.expectedUpdatedAt, 'expectedUpdatedAt')
   if (typeof expectedUpdatedAt !== 'string') throw new Error('expectedUpdatedAt must be a string')
 
-  const paymentDate = validateDateString(input.paymentDate)
+  // The date is stamped here, today in Chicago, unless a correction names one.
+  const paymentDate = input.paymentDate != null && input.paymentDate !== '' ? validateDateString(input.paymentDate) : chicagoToday()
   const paymentMethod = validateNonEmptyString(input.paymentMethod, MAX_PAYMENT_METHOD_LEN, 'paymentMethod')
+  if (!PAYMENT_METHODS.includes(paymentMethod)) throw new Error(`paymentMethod must be one of ${PAYMENT_METHODS.join(', ')}`)
   const paymentReference = input.paymentReference != null
     ? validateNonEmptyString(input.paymentReference, MAX_PAYMENT_REFERENCE_LEN, 'paymentReference')
     : null
@@ -769,10 +792,53 @@ export const handler = async (event: AppSyncEvent): Promise<ActionResult> => {
     case 'UPDATE_DETAILS':
       return updateDetailsAction({ id: event.arguments.id, input })
     case 'COMPLETE':
-      return completeAction({ id: event.arguments.id, input }, caller)
+    {
+      const result = await completeAction({ id: event.arguments.id, input }, caller)
+      const confirmed = await sendPaymentConfirmation(result.item, input)
+      return confirmed ? { ...result, item: confirmed } : result
+    }
     case 'REOPEN':
       return reopenAction({ id: event.arguments.id, input })
     default:
       throw new Error(`Unknown action: ${action}`)
   }
+}
+
+/**
+ * Tell the vendor the payment went out, when they asked for it and we know where to
+ * write. The invoice's sender is the default address; a typed vendorEmail wins. Never
+ * fatal: the payment is recorded whether or not the email goes.
+ */
+async function sendPaymentConfirmation(item: VendorPayable, input: Record<string, unknown>): Promise<VendorPayable | null> {
+  if (input.notifyVendor === false || !FROM_ADDRESS) return null
+  const to = looksLikeEmail(item.vendorEmail) ? item.vendorEmail.trim() : looksLikeEmail(item.fromEmail) ? item.fromEmail.trim() : null
+  if (!to || !item.paymentMethod || !item.paymentDate) return null
+  const { subject, text } = paymentConfirmationEmail({
+    vendor: item.vendor, invoiceNumber: item.invoiceNumber, amountCents: item.amount,
+    paymentMethod: item.paymentMethod, paymentDate: item.paymentDate, paymentReference: item.paymentReference, payer: PAYER_NAME,
+  })
+  try {
+    await ses.send(new SendEmailCommand({
+      FromEmailAddress: FROM_ADDRESS,
+      ReplyToAddresses: CONFIRM_CC ? [CONFIRM_CC] : undefined,
+      Destination: { ToAddresses: [to], CcAddresses: CONFIRM_CC ? [CONFIRM_CC] : undefined },
+      Content: { Simple: { Subject: { Data: subject }, Body: { Text: { Data: text } } } },
+    }))
+  } catch (err) {
+    console.error('[vendor-ap-actions] confirmation email failed', { id: item.id, to, err: String(err) })
+    return null
+  }
+  const now = nowIso()
+  try {
+    await dynamo.send(new UpdateItemCommand({
+      TableName: TABLE_NAME,
+      Key: { id: { S: item.id } },
+      UpdateExpression: 'SET confirmationSentAt = :at, confirmationSentTo = :to',
+      ExpressionAttributeValues: { ':at': { S: now }, ':to': { S: to } },
+    }))
+  } catch (err) {
+    console.warn('[vendor-ap-actions] could not record confirmation', String(err))
+  }
+  console.log('[vendor-ap-actions] confirmation sent', { id: item.id, to })
+  return { ...item, confirmationSentAt: now, confirmationSentTo: to }
 }

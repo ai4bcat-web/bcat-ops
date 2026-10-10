@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils'
 import { toLocalDateString } from '@/lib/payPeriod'
 import { toast } from 'sonner'
 import { formatCents } from '@/features/maintenance/maintenanceUi'
-import type { VendorPayable, VendorPayableDetails, VendorPayment, VendorApAttachment } from '@/types/vendorAp'
+import { VENDOR_PAYMENT_METHODS, type VendorPayable, type VendorPayableDetails, type VendorPayment, type VendorApAttachment } from '@/types/vendorAp'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -330,6 +330,7 @@ function DetailsDialog({
   const [amount, setAmount] = useState(item.amount != null ? (item.amount / 100).toFixed(2) : '')
   const [invoiceDate, setInvoiceDate] = useState(item.invoiceDate ?? '')
   const [dueDate, setDueDate] = useState(item.dueDate ?? '')
+  const [vendorEmail, setVendorEmail] = useState(item.vendorEmail ?? '')
   const [description, setDescription] = useState(item.description ?? '')
   const [saving, setSaving] = useState(false)
 
@@ -348,6 +349,7 @@ function DetailsDialog({
         amount: cents,
         invoiceDate: invoiceDate || null,
         dueDate: dueDate || null,
+        vendorEmail: vendorEmail.trim() || null,
         description: description.trim() || null,
       })
     } finally {
@@ -404,6 +406,10 @@ function DetailsDialog({
                     <Label htmlFor="ap-due">Due date</Label>
                     <Input id="ap-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
                   </div>
+                  <div>
+                    <Label htmlFor="ap-vendor-email">Vendor email (payment confirmations)</Label>
+                    <Input id="ap-vendor-email" type="email" placeholder={item.fromEmail ?? 'ap@vendor.com'} value={vendorEmail} onChange={(e) => setVendorEmail(e.target.value)} disabled={!fullLoaded || isPending || saving} className="mt-1" />
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="ap-description" className="text-xs">Description</Label>
@@ -419,6 +425,8 @@ function DetailsDialog({
                 <Field label="Amount" value={formatAmount(item.amount)} />
                 <Field label="Invoice date" value={item.invoiceDate || '—'} />
                 <Field label="Due date" value={item.dueDate || '—'} />
+                <Field label="Vendor email" value={item.vendorEmail || item.fromEmail || '—'} />
+                {item.confirmationSentAt ? <Field label="Confirmation" value={`Emailed to ${item.confirmationSentTo} · ${formatReceivedAt(item.confirmationSentAt)}`} /> : null}
               </div>
               {item.description && <div style={{ fontSize: 13, color: 'var(--ds-t2)', marginTop: 8, whiteSpace: 'pre-wrap' }}>{item.description}</div>}
             </Section>
@@ -544,37 +552,36 @@ function PaymentDialog({
   const [method, setMethod] = useState(item?.paymentMethod ?? '')
   const [date, setDate] = useState(item?.paymentDate ?? todayIso())
   const [reference, setReference] = useState(item?.paymentReference ?? '')
+  const [notify, setNotify] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
   if (!item) return null
 
   const isPending = pendingIds.has(item.id)
+  const isCorrection = item.status === 'DONE'
+  const vendorEmail = (item.vendorEmail || item.fromEmail || '').trim()
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     const trimmedMethod = method.trim()
     if (!trimmedMethod) {
-      toast.error('Payment method is required')
-      return
-    }
-    if (!date) {
-      toast.error('Payment date is required')
+      toast.error('Pick how it was paid')
       return
     }
     setSubmitting(true)
     try {
       await onSubmit(item.id, {
         paymentMethod: trimmedMethod,
-        paymentDate: date,
+        // A new payment is stamped with today by the server; a correction keeps its date.
+        ...(isCorrection ? { paymentDate: date } : {}),
         paymentReference: reference.trim() || null,
+        notifyVendor: notify && !!vendorEmail && !isCorrection,
       })
       onClose()
     } finally {
       setSubmitting(false)
     }
   }
-
-  const isCorrection = item.status === 'DONE'
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -587,24 +594,38 @@ function PaymentDialog({
         </DialogHeader>
         <form id="payment-form" onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 8 }}>
           <div>
-            <Label htmlFor="pay-method" className="text-xs">Payment method</Label>
-            <Input
-              id="pay-method"
-              placeholder="Card / check / cash / Zelle"
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              disabled={isPending || submitting}
-              className="mt-1"
-            />
+            <Label className="text-xs">Payment method</Label>
+            <div className="mt-1 grid grid-cols-3 gap-2">
+              {VENDOR_PAYMENT_METHODS.map((m) => (
+                <button key={m} type="button" onClick={() => setMethod(m)} disabled={isPending || submitting}
+                  className={cn('h-10 rounded-md border text-sm font-medium', method === m ? 'border-primary bg-primary/10 text-foreground' : 'border-input text-muted-foreground hover:text-foreground')}>
+                  {m}
+                </button>
+              ))}
+            </div>
           </div>
-          <div>
-            <Label htmlFor="pay-date" className="text-xs">Payment date</Label>
-            <Input id="pay-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={isPending || submitting} className="mt-1" />
-          </div>
+          {isCorrection ? (
+            <div>
+              <Label htmlFor="pay-date" className="text-xs">Payment date</Label>
+              <Input id="pay-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={isPending || submitting} className="mt-1" />
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Stamped with today's date and the time you save it.</p>
+          )}
           <div>
             <Label htmlFor="pay-reference" className="text-xs">Reference / check #</Label>
             <Input id="pay-reference" placeholder="Optional" value={reference} onChange={(e) => setReference(e.target.value)} disabled={isPending || submitting} className="mt-1" />
           </div>
+          {!isCorrection ? (
+            vendorEmail ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" id="pay-notify" checked={notify} onChange={(e) => setNotify(e.target.checked)} disabled={isPending || submitting} />
+                <span>Email a payment confirmation to <span className="font-medium">{vendorEmail}</span></span>
+              </label>
+            ) : (
+              <p className="text-xs text-muted-foreground">No vendor email on file, so no confirmation will be sent. Add one under Edit details.</p>
+            )
+          ) : null}
         </form>
         <DialogFooter className="mt-4">
           <Button variant="outline" onClick={onClose} disabled={submitting}>
@@ -1007,7 +1028,8 @@ export function VendorApPage() {
                 <span className="text-sm text-muted-foreground">{item.paymentMethod || '—'}</span>
               </td>
               <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                <span className="text-sm text-muted-foreground">{item.paymentDate || '—'}</span>
+                <span className="text-sm text-muted-foreground" title={item.paidAt ? formatReceivedAt(item.paidAt) : undefined}>{item.paidAt ? formatReceivedAt(item.paidAt) : item.paymentDate || '—'}</span>
+                {item.confirmationSentAt ? <div className="text-[11px] text-muted-foreground">✉ confirmed</div> : null}
               </td>
               <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                 <RowActions
