@@ -16,6 +16,8 @@ interface Props {
   canSend: boolean
   /** The signed-in email, so their own sends read as "You". */
   me: string | null
+  /** The conversation's colour: inbound bubbles carry its tint and edge. */
+  accent?: { border: string; bg: string }
   getUrl: (key: string) => Promise<string>
   onSend: (body: string, files: File[]) => Promise<void>
   onNote: (body: string) => Promise<void>
@@ -39,7 +41,7 @@ function CallRow({ m }: { m: DispatchMessage }) {
   )
 }
 
-function Bubble({ m, me, getUrl }: { m: DispatchMessage; me: string | null; getUrl: (key: string) => Promise<string> }) {
+function Bubble({ m, me, accent, getUrl }: { m: DispatchMessage; me: string | null; accent?: { border: string; bg: string }; getUrl: (key: string) => Promise<string> }) {
   const mine = m.direction === 'OUT'
   const note = m.kind === 'NOTE'
   const vm = m.kind === 'VOICEMAIL'
@@ -51,9 +53,9 @@ function Bubble({ m, me, getUrl }: { m: DispatchMessage; me: string | null; getU
         style={{
           maxWidth: 'min(78%, 520px)', padding: '8px 12px', borderRadius: 14,
           borderBottomRightRadius: mine ? 4 : 14, borderBottomLeftRadius: mine ? 14 : 4,
-          background: note ? 'var(--ds-amber-bg)' : mine ? 'var(--ds-blue)' : 'var(--ds-bg-2)',
+          background: note ? 'var(--ds-amber-bg)' : mine ? 'var(--ds-blue)' : (accent?.bg ?? 'var(--ds-bg-2)'),
           color: note ? 'var(--ds-t1)' : mine ? '#fff' : 'var(--ds-t1)',
-          border: note ? '1px dashed var(--ds-amber)' : 'none',
+          border: note ? '1px dashed var(--ds-amber)' : (!mine && accent ? `1px solid ${accent.border}` : 'none'),
           fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}
       >
@@ -81,7 +83,7 @@ function Bubble({ m, me, getUrl }: { m: DispatchMessage; me: string | null; getU
   )
 }
 
-export function Thread({ conversation, messages, loading, now, canSend, me, getUrl, onSend, onNote }: Props) {
+export function Thread({ conversation, messages, loading, now, canSend, me, accent, getUrl, onSend, onNote }: Props) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [mode, setMode] = useState<'text' | 'note'>('text')
@@ -144,7 +146,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, getU
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>
               <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{g.label}</span>
             </div>
-            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} getUrl={getUrl} />)}
+            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} accent={accent} getUrl={getUrl} />)}
           </div>
         ))}
       </div>

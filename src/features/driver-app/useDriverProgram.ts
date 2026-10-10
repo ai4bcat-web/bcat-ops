@@ -108,6 +108,19 @@ export function useDriverTruck(): { truck: DriverTruck | null; loaded: boolean; 
   }
 }
 
+/** The whole /me profile, for the bits of chrome (dispatch number) that read one field. */
+export function useDriverProfile(): DriverProfile | null {
+  const [, rerender] = useReducer((n: number) => n + 1, 0)
+
+  useEffect(() => {
+    listeners.add(rerender)
+    if (!cachedProfile && !lastError) void load()
+    return () => { listeners.delete(rerender) }
+  }, [])
+
+  return cachedProfile
+}
+
 export function useDriverPm(): DriverPm | null {
   const [, rerender] = useReducer((n: number) => n + 1, 0)
 

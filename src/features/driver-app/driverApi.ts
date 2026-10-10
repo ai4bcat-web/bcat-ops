@@ -100,6 +100,8 @@ export interface DriverProfile {
   pm?: DriverPm | null
   /** The truck the driver is in, or null until they pick one. Optional: older API. */
   truck?: DriverTruck | null
+  /** The dispatch number to call or text, E.164; null until Dispatch is set up. Optional: older API. */
+  dispatchPhone?: string | null
 }
 
 export interface DriverTruck {

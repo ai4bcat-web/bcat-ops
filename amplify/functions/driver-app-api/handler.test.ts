@@ -18,6 +18,11 @@ vi.mock('aws-jwt-verify', () => ({
 
 const mockGetSignedUrl = vi.hoisted(() => vi.fn())
 vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: mockGetSignedUrl }))
+// The dispatch number comes from SSM; the fixture pretends it is set up.
+vi.mock('@aws-sdk/client-ssm', () => ({
+  SSMClient: class { send = async () => ({ Parameter: { Value: '+12248756477' } }) },
+  GetParameterCommand: class { constructor(public input: unknown) {} },
+}))
 
 const mockS3Send = vi.hoisted(() => vi.fn())
 vi.mock('@aws-sdk/client-s3', () => ({
@@ -107,6 +112,7 @@ vi.hoisted(() => {
   process.env.DRIVER_SUBMISSION_TABLE_NAME = 'DriverSubmission-test'
   process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME = 'DriverSubmissionDoc-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
+  process.env.DISPATCH_PARAM_PATH = '/bcat/dispatch/test'
   process.env.DRIVER_PAY_SETTING_TABLE_NAME = 'DriverPaySetting-test'
   process.env.AMAZON_TRIP_TABLE_NAME = 'AmazonTrip-test'
   process.env.DRIVER_PAY_DEDUCTION_TABLE_NAME = 'DriverPayDeduction-test'
@@ -676,6 +682,7 @@ describe('driver-app-api handler', () => {
         // No truck assigned to this fixture driver, so there is no PM to report.
         pm: null,
         truck: null,
+        dispatchPhone: '+12248756477',
       })
     })
   })

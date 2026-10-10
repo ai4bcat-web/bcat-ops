@@ -155,6 +155,17 @@ export function matchDriverByPhone<D extends DispatchDriver>(drivers: readonly D
 
 // ── Display ──────────────────────────────────────────────────────────────────
 
+/**
+ * A stable colour slot (0..n-1) for a number nobody is linked to, so the same unknown
+ * line always looks the same in the list. Linked drivers use their own colour key.
+ */
+export function phoneColorSlot(phone: string, slots: number): number {
+  const d = phoneDigits(phone) ?? phone
+  let h = 0
+  for (const ch of d) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return slots > 0 ? h % slots : 0
+}
+
 /** What a conversation is called in the list: the driver, else a staff label, else the number. */
 export function conversationTitle(c: Pick<DispatchConversation, 'phone' | 'driverName' | 'displayName'>): string {
   return (c.driverName?.trim() || c.displayName?.trim() || prettyPhone(c.phone))

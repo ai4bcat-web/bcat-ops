@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, Hash, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { ConversationList } from './ConversationList'
 import { Thread } from './Thread'
 import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard } from './DispatchDialogs'
 import { staffName } from './dispatchUi'
+import { conversationColor, initialsOf } from './conversationColor'
 
 type Tab = 'OPEN' | 'UNREAD' | 'MINE' | 'ARCHIVED'
 const TABS: { key: Tab; label: string }[] = [
@@ -56,6 +57,7 @@ export function DispatchPage() {
 
   const selected = d.conversations.find((c) => c.id === d.selectedId) ?? null
   const selectedDriver = selected?.driverId ? drivers.find((x) => x.id === selected.driverId) ?? null : null
+  const selectedColor = selected ? conversationColor(selected, drivers) : null
 
   // Opening a conversation with unread messages marks it read for the whole team.
   useEffect(() => {
@@ -147,12 +149,15 @@ export function DispatchPage() {
 
   const thread = selected ? (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, background: 'var(--ds-bg)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--ds-surface)' }}>
         {isMobile ? <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button> : null}
+        <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 18, background: selectedColor?.avatarBg, color: '#fff', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initialsOf(conversationTitle(selected))}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conversationTitle(selected)}</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <a href={`tel:${selected.phone}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'inherit' }}><Phone className="size-3" />{prettyPhone(selected.phone)}</a>
+          <div style={{ fontSize: 15, fontWeight: 600, color: selectedColor?.text ?? 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conversationTitle(selected)}</div>
+          <div style={{ fontSize: 12, color: 'var(--ds-t3)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: 'var(--ds-t2)' }}>{prettyPhone(selected.phone)}</span>
+            <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
+            <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
             {selected.assignedTo ? <span>· {selected.assignedTo === me ? 'Yours' : `With ${staffName(selected.assignedTo)}`}</span> : null}
           </div>
@@ -200,6 +205,7 @@ export function DispatchPage() {
         now={now}
         canSend={configured}
         me={me}
+        accent={selectedColor ? { border: selectedColor.border, bg: selectedColor.bg } : undefined}
         getUrl={d.mediaUrl}
         onSend={(body, files) => d.send({ conversationId: selected.id, body, files })}
         onNote={(body) => d.addNote(selected.id, body)}

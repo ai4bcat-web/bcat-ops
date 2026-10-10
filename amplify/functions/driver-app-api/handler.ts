@@ -23,6 +23,7 @@ import {
 } from '@aws-sdk/lib-dynamodb'
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
+import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { CognitoJwtVerifier } from 'aws-jwt-verify'
 import {
@@ -96,6 +97,28 @@ import { notifyRateconSubmitted, notifyPodAdded,
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 const s3 = new S3Client({})
+
+/*
+ * The dispatch number drivers call and text, shown at the top of the app. Read from the
+ * same SSM parameter the Dispatch Lambdas use, so buying a new number never needs a
+ * release here; cached per container, null when it is not set up yet.
+ */
+const ssm = new SSMClient({})
+const DISPATCH_PARAM_PATH = process.env.DISPATCH_PARAM_PATH ?? ''
+let dispatchPhoneCache: { at: number; value: string | null } | null = null
+async function dispatchPhone(): Promise<string | null> {
+  if (dispatchPhoneCache && Date.now() - dispatchPhoneCache.at < 5 * 60 * 1000) return dispatchPhoneCache.value
+  if (!DISPATCH_PARAM_PATH) return null
+  let value: string | null = null
+  try {
+    const r = await ssm.send(new GetParameterCommand({ Name: `${DISPATCH_PARAM_PATH.replace(/\/+$/, '')}/DISPATCH_NUMBER` }))
+    value = r.Parameter?.Value?.trim() || null
+  } catch (err) {
+    console.warn('[driver-app-api] dispatch number unavailable', String(err))
+  }
+  if (value) dispatchPhoneCache = { at: Date.now(), value }
+  return value
+}
 
 const DRIVER_SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME!
 const DRIVER_SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME!
@@ -2265,6 +2288,8 @@ export const handler = async (event: FnUrlEvent) => {
         pm: await pmForDriver(driver),
         // The truck they are in — what the ELD fix, the PM line and dispatch all key on.
         truck: await truckForDriver(driver),
+        // The number to call or text dispatch, pinned to the top of the app.
+        dispatchPhone: await dispatchPhone(),
       })
     }
 

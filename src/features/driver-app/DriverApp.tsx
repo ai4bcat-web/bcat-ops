@@ -18,6 +18,7 @@ const SettlementPage = lazy(() => import('./settlement/SettlementPage').then((m)
 const PaperworkPage = lazy(() => import('./paperwork/PaperworkPage').then((m) => ({ default: m.PaperworkPage })))
 const TimeClockPage = lazy(() => import('./timeclock/TimeClockPage').then((m) => ({ default: m.TimeClockPage })))
 import { OnTheClockBar } from './timeclock/OnTheClockBar'
+import { DispatchBar } from './DispatchBar'
 const AccountPage = lazy(() => import('./AccountPage').then((m) => ({ default: m.AccountPage })))
 
 function TabButton({
@@ -59,6 +60,8 @@ export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram 
     <div className="dark flex h-dvh flex-col bg-background text-foreground">
       {/* Only Ivan's employees punch a clock, so only they can have one running. */}
       <OnTheClockBar enabled={program === 'PAPERWORK'} />
+      {/* The dispatch number, one tap from anywhere on the route. */}
+      <DispatchBar />
       {/*
         * min-h-0 lets this actually shrink.
         *

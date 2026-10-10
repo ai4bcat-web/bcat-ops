@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   phoneDigits, toE164Strict, prettyPhone, samePhone, matchDriverByPhone, conversationTitle,
   messagePreview, sortThread, sortConversations, conversationMatches, normalizeSettings, callPlan,
-  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody,
+  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody, phoneColorSlot,
 } from './dispatch'
 
 describe('phones', () => {
@@ -138,5 +138,14 @@ describe('slack bridge helpers', () => {
     expect(r.ok && r.value.slackMirror).toBe(false)
     expect(normalizeSettings({}).ok && (normalizeSettings({}) as { ok: true; value: { slackMirror: boolean } }).value.slackMirror).toBe(true)
     expect(normalizeSettings({ slackInviteEmails: ['not an email'] })).toMatchObject({ ok: false, problem: { field: 'slackInviteEmails' } })
+  })
+})
+
+describe('phoneColorSlot', () => {
+  it('is stable for a number however it is written, and spreads numbers over the slots', () => {
+    expect(phoneColorSlot('+18475550100', 12)).toBe(phoneColorSlot('(847) 555-0100', 12))
+    const slots = new Set(['+18475550100', '+18475550101', '+18475550102', '+18475550103', '+17735550199'].map((p) => phoneColorSlot(p, 12)))
+    expect(slots.size).toBeGreaterThan(1)
+    expect(phoneColorSlot('x', 0)).toBe(0)
   })
 })

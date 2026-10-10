@@ -718,6 +718,12 @@ webhookFn.addToRolePolicy(new PolicyStatement({
   resources: [`${dispatchConversationTable.tableArn}/index/*`],
 }))
 dispatchSlackBridgeFn.grantInvoke(webhookFn)
+// The driver app shows the dispatch number at the top: /me reads DISPATCH_NUMBER.
+driverApiFn.addEnvironment('DISPATCH_PARAM_PATH', dispatchParamPath)
+driverApiFn.addToRolePolicy(new PolicyStatement({
+  actions: ['ssm:GetParameter'],
+  resources: [dispatchParamArn],
+}))
 dispatchActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
 dispatchActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['cognito-idp:AdminGetUser'],
