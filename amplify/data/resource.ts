@@ -14,6 +14,7 @@ import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource
 import { tmsGeocode } from '../functions/tms-geocode/resource'
 import { podActions } from '../functions/pod-actions/resource'
 import { otrActions } from '../functions/otr-actions/resource'
+import { dispatchActions } from '../functions/dispatch-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -1949,6 +1950,78 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(otrActions)),
+
+  // ── Dispatch: texts and calls with drivers through the Twilio number ──────
+  // Rows are written by the two dispatch Lambdas; the page only reads. One row per phone.
+  DispatchConversation: a
+    .model({
+      phone:         a.string().required(),   // E.164
+      driverId:      a.string(),
+      driverName:    a.string(),              // snapshot for the list; re-resolved on link
+      displayName:   a.string(),              // staff label for a number that is not a driver
+      status:        a.enum(['OPEN', 'ARCHIVED']),
+      lastMessageAt: a.datetime(),
+      lastPreview:   a.string(),
+      lastDirection: a.enum(['IN', 'OUT']),
+      lastKind:      a.string(),
+      unreadCount:   a.integer(),
+      assignedTo:    a.string(),              // staff email
+      lastReadAt:    a.datetime(),
+      lastReadBy:    a.string(),
+    })
+    .secondaryIndexes((index) => [index('phone')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  DispatchMessage: a
+    .model({
+      conversationId:  a.string().required(),
+      phone:           a.string().required(),
+      direction:       a.enum(['IN', 'OUT']),
+      kind:            a.enum(['SMS', 'MMS', 'CALL', 'VOICEMAIL', 'NOTE']),
+      body:            a.string(),
+      media:           a.json(),              // [{ key, contentType }] in S3 dispatch-media/
+      twilioSid:       a.string(),            // MessageSid / CallSid / RecordingSid
+      status:          a.string(),            // received|queued|sent|delivered|failed|ringing|answered|missed|voicemail
+      errorCode:       a.string(),
+      errorMessage:    a.string(),
+      sentBy:          a.string(),            // staff email for OUT
+      at:              a.datetime().required(),
+      callDurationSec: a.integer(),
+      recordingKey:    a.string(),
+      transcript:      a.string(),
+    })
+    .secondaryIndexes((index) => [
+      index('conversationId').sortKeys(['at']),
+      index('twilioSid'),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Single row (id 'default'): who the phones ring, voicemail, Slack, auto-reply.
+  DispatchSettings: a
+    .model({
+      forwardTo:        a.json(),             // [{ name, phone }]
+      ringSeconds:      a.integer(),
+      greeting:         a.string(),
+      voicemailEnabled: a.boolean(),
+      slackChannelId:   a.string(),
+      autoReply:        a.string(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Dispatch router: send, start, markRead, assign, link, archive, reopen, note,
+  // mediaUrl, status, getSettings, saveSettings. Requires the page-dispatch group.
+  manageDispatch: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(dispatchActions)),
 }).authorization((allow) => [
   // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
   // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).

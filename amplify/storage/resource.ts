@@ -23,6 +23,12 @@ export const storage = defineStorage({
       allow.authenticated.to(['read']),
       allow.groups(STAFF_GROUPS).to(['read', 'delete']),
     ],
+    // Dispatch: pictures drivers text in (in/), pictures the office sends (out/), and
+    // voicemails (vm/). Inbound files are written by the webhook Lambda's own role.
+    'dispatch-media/*': [
+      allow.authenticated.to(['read', 'write']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
     'driver-photos/*': [
       allow.authenticated.to(['read', 'write', 'delete']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),

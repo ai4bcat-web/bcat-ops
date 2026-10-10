@@ -6,6 +6,7 @@ import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equ
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
 import type { FixedExpenseInput } from './driverPay'
+import type { DispatchConversation, DispatchMessage } from './dispatch'
 import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
 import type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
@@ -2859,4 +2860,66 @@ export async function deleteTimeClockEntry(id: string): Promise<void> {
     query: `mutation DeleteTimeClockEntry($input: DeleteTimeClockEntryInput!) { deleteTimeClockEntry(input: $input) { id } }`,
     variables: { input: { id } },
   })
+}
+
+// ── Dispatch (Twilio texts + calls with drivers) ─────────────────────────────
+
+const DISPATCH_CONVERSATION_FIELDS = `
+  id phone driverId driverName displayName status lastMessageAt lastPreview lastDirection lastKind
+  unreadCount assignedTo lastReadAt lastReadBy createdAt updatedAt
+`
+const DISPATCH_MESSAGE_FIELDS = `
+  id conversationId phone direction kind body media twilioSid status errorCode errorMessage sentBy at
+  callDurationSec recordingKey transcript createdAt updatedAt
+`
+
+export async function listDispatchConversations(): Promise<DispatchConversation[]> {
+  return listAll<DispatchConversation>('listDispatchConversations', DISPATCH_CONVERSATION_FIELDS, 1000)
+}
+
+/** The thread for one conversation, oldest first. */
+export async function listDispatchMessages(conversationId: string): Promise<DispatchMessage[]> {
+  const rows: DispatchMessage[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query DispatchThread($conversationId: String!, $nextToken: String) {
+        listDispatchMessageByConversationIdAndAt(conversationId: $conversationId, sortDirection: ASC, limit: 500, nextToken: $nextToken) {
+          items { ${DISPATCH_MESSAGE_FIELDS} } nextToken
+        }
+      }`,
+      variables: { conversationId, nextToken },
+    }) as { data: { listDispatchMessageByConversationIdAndAt: { items: (DispatchMessage | null)[]; nextToken?: string | null } } }
+    const page = r.data.listDispatchMessageByConversationIdAndAt
+    for (const item of page.items) if (item) rows.push(unwrapJsonFields(item, ['media']))
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return rows
+}
+
+export type DispatchAction =
+  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl'
+  | 'status' | 'getSettings' | 'saveSettings'
+
+export async function dispatchAction<T = Record<string, unknown>>(action: DispatchAction, input: object = {}): Promise<T> {
+  try {
+    const result = await client.graphql({
+      query: `mutation ManageDispatch($action: String!, $input: AWSJSON) { manageDispatch(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { manageDispatch: unknown } }
+    const value = unwrapJson(result.data.manageDispatch) as T & { message?: { media?: unknown }; settings?: { forwardTo?: unknown } }
+    if (value && typeof value === 'object' && value.message) value.message = unwrapJsonFields(value.message, ['media'])
+    if (value && typeof value === 'object' && value.settings) value.settings = unwrapJsonFields(value.settings, ['forwardTo'])
+    return value
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || 'Dispatch request failed. Refresh and try again.', { cause: err })
+  }
+}
+
+/** Stage a picture the office is about to text. Returns the S3 key the send action takes. */
+export async function uploadDispatchMedia(file: File): Promise<string> {
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+  const key = `dispatch-media/out/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  await uploadData({ path: key, data: file, options: { contentType: file.type || 'application/octet-stream' } }).result
+  return key
 }

@@ -43,6 +43,8 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/appts',     label: 'Appts',     icon: CalendarClock,   pageKey: 'appts',  badgeKey: 'appts' },
       { to: '/time-off',  label: 'Time Off',  icon: CalendarOff,     pageKey: 'timeOff' },
       { to: '/loads',     label: 'Loads',     icon: Table2,          pageKey: 'loads',  badgeKey: 'loads' },
+      // Texts and calls with drivers through the Twilio dispatch number.
+      { to: '/dispatch',  label: 'Dispatch',  icon: MessageSquare,   pageKey: 'dispatch', badgeKey: 'dispatch' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
       { to: '/pods',      label: 'PODs',      icon: PackageCheck,    pageKey: 'pods' },
       { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },

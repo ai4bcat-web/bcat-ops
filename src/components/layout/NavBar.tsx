@@ -7,6 +7,7 @@ import { apptQueueCount } from '@/lib/apptQueue'
 import { useIntakeItems } from '@/hooks/useIntakeItems'
 import { useReviewQueue } from '@/hooks/useReviewQueue'
 import { useTruckDocAlerts } from '@/hooks/useTruckDocAlerts'
+import { useDispatchUnread } from '@/hooks/useDispatch'
 import { ACTIVE_STATUSES } from '@/lib/intake'
 import { NAV_GROUPS } from '@/lib/navItems'
 
@@ -46,6 +47,8 @@ export function NavBar({
   const { items: intakeItems } = useIntakeItems()
   const { pendingCount: reviewCount } = useReviewQueue()
   const { outOfDateCount: truckDocAlerts } = useTruckDocAlerts()
+  // Unread driver texts/voicemails; polled only for people who can open the page.
+  const dispatchUnread = useDispatchUnread(hasPageAccess('dispatch'))
 
   const loadsCount = loads.length
   const maintenanceCount = maintenanceTasks.filter(t => t.status === 'upcoming').length
@@ -69,6 +72,7 @@ export function NavBar({
     if (key === 'appts') return apptCount || null
     if (key === 'review') return reviewCount || null
     if (key === 'truckDocs') return truckDocAlerts || null
+    if (key === 'dispatch') return dispatchUnread || null
     return null
   }
 

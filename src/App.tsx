@@ -45,6 +45,7 @@ import { PricingMarginPage } from '@/features/pricing-margin/PricingMarginPage'
 import { FactoringPage } from '@/features/factoring/FactoringPage'
 import { HoursPage } from '@/features/hours/HoursPage'
 import { VendorApPage } from '@/features/vendor-ap/VendorApPage'
+import { DispatchPage } from '@/features/dispatch/DispatchPage'
 import { PodsPage } from '@/features/pods/PodsPage'
 import { RequirePage, RequireOwner, LandingRedirect } from '@/components/RequirePage'
 import { DriverAuthProvider } from '@/features/driver-app/DriverAuthContext'
@@ -202,6 +203,7 @@ export default function App() {
               <Route path="/factoring" element={<RequirePage page="factoring"><FactoringPage /></RequirePage>} />
               <Route path="/hours" element={<RequirePage page="hours"><HoursPage /></RequirePage>} />
               <Route path="/vendor-ap" element={<RequirePage page="vendorAp"><VendorApPage /></RequirePage>} />
+              <Route path="/dispatch" element={<RequirePage page="dispatch"><DispatchPage /></RequirePage>} />
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
               <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />
               <Route path="/locations" element={<RequirePage page="locations"><LocationsPage /></RequirePage>} />

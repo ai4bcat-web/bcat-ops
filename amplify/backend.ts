@@ -38,6 +38,8 @@ import { driverPayEmailer } from './functions/driver-pay-emailer/resource'
 import { vehicleQuoteEmailer } from './functions/vehicle-quote-emailer/resource'
 import { googleReviews } from './functions/google-reviews/resource'
 import { paychexPaySync } from './functions/paychex-pay-sync/resource'
+import { dispatchActions } from './functions/dispatch-actions/resource'
+import { dispatchTwilioWebhook } from './functions/dispatch-twilio-webhook/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { disputePortalApi } from './functions/dispute-portal-api/resource'
@@ -99,6 +101,8 @@ const backend = defineBackend({
   driverAppApi,
   otrActions,
   otrStatusSync,
+  dispatchActions,
+  dispatchTwilioWebhook,
 })
 
 // ── Auth session lifetime ──────────────────────────────────────────────────
@@ -648,6 +652,64 @@ new CfnOutput(vendorApIntakeFn.stack, 'VendorApIntakeFunctionUrl', {
   value: vendorApIntakeUrl.url,
   description: 'Vendor AP Gmail bridge webhook; requires the shared intake secret',
 })
+
+// ── Dispatch (Twilio texts + calls with drivers) ───────────────────────────
+//
+// Credentials, the dispatch number and the webhook secret live under one SSM path and
+// are read at run time (see _shared/dispatchConfig.ts), so this stack deploys before the
+// number exists. scripts/dispatchTwilioSetup.mts fills the path and points Twilio here.
+
+const dispatchConversationTable = backend.data.resources.tables['DispatchConversation']
+const dispatchMessageTable = backend.data.resources.tables['DispatchMessage']
+const dispatchSettingsTable = backend.data.resources.tables['DispatchSettings']
+const dispatchDriverTable = backend.data.resources.tables['Driver']
+const dispatchWebhookFn = backend.dispatchTwilioWebhook.resources.lambda as LambdaFunction
+const dispatchActionsFn = backend.dispatchActions.resources.lambda as LambdaFunction
+const dispatchParamPath = `/bcat/dispatch/${backend.auth.resources.userPool.userPoolId}`
+const dispatchParamArn = Stack.of(dispatchWebhookFn).formatArn({
+  service: 'ssm',
+  resource: 'parameter',
+  resourceName: `${dispatchParamPath.replace(/^\//, '')}/*`,
+})
+const dispatchTableArns = [dispatchConversationTable.tableArn, dispatchMessageTable.tableArn, dispatchSettingsTable.tableArn]
+
+for (const fn of [dispatchWebhookFn, dispatchActionsFn]) {
+  fn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
+  fn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
+  fn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
+  fn.addEnvironment('DRIVER_TABLE_NAME', dispatchDriverTable.tableName)
+  fn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+  fn.addEnvironment('DISPATCH_PARAM_PATH', dispatchParamPath)
+  fn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: [...dispatchTableArns, ...dispatchTableArns.map((arn) => `${arn}/index/*`)],
+  }))
+  fn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:Scan'],
+    resources: [dispatchDriverTable.tableArn],
+  }))
+  fn.addToRolePolicy(new PolicyStatement({
+    actions: ['ssm:GetParametersByPath', 'ssm:GetParameter'],
+    resources: [dispatchParamArn],
+  }))
+  backend.storage.resources.bucket.grantReadWrite(fn, 'dispatch-media/*')
+}
+
+const dispatchWebhookUrl = new FunctionUrl(dispatchWebhookFn.stack, 'DispatchTwilioWebhookUrl', {
+  function: dispatchWebhookFn,
+  authType: FunctionUrlAuthType.NONE,
+})
+new CfnOutput(dispatchWebhookFn.stack, 'DispatchTwilioWebhookFunctionUrl', {
+  value: dispatchWebhookUrl.url,
+  description: 'Twilio webhook base for the dispatch number; every route needs ?t=<secret>',
+})
+// Delivery receipts for outbound texts come back to the webhook.
+dispatchActionsFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
+dispatchActionsFn.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId)
+dispatchActionsFn.addToRolePolicy(new PolicyStatement({
+  actions: ['cognito-idp:AdminGetUser'],
+  resources: [backend.auth.resources.userPool.userPoolArn],
+}))
 
 // ── amazonDisputeIntake Lambda (Google Form → AmazonDispute) ────────────────
 
