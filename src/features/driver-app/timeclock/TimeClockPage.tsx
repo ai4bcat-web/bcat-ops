@@ -21,6 +21,11 @@ import {
 import { fetchTimeClock, punchTimeClock, type TimeClockResponse } from '../driverApi'
 import { minutesLabel, PAID_HOLIDAYS } from '@/lib/timeClock'
 import { errorText } from '@/lib/errorText'
+import { fetchPaperwork } from '../driverApi'
+import { chicagoDateStr } from '@/lib/date'
+import { weekStartOfISO } from '@/features/driver-pay/week'
+import { pickupsNeedingPaperworkLocation, deliveriesNeedingPaperworkConfirm } from '@/lib/paperworkLocation'
+import { EndOfDayPaperworkDialog, StartOfDayPaperworkDialog, type WhereItem, type ConfirmItem } from '../paperwork/PaperworkGates'
 import { useDriverTruck } from '../useDriverProgram'
 import { TruckPickerDialog } from '../TruckPicker'
 
@@ -53,6 +58,9 @@ function weekLabel(weekStart: string): string {
 
 export function TimeClockPage() {
   const [data, setData] = useState<TimeClockResponse | null>(null)
+  // The paperwork questions that gate the clock: where it went (out), do you have it (in).
+  const [whereItems, setWhereItems] = useState<WhereItem[] | null>(null)
+  const [confirmItems, setConfirmItems] = useState<ConfirmItem[] | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -76,6 +84,31 @@ export function TimeClockPage() {
   useEffect(() => { load() }, [load])
 
   const loadWeek = (week: string) => { setLoading(true); setSelected(week); load(week) }
+
+  /*
+   * Clocking in asks about paperwork for today's deliveries picked up earlier; clocking out
+   * asks where today's pickups' paperwork went. If the week cannot be read the clock still
+   * works: the gate is a reminder, not a lock on getting paid.
+   */
+  const gatedPunch = async (action: 'IN' | 'OUT') => {
+    setBusy(true)
+    try {
+      const today = chicagoDateStr(new Date())
+      const week = await fetchPaperwork(weekStartOfISO(today))
+      if (action === 'OUT') {
+        const items = pickupsNeedingPaperworkLocation(week.loads, today)
+        if (items.length) { setWhereItems(items); return }
+      } else {
+        const items = deliveriesNeedingPaperworkConfirm(week.loads, today)
+        if (items.length) { setConfirmItems(items); return }
+      }
+    } catch (e) {
+      console.warn('[timeclock] paperwork gate skipped', e)
+    } finally {
+      setBusy(false)
+    }
+    await punch(action)
+  }
 
   const punch = async (action: 'IN' | 'OUT' | 'HOLIDAY' | 'PTO', opts?: { date?: string }) => {
     setBusy(true)
@@ -143,7 +176,7 @@ export function TimeClockPage() {
           title={readOnly ? 'You are viewing this driver\u2019s app; only they can punch their clock' : undefined}
           onClick={() => {
             if (!openShift && truckLoaded && !truck) { setPickTruck(true); return }
-            void punch(openShift ? 'OUT' : 'IN')
+            void gatedPunch(openShift ? 'OUT' : 'IN')
           }}
         >
           <Clock className="mr-2 h-5 w-5" aria-hidden="true" />
@@ -166,7 +199,11 @@ export function TimeClockPage() {
         )}
       </div>
 
-      <TruckPickerDialog open={pickTruck} onClose={() => setPickTruck(false)} onPicked={() => void punch('IN')} />
+      <TruckPickerDialog open={pickTruck} onClose={() => setPickTruck(false)} onPicked={() => void gatedPunch('IN')} />
+
+      {whereItems ? <EndOfDayPaperworkDialog items={whereItems} truckUnit={truck?.unitNumber ?? null} onClose={() => setWhereItems(null)} onDone={() => { setWhereItems(null); void punch('OUT') }} /> : null}
+
+      {confirmItems ? <StartOfDayPaperworkDialog items={confirmItems} onClose={() => setConfirmItems(null)} onDone={() => { setConfirmItems(null); void punch('IN') }} /> : null}
 
       {data.weeks.length > 0 && (
         <div className="mb-4">

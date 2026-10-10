@@ -341,3 +341,14 @@ describe('over-the-road runs and their rate', () => {
     expect(w.overnightCents).toBe(240_000)
   })
 })
+
+describe('parsePaperworkLocation', () => {
+  it('reads an object or a JSON string and refuses anything else', async () => {
+    const { parsePaperworkLocation } = await import('./paperwork')
+    expect(parsePaperworkLocation({ kind: 'TRUCK', unit: '3114', at: 'x' })).toMatchObject({ kind: 'TRUCK', unit: '3114' })
+    expect(parsePaperworkLocation('{"kind":"SHED","at":"x"}')).toMatchObject({ kind: 'SHED', unit: null })
+    expect(parsePaperworkLocation('{"kind":"CAB"}')).toBeNull()
+    expect(parsePaperworkLocation(null)).toBeNull()
+    expect(parsePaperworkLocation('not json')).toBeNull()
+  })
+})

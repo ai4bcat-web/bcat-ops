@@ -15,6 +15,7 @@
  *
  * Pure: loads and rows in, rows out. The handler does the I/O.
  */
+import type { PaperworkLocation } from '../../../src/lib/paperworkLocation'
 import { getStops } from '../../../src/lib/stops'
 import { driverIsOnLoad } from '../../../src/lib/driverJourney'
 import type { Load, Stop } from '../../../src/types'
@@ -54,6 +55,16 @@ function assessLoadEld(stops: PaperworkStop[], load: PaperworkLoadLike): Paperwo
   }
 }
 
+/** a.json fields come back as strings through AppSync and as objects from DynamoDB. */
+export function parsePaperworkLocation(raw: unknown): PaperworkLocation | null {
+  if (!raw) return null
+  const v = typeof raw === 'string' ? (() => { try { return JSON.parse(raw) as unknown } catch { return null } })() : raw
+  if (!v || typeof v !== 'object') return null
+  const o = v as Partial<PaperworkLocation>
+  if (o.kind !== 'TRUCK' && o.kind !== 'SHED' && o.kind !== 'TRAILER') return null
+  return { kind: o.kind, unit: o.unit ?? null, at: String(o.at ?? ''), byDriverId: o.byDriverId ?? null, byName: o.byName ?? null }
+}
+
 export interface PaperworkLoadLike {
   id: string
   aljexId?: string | null
@@ -80,6 +91,8 @@ export interface PaperworkLoadLike {
   notes?: string | null
   stops?: unknown
   status?: string | null
+  /** Where the pickup's paperwork went (see src/lib/paperworkLocation.ts). */
+  paperworkLocation?: PaperworkLocation | string | null
 }
 
 export interface PaperworkStop {
@@ -157,6 +170,8 @@ export interface PaperworkLoad {
   stops: PaperworkStop[]
   pod: PaperworkPod
   eld: PaperworkEld
+  /** Where the paperwork is, once the driver has said. */
+  paperworkLocation: PaperworkLocation | null
   /** An over-the-road run — to or from Iowa. See src/lib/overnight.ts. */
   overnight: boolean
   /*
@@ -347,6 +362,7 @@ export function buildPaperworkLoad(
     pieces: typeof load.pieces === 'number' ? load.pieces : null,
     notes: load.notes?.trim() || null,
     status: load.status?.trim() || null,
+    paperworkLocation: parsePaperworkLocation(load.paperworkLocation),
     stops,
     pod: {
       present: pages.length > 0,

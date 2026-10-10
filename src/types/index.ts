@@ -325,6 +325,8 @@ export interface Load {
   customer?: string | null  // customer/broker name
   customerId?: string | null
   customerApptWorkflow?: 'NONE' | 'BATORY' | null // resolved from Customer at read time; never persisted
+  /** Where the pickup's paperwork is at end of day, answered in the Ivan app at clock-out. */
+  paperworkLocation?: import('../lib/paperworkLocation').PaperworkLocation | null
   /** ELD oversight — the fleet manager confirmed logs were kept for a run outside the radius. */
   eldLogsReviewedAt?: string | null
   eldLogsReviewedBy?: string | null

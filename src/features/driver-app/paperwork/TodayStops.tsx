@@ -17,8 +17,10 @@
  * with one tap and stamped on the load for dispatch (src/lib/stopEvents.ts), and, on a
  * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
+import { paperworkStatusLine } from '@/lib/paperworkLocation'
+import { EndOfDayPaperworkDialog, type WhereItem } from './PaperworkGates'
 import { useState } from 'react'
-import { Camera, Check, Clock, Eye, FileWarning, Image, Loader2, LogOut, MapPin, MessageSquare, Navigation, PackageOpen, Paperclip, Truck } from 'lucide-react'
+import { Camera, Check, Clock, Eye, FileWarning, Image, Loader2, LogOut, MapPin, MessageSquare, Navigation, PackageOpen, Paperclip, Truck, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useTripDocs, type TripDoc } from '../settlement/useTripDocs'
@@ -276,6 +278,8 @@ export function TodayStops({
   // The documents the driver has sent, so a delivered load can show its POD back to them.
   const docs = useTripDocs()
   const [viewing, setViewing] = useState<{ doc: TripDoc; load: PaperworkLoad; kind: 'POD' | 'MISC' } | null>(null)
+  // A pickup card's "where is the paperwork" question, asked early rather than at clock-out.
+  const [whereFor, setWhereFor] = useState<WhereItem | null>(null)
   const keyOf = (it: TodayStop) => `${it.load.id}#${it.stop.id}`
   const patch = (it: TodayStop, p: Partial<PaperworkStop>) =>
     setPatches((all) => ({ ...all, [keyOf(it)]: { ...all[keyOf(it)], ...p } }))
@@ -402,6 +406,14 @@ export function TodayStops({
 
             <StopProgress item={item} busy={busyKey === keyOf(item)} onEvent={(ev) => void sendEvent(item, ev)} />
 
+            {/* Where the paperwork is: answered at clock-out for a pickup, confirmed at clock-in for a delivery. */}
+            {(paperworkStatusLine(load.paperworkLocation) || (!delivery && stop.departedAt)) && (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                <span className="flex items-center gap-2 text-muted-foreground"><FileText className="h-4 w-4 shrink-0 text-primary" /> Paperwork: <span className="font-semibold text-foreground">{paperworkStatusLine(load.paperworkLocation) ?? 'not filed yet'}</span></span>
+                {!delivery && <button type="button" onClick={() => setWhereFor({ load, pickupName: stop.name })} className="shrink-0 text-xs font-semibold text-primary">{load.paperworkLocation ? 'Change' : 'Set'}</button>}
+              </div>
+            )}
+
             <DetentionBox
               item={item}
               onChange={(next) => {
@@ -458,6 +470,8 @@ export function TodayStops({
           </li>
         )
       })}
+
+      {whereFor ? <EndOfDayPaperworkDialog items={[whereFor]} truckUnit={null} onClose={() => setWhereFor(null)} onDone={() => { setWhereFor(null); onChange() }} /> : null}
 
       {viewing && (
         <DocPreviewSheet

@@ -1,3 +1,4 @@
+import { paperworkStatusLine } from '@/lib/paperworkLocation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import { useForm, Controller, useFieldArray, useWatch, type Control } from 'react-hook-form'
@@ -1840,6 +1841,13 @@ export function LoadDrawer() {
               {/* PODs linked to this shipment. Two stores: the ones JobsDone received and
                   a human linked, and the ones a driver scanned or staff uploaded. Reading
                   only the first meant a driver's POD was invisible here. */}
+              {load?.paperworkLocation && (
+                <div className="mt-4 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">Paperwork: </span>
+                  <span className="font-medium">{paperworkStatusLine(load.paperworkLocation)}</span>
+                  <span className="text-muted-foreground"> · {load.paperworkLocation.byName ?? 'driver'}, {new Date((load.paperworkLocation.inHandAt ?? load.paperworkLocation.missingAt ?? load.paperworkLocation.at)).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                </div>
+              )}
               {load && (
                 <div className="pt-4 border-t border-border mt-4 space-y-3">
                   <LoadPods loadId={load.id} />

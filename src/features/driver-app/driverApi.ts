@@ -546,6 +546,8 @@ export interface PaperworkLoad {
   status: string | null
   stops: PaperworkStop[]
   pod: PaperworkPod
+  /** Where the pickup's paperwork went, once answered. Optional: older API. */
+  paperworkLocation?: import('@/lib/paperworkLocation').PaperworkLocation | null
   /*
    * Optional because the app is a PWA: a cached bundle can meet an API that predates this
    * field, and a new bundle can be served a response from one. Absent is treated as "we
@@ -927,4 +929,14 @@ export function attachSubmissionToLoad(
     method: 'POST',
     body: JSON.stringify({ loadId }),
   })
+}
+
+/** End of day: say where a pickup's paperwork is. */
+export async function setPaperworkLocation(loadId: string, kind: 'TRUCK' | 'SHED' | 'TRAILER', unit?: string | null): Promise<void> {
+  await request<{ ok: true }>('/paperwork/paperwork-location', { method: 'POST', body: JSON.stringify({ loadId, kind, unit: unit ?? '' }) })
+}
+
+/** Start of day: the delivering driver says they have the paperwork, or cannot find it. */
+export async function confirmPaperwork(loadId: string, confirm: 'HAVE' | 'MISSING'): Promise<void> {
+  await request<{ ok: true }>('/paperwork/paperwork-location', { method: 'POST', body: JSON.stringify({ loadId, confirm }) })
 }

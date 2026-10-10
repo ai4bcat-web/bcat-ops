@@ -67,6 +67,8 @@ function weekEndExclusive(periodStart: string): string {
  */
 const PAPERWORK_HISTORY_START = '2026-09-01'
 import { driverProgramOf, timeClockFor } from '../../../src/lib/driverProgram'
+import { normalizePaperworkLocation, paperworkLocationLabel, type PaperworkLocation } from '../../../src/lib/paperworkLocation'
+import { parsePaperworkLocation } from './paperwork'
 import { pmStatus, type PmStatus } from '../../../src/lib/pmDue'
 import { toHosDay, type HosDay, type MotiveLog } from '../../../src/lib/motiveHos'
 import {
@@ -976,6 +978,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'paperwork' && segments[1] === 'stop-event') {
     return { path: '/paperwork/stop-event' }
+  }
+  if (segments[0] === 'paperwork' && segments[1] === 'paperwork-location') {
+    return { path: '/paperwork/paperwork-location' }
   }
   if (segments[0] === 'trucks' && !segments[1]) {
     return { path: '/trucks' }
@@ -2818,6 +2823,52 @@ export const handler = async (event: FnUrlEvent) => {
         await postDriverStatus(driver, `${label}${place ? ` · ${place}` : ''}${pro ? ` · PRO ${pro}` : ''}${etaText}`, now)
       }
       return reply(200, { ok: true, loadId, stopId, event: ev, at: now, eta })
+    }
+
+    /*
+     * End of day: where did the paperwork from a pickup go? Passenger seat of a truck, the
+     * shed, or the trailer. Written on the load for the office and the next driver, and
+     * noted in the driver's Dispatch conversation.
+     */
+    if (method === 'POST' && path === '/paperwork/paperwork-location') {
+      const body = JSON.parse(event.body || '{}') as { loadId?: string; kind?: string; unit?: string; confirm?: string }
+      const loadId = (body.loadId ?? '').trim()
+      if (!loadId) return reply(400, { error: 'loadId is required' })
+      const confirm = (body.confirm ?? '').toUpperCase()
+      const where = confirm ? null : normalizePaperworkLocation(body)
+      if (!confirm && !where) return reply(400, { error: 'Say where it is: the passenger seat of a truck (with the unit), the shed, or a trailer (with its number)' })
+      if (confirm && confirm !== 'HAVE' && confirm !== 'MISSING') return reply(400, { error: "confirm must be 'HAVE' or 'MISSING'" })
+      const found = await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))
+      const load = found.Item as (PaperworkLoadLike & { updatedAt?: string }) | undefined
+      if (!load || !driverIsOnPaperworkLoad(load, driverId)) return reply(404, { error: 'load not found' })
+      const now = nowIso()
+      const pro = (load as { aljexId?: string | null }).aljexId?.trim()
+      if (confirm) {
+        // Start of day: the delivering driver says whether the paperwork is in hand.
+        const existing = parsePaperworkLocation(load.paperworkLocation) ?? { kind: 'UNKNOWN' as const, unit: null, at: now, byDriverId: null, byName: null }
+        const value: PaperworkLocation = confirm === 'HAVE'
+          ? { ...existing, inHandAt: now, inHandBy: driver.name, missingAt: null, missingBy: null }
+          : { ...existing, missingAt: now, missingBy: driver.name }
+        await ddb.send(new UpdateCommand({
+          TableName: LOAD_TABLE_NAME,
+          Key: { id: loadId },
+          UpdateExpression: 'SET paperworkLocation = :v, updatedAt = :now, updatedBy = :by',
+          ExpressionAttributeValues: { ':v': value, ':now': now, ':by': driver.email ?? driverId },
+        }))
+        await postDriverStatus(driver, confirm === 'HAVE'
+          ? `Has the paperwork${pro ? ` for PRO ${pro}` : ''}`
+          : `⚠️ Can't find the paperwork${pro ? ` for PRO ${pro}` : ''}${existing.kind !== 'UNKNOWN' ? ` (was: ${paperworkLocationLabel(existing).toLowerCase()})` : ''}`, now)
+        return reply(200, { ok: true, loadId, paperworkLocation: value })
+      }
+      const value: PaperworkLocation = { ...where!, at: now, byDriverId: driverId, byName: driver.name }
+      await ddb.send(new UpdateCommand({
+        TableName: LOAD_TABLE_NAME,
+        Key: { id: loadId },
+        UpdateExpression: 'SET paperworkLocation = :v, updatedAt = :now, updatedBy = :by',
+        ExpressionAttributeValues: { ':v': value, ':now': now, ':by': driver.email ?? driverId },
+      }))
+      await postDriverStatus(driver, `Paperwork${pro ? ` for PRO ${pro}` : ''}: ${paperworkLocationLabel(value)}`, now)
+      return reply(200, { ok: true, loadId, paperworkLocation: value })
     }
 
     /*

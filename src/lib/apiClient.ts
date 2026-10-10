@@ -41,6 +41,7 @@ let loadsHaveStops = true
 let loadsHaveSortOrder = true
 let loadsHaveCustomerId = true
 let loadsHaveEldReview = true
+let loadsHavePaperworkLocation = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -48,6 +49,7 @@ const loadFields = () => {
   if (loadsHaveSortOrder) f += ' sortOrder'
   if (loadsHaveCustomerId) f += ' customerId'
   if (loadsHaveEldReview) f += ' eldLogsReviewedAt eldLogsReviewedBy eldLogsNote'
+  if (loadsHavePaperworkLocation) f += ' paperworkLocation'
   return f
 }
 
@@ -116,7 +118,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -125,6 +127,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     sortOrder: /'sortOrder'/i.test(msg),
     customerId: /'customerId'/i.test(msg),
     eldReview: /'(eldLogsReviewedAt|eldLogsReviewedBy|eldLogsNote)'/i.test(msg),
+    paperworkLocation: /'paperworkLocation'/i.test(msg),
   }
 }
 
@@ -162,6 +165,10 @@ export async function listLoads(): Promise<Load[]> {
       if (loadsHaveEldReview && u.eldReview) {
         console.warn("[apiClient] backend has no ELD review fields yet — querying loads without them until deploy")
         loadsHaveEldReview = false; changed = true
+      }
+      if (loadsHavePaperworkLocation && u.paperworkLocation) {
+        console.warn("[apiClient] backend has no paperworkLocation yet — querying loads without it until deploy")
+        loadsHavePaperworkLocation = false; changed = true
       }
       if (!changed) throw err
     }
@@ -1979,10 +1986,13 @@ async function resolveDriverPhotoUrl(driver: Driver): Promise<Driver> {
 // `stops` is an a.json() field — AppSync may return it as a (possibly double-encoded)
 // string. Unwrap to a real array; null/garbage → undefined so getStops() falls back to
 // the legacy pickup/delivery synthesis rather than crashing a view.
-function normalizeLoadStops<T extends { stops?: unknown }>(load: T): T {
-  if (load.stops == null) return load
+function normalizeLoadStops<T extends { stops?: unknown; paperworkLocation?: unknown }>(load: T): T {
+  // paperworkLocation is a.json() too; same unwrap, object or nothing.
+  const pl = load.paperworkLocation == null ? load.paperworkLocation : unwrapJson(load.paperworkLocation)
+  const withPl = { ...load, paperworkLocation: pl && typeof pl === 'object' ? pl : null }
+  if (load.stops == null) return withPl
   const v = unwrapJson(load.stops)
-  return { ...load, stops: Array.isArray(v) ? v : undefined }
+  return { ...withPl, stops: Array.isArray(v) ? v : undefined }
 }
 
 async function resolveRateConfirmUrl(
