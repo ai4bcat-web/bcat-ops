@@ -20,6 +20,9 @@ import { staffName } from './dispatchUi'
 import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
 import { conversationColor, initialsOf } from './conversationColor'
+import { DriverSchedulePanel } from './DriverSchedulePanel'
+import { chicagoDateStr } from '@/lib/date'
+import { weekStartOfISO } from '@/features/driver-pay/week'
 
 type Tab = 'OPEN' | 'UNREAD' | 'MINE' | 'ARCHIVED'
 const TABS: { key: Tab; label: string }[] = [
@@ -244,6 +247,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
           <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
         </div>
       ) : null}
+      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} /> : null}
       <Thread
         key={selected.id}
         conversation={selected}
