@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal, PanelRightClose } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,9 +29,15 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'ARCHIVED', label: 'Archived' },
 ]
 
-export function DispatchPage() {
+/**
+ * @param compact The always-on drawer beside every other page: one column (list, then
+ *   the thread with a Back button), a slim top bar, no settings. Same data and actions.
+ */
+export function DispatchPage({ compact = false, onHide }: { compact?: boolean; onHide?: () => void } = {}) {
   const { user, isAdmin, isOwner } = useAuth()
   const isMobile = useIsMobile()
+  // One-column behaviour for phones and for the drawer alike.
+  const narrow = isMobile || compact
   const { drivers } = useDrivers()
   const d = useDispatch()
   const [tab, setTab] = useState<Tab>('OPEN')
@@ -123,8 +130,8 @@ export function DispatchPage() {
 
   const padX = isMobile ? 12 : 20
   const configured = d.status?.configured ?? true
-  const showList = !isMobile || !selected
-  const showThread = !isMobile || !!selected
+  const showList = !narrow || !selected
+  const showThread = !narrow || !!selected
 
   const header = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: `12px ${padX}px`, borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
@@ -152,7 +159,7 @@ export function DispatchPage() {
   ) : null
 
   const list = (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, width: isMobile ? '100%' : 340, borderRight: isMobile ? 'none' : '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, width: narrow ? '100%' : 340, borderRight: narrow ? 'none' : '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--ds-border-soft)', display: 'grid', gap: 8 }}>
         <div style={{ position: 'relative' }}>
           <Search className="size-3.5" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--ds-t3)' }} />
@@ -186,7 +193,7 @@ export function DispatchPage() {
   const thread = selected ? (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, background: 'var(--ds-bg)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--ds-surface)' }}>
-        {isMobile ? <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button> : null}
+        {narrow ? <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button> : null}
         <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 18, background: selectedColor?.avatarBg, color: '#fff', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initialsOf(conversationTitle(selected))}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600, color: selectedColor?.text ?? 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{conversationTitle(selected)}</div>
@@ -207,21 +214,21 @@ export function DispatchPage() {
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {configured ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Text them who we are, the number to save, and a contact card" onClick={() => void act('send the intro', () => d.sendIntro(selected.id))}>
-            <Send className="size-3.5" />{isMobile ? '' : 'Intro'}
+            <Send className="size-3.5" />{narrow ? '' : 'Intro'}
           </Button> : null}
           {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Primary and backup dispatcher" onClick={() => setAssigning(selected)}>
-            <UserCheck className="size-3.5" />{isMobile ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}
+            <UserCheck className="size-3.5" />{narrow ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}
           </Button> : null}
           {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title={selected.driverId ? 'Change who this number belongs to' : 'Link this number to a driver'} onClick={() => setLinking(selected)}>
-            <UserPlus className="size-3.5" />{isMobile ? '' : (selected.driverId ? 'Relink' : 'Link driver')}
+            <UserPlus className="size-3.5" />{narrow ? '' : (selected.driverId ? 'Relink' : 'Link driver')}
           </Button> : null}
           {d.status?.slackBridge ? (selected.slackChannelId ? (
             <Button variant="outline" size="sm" className="h-8 gap-1.5" asChild title={`#${selected.slackChannelName ?? 'channel'} in Slack`}>
-              <a href={`https://bcatcorp.slack.com/archives/${selected.slackChannelId}`} target="_blank" rel="noreferrer"><Hash className="size-3.5" />{isMobile ? '' : (selected.slackChannelName ?? 'Slack')}<ExternalLink className="size-3" /></a>
+              <a href={`https://bcatcorp.slack.com/archives/${selected.slackChannelId}`} target="_blank" rel="noreferrer"><Hash className="size-3.5" />{narrow ? '' : (selected.slackChannelName ?? 'Slack')}<ExternalLink className="size-3" /></a>
             </Button>
           ) : (
             <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Create this driver's Slack channel" onClick={() => void openSlackWizard(selected)}>
-              <Hash className="size-3.5" />{isMobile ? '' : 'Create Slack channel'}
+              <Hash className="size-3.5" />{narrow ? '' : 'Create Slack channel'}
             </Button>
           )) : null}
           <Button variant="outline" size="sm" className="h-8" title={selected.status === 'ARCHIVED' ? 'Reopen' : 'Archive'} onClick={() => void act('archive', () => d.setArchived(selected.id, selected.status !== 'ARCHIVED'))}>
@@ -258,9 +265,24 @@ export function DispatchPage() {
     </div>
   )
 
+  const compactBar = (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderBottom: '1px solid var(--ds-border)', background: 'var(--ds-surface)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <MessageSquare className="size-4" style={{ color: 'var(--ds-blue)' }} />
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)' }}>Dispatch</span>
+        {counts.UNREAD ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: 'var(--ds-blue)', color: '#fff', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{counts.UNREAD}</span> : null}
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <Button size="sm" variant="outline" className="h-7 gap-1" onClick={() => setNewOpen(true)} title="New message"><MessageSquarePlus className="size-3.5" /></Button>
+        <Button size="sm" variant="outline" className="h-7 gap-1" asChild title="Open the full Dispatch page"><Link to="/dispatch"><ExternalLink className="size-3.5" /></Link></Button>
+        {onHide ? <Button size="sm" variant="ghost" className="h-7 gap-1" onClick={onHide} title="Hide the dispatch drawer"><PanelRightClose className="size-3.5" /></Button> : null}
+      </div>
+    </div>
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      {header}
+      {compact ? compactBar : header}
       {banner}
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         {showList ? list : null}

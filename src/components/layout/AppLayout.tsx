@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
+import { DispatchDrawer } from '@/features/dispatch/DispatchDrawer'
 import { NavBar } from './NavBar'
 import { Topbar } from './Topbar'
 import { useAuth } from '@/hooks/useAuth'
@@ -58,6 +59,8 @@ export function AppLayout() {
           <Outlet />
         </div>
       </div>
+      {/* Dispatch beside every page, for those who can open it; hideable per person. */}
+      <DispatchDrawer key={user?.email ?? 'anon'} isDesktop={isDesktop} />
     </div>
   )
 }
