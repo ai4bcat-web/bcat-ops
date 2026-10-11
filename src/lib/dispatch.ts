@@ -29,6 +29,9 @@ export interface DispatchConversation {
   lastKind?: DispatchKind | string | null
   /** Who sent the last outbound message (staff email), for the list. */
   lastSentBy?: string | null
+  /** The driver's last app status update, kept apart from texts so it is always visible. */
+  lastStatusAt?: string | null
+  lastStatusText?: string | null
   unreadCount?: number | null
   /** Primary dispatcher (staff email). */
   assignedTo?: string | null

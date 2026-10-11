@@ -352,6 +352,8 @@ export async function recordDriverStatus(store: DispatchStore, driver: DispatchD
   if (!phone) return null
   const { conversation } = await store.ensureConversation(phone, [driver], (ds, p) => matchDriverByPhone(ds, p))
   const message = await store.putMessage(messageRow({ conversationId: conversation.id, phone, direction: 'IN', kind: 'STATUS', at, body: text, status: 'received' }))
-  const updated = await store.touchConversation(conversation.id, message, { unread: 'keep' })
+  await store.touchConversation(conversation.id, message, { unread: 'keep' })
+  // Remembered on the row so the list shows it even after later texts.
+  const updated = await store.updateConversation(conversation.id, { set: { lastStatusAt: at, lastStatusText: text } })
   return { conversation: updated, message }
 }

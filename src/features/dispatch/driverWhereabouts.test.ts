@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { placeOf, whereaboutsLine, whereaboutsOf } from './driverWhereabouts'
+import { placeOf, whereaboutsLine, whereaboutsOf, statusLine } from './driverWhereabouts'
 import type { Driver, Load } from '@/types'
 import type { TruckLocation } from '@/lib/apiClient'
 
@@ -30,5 +30,13 @@ describe('whereabouts', () => {
     expect(whereaboutsOf(null, [], [], [], 0)).toBeNull()
     expect(whereaboutsLine(null)).toBeNull()
     expect(whereaboutsLine({ place: 'Gary, IN', fixAgeMin: 600, lastEvent: null, eta: null })).toBe('Gary, IN (10h ago)')
+  })
+})
+
+describe('statusLine', () => {
+  it('prefers the conversation’s own status, falls back to the load’s last event, else nothing', () => {
+    expect(statusLine({ lastStatusText: 'Departed pickup · Batory', lastStatusAt: '2026-10-10T19:14:00Z' }, null)).toBe('Departed pickup · Batory · Oct 10, 2:14 PM')
+    expect(statusLine({}, { place: null, fixAgeMin: null, lastEvent: { label: 'On site at pickup', at: '2026-10-10T18:00:00Z' }, eta: null })).toBe('On site at pickup · Oct 10, 1:00 PM')
+    expect(statusLine({}, null)).toBeNull()
   })
 })

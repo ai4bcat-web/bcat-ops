@@ -1977,6 +1977,8 @@ const schema = a.schema({
       lastDirection: a.enum(['IN', 'OUT']),
       lastKind:      a.string(),
       lastSentBy:    a.string(),              // staff email behind the last OUT message
+      lastStatusAt:  a.datetime(),            // the driver's last app status update (on site, departed, POD…)
+      lastStatusText: a.string(),
       unreadCount:   a.integer(),
       assignedTo:    a.string(),              // primary dispatcher (staff email)
       assignedBackup: a.string(),             // backup dispatcher

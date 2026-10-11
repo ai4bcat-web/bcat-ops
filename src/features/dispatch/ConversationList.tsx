@@ -13,6 +13,8 @@ interface Props {
   now: Date
   /** Where the driver is and when they are due, when known. */
   subline?: (c: DispatchConversation) => string | null
+  /** The driver's last app status update, when known. */
+  statusOf?: (c: DispatchConversation) => string | null
 }
 
 function KindIcon({ kind }: { kind: string | null | undefined }) {
@@ -25,7 +27,7 @@ function KindIcon({ kind }: { kind: string | null | undefined }) {
   return null
 }
 
-export function ConversationList({ rows, selectedId, onSelect, now, subline }: Props) {
+export function ConversationList({ rows, selectedId, onSelect, now, subline, statusOf }: Props) {
   const { drivers } = useDrivers()
   if (rows.length === 0) {
     return <div style={{ padding: 24, fontSize: 13, color: 'var(--ds-t3)', textAlign: 'center' }}>No conversations here.</div>
@@ -73,6 +75,7 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline }: P
                   {c.lastDirection === 'OUT' && c.lastKind !== 'NOTE' ? `${staffName(c.lastSentBy) || 'Sent'}: ` : ''}{c.lastPreview ?? (isDriver ? prettyPhone(c.phone) : 'New conversation')}
                 </span>
               </span>
+              {statusOf?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Last status update from the driver app"><MapPin className="size-3 inline-block align-[-2px]" style={{ color: 'var(--ds-green)' }} /> {statusOf(c)}</span> : null}
               {subline?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📍 {subline(c)}</span> : null}
               <span style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
                 {c.assignedTo ? <span title={c.assignedTo} style={{ fontSize: 10, color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px' }}>{staffName(c.assignedTo)}</span> : null}

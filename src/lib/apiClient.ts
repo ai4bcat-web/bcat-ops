@@ -2897,7 +2897,7 @@ export async function deleteTimeClockEntry(id: string): Promise<void> {
 // ── Dispatch (Twilio texts + calls with drivers) ─────────────────────────────
 
 const DISPATCH_CONVERSATION_FIELDS = `
-  id phone driverId driverName displayName status lastMessageAt lastPreview lastDirection lastKind lastSentBy
+  id phone driverId driverName displayName status lastMessageAt lastPreview lastDirection lastKind lastSentBy lastStatusAt lastStatusText
   unreadCount assignedTo assignedBackup lastReadAt lastReadBy slackChannelId slackChannelName createdAt updatedAt
 `
 const DISPATCH_MESSAGE_FIELDS = `

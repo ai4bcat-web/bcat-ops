@@ -69,3 +69,12 @@ export function whereaboutsLine(w: Whereabouts | null): string | null {
   }
   return parts.length ? parts.join(' · ') : null
 }
+
+/** "On site at pickup · 2:14 PM": the conversation's own last status, else the load's last event. */
+export function statusLine(c: { lastStatusText?: string | null; lastStatusAt?: string | null }, w: Whereabouts | null): string | null {
+  const text = c.lastStatusText?.trim() || w?.lastEvent?.label || null
+  const at = c.lastStatusText?.trim() ? c.lastStatusAt : w?.lastEvent?.at
+  if (!text) return null
+  const when = at ? new Date(at).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null
+  return when ? `${text} · ${when}` : text
+}

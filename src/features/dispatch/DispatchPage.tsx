@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send } from 'lucide-react'
+import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,13 +9,15 @@ import { useDispatch } from '@/hooks/useDispatch'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
-import { whereaboutsOf, whereaboutsLine } from './driverWhereabouts'
+import { whereaboutsOf, whereaboutsLine, statusLine } from './driverWhereabouts'
 import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
 import { Thread } from './Thread'
 import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard, AssignDialog } from './DispatchDialogs'
 import { staffName } from './dispatchUi'
+import { FilterDialog } from './FilterDialog'
+import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
 import { conversationColor, initialsOf } from './conversationColor'
 
 type Tab = 'OPEN' | 'UNREAD' | 'MINE' | 'ARCHIVED'
@@ -56,8 +58,17 @@ export function DispatchPage() {
     const driver = c.driverId ? drivers.find((x) => x.id === c.driverId) : null
     return whereaboutsLine(whereaboutsOf(driver, loads, equipment, locations, now.getTime()))
   }
+  // The driver's last app status (on site, departed, delivered, POD), shown on every row.
+  const statusOf = (c: DispatchConversation): string | null => {
+    const driver = c.driverId ? drivers.find((x) => x.id === c.driverId) : null
+    return statusLine(c, whereaboutsOf(driver, loads, equipment, locations, now.getTime()))
+  }
 
   const me = user?.email?.toLowerCase() ?? ''
+  // This person's own filter (driver types, drivers), remembered per user on this device.
+  const [filters, setFilters] = useState<DispatchFilters>(() => readFilters(user?.email ?? ''))
+  const [filterOpen, setFilterOpen] = useState(false)
+  const applyFilterChoice = (next: DispatchFilters) => { setFilters(next); writeFilters(user?.email ?? '', next) }
   // Assigning, relinking a number and the settings are admin-only; the Lambda enforces it too.
   const canManage = isAdmin || isOwner
   const counts = useMemo(() => ({
@@ -67,19 +78,20 @@ export function DispatchPage() {
     ARCHIVED: d.conversations.filter((c) => c.status === 'ARCHIVED').length,
   }), [d.conversations, me])
 
-  const rows = useMemo(() => sortConversations(d.conversations.filter((c) => {
+  const rows = useMemo(() => sortConversations(applyFilters(d.conversations, drivers, filters).filter((c) => {
     if (tab === 'ARCHIVED') return c.status === 'ARCHIVED'
     if (c.status === 'ARCHIVED') return false
     if (tab === 'UNREAD') return (c.unreadCount ?? 0) > 0
     if (tab === 'MINE') return c.assignedTo === me || c.assignedBackup === me
     return true
-  }).filter((c) => conversationMatches(c, query))), [d.conversations, tab, me, query])
+  }).filter((c) => conversationMatches(c, query))), [d.conversations, drivers, filters, tab, me, query])
 
   const selected = d.conversations.find((c) => c.id === d.selectedId) ?? null
   const selectedDriver = selected?.driverId ? drivers.find((x) => x.id === selected.driverId) ?? null : null
   const selectedColor = selected ? conversationColor(selected, drivers) : null
   const selectedDispatchers = dispatchersOf(selectedDriver)
   const selectedWhere = selected ? whereaboutsLine(whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime())) : null
+  const selectedStatus = selected ? statusLine(selected, whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime())) : null
 
   // Opening a conversation with unread messages marks it read for the whole team.
   useEffect(() => {
@@ -146,13 +158,17 @@ export function DispatchPage() {
           <Search className="size-3.5" style={{ position: 'absolute', left: 10, top: 10, color: 'var(--ds-t3)' }} />
           <Input id="dispatch-search" placeholder="Search name, number, text" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8" />
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           {TABS.map((t) => (
             <button key={t.key} type="button" onClick={() => setTab(t.key)}
               style={{ fontSize: 12, padding: '4px 8px', borderRadius: 6, border: 'none', cursor: 'pointer', background: tab === t.key ? 'var(--ds-bg-3)' : 'transparent', color: tab === t.key ? 'var(--ds-t1)' : 'var(--ds-t3)', fontWeight: tab === t.key ? 600 : 500 }}>
               {t.label}{counts[t.key] ? <span style={{ marginLeft: 4, fontVariantNumeric: 'tabular-nums', color: t.key === 'UNREAD' && counts.UNREAD ? 'var(--ds-blue)' : undefined }}>{counts[t.key]}</span> : null}
             </button>
           ))}
+          <button type="button" onClick={() => setFilterOpen(true)} title="Filter by driver type or driver"
+            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--ds-border)', cursor: 'pointer', background: filterCount(filters) ? 'var(--ds-blue-bg)' : 'transparent', color: filterCount(filters) ? 'var(--ds-blue)' : 'var(--ds-t3)', fontWeight: 600 }}>
+            <SlidersHorizontal className="size-3.5" /> Filter{filterCount(filters) ? ` · ${filterCount(filters)}` : ''}
+          </button>
         </div>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -161,7 +177,7 @@ export function DispatchPage() {
         ) : d.error && d.conversations.length === 0 ? (
           <div style={{ padding: 16, fontSize: 13, color: 'var(--ds-red)' }}>{d.error}</div>
         ) : (
-          <ConversationList rows={rows} selectedId={d.selectedId} onSelect={d.select} now={now} subline={subline} />
+          <ConversationList rows={rows} selectedId={d.selectedId} onSelect={d.select} now={now} subline={subline} statusOf={statusOf} />
         )}
       </div>
     </div>
@@ -179,6 +195,7 @@ export function DispatchPage() {
             <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
+            {selectedStatus ? <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
             {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {(() => {
               const primary = selected.assignedTo || selectedDispatchers[0] || null
@@ -260,6 +277,7 @@ export function DispatchPage() {
       {linking ? <LinkNumberDialog key={linking.id} conversation={linking} onClose={() => setLinking(null)} onLink={(input) => d.link(linking.id, input)} /> : null}
       {slackWizard ? <SlackChannelWizard key={slackWizard.id} conversation={slackWizard} defaultInvites={wizardInvites(slackWizard)} onClose={() => setSlackWizard(null)} onCreate={(input) => d.createSlackChannel(slackWizard.id, input)} /> : null}
       {assigning ? <AssignDialog key={assigning.id} conversation={assigning} fromDriver={dispatchersOf(assigning.driverId ? drivers.find((x) => x.id === assigning.driverId) : null)} loadStaff={d.listStaff} onClose={() => setAssigning(null)} onSave={(p, b) => d.assign(assigning.id, p, b)} /> : null}
+      {filterOpen ? <FilterDialog value={filters} conversations={d.conversations} onClose={() => setFilterOpen(false)} onApply={applyFilterChoice} /> : null}
       {settingsOpen ? <DispatchSettingsDialog onClose={() => setSettingsOpen(false)} dispatchNumber={d.status?.dispatchNumber ?? null} load={d.getSettings} save={d.saveSettings} /> : null}
     </div>
   )

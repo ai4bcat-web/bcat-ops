@@ -19,10 +19,10 @@ describe('fleet sections', () => {
     expect(fleetSectionOf(c('5', null), drivers)).toBe('OTHER')
     expect(fleetSectionOf(c('6', 'gone'), drivers)).toBe('OTHER')
   })
-  it('orders sections owner operators, box trucks, Ivan local, other and drops empty ones', () => {
+  it('orders sections Ivan local, owner operators, box trucks, other and drops empty ones', () => {
     const g = groupByFleet([c('5', null), c('3', 'ivan'), c('1', 'oo')], drivers)
-    expect(g.map((s) => s.key)).toEqual(['OWNER_OP', 'IVAN', 'OTHER'])
-    expect(g.map((s) => s.label)).toEqual(['Owner operators', 'Ivan local', 'Other numbers'])
+    expect(g.map((s) => s.key)).toEqual(['IVAN', 'OWNER_OP', 'OTHER'])
+    expect(g.map((s) => s.label)).toEqual(['Ivan local', 'Owner operators', 'Other numbers'])
   })
   it('keeps unread rows first inside a section and counts the section’s unread', () => {
     const g = groupByFleet([c('1', 'ivan', 0, '2026-10-10T13:00:00Z'), c('2', 'ivan', 2, '2026-10-10T11:00:00Z')], drivers)

@@ -1,6 +1,6 @@
 /**
- * The conversation list, split the way the office thinks about drivers: owner operators,
- * box trucks, Ivan's local drivers, then everyone else (numbers not on a driver file).
+ * The conversation list, split the way the office thinks about drivers: Ivan's local
+ * drivers, owner operators, box trucks, then everyone else (numbers not on a driver file).
  * Pure, so the order of sections and of rows inside them is pinned by tests.
  */
 import { fleetBucketOf, type FleetBucket, type FleetDriver } from '@/lib/revenueByFleet'
@@ -15,7 +15,9 @@ export const FLEET_SECTION_LABEL: Record<FleetSectionKey, string> = {
   OTHER: 'Other numbers',
 }
 
-const ORDER: FleetSectionKey[] = ['OWNER_OP', 'BOX_TRUCK', 'IVAN', 'OTHER']
+/** Ivan's own drivers first: they are the ones the office talks to all day. */
+export const SECTION_ORDER: FleetSectionKey[] = ['IVAN', 'OWNER_OP', 'BOX_TRUCK', 'OTHER']
+const ORDER = SECTION_ORDER
 
 export interface FleetSection {
   key: FleetSectionKey
