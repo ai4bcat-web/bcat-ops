@@ -42,13 +42,33 @@ export type SlackIntent =
   | { kind: 'text'; channel: string; user: string; ts: string; body: string; files: SlackFile[] }
   | { kind: 'note'; channel: string; user: string; ts: string; body: string }
 
-/** What a Slack message in a driver channel asks us to do. Bots, edits and joins are noise. */
+/**
+ * Slack markup a driver must never see as a text: user mentions (<@U…>), channel links
+ * (<#C…|name>), wrapped links (<url|label>) and HTML entities. Typing "@jenny" to add
+ * someone to a channel posts a message that is nothing but a mention; that is not a text
+ * to the driver, so an empty result after cleaning means "skip".
+ */
+export function cleanSlackText(raw: string): string {
+  return raw
+    .replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '')
+    .replace(/<!(?:here|channel|everyone)(?:\|[^>]*)?>/g, '')
+    .replace(/<#[A-Z0-9]+\|([^>]*)>/g, '#$1')
+    .replace(/<(https?:[^|>]+)\|[^>]*>/g, '$1')
+    .replace(/<(https?:[^>]+)>/g, '$1')
+    .replace(/<(mailto|tel):([^|>]+)(?:\|[^>]*)?>/g, '$2')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
+
+/** What a Slack message in a driver channel asks us to do. Bots, edits, joins and bare mentions are noise. */
 export function classifySlackEvent(ev: SlackMessageEvent): SlackIntent {
   if (ev.type !== 'message') return { kind: 'skip', reason: 'not a message' }
   if (ev.bot_id) return { kind: 'skip', reason: 'bot' }
   if (ev.subtype && ev.subtype !== 'file_share') return { kind: 'skip', reason: `subtype ${ev.subtype}` }
   if (!ev.channel || !ev.user || !ev.ts) return { kind: 'skip', reason: 'incomplete' }
-  const text = (ev.text ?? '').trim()
+  const text = cleanSlackText(ev.text ?? '')
+  if (!text && (ev.text ?? '').trim()) return { kind: 'skip', reason: 'mention only' }
   const files = (ev.files ?? []).filter((f) => f.url_private)
   const note = slackNoteBody(text)
   if (note) return { kind: 'note', channel: ev.channel, user: ev.user, ts: ev.ts, body: note }

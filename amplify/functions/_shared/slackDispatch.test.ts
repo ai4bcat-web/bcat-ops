@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { FakeDispatchStore } from './dispatchFakeStore'
 import { SlackError, type SlackClient } from './slackApi'
 import {
-  classifySlackEvent, formatInbound, formatOutbound, formatDeliveryFailure, cleanChannelName, recapText,
+  classifySlackEvent, cleanSlackText, formatInbound, formatOutbound, formatDeliveryFailure, cleanChannelName, recapText,
   createSlackChannel, mirrorInbound, mirrorOutbound, renameSlackChannel, inviteStaff,
 } from './slackDispatch'
 import type { DispatchMessage } from '../../../src/lib/dispatch'
@@ -32,6 +32,12 @@ describe('classifySlackEvent', () => {
     expect(classifySlackEvent({ ...base, text: 'On my way' })).toMatchObject({ kind: 'text', body: 'On my way', files: [] })
     expect(classifySlackEvent({ ...base, text: '// told him to wait' })).toMatchObject({ kind: 'note', body: 'told him to wait' })
     expect(classifySlackEvent({ ...base, subtype: 'file_share', text: '', files: [{ id: 'F1', url_private: 'https://x' }] })).toMatchObject({ kind: 'text', body: '', files: [{ id: 'F1' }] })
+  })
+  it('never texts a bare @mention (adding someone to the channel), and strips markup otherwise', () => {
+    expect(classifySlackEvent({ ...base, text: '<@UJ0JDG2Q1>' })).toMatchObject({ kind: 'skip', reason: 'mention only' })
+    expect(classifySlackEvent({ ...base, text: '<@UJ0JDG2Q1> <@U2>  ' })).toMatchObject({ kind: 'skip', reason: 'mention only' })
+    expect(classifySlackEvent({ ...base, text: '<@UJ0JDG2Q1> can you call the driver? Gate is at <https://maps.app/x|this link> &amp; door 4' })).toMatchObject({ kind: 'text', body: 'can you call the driver? Gate is at https://maps.app/x & door 4' })
+    expect(cleanSlackText('see <#C123|dispatch> <!here>')).toBe('see #dispatch')
   })
   it('skips bots, edits, joins, thread noise and empties', () => {
     expect(classifySlackEvent({ ...base, text: 'x', bot_id: 'B1' })).toMatchObject({ kind: 'skip', reason: 'bot' })
