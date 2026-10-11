@@ -320,10 +320,33 @@ export function isImpersonating(): boolean {
 }
 
 /** Every driver route is authenticated — there is deliberately no unauthenticated path. */
+/** How long a request waits for the session to be ready before giving up. */
+const TOKEN_WAIT_MS = 5000
+const TOKEN_POLL_MS = 250
+
+/**
+ * The id token, waiting briefly for it.
+ *
+ * At launch the first API call can run before DriverAuthProvider has installed the token
+ * supplier (child effects run before the parent's) or while the stored session is still
+ * being refreshed. Both resolve within a second or two; failing on the first null put a
+ * "couldn't verify your session" screen in front of every driver, who then pressed Retry
+ * and got in. So: poll for a few seconds before concluding the session is unreachable.
+ */
+async function waitForToken(): Promise<string | null> {
+  const deadline = Date.now() + TOKEN_WAIT_MS
+  for (;;) {
+    const token = await getToken()
+    if (token) return token
+    if (Date.now() >= deadline) return null
+    await new Promise((r) => setTimeout(r, TOKEN_POLL_MS))
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!DRIVER_API_URL) throw new DriverApiError(0, 'Driver API is not configured')
-  const token = await getToken()
-  // A missing token now usually means we could not reach Cognito to refresh, not
+  const token = await waitForToken()
+  // Still nothing after waiting usually means we could not reach Cognito to refresh, not
   // that the session is dead — a genuinely rejected session shows the sign-in
   // screen instead of ever reaching here.
   if (!token) throw new DriverApiError(401, "Couldn't verify your session. Check your connection and try again.")

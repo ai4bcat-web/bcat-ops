@@ -121,7 +121,8 @@ function DriverProfileError({ message, onRetry }: { message: string; onRetry: ()
 
 function DriverRoutes() {
   const { loading, isAuthenticated } = useDriverAuth()
-  const { program, error, retry } = useDriverProgramStatus()
+  // Ask for the profile only once the session is known good; see useDriverProgram.
+  const { program, error, retry } = useDriverProgramStatus(!loading && isAuthenticated)
 
   // Wait for the program before painting the shell: see useDriverProgram for why an Ivan
   // driver must never be shown the settlement tab even for a frame.

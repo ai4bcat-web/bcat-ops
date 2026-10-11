@@ -26,23 +26,36 @@ function notify(): void {
   listeners.forEach((l) => l())
 }
 
+/** A session that was not ready yet, as opposed to a refusal: worth one quiet retry. */
+function isSessionHiccup(err: unknown): boolean {
+  return err instanceof Error && /verify your session|Failed to fetch|NetworkError|Load failed/i.test(err.message)
+}
+
+const RETRY_AFTER_MS = 1500
+
 function load(): Promise<void> {
   if (inflight) return inflight
-  inflight = fetchMe()
-    .then(
+  const attempt = (retriesLeft: number): Promise<void> =>
+    fetchMe().then(
       (me) => {
         cachedProfile = me
         cached = me.program ?? 'SETTLEMENT'
         lastError = null
       },
-      (err: unknown) => {
+      async (err: unknown) => {
+        // The first call at launch can beat the session; try once more before telling
+        // the driver anything, so they never see a Retry button for a race they did not cause.
+        if (retriesLeft > 0 && isSessionHiccup(err)) {
+          await new Promise((r) => setTimeout(r, RETRY_AFTER_MS))
+          return attempt(retriesLeft - 1)
+        }
         lastError = err instanceof Error && err.message ? err.message : 'Could not load your profile.'
       },
     )
-    .finally(() => {
-      inflight = null
-      notify()
-    })
+  inflight = attempt(1).finally(() => {
+    inflight = null
+    notify()
+  })
   return inflight
 }
 
@@ -61,14 +74,18 @@ export interface DriverProgramStatus {
   retry: () => void
 }
 
-export function useDriverProgramStatus(): DriverProgramStatus {
+/**
+ * @param enabled Start loading only once the driver is known to be signed in. Before that
+ *   there is no token to send, and asking would only manufacture an error.
+ */
+export function useDriverProgramStatus(enabled = true): DriverProgramStatus {
   const [, rerender] = useReducer((n: number) => n + 1, 0)
 
   useEffect(() => {
     listeners.add(rerender)
-    if (!cached && !lastError) void load()
+    if (enabled && !cached && !lastError) void load()
     return () => { listeners.delete(rerender) }
-  }, [])
+  }, [enabled])
 
   return {
     program: cached,
