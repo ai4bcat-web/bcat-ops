@@ -48,7 +48,7 @@ function StatusRow({ m }: { m: DispatchMessage }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', margin: '6px 0' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)', background: 'var(--ds-green-bg)', border: '1px solid var(--ds-green)', borderRadius: 999, padding: '4px 10px', maxWidth: '90%' }}>
-        <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} /> <span>{m.body}</span> <span style={{ color: 'var(--ds-t3)' }}>· {bubbleTime(m.at)}</span>
+        <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} /> <span style={{ fontWeight: 700, color: 'var(--ds-green)' }}>App update</span> <span>{m.body}</span> <span style={{ color: 'var(--ds-t3)' }}>· {bubbleTime(m.at)} · not a text</span>
       </span>
     </div>
   )
@@ -60,20 +60,25 @@ function Bubble({ m, me, accent, getUrl }: { m: DispatchMessage; me: string | nu
   const vm = m.kind === 'VOICEMAIL'
   const delivery = deliveryLabel(m)
   const sender = senderLabel(m, me)
+  // A text that never reached the driver is as loud as a note: red, and it says so.
+  const failed = mine && !note && (m.status === 'failed' || m.status === 'undelivered' || m.status === 'canceled')
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', margin: '4px 0' }}>
       <div
         style={{
           maxWidth: 'min(78%, 520px)', padding: '8px 12px', borderRadius: 14,
           borderBottomRightRadius: mine ? 4 : 14, borderBottomLeftRadius: mine ? 14 : 4,
-          background: note ? 'var(--ds-amber-bg)' : mine ? 'var(--ds-blue)' : (accent?.bg ?? 'var(--ds-bg-2)'),
-          color: note ? 'var(--ds-t1)' : mine ? '#fff' : 'var(--ds-t1)',
-          border: note ? '1px dashed var(--ds-amber)' : (!mine && accent ? `1px solid ${accent.border}` : 'none'),
+          background: note ? 'var(--ds-amber-bg)' : failed ? 'var(--ds-red-bg)' : mine ? 'var(--ds-blue)' : (accent?.bg ?? 'var(--ds-bg-2)'),
+          color: note || failed ? 'var(--ds-t1)' : mine ? '#fff' : 'var(--ds-t1)',
+          border: note ? '1px dashed var(--ds-amber)' : failed ? '1px solid var(--ds-red)' : (!mine && accent ? `1px solid ${accent.border}` : 'none'),
           fontSize: 14, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}
       >
-        {note ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--ds-amber)', marginBottom: 2 }}><StickyNote className="size-3" /> Internal note · {sender ?? staffName(m.sentBy)}</div>
-          : mine ? <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginBottom: 2 }}>{sender}</div> : null}
+        {note ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: 'var(--ds-amber)', marginBottom: 2 }}><StickyNote className="size-3" /> Internal note · not sent to driver · {sender ?? staffName(m.sentBy)}</div>
+          : failed ? <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-red)', marginBottom: 2 }}>Not sent to driver · {sender}</div>
+          : mine ? <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginBottom: 2 }}>Text · {sender}</div>
+          : vm ? null
+          : <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 2 }}>Text from driver</div>}
         {vm ? (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)' }}><Voicemail className="size-3.5" /> Voicemail · {formatDuration(m.callDurationSec)}</div>
@@ -150,6 +155,14 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
       <div ref={scroller} style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+        {messages.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', fontSize: 11, color: 'var(--ds-t3)', marginBottom: 6 }}>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-blue)', verticalAlign: '-1px', marginRight: 4 }} />Texts to the driver</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-amber-bg)', border: '1px dashed var(--ds-amber)', verticalAlign: '-1px', marginRight: 4 }} />Internal notes (not sent)</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-green-bg)', border: '1px solid var(--ds-green)', verticalAlign: '-1px', marginRight: 4 }} />Driver app updates</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: 'var(--ds-red-bg)', border: '1px solid var(--ds-red)', verticalAlign: '-1px', marginRight: 4 }} />Not delivered</span>
+          </div>
+        ) : null}
         {loading && messages.length === 0 ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 32, color: 'var(--ds-t3)' }}><Loader2 className="size-5 animate-spin" /></div>
         ) : messages.length === 0 ? (
