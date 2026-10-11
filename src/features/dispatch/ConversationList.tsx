@@ -57,7 +57,7 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline, sta
               className={cn('w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-blue)]')}
               style={{
                 display: 'grid', gridTemplateColumns: 'auto 1fr auto', gridTemplateRows: 'auto auto', gap: '2px 10px', padding: '10px 12px 10px 10px',
-                background: active ? color.bg : 'transparent',
+                background: active ? color.bg : unread ? 'var(--ds-blue-bg)' : 'transparent',
                 borderBottom: '1px solid var(--ds-border-soft)', borderLeft: `4px solid ${color.border}`,
                 cursor: 'pointer',
               }}
@@ -65,6 +65,7 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline, sta
               <span aria-hidden="true" style={{ gridRow: '1 / span 2', alignSelf: 'center', width: 34, height: 34, borderRadius: 17, background: color.avatarBg, color: '#fff', fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxShadow: unread ? `0 0 0 2px ${color.border}` : 'none' }}>{initialsOf(title)}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <span style={{ fontSize: 14, fontWeight: unread ? 700 : 600, color: color.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                {unread ? <span aria-label={`${c.unreadCount} unread`} style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', background: 'var(--ds-blue)', color: '#fff', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>NEW</span> : null}
                 {isDriver ? <span style={{ fontSize: 11, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{prettyPhone(c.phone)}</span> : null}
                 {c.status === 'ARCHIVED' ? <span style={{ fontSize: 10, color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '0 4px' }}>Archived</span> : null}
               </span>
