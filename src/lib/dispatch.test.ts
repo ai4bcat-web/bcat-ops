@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   phoneDigits, toE164Strict, prettyPhone, samePhone, matchDriverByPhone, conversationTitle,
   messagePreview, sortThread, sortConversations, conversationMatches, normalizeSettings, callPlan,
-  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody, phoneColorSlot, dispatchersOf,
+  DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody, phoneColorSlot, dispatchersOf, introTextFor, dispatchVCard,
 } from './dispatch'
 
 describe('phones', () => {
@@ -156,5 +156,18 @@ describe('dispatchersOf', () => {
     expect(dispatchersOf({ dispatcherPrimary: ' Jenny@bcatcorp.com ', dispatcherBackup: 'dennis@bcatcorp.com' })).toEqual(['jenny@bcatcorp.com', 'dennis@bcatcorp.com'])
     expect(dispatchersOf({ dispatcherPrimary: 'x@b.com', dispatcherBackup: 'X@B.COM' })).toEqual(['x@b.com'])
     expect(dispatchersOf(null)).toEqual([])
+  })
+})
+
+describe('intro text', () => {
+  it('fills the first name and the number into the default or a custom template', () => {
+    expect(introTextFor(null, 'Jason Smith', '+12248756477')).toBe('Hi Jason, this is BCAT dispatch. Save this number: (224) 875-6477. Text or call us here anytime about your loads. A contact card is attached so you can add us with one tap.')
+    expect(introTextFor('Yo {name} — {number} is dispatch.', null, '+12248756477')).toBe('Yo there — (224) 875-6477 is dispatch.')
+  })
+  it('makes a contact card with the number', () => {
+    const v = dispatchVCard('+12248756477')
+    expect(v).toContain('FN:BCAT Dispatch')
+    expect(v).toContain('TEL;TYPE=CELL,VOICE:+12248756477')
+    expect(v.startsWith('BEGIN:VCARD')).toBe(true)
   })
 })

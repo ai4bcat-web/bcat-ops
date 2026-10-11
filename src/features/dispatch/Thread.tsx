@@ -21,6 +21,8 @@ interface Props {
   getUrl: (key: string) => Promise<string>
   onSend: (body: string, files: File[]) => Promise<void>
   onNote: (body: string) => Promise<void>
+  /** Send the intro text (number to save + contact card). */
+  onIntro?: () => Promise<void>
 }
 
 const TONE_COLOR: Record<string, string> = { ok: 'var(--ds-green)', bad: 'var(--ds-red)', pending: 'var(--ds-t3)', muted: 'var(--ds-t3)' }
@@ -94,7 +96,7 @@ function Bubble({ m, me, accent, getUrl }: { m: DispatchMessage; me: string | nu
   )
 }
 
-export function Thread({ conversation, messages, loading, now, canSend, me, accent, getUrl, onSend, onNote }: Props) {
+export function Thread({ conversation, messages, loading, now, canSend, me, accent, getUrl, onSend, onNote, onIntro }: Props) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [mode, setMode] = useState<'text' | 'note'>('text')
@@ -151,7 +153,14 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
         {loading && messages.length === 0 ? (
           <div style={{ display: 'flex', justifyContent: 'center', padding: 32, color: 'var(--ds-t3)' }}><Loader2 className="size-5 animate-spin" /></div>
         ) : messages.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--ds-t3)' }}>No messages yet. Say hello below.</div>
+          <div style={{ textAlign: 'center', padding: 32, fontSize: 13, color: 'var(--ds-t3)', display: 'grid', gap: 10, justifyItems: 'center' }}>
+            <span>No messages yet.</span>
+            {onIntro && canSend ? (
+              <Button size="sm" variant="outline" className="gap-1.5" disabled={sending} onClick={() => { setSending(true); onIntro().catch((err) => toast.error(err instanceof Error ? err.message : 'The intro did not send')).finally(() => setSending(false)) }}>
+                <Send className="size-3.5" /> Send intro text (number + contact card)
+              </Button>
+            ) : <span>Say hello below.</span>}
+          </div>
         ) : groups.map((g) => (
           <div key={g.key}>
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>

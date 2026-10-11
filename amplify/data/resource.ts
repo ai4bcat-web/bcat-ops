@@ -2027,6 +2027,7 @@ const schema = a.schema({
       voicemailEnabled: a.boolean(),
       slackChannelId:   a.string(),
       autoReply:        a.string(),
+      introText:        a.string(),           // the first text to a driver; {name} and {number} are filled in
       slackMirror:      a.boolean(),          // one Slack channel per driver, both ways
       slackInviteEmails: a.json(),            // staff emails invited into every driver channel
     })

@@ -195,3 +195,21 @@ describe('slack channel wizard', () => {
     await expect(runAction('createSlackChannel', { conversationId: c.id }, JENNY, { ...deps(), slack })).rejects.toThrow(/turned off/)
   })
 })
+
+describe('sendIntro', () => {
+  it('texts the intro with the number and a contact card, from the page', async () => {
+    const puts: Array<{ key: string; contentType: string }> = []
+    objects['dispatch-media/out/bcat-dispatch.vcf'] = { contentType: 'text/vcard', size: 200 }
+    const r = await runAction('sendIntro', { driverId: 'd-jason' }, JENNY, { ...deps(), putObject: async (key: string, _b: string, contentType: string) => { puts.push({ key, contentType }) } }) as { message: { body: string; kind: string } }
+    expect(puts).toEqual([{ key: 'dispatch-media/out/bcat-dispatch.vcf', contentType: 'text/vcard' }])
+    expect(sent[0].to).toBe('+18475550100')
+    expect(sent[0].body).toContain('Hi Jason, this is BCAT dispatch. Save this number: (224) 222-1305.')
+    expect(sent[0].mediaUrls).toEqual(['https://signed/dispatch-media/out/bcat-dispatch.vcf'])
+    expect(r.message.kind).toBe('MMS')
+  })
+  it('uses the custom intro from settings', async () => {
+    store.settings = { introText: 'Hey {name}, dispatch here: {number}.' }
+    await runAction('sendIntro', { driverId: 'd-jason' }, JENNY, deps())
+    expect(sent[0].body).toBe('Hey Jason, dispatch here: (224) 222-1305.')
+  })
+})

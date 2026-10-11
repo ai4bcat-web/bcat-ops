@@ -2,7 +2,7 @@
  * dispatch-actions Lambda — see resource.ts for the action list.
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { AdminGetUserCommand, CognitoIdentityProviderClient, ListUsersCommand } from '@aws-sdk/client-cognito-identity-provider'
 import { DispatchStore, tablesFromEnv, messageRow } from '../_shared/dispatchStore'
@@ -12,7 +12,7 @@ import { sendDispatchText, MEDIA_PREFIX } from '../_shared/dispatchSend'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorOutbound, renameSlackChannel, createSlackChannel, inviteStaff, cleanChannelName, slackMirrorEnabled, slackChannelUrl, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
 import {
-  toE164Strict, matchDriverByPhone, normalizeSettings, dispatchersOf,
+  toE164Strict, matchDriverByPhone, normalizeSettings, dispatchersOf, introTextFor, dispatchVCard,
   type DispatchConversation, type DispatchMessage, type DispatchSettings,
 } from '../../../src/lib/dispatch'
 
@@ -36,7 +36,7 @@ interface AppSyncIdentity { sub?: string; username?: string; claims?: Record<str
 interface AppSyncEvent { arguments: { action: string; input?: string | Record<string, unknown> | null }; identity?: AppSyncIdentity | null }
 
 export type Action =
-  | 'send' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel' | 'slackInvite'
+  | 'send' | 'sendIntro' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel' | 'slackInvite'
   | 'status' | 'getSettings' | 'saveSettings' | 'listStaff'
 
 export interface Deps {
@@ -50,6 +50,8 @@ export interface Deps {
   slack?: SlackBridgeDeps['slack']
   /** Reads a dispatch-media object so page attachments can be uploaded into Slack. */
   readMedia?: MediaFetcher
+  /** Writes the contact card the intro text carries. */
+  putObject?: (key: string, body: string, contentType: string) => Promise<void>
 }
 
 export interface Caller { email: string; isAdmin: boolean; isOwner: boolean }
@@ -131,6 +133,8 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       return { conversation: await startConversation(input, deps) }
     case 'send':
       return sendText(input, caller, deps)
+    case 'sendIntro':
+      return sendIntro(input, caller, deps)
     case 'markRead': {
       const c = await requireConversation(store, input)
       if ((c.unreadCount ?? 0) === 0 && c.lastReadAt) return { conversation: c }
@@ -291,6 +295,32 @@ async function startConversation(input: Record<string, unknown>, deps: Deps): Pr
   return store.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null, displayName: driver ? null : (str(input.displayName, MAX_LABEL) || null), assignedTo: dispatchersOf(driver)[0] ?? null })
 }
 
+const VCARD_KEY = `${MEDIA_PREFIX}out/bcat-dispatch.vcf`
+
+/**
+ * The first text to a driver: who we are, the number to save, and a contact card they
+ * can add with one tap. Same send path as any text, so it shows in the thread and Slack.
+ */
+async function sendIntro(input: Record<string, unknown>, caller: Caller, deps: Deps): Promise<{ message: DispatchMessage; conversation: DispatchConversation }> {
+  const { store, config } = deps
+  if (!config) throw new Error('Dispatch is not connected to Twilio yet. Run the setup script first.')
+  const conversation = input.conversationId ? await requireConversation(store, input) : await startConversation(input, deps)
+  const settings = await store.getSettings().catch(() => null)
+  const body = introTextFor(settings?.introText, conversation.driverName ?? conversation.displayName, config.dispatchNumber)
+  const mediaKeys: string[] = []
+  if (deps.putObject) {
+    try {
+      await deps.putObject(VCARD_KEY, dispatchVCard(config.dispatchNumber), 'text/vcard')
+      mediaKeys.push(VCARD_KEY)
+    } catch (err) {
+      console.warn('[dispatch-actions] contact card not attached', String(err))
+    }
+  }
+  const result = await sendDispatchText(deps, { conversation, body, mediaKeys, sentBy: caller.email, via: 'app' })
+  const mirrored = await mirrorToSlack(deps, result.conversation, result.message, caller.email)
+  return { message: result.message, conversation: mirrored }
+}
+
 async function sendText(input: Record<string, unknown>, caller: Caller, deps: Deps): Promise<{ message: DispatchMessage; conversation: DispatchConversation }> {
   const body = str(input.body, 20_000)
   const keys = Array.isArray(input.mediaKeys) ? input.mediaKeys.filter((k): k is string => typeof k === 'string') : []
@@ -329,6 +359,7 @@ export const handler = async (event: AppSyncEvent) => {
       const obj = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
       return { bytes: await obj.Body!.transformToByteArray(), contentType: obj.ContentType ?? 'application/octet-stream' }
     },
+    putObject: async (key, body, contentType) => { await s3.send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType })) },
   }
   const result = await runAction(action, input, caller, deps)
   return JSON.stringify(result ?? {})

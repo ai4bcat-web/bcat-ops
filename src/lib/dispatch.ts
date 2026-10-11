@@ -83,11 +83,27 @@ export interface DispatchSettings {
   voicemailEnabled?: boolean | null
   slackChannelId?: string | null
   autoReply?: string | null
+  /** The first text to a driver, so they can save the number. {name} and {number} are filled in. */
+  introText?: string | null
   /** One Slack channel per driver, mirrored both ways. Default on. */
   slackMirror?: boolean | null
   /** Staff emails invited into every driver channel as it is created. */
   slackInviteEmails?: string[] | null
   updatedAt?: string
+}
+
+export const DEFAULT_INTRO_TEXT =
+  'Hi {name}, this is BCAT dispatch. Save this number: {number}. Text or call us here anytime about your loads. A contact card is attached so you can add us with one tap.'
+
+/** The intro text with the driver's first name and the pretty number filled in. */
+export function introTextFor(template: string | null | undefined, driverName: string | null | undefined, dispatchNumber: string): string {
+  const first = (driverName ?? '').trim().split(/\s+/)[0] || 'there'
+  return (template?.trim() || DEFAULT_INTRO_TEXT).replace(/\{name\}/g, first).replace(/\{number\}/g, prettyPhone(dispatchNumber))
+}
+
+/** A contact card for the dispatch number, for the phone to save in one tap. */
+export function dispatchVCard(dispatchNumber: string): string {
+  return ['BEGIN:VCARD', 'VERSION:3.0', 'N:Dispatch;BCAT;;;', 'FN:BCAT Dispatch', 'ORG:BCAT Corp', `TEL;TYPE=CELL,VOICE:${dispatchNumber}`, 'NOTE:Text or call BCAT dispatch about your loads.', 'END:VCARD'].join('\r\n') + '\r\n'
 }
 
 /** A Slack message starting with this is kept as an internal note, never texted. */
@@ -278,6 +294,7 @@ export function normalizeSettings(input: Partial<DispatchSettings>): { ok: true;
   }
   const greeting = (input.greeting ?? '').trim().slice(0, 600)
   const autoReply = (input.autoReply ?? '').trim().slice(0, 320)
+  const introText = (input.introText ?? '').trim().slice(0, 600)
   const slack = (input.slackChannelId ?? '').trim()
   if (slack && !/^[CG][A-Z0-9]{6,}$/.test(slack)) {
     return { ok: false, problem: { field: 'slackChannelId', message: 'Slack channel IDs look like C0123ABCDEF' } }
@@ -299,6 +316,7 @@ export function normalizeSettings(input: Partial<DispatchSettings>): { ok: true;
       voicemailEnabled: input.voicemailEnabled !== false,
       slackChannelId: slack || null,
       autoReply: autoReply || null,
+      introText: introText || null,
       slackMirror: input.slackMirror !== false,
       slackInviteEmails: invites,
     },

@@ -35,6 +35,8 @@ export interface UseDispatchResult {
   threadLoading: boolean
   refresh: () => Promise<void>
   send: (input: { conversationId: string; body: string; files?: File[] }) => Promise<void>
+  /** The first text: who we are, the number to save, a contact card. */
+  sendIntro: (conversationId: string) => Promise<void>
   start: (input: { driverId?: string; phone?: string; displayName?: string }) => Promise<DispatchConversation>
   markRead: (conversationId: string) => Promise<void>
   assign: (conversationId: string, primary: string | null, backup: string | null) => Promise<void>
@@ -145,6 +147,12 @@ export function useDispatch(): UseDispatchResult {
     }
   }, [applyConversation, loadThread])
 
+  const sendIntro = useCallback(async (conversationId: string) => {
+    const r = await dispatchAction<{ message: DispatchMessage; conversation: DispatchConversation }>('sendIntro', { conversationId })
+    applyConversation(r.conversation)
+    if (selectedRef.current === conversationId) setThread((t) => sortThread([...t.filter((m) => m.id !== r.message.id), r.message]))
+  }, [applyConversation])
+
   const start = useCallback(async (input: { driverId?: string; phone?: string; displayName?: string }) => {
     const r = await dispatchAction<{ conversation: DispatchConversation }>('start', input)
     applyConversation(r.conversation)
@@ -191,7 +199,7 @@ export function useDispatch(): UseDispatchResult {
 
   return {
     conversations, loading, error, status, selectedId, select: setSelectedId, thread, threadLoading, refresh,
-    send, start, markRead, assign, listStaff, link, setArchived, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
+    send, sendIntro, start, markRead, assign, listStaff, link, setArchived, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
   }
 }
 

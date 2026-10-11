@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink } from 'lucide-react'
+import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -189,6 +189,9 @@ export function DispatchPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
+          {configured ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Text them who we are, the number to save, and a contact card" onClick={() => void act('send the intro', () => d.sendIntro(selected.id))}>
+            <Send className="size-3.5" />{isMobile ? '' : 'Intro'}
+          </Button> : null}
           {canManage ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Primary and backup dispatcher" onClick={() => setAssigning(selected)}>
             <UserCheck className="size-3.5" />{isMobile ? '' : (selected.assignedTo ? staffName(selected.assignedTo) : 'Assign')}
           </Button> : null}
@@ -229,6 +232,7 @@ export function DispatchPage() {
         getUrl={d.mediaUrl}
         onSend={(body, files) => d.send({ conversationId: selected.id, body, files })}
         onNote={(body) => d.addNote(selected.id, body)}
+        onIntro={() => d.sendIntro(selected.id)}
       />
     </div>
   ) : (

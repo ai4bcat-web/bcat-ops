@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useDrivers } from '@/hooks/useDrivers'
 import {
   prettyPhone, toE164Strict, normalizeSettings, conversationTitle, slackChannelNameFor,
-  DEFAULT_GREETING, DEFAULT_RING_SECONDS, MIN_RING_SECONDS, MAX_RING_SECONDS,
+  DEFAULT_GREETING, DEFAULT_INTRO_TEXT, DEFAULT_RING_SECONDS, MIN_RING_SECONDS, MAX_RING_SECONDS,
   type DispatchConversation, type DispatchSettings, type DispatchForward,
 } from '@/lib/dispatch'
 
@@ -159,6 +159,7 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
   const [voicemail, setVoicemail] = useState(true)
   const [slack, setSlack] = useState('')
   const [autoReply, setAutoReply] = useState('')
+  const [introText, setIntroText] = useState('')
   const [slackMirror, setSlackMirror] = useState(true)
   const [slackInvites, setSlackInvites] = useState('')
   const [loading, setLoading] = useState(true)
@@ -174,6 +175,7 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
       setVoicemail(s?.voicemailEnabled !== false)
       setSlack(s?.slackChannelId ?? '')
       setAutoReply(s?.autoReply ?? '')
+      setIntroText(s?.introText ?? '')
       setSlackMirror(s?.slackMirror !== false)
       setSlackInvites((s?.slackInviteEmails ?? []).join(', '))
     }).catch((err) => toast.error(err instanceof Error ? err.message : 'Could not load settings')).finally(() => { if (alive) setLoading(false) })
@@ -181,7 +183,7 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
   }, [load])
 
   const submit = async () => {
-    const r = normalizeSettings({ forwardTo: forwards, ringSeconds: ring, greeting, voicemailEnabled: voicemail, slackChannelId: slack, autoReply, slackMirror, slackInviteEmails: slackInvites.split(/[\s,;]+/).filter(Boolean) })
+    const r = normalizeSettings({ forwardTo: forwards, ringSeconds: ring, greeting, voicemailEnabled: voicemail, slackChannelId: slack, autoReply, introText, slackMirror, slackInviteEmails: slackInvites.split(/[\s,;]+/).filter(Boolean) })
     if (!r.ok) { toast.error(r.problem.message); return }
     setSaving(true)
     try { await save(r.value); toast.success('Dispatch settings saved'); onClose() } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not save settings') } finally { setSaving(false) }
@@ -223,6 +225,11 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
               </label>
               <Textarea id="dispatch-greeting" rows={3} placeholder={DEFAULT_GREETING} value={greeting} onChange={(e) => setGreeting(e.target.value)} disabled={!voicemail} />
               <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Voicemails land in the thread with a transcript. Leave blank for the standard greeting.</div>
+            </section>
+            <section style={{ display: 'grid', gap: 6 }}>
+              <Label htmlFor="dispatch-intro">Intro text (the Intro button; {'{name}'} and {'{number}'} are filled in)</Label>
+              <Textarea id="dispatch-intro" rows={3} placeholder={DEFAULT_INTRO_TEXT} value={introText} onChange={(e) => setIntroText(e.target.value)} />
+              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Sent with a contact card so the driver can save the number in one tap. Leave blank for the standard text.</div>
             </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-autoreply">First-text auto-reply (optional)</Label>
