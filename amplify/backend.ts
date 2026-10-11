@@ -199,7 +199,9 @@ const driverPoolClient = new UserPoolClient(driverAuthScope, 'BcatDriverPoolClie
   generateSecret: false,
   accessTokenValidity: Duration.hours(1),
   idTokenValidity: Duration.hours(1),
-  refreshTokenValidity: Duration.days(60),
+  // Ten years is Cognito's ceiling: a driver signs in once and stays signed in. The app
+  // refreshes the hour-long id token off this on every launch (DriverAuthContext).
+  refreshTokenValidity: Duration.days(3650),
 })
 
 driverPool.addTrigger(

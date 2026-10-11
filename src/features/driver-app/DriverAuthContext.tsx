@@ -390,7 +390,7 @@ export function DriverAuthProvider({ children }: { children: ReactNode }) {
 
         /*
          * Commit the stored session FIRST, even when the id token is stale. The
-         * refresh token is what actually carries the session (60 days), and the
+         * refresh token is what actually carries the session (ten years), and the
          * driver's email/sub are still readable from the expired id token, so we
          * can show them signed in immediately. Only an outright rejection from
          * Cognito, inside the refresh below, takes that away. Refreshing first
