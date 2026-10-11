@@ -209,7 +209,8 @@ export function DispatchPage() {
           </Button>
         </div>
       </div>
-      {d.status?.slackBridge && !selected.slackChannelId && selected.lastDirection === 'IN' ? (
+      {/* Any conversation without a channel gets the prompt: started by the driver or by us. */}
+      {d.status?.slackBridge && !selected.slackChannelId ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: 'var(--ds-blue-bg)', borderBottom: '1px solid var(--ds-border)', fontSize: 13 }}>
           <Hash className="size-4" style={{ color: 'var(--ds-blue)' }} />
           <span style={{ flex: 1 }}>{conversationTitle(selected)} has no Slack channel yet. Create one so the team can answer from Slack.</span>
@@ -244,7 +245,14 @@ export function DispatchPage() {
         {showList ? list : null}
         {showThread ? thread : null}
       </div>
-      {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => { const c = await d.start(input); setTab(c.status === 'ARCHIVED' ? 'ARCHIVED' : 'OPEN'); d.select(c.id); return c }} /> : null}
+      {newOpen ? <NewMessageDialog onClose={() => setNewOpen(false)} onStart={async (input) => {
+        const c = await d.start(input)
+        setTab(c.status === 'ARCHIVED' ? 'ARCHIVED' : 'OPEN')
+        d.select(c.id)
+        // Same as a driver texting in: the channel wizard comes up straight away.
+        if (d.status?.slackBridge && !c.slackChannelId) void openSlackWizard(c)
+        return c
+      }} /> : null}
       {linking ? <LinkNumberDialog key={linking.id} conversation={linking} onClose={() => setLinking(null)} onLink={(input) => d.link(linking.id, input)} /> : null}
       {slackWizard ? <SlackChannelWizard key={slackWizard.id} conversation={slackWizard} defaultInvites={wizardInvites(slackWizard)} onClose={() => setSlackWizard(null)} onCreate={(input) => d.createSlackChannel(slackWizard.id, input)} /> : null}
       {assigning ? <AssignDialog key={assigning.id} conversation={assigning} fromDriver={dispatchersOf(assigning.driverId ? drivers.find((x) => x.id === assigning.driverId) : null)} loadStaff={d.listStaff} onClose={() => setAssigning(null)} onSave={(p, b) => d.assign(assigning.id, p, b)} /> : null}
