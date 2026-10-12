@@ -42,6 +42,8 @@ function Progress({ done, total, color }: { done: number; total: number; color: 
 export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now, hasPod }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number; hasPod?: (load: Load) => boolean }) {
   const [open, setOpen] = useState(true)
   const ivan = driverProgramOf(driver) === 'PAPERWORK'
+  const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
+  const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart, hasPod)
   // The load under way: Ivan's drivers place the truck by their stop taps plus position;
   // owner operators do not tap, so position alone decides.
   const current = currentLoadForDriver(loads as Load[], driver.id, now)
@@ -60,8 +62,6 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
   // The position-based ETA belongs on the stop the truck is heading for.
   const etaForStopId = route && route.nextIndex != null && route.etaAt && route.milesToNext ? { id: route.stops[route.nextIndex].id, at: route.etaAt } : null
   const routeTitle = ivan && dayStops.length ? "Today's route" : `Current route · PRO ${(ivan ? current : ooCurrent)?.aljexId || '—'}`
-  const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
-  const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart, hasPod)
   const title = ivan ? 'Today' : 'This week'
   const summary = ivan
     ? (dayPlan!.total ? `${dayPlan!.done} of ${dayPlan!.total} stops done${dayPlan!.inProgress ? ` · ${dayPlan!.inProgress} on site` : ''}` : route ? 'No stops scheduled today · route under way' : 'Nothing scheduled today')
