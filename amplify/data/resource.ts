@@ -125,6 +125,22 @@ const schema = a.schema({
        * nobody finds when it does. Today only Jason Smith and Charles Best have it.
        */
       ptoEligible:        a.boolean(),
+      /*
+       * The dispatcher who owns this driver's conversation, and who covers when they are
+       * out. Staff emails. A new Dispatch conversation from the driver is assigned to the
+       * primary automatically; both are invited to the driver's Slack channel by default.
+       */
+      dispatcherPrimary:  a.string(),
+      dispatcherBackup:   a.string(),
+      /*
+       * Which app a driver gets is normally decided by fleet (see src/lib/driverProgram.ts).
+       * ivanApp forces the Ivan paperwork app for someone outside that fleet; timeClock
+       * turns the Hours tab on or off regardless of fleet.
+       */
+      ivanApp:            a.boolean(),
+      timeClock:          a.boolean(),
+      // What they pull: DRY_VAN | FLATBED | POWER_ONLY. Blank means by fleet (Ivan local = dry van).
+      unitType:           a.string(),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.

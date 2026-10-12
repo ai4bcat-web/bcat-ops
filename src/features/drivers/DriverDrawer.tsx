@@ -84,7 +84,7 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
     formState: { errors, isSubmitting },
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
-    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null },
+    defaultValues: { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null },
   })
 
   // Trucks available to assign (manually-added or Motive-connected — both are Equipment).
@@ -127,10 +127,11 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
             dispatcherBackup: driver.dispatcherBackup ?? '',
             ivanApp: driver.ivanApp ?? null,
             timeClock: driver.timeClock ?? null,
+            unitType: driver.unitType ?? null,
             assignedTrailerId: driver.assignedTrailerId ?? null,
             fleetGroup: driver.fleetGroup ?? null,
           }
-        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null })
+        : { name: '', phone: '', active: true, type: 'driver', colorKey: undefined, notes: '', email: '', cdl: '', cdlExpiration: '', medCardExpiration: '', drugTestDate: '', hireDate: '', assignedTruckId: null, assignedTrailerId: null, fleetGroup: null, motiveDriverId: null, dispatcherPrimary: '', dispatcherBackup: '', ivanApp: null, timeClock: null, unitType: null })
       setPhotoFile(null)
       setPhotoPreview(driver?.photoUrl ?? null)
       setShouldDeletePhoto(false)
@@ -402,6 +403,16 @@ export function DriverDrawer({ open, driver: driverProp, onClose }: DriverDrawer
                         <Switch checked={field.value === true} onCheckedChange={(v) => field.onChange(v ? true : null)} />
                         <span className="text-xs text-muted-foreground">{field.value === true ? 'Forced on' : 'By fleet (Ivan local and box truck)'}</span>
                       </div>
+                    )} />
+                  </Field>
+                  <Field label="Unit type" hint="what they pull; Ivan local is dry van unless set">
+                    <Controller name="unitType" control={control} render={({ field }) => (
+                      <ToggleGroup type="single" value={field.value ?? 'auto'} onValueChange={(v) => v && field.onChange(v === 'auto' ? null : v)}>
+                        <ToggleGroupItem value="auto">By fleet</ToggleGroupItem>
+                        <ToggleGroupItem value="DRY_VAN">Dry van</ToggleGroupItem>
+                        <ToggleGroupItem value="FLATBED">Flatbed</ToggleGroupItem>
+                        <ToggleGroupItem value="POWER_ONLY">Power only</ToggleGroupItem>
+                      </ToggleGroup>
                     )} />
                   </Field>
                   <Field label="Time clock" hint="Hours tab in the app; by fleet means on for Ivan local, off for box truck">

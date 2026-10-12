@@ -77,11 +77,11 @@ const driverFields = () => [
   driversHaveCompliance ? 'onboardingStatus complianceStatus' : '',
   driversHaveTrailer ? 'assignedTrailerId fleetGroup' : '',
   driversHaveMotive ? 'motiveDriverId' : '',
-  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup ivanApp timeClock' : '',
+  driversHaveDispatcher ? 'dispatcherPrimary dispatcherBackup ivanApp timeClock unitType' : '',
 ].filter(Boolean).join(' ')
 
 const isMotiveFieldUndefined = (err: unknown) => /motiveDriverId/.test(JSON.stringify(err ?? ''))
-const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)|ivanApp|timeClock/.test(JSON.stringify(err ?? ''))
+const isDispatcherFieldUndefined = (err: unknown) => /dispatcher(Primary|Backup)|ivanApp|timeClock|unitType/.test(JSON.stringify(err ?? ''))
 
 function isComplianceFieldUndefined(err: unknown): boolean {
   const errs = (err as { errors?: { message?: string }[] })?.errors
@@ -366,7 +366,7 @@ export async function updateDriver(
   const { photoUrl: _skip, ...all } = patch as typeof patch & { photoUrl?: string }
   const { assignedTrailerId: _t, fleetGroup: _f, ...withoutNewFields } = all
   const { motiveDriverId: _m, ...withoutMotive } = all
-  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ivanApp: _ia, timeClock: _tc, ...withoutDispatcher } = all
+  const { dispatcherPrimary: _dp, dispatcherBackup: _db, ivanApp: _ia, timeClock: _tc, unitType: _ut, ...withoutDispatcher } = all
 
   // The SELECTION matters as much as the input. Building it from `driversHaveTrailer`
   // meant a stale flag returned a driver with fleetGroup/assignedTrailerId missing —
@@ -374,7 +374,7 @@ export async function updateDriver(
   // saved value instantly read as unsaved. Ask for them on the optimistic attempt.
   const run = async (input: Record<string, unknown>, withNewFields: boolean) => {
     const fields = withNewFields
-      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup ivanApp timeClock`
+      ? `${DRIVER_BASE_FIELDS} ${driversHaveCompliance ? 'onboardingStatus complianceStatus' : ''} assignedTrailerId fleetGroup motiveDriverId dispatcherPrimary dispatcherBackup ivanApp timeClock unitType`
       : driverFields()
     return client.graphql({
       query: `mutation UpdateDriver($input: UpdateDriverInput!) { updateDriver(input: $input) { ${fields} } }`,

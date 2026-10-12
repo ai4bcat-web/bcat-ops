@@ -21,6 +21,7 @@ import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
 import { conversationColor, initialsOf } from './conversationColor'
 import { DriverSchedulePanel } from './DriverSchedulePanel'
+import { unitTypeOf, unitKindLabel, unitTypeEditable, nextUnitType, UNIT_TYPE_LABEL } from '@/lib/unitType'
 import { chicagoDateStr } from '@/lib/date'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 
@@ -41,7 +42,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   const isMobile = useIsMobile()
   // One-column behaviour for phones and for the drawer alike.
   const narrow = isMobile || compact
-  const { drivers } = useDrivers()
+  const { drivers, updateDriver } = useDrivers()
   const d = useDispatch()
   const [tab, setTab] = useState<Tab>('OPEN')
   const [query, setQuery] = useState('')
@@ -211,6 +212,15 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             <a href={`tel:${selected.phone}`} title="Call from your phone" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><Phone className="size-3" />Call</a>
             <a href={`sms:${selected.phone}`} title="Text from your own phone (not the dispatch number)" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--ds-blue)', fontWeight: 600 }}><MessageSquare className="size-3" />Text</a>
             {selectedDriver ? <span>{selectedDriver.fleetGroup === 'AMAZON' ? 'Owner operator' : selectedDriver.fleetGroup === 'BOX_TRUCK' ? 'Box truck' : selectedDriver.fleetGroup === 'LOCAL' ? 'Ivan local' : 'Driver'}{selectedDriver.active ? '' : ' · inactive'}</span> : <span>Not a driver on file</span>}
+            {selectedDriver ? (
+              unitTypeEditable(selectedDriver) ? (
+                <button type="button" onClick={() => { const next = nextUnitType(selectedDriver.unitType); void updateDriver(selectedDriver.id, { unitType: next }); toast.success(`${selectedDriver.name}: ${UNIT_TYPE_LABEL[next]}`) }}
+                  title="Tap to change: dry van → flatbed → power only"
+                  style={{ all: 'unset', cursor: 'pointer', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: unitTypeOf(selectedDriver) ? 'var(--ds-t1)' : 'var(--ds-amber)', background: 'var(--ds-bg-2)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '1px 6px' }}>
+                  {unitKindLabel(unitTypeOf(selectedDriver))} ⇄
+                </button>
+              ) : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t2)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 6px' }}>{unitKindLabel(unitTypeOf(selectedDriver))}</span>
+            ) : null}
             {selectedStatus ? <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
             {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {(() => {

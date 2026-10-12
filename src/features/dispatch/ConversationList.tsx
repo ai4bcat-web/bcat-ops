@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { useDrivers } from '@/hooks/useDrivers'
 import { conversationColor, initialsOf } from './conversationColor'
 import { groupByFleet } from './fleetSections'
+import { unitTypeOf, unitKindLabel } from '@/lib/unitType'
 import { conversationTitle, prettyPhone, type DispatchConversation } from '@/lib/dispatch'
 import { listTime, staffName } from './dispatchUi'
 
@@ -67,6 +68,7 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline, sta
                 <span style={{ fontSize: 14, fontWeight: unread ? 700 : 600, color: color.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
                 {unread ? <span aria-label={`${c.unreadCount} unread`} style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.06em', background: 'var(--ds-blue)', color: '#fff', borderRadius: 4, padding: '1px 5px', flexShrink: 0 }}>NEW</span> : null}
                 {isDriver ? <span style={{ fontSize: 11, color: 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{prettyPhone(c.phone)}</span> : null}
+                {isDriver ? (() => { const k = unitTypeOf(drivers.find((d) => d.id === c.driverId)); return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: k ? 'var(--ds-t2)' : 'var(--ds-amber)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>{unitKindLabel(k)}</span> })() : null}
                 {c.status === 'ARCHIVED' ? <span style={{ fontSize: 10, color: 'var(--ds-t3)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '0 4px' }}>Archived</span> : null}
               </span>
               <span style={{ fontSize: 11, color: unread ? color.border : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{listTime(c.lastMessageAt, now)}</span>

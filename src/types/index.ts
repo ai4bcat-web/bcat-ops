@@ -43,12 +43,15 @@ export interface Driver {
   ivanApp?: boolean | null
   /** Hours tab on/off; null = by fleet (Ivan local on, everyone else off). */
   timeClock?: boolean | null
+  /** What they pull; null = by fleet (Ivan local is dry van). See src/lib/unitType.ts. */
+  unitType?: UnitType | null
   createdAt: string
   updatedAt: string
 }
 
 // ── DOT compliance & onboarding ──────────────────────────────────────────────
 
+export type UnitType = 'DRY_VAN' | 'FLATBED' | 'POWER_ONLY'
 export type DriverType = 'COMPANY' | 'OWNER_OPERATOR'
 export type TruckOwnershipType = 'COMPANY' | 'OWNER_OPERATOR' | 'LEASED'
 export type ComplianceStatus = 'COMPLIANT' | 'EXPIRING_SOON' | 'NON_COMPLIANT' | 'UNKNOWN'
