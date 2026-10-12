@@ -13,6 +13,7 @@
  */
 
 import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
+import { paperworkShortLabel, paperworkStatusLine } from '@/lib/paperworkLocation'
 import { GripVertical, X, Plus, Pencil, CheckCircle, Circle, AlertCircle } from 'lucide-react'
 import { addDays, formatDayHeader, formatApptTime, formatDateShort, needLabel, apptHasTime, PENDING_LABEL } from '@/lib/date'
 import { getColor, LOAD_HIGHLIGHT_PALETTE, getHighlightHex } from '@/lib/driverColors'
@@ -30,7 +31,7 @@ import { requiresApptProofs } from '@/lib/apptQueue'
 import { PodMark } from './CalendarPaperwork'
 
 // ── Column widths ─────────────────────────────────────────────────────────────
-const COL = { color: 20, aljex: 60, pod: 40, tms: 80, pu: 72, trailer: 70, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
+const COL = { color: 20, aljex: 60, pod: 40, tms: 80, pu: 72, trailer: 70, paperwork: 96, puAppt: 130, deAppt: 130, status: 100, route: 260, driver: 160, notes: 200, rate: 68, locations: 220 } as const
 const ROW_H = 28
 const DRAG_HANDLE_W = 16
 
@@ -650,6 +651,17 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
         {load.trailerNumber || '—'}
       </div>
 
+      {/* Where the pickup's paperwork went (filed by the driver at clock-out), and whether the next driver has it. */}
+      {(() => {
+        const short = paperworkShortLabel(load.paperworkLocation)
+        const missing = short === 'Missing'
+        return (
+          <div className="shrink-0 flex items-center px-1.5 truncate" style={{ width: COL.paperwork, fontSize: 11.5, color: missing ? 'var(--ds-red)' : short ? 'var(--ds-t1)' : 'var(--ds-t3)', fontWeight: missing ? 700 : 500 }} title={paperworkStatusLine(load.paperworkLocation) ?? 'Paperwork location not filed yet'}>
+            {short ?? '—'}
+          </div>
+        )
+      })()}
+
       {/* PU / DE location names — single stop name in multi-stop mode */}
       <div className="shrink-0 flex flex-col justify-center px-1.5 leading-tight" style={{ width: COL.locations }}>
         {stopMode ? (
@@ -1056,6 +1068,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         <ColHeader width={COL.tms}>TMS</ColHeader>
         <ColHeader width={COL.pu}>PU #</ColHeader>
         <ColHeader width={COL.trailer}>Trailer</ColHeader>
+        <ColHeader width={COL.paperwork}>Paperwork</ColHeader>
         <ColHeader width={COL.locations}>PU / DE Location</ColHeader>
         <ColHeader width={COL.route}>Route</ColHeader>
         <ColHeader width={COL.puAppt}>PU Appt</ColHeader>

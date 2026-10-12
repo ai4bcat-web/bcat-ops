@@ -51,6 +51,24 @@ export function paperworkStatusLine(loc: PaperworkLocation | null | undefined): 
   return paperworkLocationLabel(loc)
 }
 
+/**
+ * The place in a few characters, for a column: "Seat 3114" / "Shed" / "Trailer 5302",
+ * then "In hand" once the next driver confirmed it and "Missing" if they could not find it.
+ * Null when nothing has been filed. The long form (paperworkStatusLine) goes in the title.
+ */
+export function paperworkShortLabel(loc: PaperworkLocation | null | undefined): string | null {
+  if (!loc) return null
+  if (loc.missingAt && (!loc.inHandAt || loc.missingAt > loc.inHandAt)) return 'Missing'
+  if (loc.inHandAt) return 'In hand'
+  const unit = (loc.unit ?? '').trim()
+  switch (loc.kind) {
+    case 'TRUCK': return unit ? `Seat ${unit}` : 'Seat'
+    case 'TRAILER': return unit ? `Trailer ${unit}` : 'Trailer'
+    case 'SHED': return 'Shed'
+    default: return 'Not recorded'
+  }
+}
+
 /** Clean what the app sent; null when it is not a usable answer. */
 export function normalizePaperworkLocation(input: { kind?: unknown; unit?: unknown }): { kind: PaperworkPlace; unit: string | null } | null {
   const kind = String(input.kind ?? '').toUpperCase()

@@ -14,6 +14,7 @@ import { RouteStrip } from '@/features/dispatch/RouteStrip'
 import { StateIcon, Progress } from '@/features/dispatch/DriverSchedulePanel'
 import { ivanWeekSchedule } from '@/lib/driverSchedule'
 import { routeProgressForStops, type LatLng } from '@/lib/routeProgress'
+import { paperworkShortLabel, paperworkStatusLine } from '@/lib/paperworkLocation'
 import type { Driver, Load } from '@/types'
 
 const getInitials = (name: string) =>
@@ -90,6 +91,11 @@ export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, on
                     <span style={{ fontWeight: 600 }}>{stop.type === 'delivery' ? 'Deliver' : 'Pick up'}</span> {stop.name || stop.city || '—'}{stop.city && stop.name ? ` · ${stop.city}` : ''}{' '}
                     <button type="button" onClick={() => onOpenLoad(load.id)} style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'var(--ds-accent, #1ea8f3)', fontWeight: 700, cursor: 'pointer' }}>PRO {load.aljexId?.trim() || '—'}</button>
                     {apptWarning ? <span title={apptWarning} style={{ marginLeft: 6, color: 'var(--ds-amber)', fontWeight: 700 }}>⚠ time?</span> : null}
+                    {paperworkShortLabel(load.paperworkLocation) ? (
+                      <span title={paperworkStatusLine(load.paperworkLocation) ?? undefined} style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: paperworkShortLabel(load.paperworkLocation) === 'Missing' ? 'var(--ds-red)' : 'var(--ds-t2)', background: 'var(--ds-bg-2)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '0 5px' }}>
+                        📄 {paperworkShortLabel(load.paperworkLocation)}
+                      </span>
+                    ) : null}
                   </span>
                   <span style={{ fontVariantNumeric: 'tabular-nums', color: apptWarning ? 'var(--ds-amber)' : 'var(--ds-t3)', whiteSpace: 'nowrap', textAlign: 'right' }}>
                     {state === 'DONE' ? `${stop.type === 'delivery' ? 'delivered' : 'left'} ${time(stop.departedAt)}` : state === 'IN_PROGRESS' ? `on site ${time(stop.arrivedAt)}` : time(stop.appt) || 'TBD'}

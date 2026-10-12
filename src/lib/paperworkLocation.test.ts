@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { paperworkShortLabel } from './paperworkLocation'
 import { paperworkLocationLabel, paperworkStatusLine, normalizePaperworkLocation, pickupsNeedingPaperworkLocation, deliveriesNeedingPaperworkConfirm } from './paperworkLocation'
 
 describe('paperwork location', () => {
@@ -47,5 +48,16 @@ describe('start of day', () => {
     expect(paperworkStatusLine({ kind: 'SHED', at: 'x', inHandAt: 'y', inHandBy: 'Jason' })).toBe('Jason has it (was: in the shed)')
     expect(paperworkStatusLine({ kind: 'UNKNOWN', at: 'x', missingAt: 'y', missingBy: 'Jason' })).toBe('Jason could not find it')
     expect(paperworkStatusLine(null)).toBeNull()
+  })
+})
+
+describe('paperworkShortLabel', () => {
+  it('names the place in a few characters, then what became of it', () => {
+    expect(paperworkShortLabel({ kind: 'TRUCK', unit: '3114', at: '2026-10-12T22:00:00Z' })).toBe('Seat 3114')
+    expect(paperworkShortLabel({ kind: 'TRAILER', unit: '5302', at: '2026-10-12T22:00:00Z' })).toBe('Trailer 5302')
+    expect(paperworkShortLabel({ kind: 'SHED', at: '2026-10-12T22:00:00Z' })).toBe('Shed')
+    expect(paperworkShortLabel({ kind: 'SHED', at: '2026-10-12T22:00:00Z', inHandAt: '2026-10-13T11:00:00Z', inHandBy: 'Jason' })).toBe('In hand')
+    expect(paperworkShortLabel({ kind: 'SHED', at: '2026-10-12T22:00:00Z', missingAt: '2026-10-13T11:00:00Z' })).toBe('Missing')
+    expect(paperworkShortLabel(null)).toBeNull()
   })
 })

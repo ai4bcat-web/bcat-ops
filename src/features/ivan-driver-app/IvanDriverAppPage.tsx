@@ -16,6 +16,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { getColor } from '@/lib/driverColors'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { chicagoDateStr } from '@/lib/date'
+import { paperworkShortLabel, paperworkStatusLine } from '@/lib/paperworkLocation'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
   buildIvanDriverApp, flattenRows, sortFlatRows,
@@ -257,6 +258,7 @@ export function IvanDriverAppPage() {
               <SortHeader label="PRO #"    col="reference" align="left" sort={sort} onSort={setSort} />
               <SortHeader label="Customer" col="customer"  align="left" sort={sort} onSort={setSort} />
               <th style={{ ...TH, textAlign: 'left' }}>Route</th>
+              <th style={{ ...TH, textAlign: 'left' }}>Paperwork</th>
               <SortHeader label="Delivered" col="delivered" sort={sort} onSort={setSort} />
               <SortHeader label="POD"       col="pod"       sort={sort} onSort={setSort} />
               <SortHeader label="POD sent"  col="podSent"   sort={sort} onSort={setSort} />
@@ -277,6 +279,9 @@ export function IvanDriverAppPage() {
                   <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t2)' }}>
                     {r.load.originCity || '—'} → {r.load.destinationCity || '—'}
                   </td>
+                  <td style={{ ...TD, textAlign: 'left', color: paperworkShortLabel(r.load.paperworkLocation) === 'Missing' ? '#b91c1c' : paperworkShortLabel(r.load.paperworkLocation) ? 'var(--ds-t1)' : 'var(--ds-t3)' }} title={paperworkStatusLine(r.load.paperworkLocation) ?? 'Not filed yet'}>
+                    {paperworkShortLabel(r.load.paperworkLocation) ?? '—'}
+                  </td>
                   <td style={TD}>{apptLabel(r.load.deliveryAppt)}</td>
                   <td style={TD}><PodChip row={r} /></td>
                   <td style={{ ...TD, color: 'var(--ds-t3)' }}>{podSentLabel(r.podUploadedAt)}</td>
@@ -284,7 +289,7 @@ export function IvanDriverAppPage() {
               ))}
               {flat.filter((r) => r.podNotes).map((r) => (
                 <tr key={`${r.load.id}-why`}>
-                  <td colSpan={7} style={{ ...TD, textAlign: 'left', color: '#b91c1c', paddingTop: 0, whiteSpace: 'normal' }}>
+                  <td colSpan={8} style={{ ...TD, textAlign: 'left', color: '#b91c1c', paddingTop: 0, whiteSpace: 'normal' }}>
                     {r.reference}: {r.podNotes}
                   </td>
                 </tr>
