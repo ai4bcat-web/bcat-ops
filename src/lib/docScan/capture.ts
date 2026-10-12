@@ -82,6 +82,8 @@ export interface Readability {
   /** How much of the tonal range is used. Flat means a washed-out or very dark shot. */
   contrast: number
   ok: boolean
+  /** Usable but not great: shown as advice, never blocks. */
+  hint?: string | null
   /** What to tell the driver to do about it. Null when the page is fine. */
   problem: string | null
 }
@@ -128,13 +130,23 @@ export function assessReadability(frame: GrayFrame): Readability {
   const mean = n ? lapSum / n : 0
   const sharpness = n ? lapSqSum / n - mean * mean : 0
 
+  /*
+   * Two tiers. A page that genuinely cannot be read is refused (problem). A page that is
+   * merely soft or dim gets a hint and goes through: drivers were being made to retake
+   * perfectly usable PODs because the single bar sat too high, and a retake in a dark
+   * dock rarely comes out sharper than the first try.
+   */
   let problem: string | null = null
-  if (brightness < 40) problem = 'Too dark — move into better light.'
-  else if (brightness > 225) problem = 'Washed out — move out of direct glare.'
-  else if (contrast < 40) problem = 'Very flat — put the page on a darker surface.'
-  else if (sharpness < 50) problem = 'Blurry — hold still and tap to focus.'
+  let hint: string | null = null
+  if (brightness < 22) problem = 'Too dark — move into better light.'
+  else if (brightness > 243) problem = 'Washed out — move out of direct glare.'
+  else if (contrast < 20) problem = 'Very flat — put the page on a darker surface.'
+  else if (sharpness < 12) problem = 'Blurry — hold still and tap to focus.'
+  else if (brightness < 40) hint = 'A little dark — fine if you can read it.'
+  else if (contrast < 40) hint = 'A little flat — fine if you can read it.'
+  else if (sharpness < 50) hint = 'A little soft — retake if the numbers are not clear.'
 
-  return { sharpness, brightness, contrast, ok: problem === null, problem }
+  return { sharpness, brightness, contrast, ok: problem === null, problem, hint }
 }
 
 /**

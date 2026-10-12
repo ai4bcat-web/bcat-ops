@@ -355,6 +355,13 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
               )}
             </>
           ) : null}
+          {/* Usable but not great: say so, and let the driver decide. */}
+          {strict && !shot.readability.problem && shot.readability.hint ? (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-400/60 bg-amber-500/15 p-3 text-sm text-amber-100">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>{shot.readability.hint}</p>
+            </div>
+          ) : null}
           {/* The outline is a guess; the driver can see whether it was right. */}
           {!(strict && shot.readability.problem) && shot.cropped && shot.whole && (
             <button

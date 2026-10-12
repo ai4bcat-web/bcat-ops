@@ -121,6 +121,17 @@ describe('assessReadability', () => {
     expect(assessReadability({ data, width: w, height: h }).problem).toMatch(/blurry/i)
   })
 
+  it('lets a merely soft page through with a hint instead of refusing it', () => {
+    // Enough edges to be readable, not enough to be crisp: hint, not problem.
+    const w = 200, h = 200
+    const data = new Uint8Array(w * h)
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) data[y * w + x] = ((x >> 4) + (y >> 4)) % 2 ? 150 : 120
+    const r = assessReadability({ data, width: w, height: h })
+    expect(r.problem).toBeNull()
+    expect(r.ok).toBe(true)
+    expect(r.hint).toMatch(/soft|flat/i)
+  })
+
   it('passes a real page with ink on it', () => {
     const r = assessReadability(pageOnDarkBackground())
     expect(r.ok).toBe(true)
