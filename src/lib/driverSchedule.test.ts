@@ -48,3 +48,16 @@ describe('ownerOperatorWeek', () => {
     expect(w.loads[1].stopsDone).toBe(0)
   })
 })
+
+describe('inverted appointments', () => {
+  it('keeps a load’s pickup before its delivery and flags the bad time', () => {
+    const loads = [
+      load('14645', [stop({ id: 'cargill', name: 'Cargill Salt', appt: '2026-10-12T14:15:00Z' }), stop({ id: 'elgin', type: 'delivery', sequence: 1, name: 'Farm & Fleet', appt: '2026-10-12T13:00:00Z' })]),
+      load('14577', [stop({ id: 'cap', type: 'delivery', sequence: 1, name: 'Create-A-Pac', appt: '2026-10-12T12:00:00Z', departedAt: '2026-10-12T12:37:00Z' })]),
+    ]
+    const d = ivanDaySchedule(loads, 'd1', '2026-10-12')
+    expect(d.stops.map((s) => s.stop.id)).toEqual(['cap', 'cargill', 'elgin'])
+    expect(d.stops[2].apptWarning).toMatch(/before the pickup/)
+    expect(d.stops[1].apptWarning).toBeUndefined()
+  })
+})

@@ -31,6 +31,8 @@ export interface DayStop {
   load: Load
   stop: Stop
   state: StopState
+  /** The appointment is impossible as entered: a delivery before its pickup. */
+  apptWarning?: string | null
 }
 
 export interface DaySchedule {
@@ -50,7 +52,25 @@ export function ivanDaySchedule(loads: readonly Load[], driverId: string, today:
       stops.push({ load, stop, state: stopState(stop) })
     }
   }
-  stops.sort((a, b) => String(a.stop.appt ?? '').localeCompare(String(b.stop.appt ?? '')) || a.stop.sequence - b.stop.sequence)
+  // A load's stops stay in route order (pickup before its delivery) whatever the clock
+  // says: the office sometimes types a delivery time earlier than the pickup, and showing
+  // the delivery first makes one load read as two. Loads order by their earliest stop.
+  const anchor = new Map<string, string>()
+  for (const { load, stop } of stops) {
+    const t = String(stop.appt ?? '')
+    const cur = anchor.get(load.id)
+    if (cur === undefined || (t && t < cur)) anchor.set(load.id, t)
+  }
+  stops.sort((a, b) =>
+    (anchor.get(a.load.id) ?? '').localeCompare(anchor.get(b.load.id) ?? '') ||
+    a.load.id.localeCompare(b.load.id) ||
+    a.stop.sequence - b.stop.sequence)
+  for (const item of stops) {
+    const earlierPickup = stops.find((o) => o.load.id === item.load.id && o.stop.type === 'pickup' && o.stop.sequence < item.stop.sequence)
+    if (item.stop.type === 'delivery' && earlierPickup && item.stop.appt && earlierPickup.stop.appt && item.stop.appt < earlierPickup.stop.appt) {
+      item.apptWarning = 'Delivery appointment is before the pickup; check the times on the load'
+    }
+  }
   return {
     stops,
     done: stops.filter((s) => s.state === 'DONE').length,
