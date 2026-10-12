@@ -274,3 +274,38 @@ describe('invoicing by hand', () => {
     expect(screen.queryByTestId('otr-panel')).not.toBeInTheDocument()
   })
 })
+
+describe('Pending with OTR shows what OTR says', () => {
+  const pending = (id: string, otrStatus: string | null) =>
+    item({ id, proNumber: id, status: 'PENDING_WITH_OTR', otrInvoiceId: `inv-${id}`, otrStatus, otrStatusSyncedAt: otrStatus ? '2026-10-12T14:05:30Z' : null })
+
+  it("flags each row with OTR's own status and breaks the tab down by it", () => {
+    setup([pending('14564', '6'), pending('14550', '8'), pending('14604', '1'), pending('14599', '1'), pending('14700', null)])
+    fireEvent.click(screen.getByRole('button', { name: /Pending with OTR/ }))
+    expect(screen.getByLabelText('OTR status for PRO 14564: IssueClient')).toHaveTextContent('OTR: IssueClient ⚠')
+    expect(screen.getByLabelText('OTR status for PRO 14550: IssueFollowUp')).toBeInTheDocument()
+    expect(screen.getByLabelText('OTR status for PRO 14604: Pending')).toHaveTextContent('OTR: Pending')
+    expect(screen.getByLabelText('OTR status for PRO 14700: not reported yet')).toBeInTheDocument()
+    const chips = within(screen.getByRole('group', { name: 'OTR status' })).getAllByRole('button').map((b) => b.textContent)
+    // Attention first, then by count.
+    expect(chips).toEqual(['IssueClient ⚠1', 'IssueFollowUp ⚠1', 'Pending2', 'Awaiting OTR1'])
+  })
+
+  it('narrows the tab to one OTR status and back', () => {
+    setup([pending('14564', '6'), pending('14604', '1'), pending('14700', null)])
+    fireEvent.click(screen.getByRole('button', { name: /Pending with OTR/ }))
+    const group = screen.getByRole('group', { name: 'OTR status' })
+    fireEvent.click(within(group).getByRole('button', { name: /IssueClient/ }))
+    expect(screen.getByText('14564')).toBeInTheDocument()
+    expect(screen.queryByText('14604')).not.toBeInTheDocument()
+    expect(screen.queryByText('14700')).not.toBeInTheDocument()
+    fireEvent.click(within(group).getByRole('button', { name: /IssueClient/ }))
+    expect(screen.getByText('14604')).toBeInTheDocument()
+  })
+
+  it('does not put OTR chips on rows that are not with OTR', () => {
+    setup([item({ id: 'a', proNumber: 'A1', status: 'NEED_TO_FACTOR', otrStatus: '1' })])
+    expect(screen.queryByLabelText(/OTR status for PRO A1/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'OTR status' })).not.toBeInTheDocument()
+  })
+})

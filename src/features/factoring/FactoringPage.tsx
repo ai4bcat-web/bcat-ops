@@ -18,6 +18,7 @@ import { invoiceAmountOf, totalsByStatus, money } from './factoringTotals'
 import { FactoringDocCell } from './FactoringDocCell'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
+import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -314,6 +315,11 @@ function NoBuyFlag({ item }: { item: FactoringItem }) {
   )
 }
 
+/** OTR's label for the row, or the stand-in for one OTR has not reported on. */
+function otrLabelOf(item: FactoringItem): string {
+  return otrStatusMeta(item.otrStatus)?.label ?? OTR_UNREPORTED
+}
+
 function StatusBadge({ item }: { item: FactoringItem }) {
   const tone = STATUS_TONE[item.status]
   return (
@@ -332,6 +338,36 @@ function StatusBadge({ item }: { item: FactoringItem }) {
   )
 }
 
+/** The label the Pending tab's chips use for a row OTR has said nothing about yet. */
+const OTR_UNREPORTED = 'Awaiting OTR'
+
+/** What OTR's board says, in OTR's words — on the row, so the tab answers "where is it at OTR" without opening anything. */
+function OtrStatusFlag({ item }: { item: FactoringItem }) {
+  if (item.status !== 'PENDING_WITH_OTR') return null
+  const meta = otrStatusMeta(item.otrStatus)
+  const synced = item.otrStatusSyncedAt ? ` · synced ${new Date(item.otrStatusSyncedAt).toLocaleString()}` : ''
+  if (!meta) {
+    return (
+      <span
+        title={`Submitted to OTR; their board has not reported a status yet${synced}`}
+        aria-label={`OTR status for PRO ${item.proNumber}: not reported yet`}
+        style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', background: 'var(--ds-surface)', color: 'var(--ds-t3)', border: '1px dashed var(--ds-border)' }}
+      >
+        OTR: {OTR_UNREPORTED.toLowerCase()}
+      </span>
+    )
+  }
+  return (
+    <span
+      title={`${meta.needsAttention ? 'OTR or the broker is waiting on us' : "OTR's board"}${synced}`}
+      aria-label={`OTR status for PRO ${item.proNumber}: ${meta.label}`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', background: meta.tone.bg, color: meta.tone.fg, border: `1px solid ${meta.tone.border}` }}
+    >
+      OTR: {meta.label}{meta.needsAttention ? ' ⚠' : ''}
+    </span>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 export function FactoringPage() {
@@ -339,6 +375,8 @@ export function FactoringPage() {
   const { user } = useAuth()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterKey>('NEED_TO_FACTOR')
+  /** On the Pending tab: one of OTR's own labels (or OTR_UNREPORTED) to narrow to, or null for all. */
+  const [otrFilter, setOtrFilter] = useState<string | null>(null)
   /**
    * Which rows are open. Collapsed by default: the panel is an editor, and rendering one
    * per row turned a list of twenty PROs into twenty stacked forms. The row itself already
@@ -380,9 +418,28 @@ export function FactoringPage() {
       .filter((item) =>
         activeTab === 'ALL' ? item.status !== 'ARCHIVED' : item.status === activeTab,
       )
+      .filter((item) => activeTab !== 'PENDING_WITH_OTR' || !otrFilter || otrLabelOf(item) === otrFilter)
       .filter((item) => matchesSearch(item, search))
       .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
-  }, [items, activeTab, search])
+  }, [items, activeTab, search, otrFilter])
+
+  /*
+   * The Pending tab broken down by what OTR's board says — IssueClient, IssueFollowUp,
+   * Pending — so the rows OTR is waiting on us for are one click away. Counted over the
+   * whole tab, not the search, so the chips read the same whatever is typed.
+   */
+  const otrBreakdown = useMemo(() => {
+    const counts = new Map<string, { count: number; attention: boolean }>()
+    for (const item of items) {
+      if (item.status !== 'PENDING_WITH_OTR') continue
+      const label = otrLabelOf(item)
+      const cur = counts.get(label) ?? { count: 0, attention: otrStatusMeta(item.otrStatus)?.needsAttention ?? false }
+      counts.set(label, { ...cur, count: cur.count + 1 })
+    }
+    return [...counts.entries()]
+      .map(([label, v]) => ({ label, ...v }))
+      .sort((a, b) => Number(b.attention) - Number(a.attention) || b.count - a.count || a.label.localeCompare(b.label))
+  }, [items])
 
   /*
    * Ten at a time.
@@ -400,7 +457,7 @@ export function FactoringPage() {
    * this render reads — no second render, and no window where the table is empty because
    * the rows are behind you.
    */
-  const filterKey = `${activeTab}|${search}|${perPage}`
+  const filterKey = `${activeTab}|${otrFilter ?? ''}|${search}|${perPage}`
   const [pageState, setPageState] = useState({ key: filterKey, page: 1 })
   const page = pageState.key === filterKey ? pageState.page : 1
   const setPage = (next: number | ((p: number) => number)) =>
@@ -488,6 +545,37 @@ export function FactoringPage() {
               )
             })}
           </div>
+
+          {/* What OTR's board says, as chips: click one to see only those rows. */}
+          {activeTab === 'PENDING_WITH_OTR' && otrBreakdown.length > 0 && (
+            <div role="group" aria-label="OTR status" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OTR says</span>
+              {otrBreakdown.map(({ label, count, attention }) => {
+                const meta = label === OTR_UNREPORTED ? null : otrStatusMeta(label)
+                const on = otrFilter === label
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setOtrFilter(on ? null : label)}
+                    title={attention ? 'OTR or the broker is waiting on us' : undefined}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      padding: '4px 10px', fontSize: 11.5, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
+                      background: meta ? meta.tone.bg : 'var(--ds-surface)',
+                      color: meta ? meta.tone.fg : 'var(--ds-t3)',
+                      border: `${meta ? '1px solid' : '1px dashed'} ${meta ? meta.tone.border : 'var(--ds-border)'}`,
+                      outline: on ? '2px solid var(--ds-blue)' : 'none', outlineOffset: 1,
+                    }}
+                  >
+                    {label}{attention ? ' ⚠' : ''}
+                    <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 999, padding: '0 6px', background: 'rgba(0,0,0,0.08)' }}>{count}</span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
 
           {/* Search */}
           <div style={{ position: 'relative', flex: 1, minWidth: 220, maxWidth: 360 }}>
@@ -643,6 +731,7 @@ export function FactoringPage() {
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <StatusBadge item={item} />
+                          <OtrStatusFlag item={item} />
                           <NoBuyFlag item={item} />
                           {pendingIds.has(item.id) && (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
