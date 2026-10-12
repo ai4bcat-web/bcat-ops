@@ -210,9 +210,9 @@ export function TruckMapWidget() {
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
+          <div style={{ overflowX: 'auto', display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', minWidth: 780, gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               {([
                 ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
@@ -244,7 +244,7 @@ export function TruckMapWidget() {
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', gap: 12,
+                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', minWidth: 780, gap: 12,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,

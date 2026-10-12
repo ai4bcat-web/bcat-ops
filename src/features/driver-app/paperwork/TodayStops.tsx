@@ -386,7 +386,7 @@ export function TodayStops({
             </div>
 
             {/* The numbers the shipper and the office will ask for, in the order they ask. */}
-            <dl className="mt-3 grid grid-cols-4 gap-2 rounded-lg bg-background/50 px-3 py-2">
+            <dl className="mt-3 grid grid-cols-2 gap-2 rounded-lg bg-background/50 px-3 py-2 sm:grid-cols-4">
               <div>
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">BCAT PRO #</dt>
                 <dd className="text-base font-bold tabular-nums text-foreground">{load.reference}</dd>

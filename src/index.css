@@ -580,6 +580,10 @@ body {
   div[style*="min-width: 1240px"] {
     min-width: 0 !important;
   }
+  /* Dashboard fleet table: scrolls sideways in its card on a phone instead of forcing the page wide. */
+  div[style*="min-width: 780px"] {
+    min-width: 0 !important;
+  }
 
   /* Side-by-side panels stack rather than squeeze. */
   [style*="grid-template-columns: 1fr 1fr"],

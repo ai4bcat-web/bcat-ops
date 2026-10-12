@@ -45,7 +45,7 @@ export function RouteStrip({ progress, title, dark = false }: { progress: RouteP
           const here = s.state === 'IN_PROGRESS'
           const a = anchor(i)
           return (
-            <div key={s.id} style={{ position: 'absolute', left: `${left}%`, top: 27, transform: a.transform, display: 'grid', justifyItems: a.justifyItems, gap: 5, width: 150, maxWidth: n > 2 ? `${Math.max(90, 100 / (n - 1))}%` : 150 }} title={`${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}>
+            <div key={s.id} style={{ position: 'absolute', left: `${left}%`, top: 27, transform: a.transform, display: 'grid', justifyItems: a.justifyItems, gap: 5, width: n <= 2 ? '48%' : `${Math.max(22, Math.floor(92 / (n - 1)))}%`, maxWidth: 160 }} title={`${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}>
               <span style={{ width: 14, height: 14, borderRadius: 7, background: done || here ? fill : (dark ? '#141f36' : 'var(--ds-surface)'), border: `2px solid ${done || here ? fill : muted}`, boxShadow: here ? `0 0 0 4px ${dark ? 'rgba(30,168,243,0.3)' : 'var(--ds-blue-soft)'}` : 'none', boxSizing: 'border-box' }} />
               <span style={{ fontSize: 11, lineHeight: 1.25, color: done ? muted : text, fontWeight: here ? 700 : 500, textAlign: a.textAlign, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textDecoration: done ? 'line-through' : 'none' }}>
                 {`${s.type === 'delivery' ? 'DE' : 'PU'} · ${nice(s.label)}`}

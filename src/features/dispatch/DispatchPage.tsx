@@ -201,7 +201,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
 
   const thread = selected ? (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, background: 'var(--ds-bg)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--ds-surface)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--ds-border)', borderTop: `3px solid ${selectedColor?.border ?? 'transparent'}`, background: 'var(--ds-surface)', flexWrap: narrow ? 'wrap' : 'nowrap' }}>
         {narrow ? <Button variant="ghost" size="icon" className="size-8" aria-label="Back to conversations" onClick={() => d.select(null)}><ArrowLeft className="size-4" /></Button> : null}
         <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 18, background: selectedColor?.avatarBg, color: '#fff', fontSize: 13, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initialsOf(conversationTitle(selected))}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
@@ -221,7 +221,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             })()}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', ...(narrow ? { width: '100%', paddingLeft: 46 } : {}) }}>
           {configured ? <Button variant="outline" size="sm" className="h-8 gap-1.5" title="Text them who we are, the number to save, and a contact card" onClick={() => void act('send the intro', () => d.sendIntro(selected.id))}>
             <Send className="size-3.5" />{narrow ? '' : 'Intro'}
           </Button> : null}
