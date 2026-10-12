@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  deliveriesClosedByPod, closeDeliveries, applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
+  deliveriesClosedByPod, closeDeliveries, markAllStopsDone, applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
   lastStopEvent, pendingDeliveryEta, ETA_MIN_MINUTES,
 } from './stopEvents'
 import type { Load, Stop } from '../types'
@@ -136,6 +136,16 @@ describe('pendingDeliveryEta', () => {
     expect(pendingDeliveryEta({ ...l, stops: rolling } as Load)).toEqual({ etaAt: '2026-10-08T16:05:00.000Z', basis: 'motive' })
     const arrived = applyStopEvent(rolling, 'de', 'ARRIVED', '2026-10-08T16:00:00.000Z')
     expect(pendingDeliveryEta({ ...l, stops: arrived } as Load)).toBeNull()
+  })
+})
+
+describe('markAllStopsDone', () => {
+  it('stamps every open stop and leaves finished ones as they were', () => {
+    const pu = { id: 'pu', type: 'pickup', sequence: 0, arrivedAt: '2026-10-09T13:00:00Z', departedAt: '2026-10-09T14:00:00Z' } as unknown as Stop
+    const de = { id: 'de', type: 'delivery', sequence: 1 } as unknown as Stop
+    const next = markAllStopsDone([pu, de], '2026-10-12T15:00:00Z')
+    expect(next[0]).toBe(pu)
+    expect(next[1]).toMatchObject({ arrivedAt: '2026-10-12T15:00:00Z', departedAt: '2026-10-12T15:00:00Z' })
   })
 })
 

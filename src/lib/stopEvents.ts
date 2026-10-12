@@ -50,6 +50,15 @@ export function deliveriesClosedByPod(load: Load, stops: Stop[], driverId: strin
   return arrived.length ? arrived : mine
 }
 
+/**
+ * The office's record that a shipment was delivered: every stop stamped arrived and
+ * departed where it was not already. For an owner operator who delivered and has not
+ * sent the POD yet — the POD stays owed; this only stops dispatch showing them under way.
+ */
+export function markAllStopsDone(stops: Stop[], atIso: string): Stop[] {
+  return stops.map((s) => (s.departedAt ? s : { ...s, arrivedAt: s.arrivedAt ?? atIso, departedAt: atIso }))
+}
+
 /** The stops with those deliveries stamped arrived (if not already) and departed at `atIso`. */
 export function closeDeliveries(stops: Stop[], closing: readonly Pick<Stop, 'id'>[], atIso: string): Stop[] {
   const ids = new Set(closing.map((s) => s.id))

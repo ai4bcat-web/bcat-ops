@@ -39,7 +39,7 @@ function Progress({ done, total, color }: { done: number; total: number; color: 
  * The driver's schedule beside their thread: Ivan's drivers get today's stops and how far
  * through them they are; owner operators get the week's shipments and their state.
  */
-export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now, hasPod }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number; hasPod?: (load: Load) => boolean }) {
+export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now, hasPod, onMarkDelivered }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number; hasPod?: (load: Load) => boolean; /** The office's record that an owner operator delivered a shipment the POD has not come in for. */ onMarkDelivered?: (load: Load) => void }) {
   const [open, setOpen] = useState(true)
   const ivan = driverProgramOf(driver) === 'PAPERWORK'
   const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
@@ -105,7 +105,19 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
                     <span style={{ fontWeight: 600 }}>PRO {load.aljexId || '—'}</span> {laneLabel(load)}
                     <span style={{ color: 'var(--ds-t3)' }}> · {state === 'COMPLETED' ? 'delivered' : state === 'IN_PROGRESS' ? `under way · ${stopsDone}/${stopsTotal} stops` : 'not started'}</span>
                   </span>
-                  <span style={{ color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{day(startsAt)}</span>
+                  <span style={{ color: 'var(--ds-t3)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {day(startsAt)}
+                    {state !== 'COMPLETED' && onMarkDelivered ? (
+                      <button
+                        type="button"
+                        onClick={() => onMarkDelivered(load)}
+                        title="Record that this shipment was delivered. The driver still owes the POD."
+                        style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: '1px solid var(--ds-border)', borderRadius: 6, padding: '1px 6px', cursor: 'pointer' }}
+                      >
+                        Mark delivered
+                      </button>
+                    ) : null}
+                  </span>
                 </div>
               ))}
             </>

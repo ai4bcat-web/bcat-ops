@@ -410,3 +410,57 @@ export function AssignDialog({ conversation, fromDriver, loadStaff, onClose, onS
     </Dialog>
   )
 }
+
+// ── File an attachment as a POD ──────────────────────────────────────────────
+
+interface FileAsPodProps {
+  driverName: string
+  /** The driver's loads, newest first; the one under way first of all. */
+  loads: Array<{ id: string; pro: string; lane: string; when: string | null; delivered: boolean }>
+  attachment: { name?: string; contentType: string }
+  onClose: () => void
+  onPick: (loadId: string) => Promise<void>
+}
+
+/**
+ * A POD a driver texted in is still the POD. Picking the load here files the attachment
+ * exactly as a staff upload from the load drawer would, so factoring, the loads board
+ * and the driver's own app all see it.
+ */
+export function FileAsPodDialog({ driverName, loads, attachment, onClose, onPick }: FileAsPodProps) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const go = async (loadId: string) => {
+    setBusy(loadId)
+    try { await onPick(loadId); onClose() } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not file the POD') } finally { setBusy(null) }
+  }
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>File as POD</DialogTitle>
+          <DialogDescription>
+            Which of {driverName}&rsquo;s loads is this {attachment.contentType === 'application/pdf' ? 'PDF' : 'picture'} the POD for? It is filed the same as a POD sent from the driver app.
+          </DialogDescription>
+        </DialogHeader>
+        {loads.length === 0 ? (
+          <p style={{ fontSize: 13, color: 'var(--ds-t3)' }}>No loads on file for {driverName}. Put them on a load first, then file the POD from the load drawer.</p>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, maxHeight: 280, overflowY: 'auto', border: '1px solid var(--ds-border)', borderRadius: 8 }}>
+            {loads.map((l) => (
+              <li key={l.id}>
+                <button type="button" disabled={busy !== null} onClick={() => void go(l.id)}
+                  style={{ width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', gap: 8, padding: '8px 10px', background: 'none', border: 'none', borderBottom: '1px solid var(--ds-border-soft)', cursor: 'pointer', fontSize: 13, color: l.delivered ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><strong>PRO {l.pro}</strong> {l.lane}{l.delivered ? ' · delivered' : ''}</span>
+                  <span style={{ color: 'var(--ds-t3)', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 6 }}>{l.when ?? ''}{busy === l.id ? <Loader2 className="size-3.5 animate-spin" /> : null}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy !== null}>Cancel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}

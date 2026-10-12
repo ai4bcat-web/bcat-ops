@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { formatDuration, MAX_SMS_BODY, type DispatchConversation, type DispatchMessage } from '@/lib/dispatch'
 import { groupByDay, bubbleTime, deliveryLabel, staffName, senderLabel, acceptFiles, ACCEPTED_MEDIA } from './dispatchUi'
 import { MediaThumb, VoicemailPlayer, PendingFilePreview } from './MediaThumb'
+import type { DispatchMedia } from '@/lib/dispatch'
 
 interface Props {
   conversation: DispatchConversation
@@ -23,6 +24,8 @@ interface Props {
   onNote: (body: string) => Promise<void>
   /** Send the intro text (number to save + contact card). */
   onIntro?: () => Promise<void>
+  /** File an inbound attachment as the POD for one of the driver's loads. */
+  onFileAsPod?: (media: DispatchMedia) => void
 }
 
 const TONE_COLOR: Record<string, string> = { ok: 'var(--ds-green)', bad: 'var(--ds-red)', pending: 'var(--ds-t3)', muted: 'var(--ds-t3)' }
@@ -54,7 +57,7 @@ function StatusRow({ m }: { m: DispatchMessage }) {
   )
 }
 
-function Bubble({ m, me, accent, getUrl }: { m: DispatchMessage; me: string | null; accent?: { border: string; bg: string }; getUrl: (key: string) => Promise<string> }) {
+function Bubble({ m, me, accent, getUrl, onFileAsPod }: { m: DispatchMessage; me: string | null; accent?: { border: string; bg: string }; getUrl: (key: string) => Promise<string>; onFileAsPod?: (media: DispatchMedia) => void }) {
   const mine = m.direction === 'OUT'
   const note = m.kind === 'NOTE'
   const vm = m.kind === 'VOICEMAIL'
@@ -89,7 +92,17 @@ function Bubble({ m, me, accent, getUrl }: { m: DispatchMessage; me: string | nu
         {!vm && m.body ? <div>{m.body}</div> : null}
         {m.media?.length ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: m.body ? 6 : 0 }}>
-            {m.media.map((md) => <MediaThumb key={md.key} media={md} getUrl={getUrl} />)}
+            {m.media.map((md) => (
+              <div key={md.key}>
+                <MediaThumb media={md} getUrl={getUrl} />
+                {/* A POD texted in is still a POD: one click files it on the load. */}
+                {m.direction === 'IN' && onFileAsPod && (md.contentType.startsWith('image/') || md.contentType === 'application/pdf') ? (
+                  <button type="button" onClick={() => onFileAsPod(md)} style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: 'var(--ds-blue)', background: 'none', border: '1px solid var(--ds-border)', borderRadius: 6, padding: '2px 8px', cursor: 'pointer' }}>
+                    File as POD…
+                  </button>
+                ) : null}
+              </div>
+            ))}
           </div>
         ) : null}
       </div>
@@ -101,7 +114,7 @@ function Bubble({ m, me, accent, getUrl }: { m: DispatchMessage; me: string | nu
   )
 }
 
-export function Thread({ conversation, messages, loading, now, canSend, me, accent, getUrl, onSend, onNote, onIntro }: Props) {
+export function Thread({ conversation, messages, loading, now, canSend, me, accent, getUrl, onSend, onNote, onIntro, onFileAsPod }: Props) {
   const [body, setBody] = useState('')
   const [files, setFiles] = useState<File[]>([])
   const [mode, setMode] = useState<'text' | 'note'>('text')
@@ -179,7 +192,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>
               <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{g.label}</span>
             </div>
-            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : m.kind === 'STATUS' ? <StatusRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} accent={accent} getUrl={getUrl} />)}
+            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : m.kind === 'STATUS' ? <StatusRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} accent={accent} getUrl={getUrl} onFileAsPod={onFileAsPod} />)}
           </div>
         ))}
       </div>

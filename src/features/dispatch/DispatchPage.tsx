@@ -15,7 +15,13 @@ import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
 import { Thread } from './Thread'
-import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard, AssignDialog } from './DispatchDialogs'
+import { NewMessageDialog, LinkNumberDialog, DispatchSettingsDialog, SlackChannelWizard, AssignDialog, FileAsPodDialog } from './DispatchDialogs'
+import { driverIsOnLoad, laneLabel } from '@/lib/driverJourney'
+import { getStops } from '@/lib/stops'
+import { markAllStopsDone } from '@/lib/stopEvents'
+import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
+import type { DispatchMedia } from '@/lib/dispatch'
+import type { Load } from '@/types'
 import { staffName } from './dispatchUi'
 import { FilterDialog } from './FilterDialog'
 import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilters } from './dispatchFilters'
@@ -58,10 +64,14 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t) }, [])
   // Where each truck is, for the location line under a driver: refreshed every minute.
   const loads = useAppStore((s) => s.loads)
+  const updateLoad = useAppStore((s) => s.updateLoad)
+  /** An inbound attachment being filed as a POD, while the load picker is open. */
+  const [filingPod, setFilingPod] = useState<DispatchMedia | null>(null)
   const equipment = useAppStore((s) => s.equipment)
   // Which loads have a POD on file: for owner operators that is what "delivered" means.
   const paperwork = useLoadPaperwork(loads)
   const hasPod = (load: (typeof loads)[number]) => (paperwork.index ? loadHasPod(paperwork.index, load) : false)
+
   const [locations, setLocations] = useState<TruckLocation[]>([])
   useEffect(() => {
     let alive = true
@@ -110,6 +120,44 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
 
   const selected = d.conversations.find((c) => c.id === d.selectedId) ?? null
   const selectedDriver = selected?.driverId ? drivers.find((x) => x.id === selected.driverId) ?? null : null
+
+  /*
+   * The office's record that an owner operator delivered. They do not tap stops, so until
+   * the POD arrives nothing else moves the shipment off "under way"; this stamps the stops
+   * and leaves a note in the thread. The POD is still owed — the loads board keeps saying so.
+   */
+  const markDelivered = async (load: Load) => {
+    const pro = load.aljexId?.trim() || load.id.slice(0, 8)
+    if (!window.confirm(`Mark PRO ${pro} delivered?\n\nThis records the delivery for dispatch. The driver still owes the POD.`)) return
+    try {
+      await updateLoad(load.id, { stops: markAllStopsDone(getStops(load), new Date().toISOString()) })
+      if (selected) await d.addNote(selected.id, `Marked PRO ${pro} delivered — POD still owed`).catch(() => undefined)
+      toast.success(`PRO ${pro} marked delivered`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not mark the load delivered')
+    }
+  }
+
+  /** A POD texted in, filed on the load exactly as a staff upload from the load drawer. */
+  const fileAsPod = async (media: DispatchMedia, loadId: string) => {
+    if (!selectedDriver) return
+    const load = loads.find((l) => l.id === loadId)
+    const url = await d.mediaUrl(media.key)
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Could not read the attachment')
+    const blob = await res.blob()
+    const ext = media.contentType === 'application/pdf' ? 'pdf' : (media.contentType.split('/')[1] || 'jpg')
+    const file = new File([blob], media.name ?? `pod-${load?.aljexId?.trim() || loadId.slice(0, 8)}.${ext}`, { type: media.contentType })
+    await staffUploadDriverDoc({
+      driver: { id: selectedDriver.id, name: selectedDriver.name, email: selectedDriver.email ?? null },
+      kind: 'POD', files: [file], submittedByEmail: me,
+      referenceNumber: load?.aljexId?.trim() || undefined, loadId,
+      note: 'Texted to dispatch',
+    })
+    paperwork.refresh()
+    if (selected) await d.addNote(selected.id, `Filed the attachment as the POD for PRO ${load?.aljexId?.trim() || '—'}`).catch(() => undefined)
+    toast.success(`POD filed on PRO ${load?.aljexId?.trim() || '—'}`)
+  }
   const selectedColor = selected ? conversationColor(selected, drivers) : null
   const selectedDispatchers = dispatchersOf(selectedDriver)
   const selectedWhere = selected ? whereaboutsLine(whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime())) : null
@@ -268,7 +316,16 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
           <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
         </div>
       ) : null}
-      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} hasPod={hasPod} /> : null}
+      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} hasPod={hasPod} onMarkDelivered={(load) => void markDelivered(load)} /> : null}
+      {filingPod && selectedDriver ? (
+        <FileAsPodDialog
+          driverName={selectedDriver.name}
+          attachment={filingPod}
+          loads={driverLoadChoices(loads as Load[], selectedDriver.id, hasPod)}
+          onClose={() => setFilingPod(null)}
+          onPick={(loadId) => fileAsPod(filingPod, loadId)}
+        />
+      ) : null}
       <Thread
         key={selected.id}
         conversation={selected}
@@ -282,6 +339,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
         onSend={(body, files) => d.send({ conversationId: selected.id, body, files })}
         onNote={(body) => d.addNote(selected.id, body)}
         onIntro={() => d.sendIntro(selected.id)}
+        onFileAsPod={selectedDriver ? (media) => setFilingPod(media) : undefined}
       />
     </div>
   ) : (
@@ -328,4 +386,14 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
       {settingsOpen ? <DispatchSettingsDialog onClose={() => setSettingsOpen(false)} dispatchNumber={d.status?.dispatchNumber ?? null} load={d.getSettings} save={d.saveSettings} /> : null}
     </div>
   )
+}
+
+/** The driver's loads for the POD picker: under way first, then newest; delivered ones last and greyed. */
+function driverLoadChoices(loads: Load[], driverId: string, hasPod: (load: Load) => boolean) {
+  const latestAppt = (l: Load) => getStops(l).map((s) => s.appt ?? '').sort().pop() ?? ''
+  return loads
+    .filter((l) => driverIsOnLoad(l, driverId))
+    .map((l) => ({ id: l.id, pro: l.aljexId?.trim() || '—', lane: laneLabel(l), when: latestAppt(l) ? latestAppt(l).slice(0, 10) : null, delivered: hasPod(l), raw: latestAppt(l) }))
+    .sort((a, b) => Number(a.delivered) - Number(b.delivered) || b.raw.localeCompare(a.raw))
+    .slice(0, 12)
 }
