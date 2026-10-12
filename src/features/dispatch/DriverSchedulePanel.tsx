@@ -3,7 +3,9 @@ import { ChevronDown, ChevronRight, CheckCircle2, CircleDot, Circle } from 'luci
 import type { Driver, Load } from '@/types'
 import { driverProgramOf } from '@/lib/driverProgram'
 import { ivanDaySchedule, ownerOperatorWeek, type StopState, type LoadState } from '@/lib/driverSchedule'
-import { laneLabel } from '@/lib/driverJourney'
+import { laneLabel, currentLoadForDriver } from '@/lib/driverJourney'
+import { routeProgress, type LatLng } from '@/lib/routeProgress'
+import { RouteStrip } from './RouteStrip'
 
 function StateIcon({ state }: { state: StopState | LoadState }) {
   if (state === 'DONE' || state === 'COMPLETED') return <CheckCircle2 className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} />
@@ -37,9 +39,13 @@ function Progress({ done, total, color }: { done: number; total: number; color: 
  * The driver's schedule beside their thread: Ivan's drivers get today's stops and how far
  * through them they are; owner operators get the week's shipments and their state.
  */
-export function DriverSchedulePanel({ driver, loads, today, weekStart }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string }) {
+export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number }) {
   const [open, setOpen] = useState(true)
   const ivan = driverProgramOf(driver) === 'PAPERWORK'
+  // The load under way: Ivan's drivers place the truck by their stop taps plus position;
+  // owner operators do not tap, so position alone decides.
+  const current = currentLoadForDriver(loads as Load[], driver.id, now)
+  const route = current ? routeProgress(current, truck ?? null, { useTaps: ivan }) : null
   const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
   const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart)
   const title = ivan ? 'Today' : 'This week'
@@ -56,6 +62,7 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart }: { drive
       </button>
       {open ? (
         <div style={{ padding: '0 14px 10px', display: 'grid', gap: 6 }}>
+          {route && current ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--ds-border-soft)', marginBottom: 4 }}><RouteStrip progress={route} title={`Current route · PRO ${current.aljexId || '—'}`} /></div> : null}
           {ivan && dayPlan ? (
             <>
               {dayPlan.total ? <Progress done={dayPlan.done} total={dayPlan.total} color="var(--ds-green)" /> : null}

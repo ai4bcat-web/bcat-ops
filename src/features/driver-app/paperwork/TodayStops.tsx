@@ -18,6 +18,8 @@
  * delivery the driver is rolling toward, the ETA the server worked out from the truck.
  */
 import { paperworkStatusLine } from '@/lib/paperworkLocation'
+import { RouteStrip } from '@/features/dispatch/RouteStrip'
+import { routeFromStops } from '@/lib/routeProgress'
 import { EndOfDayPaperworkDialog, TrailerDialog, type WhereItem } from './PaperworkGates'
 import { useDriverProfile } from '../useDriverProgram'
 import { useState } from 'react'
@@ -323,7 +325,16 @@ export function TodayStops({
     )
   }
 
+  // Today's route as a strip: where they are between the stops, from their own taps.
+  const route = routeFromStops(items.map((it) => ({ id: it.stop.id, type: it.stop.type, name: it.stop.name, city: it.stop.city, appt: it.stop.appt, etaAt: it.stop.etaAt ?? null, arrivedAt: it.stop.arrivedAt, departedAt: it.stop.departedAt })))
+
   return (
+    <>
+    {route ? (
+      <div className="mb-3 rounded-xl border border-border bg-card px-3 py-3">
+        <RouteStrip progress={route} title="Today's route" dark />
+      </div>
+    ) : null}
     <ul className="flex flex-col gap-3">
       {items.map((item) => {
         const { load, stop } = item
@@ -495,5 +506,6 @@ export function TodayStops({
         />
       )}
     </ul>
+    </>
   )
 }

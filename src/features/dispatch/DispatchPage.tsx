@@ -68,6 +68,12 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
     const driver = c.driverId ? drivers.find((x) => x.id === c.driverId) : null
     return whereaboutsLine(whereaboutsOf(driver, loads, equipment, locations, now.getTime()))
   }
+  // The truck's last fix for a driver, for the route strip.
+  const truckFixOf = (driver: typeof drivers[number]) => {
+    const eq = driver.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
+    const loc = eq ? locations.filter((l) => l.truckId === eq.id || l.unitNumber === String(eq.unitNumber)).sort((a, b) => (a.locatedAt < b.locatedAt ? 1 : -1))[0] : undefined
+    return loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon) ? { lat: loc.lat, lng: loc.lon } : null
+  }
   // The driver's last app status (on site, departed, delivered, POD), shown on every row.
   const statusOf = (c: DispatchConversation): string | null => {
     const driver = c.driverId ? drivers.find((x) => x.id === c.driverId) : null
@@ -247,7 +253,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
           <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
         </div>
       ) : null}
-      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} /> : null}
+      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} /> : null}
       <Thread
         key={selected.id}
         conversation={selected}
