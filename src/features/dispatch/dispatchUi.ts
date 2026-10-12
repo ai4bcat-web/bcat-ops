@@ -100,3 +100,25 @@ export function acceptFiles(files: readonly File[], existing = 0): { ok: File[];
   }
   return { ok, rejected }
 }
+
+/**
+ * The files in a paste or a drop. A screenshot on the clipboard arrives as an item with
+ * no useful name ("image.png" at best), so each gets a name the thread and the driver's
+ * phone can show. Text on the clipboard yields nothing here and pastes as text as usual.
+ */
+export function filesFromTransfer(items: ArrayLike<{ kind: string; type: string; getAsFile(): File | null }> | null | undefined, at = new Date()): File[] {
+  const out: File[] = []
+  if (!items) return out
+  const stamp = at.toISOString().replace(/[-:]/g, '').slice(0, 15)
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i]
+    if (it.kind !== 'file') continue
+    const f = it.getAsFile()
+    if (!f) continue
+    const named = /^(image\.(png|jpe?g|gif|webp)|blob|)$/i.test(f.name) || !f.name
+    if (!named) { out.push(f); continue }
+    const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+    out.push(new File([f], `pasted-${stamp}-${out.length + 1}.${ext}`, { type: f.type, lastModified: f.lastModified }))
+  }
+  return out
+}

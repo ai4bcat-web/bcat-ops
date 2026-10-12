@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { listTime, dayLabel, groupByDay, deliveryLabel, staffName, senderLabel, acceptFiles } from './dispatchUi'
+import { listTime, dayLabel, groupByDay, deliveryLabel, staffName, senderLabel, acceptFiles, filesFromTransfer } from './dispatchUi'
 import type { DispatchMessage } from '@/lib/dispatch'
 
 const now = new Date('2026-10-10T20:00:00.000Z')   // 3:00 PM Chicago, a Saturday
@@ -56,5 +56,20 @@ describe('misc', () => {
     expect(acceptFiles(six).ok).toHaveLength(5)
     expect(acceptFiles(six).rejected[0]).toContain('limit 5')
     expect(acceptFiles([f('big.jpg', 'image/jpeg', 6 * 1024 * 1024)]).rejected[0]).toContain('over 5 MB')
+  })
+})
+
+describe('filesFromTransfer', () => {
+  const item = (file: File | null, kind = 'file') => ({ kind, type: file?.type ?? 'text/plain', getAsFile: () => file })
+  it('names a pasted screenshot and keeps a real file name', () => {
+    const shot = new File(['x'], 'image.png', { type: 'image/png' })
+    const real = new File(['x'], 'bol-14578.jpg', { type: 'image/jpeg' })
+    const out = filesFromTransfer([item(shot), item(null, 'string'), item(real)], new Date('2026-10-12T15:04:05Z'))
+    expect(out.map((f) => f.name)).toEqual(['pasted-20261012T150405-1.png', 'bol-14578.jpg'])
+    expect(out[0].type).toBe('image/png')
+  })
+  it('yields nothing for a text paste', () => {
+    expect(filesFromTransfer([item(null, 'string')])).toEqual([])
+    expect(filesFromTransfer(null)).toEqual([])
   })
 })

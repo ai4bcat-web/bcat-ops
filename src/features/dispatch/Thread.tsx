@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ClipboardEvent, type DragEvent } from 'react'
 import { Loader2, Paperclip, Send, Phone, PhoneMissed, PhoneIncoming, Voicemail, StickyNote, MapPin } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { formatDuration, MAX_SMS_BODY, type DispatchConversation, type DispatchMessage } from '@/lib/dispatch'
-import { groupByDay, bubbleTime, deliveryLabel, staffName, senderLabel, acceptFiles, ACCEPTED_MEDIA } from './dispatchUi'
+import { groupByDay, bubbleTime, deliveryLabel, staffName, senderLabel, acceptFiles, filesFromTransfer, ACCEPTED_MEDIA } from './dispatchUi'
 import { MediaThumb, VoicemailPlayer, PendingFilePreview } from './MediaThumb'
 import type { DispatchMedia } from '@/lib/dispatch'
 
@@ -156,11 +156,25 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit() }
   }
 
-  const pick = (list: FileList | null) => {
+  const pick = (list: FileList | File[] | null) => {
     if (!list) return
     const r = acceptFiles(Array.from(list), files.length)
     if (r.rejected.length) toast.error(`Skipped: ${r.rejected.join(', ')}`)
     setFiles((f) => [...f, ...r.ok])
+  }
+
+  // A screenshot pasted or dropped into the composer attaches like a picked file; text pastes as text.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = filesFromTransfer(e.clipboardData?.items)
+    if (!pasted.length) return
+    e.preventDefault()
+    pick(pasted)
+  }
+  const onDrop = (e: DragEvent<HTMLFormElement>) => {
+    const dropped = filesFromTransfer(e.dataTransfer?.items)
+    if (!dropped.length) return
+    e.preventDefault()
+    pick(dropped)
   }
 
   const groups = groupByDay(messages, now)
@@ -197,7 +211,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
         ))}
       </div>
 
-      <form onSubmit={submit} style={{ borderTop: '1px solid var(--ds-border)', padding: '10px 12px', background: 'var(--ds-surface)' }}>
+      <form onDrop={onDrop} onDragOver={(e) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault() }} onSubmit={submit} style={{ borderTop: '1px solid var(--ds-border)', padding: '10px 12px', background: 'var(--ds-surface)' }}>
         {files.length ? (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
             {files.map((f, i) => <PendingFilePreview key={`${f.name}-${f.size}-${i}`} file={f} onRemove={() => setFiles((x) => x.filter((_, j) => j !== i))} />)}
@@ -223,6 +237,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
             value={body}
             onChange={(e) => setBody(e.target.value)}
             onKeyDown={onKey}
+            onPaste={onPaste}
             placeholder={mode === 'note' ? 'Internal note (the driver never sees this)' : canSend ? `Text ${conversation.driverName ?? 'this number'}…` : 'Dispatch is not connected to Twilio yet'}
             disabled={mode === 'text' && !canSend}
             rows={2}
@@ -234,7 +249,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
           </Button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--ds-t3)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
-          <span>{mode === 'note' ? 'Notes stay in BCAT Ops.' : 'Enter sends · Shift+Enter for a new line'}</span>
+          <span>{mode === 'note' ? 'Notes stay in BCAT Ops.' : 'Enter sends · Shift+Enter for a new line · paste or drop a picture to attach it'}</span>
           {mode === 'text' && body.length > 140 ? <span style={{ color: body.length > MAX_SMS_BODY ? 'var(--ds-red)' : undefined }}>{body.length}/{MAX_SMS_BODY}</span> : null}
         </div>
       </form>
