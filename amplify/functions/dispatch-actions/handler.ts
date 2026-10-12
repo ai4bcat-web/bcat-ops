@@ -292,6 +292,15 @@ async function startConversation(input: Record<string, unknown>, deps: Deps): Pr
     if (existing.status === 'ARCHIVED') return store.updateConversation(existing.id, { set: { status: 'OPEN' } })
     return existing
   }
+  // The driver already has a thread on another number (they text from a phone the file
+  // does not list): keep talking there rather than opening a second, empty Jason.
+  if (driver) {
+    const theirs = (await store.listConversations()).filter((c) => c.driverId === driver.id).sort((a, b) => String(b.lastMessageAt ?? '').localeCompare(String(a.lastMessageAt ?? '')))[0]
+    if (theirs) {
+      if (theirs.status === 'ARCHIVED') return store.updateConversation(theirs.id, { set: { status: 'OPEN' } })
+      return theirs
+    }
+  }
   return store.createConversation({ phone, driverId: driver?.id ?? null, driverName: driver?.name ?? null, displayName: driver ? null : (str(input.displayName, MAX_LABEL) || null), assignedTo: dispatchersOf(driver)[0] ?? null })
 }
 
