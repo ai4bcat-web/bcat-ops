@@ -10,10 +10,11 @@ import type { TodayStop } from './daySheet'
 /*
  * The two paperwork questions around the clock.
  *
- * End of day, before clocking out: for each load picked up today, where did the BOL go?
+ * End of day, before clocking out: any paperwork from today, and where did each one go?
+ * One screen, every load on it, a tap per load, and a skip for a day with none — answered
+ * standing in a yard with a phone, so it has to be quick.
  * Start of day, before clocking in: for each load being delivered today that was picked
- * up earlier, does the driver have the paperwork in hand? Both are asked one load at a
- * time with big buttons, because this is answered standing in a yard with a phone.
+ * up earlier, does the driver have the paperwork in hand? Asked one load at a time.
  */
 
 export interface WhereItem { load: PaperworkLoad; pickupName: string | null }
@@ -28,25 +29,32 @@ interface WhereProps {
 }
 
 export function EndOfDayPaperworkDialog({ items, truckUnit, onClose, onDone }: WhereProps) {
-  const [index, setIndex] = useState(0)
+  type Choice = { kind: Exclude<PaperworkPlace, 'UNKNOWN'>; unit: string }
+  // One answer per load, chosen with a tap; nothing is saved until "Save & clock out".
+  const [choices, setChoices] = useState<Record<string, Choice | undefined>>({})
   const [truck, setTruck] = useState(truckUnit ?? '')
-  const [trailer, setTrailer] = useState(items[0]?.load.trailerNumber ?? '')
+  const [trailers, setTrailers] = useState<Record<string, string>>(() => Object.fromEntries(items.map((it) => [it.load.id, it.load.trailerNumber ?? ''])))
   const [busy, setBusy] = useState(false)
-  const item = items[index]
-  if (!item) return null
 
-  const answer = async (kind: Exclude<PaperworkPlace, 'UNKNOWN'>) => {
-    const unit = kind === 'TRUCK' ? truck.trim() : kind === 'TRAILER' ? trailer.trim() : null
-    if (kind !== 'SHED' && !unit) { toast.error(kind === 'TRUCK' ? 'Which truck? Enter the unit number.' : 'Which trailer? Enter its number.'); return }
+  const pick = (loadId: string, kind: Choice['kind']) =>
+    setChoices((c) => (c[loadId]?.kind === kind ? { ...c, [loadId]: undefined } : { ...c, [loadId]: { kind, unit: '' } }))
+
+  const chosen = items.filter((it) => choices[it.load.id])
+
+  const save = async () => {
+    for (const it of chosen) {
+      const kind = choices[it.load.id]!.kind
+      const unit = kind === 'TRUCK' ? truck.trim() : kind === 'TRAILER' ? (trailers[it.load.id] ?? '').trim() : ''
+      if (kind !== 'SHED' && !unit) { toast.error(kind === 'TRUCK' ? 'Which truck? Enter the unit number.' : `Which trailer for PRO ${it.load.reference}? Enter its number.`); return }
+    }
     setBusy(true)
     try {
-      await setPaperworkLocation(item.load.id, kind, unit)
-      if (index + 1 < items.length) {
-        setIndex(index + 1)
-        setTrailer(items[index + 1].load.trailerNumber ?? '')
-      } else {
-        onDone()
-      }
+      await Promise.all(chosen.map((it) => {
+        const kind = choices[it.load.id]!.kind
+        const unit = kind === 'TRUCK' ? truck.trim() : kind === 'TRAILER' ? (trailers[it.load.id] ?? '').trim() : null
+        return setPaperworkLocation(it.load.id, kind, unit)
+      }))
+      onDone()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save')
     } finally {
@@ -54,37 +62,63 @@ export function EndOfDayPaperworkDialog({ items, truckUnit, onClose, onDone }: W
     }
   }
 
-  const unitInput = (id: string, value: string, onChange: (v: string) => void, placeholder: string) => (
-    <input id={id} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} inputMode="numeric"
-      onClick={(e) => e.stopPropagation()}
-      className="h-10 w-24 rounded-md border border-input bg-background px-2 text-center font-mono text-base text-foreground" />
-  )
+  const chip = (loadId: string, kind: Choice['kind'], icon: React.ReactNode, label: string) => {
+    const on = choices[loadId]?.kind === kind
+    return (
+      <button type="button" disabled={busy} onClick={() => pick(loadId, kind)} aria-pressed={on}
+        className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold ${on ? 'border-primary bg-primary/15 text-foreground' : 'border-border bg-card text-muted-foreground'}`}>
+        {icon} {label}
+      </button>
+    )
+  }
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Where is the paperwork?</DialogTitle>
+          <DialogTitle>Any paperwork from today?</DialogTitle>
           <DialogDescription className="text-muted-foreground">
-            PRO {item.load.reference}{item.pickupName ? ` · picked up at ${item.pickupName}` : ''}{items.length > 1 ? ` · ${index + 1} of ${items.length}` : ''}
+            Tap where you put each one. Skip if you have none.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <button type="button" disabled={busy} onClick={() => void answer('TRUCK')}
-            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-left text-base font-semibold hover:border-primary">
-            <span className="flex items-center gap-3"><Truck className="h-6 w-6 text-primary" /> Passenger seat of truck</span>
-            {unitInput('paperwork-truck', truck, setTruck, 'unit')}
-          </button>
-          <button type="button" disabled={busy} onClick={() => void answer('SHED')}
-            className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 text-left text-base font-semibold hover:border-primary">
-            <Warehouse className="h-6 w-6 text-primary" /> In the shed
-          </button>
-          <button type="button" disabled={busy} onClick={() => void answer('TRAILER')}
-            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-left text-base font-semibold hover:border-primary">
-            <span className="flex items-center gap-3"><Container className="h-6 w-6 text-primary" /> In the trailer</span>
-            {unitInput('paperwork-trailer', trailer, setTrailer, 'trailer #')}
-          </button>
-          {busy ? <div className="flex justify-center"><Loader2 className="h-5 w-5 animate-spin" /></div> : null}
+          {/* The truck is one answer for the whole day: a driver sits in one cab. */}
+          <label htmlFor="paperwork-truck" className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+            <span className="flex items-center gap-2"><Truck className="h-4 w-4 text-primary" /> Your truck</span>
+            <input id="paperwork-truck" value={truck} onChange={(e) => setTruck(e.target.value)} placeholder="unit" inputMode="numeric"
+              className="h-9 w-20 rounded-md border border-input bg-background px-2 text-center font-mono text-base text-foreground" />
+          </label>
+          <ul className="grid gap-2">
+            {items.map((it) => {
+              const c = choices[it.load.id]
+              return (
+                <li key={it.load.id} className="rounded-xl border border-border bg-card p-3">
+                  <div className="mb-2 text-sm">
+                    <span className="font-bold text-foreground">PRO {it.load.reference}</span>
+                    {it.pickupName ? <span className="text-muted-foreground"> · {it.pickupName}</span> : null}
+                    {c ? <Check className="ml-2 inline h-4 w-4 text-primary" aria-label="answered" /> : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {chip(it.load.id, 'TRUCK', <Truck className="h-4 w-4" />, 'Seat')}
+                    {chip(it.load.id, 'SHED', <Warehouse className="h-4 w-4" />, 'Shed')}
+                    {chip(it.load.id, 'TRAILER', <Container className="h-4 w-4" />, 'Trailer')}
+                    {c?.kind === 'TRAILER' ? (
+                      <input aria-label={`Trailer number for PRO ${it.load.reference}`} value={trailers[it.load.id] ?? ''} onChange={(e) => setTrailers((t) => ({ ...t, [it.load.id]: e.target.value }))} placeholder="trailer #" inputMode="numeric" autoFocus
+                        className="h-9 w-24 rounded-md border border-input bg-background px-2 text-center font-mono text-base text-foreground" />
+                    ) : null}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button type="button" variant="outline" className="h-12" disabled={busy} onClick={onDone}>
+              No paperwork today
+            </Button>
+            <Button type="button" className="h-12 font-bold" disabled={busy || chosen.length === 0} onClick={() => void save()}>
+              {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : `Save${chosen.length > 1 ? ` ${chosen.length}` : ''} & clock out`}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
