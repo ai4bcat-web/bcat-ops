@@ -126,3 +126,38 @@ export function ownerOperatorWeek(loads: readonly Load[], driverId: string, week
     upcoming: rows.filter((r) => r.state === 'UPCOMING').length,
   }
 }
+
+export interface DriverStopEvent {
+  event: 'ARRIVED' | 'DEPARTED'
+  stopType: Stop['type']
+  stopName: string | null
+  at: string
+  /** The words dispatch uses: On site at pickup / Departed pickup / On site at delivery / Delivered. */
+  label: string
+  load: Load
+}
+
+/**
+ * The most recent facility event THIS driver reported, across their loads. A load's other
+ * stops may belong to another driver (Eulalio picks up, Jason delivers), and his delivery
+ * must never read as hers.
+ */
+export function lastStopEventForDriver(loads: readonly Load[], driverId: string): DriverStopEvent | null {
+  let best: DriverStopEvent | null = null
+  for (const load of loads) {
+    for (const s of getStops(load)) {
+      if (s.driverId !== driverId) continue
+      const candidates: Array<['ARRIVED' | 'DEPARTED', string | null | undefined]> = [['ARRIVED', s.arrivedAt], ['DEPARTED', s.departedAt]]
+      for (const [event, at] of candidates) {
+        if (!at || Number.isNaN(Date.parse(at))) continue
+        if (best && at <= best.at) continue
+        const delivery = s.type === 'delivery'
+        best = {
+          event, stopType: s.type, stopName: s.name?.trim() || null, at, load,
+          label: event === 'ARRIVED' ? (delivery ? 'On site at delivery' : 'On site at pickup') : (delivery ? 'Delivered' : 'Departed pickup'),
+        }
+      }
+    }
+  }
+  return best
+}

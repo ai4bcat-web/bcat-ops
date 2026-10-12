@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ivanDaySchedule, ownerOperatorWeek, stopState, loadState } from './driverSchedule'
+import { ivanDaySchedule, ownerOperatorWeek, stopState, loadState, lastStopEventForDriver } from './driverSchedule'
 import type { Load } from '@/types'
 
 const stop = (over: Record<string, unknown>) => ({ id: Math.random().toString(), type: 'pickup', sequence: 0, driverId: 'd1', appt: '2026-10-11T14:00:00Z', ...over })
@@ -59,5 +59,18 @@ describe('inverted appointments', () => {
     expect(d.stops.map((s) => s.stop.id)).toEqual(['cap', 'cargill', 'elgin'])
     expect(d.stops[2].apptWarning).toMatch(/before the pickup/)
     expect(d.stops[1].apptWarning).toBeUndefined()
+  })
+})
+
+describe('lastStopEventForDriver', () => {
+  it('never attributes another driver’s stop to this one', () => {
+    const shared = load('14577', [
+      stop({ id: 'pu', driverId: 'eulalio', appt: '2026-10-09T17:00:00Z' }),
+      stop({ id: 'de', type: 'delivery', sequence: 1, driverId: 'jason', arrivedAt: '2026-10-12T11:55:00Z', departedAt: '2026-10-12T12:37:00Z' }),
+    ])
+    expect(lastStopEventForDriver([shared], 'eulalio')).toBeNull()
+    expect(lastStopEventForDriver([shared], 'jason')?.label).toBe('Delivered')
+    const mine = load('14578', [stop({ id: 'p2', driverId: 'eulalio', arrivedAt: '2026-10-12T10:39:00Z' })])
+    expect(lastStopEventForDriver([shared, mine], 'eulalio')).toMatchObject({ label: 'On site at pickup', at: '2026-10-12T10:39:00Z' })
   })
 })

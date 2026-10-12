@@ -7,7 +7,8 @@ import type { Driver, Load } from '@/types'
 import type { Equipment } from '@/types/equipment'
 import type { TruckLocation } from '@/lib/apiClient'
 import { currentLoadForDriver } from '@/lib/driverJourney'
-import { lastStopEvent, pendingDeliveryEta } from '@/lib/stopEvents'
+import { pendingDeliveryEta } from '@/lib/stopEvents'
+import { lastStopEventForDriver } from '@/lib/driverSchedule'
 
 export interface Whereabouts {
   /** "Schaumburg, IL", or null when the truck has no fix. */
@@ -43,7 +44,9 @@ export function whereaboutsOf(
   const truck = driver.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
   const loc = truck ? locations.filter((l) => l.truckId === truck.id || l.unitNumber === String(truck.unitNumber)).sort((a, b) => (a.locatedAt < b.locatedAt ? 1 : -1))[0] : undefined
   const load = currentLoadForDriver(loads as Load[], driver.id, now)
-  const ev = load ? lastStopEvent(load) : null
+  // Only this driver's own stops: a load they share with another driver must not lend
+  // them the other driver's delivery.
+  const ev = lastStopEventForDriver(loads, driver.id)
   const pending = load ? pendingDeliveryEta(load) : null
   let etaStop: string | null = null
   if (load && pending) {
