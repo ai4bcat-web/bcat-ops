@@ -61,3 +61,14 @@ describe('paperworkShortLabel', () => {
     expect(paperworkShortLabel(null)).toBeNull()
   })
 })
+
+describe('clock-out does not ask about a load already delivered', () => {
+  const pickup = (over: Record<string, unknown> = {}) => ({ type: 'pickup', date: '2026-10-12', yours: true, name: 'Batory', arrivedAt: '2026-10-12T14:00:00Z', departedAt: '2026-10-12T15:00:00Z', ...over })
+  const delivery = (over: Record<string, unknown> = {}) => ({ type: 'delivery', date: '2026-10-12', yours: true, name: 'Eagle Foods', ...over })
+  it('asks about a pickup still on the truck, not one delivered or with a POD in', () => {
+    const open = { id: 'a', reference: '1', stops: [pickup(), delivery()] }
+    const delivered = { id: 'b', reference: '2', stops: [pickup(), delivery({ arrivedAt: '2026-10-12T16:00:00Z', departedAt: '2026-10-12T16:30:00Z' })] }
+    const podIn = { id: 'c', reference: '3', pod: { present: true }, stops: [pickup(), delivery()] }
+    expect(pickupsNeedingPaperworkLocation([open, delivered, podIn], '2026-10-12').map((x) => x.load.id)).toEqual(['a'])
+  })
+})

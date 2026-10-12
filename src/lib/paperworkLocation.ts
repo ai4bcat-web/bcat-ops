@@ -84,7 +84,16 @@ export interface PickupLike {
   reference: string
   trailerNumber?: string | null
   paperworkLocation?: PaperworkLocation | null
+  /** A POD on file means the trip is done and the paperwork went with it. */
+  pod?: { present: boolean } | null
   stops: Array<{ type: string; date: string | null; yours: boolean; name: string | null; arrivedAt?: string | null; departedAt?: string | null }>
+}
+
+/** Delivered: every delivery stop departed, or a POD on file. Nothing about its paperwork is still a question. */
+export function tripDelivered(load: Pick<PickupLike, 'pod' | 'stops'>): boolean {
+  if (load.pod?.present) return true
+  const deliveries = load.stops.filter((s) => s.type.toLowerCase() === 'delivery')
+  return deliveries.length > 0 && deliveries.every((s) => !!s.departedAt)
 }
 
 /**
@@ -110,12 +119,15 @@ export function deliveriesNeedingPaperworkConfirm<L extends PickupLike>(loads: r
 /**
  * The loads this driver picked up today that still have no paperwork answer. "Picked up"
  * means a pickup of theirs dated today, or one they actually arrived at today whatever
- * the appointment said.
+ * the appointment said. A load already delivered (POD in, or the delivery departed) is
+ * not asked about: its paperwork went to the consignee, and asking where it is kept
+ * drivers from clocking out.
  */
 export function pickupsNeedingPaperworkLocation<L extends PickupLike>(loads: readonly L[], today: string): Array<{ load: L; pickupName: string | null }> {
   const out: Array<{ load: L; pickupName: string | null }> = []
   for (const load of loads) {
     if (load.paperworkLocation) continue
+    if (tripDelivered(load)) continue
     const pickup = load.stops.find((s) => s.type.toLowerCase() === 'pickup' && s.yours && (s.date === today || (s.arrivedAt ?? '').startsWith(today) || (s.departedAt ?? '').startsWith(today)))
     if (pickup) out.push({ load, pickupName: pickup.name })
   }
