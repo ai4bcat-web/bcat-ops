@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
+  deliveriesClosedByPod, closeDeliveries, applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
   lastStopEvent, pendingDeliveryEta, ETA_MIN_MINUTES,
 } from './stopEvents'
 import type { Load, Stop } from '../types'
@@ -136,5 +136,28 @@ describe('pendingDeliveryEta', () => {
     expect(pendingDeliveryEta({ ...l, stops: rolling } as Load)).toEqual({ etaAt: '2026-10-08T16:05:00.000Z', basis: 'motive' })
     const arrived = applyStopEvent(rolling, 'de', 'ARRIVED', '2026-10-08T16:00:00.000Z')
     expect(pendingDeliveryEta({ ...l, stops: arrived } as Load)).toBeNull()
+  })
+})
+
+describe('a POD closes the delivery', () => {
+  const load = { id: 'l1', pickupDriverId: null, deliveryDriverId: null } as unknown as Load
+  const pu = { id: 'pu', type: 'pickup', sequence: 0, driverId: 'd1', departedAt: '2026-10-12T13:34:00Z' } as unknown as Stop
+  it('closes the delivery the driver is on site at, stamping departed', () => {
+    const de = { id: 'de', type: 'delivery', sequence: 1, driverId: 'd1', arrivedAt: '2026-10-12T13:35:12Z' } as unknown as Stop
+    const closing = deliveriesClosedByPod(load, [pu, de], 'd1')
+    expect(closing.map((s) => s.id)).toEqual(['de'])
+    const next = closeDeliveries([pu, de], closing, '2026-10-12T15:02:00Z')
+    expect(next[1]).toMatchObject({ arrivedAt: '2026-10-12T13:35:12Z', departedAt: '2026-10-12T15:02:00Z' })
+    expect(next[0]).toBe(pu)
+  })
+  it('falls back to the delivery the driver is set for, and stamps arrival too', () => {
+    const de = { id: 'de', type: 'delivery', sequence: 1, driverId: 'd1' } as unknown as Stop
+    const next = closeDeliveries([pu, de], deliveriesClosedByPod(load, [pu, de], 'd1'), '2026-10-12T15:02:00Z')
+    expect(next[1]).toMatchObject({ arrivedAt: '2026-10-12T15:02:00Z', departedAt: '2026-10-12T15:02:00Z' })
+  })
+  it("leaves another driver's delivery and an already-departed one alone", () => {
+    const other = { id: 'x', type: 'delivery', sequence: 1, driverId: 'd2' } as unknown as Stop
+    const done = { id: 'y', type: 'delivery', sequence: 2, driverId: 'd1', departedAt: '2026-10-12T12:00:00Z' } as unknown as Stop
+    expect(deliveriesClosedByPod(load, [pu, other, done], 'd1')).toEqual([])
   })
 })

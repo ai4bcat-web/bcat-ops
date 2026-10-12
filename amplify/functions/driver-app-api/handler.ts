@@ -81,6 +81,7 @@ import { chicagoDateStr } from '../../../src/lib/date'
 import { locateCity } from '../../../src/lib/eldRadius'
 import {
   applyStopEvent, estimateEta, planDeliveryEta, withEta, type LatLng, type StopEvent,
+  deliveriesClosedByPod, closeDeliveries,
 } from '../../../src/lib/stopEvents'
 import {
   buildPaperworkLoad,
@@ -1420,6 +1421,62 @@ export function pickOpenPodSubmission<T extends { referenceNumber?: string | nul
  * Deliberately forgiving: a PRO that matches nothing leaves the submission unattached, as
  * before, because a POD with nowhere to go must still be kept.
  */
+/** The POD pages that belong to a load: by the submission's link, else by PRO. */
+function podDocsForLoad(
+  docs: ReadonlyArray<PodDocRow & { submissionId?: string | null }>,
+  subById: ReadonlyMap<string, { loadId?: string | null; referenceNumber?: string | null }>,
+  load: PaperworkLoadLike,
+): PodDocRow[] {
+  const pro = normalizePro(referenceOf(load))
+  return docs.filter((d) => {
+    const sub = d.submissionId ? subById.get(d.submissionId) : undefined
+    if (!sub) return false
+    if (sub.loadId && sub.loadId === load.id) return true
+    return !!pro && normalizePro(sub.referenceNumber ?? '') === pro
+  })
+}
+
+/** Whether this driver has a POD page on file for the load. See deliveriesClosedByPod. */
+async function driverHasPodFor(driverId: string, load: PaperworkLoadLike): Promise<boolean> {
+  const [docs, subs] = await Promise.all([
+    scan<PodDocRow & { submissionId?: string | null }>(DRIVER_SUBMISSION_DOC_TABLE, 'driverId = :did', {}, { ':did': driverId }),
+    scan<{ id: string; loadId?: string | null; referenceNumber?: string | null }>(DRIVER_SUBMISSION_TABLE, 'driverId = :did', {}, { ':did': driverId }),
+  ])
+  const subById = new Map(subs.map((x) => [x.id, x]))
+  return podDocsForLoad(docs, subById, load).some((d) => (d.kind ?? '').toUpperCase() === 'POD')
+}
+
+/**
+ * The POD just landed: stamp the driver's open delivery on that load as delivered and
+ * tell dispatch. Best-effort — the POD is already stored; a failure here costs a tap.
+ */
+async function closeDeliveryOnPod(driver: DriverRow, driverId: string, sub: Pick<DriverSubmissionRow, 'loadId' | 'referenceNumber' | 'stopLabel'>, now: string): Promise<void> {
+  const pro = normalizePro(sub.referenceNumber ?? null) ?? ''
+  const tail = `${sub.stopLabel ? ` · ${sub.stopLabel}` : ''}${pro ? ` · PRO ${pro}` : ''}`
+  try {
+    const loadId = sub.loadId || (await resolveLoadIdByPro(sub.referenceNumber ?? null))
+    const load = loadId ? ((await ddb.send(new GetCommand({ TableName: LOAD_TABLE_NAME, Key: { id: loadId } }))).Item as (PaperworkLoadLike & { updatedAt?: string }) | undefined) : undefined
+    if (!load || !driverIsOnPaperworkLoad(load, driverId)) { await postDriverStatus(driver, `POD sent${tail}`, now); return }
+    const stops = getStops(load as unknown as Load) as Stop[]
+    const closing = deliveriesClosedByPod(load as unknown as Load, stops, driverId)
+    if (closing.length === 0) { await postDriverStatus(driver, `POD sent${tail}`, now); return }
+    await ddb.send(new UpdateCommand({
+      TableName: LOAD_TABLE_NAME,
+      Key: { id: load.id },
+      UpdateExpression: 'SET stops = :stops, updatedAt = :now, updatedBy = :by',
+      ConditionExpression: load.updatedAt ? 'updatedAt = :prev' : 'attribute_not_exists(updatedAt)',
+      ExpressionAttributeValues: { ':stops': closeDeliveries(stops, closing, now), ':now': now, ':by': driver.email ?? driverId, ...(load.updatedAt ? { ':prev': load.updatedAt } : {}) },
+    }))
+    const place = [closing[0].name?.trim(), closing[0].city?.trim()].filter(Boolean).join(', ')
+    const loadPro = (load as { aljexId?: string | null }).aljexId?.trim()
+    console.log('[driver-app-api] delivery closed by POD', { driverId, loadId: load.id, stops: closing.map((c) => c.id) })
+    await postDriverStatus(driver, `Delivered${place ? ` · ${place}` : ''}${loadPro ? ` · PRO ${loadPro}` : pro ? ` · PRO ${pro}` : ''} · POD sent`, now)
+  } catch (err) {
+    console.warn('[driver-app-api] could not close the delivery on POD', String(err))
+    await postDriverStatus(driver, `POD sent${tail}`, now)
+  }
+}
+
 async function resolveLoadIdByPro(referenceNumber: string | null): Promise<string | null> {
   const want = normalizePro(referenceNumber)
   if (!want || !LOAD_TABLE_NAME) return null
@@ -2673,15 +2730,7 @@ export const handler = async (event: FnUrlEvent) => {
 
       // A doc knows its submission; the submission knows the load. Join once.
       const subById = new Map(subs.map((x) => [x.id, x]))
-      function docsForLoad(load: PaperworkLoadLike): PodDocRow[] {
-        const pro = normalizePro(referenceOf(load))
-        return docs.filter((d) => {
-          const sub = d.submissionId ? subById.get(d.submissionId) : undefined
-          if (!sub) return false
-          if (sub.loadId && sub.loadId === load.id) return true
-          return !!pro && normalizePro(sub.referenceNumber ?? '') === pro
-        })
-      }
+      const docsForLoad = (load: PaperworkLoadLike): PodDocRow[] => podDocsForLoad(docs, subById, load)
 
       const built = mine
         .map((l) => buildPaperworkLoad(l, docsForLoad(l), times.filter((t) => t.loadId === l.id), driverId))
@@ -2801,6 +2850,11 @@ export const handler = async (event: FnUrlEvent) => {
       const stops = getStops(load as unknown as Load) as Stop[]
       const stop = stops.find((s) => s.id === stopId)
       if (!stop) return reply(404, { error: 'stop not found on this load' })
+      // A delivery is delivered when the POD is on file (see deliveriesClosedByPod); the
+      // app sends the driver to the scanner instead, so this is the backstop for a stale bundle.
+      if (ev === 'DEPARTED' && stop.type === 'delivery' && !(await driverHasPodFor(driverId, load))) {
+        return reply(409, { error: 'Send the POD first — the delivery is marked delivered once the POD is on file.', needsPod: true })
+      }
       // Leaving a pickup: Ivan's local drivers must say which trailer carries the load.
       const leavingPickup = ev === 'DEPARTED' && stop.type === 'pickup'
       // The driver row alone decides here (fleet / ivanApp); the app, which also knows the pay
@@ -3225,9 +3279,8 @@ export const handler = async (event: FnUrlEvent) => {
       }
       const result = await completeSubmission(driverId, id, kind)
       if (kind === 'POD' && !result.error) {
-        const sub = (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as { stopLabel?: string | null; proNumber?: string | null; aljexId?: string | null } | undefined
-        const pro = (sub?.proNumber ?? sub?.aljexId ?? '').trim()
-        await postDriverStatus(driver, `POD sent${sub?.stopLabel ? ` · ${sub.stopLabel}` : ''}${pro ? ` · PRO ${pro}` : ''}`, nowIso())
+        const sub = (await ddb.send(new GetCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: { id } }))).Item as DriverSubmissionRow | undefined
+        await closeDeliveryOnPod(driver, driverId, sub ?? { loadId: null, referenceNumber: null, stopLabel: null }, nowIso())
       }
       return reply(200, result.error ? { ok: true, error: result.error } : { ok: true })
     }

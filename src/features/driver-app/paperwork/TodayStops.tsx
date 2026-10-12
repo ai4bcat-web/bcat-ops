@@ -210,15 +210,19 @@ function StatusPill({ tone, children }: { tone: 'sky' | 'emerald' | 'slate'; chi
 /**
  * The stop's status and the one button that moves it on.
  *   pickup:    On site at pickup → Departed
- *   delivery:  On site at delivery → Delivered (which also opens the POD scanner)
+ *   delivery:  On site at delivery → Delivered — send POD, which opens the scanner; the
+ *              POD landing is what marks the stop delivered (see deliveriesClosedByPod).
+ *              With a POD already on file the button marks it directly.
  */
 function StopProgress({
   item,
   busy,
+  podPresent,
   onEvent,
 }: {
   item: TodayStop
   busy: boolean
+  podPresent: boolean
   onEvent: (event: StopEvent) => void
 }) {
   const { stop } = item
@@ -241,9 +245,12 @@ function StopProgress({
           On site since {clock(stop.arrivedAt)}
         </StatusPill>
         <Button className="h-14 w-full gap-2 text-base font-bold" disabled={busy} onClick={() => onEvent('DEPARTED')}>
-          {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : delivery ? <Camera className="h-5 w-5" aria-hidden="true" /> : <LogOut className="h-5 w-5" aria-hidden="true" />}
-          {delivery ? 'Delivered — send POD' : 'Departed'}
+          {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : delivery && !podPresent ? <Camera className="h-5 w-5" aria-hidden="true" /> : <LogOut className="h-5 w-5" aria-hidden="true" />}
+          {delivery ? (podPresent ? 'Delivered' : 'Delivered — send POD') : 'Departed'}
         </Button>
+        {delivery && !podPresent && (
+          <p className="text-xs text-muted-foreground">The stop is marked delivered once the POD is sent.</p>
+        )}
       </div>
     )
   }
@@ -306,11 +313,7 @@ export function TodayStops({
         if (target) patch(target, { etaAt: res.eta.etaAt, etaBasis: res.eta.basis })
       }
       onChange()
-      if (event === 'DEPARTED' && isDelivery(item.stop)) {
-        onSendPod(item.load)
-      } else {
-        toast.success(event === 'ARRIVED' ? 'Marked on site' : 'Marked departed')
-      }
+      toast.success(event === 'ARRIVED' ? 'Marked on site' : isDelivery(item.stop) ? 'Marked delivered' : 'Marked departed')
     } catch (err) {
       toast.error(errorText(err))
     } finally {
@@ -432,7 +435,16 @@ export function TodayStops({
               onAdded={(note) => patch(item, { location: item.stop.location ? { ...item.stop.location, driverNotes: [...(item.stop.location.driverNotes ?? []), note] } : null })}
             />
 
-            <StopProgress item={item} busy={busyKey === keyOf(item)} onEvent={(ev) => { if (ev === 'DEPARTED' && !delivery && trailerRequired) setTrailerFor(item); else void sendEvent(item, ev) }} />
+            <StopProgress
+              item={item}
+              busy={busyKey === keyOf(item)}
+              podPresent={load.pod.present}
+              onEvent={(ev) => {
+                if (ev === 'DEPARTED' && delivery && !load.pod.present) onSendPod(load)   // the POD marks it delivered
+                else if (ev === 'DEPARTED' && !delivery && trailerRequired) setTrailerFor(item)
+                else void sendEvent(item, ev)
+              }}
+            />
 
             {/* Where the paperwork is: answered at clock-out for a pickup, confirmed at clock-in for a delivery. */}
             {(paperworkStatusLine(load.paperworkLocation) || (!delivery && stop.departedAt)) && (

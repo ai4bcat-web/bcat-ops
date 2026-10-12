@@ -272,10 +272,9 @@ describe("today's sheet", () => {
     await waitFor(() => expect(screen.getByText(/Departed 10:40 AM/)).toBeTruthy())
   })
 
-  it('Delivered sends the event and opens the POD scanner for that load', async () => {
+  it('Delivered opens the POD scanner without marking the stop — the POD landing marks it', async () => {
     const { fireEvent } = await import('@testing-library/react')
     const { Routes, Route, useLocation } = await import('react-router-dom')
-    api.recordStopEvent.mockResolvedValueOnce({ at: '2026-10-07T19:10:00.000Z', eta: null })
     todayWeek([load({ stops: [stop('st-de', 'delivery', '2026-10-07', { arrivedAt: '2026-10-07T18:30:00.000Z' })] })])
     const Scanner = () => { const loc = useLocation(); return <div>SCANNER {loc.search}</div> }
     render(
@@ -288,10 +287,22 @@ describe("today's sheet", () => {
     )
     await waitFor(() => expect(screen.getByRole('button', { name: /Delivered — send POD/ })).toBeTruthy(), { timeout: 5000 })
     expect(screen.queryByRole('button', { name: /On site at delivery/ })).toBeNull()
+    expect(screen.getByText(/marked delivered once the POD is sent/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /Delivered — send POD/ }))
-    await waitFor(() => expect(api.recordStopEvent).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-de', event: 'DEPARTED' }))
-    // Straight into the scanner, on this load.
+    // Straight into the scanner, on this load — and nothing stamped yet.
     await waitFor(() => expect(screen.getByText(/SCANNER/).textContent).toMatch(/kind=pod.*ref=14538.*loadId=load-1/))
+    expect(api.recordStopEvent).not.toHaveBeenCalled()
+  })
+
+  it('with the POD already on file, Delivered marks the stop directly', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.recordStopEvent.mockResolvedValueOnce({ at: '2026-10-07T19:10:00.000Z', eta: null })
+    todayWeek([load({ stops: [stop('st-de', 'delivery', '2026-10-07', { arrivedAt: '2026-10-07T18:30:00.000Z' })], pod: { present: true, pages: 1, legibility: 'OK', notes: null } })])
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Delivered$/ })).toBeTruthy(), { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: /^Delivered$/ }))
+    await waitFor(() => expect(api.recordStopEvent).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-de', event: 'DEPARTED' }))
+    await waitFor(() => expect(screen.getByText(/Delivered 2:10 PM/)).toBeTruthy())
   })
 
   it('shows the ETA on a delivery the driver is rolling toward, and says where it came from', async () => {

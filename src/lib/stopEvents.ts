@@ -32,6 +32,30 @@ export const ETA_MIN_MINUTES = 10
 
 export interface LatLng { lat: number; lng: number }
 
+/**
+ * A delivery is complete when the POD is on file, not when the driver taps a button:
+ * dispatch, the loads board and the driver's pay all read "Delivered" off the stop, and a
+ * tap six seconds after "on site" (it has happened) made a load look delivered that was
+ * still waiting for a door. So the driver's tap at a delivery opens the POD scanner, and
+ * the POD landing is what stamps the stop.
+ *
+ * Which delivery stops the POD closes: the driver's open deliveries on the load — the
+ * ones they have arrived at, or failing that the ones they are set to deliver. Any stop
+ * that already shows departed is left alone.
+ */
+export function deliveriesClosedByPod(load: Load, stops: Stop[], driverId: string): Stop[] {
+  const open = stops.filter((s) => s.type === 'delivery' && !s.departedAt)
+  const mine = open.filter((s) => delivererOf(load, stops, s) === driverId)
+  const arrived = mine.filter((s) => !!s.arrivedAt)
+  return arrived.length ? arrived : mine
+}
+
+/** The stops with those deliveries stamped arrived (if not already) and departed at `atIso`. */
+export function closeDeliveries(stops: Stop[], closing: readonly Pick<Stop, 'id'>[], atIso: string): Stop[] {
+  const ids = new Set(closing.map((s) => s.id))
+  return stops.map((s) => (ids.has(s.id) ? { ...s, arrivedAt: s.arrivedAt ?? atIso, departedAt: atIso } : s))
+}
+
 /** The stops with one event stamped. Arrival is left alone on a departure: see loadStatus. */
 export function applyStopEvent(stops: Stop[], stopId: string, event: StopEvent, atIso: string): Stop[] {
   return stops.map((s) => {
