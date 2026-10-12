@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { placeOf, whereaboutsLine, whereaboutsOf, statusLine } from './driverWhereabouts'
+import { placeOf, whereaboutsLine, whereaboutsOf, statusLine, trailerOnDriver, unitLine } from './driverWhereabouts'
 import type { Driver, Load } from '@/types'
 import type { TruckLocation } from '@/lib/apiClient'
 
@@ -29,7 +29,27 @@ describe('whereabouts', () => {
   it('says nothing for a conversation with no driver, and marks a stale fix', () => {
     expect(whereaboutsOf(null, [], [], [], 0)).toBeNull()
     expect(whereaboutsLine(null)).toBeNull()
-    expect(whereaboutsLine({ place: 'Gary, IN', fixAgeMin: 600, lastEvent: null, eta: null })).toBe('Gary, IN (10h ago)')
+    expect(whereaboutsLine({ place: 'Gary, IN', fixAgeMin: 600, lastEvent: null, eta: null, truck: null, trailer: null })).toBe('Gary, IN (10h ago)')
+  })
+  it('names the truck on file and the trailer riding with the load under way', () => {
+    const driver = { id: 'd1', assignedTruckId: 'eq-1', assignedTrailerId: 'tr-9' } as Driver
+    const equipment = [{ id: 'eq-1', unitNumber: '3114' }, { id: 'tr-9', unitNumber: '9001' }]
+    const hauling = { id: 'l1', trailerNumber: '5302', stops: [
+      { id: 'p', type: 'pickup', sequence: 1, driverId: 'd1', departedAt: '2026-10-12T14:00:00Z' },
+      { id: 'd', type: 'delivery', sequence: 2, driverId: 'd1' },
+    ] } as unknown as Load
+    const delivered = { id: 'l0', trailerNumber: '4471', stops: [
+      { id: 'p', type: 'pickup', sequence: 1, driverId: 'd1', departedAt: '2026-10-12T12:00:00Z' },
+      { id: 'd', type: 'delivery', sequence: 2, driverId: 'd1', departedAt: '2026-10-12T13:30:00Z' },
+    ] } as unknown as Load
+    expect(trailerOnDriver(driver, [delivered, hauling], equipment)).toBe('5302')
+    // Nothing under way: the trailer on their file.
+    expect(trailerOnDriver(driver, [delivered], equipment)).toBe('9001')
+    expect(trailerOnDriver({ id: 'd1', assignedTrailerId: null }, [delivered], equipment)).toBeNull()
+    const w = whereaboutsOf(driver, [hauling], equipment, [], Date.parse('2026-10-12T15:00:00Z'))
+    expect(unitLine(w)).toBe('Truck 3114 · Trailer 5302')
+    expect(unitLine({ place: null, fixAgeMin: null, lastEvent: null, eta: null, truck: null, trailer: '5302' })).toBe('Trailer 5302')
+    expect(unitLine(null)).toBeNull()
   })
 })
 

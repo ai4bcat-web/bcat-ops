@@ -10,7 +10,7 @@ import { useDispatch } from '@/hooks/useDispatch'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useAppStore } from '@/store/useAppStore'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
-import { whereaboutsOf, whereaboutsLine, statusLine } from './driverWhereabouts'
+import { whereaboutsOf, whereaboutsLine, statusLine, unitLine } from './driverWhereabouts'
 import { cn } from '@/lib/utils'
 import { conversationTitle, prettyPhone, sortConversations, conversationMatches, dispatchersOf, type DispatchConversation } from '@/lib/dispatch'
 import { ConversationList } from './ConversationList'
@@ -160,7 +160,9 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   }
   const selectedColor = selected ? conversationColor(selected, drivers) : null
   const selectedDispatchers = dispatchersOf(selectedDriver)
-  const selectedWhere = selected ? whereaboutsLine(whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime())) : null
+  const selectedWhereabouts = selected ? whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime()) : null
+  const selectedWhere = whereaboutsLine(selectedWhereabouts)
+  const selectedUnits = unitLine(selectedWhereabouts)
   const selectedStatus = selected ? statusLine(selected, whereaboutsOf(selectedDriver, loads, equipment, locations, now.getTime())) : null
 
   // Opening a conversation with unread messages marks it read for the whole team.
@@ -275,6 +277,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
               ) : <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t2)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 6px' }}>{unitKindLabel(unitTypeOf(selectedDriver))}</span>
             ) : null}
             {selectedStatus ? <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
+            {selectedUnits ? <span title="The truck on their file and the trailer on the load they are hauling" style={{ color: 'var(--ds-t2)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>🚛 {selectedUnits}</span> : null}
             {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {(() => {
               const primary = selected.assignedTo || selectedDispatchers[0] || null

@@ -19,6 +19,35 @@ export interface Whereabouts {
   lastEvent: { label: string; at: string } | null
   /** When they are due at the next delivery, and where. */
   eta: { at: string; stopName: string | null; basis: 'motive' | 'appt' } | null
+  /** The unit number of the truck on their file. */
+  truck: string | null
+  /** The trailer under them: the one named on the load they are hauling, else the one on their file. */
+  trailer: string | null
+}
+
+/**
+ * The trailer the driver has on right now. Ivan's drivers name the trailer as they leave
+ * a pickup and it rides with that load to the delivery, so the load they have departed a
+ * pickup on and not yet delivered is the one that says. Newest departure wins when two
+ * loads are both open (a swap at a yard).
+ */
+export function trailerOnDriver(driver: Pick<Driver, 'id' | 'assignedTrailerId'>, loads: readonly Load[], equipment: readonly Pick<Equipment, 'id' | 'unitNumber'>[]): string | null {
+  let best: { at: string; trailer: string } | null = null
+  for (const load of loads) {
+    const trailer = load.trailerNumber?.trim()
+    if (!trailer) continue
+    const stops = load.stops ?? []
+    const mine = stops.filter((s) => s.driverId === driver.id)
+    if (!mine.length) continue
+    const delivered = stops.filter((s) => s.type === 'delivery').every((s) => !!s.departedAt) && stops.some((s) => s.type === 'delivery')
+    if (delivered) continue
+    const departed = mine.filter((s) => s.type === 'pickup' && s.departedAt).map((s) => s.departedAt as string).sort().pop()
+    if (!departed) continue
+    if (!best || departed > best.at) best = { at: departed, trailer }
+  }
+  if (best) return best.trailer
+  const own = driver.assignedTrailerId ? equipment.find((e) => e.id === driver.assignedTrailerId) : undefined
+  return own ? String(own.unitNumber) : null
 }
 
 /** "City, ST" out of a Motive description, else coordinates, else null. */
@@ -58,7 +87,16 @@ export function whereaboutsOf(
     fixAgeMin: loc ? Math.max(0, Math.round((now - new Date(loc.locatedAt).getTime()) / 60_000)) : null,
     lastEvent: ev ? { label: ev.label, at: ev.at } : null,
     eta: pending ? { at: pending.etaAt, stopName: etaStop, basis: pending.basis } : null,
+    truck: truck ? String(truck.unitNumber) : null,
+    trailer: trailerOnDriver(driver, loads, equipment),
   }
+}
+
+/** "Truck 3114 · Trailer 5302", or whichever half is known, or null. */
+export function unitLine(w: Whereabouts | null): string | null {
+  if (!w) return null
+  const parts = [w.truck ? `Truck ${w.truck}` : null, w.trailer ? `Trailer ${w.trailer}` : null].filter(Boolean)
+  return parts.length ? parts.join(' · ') : null
 }
 
 /** One line for the list: "📍 Schaumburg, IL · ETA 2:45 PM Batory". */
