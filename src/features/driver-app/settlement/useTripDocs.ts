@@ -18,6 +18,12 @@ import { normalizePro } from '@/lib/podPresence'
 export interface TripDoc {
   submissionId: string
   document: SubmissionDocument
+  /**
+   * The pages behind the document, in order, so the viewer can show every one. A merged
+   * PDF in an iframe shows only its first page on iOS, which is how a two-page POD looked
+   * like one page to a driver; the pages themselves render as plain images anywhere.
+   */
+  pages?: Array<{ docId: string; contentType: string }>
   /** Where a photo was taken, when the driver sent it from a stop. */
   stopId?: string | null
   stopLabel?: string | null
@@ -64,7 +70,13 @@ export function useTripDocs(): TripDocIndex {
       for (const sub of subs ?? []) {
         if (!matches(sub, loadId, pro)) continue
         const document = (sub.documents ?? []).find((d) => d.kind === kind)
-        if (document) return { submissionId: sub.id, document }
+        if (document) {
+          const pages = (sub.docs ?? [])
+            .filter((d) => d.kind === kind)
+            .sort((a, b) => (a.pageNumber ?? 0) - (b.pageNumber ?? 0))
+            .map((d) => ({ docId: d.id, contentType: d.contentType }))
+          return { submissionId: sub.id, document, pages }
+        }
       }
       return null
     },

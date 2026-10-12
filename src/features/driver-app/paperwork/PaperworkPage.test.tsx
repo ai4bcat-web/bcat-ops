@@ -12,6 +12,8 @@ const api = {
   listMaintenanceTasks: vi.fn(),
   reportMaintenanceTask: vi.fn(),
   fetchSubmissions: vi.fn(),
+  fetchDocUrl: vi.fn(),
+  removeSubmissionDocs: vi.fn(),
   fetchRecentLoads: vi.fn(),
   // The PM line on the home screen reads the driver's profile.
   fetchMe: vi.fn(),
@@ -186,6 +188,31 @@ describe('Ivan paperwork — the day sheet', () => {
     renderPage()
     await waitFor(() => expect(screen.getByText(/POD on file · 3 pages/)).toBeTruthy(), { timeout: 5000 })
     await waitFor(() => expect(screen.getByRole('button', { name: /View POD \(3 pages\)/ })).toBeTruthy())
+  })
+
+  it('View POD shows every page, not just the first', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    api.fetchPaperwork.mockResolvedValue({
+      weekStart: '2026-10-04', today: '2026-10-07',
+      loads: [load({ pod: { present: true, pages: 2, legibility: 'OK', notes: null } })],
+      loadCount: 1, podsMissing: 0, podsIllegible: 0,
+    })
+    api.fetchSubmissions.mockResolvedValue([{
+      id: 'sub-1', status: 'SENT', loadId: 'load-1', referenceNumber: '14538', createdAt: '2026-10-07T18:00:00Z',
+      docs: [
+        { id: 'p2', kind: 'POD', fileName: 'b.jpg', contentType: 'image/jpeg', pageNumber: 2, uploadedAt: '2026-10-07T18:01:00Z', enhanced: true },
+        { id: 'p1', kind: 'POD', fileName: 'a.jpg', contentType: 'image/jpeg', pageNumber: 1, uploadedAt: '2026-10-07T18:00:00Z', enhanced: true },
+      ],
+      documents: [{ kind: 'POD', docId: 'combined-POD', pageCount: 2, enhanced: true, contentType: 'application/pdf', combined: true }],
+    }])
+    api.fetchDocUrl.mockImplementation(async (_sub: string, docId: string) => `https://signed/${docId}`)
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /View POD \(2 pages\)/ })).toBeTruthy(), { timeout: 5000 })
+    fireEvent.click(screen.getByRole('button', { name: /View POD \(2 pages\)/ }))
+    await waitFor(() => expect(screen.getByAltText(/page 1 of 2/)).toBeTruthy())
+    expect((screen.getByAltText(/page 1 of 2/) as HTMLImageElement).src).toBe('https://signed/p1')
+    expect((screen.getByAltText(/page 2 of 2/) as HTMLImageElement).src).toBe('https://signed/p2')
+    expect(document.querySelector('iframe')).toBeNull()
   })
 
   it('no longer asks the driver to type in and out times', async () => {

@@ -3,8 +3,9 @@
  *
  * Built for a phone rather than reusing the office preview: full-bleed, big targets, and
  * the three things a driver actually wants in order — see it, send a different one, take
- * it off. A PDF goes in an iframe, which every phone browser renders; an image goes in an
- * <img>, which beats an iframe on iOS.
+ * it off. The pages are shown one under the other as images — an iframe'd PDF shows only
+ * its first page on iOS, so a two-page POD looked like one. The merged PDF is still what
+ * Save hands over. A document that was uploaded as a PDF itself still goes in an iframe.
  *
  * Removing is behind a confirm because a POD is what releases the load onto their check.
  * The wording says that out loud rather than asking "are you sure?" about nothing.
@@ -31,22 +32,36 @@ export function DocPreviewSheet({
   onAddPages: () => void
   onRemoved: () => void
 }) {
+  /** What Save hands over: the merged PDF where there is one, else the single document. */
   const [url, setUrl] = useState<string | null>(null)
+  /** Every page as an image, in order, when the pages are images. */
+  const [pageUrls, setPageUrls] = useState<string[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<'download' | 'remove' | null>(null)
 
+  const imagePages = (doc.pages ?? []).filter((p) => p.docId && !/pdf/i.test(p.contentType || ''))
+  const byPage = imagePages.length > 0 && imagePages.length === (doc.pages ?? []).length
+  const pageKey = imagePages.map((p) => p.docId).join('|')
+
   useEffect(() => {
     let cancelled = false
+    const fail = (err: unknown) => {
+      if (cancelled) return
+      setError(err instanceof Error ? err.message : 'Could not open that document')
+    }
     fetchDocUrl(doc.submissionId, doc.document.docId)
       .then((u) => { if (!cancelled) setUrl(u) })
-      .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Could not open that document')
-      })
+      .catch(fail)
+    if (byPage) {
+      Promise.all(pageKey.split('|').map((id) => fetchDocUrl(doc.submissionId, id)))
+        .then((urls) => { if (!cancelled) setPageUrls(urls) })
+        .catch(fail)
+    }
     return () => { cancelled = true }
-  }, [doc.submissionId, doc.document.docId])
+  }, [doc.submissionId, doc.document.docId, byPage, pageKey])
 
-  const pdf = /pdf/i.test(doc.document.contentType || '') || doc.document.combined
+  const pdf = !byPage && (/pdf/i.test(doc.document.contentType || '') || doc.document.combined)
+  const ready = byPage ? pageUrls !== null : url !== null
   const pages = doc.document.pageCount > 1 ? `${doc.document.pageCount} pages · ` : ''
   const quality = doc.document.enhanced ? 'cleaned up for the office' : 'as you sent it'
 
@@ -79,15 +94,26 @@ export function DocPreviewSheet({
             <AlertTriangle className="h-6 w-6 text-amber-300" />
             <p className="text-sm text-foreground">{error}</p>
           </div>
-        ) : !url ? (
+        ) : !ready ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
             <Loader2 className="h-5 w-5 animate-spin" />
             <p className="text-sm">Opening it…</p>
           </div>
+        ) : byPage && pageUrls ? (
+          <ol className="flex flex-col gap-3 p-2">
+            {pageUrls.map((u, i) => (
+              <li key={pageKey.split('|')[i] ?? i}>
+                {pageUrls.length > 1 && (
+                  <p className="mb-1 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Page {i + 1} of {pageUrls.length}</p>
+                )}
+                <img src={u} alt={`${LABEL[kind]} for ${shipment}, page ${i + 1} of ${pageUrls.length}`} className="mx-auto block max-w-full bg-white" />
+              </li>
+            ))}
+          </ol>
         ) : pdf ? (
-          <iframe src={url} title={`${LABEL[kind]} for ${shipment}`} className="h-full w-full border-0 bg-white" />
+          <iframe src={url!} title={`${LABEL[kind]} for ${shipment}`} className="h-full w-full border-0 bg-white" />
         ) : (
-          <img src={url} alt={`${LABEL[kind]} for ${shipment}`} className="mx-auto block max-w-full bg-white" />
+          <img src={url!} alt={`${LABEL[kind]} for ${shipment}`} className="mx-auto block max-w-full bg-white" />
         )}
       </div>
 
