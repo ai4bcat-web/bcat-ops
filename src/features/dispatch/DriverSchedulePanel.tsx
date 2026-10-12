@@ -39,7 +39,7 @@ function Progress({ done, total, color }: { done: number; total: number; color: 
  * The driver's schedule beside their thread: Ivan's drivers get today's stops and how far
  * through them they are; owner operators get the week's shipments and their state.
  */
-export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number }) {
+export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now, hasPod }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number; hasPod?: (load: Load) => boolean }) {
   const [open, setOpen] = useState(true)
   const ivan = driverProgramOf(driver) === 'PAPERWORK'
   // The load under way: Ivan's drivers place the truck by their stop taps plus position;
@@ -50,14 +50,18 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
   // run one shipment at a time, so theirs is the load under way.
   const dayStops = ivan ? ivanDaySchedule(loads, driver.id, today).stops.map((x) => x.stop) : []
   const nowIso = new Date(now).toISOString()
+  // An owner operator's "current" shipment is the first of the week not yet delivered
+  // (POD in): once the POD is submitted the strip moves on, or shows nothing.
+  const ooCurrent = !ivan && week ? (week.loads.find((w) => w.state !== 'COMPLETED')?.load ?? null) : current
   const route = ivan && dayStops.length
     ? routeProgressForStops(dayStops, truck ?? null, { useTaps: true, nowIso })
-    : current ? routeProgress(current, truck ?? null, { useTaps: ivan, nowIso }) : null
+    : ivan && current ? routeProgress(current, truck ?? null, { useTaps: true, nowIso })
+    : ooCurrent ? routeProgress(ooCurrent, truck ?? null, { useTaps: false, nowIso }) : null
   // The position-based ETA belongs on the stop the truck is heading for.
   const etaForStopId = route && route.nextIndex != null && route.etaAt && route.milesToNext ? { id: route.stops[route.nextIndex].id, at: route.etaAt } : null
-  const routeTitle = ivan && dayStops.length ? "Today's route" : `Current route · PRO ${current?.aljexId || '—'}`
+  const routeTitle = ivan && dayStops.length ? "Today's route" : `Current route · PRO ${(ivan ? current : ooCurrent)?.aljexId || '—'}`
   const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
-  const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart)
+  const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart, hasPod)
   const title = ivan ? 'Today' : 'This week'
   const summary = ivan
     ? (dayPlan!.total ? `${dayPlan!.done} of ${dayPlan!.total} stops done${dayPlan!.inProgress ? ` · ${dayPlan!.inProgress} on site` : ''}` : route ? 'No stops scheduled today · route under way' : 'Nothing scheduled today')

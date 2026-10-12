@@ -95,8 +95,12 @@ export interface WeekSchedule {
   upcoming: number
 }
 
-/** How far along a whole shipment is: delivered when its last delivery is departed. */
-export function loadState(load: Load): LoadState {
+/**
+ * How far along a whole shipment is: delivered when its last delivery is departed, or, for
+ * drivers who do not tap stops (owner operators), when the POD has been submitted.
+ */
+export function loadState(load: Load, hasPod?: (load: Load) => boolean): LoadState {
+  if (hasPod?.(load)) return 'COMPLETED'
   const stops = getStops(load)
   if (stops.length === 0) return 'UPCOMING'
   const deliveries = stops.filter((s) => s.type === 'delivery')
@@ -107,7 +111,7 @@ export function loadState(load: Load): LoadState {
 }
 
 /** Every shipment of an owner operator's that touches the week starting `weekStart` (Sunday). */
-export function ownerOperatorWeek(loads: readonly Load[], driverId: string, weekStart: string): WeekSchedule {
+export function ownerOperatorWeek(loads: readonly Load[], driverId: string, weekStart: string, hasPod?: (load: Load) => boolean): WeekSchedule {
   const weekEnd = new Date(Date.parse(`${weekStart}T12:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10)
   const rows: WeekLoad[] = []
   for (const load of loads) {
@@ -116,7 +120,8 @@ export function ownerOperatorWeek(loads: readonly Load[], driverId: string, week
     const days = stops.map(stopDay).filter((d): d is string => !!d)
     if (!days.some((d) => d >= weekStart && d <= weekEnd)) continue
     const appts = stops.map((s) => s.appt).filter((a) => a && !Number.isNaN(Date.parse(a))).sort()
-    rows.push({ load, state: loadState(load), startsAt: appts[0] ?? null, stopsDone: stops.filter((s) => stopState(s) === 'DONE').length, stopsTotal: stops.length })
+    const state = loadState(load, hasPod)
+    rows.push({ load, state, startsAt: appts[0] ?? null, stopsDone: state === 'COMPLETED' ? stops.length : stops.filter((s) => stopState(s) === 'DONE').length, stopsTotal: stops.length })
   }
   rows.sort((a, b) => String(a.startsAt ?? '').localeCompare(String(b.startsAt ?? '')))
   return {

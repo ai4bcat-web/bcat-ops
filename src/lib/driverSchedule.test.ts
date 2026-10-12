@@ -74,3 +74,14 @@ describe('lastStopEventForDriver', () => {
     expect(lastStopEventForDriver([shared, mine], 'eulalio')).toMatchObject({ label: 'On site at pickup', at: '2026-10-12T10:39:00Z' })
   })
 })
+
+describe('owner operators complete on POD', () => {
+  it('calls a shipment delivered once its POD is in, with no stop taps at all', () => {
+    const l = load('14657', [stop({ appt: '2026-10-09T13:00:00Z' }), stop({ type: 'delivery', sequence: 1, appt: '2026-10-12T13:00:00Z' })])
+    expect(loadState(l)).toBe('UPCOMING')
+    expect(loadState(l, () => true)).toBe('COMPLETED')
+    const w = ownerOperatorWeek([l], 'd1', '2026-10-11', (x) => x.aljexId === '14657')
+    expect(w.loads[0].state).toBe('COMPLETED')
+    expect(w.completed).toBe(1)
+  })
+})

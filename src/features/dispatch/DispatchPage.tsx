@@ -22,6 +22,8 @@ import { applyFilters, readFilters, writeFilters, filterCount, type DispatchFilt
 import { conversationColor, initialsOf } from './conversationColor'
 import { DriverSchedulePanel } from './DriverSchedulePanel'
 import { unitTypeOf, unitKindLabel, unitTypeEditable, nextUnitType, UNIT_TYPE_LABEL } from '@/lib/unitType'
+import { useLoadPaperwork } from '@/hooks/useLoadPaperwork'
+import { loadHasPod } from '@/lib/podPresence'
 import { chicagoDateStr } from '@/lib/date'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 
@@ -57,6 +59,9 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
   // Where each truck is, for the location line under a driver: refreshed every minute.
   const loads = useAppStore((s) => s.loads)
   const equipment = useAppStore((s) => s.equipment)
+  // Which loads have a POD on file: for owner operators that is what "delivered" means.
+  const paperwork = useLoadPaperwork(loads)
+  const hasPod = (load: (typeof loads)[number]) => (paperwork.index ? loadHasPod(paperwork.index, load) : false)
   const [locations, setLocations] = useState<TruckLocation[]>([])
   useEffect(() => {
     let alive = true
@@ -263,7 +268,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
           <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
         </div>
       ) : null}
-      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} /> : null}
+      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} hasPod={hasPod} /> : null}
       <Thread
         key={selected.id}
         conversation={selected}
