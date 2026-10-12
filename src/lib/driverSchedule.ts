@@ -110,6 +110,22 @@ export function loadState(load: Load, hasPod?: (load: Load) => boolean): LoadSta
   return 'UPCOMING'
 }
 
+export interface WeekDay {
+  /** YYYY-MM-DD, Chicago. */
+  date: string
+  schedule: DaySchedule
+}
+
+/** The seven days from `weekStart` (Sunday) for one of Ivan's drivers, each with that day's stops. */
+export function ivanWeekSchedule(loads: readonly Load[], driverId: string, weekStart: string): WeekDay[] {
+  const out: WeekDay[] = []
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(Date.parse(`${weekStart}T12:00:00Z`) + i * 86_400_000).toISOString().slice(0, 10)
+    out.push({ date, schedule: ivanDaySchedule(loads, driverId, date) })
+  }
+  return out
+}
+
 /** Every shipment of an owner operator's that touches the week starting `weekStart` (Sunday). */
 export function ownerOperatorWeek(loads: readonly Load[], driverId: string, weekStart: string, hasPod?: (load: Load) => boolean): WeekSchedule {
   const weekEnd = new Date(Date.parse(`${weekStart}T12:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10)

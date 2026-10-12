@@ -7,22 +7,19 @@
  * this is the same job for the other fleet.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, Smartphone, AlertTriangle, ArrowUpDown } from 'lucide-react'
-import { Avatar } from '@/components/ui/avatar'
+import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, AlertTriangle, ArrowUpDown } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
-import { SendDriverInvite } from '@/features/owner-operator-pay/SendDriverInvite'
+import { IvanDriverWeek } from './IvanDriverWeek'
+import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
+import { chicagoDateStr } from '@/lib/date'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import {
   buildIvanDriverApp, flattenRows, sortFlatRows,
   type IvanLoadRow, type IvanSortKey, type SortDirection,
 } from './ivanDriverApp'
 import { errorText } from '@/lib/errorText'
-
-const getInitials = (name: string) =>
-  name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 
 const apptLabel = (iso: string | null | undefined) =>
   iso
@@ -107,10 +104,29 @@ function PodChip({ row }: { row: IvanLoadRow }) {
 }
 
 export function IvanDriverAppPage() {
-  const navigate = useNavigate()
   const drivers = useAppStore((s) => s.drivers)
   const loads = useAppStore((s) => s.loads)
+  const equipment = useAppStore((s) => s.equipment)
   const [periodStart, setPeriodStart] = useState(() => sundayOf())
+  // Where the trucks are, for today's route strips. Same feed the Dispatch page reads.
+  const [locations, setLocations] = useState<TruckLocation[]>([])
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    let alive = true
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      setNow(Date.now())
+      listTruckLocations().then((rows) => { if (alive) setLocations(rows) }).catch(() => undefined)
+    }
+    const first = setTimeout(tick, 0)
+    const t = setInterval(tick, 60_000)
+    return () => { alive = false; clearTimeout(first); clearInterval(t) }
+  }, [])
+  const truckFixOf = (driver: (typeof drivers)[number]) => {
+    const eq = driver.assignedTruckId ? equipment.find((e) => e.id === driver.assignedTruckId) : undefined
+    const loc = eq ? locations.filter((l) => l.truckId === eq.id || l.unitNumber === String(eq.unitNumber)).sort((a, b) => (a.locatedAt < b.locatedAt ? 1 : -1))[0] : undefined
+    return loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lon) ? { lat: loc.lat, lng: loc.lon } : null
+  }
   const [submissions, setSubmissions] = useState<SubmissionWithDocs[]>([])
   const [warning, setWarning] = useState<string | null>(null)
   const setSelectedLoad = useAppStore((st) => st.setSelectedLoad)
@@ -182,48 +198,24 @@ export function IvanDriverAppPage() {
         </p>
       )}
 
-      {/*
-        * The drivers, and what can be done to them — invite, or look at their app.
-        * Lifted out of the table because those are per-PERSON actions: repeating them on
-        * every one of a driver's loads was noise, and it is what stopped the week being
-        * one list.
-        */}
+      {/* Each driver, day by day, as the Dispatch page shows them: route strip, stops done, the stops. */}
       {rows.length > 0 && (
-        <section style={{ marginBottom: 16, border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 14 }}>
-          <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', marginBottom: 10 }}>Drivers</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-            {rows.map((row) => (
-              <div key={row.driver.id} style={{ display: 'flex', alignItems: 'center', gap: 10, border: '1px solid var(--ds-border)', borderRadius: 10, padding: '8px 10px', minWidth: 260, flex: '1 1 300px', background: 'var(--ds-bg)' }}>
-                <Avatar initials={getInitials(row.driver.name)} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontWeight: 650, color: 'var(--ds-t1)', fontSize: 13 }}>{row.driver.name}</p>
-                  <p style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>
-                    {row.loads.length} load{row.loads.length === 1 ? '' : 's'}
-                    {row.podsMissing > 0 && ` · ${row.podsMissing} missing`}
-                    {row.podsIllegible > 0 && ` · ${row.podsIllegible} not legible`}
-                  </p>
-                  {row.unclassified && (
-                    <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '4px 0 0', color: '#b45309', fontSize: 11 }}>
-                      <AlertTriangle size={11} style={{ marginTop: 2, flexShrink: 0 }} />
-                      <span>No fleet set — the app still shows them a settlement. In Files → Drivers set the fleet to Local or Box truck, or switch on Ivan driver app.</span>
-                    </p>
-                  )}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                  <SendDriverInvite driver={row.driver} email={row.driver.email ?? ''} />
-                  <button
-                    onClick={() => navigate(`/driver-view/${row.driver.id}`)}
-                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, height: 28, padding: '0 10px', borderRadius: 8, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
-                  >
-                    <Smartphone size={13} /> View as driver
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        <div style={{ display: 'grid', gap: 14, marginBottom: 18 }}>
+          {rows.map((row) => (
+            <div key={row.driver.id}>
+              <IvanDriverWeek driver={row.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(row.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')} />
+              {row.unclassified && (
+                <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: '#b45309', fontSize: 11.5 }}>
+                  <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
+                  <span>No fleet set — the app still shows {row.driver.name} a settlement. In Files → Drivers set the fleet to Local or Box truck, or switch on Ivan driver app.</span>
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
+      <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', margin: '0 0 8px' }}>Paperwork this week</p>
       {/* The week, as one list. Driver is a column like any other. */}
       {flat.length === 0 ? (
         rows.length > 0 && (

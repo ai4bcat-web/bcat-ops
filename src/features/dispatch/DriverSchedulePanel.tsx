@@ -7,7 +7,7 @@ import { laneLabel, currentLoadForDriver } from '@/lib/driverJourney'
 import { routeProgress, routeProgressForStops, type LatLng } from '@/lib/routeProgress'
 import { RouteStrip } from './RouteStrip'
 
-function StateIcon({ state }: { state: StopState | LoadState }) {
+export function StateIcon({ state }: { state: StopState | LoadState }) {
   if (state === 'DONE' || state === 'COMPLETED') return <CheckCircle2 className="size-3.5 shrink-0" style={{ color: 'var(--ds-green)' }} />
   if (state === 'IN_PROGRESS') return <CircleDot className="size-3.5 shrink-0" style={{ color: 'var(--ds-amber)' }} />
   return <Circle className="size-3.5 shrink-0" style={{ color: 'var(--ds-t3)' }} />
@@ -23,7 +23,7 @@ function day(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'short', day: 'numeric' })
 }
 
-function Progress({ done, total, color }: { done: number; total: number; color: string }) {
+export function Progress({ done, total, color }: { done: number; total: number; color: string }) {
   const pct = total ? Math.round((done / total) * 100) : 0
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

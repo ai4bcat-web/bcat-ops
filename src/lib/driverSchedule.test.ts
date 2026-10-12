@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { ivanDaySchedule, ownerOperatorWeek, stopState, loadState, lastStopEventForDriver } from './driverSchedule'
+import { ivanDaySchedule, ownerOperatorWeek, stopState, loadState, lastStopEventForDriver, ivanWeekSchedule } from './driverSchedule'
 import type { Load } from '@/types'
 
 const stop = (over: Record<string, unknown>) => ({ id: Math.random().toString(), type: 'pickup', sequence: 0, driverId: 'd1', appt: '2026-10-11T14:00:00Z', ...over })
@@ -83,5 +83,21 @@ describe('owner operators complete on POD', () => {
     const w = ownerOperatorWeek([l], 'd1', '2026-10-11', (x) => x.aljexId === '14657')
     expect(w.loads[0].state).toBe('COMPLETED')
     expect(w.completed).toBe(1)
+  })
+})
+
+describe('ivanWeekSchedule', () => {
+  it('lays the week out Sunday to Saturday with each day\'s stops', () => {
+    const load = {
+      id: 'l1', aljexId: '14578', stops: [
+        { id: 'pu', type: 'pickup', sequence: 0, driverId: 'd1', appt: '2026-10-12T13:00:00Z', arrivedAt: '2026-10-12T12:40:00Z', departedAt: '2026-10-12T13:30:00Z' },
+        { id: 'de', type: 'delivery', sequence: 1, driverId: 'd1', appt: '2026-10-13T14:00:00Z' },
+      ],
+    } as unknown as Load
+    const week = ivanWeekSchedule([load], 'd1', '2026-10-11')
+    expect(week.map((d) => d.date)).toEqual(['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17'])
+    expect(week[1].schedule).toMatchObject({ total: 1, done: 1 })
+    expect(week[2].schedule).toMatchObject({ total: 1, done: 0 })
+    expect(week[0].schedule.total).toBe(0)
   })
 })
