@@ -1047,7 +1047,9 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       {/* Sticky column header */}
       <div
         className="flex items-center sticky top-0 z-20 shrink-0"
-        style={{ height: ROW_H, paddingLeft: headerPad, background: 'var(--ds-surface)', borderBottom: '2px solid var(--ds-border-strong)' }}
+        // max-content: when the columns are wider than the window the header must grow
+        // with them, or its background and the rows' end short of the last columns.
+        style={{ height: ROW_H, paddingLeft: headerPad, minWidth: 'max-content', background: 'var(--ds-surface)', borderBottom: '2px solid var(--ds-border-strong)' }}
       >
         <ColHeader width={COL.aljex}>Pro #</ColHeader>
         <ColHeader width={COL.pod}>POD</ColHeader>
@@ -1072,6 +1074,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
       <div
         className="shrink-0"
         style={{
+          minWidth: 'max-content',
           borderBottom: '1px solid var(--ds-border)',
           background: unschedDropOver ? 'rgba(245,158,11,0.10)' : undefined,
           outline: unschedDropOver ? '2px solid #f59e0b' : undefined, outlineOffset: -2,
@@ -1137,6 +1140,7 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
             key={di}
             className="shrink-0"
             style={{
+              minWidth: 'max-content',
               borderBottom: '1px solid var(--ds-border)',
               background: dropDay === dayStr ? 'rgba(34,197,94,0.08)' : undefined,
               outline: dropDay === dayStr ? '2px solid #22c55e' : undefined, outlineOffset: -2,
