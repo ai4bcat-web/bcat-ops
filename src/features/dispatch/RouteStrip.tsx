@@ -24,28 +24,41 @@ export function RouteStrip({ progress, title, dark = false }: { progress: RouteP
   const caption = progress.complete
     ? 'Route complete'
     : `${pct}% of route${next ? ` · next: ${next.type === 'delivery' ? 'deliver' : 'pick up'} ${next.label}` : ''}${progress.milesToNext != null && progress.milesToNext > 0 ? ` · ${progress.milesToNext} mi to go` : ''}${next?.etaAt ? ` · due ${time(next.etaAt)}` : ''}`
+  /** Edge labels anchor inward so nothing is clipped; middle ones centre on their dot. */
+  const anchor = (i: number): { transform: string; textAlign: 'left' | 'center' | 'right'; justifyItems: 'start' | 'center' | 'end' } => {
+    if (n === 1) return { transform: 'translateX(-50%)', textAlign: 'center', justifyItems: 'center' }
+    if (i === 0) return { transform: 'translateX(-7px)', textAlign: 'left', justifyItems: 'start' }
+    if (i === n - 1) return { transform: 'translateX(calc(-100% + 7px))', textAlign: 'right', justifyItems: 'end' }
+    return { transform: 'translateX(-50%)', textAlign: 'center', justifyItems: 'center' }
+  }
+  const nice = (label: string) => (label === label.toUpperCase() && label.length > 4 ? label.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : label)
   return (
-    <div style={{ display: 'grid', gap: 6 }}>
+    <div style={{ display: 'grid', gap: 4 }}>
       {title ? <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: muted }}>{title}</div> : null}
-      <div style={{ position: 'relative', height: 44, margin: '0 10px' }}>
-        <div style={{ position: 'absolute', left: 0, right: 0, top: 11, height: 4, borderRadius: 2, background: line }} />
-        <div style={{ position: 'absolute', left: 0, top: 11, height: 4, borderRadius: 2, width: `${pct}%`, background: fill, transition: 'width .3s' }} />
+      {/* Track: 26px of headroom for the truck, the line, then two lines of label. */}
+      <div style={{ position: 'relative', height: 78, margin: '0 8px' }}>
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 32, height: 4, borderRadius: 2, background: line }} />
+        <div style={{ position: 'absolute', left: 0, top: 32, height: 4, borderRadius: 2, width: `${pct}%`, background: fill, transition: 'width .3s' }} />
         {progress.stops.map((s, i) => {
           const left = n === 1 ? 50 : (i / legs) * 100
           const done = s.state === 'DONE'
           const here = s.state === 'IN_PROGRESS'
+          const a = anchor(i)
           return (
-            <div key={s.id} style={{ position: 'absolute', left: `${left}%`, top: 0, transform: 'translateX(-50%)', display: 'grid', justifyItems: 'center', gap: 4, width: 90 }} title={`${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}>
-              <span style={{ width: 14, height: 14, borderRadius: 7, marginTop: 6, background: done || here ? fill : (dark ? '#141f36' : 'var(--ds-surface)'), border: `2px solid ${done || here ? fill : muted}`, boxShadow: here ? `0 0 0 4px ${dark ? 'rgba(30,168,243,0.3)' : 'var(--ds-blue-soft)'}` : 'none' }} />
-              <span style={{ fontSize: 10, color: done ? muted : text, fontWeight: here ? 700 : 500, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: done ? 'line-through' : 'none' }}>
-                {s.type === 'delivery' ? 'DE' : 'PU'} {s.label}
+            <div key={s.id} style={{ position: 'absolute', left: `${left}%`, top: 27, transform: a.transform, display: 'grid', justifyItems: a.justifyItems, gap: 5, width: 150, maxWidth: n > 2 ? `${Math.max(90, 100 / (n - 1))}%` : 150 }} title={`${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}>
+              <span style={{ width: 14, height: 14, borderRadius: 7, background: done || here ? fill : (dark ? '#141f36' : 'var(--ds-surface)'), border: `2px solid ${done || here ? fill : muted}`, boxShadow: here ? `0 0 0 4px ${dark ? 'rgba(30,168,243,0.3)' : 'var(--ds-blue-soft)'}` : 'none', boxSizing: 'border-box' }} />
+              <span style={{ fontSize: 11, lineHeight: 1.25, color: done ? muted : text, fontWeight: here ? 700 : 500, textAlign: a.textAlign, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textDecoration: done ? 'line-through' : 'none' }}>
+                <span style={{ color: muted, fontWeight: 700 }}>{s.type === 'delivery' ? 'DE' : 'PU'}</span> {nice(s.label)}
               </span>
             </div>
           )
         })}
         {!progress.complete ? (
-          <div aria-label="Truck position" style={{ position: 'absolute', left: `${truckLeft}%`, top: -8, transform: 'translateX(-50%)', width: 26, height: 26, borderRadius: 13, background: dark ? '#141f36' : 'var(--ds-surface)', border: `2px solid ${fill}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--sh-sm)', transition: 'left .3s' }}>
-            <Truck className="size-3.5" style={{ color: fill }} />
+          <div aria-label="Truck position" style={{ position: 'absolute', left: `${truckLeft}%`, top: 0, transform: 'translateX(-50%)', display: 'grid', justifyItems: 'center', transition: 'left .3s' }}>
+            <div style={{ width: 26, height: 26, borderRadius: 13, background: dark ? '#141f36' : 'var(--ds-surface)', border: `2px solid ${fill}`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--sh-sm)' }}>
+              <Truck className="size-3.5" style={{ color: fill }} />
+            </div>
+            <div style={{ width: 2, height: 6, background: fill }} />
           </div>
         ) : null}
       </div>

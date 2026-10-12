@@ -50,7 +50,7 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
   const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart)
   const title = ivan ? 'Today' : 'This week'
   const summary = ivan
-    ? (dayPlan!.total ? `${dayPlan!.done} of ${dayPlan!.total} stops done${dayPlan!.inProgress ? ` · ${dayPlan!.inProgress} on site` : ''}` : 'Nothing scheduled today')
+    ? (dayPlan!.total ? `${dayPlan!.done} of ${dayPlan!.total} stops done${dayPlan!.inProgress ? ` · ${dayPlan!.inProgress} on site` : ''}` : route ? 'No stops scheduled today · route under way' : 'Nothing scheduled today')
     : (week!.loads.length ? `${week!.completed} delivered · ${week!.inProgress} under way · ${week!.upcoming} to go` : 'No shipments this week')
 
   return (
