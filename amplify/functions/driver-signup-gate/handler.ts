@@ -79,13 +79,19 @@ export const handler = async (
     // Driver.email takes precedence over DriverPaySetting.email.
     driverId = driverMatch.id
     driverActive = driverMatch.active !== false
+    /*
+     * Only a pay setting the driver API would honour counts. A box-truck driver carries a
+     * BOX_TRUCK pay setting (the pay page files their overnight runs under it) that is not
+     * a settlement; the API skips it and puts them on paperwork, and the gate must do the
+     * same or it rejects them for the setting's sake — which is what happened to Zak.
+     */
     setting = settings.find(
-      (s) => s.driverId === driverId && s.active !== false,
+      (s) => s.driverId === driverId && s.active !== false && isEligiblePayGroup(s.payGroup),
     )
   } else {
     // Fall back to matching an active pay setting by email, then verify its driver.
     setting = settings.find(
-      (s) => s.email?.toLowerCase().trim() === email && s.active !== false,
+      (s) => s.email?.toLowerCase().trim() === email && s.active !== false && isEligiblePayGroup(s.payGroup),
     )
     if (setting) {
       const linkedDriver = drivers.find((d) => d.id === setting!.driverId)

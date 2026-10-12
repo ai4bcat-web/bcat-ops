@@ -175,6 +175,27 @@ describe('driver-signup-gate handler', () => {
     )
   })
 
+  it('admits a box-truck driver whose pay setting is BOX_TRUCK, on the paperwork rule', async () => {
+    /*
+     * The live bug: Zak's file says fleet BOX_TRUCK, and the pay page had filed a BOX_TRUCK
+     * pay setting for his overnight runs. The driver API ignores a setting that is not on
+     * the roster and puts him on paperwork; the gate took the same setting at face value
+     * and told him no driver record matched.
+     */
+    sendSpy.mockImplementation(async (command) => {
+      if (command instanceof ScanCommand) {
+        if (command.input.TableName === DRIVER_TABLE) {
+          return { Items: [driverItem('drv-zak', 'zakka4@aol.com', true, { fleetGroup: 'BOX_TRUCK' })] }
+        }
+        if (command.input.TableName === PAY_SETTING_TABLE) {
+          return { Items: [paySettingItem('drv-zak', 'zakka4@aol.com', true, 'BOX_TRUCK')] }
+        }
+      }
+      return undefined
+    })
+    await expect(handler(signupEvent('zakka4@aol.com'))).resolves.toBeDefined()
+  })
+
   it('lets one of Ivan’s own drivers create an account', async () => {
     /*
      * LOCAL is Ivan's fleet. They joined the roster when Ivan paperwork shipped: the invite
