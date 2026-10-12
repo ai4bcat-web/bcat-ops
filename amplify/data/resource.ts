@@ -51,6 +51,11 @@ const schema = a.schema({
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       // ELD oversight: a run outside the 150 air-mile radius needs logs, and somebody has
       // to confirm they were kept. Set from the fleet manager dashboard. See src/lib/eldMonitor.ts.
+      // What is on the truck, read off the rate confirmation when the load is built.
+      commodity:       a.string(),
+      weight:          a.integer(),            // pounds
+      pieces:          a.integer(),            // count of piecesUnit
+      piecesUnit:      a.string(),             // pallets | cases | pieces | skids | rolls | bundles
       // The trailer carrying the load, named by the driver as they leave the pickup.
       trailerNumber:   a.string(),
       // Where the pickup's paperwork went at end of day: { kind: TRUCK|SHED|TRAILER, unit, at, byDriverId, byName }

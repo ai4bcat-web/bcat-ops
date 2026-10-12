@@ -1,7 +1,7 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
 import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
-import type { RateConExtract } from '@/lib/otrInvoice'
+import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
 import { fileContentType } from '@/lib/disputeFiles'
@@ -43,6 +43,7 @@ let loadsHaveCustomerId = true
 let loadsHaveEldReview = true
 let loadsHavePaperworkLocation = true
 let loadsHaveTrailer = true
+let loadsHaveFreight = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -52,6 +53,7 @@ const loadFields = () => {
   if (loadsHaveEldReview) f += ' eldLogsReviewedAt eldLogsReviewedBy eldLogsNote'
   if (loadsHavePaperworkLocation) f += ' paperworkLocation'
   if (loadsHaveTrailer) f += ' trailerNumber'
+  if (loadsHaveFreight) f += ' commodity weight pieces piecesUnit'
   return f
 }
 
@@ -120,7 +122,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -131,6 +133,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     eldReview: /'(eldLogsReviewedAt|eldLogsReviewedBy|eldLogsNote)'/i.test(msg),
     paperworkLocation: /'paperworkLocation'/i.test(msg),
     trailer: /'trailerNumber'/i.test(msg),
+    freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
   }
 }
 
@@ -176,6 +179,10 @@ export async function listLoads(): Promise<Load[]> {
       if (loadsHaveTrailer && u.trailer) {
         console.warn("[apiClient] backend has no trailerNumber yet — querying loads without it until deploy")
         loadsHaveTrailer = false; changed = true
+      }
+      if (loadsHaveFreight && u.freight) {
+        console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
+        loadsHaveFreight = false; changed = true
       }
       if (!changed) throw err
     }
@@ -1240,6 +1247,8 @@ export async function parseRateConfirm(args: {
   appts: { pickup: ParsedRateconAppt; delivery: ParsedRateconAppt } | null
   /** The billing fields off the same single pass. Null when the parser could not read them. */
   invoice?: RateConExtract | null
+  /** What is on the truck, off the same pass. */
+  freight?: RateConFreight | null
   error?: string | null
 }> {
   let res: unknown

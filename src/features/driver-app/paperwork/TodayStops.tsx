@@ -26,6 +26,7 @@ import { useState } from 'react'
 import { Camera, Check, Clock, Eye, FileWarning, Image, Loader2, LogOut, MapPin, MessageSquare, Navigation, PackageOpen, Paperclip, Truck, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { freightSummary } from '@/lib/freight'
 import { useTripDocs, type TripDoc } from '../settlement/useTripDocs'
 import { DocPreviewSheet } from '../settlement/DocPreviewSheet'
 import { apptTimeLabel } from '@/lib/date'
@@ -405,6 +406,13 @@ export function TodayStops({
                 <dd className="truncate text-base font-bold tabular-nums text-foreground">{load.pickupNumber || '—'}</dd>
               </div>
             </dl>
+            {/* What is on the truck, as the rate con states it. */}
+            {freightSummary(load) && (
+              <p className="mt-1.5 text-sm text-foreground">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Freight </span>
+                {freightSummary(load)}
+              </p>
+            )}
             {load.customer && <p className="mt-1.5 text-sm text-muted-foreground">{load.customer}</p>}
 
             {showEta && (

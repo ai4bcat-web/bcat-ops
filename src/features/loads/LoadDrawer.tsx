@@ -24,6 +24,7 @@ import { DriverDocUploadDialog } from '@/features/driver-docs'
 import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm, createLocation } from '@/lib/apiClient'
 import { matchStopLocation, locationInputForStop } from '@/lib/locationAutoSave'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
+import { freightSummary, hasFreight, PIECES_UNITS } from '@/lib/freight'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
 import { loadSchemaFor, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
 import { getStops, makeStop, deriveLegacyFields } from '@/lib/stops'
@@ -938,6 +939,28 @@ function NewLoadDialog({
                   <Input {...register('trailerNumber')} placeholder="5302" className="h-9" />
                 </Field>
               </div>
+              {/* What is on the truck — read off the rate con when one is uploaded, editable here. */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[2fr_1fr_1fr_1fr]">
+                <Field label="Commodity" error={errors.commodity?.message}>
+                  <Input {...register('commodity')} placeholder="Paper goods" className="h-9" />
+                </Field>
+                <Field label="Weight (lbs)" error={errors.weight?.message}>
+                  <Input type="number" min={0} step={1} {...register('weight', { valueAsNumber: true })} placeholder="41000" className="h-9" />
+                </Field>
+                <Field label="Qty" error={errors.pieces?.message}>
+                  <Input type="number" min={0} step={1} {...register('pieces', { valueAsNumber: true })} placeholder="22" className="h-9" />
+                </Field>
+                <Field label="Unit">
+                  <select
+                    {...register('piecesUnit')}
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                    aria-label="Quantity unit"
+                  >
+                    <option value="">pieces</option>
+                    {PIECES_UNITS.filter((u) => u !== 'pieces').map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </Field>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <Controller
                   name="customerId"
@@ -1341,6 +1364,7 @@ export function LoadDrawer() {
     resolver: zodResolver(factoredAwareSchema),
     defaultValues: {
       aljexId: '', tmsId: '', pickupNumber: '', trailerNumber: '',
+      commodity: '', weight: null, pieces: null, piecesUnit: '',
       stops: emptyStopForms(), readyToInvoice: false,
       customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
     },
@@ -1354,6 +1378,10 @@ export function LoadDrawer() {
         tmsId: load.tmsId,
         pickupNumber: load.pickupNumber,
         trailerNumber: load.trailerNumber ?? '',
+        commodity: load.commodity ?? '',
+        weight: load.weight ?? null,
+        pieces: load.pieces ?? null,
+        piecesUnit: load.piecesUnit ?? '',
         stops: loadToStopForms(load),
         readyToInvoice:   load.readyToInvoice,
         customer: load.customer ?? '',
@@ -1384,6 +1412,8 @@ export function LoadDrawer() {
         aljexId: '', tmsId: tender?.reference ?? '',
         pickupNumber: tender?.pickupNumber ?? '',
         trailerNumber: '',
+        // The tender email states the weight; the commodity and count wait for the rate con.
+        commodity: '', weight: tender?.weightLb ?? null, pieces: null, piecesUnit: '',
         stops: tender
           ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory, formDirectory.locations)
           : emptyStopForms(preDate, createPreFill?.driverId ?? null),
@@ -1562,6 +1592,10 @@ export function LoadDrawer() {
       readyToInvoice: values.readyToInvoice,
       rate: values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined,
       miles: values.miles ?? undefined,
+      commodity: values.commodity?.trim() || undefined,
+      weight: values.weight != null && !isNaN(values.weight) ? Math.round(values.weight) : undefined,
+      pieces: values.pieces != null && !isNaN(values.pieces) ? Math.round(values.pieces) : undefined,
+      piecesUnit: values.pieces != null && !isNaN(values.pieces) ? (values.piecesUnit || 'pieces') : undefined,
       customer: values.customer || undefined,
       customerId: values.customerId?.trim() || undefined,
       notes: values.notes || undefined,
@@ -1766,6 +1800,7 @@ export function LoadDrawer() {
                   )
                 })
               })()}
+              {hasFreight(load) && <ReadonlyField label="Freight" value={freightSummary(load)} />}
               {load.miles && <ReadonlyField label="Miles" value={String(load.miles)} />}
               {load.rate != null && (
                 <ReadonlyField label="Rate" value={`$${(load.rate / 100).toFixed(2)}`} />

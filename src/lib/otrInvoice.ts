@@ -64,6 +64,14 @@ export const OTR_FIELD_LABEL: Record<OtrRequiredField, string> = {
 
 /** What the extended ratecon parser returns. Every field is optional — a tender
  *  may omit any of them, and a null is always preferable to a guess. */
+/** What the tender says is on the truck. */
+export interface RateConFreight {
+  commodity?: string | null
+  weightLbs?: number | null
+  pieces?: number | null
+  piecesUnit?: string | null
+}
+
 export interface RateConExtract {
   brokerName?: string | null
   poNumber?: string | null

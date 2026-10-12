@@ -93,6 +93,10 @@ export const loadSchema = z.object({
   tmsId: z.string().min(1, 'TMS ID / PO is required'),
   pickupNumber: z.string().min(1, 'PU# is required'),
   trailerNumber: z.string().optional(),
+  commodity: z.string().optional().nullable(),
+  weight: z.number().min(0).optional().nullable(),
+  pieces: z.number().int().min(0).optional().nullable(),
+  piecesUnit: z.string().optional().nullable(),
 
   stops: stopsSchema,
   readyToInvoice: z.boolean(),

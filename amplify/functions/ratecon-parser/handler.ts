@@ -27,7 +27,7 @@ interface Args {
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['pickup', 'delivery', 'invoice'],
+  required: ['pickup', 'delivery', 'invoice', 'freight'],
   properties: {
     invoice: {
       type: 'object',
@@ -48,6 +48,15 @@ const SCHEMA = {
         destinationCity:  { type: ['string', 'null'], description: 'City of the LAST delivery' },
         destinationState: { type: ['string', 'null'], description: 'Two-letter state of the last delivery' },
         destinationZip:   { type: ['string', 'null'], description: '5-digit ZIP of the last delivery' },
+      },
+    },
+    freight: {
+      type: 'object', additionalProperties: false, required: ['commodity', 'weightLbs', 'pieces', 'piecesUnit'],
+      properties: {
+        commodity:  { type: ['string', 'null'], description: 'What is being hauled, as the tender names it (e.g. "Frozen foods", "Steel coils"). Null if not stated.' },
+        weightLbs:  { type: ['number', 'null'], description: 'Total weight in pounds. Convert from kg or tons if needed. Null if not stated.' },
+        pieces:     { type: ['number', 'null'], description: 'Count of pieces/pallets/cases as stated. Null if not stated.' },
+        piecesUnit: { type: ['string', 'null'], enum: ['pallets', 'cases', 'pieces', 'skids', 'rolls', 'bundles', 'drums', 'totes', null], description: 'The unit the count is in. Null if not stated.' },
       },
     },
     pickup: {
@@ -105,6 +114,7 @@ export const handler = async (event: { arguments: Args }) => {
               'originCity/State/Zip describe the FIRST pickup; destinationCity/State/Zip the LAST delivery. Use the two-letter state code.',
               'invoice.date is the DELIVERY date.',
               'poNumber is whatever reference the broker will match the invoice on (PO #, order #, load #, reference #).',
+              'Also extract "freight": the commodity, total weight in pounds, and the piece count with its unit (pallets, cases, pieces, skids, rolls, bundles, drums, totes), exactly as the tender states them.',
               'Do NOT extract an MC number, and do not infer one.',
               '',
               'If a field is genuinely not stated (e.g. FCFS with no time), return null for it. Never guess.',
@@ -119,10 +129,10 @@ export const handler = async (event: { arguments: Args }) => {
     const parsed = JSON.parse(text) as Record<string, unknown>
     // `appts` keeps its original shape so the appointment callers are untouched; `invoice`
     // is additive, and a caller that predates it simply ignores the extra key.
-    return { appts: parsed, invoice: parsed.invoice ?? null, error: null }
+    return { appts: parsed, invoice: parsed.invoice ?? null, freight: parsed.freight ?? null, error: null }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     console.error('[ratecon-parser]', msg)
-    return { appts: null, invoice: null, error: msg }
+    return { appts: null, invoice: null, freight: null, error: msg }
   }
 }

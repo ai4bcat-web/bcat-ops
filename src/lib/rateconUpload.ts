@@ -1,5 +1,7 @@
 import { toast } from 'sonner'
 import { uploadRateConfirm, parseRateConfirm } from './apiClient'
+import { freightSummary, type FreightLike } from './freight'
+import type { RateConFreight } from './otrInvoice'
 import { getStops, updateStop } from './stops'
 import { fromDateInput, fromDateTimeInput } from './date'
 import { staffUploadDriverDoc, type StaffDriverInfo } from './driverSubmissionsClient'
@@ -62,8 +64,17 @@ export async function uploadRateconAndApply(
       r.readAsDataURL(file)
     })
     toast.info('Reading appointment times from the ratecon…')
-    const { appts, error } = await parseRateConfirm({ fileBase64: b64, mediaType: file.type || 'application/pdf' })
-    if (!appts) { if (error) toast.error(`Ratecon read failed: ${error}`); return true }
+    const { appts, freight, error } = await parseRateConfirm({ fileBase64: b64, mediaType: file.type || 'application/pdf' })
+    /*
+     * What is on the truck, off the same read. Only fills what is still BLANK on the load:
+     * a dispatcher who typed the commodity by hand is not overwritten by a second upload.
+     */
+    const freightPatch = freightPatchFor(load, freight)
+    if (!appts) {
+      if (freightPatch) { await updateLoad(load.id, freightPatch); toast.success(`Freight set from ratecon — ${freightSummary(freightPatch)}`) }
+      if (error) toast.error(`Ratecon read failed: ${error}`)
+      return true
+    }
     let stops = getStops(load)
     const apply = (kind: 'pickup' | 'delivery', a: { date: string | null; time: string | null; timeEnd: string | null }) => {
       const stop = kind === 'pickup' ? stops.find((s) => s.type === 'pickup') : [...stops].reverse().find((s) => s.type === 'delivery')
@@ -75,14 +86,36 @@ export async function uploadRateconAndApply(
       return `${kind} ${a.date}${a.time ? ` ${a.time}` : ''}`
     }
     const applied = [apply('pickup', appts.pickup), apply('delivery', appts.delivery)].filter(Boolean)
+    if (applied.length || freightPatch) {
+      await updateLoad(load.id, { ...(applied.length ? { stops } : {}), ...(freightPatch ?? {}) })
+    }
     if (applied.length) {
-      await updateLoad(load.id, { stops })
       toast.success(`Appointments set from ratecon — ${applied.join(', ')} · CONFIRMED`)
     } else {
       toast('Ratecon read, but no appointment date/time found in it — set the times by hand.')
     }
+    if (freightPatch) toast.success(`Freight set from ratecon — ${freightSummary(freightPatch)}`)
   } catch (err) {
     toast.error(`Couldn't read the ratecon: ${err instanceof Error ? err.message : 'unknown error'}`)
   }
   return true
+}
+
+/**
+ * The freight fields a rate-con read should write onto a load: each one only where the
+ * load has nothing yet. Null when there is nothing new to write.
+ */
+export function freightPatchFor(load: FreightLike, freight: RateConFreight | null | undefined): Partial<Load> | null {
+  if (!freight) return null
+  const patch: Partial<Load> = {}
+  const commodity = (freight.commodity ?? '').trim()
+  if (commodity && !(load.commodity ?? '').trim()) patch.commodity = commodity
+  if (typeof freight.weightLbs === 'number' && freight.weightLbs > 0 && !(typeof load.weight === 'number' && load.weight > 0)) {
+    patch.weight = Math.round(freight.weightLbs)
+  }
+  if (typeof freight.pieces === 'number' && freight.pieces > 0 && !(typeof load.pieces === 'number' && load.pieces > 0)) {
+    patch.pieces = Math.round(freight.pieces)
+    if (freight.piecesUnit) patch.piecesUnit = freight.piecesUnit
+  }
+  return Object.keys(patch).length ? patch : null
 }

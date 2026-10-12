@@ -88,6 +88,7 @@ export interface PaperworkLoadLike {
   commodity?: string | null
   weight?: number | null
   pieces?: number | null
+  piecesUnit?: string | null
   notes?: string | null
   stops?: unknown
   status?: string | null
@@ -165,6 +166,7 @@ export interface PaperworkLoad {
   commodity: string | null
   weight: number | null
   pieces: number | null
+  piecesUnit?: string | null
   notes: string | null
   status: string | null
   stops: PaperworkStop[]
@@ -360,6 +362,7 @@ export function buildPaperworkLoad(
     commodity: load.commodity?.trim() || null,
     weight: typeof load.weight === 'number' ? load.weight : null,
     pieces: typeof load.pieces === 'number' ? load.pieces : null,
+    piecesUnit: load.piecesUnit?.trim() || null,
     notes: load.notes?.trim() || null,
     status: load.status?.trim() || null,
     paperworkLocation: parsePaperworkLocation(load.paperworkLocation),

@@ -577,6 +577,7 @@ export interface PaperworkLoad {
   commodity: string | null
   weight: number | null
   pieces: number | null
+  piecesUnit?: string | null
   notes: string | null
   status: string | null
   stops: PaperworkStop[]
