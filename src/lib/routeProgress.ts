@@ -12,6 +12,7 @@ import type { Load, Stop } from '@/types'
 import { getStops } from './stops'
 import { airMiles, locateCity } from './eldRadius'
 import { stopState, type StopState } from './driverSchedule'
+import { estimateEta } from './stopEvents'
 
 export interface LatLng { lat: number; lng: number }
 
@@ -38,6 +39,8 @@ export interface RouteProgress {
   nextIndex: number | null
   /** Straight-line miles from the truck to the next stop, when both are known. */
   milesToNext: number | null
+  /** When the truck should reach the next stop, from its position (ISO), when known. */
+  etaAt: string | null
   complete: boolean
   /** How the position was decided. */
   basis: 'taps' | 'taps+location' | 'location' | 'none'
@@ -59,7 +62,7 @@ export function legFraction(truck: LatLng, from: LatLng, to: LatLng): number {
   return clamp01(1 - airMiles(truck, to) / total)
 }
 
-export function routeProgress(load: Load, truck: LatLng | null, opts: { useTaps?: boolean } = {}): RouteProgress | null {
+export function routeProgress(load: Load, truck: LatLng | null, opts: { useTaps?: boolean; nowIso?: string } = {}): RouteProgress | null {
   const raw = getStops(load)
   // getStops synthesises legacy stops for a load with none; a route with no places is no route.
   if (raw.length === 0 || raw.every((s) => !s.name?.trim() && !s.city?.trim())) return null
@@ -70,7 +73,7 @@ export function routeProgress(load: Load, truck: LatLng | null, opts: { useTaps?
  * The same reading over any ordered list of stops: a day's run across several loads for
  * an Ivan driver, or one load's stops.
  */
-export function routeProgressForStops(raw: readonly Stop[], truck: LatLng | null, opts: { useTaps?: boolean } = {}): RouteProgress | null {
+export function routeProgressForStops(raw: readonly Stop[], truck: LatLng | null, opts: { useTaps?: boolean; nowIso?: string } = {}): RouteProgress | null {
   if (raw.length === 0) return null
   const useTaps = opts.useTaps !== false
   const stops: RouteStop[] = raw.map((s) => ({
@@ -90,10 +93,10 @@ export function routeProgressForStops(raw: readonly Stop[], truck: LatLng | null
   }
   if (onSite >= 0) {
     const pos = onSite
-    return { stops, percent: Math.round((pos / legs) * 100), position: pos, nextIndex: onSite, milesToNext: 0, complete: false, basis: 'taps' }
+    return { stops, percent: Math.round((pos / legs) * 100), position: pos, nextIndex: onSite, milesToNext: 0, etaAt: null, complete: false, basis: 'taps' }
   }
   if (lastDone >= raw.length - 1) {
-    return { stops, percent: 100, position: raw.length - 1, nextIndex: null, milesToNext: 0, complete: true, basis: 'taps' }
+    return { stops, percent: 100, position: raw.length - 1, nextIndex: null, milesToNext: 0, etaAt: null, complete: true, basis: 'taps' }
   }
   const nextIndex = lastDone + 1
   const prevIndex = lastDone   // -1 before the first stop
@@ -106,7 +109,7 @@ export function routeProgressForStops(raw: readonly Stop[], truck: LatLng | null
       const at = stopLatLng(raw[i])
       if (at && airMiles(truck, at) <= AT_STOP_MILES) {
         const marked = stops.map((st, j) => (j === i ? { ...st, state: 'IN_PROGRESS' as StopState } : j < i && st.state === 'UPCOMING' ? { ...st, state: 'DONE' as StopState } : st))
-        return { stops: marked, percent: Math.round((i / legs) * 100), position: i, nextIndex: i, milesToNext: 0, complete: false, basis: useTaps ? 'taps+location' : 'location' }
+        return { stops: marked, percent: Math.round((i / legs) * 100), position: i, nextIndex: i, milesToNext: 0, etaAt: null, complete: false, basis: useTaps ? 'taps+location' : 'location' }
       }
     }
   }
@@ -117,8 +120,10 @@ export function routeProgressForStops(raw: readonly Stop[], truck: LatLng | null
   let fraction = 0
   let basis: RouteProgress['basis'] = useTaps ? 'taps' : 'none'
   let milesToNext: number | null = null
+  let etaAt: string | null = null
   if (truck && next) {
     milesToNext = Math.round(airMiles(truck, next))
+    etaAt = estimateEta(truck, next, opts.nowIso ?? new Date().toISOString())
     if (prev) {
       fraction = legFraction(truck, prev, next)
       basis = useTaps ? 'taps+location' : 'location'
@@ -129,14 +134,14 @@ export function routeProgressForStops(raw: readonly Stop[], truck: LatLng | null
       const last = stopLatLng(raw[raw.length - 1])
       if (last && raw.length > 1) {
         const whole = legFraction(truck, next, last)
-        return { stops, percent: Math.round(whole * 100), position: whole * legs, nextIndex: whole >= 0.999 ? null : nextIndex, milesToNext: Math.round(airMiles(truck, last)), complete: false, basis: 'location' }
+        return { stops, percent: Math.round(whole * 100), position: whole * legs, nextIndex: whole >= 0.999 ? null : nextIndex, milesToNext, etaAt, complete: false, basis: 'location' }
       }
       basis = 'location'
     }
   }
   const position = prevIndex >= 0 ? prevIndex + fraction : 0
   const percent = Math.round((position / legs) * 100)
-  return { stops, percent, position, nextIndex, milesToNext, complete: false, basis }
+  return { stops, percent, position, nextIndex, milesToNext, etaAt, complete: false, basis }
 }
 
 /**
@@ -154,8 +159,8 @@ export function routeFromStops(stops: ReadonlyArray<{ id: string; type: string; 
   const onSite = rs.findIndex((s) => s.state === 'IN_PROGRESS')
   let lastDone = -1
   rs.forEach((s, i) => { if (s.state === 'DONE') lastDone = i })
-  if (onSite >= 0) return { stops: rs, percent: Math.round((onSite / legs) * 100), position: onSite, nextIndex: onSite, milesToNext: 0, complete: false, basis: 'taps' }
-  if (lastDone >= rs.length - 1) return { stops: rs, percent: 100, position: rs.length - 1, nextIndex: null, milesToNext: 0, complete: true, basis: 'taps' }
+  if (onSite >= 0) return { stops: rs, percent: Math.round((onSite / legs) * 100), position: onSite, nextIndex: onSite, milesToNext: 0, etaAt: null, complete: false, basis: 'taps' }
+  if (lastDone >= rs.length - 1) return { stops: rs, percent: 100, position: rs.length - 1, nextIndex: null, milesToNext: 0, etaAt: null, complete: true, basis: 'taps' }
   const position = Math.max(0, lastDone)
-  return { stops: rs, percent: Math.round((position / legs) * 100), position, nextIndex: lastDone + 1, milesToNext: null, complete: false, basis: 'taps' }
+  return { stops: rs, percent: Math.round((position / legs) * 100), position, nextIndex: lastDone + 1, milesToNext: null, etaAt: null, complete: false, basis: 'taps' }
 }

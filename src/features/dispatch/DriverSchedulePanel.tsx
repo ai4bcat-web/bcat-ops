@@ -49,9 +49,12 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
   // delivery is done the marker moves onto the leg to the next pickup. Owner operators
   // run one shipment at a time, so theirs is the load under way.
   const dayStops = ivan ? ivanDaySchedule(loads, driver.id, today).stops.map((x) => x.stop) : []
+  const nowIso = new Date(now).toISOString()
   const route = ivan && dayStops.length
-    ? routeProgressForStops(dayStops, truck ?? null, { useTaps: true })
-    : current ? routeProgress(current, truck ?? null, { useTaps: ivan }) : null
+    ? routeProgressForStops(dayStops, truck ?? null, { useTaps: true, nowIso })
+    : current ? routeProgress(current, truck ?? null, { useTaps: ivan, nowIso }) : null
+  // The position-based ETA belongs on the stop the truck is heading for.
+  const etaForStopId = route && route.nextIndex != null && route.etaAt && route.milesToNext ? { id: route.stops[route.nextIndex].id, at: route.etaAt } : null
   const routeTitle = ivan && dayStops.length ? "Today's route" : `Current route · PRO ${current?.aljexId || '—'}`
   const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
   const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart)
@@ -73,15 +76,17 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
           {ivan && dayPlan ? (
             <>
               {dayPlan.total ? <Progress done={dayPlan.done} total={dayPlan.total} color="var(--ds-green)" /> : null}
-              {dayPlan.stops.map(({ load, stop, state, apptWarning }) => (
-                <div key={`${load.id}:${stop.id}`} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'DONE' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+              {dayPlan.stops.map(({ load, stop, state, apptWarning }, i) => (
+                <div key={`${load.id}:${stop.id}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'DONE' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
+                  <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--ds-t3)', width: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
                   <StateIcon state={state} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: state === 'DONE' ? 'line-through' : 'none' }}>
                     <span style={{ fontWeight: 600 }}>{stop.type === 'delivery' ? 'Deliver' : 'Pick up'}</span> {stop.name || stop.city || '—'}{stop.city && stop.name ? ` · ${stop.city}` : ''} <span style={{ color: 'var(--ds-t3)' }}>· PRO {load.aljexId || '—'}</span>
                     {apptWarning ? <span title={apptWarning} style={{ marginLeft: 6, color: 'var(--ds-amber)', fontWeight: 700 }}>⚠ time?</span> : null}
                   </span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', color: apptWarning ? 'var(--ds-amber)' : 'var(--ds-t3)', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: apptWarning ? 'var(--ds-amber)' : 'var(--ds-t3)', whiteSpace: 'nowrap', textAlign: 'right' }}>
                     {state === 'DONE' ? `left ${time(stop.departedAt)}` : state === 'IN_PROGRESS' ? `on site ${time(stop.arrivedAt)}` : time(stop.appt) || 'TBD'}
+                    {etaForStopId?.id === stop.id ? <div style={{ fontSize: 11, color: 'var(--ds-blue)', fontWeight: 600 }}>ETA ~{time(etaForStopId.at)}</div> : null}
                   </span>
                 </div>
               ))}

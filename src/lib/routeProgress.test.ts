@@ -86,3 +86,13 @@ describe('a day across loads', () => {
     expect(r2.stops[1].state).toBe('IN_PROGRESS')
   })
 })
+
+describe('eta from position', () => {
+  it('estimates when the truck reaches the next stop, from where it is now', () => {
+    const r = routeProgress(load([pickup({ departedAt: 'y' }), delivery()]), ELK, { nowIso: '2026-10-12T14:00:00Z' })!
+    expect(r.etaAt).not.toBeNull()
+    expect(Date.parse(r.etaAt!)).toBeGreaterThan(Date.parse('2026-10-12T14:00:00Z'))
+    expect(Date.parse(r.etaAt!)).toBeLessThan(Date.parse('2026-10-12T16:00:00Z'))
+    expect(routeProgress(load([pickup(), delivery()]), null)!.etaAt).toBeNull()
+  })
+})
