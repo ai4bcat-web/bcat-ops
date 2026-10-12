@@ -104,6 +104,32 @@ export function introTextFor(template: string | null | undefined, driverName: st
   return (template?.trim() || DEFAULT_INTRO_TEXT).replace(/\{name\}/g, first).replace(/\{number\}/g, prettyPhone(dispatchNumber))
 }
 
+/**
+ * The name at the foot of every text a driver gets — "- Ryne" — so they know who in the
+ * office answered. A first name only: from the Slack profile when the text was typed in
+ * Slack, otherwise from the staff email (jenny@bcatcorp.com → Jenny). Null when nothing
+ * usable is known, in which case the text goes out unsigned rather than as "- Slack".
+ */
+export function signatureName(sentBy: string | null | undefined, fullName?: string | null): string | null {
+  const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+  const first = (fullName ?? '').trim().split(/\s+/)[0] ?? ''
+  if (first && !first.includes('@') && /^[A-Za-z]/.test(first)) return cap(first.replace(/[^A-Za-z'-]/g, ''))
+  const email = (sentBy ?? '').trim()
+  if (!email || email.startsWith('slack:') || !email.includes('@')) return null
+  const local = (email.split('@')[0].split(/[._+-]/)[0] ?? '').replace(/\d+$/, '')
+  return local ? cap(local) : null
+}
+
+/** The text as the driver receives it: the body with "- Name" on its own last line. */
+export function signText(body: string, name: string | null | undefined): string {
+  const text = body.trim()
+  if (!name) return text
+  // Already ends in "- Ryne" (typed by hand, any dash) — leave it.
+  const already = new RegExp(`[-–—]\\s*${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i')
+  if (already.test(text)) return text
+  return text ? `${text}\n- ${name}` : `- ${name}`
+}
+
 /** A contact card for the dispatch number, for the phone to save in one tap. */
 export function dispatchVCard(dispatchNumber: string): string {
   return ['BEGIN:VCARD', 'VERSION:3.0', 'N:Dispatch;BCAT;;;', 'FN:BCAT Dispatch', 'ORG:BCAT Corp', `TEL;TYPE=CELL,VOICE:${dispatchNumber}`, 'NOTE:Text or call BCAT dispatch about your loads.', 'END:VCARD'].join('\r\n') + '\r\n'

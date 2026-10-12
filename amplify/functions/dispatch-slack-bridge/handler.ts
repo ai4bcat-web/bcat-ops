@@ -12,7 +12,7 @@ import { sendMessage, extensionFor } from '../_shared/twilio'
 import { sendDispatchText, MEDIA_PREFIX, type SendDeps } from '../_shared/dispatchSend'
 import { slackClient, type SlackClient } from '../_shared/slackApi'
 import { classifySlackEvent, type SlackMessageEvent, type SlackFile } from '../_shared/slackDispatch'
-import { MAX_MEDIA_PER_MESSAGE } from '../../../src/lib/dispatch'
+import { signatureName, MAX_MEDIA_PER_MESSAGE } from '../../../src/lib/dispatch'
 
 const dynamo = new DynamoDBClient({})
 const s3 = new S3Client({})
@@ -67,7 +67,7 @@ export async function handleSlackEvent(ev: SlackMessageEvent, deps: BridgeDeps):
 
   try {
     if (!intent.body && mediaKeys.length === 0) throw new Error('Nothing to send: the attachment could not be read')
-    await sendDispatchText(deps, { conversation, body: intent.body, mediaKeys, sentBy: who.email, via: 'slack', slackTs: intent.ts })
+    await sendDispatchText(deps, { conversation, body: intent.body, mediaKeys, sentBy: who.email, via: 'slack', slackTs: intent.ts, signedAs: signatureName(who.email, who.name) })
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err)
     await deps.slack.call('chat.postMessage', { channel: intent.channel, thread_ts: intent.ts, text: `⚠️ Not sent to the driver: ${why}` }).catch(() => undefined)

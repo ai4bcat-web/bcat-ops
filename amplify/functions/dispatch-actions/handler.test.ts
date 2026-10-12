@@ -67,7 +67,7 @@ describe('authorize', () => {
 describe('send', () => {
   it('texts the driver from the dispatch number and files the outbound message', async () => {
     const r = await runAction('send', { driverId: 'd-jason', body: 'Load 14578 is ready' }, JENNY, deps()) as { message: { status: string; sentBy: string }; conversation: { phone: string; driverName: string; unreadCount: number; lastDirection: string } }
-    expect(sent).toEqual([{ to: '+18475550100', body: 'Load 14578 is ready', mediaUrls: undefined }])
+    expect(sent).toEqual([{ to: '+18475550100', body: 'Load 14578 is ready\n- Jenny', mediaUrls: undefined }])
     expect(r.message.status).toBe('queued')
     expect(r.message.sentBy).toBe('jenny@bcatcorp.com')
     expect(r.conversation.driverName).toBe('Jason Smith')
@@ -210,6 +210,6 @@ describe('sendIntro', () => {
   it('uses the custom intro from settings', async () => {
     store.settings = { introText: 'Hey {name}, dispatch here: {number}.' }
     await runAction('sendIntro', { driverId: 'd-jason' }, JENNY, deps())
-    expect(sent[0].body).toBe('Hey Jason, dispatch here: (224) 222-1305.')
+    expect(sent[0].body).toBe('Hey Jason, dispatch here: (224) 222-1305.\n- Jenny')
   })
 })

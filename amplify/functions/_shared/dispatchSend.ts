@@ -8,7 +8,7 @@
 import type { DispatchConfig } from './dispatchConfig'
 import { DispatchStore, messageRow } from './dispatchStore'
 import { TwilioError } from './twilio'
-import { MAX_SMS_BODY, MAX_MEDIA_PER_MESSAGE, MAX_MMS_BYTES, type DispatchConversation, type DispatchMedia, type DispatchMessage } from '../../../src/lib/dispatch'
+import { MAX_SMS_BODY, MAX_MEDIA_PER_MESSAGE, MAX_MMS_BYTES, signatureName, signText, type DispatchConversation, type DispatchMedia, type DispatchMessage } from '../../../src/lib/dispatch'
 
 export const MEDIA_PREFIX = 'dispatch-media/'
 
@@ -28,13 +28,21 @@ export interface SendInput {
   sentBy: string
   via: 'app' | 'slack'
   slackTs?: string | null
+  /**
+   * The first name signed at the foot of the text. Omit to derive it from sentBy; pass
+   * null to send unsigned (system texts such as auto-replies).
+   */
+  signedAs?: string | null
 }
 
 export async function sendDispatchText(deps: SendDeps, input: SendInput): Promise<{ message: DispatchMessage; conversation: DispatchConversation }> {
   const { store, config } = deps
   if (!config) throw new Error('Dispatch is not connected to Twilio yet. Run the setup script first.')
   const body = input.body.trim()
-  if (body.length > MAX_SMS_BODY) throw new Error(`Texts are limited to ${MAX_SMS_BODY} characters`)
+  // The driver's copy carries "- Ryne" on its last line; the thread keeps the body as typed,
+  // since the page and Slack already show who sent it.
+  const signed = signText(body, input.signedAs === undefined ? signatureName(input.sentBy) : input.signedAs)
+  if (signed.length > MAX_SMS_BODY) throw new Error(`Texts are limited to ${MAX_SMS_BODY} characters`)
   const keys = input.mediaKeys
   if (!body && keys.length === 0) throw new Error('Write something or attach a picture')
   if (keys.length > MAX_MEDIA_PER_MESSAGE) throw new Error(`At most ${MAX_MEDIA_PER_MESSAGE} pictures per text`)
@@ -56,7 +64,7 @@ export async function sendDispatchText(deps: SendDeps, input: SendInput): Promis
 
   let sent: Awaited<ReturnType<SendDeps['send']>>
   try {
-    sent = await deps.send(config, { to: conversation.phone, body: body || undefined, mediaUrls: mediaUrls.length ? mediaUrls : undefined })
+    sent = await deps.send(config, { to: conversation.phone, body: signed || undefined, mediaUrls: mediaUrls.length ? mediaUrls : undefined })
   } catch (err) {
     const te = err instanceof TwilioError ? err : null
     const failed = await store.putMessage({ ...messageRow({ ...base, at: deps.now().toISOString(), status: 'failed', errorCode: te?.code != null ? String(te.code) : null, errorMessage: te?.message ?? String(err) }), via: input.via, slackTs: input.slackTs ?? null })

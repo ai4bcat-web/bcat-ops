@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
+import { signatureName, signText,
   phoneDigits, toE164Strict, prettyPhone, samePhone, matchDriverByPhone, conversationTitle,
   messagePreview, sortThread, sortConversations, conversationMatches, normalizeSettings, callPlan,
   DEFAULT_GREETING, DEFAULT_RING_SECONDS, slackChannelNameFor, slackNoteBody, phoneColorSlot, dispatchersOf, introTextFor, dispatchVCard,
@@ -169,5 +169,23 @@ describe('intro text', () => {
     expect(v).toContain('FN:BCAT Dispatch')
     expect(v).toContain('TEL;TYPE=CELL,VOICE:+12248756477')
     expect(v.startsWith('BEGIN:VCARD')).toBe(true)
+  })
+})
+
+describe('text signatures', () => {
+  it('signs with a first name from the Slack profile or the staff email', () => {
+    expect(signatureName('ryne@bcatcorp.com')).toBe('Ryne')
+    expect(signatureName('jenny.k@bcatcorp.com')).toBe('Jenny')
+    expect(signatureName('slack:U123', 'Dennis Alvarez')).toBe('Dennis')
+    expect(signatureName('ryne@bcatcorp.com', 'ryne@bestcareautotransport.com')).toBe('Ryne')
+    expect(signatureName('slack:U123')).toBeNull()
+    expect(signatureName('')).toBeNull()
+  })
+  it('puts the name on its own last line and never doubles it', () => {
+    expect(signText('Go to door 4', 'Ryne')).toBe('Go to door 4\n- Ryne')
+    expect(signText('Go to door 4\n- Ryne', 'Ryne')).toBe('Go to door 4\n- Ryne')
+    expect(signText('Thanks — Ryne', 'Ryne')).toBe('Thanks — Ryne')
+    expect(signText('', 'Ryne')).toBe('- Ryne')
+    expect(signText('Go to door 4', null)).toBe('Go to door 4')
   })
 })

@@ -51,11 +51,11 @@ async function channelled() {
 }
 
 describe('Slack → driver', () => {
-  it('texts the driver what a teammate typed, signed with their email', async () => {
+  it('texts the driver what a teammate typed, signed with their first name', async () => {
     const c = await channelled()
     const r = await handleSlackEvent({ type: 'message', channel: 'C9', user: 'U2', ts: '1.1', text: 'Go to door 4' }, deps())
     expect(r.outcome).toBe('sent')
-    expect(sent).toEqual([{ to: '+18475550100', body: 'Go to door 4', mediaUrls: undefined }])
+    expect(sent).toEqual([{ to: '+18475550100', body: 'Go to door 4\n- Dennis', mediaUrls: undefined }])
     const [m] = [...store.messages.values()]
     expect(m).toMatchObject({ direction: 'OUT', kind: 'SMS', sentBy: 'dennis@bcatcorp.com', via: 'slack', slackTs: '1.1' })
     expect(store.conversations.get(c.id)?.lastSentBy).toBe('dennis@bcatcorp.com')
@@ -73,7 +73,7 @@ describe('Slack → driver', () => {
     await channelled()
     const r = await handleSlackEvent({ type: 'message', channel: 'C9', user: 'U2', ts: '1.21', thread_ts: '1.1', text: 'Also bring the BOL' }, deps())
     expect(r.outcome).toBe('sent')
-    expect(sent[0].body).toBe('Also bring the BOL')
+    expect(sent[0].body).toBe('Also bring the BOL\n- Dennis')
   })
   it('keeps // messages as internal notes and never texts them', async () => {
     await channelled()
