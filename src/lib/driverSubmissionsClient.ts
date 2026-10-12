@@ -372,6 +372,33 @@ export interface StaffUploadDriverDocInput {
  * that already has a RATECON but no POD). Otherwise creates a new submission.
  */
 export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Promise<SubmissionWithDocs> {
+  const result = await staffUploadDriverDocOnly(input)
+  // A POD filed by the office marks the trip delivered, as one sent from the driver app does.
+  if (input.kind === 'POD' && input.loadId) await markDeliveredForPod(input.loadId, input.driver.id)
+  return result
+}
+
+/**
+ * Stamp the load's open delivery as delivered now that a POD is on file for it — the same
+ * rule the driver API applies when the POD comes from the app (deliveriesClosedByPod).
+ * Best-effort: the POD is already filed, and the office can still mark the stop by hand.
+ * Goes through the store so the calendar and dispatch see the change without a reload.
+ */
+async function markDeliveredForPod(loadId: string, driverId: string): Promise<void> {
+  try {
+    const { useAppStore } = await import('@/store/useAppStore')
+    const { stopsAfterPod } = await import('./stopEvents')
+    const state = useAppStore.getState()
+    const load = state.loads.find((l) => l.id === loadId)
+    if (!load) return
+    const stops = stopsAfterPod(load, driverId, new Date().toISOString())
+    if (stops) await state.updateLoad(load.id, { stops })
+  } catch (err) {
+    console.warn('[driverSubmissionsClient] POD filed but the delivery could not be marked', err)
+  }
+}
+
+async function staffUploadDriverDocOnly(input: StaffUploadDriverDocInput): Promise<SubmissionWithDocs> {
   const error = driverDocValidationError(input.files)
   if (error) throw new Error(error)
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  deliveriesClosedByPod, closeDeliveries, markAllStopsDone, applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
+  deliveriesClosedByPod, closeDeliveries, markAllStopsDone, stopsAfterPod, applyStopEvent, estimateEta, delivererOf, nextDeliveryAfter, planDeliveryEta, withEta,
   lastStopEvent, pendingDeliveryEta, ETA_MIN_MINUTES,
 } from './stopEvents'
 import type { Load, Stop } from '../types'
@@ -146,6 +146,21 @@ describe('markAllStopsDone', () => {
     const next = markAllStopsDone([pu, de], '2026-10-12T15:00:00Z')
     expect(next[0]).toBe(pu)
     expect(next[1]).toMatchObject({ arrivedAt: '2026-10-12T15:00:00Z', departedAt: '2026-10-12T15:00:00Z' })
+  })
+})
+
+describe('stopsAfterPod', () => {
+  const pu = { id: 'pu', type: 'pickup', sequence: 0, driverId: 'd1', departedAt: '2026-10-12T13:34:00Z' } as unknown as Stop
+  const de = { id: 'de', type: 'delivery', sequence: 1, driverId: 'd1' } as unknown as Stop
+  const load = { id: 'l1', stops: [pu, de] } as unknown as Load
+  it("stamps the driver's delivery when the office files their POD", () => {
+    const next = stopsAfterPod(load, 'd1', '2026-10-12T16:00:00Z')
+    expect(next?.[1]).toMatchObject({ arrivedAt: '2026-10-12T16:00:00Z', departedAt: '2026-10-12T16:00:00Z' })
+  })
+  it('stamps every open delivery when the filer is not on the load, and nothing when it is already delivered', () => {
+    expect(stopsAfterPod(load, 'someone-else', '2026-10-12T16:00:00Z')?.[1].departedAt).toBe('2026-10-12T16:00:00Z')
+    const done = { ...load, stops: [pu, { ...de, departedAt: '2026-10-12T15:00:00Z' }] } as unknown as Load
+    expect(stopsAfterPod(done, 'd1', '2026-10-12T16:00:00Z')).toBeNull()
   })
 })
 

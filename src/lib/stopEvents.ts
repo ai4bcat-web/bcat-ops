@@ -59,6 +59,20 @@ export function markAllStopsDone(stops: Stop[], atIso: string): Stop[] {
   return stops.map((s) => (s.departedAt ? s : { ...s, arrivedAt: s.arrivedAt ?? atIso, departedAt: atIso }))
 }
 
+/**
+ * The load's stops once a POD is on file for it: the driver's open delivery stamped
+ * delivered — or, when the POD was filed by the office for a driver who is not on the
+ * load's stops, every open delivery, since a POD means the trip is done. Null when there
+ * was nothing left to stamp.
+ */
+export function stopsAfterPod(load: Load, driverId: string | null | undefined, atIso: string): Stop[] | null {
+  const stops = getStops(load)
+  let closing: Stop[] = driverId ? deliveriesClosedByPod(load, stops, driverId) : []
+  if (!closing.length) closing = stops.filter((s) => s.type === 'delivery' && !s.departedAt)
+  if (!closing.length) return null
+  return closeDeliveries(stops, closing, atIso)
+}
+
 /** The stops with those deliveries stamped arrived (if not already) and departed at `atIso`. */
 export function closeDeliveries(stops: Stop[], closing: readonly Pick<Stop, 'id'>[], atIso: string): Stop[] {
   const ids = new Set(closing.map((s) => s.id))
