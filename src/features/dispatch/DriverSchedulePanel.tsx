@@ -4,7 +4,7 @@ import type { Driver, Load } from '@/types'
 import { driverProgramOf } from '@/lib/driverProgram'
 import { ivanDaySchedule, ownerOperatorWeek, type StopState, type LoadState } from '@/lib/driverSchedule'
 import { laneLabel, currentLoadForDriver } from '@/lib/driverJourney'
-import { routeProgress, type LatLng } from '@/lib/routeProgress'
+import { routeProgress, routeProgressForStops, type LatLng } from '@/lib/routeProgress'
 import { RouteStrip } from './RouteStrip'
 
 function StateIcon({ state }: { state: StopState | LoadState }) {
@@ -45,7 +45,14 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
   // The load under way: Ivan's drivers place the truck by their stop taps plus position;
   // owner operators do not tap, so position alone decides.
   const current = currentLoadForDriver(loads as Load[], driver.id, now)
-  const route = current ? routeProgress(current, truck ?? null, { useTaps: ivan }) : null
+  // Ivan's drivers run a day across several loads, so their strip is the whole day: once a
+  // delivery is done the marker moves onto the leg to the next pickup. Owner operators
+  // run one shipment at a time, so theirs is the load under way.
+  const dayStops = ivan ? ivanDaySchedule(loads, driver.id, today).stops.map((x) => x.stop) : []
+  const route = ivan && dayStops.length
+    ? routeProgressForStops(dayStops, truck ?? null, { useTaps: true })
+    : current ? routeProgress(current, truck ?? null, { useTaps: ivan }) : null
+  const routeTitle = ivan && dayStops.length ? "Today's route" : `Current route · PRO ${current?.aljexId || '—'}`
   const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
   const week = ivan ? null : ownerOperatorWeek(loads, driver.id, weekStart)
   const title = ivan ? 'Today' : 'This week'
@@ -62,7 +69,7 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
       </button>
       {open ? (
         <div style={{ padding: '0 14px 10px', display: 'grid', gap: 6 }}>
-          {route && current ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--ds-border-soft)', marginBottom: 4 }}><RouteStrip progress={route} title={`Current route · PRO ${current.aljexId || '—'}`} /></div> : null}
+          {route ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--ds-border-soft)', marginBottom: 4 }}><RouteStrip progress={route} title={routeTitle} /></div> : null}
           {ivan && dayPlan ? (
             <>
               {dayPlan.total ? <Progress done={dayPlan.done} total={dayPlan.total} color="var(--ds-green)" /> : null}

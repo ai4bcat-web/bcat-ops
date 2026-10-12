@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { routeProgress, legFraction, routeFromStops } from './routeProgress'
+import { routeProgress, legFraction, routeFromStops, routeProgressForStops } from './routeProgress'
 import { locateCity } from './eldRadius'
 import type { Load } from '@/types'
 
@@ -49,5 +49,40 @@ describe('routeFromStops (driver app, no position)', () => {
     expect(r.percent).toBe(50)
     expect(r.nextIndex).toBe(1)
     expect(routeFromStops([])).toBeNull()
+  })
+})
+
+describe('position beats a missed tap', () => {
+  it('puts the truck at the delivery when it is parked there, even with no taps on the load', () => {
+    const r = routeProgress(load([pickup(), delivery()]), CHICAGO)!
+    expect(r.stops[1].state).toBe('IN_PROGRESS')
+    expect(r.stops[0].state).toBe('DONE')
+    expect(r.percent).toBe(100)
+    expect(r.nextIndex).toBe(1)
+    expect(r.milesToNext).toBe(0)
+  })
+  it('places an untapped Ivan driver along the route by position', () => {
+    const mid = { lat: (CHICAGO.lat + ELK.lat) / 2, lng: (CHICAGO.lng + ELK.lng) / 2 }
+    const r = routeProgress(load([pickup(), delivery()]), mid)!
+    expect(r.basis).toBe('location')
+    expect(r.percent).toBeGreaterThan(30)
+    expect(r.percent).toBeLessThan(70)
+  })
+})
+
+describe('a day across loads', () => {
+  it('moves onto the leg to the next pickup once a delivery is done', () => {
+    const stops = [
+      { ...delivery({ id: 'd1', sequence: 0, name: 'Woodmans', city: 'Beloit, WI', departedAt: '2026-10-12T11:11:00Z' }) },
+      { ...pickup({ id: 'p2', sequence: 1, name: 'Rust-Oleum', city: 'Pleasant Prairie, WI' }) },
+      { ...delivery({ id: 'd2', sequence: 2, name: 'MPS', city: 'Chicago, IL' }) },
+    ] as unknown as import('@/types').Stop[]
+    const r = routeProgressForStops(stops, null)!
+    expect(r.complete).toBe(false)
+    expect(r.nextIndex).toBe(1)
+    expect(r.position).toBe(0)
+    expect(r.stops.map((s) => s.state)).toEqual(['DONE', 'UPCOMING', 'UPCOMING'])
+    const r2 = routeProgressForStops(stops, { lat: 42.52, lng: -87.93 })!   // parked at Pleasant Prairie
+    expect(r2.stops[1].state).toBe('IN_PROGRESS')
   })
 })
