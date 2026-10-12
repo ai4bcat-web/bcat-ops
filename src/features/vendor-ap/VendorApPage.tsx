@@ -733,7 +733,8 @@ export function VendorApPage() {
   const isMobile = useIsMobile()
 
   const [search, setSearch] = useState('')
-  const [activeTab, setActiveTab] = useState<'ALL' | 'NEED_TO_PAY' | 'DONE'>('ALL')
+  // Opens on what is still owed: a paid row leaves this view, which is what "mark done" should look like.
+  const [activeTab, setActiveTab] = useState<'ALL' | 'NEED_TO_PAY' | 'DONE'>('NEED_TO_PAY')
   const [detailId, setDetailId] = useState<string | null>(null)
   const [detailFull, setDetailFull] = useState<VendorPayable | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -833,14 +834,20 @@ export function VendorApPage() {
     async (id: string, payment: VendorPayment) => {
       try {
         const updated = await recordPayment(id, payment)
-        toast.success('Payment recorded')
-        setDetailFull((prev) => (prev ? { ...prev, ...updated, emailBody: prev.emailBody } : updated))
+        const wasOpen = detailIdRef.current === id
+        if (wasOpen && updated.status === 'DONE') {
+          // Paid from the details dialog: the job is finished, so the dialog goes too.
+          closeDetails()
+        } else {
+          setDetailFull((prev) => (prev ? { ...prev, ...updated, emailBody: prev.emailBody } : updated))
+        }
+        toast.success(updated.status === 'DONE' ? 'Paid — moved to Done' : 'Payment updated')
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Failed to record payment')
         throw err
       }
     },
-    [recordPayment],
+    [recordPayment, closeDetails],
   )
 
   const handleReopen = useCallback(
