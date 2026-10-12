@@ -57,9 +57,12 @@ function TabButton({
 }
 
 export function DriverApp({ program = 'SETTLEMENT' }: { program?: DriverProgram }) {
-  // The Hours tab follows the driver file's time-clock setting; an older API that does not
-  // say falls back to "Ivan app means a clock".
-  const timeClock = useDriverProfile()?.timeClock ?? (program === 'PAPERWORK')
+  // The Hours tab follows the driver file's time-clock setting and nothing else. Until the
+  // profile has loaded there is no clock: a box-truck driver used to see the Hours tab flash
+  // in (and stay, if the profile fetch failed) because the fallback was "Ivan app means a
+  // clock". The server refuses punches from a driver without a clock either way.
+  const profile = useDriverProfile()
+  const timeClock = profile ? profile.timeClock === true : false
   return (
     <div className="dark flex h-dvh flex-col bg-background text-foreground">
       {/* Only Ivan's employees punch a clock, so only they can have one running. */}

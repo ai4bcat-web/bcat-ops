@@ -2572,6 +2572,11 @@ export const handler = async (event: FnUrlEvent) => {
       if (driverProgramOf({ ...driver, payGroup: setting.payGroup }) !== 'PAPERWORK') {
         return reply(409, { error: 'The time clock is an Ivan driver feature.' })
       }
+      // Box-truck drivers and anyone whose file switches it off have no clock, whatever
+      // bundle their phone is running.
+      if (!timeClockFor({ fleetGroup: driver.fleetGroup, driverType: driver.driverType, payGroup: setting.payGroup, ivanApp: driver.ivanApp, timeClock: driver.timeClock })) {
+        return reply(409, { error: 'The time clock is switched off for this driver.' })
+      }
       if (!TIME_CLOCK_TABLE) return reply(503, { error: 'Time clock is not configured' })
 
       const rows = await timeClockRowsFor(driverId)

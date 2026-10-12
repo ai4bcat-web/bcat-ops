@@ -58,3 +58,15 @@ describe('trailerRequiredOnPickup', () => {
     expect(trailerRequiredOnPickup({ fleetGroup: 'AMAZON' })).toBe(false)
   })
 })
+
+describe('box truck drivers', () => {
+  it('get the Ivan paperwork app and no clock, whichever pay group they carry', async () => {
+    const { driverProgramOf, timeClockFor, trailerRequiredOnPickup } = await import('./driverProgram')
+    const zak = { fleetGroup: 'BOX_TRUCK', payGroup: 'BOX_TRUCK', timeClock: null }
+    expect(driverProgramOf(zak)).toBe('PAPERWORK')
+    expect(timeClockFor(zak)).toBe(false)                                         // box truck has no clock even on the Ivan app
+    expect(trailerRequiredOnPickup(zak)).toBe(false)
+    expect(timeClockFor({ ...zak, payGroup: 'LOCAL' })).toBe(false)
+    expect(timeClockFor({ ...zak, timeClock: true })).toBe(true)                  // unless staff switch it on
+  })
+})
