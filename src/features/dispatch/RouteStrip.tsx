@@ -31,12 +31,16 @@ export function RouteStrip({ progress, title, dark = false }: { progress: RouteP
     if (i === n - 1) return { transform: 'translateX(calc(-100% + 7px))', textAlign: 'right', justifyItems: 'end' }
     return { transform: 'translateX(-50%)', textAlign: 'center', justifyItems: 'center' }
   }
-  const nice = (label: string) => (label === label.toUpperCase() && label.length > 4 ? label.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : label)
+  // Title-case shouting names; an apostrophe does not start a word (Batory's, not Batory'S).
+  const nice = (label: string) => (label === label.toUpperCase() && label.length > 4 ? label.toLowerCase().replace(/(^|[\s\-/(])([a-z])/g, (_m, pre: string, c: string) => pre + c.toUpperCase()) : label)
+  // With three or more stops the labels alternate between two rows so neighbours never collide.
+  const staggered = n > 2
+  const rowFor = (i: number) => (staggered && i % 2 === 1 ? 1 : 0)
   return (
     <div style={{ display: 'grid', gap: 4 }}>
       {title ? <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: muted }}>{title}</div> : null}
       {/* Track: 26px of headroom for the truck, the line, then two lines of label. */}
-      <div style={{ position: 'relative', height: 78, margin: '0 8px' }}>
+      <div style={{ position: 'relative', height: staggered ? 104 : 78, margin: '0 8px' }}>
         <div style={{ position: 'absolute', left: 0, right: 0, top: 32, height: 4, borderRadius: 2, background: line }} />
         <div style={{ position: 'absolute', left: 0, top: 32, height: 4, borderRadius: 2, width: `${pct}%`, background: fill, transition: 'width .3s' }} />
         {progress.stops.map((s, i) => {
@@ -45,9 +49,9 @@ export function RouteStrip({ progress, title, dark = false }: { progress: RouteP
           const here = s.state === 'IN_PROGRESS'
           const a = anchor(i)
           return (
-            <div key={s.id} style={{ position: 'absolute', left: `${left}%`, top: 27, transform: a.transform, display: 'grid', justifyItems: a.justifyItems, gap: 5, width: n <= 2 ? '48%' : `${Math.max(22, Math.floor(92 / (n - 1)))}%`, maxWidth: 160 }} title={`${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}>
+            <div key={s.id} style={{ position: 'absolute', left: `${left}%`, top: 27, transform: a.transform, display: 'grid', justifyItems: a.justifyItems, gap: 5, width: n <= 2 ? '48%' : `${Math.min(46, Math.floor(180 / (n - 1)))}%`, maxWidth: 170 }} title={`${s.label}${s.city ? ` · ${s.city}` : ''}${s.appt ? ` · ${time(s.appt)}` : ''}`}>
               <span style={{ width: 14, height: 14, borderRadius: 7, background: done || here ? fill : (dark ? '#141f36' : 'var(--ds-surface)'), border: `2px solid ${done || here ? fill : muted}`, boxShadow: here ? `0 0 0 4px ${dark ? 'rgba(30,168,243,0.3)' : 'var(--ds-blue-soft)'}` : 'none', boxSizing: 'border-box' }} />
-              <span style={{ fontSize: 11, lineHeight: 1.25, color: done ? muted : text, fontWeight: here ? 700 : 500, textAlign: a.textAlign, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textDecoration: done ? 'line-through' : 'none' }}>
+              <span style={{ fontSize: 11, lineHeight: 1.25, color: done ? muted : text, fontWeight: here ? 700 : 500, textAlign: a.textAlign, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textDecoration: done ? 'line-through' : 'none', marginTop: rowFor(i) ? 26 : 0 }}>
                 {`${s.type === 'delivery' ? 'DE' : 'PU'} · ${nice(s.label)}`}
               </span>
             </div>
