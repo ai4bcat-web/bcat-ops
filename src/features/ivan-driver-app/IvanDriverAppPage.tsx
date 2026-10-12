@@ -12,6 +12,8 @@ import { useAppStore } from '@/store/useAppStore'
 import { listDriverSubmissions, type SubmissionWithDocs } from '@/lib/driverSubmissionsClient'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import { IvanDriverWeek } from './IvanDriverWeek'
+import { Avatar } from '@/components/ui/avatar'
+import { getColor } from '@/lib/driverColors'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { chicagoDateStr } from '@/lib/date'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
@@ -20,6 +22,9 @@ import {
   type IvanLoadRow, type IvanSortKey, type SortDirection,
 } from './ivanDriverApp'
 import { errorText } from '@/lib/errorText'
+
+const getInitials = (name: string) =>
+  name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 
 const apptLabel = (iso: string | null | undefined) =>
   iso
@@ -108,6 +113,8 @@ export function IvanDriverAppPage() {
   const loads = useAppStore((s) => s.loads)
   const equipment = useAppStore((s) => s.equipment)
   const [periodStart, setPeriodStart] = useState(() => sundayOf())
+  // One driver at a time, picked from the chips at the top — as on the owner-operator page.
+  const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
   // Where the trucks are, for today's route strips. Same feed the Dispatch page reads.
   const [locations, setLocations] = useState<TruckLocation[]>([])
   const [now, setNow] = useState(() => Date.now())
@@ -149,7 +156,9 @@ export function IvanDriverAppPage() {
 
   // Default: the thing most worth seeing first is who still owes paperwork.
   const [sort, setSort] = useState<SortState>({ key: 'pod', direction: 'asc' })
-  const flat = useMemo(() => sortFlatRows(flattenRows(rows), sort.key, sort.direction), [rows, sort])
+  const selectedRow = rows.find((r) => r.driver.id === selectedDriverId) ?? rows[0] ?? null
+  // The paperwork table is the selected driver's week, like the loads table on a settlement.
+  const flat = useMemo(() => sortFlatRows(flattenRows(selectedRow ? [selectedRow] : []), sort.key, sort.direction), [selectedRow, sort])
 
 
   const isThisWeek = periodStart === sundayOf()
@@ -198,29 +207,46 @@ export function IvanDriverAppPage() {
         </p>
       )}
 
-      {/* Each driver, day by day, as the Dispatch page shows them: route strip, stops done, the stops. */}
+      {/* One chip per driver; the chosen one's week fills the page below. */}
       {rows.length > 0 && (
-        <div style={{ display: 'grid', gap: 14, marginBottom: 18 }}>
-          {rows.map((row) => (
-            <div key={row.driver.id}>
-              <IvanDriverWeek driver={row.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(row.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')} />
-              {row.unclassified && (
-                <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: '#b45309', fontSize: 11.5 }}>
-                  <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
-                  <span>No fleet set — the app still shows {row.driver.name} a settlement. In Files → Drivers set the fleet to Local or Box truck, or switch on Ivan driver app.</span>
-                </p>
-              )}
-            </div>
-          ))}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+          {rows.map((r) => {
+            const active = selectedRow?.driver.id === r.driver.id
+            const color = getColor(r.driver.colorKey)
+            const outstanding = r.podsMissing + r.podsIllegible
+            return (
+              <button key={r.driver.id} onClick={() => setSelectedDriverId(r.driver.id)} title={r.driver.name} aria-pressed={active}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderRadius: 10, border: `1px solid ${active ? 'var(--ds-blue)' : 'var(--ds-border)'}`, background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)', cursor: 'pointer', fontFamily: 'inherit', boxShadow: active ? 'var(--sh-sm)' : 'none' }}>
+                <Avatar src={r.driver.photoUrl} initials={getInitials(r.driver.name)} size="xs" style={{ background: color.avatarBg, color: '#fff' }} />
+                <span style={{ fontSize: 13, fontWeight: active ? 700 : 600, color: 'var(--ds-t1)' }}>{r.driver.name}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: outstanding ? '#b45309' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums' }}>
+                  {r.loads.length} load{r.loads.length === 1 ? '' : 's'}{outstanding ? ` · ${outstanding} POD` : ''}
+                </span>
+                {r.unclassified && <AlertTriangle size={12} style={{ color: '#b45309' }} aria-label="No fleet set" />}
+              </button>
+            )
+          })}
         </div>
       )}
 
-      <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', margin: '0 0 8px' }}>Paperwork this week</p>
+      {selectedRow && (
+        <div style={{ marginBottom: 18 }}>
+          <IvanDriverWeek key={selectedRow.driver.id} driver={selectedRow.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(selectedRow.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')} />
+          {selectedRow.unclassified && (
+            <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: '#b45309', fontSize: 11.5 }}>
+              <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>No fleet set — the app still shows {selectedRow.driver.name} a settlement. In Files → Drivers set the fleet to Local or Box truck, or switch on Ivan driver app.</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {selectedRow && <p style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t2)', margin: '0 0 8px' }}>{selectedRow.driver.name}&rsquo;s paperwork this week</p>}
       {/* The week, as one list. Driver is a column like any other. */}
       {flat.length === 0 ? (
         rows.length > 0 && (
           <p style={{ color: 'var(--ds-t3)', fontSize: 13.5, padding: 14, border: '1px solid var(--ds-border)', borderRadius: 10 }}>
-            Nothing delivering this week.
+            Nothing delivering this week for {selectedRow?.driver.name ?? 'this driver'}.
           </p>
         )
       ) : (
