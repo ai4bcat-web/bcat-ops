@@ -9,6 +9,7 @@ import type { Load, Stop } from '@/types'
 import { getStops } from './stops'
 import { chicagoDateStr } from './date'
 import { driverIsOnLoad } from './driverJourney'
+import { apptSortKey } from './apptOrder'
 
 export type StopState = 'DONE' | 'IN_PROGRESS' | 'UPCOMING'
 export type LoadState = 'COMPLETED' | 'IN_PROGRESS' | 'UPCOMING'
@@ -56,10 +57,12 @@ export function ivanDaySchedule(loads: readonly Load[], driverId: string, today:
   // says: the office sometimes types a delivery time earlier than the pickup, and showing
   // the delivery first makes one load read as two. Loads order by their earliest stop.
   const anchor = new Map<string, string>()
+  // Each load's earliest key; an untimed (FCFS / midnight) stop keys after the timed ones
+  // of its day, so an open-time load follows the fixed appointments. See apptOrder.ts.
   for (const { load, stop } of stops) {
-    const t = String(stop.appt ?? '')
+    const t = apptSortKey(stop)
     const cur = anchor.get(load.id)
-    if (cur === undefined || (t && t < cur)) anchor.set(load.id, t)
+    if (cur === undefined || t < cur) anchor.set(load.id, t)
   }
   stops.sort((a, b) =>
     (anchor.get(a.load.id) ?? '').localeCompare(anchor.get(b.load.id) ?? '') ||

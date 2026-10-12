@@ -2,6 +2,7 @@
  * What goes on today's sheet. Pure, so the day can be pinned without a page.
  */
 import type { PaperworkLoad, PaperworkStop } from '../driverApi'
+import { apptSortKey } from '@/lib/apptOrder'
 
 /** Matches DETENTION_FREE_HOURS on the server: two hours past the appointment. */
 export const DETENTION_HOURS = 2
@@ -23,8 +24,10 @@ export function stopsForDay(loads: PaperworkLoad[], today: string): TodayStop[] 
       if (stop.date === today && stop.yours) out.push({ load, stop })
     }
   }
+  // Timed appointments first, in time order; a first-come-first-served or date-only stop
+  // (stored at midnight) after them, since the driver fits it around the fixed ones.
   return out.sort((a, b) =>
-    String(a.stop.appt ?? '').localeCompare(String(b.stop.appt ?? '')) || a.stop.sequence - b.stop.sequence)
+    apptSortKey(a.stop).localeCompare(apptSortKey(b.stop)) || a.stop.sequence - b.stop.sequence)
 }
 
 export function isDelivery(stop: PaperworkStop): boolean {
