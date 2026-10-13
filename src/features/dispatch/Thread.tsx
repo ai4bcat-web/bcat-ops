@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
-import { formatDuration, MAX_SMS_BODY, type DispatchConversation, type DispatchMessage } from '@/lib/dispatch'
+import { formatDuration, MAX_SMS_BODY, type DispatchConversation, type DispatchMessage, conversationTitle } from '@/lib/dispatch'
 import { groupByDay, bubbleTime, deliveryLabel, staffName, senderLabel, acceptFiles, filesFromTransfer, ACCEPTED_MEDIA } from './dispatchUi'
 import { MediaThumb, VoicemailPlayer, PendingFilePreview } from './MediaThumb'
 import type { DispatchMedia } from '@/lib/dispatch'
@@ -57,7 +57,7 @@ function StatusRow({ m }: { m: DispatchMessage }) {
   )
 }
 
-function Bubble({ m, me, accent, getUrl, onFileAsPod }: { m: DispatchMessage; me: string | null; accent?: { border: string; bg: string }; getUrl: (key: string) => Promise<string>; onFileAsPod?: (media: DispatchMedia) => void }) {
+function Bubble({ m, me, from, accent, getUrl, onFileAsPod }: { m: DispatchMessage; me: string | null; /** Who the inbound texts are from: the driver's name. */ from: string; accent?: { border: string; bg: string }; getUrl: (key: string) => Promise<string>; onFileAsPod?: (media: DispatchMedia) => void }) {
   const mine = m.direction === 'OUT'
   const note = m.kind === 'NOTE'
   const vm = m.kind === 'VOICEMAIL'
@@ -81,7 +81,7 @@ function Bubble({ m, me, accent, getUrl, onFileAsPod }: { m: DispatchMessage; me
           : failed ? <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ds-red)', marginBottom: 2 }}>Not sent to driver · {sender}</div>
           : mine ? <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.85, marginBottom: 2 }}>Text · {sender}</div>
           : vm ? null
-          : <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 2 }}>Text from driver</div>}
+          : <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ds-t3)', marginBottom: 2 }}>Text from {from}</div>}
         {vm ? (
           <div style={{ display: 'grid', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--ds-t2)' }}><Voicemail className="size-3.5" /> Voicemail · {formatDuration(m.callDurationSec)}</div>
@@ -206,7 +206,7 @@ export function Thread({ conversation, messages, loading, now, canSend, me, acce
             <div style={{ display: 'flex', justifyContent: 'center', margin: '10px 0 6px' }}>
               <span style={{ fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--ds-t3)' }}>{g.label}</span>
             </div>
-            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : m.kind === 'STATUS' ? <StatusRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} accent={accent} getUrl={getUrl} onFileAsPod={onFileAsPod} />)}
+            {g.messages.map((m) => m.kind === 'CALL' ? <CallRow key={m.id} m={m} /> : m.kind === 'STATUS' ? <StatusRow key={m.id} m={m} /> : <Bubble key={m.id} m={m} me={me} from={conversationTitle(conversation)} accent={accent} getUrl={getUrl} onFileAsPod={onFileAsPod} />)}
           </div>
         ))}
       </div>

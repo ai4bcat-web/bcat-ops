@@ -80,7 +80,10 @@ export function staffName(email: string | null | undefined): string {
 /** Who sent an outbound message and from where, as the bubble shows it. */
 export function senderLabel(m: Pick<DispatchMessage, 'direction' | 'sentBy' | 'via'>, me: string | null | undefined): string | null {
   if (m.direction !== 'OUT') return null
-  const name = m.sentBy && me && m.sentBy.toLowerCase() === me.toLowerCase() ? 'You' : (staffName(m.sentBy) || 'BCAT Ops')
+  // Always the person's name, so when several people work the page everyone can see who
+  // answered — "(you)" marks your own without hiding the name from the others.
+  const who = staffName(m.sentBy) || 'BCAT Ops'
+  const name = m.sentBy && me && m.sentBy.toLowerCase() === me.toLowerCase() ? `${who} (you)` : who
   return m.via === 'slack' ? `${name} via Slack` : name
 }
 

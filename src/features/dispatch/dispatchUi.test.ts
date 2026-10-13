@@ -43,7 +43,7 @@ describe('misc', () => {
   })
   it('labels who sent an outbound message, and from where', () => {
     expect(senderLabel({ direction: 'OUT', sentBy: 'jenny@bcatcorp.com' }, 'ryne@bcatcorp.com')).toBe('Jenny')
-    expect(senderLabel({ direction: 'OUT', sentBy: 'Ryne@bcatcorp.com' }, 'ryne@bcatcorp.com')).toBe('You')
+    expect(senderLabel({ direction: 'OUT', sentBy: 'Ryne@bcatcorp.com' }, 'ryne@bcatcorp.com')).toBe('Ryne (you)')
     expect(senderLabel({ direction: 'OUT', sentBy: 'dennis@bcatcorp.com', via: 'slack' }, 'ryne@bcatcorp.com')).toBe('Dennis via Slack')
     expect(senderLabel({ direction: 'IN', sentBy: null }, 'ryne@bcatcorp.com')).toBeNull()
   })
