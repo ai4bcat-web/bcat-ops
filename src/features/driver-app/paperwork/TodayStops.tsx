@@ -286,6 +286,7 @@ export function TodayStops({
   // What the driver just did, applied on top of the week until the refetch lands.
   const [patches, setPatches] = useState<Record<string, Partial<PaperworkStop>>>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [showDone, setShowDone] = useState(false)
   // The documents the driver has sent, so a delivered load can show its POD back to them.
   const docs = useTripDocs()
   const [viewing, setViewing] = useState<{ doc: TripDoc; load: PaperworkLoad; kind: 'POD' | 'MISC' } | null>(null)
@@ -329,18 +330,13 @@ export function TodayStops({
     )
   }
 
-  // Today's route as a strip: where they are between the stops, from their own taps.
-  const route = routeFromStops(items.map((it) => ({ id: it.stop.id, type: it.stop.type, name: it.stop.name, city: it.stop.city, appt: it.stop.appt, etaAt: it.stop.etaAt ?? null, arrivedAt: it.stop.arrivedAt, departedAt: it.stop.departedAt })))
+  // Done stops drop to a Completed section so the next load is at the top; they stay
+  // openable for a late POD, a trailer change or where the paperwork went.
+  const openItems = items.filter((it) => !it.stop.departedAt)
+  const doneItems = items.filter((it) => !!it.stop.departedAt)
 
-  return (
-    <>
-    {route ? (
-      <div className="mb-3 rounded-xl border border-border bg-card px-3 py-3">
-        <RouteStrip progress={route} title="Today's route" dark />
-      </div>
-    ) : null}
-    <ul className="flex flex-col gap-3">
-      {items.map((item) => {
+  // One card per stop, used for today's list and the completed section alike.
+  const renderCard = (item: TodayStop) => {
         const { load, stop } = item
         const delivery = isDelivery(stop)
         const podOk = load.pod.present && load.pod.legibility === 'OK'
@@ -509,7 +505,30 @@ export function TodayStops({
             )}
           </li>
         )
-      })}
+  }
+
+  // Today's route as a strip: where they are between the stops, from their own taps.
+  const route = routeFromStops(items.map((it) => ({ id: it.stop.id, type: it.stop.type, name: it.stop.name, city: it.stop.city, appt: it.stop.appt, etaAt: it.stop.etaAt ?? null, arrivedAt: it.stop.arrivedAt, departedAt: it.stop.departedAt })))
+
+  return (
+    <>
+    {route ? (
+      <div className="mb-3 rounded-xl border border-border bg-card px-3 py-3">
+        <RouteStrip progress={route} title="Today's route" dark />
+      </div>
+    ) : null}
+    <ul className="flex flex-col gap-3">
+      {openItems.map(renderCard)}
+      {doneItems.length > 0 ? (
+        <li className="mt-1">
+          <button type="button" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone}
+            className="flex w-full items-center justify-between rounded-xl border border-border bg-card px-4 py-3 text-left">
+            <span className="flex items-center gap-2 text-sm font-bold text-foreground"><Check className="h-4 w-4 text-emerald-300" aria-hidden="true" /> Completed · {doneItems.length}</span>
+            <span className="text-xs text-muted-foreground">{showDone ? 'Hide' : 'Show'} — open one to add a document, the trailer or where the paperwork is</span>
+          </button>
+        </li>
+      ) : null}
+      {showDone ? <li><ul className="flex flex-col gap-3 opacity-90">{doneItems.map(renderCard)}</ul></li> : null}
 
       {trailerFor ? <TrailerDialog key={keyOf(trailerFor)} item={trailerFor} onClose={() => setTrailerFor(null)} onPick={(t) => { setTrailerFor(null); void sendEvent(trailerFor, 'DEPARTED', t) }} /> : null}
       {whereFor ? <EndOfDayPaperworkDialog items={[whereFor]} truckUnit={null} onClose={() => setWhereFor(null)} onDone={() => { setWhereFor(null); onChange() }} /> : null}

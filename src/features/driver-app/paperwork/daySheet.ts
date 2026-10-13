@@ -24,10 +24,18 @@ export function stopsForDay(loads: PaperworkLoad[], today: string): TodayStop[] 
       if (stop.date === today && stop.yours) out.push({ load, stop })
     }
   }
-  // Timed appointments first, in time order; a first-come-first-served or date-only stop
-  // (stored at midnight) after them, since the driver fits it around the fixed ones.
+  // The dispatcher's order on the calendar first (the numbers on the schedule), then timed
+  // appointments in time order, then first-come-first-served / date-only stops (stored at
+  // midnight), then a load's pickup before its delivery.
   return out.sort((a, b) =>
-    apptSortKey(a.stop).localeCompare(apptSortKey(b.stop)) || a.stop.sequence - b.stop.sequence)
+    scheduleRank(a.load) - scheduleRank(b.load) ||
+    apptSortKey(a.stop).localeCompare(apptSortKey(b.stop)) ||
+    a.stop.sequence - b.stop.sequence)
+}
+
+/** A load's place on the schedule; one the dispatcher never ordered goes after the ordered ones. */
+function scheduleRank(load: Pick<PaperworkLoad, 'sortOrder'>): number {
+  return typeof load.sortOrder === 'number' ? load.sortOrder : Number.MAX_SAFE_INTEGER
 }
 
 export function isDelivery(stop: PaperworkStop): boolean {

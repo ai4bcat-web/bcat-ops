@@ -682,6 +682,7 @@ describe('driver-app-api handler', () => {
         // No truck assigned to this fixture driver, so there is no PM to report.
         pm: null,
         truck: null,
+        trailer: null,
         dispatchPhone: '+12248756477',
         // AMAZON pay group, no fleet: a settlement driver with no clock.
         timeClock: false,

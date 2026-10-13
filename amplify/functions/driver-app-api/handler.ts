@@ -251,6 +251,7 @@ interface FnUrlEvent {
 }
 
 interface DriverRow {
+  assignedTrailerId?: string | null
   id: string
   name: string
   active: boolean
@@ -1792,6 +1793,18 @@ async function truckForDriver(driver: DriverRow): Promise<{ id: string; unitNumb
   }
 }
 
+async function trailerForDriver(driver: DriverRow): Promise<{ id: string; unitNumber: string } | null> {
+  const trailerId = (driver.assignedTrailerId ?? '').trim()
+  if (!trailerId || !EQUIPMENT_TABLE) return null
+  try {
+    const t = (await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: trailerId } }))).Item as EquipmentRow | undefined
+    return t ? { id: t.id, unitNumber: String(t.unitNumber ?? '').trim() } : null
+  } catch (err) {
+    console.error('[driver-app-api] could not read the driver\'s trailer', { trailerId, err })
+    return null
+  }
+}
+
 /** The latest ELD fix for the driver's assigned truck, or null when there is none. */
 async function truckFixForDriver(driver: DriverRow): Promise<LatLng | null> {
   const truckId = (driver.assignedTruckId ?? '').trim()
@@ -2382,6 +2395,8 @@ export const handler = async (event: FnUrlEvent) => {
         pm: await pmForDriver(driver),
         // The truck they are in — what the ELD fix, the PM line and dispatch all key on.
         truck: await truckForDriver(driver),
+        // The trailer they said they started the day with, if asked.
+        trailer: await trailerForDriver(driver),
         // The number to call or text dispatch, pinned to the top of the app.
         dispatchPhone: await dispatchPhone(),
         // Whether the Hours tab shows: Ivan's own fleet, or a staff override on the file.
@@ -2533,6 +2548,37 @@ export const handler = async (event: FnUrlEvent) => {
         released: { drivers: previousHolders.map((d) => d.name), trucks: otherTrucks.map((t) => t.unitNumber) },
       })
       return reply(200, { truck: { id: truck.id, unitNumber: String(truck.unitNumber ?? '').trim() } })
+    }
+
+    /*
+     * The trailer the driver is starting the day with (Ivan local drivers, at clock-in).
+     * Written on the driver's file and the trailer's row, like the truck; null clears it
+     * (bobtail). The trailer a LOAD rides on is still named as they leave each pickup.
+     */
+    if (method === 'POST' && path === '/me/trailer') {
+      if (!EQUIPMENT_TABLE) return reply(503, { error: 'Trailers are not configured' })
+      const body = JSON.parse(event.body || '{}') as { trailerId?: string | null }
+      const trailerId = (body.trailerId ?? '').trim()
+      const now = nowIso()
+      let picked: EquipmentRow | undefined
+      if (trailerId) {
+        picked = (await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: trailerId } }))).Item as EquipmentRow | undefined
+        if (!picked || picked.type !== 'trailer' || picked.active === false) return reply(404, { error: 'trailer not found' })
+      }
+      const [roster, mine] = await Promise.all([
+        trailerId ? scan<DriverRow>(DRIVER_TABLE, 'assignedTrailerId = :t', {}, { ':t': trailerId }) : Promise.resolve([] as DriverRow[]),
+        scan<EquipmentRow>(EQUIPMENT_TABLE, 'assignedDriverId = :me AND #t = :trailer', { '#t': 'type' }, { ':me': driver.id, ':trailer': 'trailer' }),
+      ])
+      const previousHolders = roster.filter((d) => d.id !== driver.id)
+      const released = mine.filter((t) => t.id !== trailerId)
+      await Promise.all([
+        ddb.send(new UpdateCommand({ TableName: DRIVER_TABLE, Key: { id: driver.id }, UpdateExpression: 'SET assignedTrailerId = :t, updatedAt = :u', ExpressionAttributeValues: { ':t': trailerId || null, ':u': now } })),
+        ...(trailerId ? [ddb.send(new UpdateCommand({ TableName: EQUIPMENT_TABLE, Key: { id: trailerId }, UpdateExpression: 'SET assignedDriverId = :d, updatedAt = :u', ExpressionAttributeValues: { ':d': driver.id, ':u': now } }))] : []),
+        ...previousHolders.map((d) => ddb.send(new UpdateCommand({ TableName: DRIVER_TABLE, Key: { id: d.id }, UpdateExpression: 'SET assignedTrailerId = :n, updatedAt = :u', ExpressionAttributeValues: { ':n': null, ':u': now } }))),
+        ...released.map((t) => ddb.send(new UpdateCommand({ TableName: EQUIPMENT_TABLE, Key: { id: t.id }, UpdateExpression: 'SET assignedDriverId = :n, updatedAt = :u', ExpressionAttributeValues: { ':n': null, ':u': now } }))),
+      ])
+      console.log('[driver-app-api] trailer picked', { driverId: driver.id, driverName: driver.name, trailerId: trailerId || null, unitNumber: picked?.unitNumber ?? null })
+      return reply(200, { trailer: picked ? { id: picked.id, unitNumber: String(picked.unitNumber ?? '').trim() } : null })
     }
 
     /*

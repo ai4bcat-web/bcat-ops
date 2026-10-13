@@ -83,6 +83,7 @@ export interface PaperworkLoadLike {
   originName?: string | null
   destinationName?: string | null
   trailerNumber?: string | null
+  sortOrder?: number | null
   /** CENTS, as stored on the Load. */
   rate?: number | null
   commodity?: string | null
@@ -163,6 +164,8 @@ export interface PaperworkLoad {
   destination: string | null
   miles: number | null
   trailerNumber: string | null
+  /** The calendar's order for the day, when the dispatcher dragged the loads into one. */
+  sortOrder: number | null
   commodity: string | null
   weight: number | null
   pieces: number | null
@@ -359,6 +362,7 @@ export function buildPaperworkLoad(
     destination: place(load.destinationCity, load.destinationState, load.destinationName),
     miles: typeof load.miles === 'number' ? load.miles : null,
     trailerNumber: load.trailerNumber?.trim() || null,
+    sortOrder: typeof load.sortOrder === 'number' ? load.sortOrder : null,
     commodity: load.commodity?.trim() || null,
     weight: typeof load.weight === 'number' ? load.weight : null,
     pieces: typeof load.pieces === 'number' ? load.pieces : null,

@@ -100,6 +100,8 @@ export interface DriverProfile {
   pm?: DriverPm | null
   /** The truck the driver is in, or null until they pick one. Optional: older API. */
   truck?: DriverTruck | null
+  /** The trailer they started the day with, or null (bobtail / not asked). Optional: older API. */
+  trailer?: DriverTruck | null
   /** The dispatch number to call or text, E.164; null until Dispatch is set up. Optional: older API. */
   dispatchPhone?: string | null
   /** Hours tab on? Ivan's fleet by default; staff can override on the driver file. Optional: older API. */
@@ -139,6 +141,11 @@ export async function fetchTrucks(): Promise<TruckChoice[]> {
 /** I am in this truck today. */
 export async function selectTruck(truckId: string): Promise<{ truck: DriverTruck }> {
   return request('/me/truck', { method: 'POST', body: JSON.stringify({ truckId }) })
+}
+
+/** I am starting the day with this trailer (null: none, bobtail). */
+export async function selectTrailer(trailerId: string | null): Promise<{ trailer: DriverTruck | null }> {
+  return request('/me/trailer', { method: 'POST', body: JSON.stringify({ trailerId }) })
 }
 
 /** Mirrors pmStatus() in src/lib/pmDue.ts, plus the truck's unit number. */
@@ -574,6 +581,8 @@ export interface PaperworkLoad {
   destination: string | null
   miles: number | null
   trailerNumber: string | null
+  /** The dispatcher's order for the day on the calendar; today's checklist follows it. Optional: older API. */
+  sortOrder?: number | null
   commodity: string | null
   weight: number | null
   pieces: number | null

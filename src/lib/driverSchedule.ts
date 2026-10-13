@@ -59,8 +59,10 @@ export function ivanDaySchedule(loads: readonly Load[], driverId: string, today:
   const anchor = new Map<string, string>()
   // Each load's earliest key; an untimed (FCFS / midnight) stop keys after the timed ones
   // of its day, so an open-time load follows the fixed appointments. See apptOrder.ts.
+  // A load the dispatcher dragged into place on the calendar keeps that place ahead of
+  // the rest, matching the driver's own checklist.
   for (const { load, stop } of stops) {
-    const t = apptSortKey(stop)
+    const t = (typeof load.sortOrder === 'number' ? `0${String(load.sortOrder).padStart(8, '0')}` : '1') + apptSortKey(stop)
     const cur = anchor.get(load.id)
     if (cur === undefined || t < cur) anchor.set(load.id, t)
   }

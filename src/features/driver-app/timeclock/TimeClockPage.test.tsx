@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 
-const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn() }
+const api = { fetchTimeClock: vi.fn(), punchTimeClock: vi.fn(), fetchMe: vi.fn(), fetchTrucks: vi.fn(), selectTruck: vi.fn(), fetchTrailers: vi.fn(), selectTrailer: vi.fn() }
 vi.mock('../driverApi', () => api)
 const { clearCachedProgram } = await import('../useDriverProgram')
 
@@ -73,6 +73,25 @@ describe('the clock button', () => {
     render(<TimeClockPage />)
     await waitFor(() => expect(screen.getByText('Clock in')).toBeTruthy())
     fireEvent.click(screen.getByText('Clock in'))
+    await waitFor(() => expect(api.punchTimeClock).toHaveBeenCalledWith('IN', undefined))
+  })
+
+  it('asks one of Ivan’s local drivers for their truck and trailer first', async () => {
+    api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Jason Smith', program: 'PAPERWORK', ivanLocal: true, truck: { id: 'eq-3114', unitNumber: '3114' } })
+    api.fetchTrucks.mockResolvedValue([{ id: 'eq-3114', unitNumber: '3114', eld: true, holder: 'Jason Smith', yours: true }])
+    api.selectTruck.mockResolvedValue({ truck: { id: 'eq-3114', unitNumber: '3114' } })
+    api.fetchTrailers.mockResolvedValue([{ id: 'tr-5302', unitNumber: '5302', nickname: null }])
+    api.selectTrailer.mockResolvedValue({ trailer: { id: 'tr-5302', unitNumber: '5302' } })
+    render(<TimeClockPage />)
+    await waitFor(() => expect(screen.getByText('Clock in')).toBeTruthy())
+    fireEvent.click(screen.getByText('Clock in'))
+    // Truck first, even though one is already on file — they confirm it every morning.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Truck 3114/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Truck 3114/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Trailer 5302/ })).toBeTruthy())
+    expect(api.punchTimeClock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /Trailer 5302/ }))
+    await waitFor(() => expect(api.selectTrailer).toHaveBeenCalledWith('tr-5302'))
     await waitFor(() => expect(api.punchTimeClock).toHaveBeenCalledWith('IN', undefined))
   })
 })

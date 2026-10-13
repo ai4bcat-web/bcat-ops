@@ -59,6 +59,11 @@ function load(): Promise<void> {
   return inflight
 }
 
+/** Re-read /me now — after the driver picks a truck or trailer, so the app shows it. */
+export function refreshDriverProfile(): Promise<void> {
+  return load()
+}
+
 /** Forget everything — on sign-out, so the next driver on this phone starts clean. */
 export function clearCachedProgram(): void {
   cached = null

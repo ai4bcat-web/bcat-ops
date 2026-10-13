@@ -296,7 +296,26 @@ describe("today's sheet", () => {
     api.recordStopEvent.mockResolvedValueOnce({ at: '2026-10-07T15:40:00.000Z', eta: { stopId: 'st-de', etaAt: '2026-10-07T16:05:00.000Z', basis: 'motive' } })
     fireEvent.click(screen.getByRole('button', { name: /^Departed$/ }))
     await waitFor(() => expect(api.recordStopEvent).toHaveBeenLastCalledWith({ loadId: 'load-1', stopId: 'st-pu', event: 'DEPARTED' }))
+    // A departed pickup drops into Completed; the next stop is at the top. Open it to see the stamp.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Completed · 1/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Completed · 1/ }))
     await waitFor(() => expect(screen.getByText(/Departed 10:40 AM/)).toBeTruthy())
+  })
+
+  it('drops a delivered stop into Completed and keeps it openable', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    todayWeek([
+      load({ id: 'done', reference: '14577', stops: [stop('d1', 'delivery', '2026-10-07', { arrivedAt: '2026-10-07T13:00:00.000Z', departedAt: '2026-10-07T13:30:00.000Z' })] }),
+      load({ id: 'next', reference: '14578', stops: [stop('d2', 'delivery', '2026-10-07', { arrivedAt: '2026-10-07T15:00:00.000Z' })] }),
+    ])
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /Completed · 1/ })).toBeTruthy(), { timeout: 5000 })
+    // The open load is on the sheet; the delivered one is folded away until asked for.
+    expect(screen.getByText('14578')).toBeTruthy()
+    expect(screen.queryByText('14577')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Completed · 1/ }))
+    await waitFor(() => expect(screen.getByText('14577')).toBeTruthy())
+    expect(screen.getByText(/Delivered 8:30 AM/)).toBeTruthy()
   })
 
   it('Delivered opens the POD scanner without marking the stop — the POD landing marks it', async () => {
@@ -329,6 +348,8 @@ describe("today's sheet", () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /^Delivered$/ })).toBeTruthy(), { timeout: 5000 })
     fireEvent.click(screen.getByRole('button', { name: /^Delivered$/ }))
     await waitFor(() => expect(api.recordStopEvent).toHaveBeenCalledWith({ loadId: 'load-1', stopId: 'st-de', event: 'DEPARTED' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Completed · 1/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Completed · 1/ }))
     await waitFor(() => expect(screen.getByText(/Delivered 2:10 PM/)).toBeTruthy())
   })
 

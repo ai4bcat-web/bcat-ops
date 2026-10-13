@@ -26,8 +26,9 @@ import { chicagoDateStr } from '@/lib/date'
 import { weekStartOfISO } from '@/features/driver-pay/week'
 import { pickupsNeedingPaperworkLocation, deliveriesNeedingPaperworkConfirm } from '@/lib/paperworkLocation'
 import { EndOfDayPaperworkDialog, StartOfDayPaperworkDialog, type WhereItem, type ConfirmItem } from '../paperwork/PaperworkGates'
-import { useDriverTruck } from '../useDriverProgram'
+import { useDriverTruck, useDriverProfile } from '../useDriverProgram'
 import { TruckPickerDialog } from '../TruckPicker'
+import { TrailerPickerDialog } from '../TrailerPicker'
 
 /** Cents to "$1,500.00" — a figure a driver checks against what they were paid. */
 function money(cents: number): string {
@@ -68,6 +69,8 @@ export function TimeClockPage() {
   // Clocking in is the start of the day: the moment to say which truck, if not said yet.
   const { truck, loaded: truckLoaded } = useDriverTruck()
   const [pickTruck, setPickTruck] = useState(false)
+  const [pickTrailer, setPickTrailer] = useState(false)
+  const ivanLocal = useDriverProfile()?.ivanLocal === true
 
   /*
    * No synchronous setLoading here: this runs from an effect on mount, and a setState in an
@@ -175,7 +178,9 @@ export function TimeClockPage() {
           disabled={busy || readOnly}
           title={readOnly ? 'You are viewing this driver\u2019s app; only they can punch their clock' : undefined}
           onClick={() => {
-            if (!openShift && truckLoaded && !truck) { setPickTruck(true); return }
+            // Ivan's local drivers say which truck and trailer they are starting with every
+            // day; anyone else is only asked for a truck when none is on their file.
+            if (!openShift && (ivanLocal || (truckLoaded && !truck))) { setPickTruck(true); return }
             void gatedPunch(openShift ? 'OUT' : 'IN')
           }}
         >
@@ -199,7 +204,8 @@ export function TimeClockPage() {
         )}
       </div>
 
-      <TruckPickerDialog open={pickTruck} onClose={() => setPickTruck(false)} onPicked={() => void gatedPunch('IN')} />
+      <TruckPickerDialog open={pickTruck} onClose={() => setPickTruck(false)} onPicked={() => { if (ivanLocal) setPickTrailer(true); else void gatedPunch('IN') }} />
+      <TrailerPickerDialog open={pickTrailer} onClose={() => setPickTrailer(false)} onPicked={() => void gatedPunch('IN')} />
 
       {whereItems ? <EndOfDayPaperworkDialog items={whereItems} truckUnit={truck?.unitNumber ?? null} onClose={() => setWhereItems(null)} onDone={() => { setWhereItems(null); void punch('OUT') }} /> : null}
 

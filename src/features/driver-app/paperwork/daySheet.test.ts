@@ -48,3 +48,14 @@ describe('untimed stops', () => {
     expect(stopsForDay([carlyn, amazon], '2026-10-13').map((x) => x.load.reference)).toEqual(['amazon', 'carlyn'])
   })
 })
+
+describe('the schedule order', () => {
+  it("follows the dispatcher's calendar order before appointment times", async () => {
+    const { stopsForDay } = await import('./daySheet')
+    const mk = (id: string, appt: string, sortOrder: number | null) => ({ id, reference: id, sortOrder, stops: [{ id: `${id}-d`, type: 'delivery', date: '2026-10-13', yours: true, appt, sequence: 1, name: id }] }) as unknown as import('../driverApi').PaperworkLoad
+    const second = mk('second', '2026-10-13T12:00:00.000Z', 2)
+    const first = mk('first', '2026-10-13T16:00:00.000Z', 1)
+    const unordered = mk('unordered', '2026-10-13T11:00:00.000Z', null)
+    expect(stopsForDay([unordered, second, first], '2026-10-13').map((x) => x.load.reference)).toEqual(['first', 'second', 'unordered'])
+  })
+})
