@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
+import { apptLadderAfterEdit,
   apptWorkflowStatus, canMarkRequested, canMarkConfirmed, changeNeededPatch, canSetChangeNeeded, defaultRequestedFor, statusLabel,
 } from './apptStatus'
 import { fromDateInput, fromDateTimeInput } from './date'
@@ -89,5 +89,23 @@ describe('statusLabel — who is up next', () => {
     expect(statusLabel('need_book', 'delivery')).toBe('NEED RUBEN')
     expect(statusLabel('requested', 'delivery')).toBe('REQUESTED')
     expect(statusLabel('confirmed', 'pickup')).toBe('CONFIRMED')
+  })
+})
+
+describe('apptLadderAfterEdit — editing a booked appointment reopens it', () => {
+  const confirmed = { appt: fromDateTimeInput('2026-10-14T11:00'), apptType: 'exact' as const, apptEnd: undefined, apptStatus: 'confirmed' as const }
+  it('a confirmed pickup moved to NEED 06:00 goes back to NEED DENNIS with the screenshots cleared', () => {
+    const p = apptLadderAfterEdit(confirmed, { type: 'pickup', appt: fromDateTimeInput('2026-10-14T06:00'), apptType: 'tbd', apptEnd: undefined })
+    expect(p.apptStatus).toBe('need_request')
+    expect(p.apptProofs).toEqual({ request: null, e2open: null, email: null })
+    expect(p.apptMoveRequested).toBe(false)
+  })
+  it('a delivery edited to a date with no time goes to NEED RUBEN; with a time, NEED DENNIS', () => {
+    expect(apptLadderAfterEdit(confirmed, { type: 'delivery', appt: fromDateInput('2026-10-15'), apptType: 'tbd', apptEnd: undefined }).apptStatus).toBe('need_book')
+    expect(apptLadderAfterEdit(confirmed, { type: 'delivery', appt: fromDateTimeInput('2026-10-15T09:00'), apptType: 'exact', apptEnd: undefined }).apptStatus).toBe('need_request')
+  })
+  it('leaves an unchanged appointment, and one still being requested, alone', () => {
+    expect(apptLadderAfterEdit(confirmed, { type: 'pickup', ...confirmed })).toEqual({})
+    expect(apptLadderAfterEdit({ ...confirmed, apptStatus: 'need_request' }, { type: 'pickup', appt: fromDateTimeInput('2026-10-14T06:00'), apptType: 'tbd', apptEnd: undefined })).toEqual({})
   })
 })

@@ -70,6 +70,36 @@ export function apptWorkflowStatus(stop: Stop, load: Pick<Load, 'customer' | 'cu
   return stop.type === 'delivery' ? 'need_book' : 'need_request'
 }
 
+/**
+ * The ladder after someone edits an appointment in the load drawer.
+ *
+ * A stop that was REQUESTED or CONFIRMED and now has a different date, time, window or
+ * type is open work again: back to NEED DENNIS (or NEED RUBEN for a delivery with no time
+ * yet), with every screenshot cleared so the new booking earns fresh proof. The drawer
+ * used to carry the old status through untouched, so a confirmed 11:00 pickup moved to
+ * NEED 06:00 still read CONFIRMED and never reached Dennis's list. An edit that leaves
+ * the appointment alone changes nothing.
+ */
+export function apptLadderAfterEdit(
+  was: Pick<Stop, 'appt' | 'apptType' | 'apptEnd' | 'apptStatus'>,
+  next: Pick<Stop, 'type' | 'appt' | 'apptType' | 'apptEnd'>,
+): Partial<Stop> {
+  const changed =
+    (was.appt ?? null) !== (next.appt ?? null) ||
+    (was.apptType ?? 'exact') !== (next.apptType ?? 'exact') ||
+    (was.apptEnd ?? null) !== (next.apptEnd ?? null)
+  if (!changed) return {}
+  if (was.apptStatus !== 'requested' && was.apptStatus !== 'confirmed') return {}
+  const apptStatus: ApptWorkflowStatus = next.type === 'delivery' && !apptHasTime(next.appt) ? 'need_book' : 'need_request'
+  return {
+    apptStatus,
+    apptChangeTo: null,
+    apptMoveRequested: false,
+    apptRequestedFor: null,
+    apptProofs: { request: null, e2open: null, email: null },
+  }
+}
+
 /** Screenshot gates. */
 export const canMarkRequested = (stop: Stop): boolean => !!stop.apptProofs?.request
 export const canMarkConfirmed = (stop: Stop): boolean =>

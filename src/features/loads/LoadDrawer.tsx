@@ -24,6 +24,7 @@ import { DriverDocUploadDialog } from '@/features/driver-docs'
 import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm, createLocation } from '@/lib/apiClient'
 import { matchStopLocation, locationInputForStop } from '@/lib/locationAutoSave'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
+import { apptLadderAfterEdit } from '@/lib/apptStatus'
 import { freightSummary, hasFreight, PIECES_UNITS } from '@/lib/freight'
 import { staffUploadDriverDoc } from '@/lib/driverSubmissionsClient'
 import { loadSchemaFor, type LoadFormValues, type StopFormValue } from '@/lib/schemas'
@@ -179,8 +180,15 @@ function deriveSplitFromStops(stops: StopFormValue[]): boolean {
   )
 }
 
+// Form stop → stored Stop, with the Batory ladder reopened when the appointment changed
+// (see apptLadderAfterEdit): a confirmed stop given a new time is Dennis's work again.
+function stopFormToStop(s: StopFormValue, sequence: number, prev?: { type?: Stop['apptType']; value?: string }, was?: Stop): Stop {
+  const next = stopFormToStopRaw(s, sequence, prev, was)
+  return was ? { ...next, ...apptLadderAfterEdit(was, next) } : next
+}
+
 // Form stop → stored Stop (appt form string → ISO UTC, mirrors the legacy toIso()).
-function stopFormToStop(
+function stopFormToStopRaw(
   s: StopFormValue,
   sequence: number,
   prev?: { type?: Stop['apptType']; value?: string },
