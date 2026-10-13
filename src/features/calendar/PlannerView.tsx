@@ -22,7 +22,7 @@ import { useLoads } from '@/hooks/useLoads'
 import { updateStop, getStops } from '@/lib/stops'
 import { ApptEditPopover } from '@/components/ApptEditPopover'
 import { computeMoveDates, computeStopMove, type MoveRole } from '@/lib/calendarMoves'
-import { compareByOrder, persistDragOrder } from '@/lib/calendarOrder'
+import { compareByOrder, persistDragOrder, groupRowsByDriver } from '@/lib/calendarOrder'
 import { cn } from '@/lib/utils'
 import type { Load, Driver, ColorKey, Stop } from '@/types'
 import type { DriverAvailability } from '@/lib/apiClient'
@@ -142,6 +142,8 @@ interface DayEntry {
   key:  string
   /** Present in multi-stop render mode: this row represents ONE stop, not a pickup/delivery half. */
   stop?: Stop
+  /** The colour of the first load in this driver's stack for the day; every row in the stack wears it. */
+  groupColorKey?: ColorKey | null
 }
 
 // ── Chicago date string ───────────────────────────────────────────────────────
@@ -535,7 +537,8 @@ function PlannerRow({ entry, drivers, dragging, dragOver, selected, onDragStart,
     : (role === 'delivery'
         ? [...getStops(load)].reverse().find((s) => s.type === 'delivery')
         : getStops(load).find((s) => s.type === 'pickup'))
-  const cardColorKey = colorStop?.colorKey ?? load.colorKey
+  // A row in a driver's stack wears the stack's colour (its first load's); the first row and a row on its own wear their own.
+  const cardColorKey = entry.groupColorKey ?? colorStop?.colorKey ?? load.colorKey
   const highlightHex = getHighlightHex(cardColorKey)
   const relevantDriver   = drivers.find((d) => d.id === relevantDriverId)
   const driverName       = relevantDriver?.name ?? '—'
@@ -915,8 +918,27 @@ export function PlannerView({ loads, drivers, weekStart, numDays = 7, days: days
         : e.role === 'delivery' ? (e.load.deliveryAppt ?? e.load.pickupAppt ?? '')
         : (e.load.pickupAppt ?? '')
     const cmp = compareByOrder<DayEntry>((e) => e.load.sortOrder, rowTime)
-    for (const arr of map.values()) {
+    // The driver a row belongs to, and the colour it would wear on its own.
+    const driverOf = (e: DayEntry): string | null =>
+      e.stop ? (e.stop.driverId ?? null) : ((e.role === 'delivery' ? e.load.deliveryDriverId : e.load.pickupDriverId) ?? null)
+    const ownColorOf = (e: DayEntry): ColorKey | null => {
+      const colorStop = e.stop
+        ? e.stop
+        : (e.role === 'delivery'
+            ? [...getStops(e.load)].reverse().find((s) => s.type === 'delivery')
+            : getStops(e.load).find((s) => s.type === 'pickup'))
+      return (colorStop?.colorKey ?? e.load.colorKey ?? null) as ColorKey | null
+    }
+    // Each driver's loads stacked together in slot order (1, 2, 3…), every row in the
+    // stack in the colour of its first load. See groupRowsByDriver.
+    for (const [day, arr] of map) {
       arr.sort(cmp)
+      const { rows, firstByDriver } = groupRowsByDriver(arr, driverOf, (e) => e.load.daySlot)
+      map.set(day, rows.map((e) => {
+        const d = driverOf(e)
+        const first = d ? firstByDriver.get(d) : undefined
+        return first && first !== e ? { ...e, groupColorKey: ownColorOf(first) } : e
+      }))
     }
 
     return map
