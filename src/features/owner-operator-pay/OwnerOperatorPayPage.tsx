@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy, Smartphone } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, Download, Settings, Banknote, PlusCircle, Pencil, Trash2, AlertTriangle, Copy, Smartphone, FileText, Mail } from 'lucide-react'
 import { OTR_FIELD_LABEL, type OtrRequiredField } from '@/lib/otrInvoice'
 import { DRIVER_PORTAL_URL } from '@/lib/driverPortal'
 import { Avatar } from '@/components/ui/avatar'
@@ -13,18 +13,22 @@ import type { OwnerOpTrip } from '@/lib/ownerOperatorTrips'
 import { tripPayAmount, FACTORING_FEE_LABEL } from '@/lib/driverPay'
 import { mileageDeductionLine } from '@/lib/mileageDeduction'
 import { creditLineLabel } from '@/lib/payCredits'
-import { payCreditsDeployed, type DriverPayCredit } from '@/lib/apiClient'
+import { payCreditsDeployed, sendDriverPayEmail, type DriverPayCredit } from '@/lib/apiClient'
+import { buildOwnerOperatorStatementPdf, ownerOperatorPdfFilename, pdfToBase64 } from '@/lib/payPdfOwnerOperator'
 import { getColor } from '@/lib/driverColors'
 import { weekLabelLong, sundayOf, shiftWeek } from '@/features/driver-pay/week'
 import type { Driver } from '@/types'
 import { SettingsModal, CreditModal } from './OwnerOperatorPayForms'
-import { DeductionModal, WeeklyMileageRow } from '../driver-pay/DriverPayForms'
+import { DeductionModal, WeeklyMileageRow, EmailModal } from '../driver-pay/DriverPayForms'
 import { SendDriverInvite } from './SendDriverInvite'
 import { SettlementDocUpload } from './SettlementDocUpload'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 import { PAY_HOLD_LABEL, type PayHoldReason } from '@/lib/payHold'
 
 const money = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+/** Every statement email copies the office, as the Amazon page does. */
+const PAY_EMAIL_CC = 'ryne@bcatcorp.com'
+
 const getInitials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((p) => p[0] ?? '').join('').toUpperCase() || '?'
 const pct = (n: number) => `${Math.round(n * 100)}%`
 /**
@@ -317,6 +321,36 @@ export function OwnerOperatorPayPage() {
   const [dedDriver, setDedDriver] = useState<string | null>(null)
   const [creditFor, setCreditFor] = useState<{ row: OwnerOperatorPayRow; credit?: DriverPayCredit; kind?: 'CREDIT' | 'DEBIT' } | null>(null)
   const [settingsFor, setSettings] = useState<Driver | null>(null)
+  // The statement going out by email, as on the Amazon page.
+  const [emailFor, setEmailFor] = useState<OwnerOperatorPayRow | null>(null)
+
+  const handlePdf = async (row: OwnerOperatorPayRow) => {
+    try {
+      const doc = await buildOwnerOperatorStatementPdf(row, periodStart)
+      doc.save(ownerOperatorPdfFilename(row, periodStart))
+    } catch (e) {
+      toast.error(`Couldn't build PDF: ${e instanceof Error ? e.message : 'unknown error'}`)
+    }
+  }
+  const preparePdf = async (row: OwnerOperatorPayRow) => {
+    const doc = await buildOwnerOperatorStatementPdf(row, periodStart)
+    return { base64: pdfToBase64(doc), blobUrl: doc.output('bloburl').toString() }
+  }
+  const handleSendEmail = async (row: OwnerOperatorPayRow, fields: { to: string; cc: string; subject: string; bodyText: string; pdfBase64: string }) => {
+    const res = await sendDriverPayEmail({
+      to: fields.to,
+      cc: fields.cc || undefined,
+      subject: fields.subject || undefined,
+      bodyText: fields.bodyText || undefined,
+      driverName: row.driver.name,
+      periodLabel: weekLabelLong(periodStart),
+      filename: ownerOperatorPdfFilename(row, periodStart),
+      pdfBase64: fields.pdfBase64,
+    })
+    if (!res.sent) throw new Error(res.error || 'The email service rejected the message')
+    toast.success(`Sent to ${fields.to}${fields.cc ? ` (cc ${fields.cc})` : ''}`)
+    setEmailFor(null)
+  }
   const [selectedDriverId, setSelectedDriverId] = useState<string | null>(null)
 
   const isThisWeek = periodStart === sundayOf()
@@ -434,6 +468,8 @@ export function OwnerOperatorPayPage() {
               toast.success('Mileage deduction added')
             }}
             onExport={() => download(`owner-operator-pay-${selectedRow.driver.name.replace(/\s+/g, '-')}-${periodStart}.csv`, statementCsv(selectedRow, periodStart))}
+            onPdf={() => void handlePdf(selectedRow)}
+            onEmail={() => setEmailFor(selectedRow)}
           />
         )}
 
@@ -453,6 +489,23 @@ export function OwnerOperatorPayPage() {
         )}
       </div>
 
+      {emailFor && (() => {
+        const r = emailFor
+        const firstName = r.driver.name.trim().split(/\s+/)[0] || 'there'
+        return (
+          <EmailModal
+            driverName={r.driver.name}
+            defaultTo={r.setting.email || r.driver.email || ''}
+            defaultCc={PAY_EMAIL_CC}
+            defaultSubject={`Settlement — ${weekLabelLong(periodStart)}`}
+            defaultBody={`Hi ${firstName},\n\nPlease find your settlement for ${weekLabelLong(periodStart)} attached.\n\n— Ivan Cartage`}
+            filename={ownerOperatorPdfFilename(r, periodStart)}
+            preparePdf={() => preparePdf(r)}
+            onSend={(fields) => handleSendEmail(r, fields)}
+            onClose={() => setEmailFor(null)}
+          />
+        )
+      })()}
       {dedDriver && <DeductionModal driverId={dedDriver} periodStart={periodStart} onSave={async (input) => { await pay.addDeduction(input); setDedDriver(null) }} onClose={() => setDedDriver(null)} />}
       {creditFor && (
         <CreditModal
@@ -479,7 +532,7 @@ export function OwnerOperatorPayPage() {
   )
 }
 
-function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport }: {
+function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit, onAddDebit, onEditCredit, onRemoveCredit, onSettings, onRemoveDeduction, onWaiveDeduction, onAddMileage, onExport, onPdf, onEmail }: {
   row: OwnerOperatorPayRow
   /** Recorded on any document uploaded from this card. */
   staffEmail: string
@@ -491,6 +544,7 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
   onRemoveDeduction: (id: string) => void; onWaiveDeduction: (label: string, amount: number) => Promise<void>
   onAddMileage: (miles: number, costPerMile: number) => Promise<void>
   onExport: () => void
+  onPdf: () => void; onEmail: () => void
 }) {
   const { driver, setting, statement, oneOffs } = row
   const navigate = useNavigate()
@@ -540,6 +594,8 @@ function StatementCard({ row, staffEmail, onRefresh, onAddDeduction, onAddCredit
           <PlusCircle size={13} /> Add debit
         </button>
         {iconBtn(onExport, Download, 'CSV')}
+        {iconBtn(onPdf, FileText, 'PDF')}
+        {iconBtn(onEmail, Mail, 'Email')}
         <div style={{ flex: 1 }} />
         {iconBtn(onSettings, Settings, 'Settings')}
       </div>

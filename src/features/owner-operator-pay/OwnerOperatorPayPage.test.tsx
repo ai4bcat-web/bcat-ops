@@ -220,6 +220,15 @@ describe('OwnerOperatorPayPage', () => {
     expect(screen.getByText('Check amount').closest('div')?.parentElement).toHaveTextContent('$189.00')
   })
 
+  it('offers the PDF and Email buttons the Amazon settlement page has', () => {
+    useOwnerOperatorPayMock.mockReturnValue(basePayState({ rows: [baseRow()] }))
+    render(<MemoryRouter><OwnerOperatorPayPage /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: 'PDF' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Email' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Email' }))
+    expect(screen.getByText(/Email Test Driver's statement/)).toBeInTheDocument()
+  })
+
   it('renders the driver app URL once, at the top, and never per driver card', () => {
     const rows = [
       baseRow({ driver: baseDriver({ id: 'd1', name: 'Chad Salerno', email: 'chad@example.com' }) }),
