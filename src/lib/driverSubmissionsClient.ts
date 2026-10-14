@@ -36,6 +36,9 @@ export interface DriverSubmissionRecord {
   loadId?: string | null
   referenceNumber?: string | null
   note?: string | null
+  /** Where a stop photo was taken, as the driver app files it. */
+  stopId?: string | null
+  stopLabel?: string | null
   slackChannelId?: string | null
   slackMessageTs?: string | null
   emailMessageId?: string | null
@@ -150,7 +153,7 @@ export function driverDocValidationError(files: File[]): string | null {
 
 const SUBMISSION_FIELDS = `
   id driverId driverName status source submittedByEmail externalMessageId loadId
-  referenceNumber note slackChannelId slackMessageTs emailMessageId emailSubject
+  referenceNumber note stopId stopLabel slackChannelId slackMessageTs emailMessageId emailSubject
   notifiedAt combinedPodKey combinedRateconKey combinedAt createdAt updatedAt
 `
 
