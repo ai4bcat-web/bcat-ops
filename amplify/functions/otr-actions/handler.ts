@@ -629,6 +629,15 @@ async function uploadInvoiceDocuments(
   const uploaded: { pod?: string; rateConfirmation?: string } = {}
   const errors: string[] = []
 
+  /*
+   * OTR answers 500 "This Invoice Already Has a POD" (and the same for a rate con) to a
+   * second upload. That is not a failure to reach them — the document is there, which is
+   * all the queue needs to know. Their API has no replace or delete; a wrong document is
+   * swapped in the OTR portal.
+   */
+  const alreadyThere = (e: unknown): boolean =>
+    e instanceof OtrError && /already\s+has\s+an?\s+(pod|rate\s*con)/i.test(`${e.message} ${e.body ?? ''}`)
+
   function describe(label: string, e: unknown): string {
     if (e instanceof OtrError) {
       const body = trim(e.body).slice(0, 400)
@@ -664,7 +673,8 @@ async function uploadInvoiceDocuments(
       })
       uploaded.pod = podKey
     } catch (e) {
-      errors.push(describe('POD', e))
+      if (alreadyThere(e)) { uploaded.pod = podKey; console.log('[otr-actions] POD already at OTR', { invoiceId: String(invoiceId) }) }
+      else errors.push(describe('POD', e))
     }
   } else {
     errors.push('POD: nothing on file to send')
@@ -690,7 +700,8 @@ async function uploadInvoiceDocuments(
       })
       uploaded.rateConfirmation = rcKey
     } catch (e) {
-      errors.push(describe('Rate confirmation', e))
+      if (alreadyThere(e)) { uploaded.rateConfirmation = rcKey; console.log('[otr-actions] rate con already at OTR', { invoiceId: String(invoiceId) }) }
+      else errors.push(describe('Rate confirmation', e))
     }
   } else {
     errors.push('Rate confirmation: nothing on file to send')

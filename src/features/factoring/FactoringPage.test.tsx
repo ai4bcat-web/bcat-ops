@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom/vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { FactoringPage } from './FactoringPage'
 import type { FactoringItem } from '@/types'
 import type { OtrReadiness } from '@/lib/otrInvoice'
@@ -22,12 +22,13 @@ vi.mock('@/store/useAppStore', () => ({
   useAppStore: (sel: (s: unknown) => unknown) => sel({ loads: [], updateLoad: vi.fn() }),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
+const uploadOtrDocsMock = vi.hoisted(() => vi.fn())
 vi.mock('./OtrPanel', () => ({ OtrPanel: () => <div data-testid="otr-panel" /> }))
 vi.mock('./ManualInvoicePanel', () => ({ ManualInvoicePanel: () => <div data-testid="manual-panel" /> }))
 // The drawer the PRO column opens. Its own behaviour is covered by LoadDrawer's tests;
 // here it would only drag the whole load form into a test about the queue.
 vi.mock('@/features/loads/LoadDrawer', () => ({ LoadDrawer: () => null }))
-vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn(), assembleInvoice }))
+vi.mock('@/lib/otrClient', () => ({ syncOtrStatus: vi.fn(), assembleInvoice, uploadOtrDocs: uploadOtrDocsMock }))
 vi.mock('@/hooks/useLoadDriverDocs', () => ({
   useLoadDriverDocs: () => ({ pods: [], ratecons: [], loading: false, error: null, refresh: vi.fn() }),
 }))
@@ -315,5 +316,13 @@ describe('documents that did not reach OTR', () => {
     setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
     expect(screen.getByText('14564')).toBeInTheDocument()
     expect(screen.getByLabelText('OTR documents missing for PRO 14564')).toHaveTextContent('DOCS NOT AT OTR')
+  })
+
+  it('resends the documents from the row and re-reads the queue', async () => {
+    uploadOtrDocsMock.mockResolvedValue({ invoiceId: '25594544', uploaded: { pod: 'k' }, documentErrors: [] })
+    const { refresh } = setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
+    fireEvent.click(screen.getByRole('button', { name: 'Resend documents for PRO 14564' }))
+    await waitFor(() => expect(uploadOtrDocsMock).toHaveBeenCalledWith('x'))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 })

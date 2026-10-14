@@ -19,7 +19,8 @@ import { FactoringDocCell } from './FactoringDocCell'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
-import { otrDocsIncomplete } from '@/lib/otrSubmitOutcome'
+import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
+import { uploadOtrDocs } from '@/lib/otrClient'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -321,16 +322,43 @@ function otrLabelOf(item: FactoringItem): string {
   return otrStatusMeta(item.otrStatus)?.label ?? OTR_UNREPORTED
 }
 
-/** The invoice is at OTR without its paperwork: red until the documents are resent. */
-function OtrDocsFlag({ item }: { item: FactoringItem }) {
+/** The invoice is at OTR without its paperwork: red, with Resend right there, until the documents land. */
+function OtrDocsFlag({ item, onResent }: { item: FactoringItem; onResent: () => void }) {
+  const [busy, setBusy] = useState(false)
   if (!otrDocsIncomplete(item)) return null
+  const resend = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setBusy(true)
+    try {
+      const r = await uploadOtrDocs(item.id)
+      onResent()
+      if (r.documentErrors.length) toast.error(otrDocsErrorMessage(r.documentErrors))
+      else toast.success(`PRO ${item.proNumber}: documents at OTR — now pending with OTR`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not resend the documents')
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
-    <span
-      title={item.otrError ?? 'A document did not reach OTR — upload it again and press Resend documents'}
-      aria-label={`OTR documents missing for PRO ${item.proNumber}`}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: '#fecaca', color: '#b91c1c', border: '1px solid #f87171', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}
-    >
-      DOCS NOT AT OTR
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span
+        title={item.otrError ?? 'A document did not reach OTR — upload it again and press Resend'}
+        aria-label={`OTR documents missing for PRO ${item.proNumber}`}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: '#fecaca', color: '#b91c1c', border: '1px solid #f87171', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}
+      >
+        DOCS NOT AT OTR
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => void resend(e)}
+        aria-label={`Resend documents for PRO ${item.proNumber}`}
+        title="Send the POD and rate con on this row to the invoice OTR already has"
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: 'var(--ds-surface)', color: '#b91c1c', border: '1px solid #f87171', fontSize: 11, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+      >
+        {busy ? <Loader2 className="size-3 animate-spin" /> : null} Resend
+      </button>
     </span>
   )
 }
@@ -748,7 +776,7 @@ export function FactoringPage() {
                           <StatusBadge item={item} />
                           <OtrStatusFlag item={item} />
                           <NoBuyFlag item={item} />
-                          <OtrDocsFlag item={item} />
+                          <OtrDocsFlag item={item} onResent={refresh} />
                           {pendingIds.has(item.id) && (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           )}
