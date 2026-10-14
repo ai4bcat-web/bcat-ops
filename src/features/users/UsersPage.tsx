@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { errorMessage } from '@/lib/utils/errorMessage'
 import {
   Mail, Plus, KeyRound, UserX, UserCheck, ChevronDown, ShieldCheck, Shield,
-  Check, Loader2, RefreshCw, AlertTriangle, Users,
+  Check, Loader2, RefreshCw, AlertTriangle, Users, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Avatar } from '@/components/ui/avatar'
@@ -14,7 +14,7 @@ import {
   disableCognitoUser, enableCognitoUser,
   resetCognitoPassword, setUserAdmin,
   getUserGroups, setUserPageGroups,
-  type CognitoUser,
+  type CognitoUser, deleteCognitoUser,
 } from '@/lib/apiClient'
 import { PERMISSION_PAGES } from '@/lib/navItems'
 import { toast } from 'sonner'
@@ -80,13 +80,14 @@ interface UserCardProps {
   onToggleAdmin: (u: UserWithGroups, makeAdmin: boolean) => Promise<void>
   onReset: (u: UserWithGroups) => Promise<void>
   onToggleEnabled: (u: UserWithGroups) => Promise<void>
+  onDelete: (u: UserWithGroups) => Promise<void>
   busyAdminId: string | null
   resettingId: string | null
   togglingId: string | null
   savingPermissions: boolean
 }
 
-function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled, busyAdminId, resettingId, togglingId, savingPermissions }: UserCardProps) {
+function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled, onDelete, busyAdminId, resettingId, togglingId, savingPermissions }: UserCardProps) {
   const [expanded, setExpanded] = useState(false)
   const admin = isUserAdmin(user)
   const name = displayName(user)
@@ -148,6 +149,16 @@ function UserCard({ user, onTogglePage, onToggleAdmin, onReset, onToggleEnabled,
           >
             {isToggling ? <Loader2 className="size-3 animate-spin" /> : user.enabled ? <UserX className="size-3" /> : <UserCheck className="size-3" />}
             {user.enabled ? 'Disable' : 'Enable'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/5"
+            onClick={() => onDelete(user)}
+            disabled={isToggling}
+            title="Remove this user entirely — sign-in, groups and page access"
+          >
+            <Trash2 className="size-3" />Delete
           </Button>
           <button
             onClick={() => setExpanded((v) => !v)}
@@ -377,6 +388,20 @@ export function UsersPage() {
     }
   }
 
+  const handleDelete = async (u: UserWithGroups) => {
+    if (!window.confirm(`Delete ${u.email} entirely?\n\nThey can no longer sign in and their page access is gone. Loads, notes and uploads they made keep their name. This cannot be undone — disable instead if they might be back.`)) return
+    setTogglingId(u.username)
+    try {
+      await deleteCognitoUser(u.username)
+      toast.success(`${u.email} deleted`)
+      setUsers((prev) => prev.filter((x) => x.username !== u.username))
+    } catch (err: unknown) {
+      toast.error(errorMessage(err))
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
   // Never flash real UI for non-owners while the redirect is in flight
   if (authLoading || !isOwner) return null
 
@@ -523,6 +548,7 @@ export function UsersPage() {
                   onToggleAdmin={handleToggleAdmin}
                   onReset={handleReset}
                   onToggleEnabled={handleToggleEnabled}
+                  onDelete={handleDelete}
                   busyAdminId={busyAdminId}
                   resettingId={resettingId}
                   togglingId={togglingId}

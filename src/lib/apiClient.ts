@@ -1427,6 +1427,14 @@ export async function enableCognitoUser(username: string): Promise<void> {
   })
 }
 
+/** Remove the user from the pool entirely. Owner only; the owner account itself is refused. */
+export async function deleteCognitoUser(username: string): Promise<void> {
+  await client.graphql({
+    query: `query ManageUsers($action: String!, $username: String) { manageUsers(action: $action, username: $username) }`,
+    variables: { action: 'delete', username },
+  })
+}
+
 export async function getUserGroups(username: string): Promise<string[]> {
   const result = await client.graphql({
     query: `query ManageUsers($action: String!, $username: String) { manageUsers(action: $action, username: $username) }`,

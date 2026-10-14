@@ -236,6 +236,7 @@ backend.userManagement.resources.lambda.addToRolePolicy(
       'cognito-idp:AdminCreateUser',
       'cognito-idp:AdminDisableUser',
       'cognito-idp:AdminEnableUser',
+      'cognito-idp:AdminDeleteUser',
       'cognito-idp:AdminGetUser',
       'cognito-idp:AdminListGroupsForUser',
       'cognito-idp:AdminAddUserToGroup',

@@ -3,6 +3,7 @@ import {
   AdminCreateUserCommand,
   ListUsersCommand,
   AdminDisableUserCommand,
+  AdminDeleteUserCommand,
   AdminEnableUserCommand,
   AdminListGroupsForUserCommand,
   AdminAddUserToGroupCommand,
@@ -28,7 +29,7 @@ const DEFAULT_GROUP = 'DISPATCHER'  // auto-assigned to new invited users
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 
 interface Args {
-  action: 'list' | 'create' | 'disable' | 'enable' | 'getGroups' | 'setPageGroups' | 'resetPassword' | 'setAdmin'
+  action: 'list' | 'create' | 'disable' | 'enable' | 'delete' | 'getGroups' | 'setPageGroups' | 'resetPassword' | 'setAdmin'
   email?: string
   username?: string
   pages?: string    // JSON string: string[]
@@ -140,6 +141,18 @@ export const handler = async (event: { arguments: Args; identity?: AppSyncIdenti
     case 'enable': {
       if (!username) throw new Error('username is required')
       await cognito.send(new AdminEnableUserCommand({ UserPoolId: USER_POOL_ID, Username: username }))
+      return JSON.stringify({ success: true })
+    }
+    case 'delete': {
+      // Gone from the user pool for good: sign-in, groups and page access. Rows they
+      // wrote (loads, notes, uploads) keep their email as the author. The owner's own
+      // account is never deletable from here.
+      if (!username) throw new Error('username is required')
+      const target = await cognito.send(new AdminGetUserCommand({ UserPoolId: USER_POOL_ID, Username: username }))
+      const targetEmail = (target.UserAttributes?.find((a) => a.Name === 'email')?.Value ?? '').toLowerCase().trim()
+      if (targetEmail === OWNER_EMAIL || username.toLowerCase() === OWNER_EMAIL) throw new Error('The owner account cannot be deleted')
+      await cognito.send(new AdminDeleteUserCommand({ UserPoolId: USER_POOL_ID, Username: username }))
+      console.log('[userManagement] user deleted', { by: callerEmail, username, email: targetEmail })
       return JSON.stringify({ success: true })
     }
     case 'getGroups': {
