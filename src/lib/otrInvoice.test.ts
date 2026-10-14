@@ -176,9 +176,11 @@ describe('assembleOtrInvoice', () => {
       hasPod: true,
       hasRateConfirmation: true,
     })
-    // Still submittable — precedence picked the tender — but a human is told.
+    // Still submittable — the load's booked rate goes out, not the number read off the
+    // PDF — and a human is told the two disagree.
     expect(r.ready).toBe(true)
-    expect(r.payload.InvoiceAmount).toBe(450)
+    expect(r.payload.InvoiceAmount).toBe(525)
+    expect(r.sources.InvoiceAmount).toBe('load')
     expect(r.warnings).toHaveLength(1)
     expect(r.warnings[0].field).toBe('InvoiceAmount')
     expect(r.warnings[0].message).toContain('$450.00')
@@ -405,5 +407,16 @@ describe('what a rate confirmation fills in', () => {
     })
     expect(r.payload.BrokerMC).toBeUndefined()
     expect(r.missingFields).toContain('BrokerMC')
+  })
+})
+
+describe('the invoice amount is the load\'s rate', () => {
+  it('falls back to the rate confirmation only when the load has no rate', () => {
+    const noRate = assembleOtrInvoice({ load: {}, rateCon: { totalRate: 450 } as never })
+    expect(noRate.payload.InvoiceAmount).toBe(450)
+    expect(noRate.sources.InvoiceAmount).toBe('ratecon')
+    const priced = assembleOtrInvoice({ load: { rate: 52500 }, rateCon: { totalRate: 450 } as never })
+    expect(priced.payload.InvoiceAmount).toBe(525)
+    expect(priced.sources.InvoiceAmount).toBe('load')
   })
 })

@@ -322,12 +322,19 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
     ['load', input.customerMcNumber],
   ])
 
+  /*
+   * The amount is the rate ON THE LOAD — what the office booked it at. The figure read
+   * off the rate confirmation PDF is a machine's guess at a number on a page (a
+   * fuel surcharge line, a per-mile rate, a lumper), and it put wrong rates on the
+   * queue. It is only a fallback for a load nobody has priced yet, and when it
+   * disagrees with the load a warning says so.
+   */
   set(
     'InvoiceAmount',
     [
       ['manual', m.InvoiceAmount],
-      ['ratecon', rc?.totalRate],
       ['load', rateCentsToDollars(load.rate)],
+      ['ratecon', rc?.totalRate],
     ],
     (v) => {
       /*
@@ -423,8 +430,8 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
   if (!input.hasPod) missingDocuments.push('POD')
   if (!input.hasRateConfirmation) missingDocuments.push('Rate confirmation')
 
-  // Amount conflict: the tender and the load disagree. Precedence already chose
-  // one; say so out loud rather than letting a wrong invoice through quietly.
+  // Amount conflict: the load and the rate confirmation disagree. The load's rate is
+  // what goes out; say so out loud so a mis-keyed load gets a second look.
   const warnings: OtrWarning[] = []
   const tenderAmount = typeof rc?.totalRate === 'number' ? rc.totalRate : undefined
   const loadAmount = rateCentsToDollars(load.rate)
@@ -437,8 +444,8 @@ export function assembleOtrInvoice(input: AssembleInput): OtrReadiness {
     warnings.push({
       field: 'InvoiceAmount',
       message:
-        `Rate confirmation says $${tenderAmount.toFixed(2)} but the load is booked at ` +
-        `$${loadAmount.toFixed(2)}. Submitting $${Number(payload.InvoiceAmount).toFixed(2)}.`,
+        `The load is booked at $${loadAmount.toFixed(2)} but the rate confirmation reads ` +
+        `$${tenderAmount.toFixed(2)}. Submitting $${Number(payload.InvoiceAmount).toFixed(2)} (the load's rate).`,
     })
   }
 
