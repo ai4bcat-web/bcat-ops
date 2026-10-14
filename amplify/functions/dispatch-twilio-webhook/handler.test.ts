@@ -103,6 +103,27 @@ describe('inbound texts', () => {
     const [c] = [...store.conversations.values()]
     expect(c.lastPreview).toBe('2 photos')
   })
+  it("files a picture from a driver as the POD on their one open load, and says so in the thread", async () => {
+    const load = { id: 'L1', aljexId: '14617', updatedAt: '2026-10-10T00:00:00Z', stops: [
+      { id: 'p', type: 'pickup', sequence: 0, driverId: 'd-jason', appt: '2026-10-10T12:00:00Z', departedAt: '2026-10-10T13:00:00Z' },
+      { id: 'd', type: 'delivery', sequence: 1, driverId: 'd-jason', name: 'EAGLE FOODS', city: 'WAUKEGAN', appt: '2026-10-10T14:00:00Z' },
+    ] }
+    const filed: unknown[] = []; const marked: unknown[] = []
+    const autoPod = {
+      loadsForDriver: async () => [load],
+      hasPod: async () => false,
+      fileSubmission: async (i: unknown) => { filed.push(i); return { submissionId: 's1' } },
+      markDelivered: async (l: unknown, stops: unknown) => { marked.push({ l, stops }) },
+    }
+    await handleEvent(post('/sms', { From: '+18475550100', MessageSid: 'SM9', Body: '', NumMedia: '1', MediaUrl0: 'https://api.twilio.com/m/0', MediaContentType0: 'image/jpeg' }), { ...deps(), autoPod } as never)
+    expect(filed).toHaveLength(1)
+    expect((filed[0] as { pro: string }).pro).toBe('14617')
+    expect(marked).toHaveLength(1)
+    const msgs = [...store.messages.values()]
+    expect(msgs.map((m) => m.kind)).toEqual(['MMS', 'STATUS'])
+    expect(msgs[1].body).toMatch(/^Delivered · EAGLE FOODS, WAUKEGAN · PRO 14617 · POD filed from your text/)
+  })
+
   it('ignores Twilio retrying the same MessageSid', async () => {
     const form = { From: '+18475550100', MessageSid: 'SM4', Body: 'once' }
     await handleEvent(post('/sms', form), deps())

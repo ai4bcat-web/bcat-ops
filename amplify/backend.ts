@@ -722,6 +722,23 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
   }))
   backend.storage.resources.bucket.grantReadWrite(fn, 'dispatch-media/*')
 }
+// A picture texted to dispatch is filed as the POD on the driver's open load
+// (amplify/functions/_shared/dispatchAutoPod.ts): the webhook reads loads and writes
+// a driver submission, and stamps the delivery.
+{
+  const dispatchLoadTable = backend.data.resources.tables['Load']
+  dispatchWebhookFn.addEnvironment('LOAD_TABLE_NAME', dispatchLoadTable.tableName)
+  dispatchWebhookFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME', driverSubmissionTable.tableName)
+  dispatchWebhookFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
+  dispatchWebhookFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:Scan', 'dynamodb:GetItem', 'dynamodb:UpdateItem'],
+    resources: [dispatchLoadTable.tableArn],
+  }))
+  dispatchWebhookFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:Scan', 'dynamodb:PutItem'],
+    resources: [driverSubmissionTable.tableArn, driverSubmissionDocTable.tableArn],
+  }))
+}
 
 const dispatchWebhookUrl = new FunctionUrl(dispatchWebhookFn.stack, 'DispatchTwilioWebhookUrl', {
   function: dispatchWebhookFn,

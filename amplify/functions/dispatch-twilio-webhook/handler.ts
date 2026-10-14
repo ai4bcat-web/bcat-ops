@@ -15,6 +15,12 @@ import {
 } from '../_shared/twilio'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorInbound, mirrorDeliveryFailure, mirrorTranscript, slackMirrorEnabled, type SlackBridgeDeps, type MediaFetcher } from '../_shared/slackDispatch'
+import { autoFilePod, type AutoPodStore } from '../_shared/dispatchAutoPod'
+import { DynamoDBDocumentClient, ScanCommand as DocScanCommand, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { randomUUID } from 'node:crypto'
+import { getStops } from '../../../src/lib/stops'
+import { normalizePro } from '../../../src/lib/podPresence'
+import type { Load, Stop } from '../../../src/types'
 import { matchDriverByPhone, conversationTitle, callPlan, type DispatchMedia, type DispatchDriver, type DispatchConversation, type DispatchMessage } from '../../../src/lib/dispatch'
 
 const dynamo = new DynamoDBClient({})
@@ -36,6 +42,8 @@ interface Deps {
   readMedia?: MediaFetcher
   sendSms: (to: string, body: string) => Promise<void>
   now: () => Date
+  /** Files a texted picture as the POD on the driver's open load; absent in a stack without the load tables. */
+  autoPod?: AutoPodStore
 }
 
 /** Mirror into the driver's Slack channel when the bridge is on and the channel exists. Never fatal. */
@@ -159,6 +167,31 @@ async function inboundSms(p: Record<string, string>, deps: Deps): Promise<Reply>
   }))
   const updated = await store.touchConversation(conversation.id, message, { unread: 'increment' })
   await toSlack(deps, updated, (b) => mirrorInbound(b, updated, message, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
+
+  // A picture from a driver is a POD until proven otherwise: file it on their open load.
+  if (deps.autoPod && media.length) {
+    const driver = updated.driverId ? roster.find((d) => d.id === updated.driverId) ?? null : null
+    try {
+      const r = await autoFilePod(deps.autoPod, driver ? { id: driver.id, name: driver.name } : null, { body, media, at: message.at })
+      if (r.filed) {
+        const place = [...getStops(r.load)].reverse().find((s) => s.type === 'delivery')
+        const where = [place?.name?.trim(), place?.city?.trim()].filter(Boolean).join(', ')
+        const text = `${r.delivered ? 'Delivered' : 'POD received'}${where ? ` · ${where}` : ''} · PRO ${r.pro} · POD filed from your text${r.how === 'pro' ? '' : ''}`
+        const status = await store.putMessage(messageRow({ conversationId: updated.id, phone: from, direction: 'IN', kind: 'STATUS', at: deps.now().toISOString(), body: text, status: 'received' }))
+        const touched = await store.touchConversation(updated.id, status, { unread: 'keep' })
+        await toSlack(deps, touched, (b) => mirrorInbound(b, touched, status, deps.readMedia ?? (() => Promise.reject(new Error('no media reader')))))
+        console.log('[dispatch-webhook] POD auto-filed', { driverId: driver?.id, loadId: r.load.id, pro: r.pro, how: r.how, pages: media.length })
+      } else if (r.reason === 'many') {
+        const pros = (r.loads ?? []).map((l) => (l.aljexId ?? '').trim() || '—').join(', ')
+        const note = await store.putMessage(messageRow({ conversationId: updated.id, phone: from, direction: 'OUT', kind: 'NOTE', at: deps.now().toISOString(), body: `📎 Picture not filed as a POD — ${driver?.name ?? 'the driver'} has ${r.loads?.length ?? 0} loads open (PRO ${pros}). Tap File as POD under the picture to pick the load, or ask them for the PRO.`, status: 'saved', sentBy: 'dispatch' }))
+        await store.touchConversation(updated.id, note, { unread: 'keep' })
+      } else {
+        console.log('[dispatch-webhook] picture not filed as POD', { driverId: driver?.id, reason: r.reason })
+      }
+    } catch (err) {
+      console.error('[dispatch-webhook] POD auto-file failed', { sid, err: String(err) })
+    }
+  }
 
   const settings = await store.getSettings().catch(() => null)
   if (settings?.slackChannelId && deps.slack) {
@@ -330,6 +363,69 @@ async function transcriptionReady(p: Record<string, string>, deps: Deps): Promis
   return text('ok')
 }
 
+// ── POD auto-file plumbing ──────────────────────────────────────────────────
+
+const LOAD_TABLE = process.env.LOAD_TABLE_NAME ?? ''
+const SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
+const SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
+
+async function scanAll<T>(doc: DynamoDBDocumentClient, TableName: string, extra: { FilterExpression?: string; ExpressionAttributeValues?: Record<string, unknown> } = {}): Promise<T[]> {
+  const out: T[] = []
+  let ExclusiveStartKey: Record<string, unknown> | undefined
+  do {
+    const r = await doc.send(new DocScanCommand({ TableName, ...extra, ExclusiveStartKey }))
+    out.push(...((r.Items ?? []) as T[]))
+    ExclusiveStartKey = r.LastEvaluatedKey as Record<string, unknown> | undefined
+  } while (ExclusiveStartKey)
+  return out
+}
+
+/** The load, submission and document tables, as the auto-file needs them. Undefined when the stack lacks them. */
+function autoPodStore(): AutoPodStore | undefined {
+  if (!LOAD_TABLE || !SUBMISSION_TABLE || !SUBMISSION_DOC_TABLE) return undefined
+  const doc = DynamoDBDocumentClient.from(dynamo, { marshallOptions: { removeUndefinedValues: true } })
+  return {
+    loadsForDriver: async (driverId) => {
+      // The stops JSON names the driver; the legacy fields do too. One scan, filtered here.
+      const rows = await scanAll<Load & { stops?: unknown }>(doc, LOAD_TABLE, {
+        FilterExpression: 'contains(stops, :d) OR pickupDriverId = :d OR deliveryDriverId = :d',
+        ExpressionAttributeValues: { ':d': driverId },
+      })
+      return rows.map((l) => ({ ...l, stops: typeof l.stops === 'string' ? JSON.parse(l.stops) : l.stops } as Load))
+    },
+    hasPod: async (load, driverId) => {
+      const pro = normalizePro(load.aljexId ?? null)
+      const subs = await scanAll<{ id: string; loadId?: string | null; referenceNumber?: string | null }>(doc, SUBMISSION_TABLE, { FilterExpression: 'driverId = :d', ExpressionAttributeValues: { ':d': driverId } })
+      const mine = new Set(subs.filter((s) => (s.loadId && s.loadId === load.id) || (!!pro && normalizePro(s.referenceNumber ?? null) === pro)).map((s) => s.id))
+      if (!mine.size) return false
+      const docs = await scanAll<{ submissionId: string; kind?: string }>(doc, SUBMISSION_DOC_TABLE, { FilterExpression: 'driverId = :d AND kind = :k', ExpressionAttributeValues: { ':d': driverId, ':k': 'POD' } })
+      return docs.some((d) => mine.has(d.submissionId))
+    },
+    fileSubmission: async ({ driverId, driverName, load, pro, pages, at }) => {
+      const submissionId = randomUUID()
+      await doc.send(new PutCommand({ TableName: SUBMISSION_TABLE, Item: {
+        id: submissionId, __typename: 'DriverSubmission', driverId, driverName, status: 'LINKED', source: 'STAFF',
+        submittedByEmail: 'dispatch', loadId: load.id, referenceNumber: pro, note: 'Texted to dispatch', createdAt: at, updatedAt: at,
+      }, ConditionExpression: 'attribute_not_exists(id)' }))
+      // The picture already sits in the bucket under dispatch-media/, readable to staff; the row points at it.
+      await Promise.all(pages.map((m, i) => doc.send(new PutCommand({ TableName: SUBMISSION_DOC_TABLE, Item: {
+        id: randomUUID(), submissionId, driverId, kind: 'POD', s3Key: m.key, fileName: `POD-${pro}-${i + 1}.${m.key.split('.').pop() ?? 'jpg'}`,
+        contentType: m.contentType, pageNumber: i + 1, uploadedAt: at, scanStatus: 'ORIGINAL_ONLY', createdAt: at, updatedAt: at,
+      } }))))
+      return { submissionId }
+    },
+    markDelivered: async (load, stops: Stop[], at) => {
+      const prev = (load as Load & { updatedAt?: string }).updatedAt
+      await doc.send(new UpdateCommand({
+        TableName: LOAD_TABLE, Key: { id: load.id },
+        UpdateExpression: 'SET stops = :stops, updatedAt = :now, updatedBy = :by',
+        ConditionExpression: prev ? 'updatedAt = :prev' : 'attribute_not_exists(updatedAt)',
+        ExpressionAttributeValues: { ':stops': stops, ':now': at, ':by': 'dispatch', ...(prev ? { ':prev': prev } : {}) },
+      }))
+    },
+  }
+}
+
 // ── Lambda entry ────────────────────────────────────────────────────────────
 
 export const handler = async (event: FnUrlEvent) => {
@@ -365,6 +461,7 @@ export const handler = async (event: FnUrlEvent) => {
       await sendMessage(config, { to, from: config.dispatchNumber, body })
     },
     now: () => new Date(),
+    autoPod: autoPodStore(),
   }
   try {
     return await handleEvent(event, deps)
