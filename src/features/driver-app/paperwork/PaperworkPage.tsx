@@ -70,6 +70,8 @@ export function PaperworkPage() {
     }
   }, [opening, openedOnTomorrow])
   const [week, setWeek] = useState<Paperwork | null>(null)
+  // A fresher week the driver has been told about but not yet taken (see the schedule check below).
+  const [pendingWeek, setPendingWeek] = useState<Paperwork | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [retryKey, setRetryKey] = useState(0)
   const dateInput = useRef<HTMLInputElement>(null)
@@ -92,7 +94,6 @@ export function PaperworkPage() {
    * sheet on screen would read differently the driver is told, and takes it with a tap
    * rather than having the list reshuffle under their thumb.
    */
-  const [pendingWeek, setPendingWeek] = useState<Paperwork | null>(null)
   useEffect(() => {
     let stale = false
     const current = week
