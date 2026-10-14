@@ -318,6 +318,24 @@ describe("today's sheet", () => {
     expect(screen.getByText(/Delivered 8:30 AM/)).toBeTruthy()
   })
 
+  it("tells the driver when dispatch changed today's sheet, and refreshes on tap", async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const before = { weekStart: '2026-10-04', today: '2026-10-07', loads: [load({ stops: [stop('st-pu', 'pickup', '2026-10-07')] })], loadCount: 1, podsMissing: 0, podsIllegible: 0 }
+    const after = { ...before, loads: [load({ stops: [stop('st-pu', 'pickup', '2026-10-07', { name: 'NEW SHIPPER INC' })] })] }
+    api.fetchPaperwork.mockReset()
+    api.fetchPaperwork.mockResolvedValueOnce(before).mockResolvedValue(after)
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Today')).toBeTruthy(), { timeout: 5000 })
+    expect(screen.queryByText(/Your schedule changed/)).toBeNull()
+    // The app comes back to the foreground: the week is re-read and the change noticed.
+    document.dispatchEvent(new Event('visibilitychange'))
+    await waitFor(() => expect(screen.getByText(/Your schedule changed/)).toBeTruthy())
+    expect(screen.queryAllByText(/NEW SHIPPER INC/)).toHaveLength(0)
+    fireEvent.click(screen.getByText(/Your schedule changed/))
+    await waitFor(() => expect(screen.getAllByText(/NEW SHIPPER INC/).length).toBeGreaterThan(0))
+    expect(screen.queryByText(/Your schedule changed/)).toBeNull()
+  })
+
   it('Delivered opens the POD scanner without marking the stop — the POD landing marks it', async () => {
     const { fireEvent } = await import('@testing-library/react')
     const { Routes, Route, useLocation } = await import('react-router-dom')

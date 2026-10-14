@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, Loader2, RefreshCcw, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { fetchPaperwork, type Paperwork } from '../driverApi'
+import { scheduleFingerprint, announceScheduleChange, SCHEDULE_CHECK_MS } from './scheduleFingerprint'
 import { TodayStops } from './TodayStops'
 import { DayLogs } from './DayLogs'
 import { UnattachedPods } from '../UnattachedPods'
@@ -78,12 +79,41 @@ export function PaperworkPage() {
   useEffect(() => {
     let stale = false
     fetchPaperwork(weekStart)
-      .then((w) => { if (!stale) { setWeek(w); setError(null) } })
+      .then((w) => { if (!stale) { setWeek(w); setPendingWeek(null); setError(null) } })
       .catch((err) => { if (!stale) setError(errorText(err)) })
     return () => { stale = true }
   }, [weekStart, retryKey])
 
   const reload = useCallback(() => setRetryKey((k) => k + 1), [])
+
+  /*
+   * Dispatch changes the day while the driver is out on it. Every couple of minutes, and
+   * whenever the app comes back to the foreground, the week is re-read quietly; if the
+   * sheet on screen would read differently the driver is told, and takes it with a tap
+   * rather than having the list reshuffle under their thumb.
+   */
+  const [pendingWeek, setPendingWeek] = useState<Paperwork | null>(null)
+  useEffect(() => {
+    let stale = false
+    const current = week
+    const check = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!current || current.weekStart !== weekStart) return
+      fetchPaperwork(weekStart)
+        .then((fresh) => {
+          if (stale) return
+          if (scheduleFingerprint(fresh.loads, day) !== scheduleFingerprint(current.loads, day)) {
+            setPendingWeek(fresh)
+            announceScheduleChange()
+          }
+        })
+        .catch(() => undefined)
+    }
+    const t = setInterval(check, SCHEDULE_CHECK_MS)
+    document.addEventListener('visibilitychange', check)
+    return () => { stale = true; clearInterval(t); document.removeEventListener('visibilitychange', check) }
+  }, [weekStart, day, week])
+  const applyPending = () => { if (pendingWeek) { setWeek(pendingWeek); setPendingWeek(null) } }
 
   const sendPod = useCallback(
     (load: { id: string; reference: string }) =>
@@ -200,6 +230,16 @@ export function PaperworkPage() {
             <p className="mb-3 text-sm font-semibold text-red-200">
               {week.podsIllegible} POD{week.podsIllegible === 1 ? '' : 's'} this week cannot be read — please resend
             </p>
+          )}
+
+          {pendingWeek && (
+            <button type="button" onClick={applyPending} className="mb-3 flex w-full items-center gap-3 rounded-xl border border-primary bg-primary/15 p-4 text-left">
+              <RefreshCcw className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+              <span className="flex-1">
+                <span className="block text-base font-bold text-foreground">Your schedule changed</span>
+                <span className="block text-sm text-muted-foreground">Dispatch updated {isToday ? 'today\u2019s' : 'this day\u2019s'} loads. Tap to refresh.</span>
+              </span>
+            </button>
           )}
 
           {/* Logs or no logs, before anything else: the one thing to know before rolling. */}
