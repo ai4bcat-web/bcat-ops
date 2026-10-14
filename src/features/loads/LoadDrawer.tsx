@@ -1787,7 +1787,8 @@ export function LoadDrawer() {
                   const when = apptLabel(s.appt, s.apptType, s.apptEnd)
                   const who = driverName(s.driverId)
                   const place = s.locationId ? formDirectory.locations.find((l) => l.id === s.locationId) : undefined
-                  const notes = place?.driverNotes ?? []
+                  // Defensive as well as unwrapped at the client: a string here must never take the page down.
+                  const notes = Array.isArray(place?.driverNotes) ? place.driverNotes : []
                   return (
                     <div key={s.id}>
                       <ReadonlyField

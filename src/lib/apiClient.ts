@@ -1068,7 +1068,10 @@ export async function archiveCustomer(id: string, expectedUpdatedAt: string): Pr
 }
 
 export async function listLocations(opts?: { includeArchived?: boolean }): Promise<LocationRecord[]> {
-  const rows = (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts']))
+  // driverNotes is AWSJSON too: the driver app appends to it as a native list, and
+  // AppSync hands that back as a JSON STRING. Left wrapped, the load drawer called
+  // .map on it and blanked the page for every load touching that location.
+  const rows = (await listAll<LocationRecord>('listLocations', LOCATION_FIELDS, 1000)).map((l) => unwrapJsonFields(l, ['contacts', 'driverNotes']))
   return opts?.includeArchived ? rows : rows.filter(isActiveDirectoryRecord)
 }
 /**
