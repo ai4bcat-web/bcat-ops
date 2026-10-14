@@ -129,6 +129,12 @@ describe('the v2 create-invoice response', () => {
     expect(r.invoiceExists).toBe(true)
   })
 
+  it('refuses a 409 that names a DIFFERENT invoice number — another PRO with this PO', async () => {
+    // PRO 14641 was handed 14624's invoice id this way and had its rate con filed on it.
+    const { impl } = stubFetch({ status: 409, body: { ...CREATED, invoiceNo: '14624' } })
+    await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/different PRO/)
+  })
+
   it('still raises on a 409 that carries no id to go on', async () => {
     const { impl } = stubFetch({ status: 409, body: { message: 'conflict' } })
     await expect(client(impl).createInvoice(PAYLOAD)).rejects.toThrow(/Duplicate/)

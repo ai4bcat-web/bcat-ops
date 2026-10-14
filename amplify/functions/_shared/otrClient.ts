@@ -467,6 +467,22 @@ export class OtrClient {
     if (res.status === 409) {
       const dup = safeJson(text)
       const dupId = Number(dup?.invoicePkey ?? dup?.invoiceId)
+      /*
+       * Only OUR OWN invoice counts as "already exists". OTR also answers 409 when a
+       * different invoice carries the same PO number — PRO 14641 got PRO 14624's invoice
+       * id back, the submit carried on with it, and 14641's rate confirmation was
+       * uploaded onto 14624's invoice. A 409 whose invoice number is not the one we sent
+       * is a clash to fix, not an invoice to continue with.
+       */
+      const dupNo = String(dup?.invoiceNo ?? dup?.InvoiceNo ?? '').trim()
+      if (Number.isFinite(dupId) && dupNo && dupNo !== String(payload.InvoiceNo).trim()) {
+        throw new OtrError(
+          `OTR already has invoice ${dupId} (their #${dupNo}) with this PO number — a different PRO. ` +
+            `Nothing was created for ${payload.InvoiceNo}. Check the PO number, then submit again.`,
+          res.status,
+          text,
+        )
+      }
       if (Number.isFinite(dupId)) {
         console.warn('[otr] invoice already exists at OTR; continuing with it', {
           invoiceNo: payload.InvoiceNo,
