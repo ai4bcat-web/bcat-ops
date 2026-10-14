@@ -409,8 +409,9 @@ describe("today's sheet", () => {
         </Routes>
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /Add photos \/ docs/ })).toHaveLength(2), { timeout: 5000 })
-    fireEvent.click(screen.getAllByRole('button', { name: /Add photos \/ docs/ })[0])
+    // A pickup says pickup paperwork; a delivery says it is not the POD — so nobody files a BOL photo as the proof of delivery.
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Pickup photos \/ paperwork|Other photos \(not the POD\)/ })).toHaveLength(2), { timeout: 5000 })
+    fireEvent.click(screen.getAllByRole('button', { name: /Pickup photos \/ paperwork|Other photos \(not the POD\)/ })[0])
     await waitFor(() => expect(screen.getByText(/SCANNER/).textContent).toMatch(/kind=misc.*loadId=load-1.*stopId=st-pu.*stopLabel=Pickup/))
   })
 

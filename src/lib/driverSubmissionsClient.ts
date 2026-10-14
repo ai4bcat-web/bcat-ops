@@ -384,7 +384,7 @@ export async function staffUploadDriverDoc(input: StaffUploadDriverDocInput): Pr
  * Best-effort: the POD is already filed, and the office can still mark the stop by hand.
  * Goes through the store so the calendar and dispatch see the change without a reload.
  */
-async function markDeliveredForPod(loadId: string, driverId: string): Promise<void> {
+export async function markDeliveredForPod(loadId: string, driverId: string): Promise<void> {
   try {
     const { useAppStore } = await import('@/store/useAppStore')
     const { stopsAfterPod } = await import('./stopEvents')
@@ -659,4 +659,19 @@ async function addDocsToSubmission(
     )
   }
   if (kind !== 'MISC') await queueDriverDocScan(submissionId, kind)
+}
+
+/**
+ * A photo a driver sent from a stop turns out to be the POD: re-file that one document
+ * as POD and, since a POD means the trip is done, mark the delivery. Nothing is copied —
+ * the same file, under the right heading.
+ */
+export async function useDriverDocAsPod(docId: string, loadId: string | null | undefined, driverId: string): Promise<void> {
+  await gql(
+    `mutation UpdateDriverSubmissionDoc($input: UpdateDriverSubmissionDocInput!) {
+      updateDriverSubmissionDoc(input: $input) { id kind }
+    }`,
+    { input: { id: docId, kind: 'POD', scanStatus: 'PENDING' } },
+  )
+  if (loadId) await markDeliveredForPod(loadId, driverId)
 }

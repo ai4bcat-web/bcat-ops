@@ -499,7 +499,7 @@ export function TodayStops({
                   onClick={() => onAddPhotos(load, stop)}
                 >
                   <Paperclip className="h-4 w-4" aria-hidden="true" />
-                  {photos.length > 0 ? 'Add more photos / docs' : 'Add photos / docs'}
+                  {delivery ? (photos.length > 0 ? 'More photos (not the POD)' : 'Other photos (not the POD)') : (photos.length > 0 ? 'More pickup photos / paperwork' : 'Pickup photos / paperwork')}
                 </Button>
               </div>
             )}

@@ -13,7 +13,7 @@
  * row opens a preview, and the preview can replace or remove.
  */
 import { useState } from 'react'
-import { FileText, Loader2, AlertTriangle, Eye, Wand2 } from 'lucide-react'
+import { FileText, Loader2, AlertTriangle, Eye, Wand2, Package } from 'lucide-react'
 import { toast } from 'sonner'
 import { useLoadDriverDocs, type LoadDriverDoc } from '@/hooks/useLoadDriverDocs'
 import { DocumentPreview } from '@/features/documents/DocumentPreview'
@@ -21,6 +21,7 @@ import {
   removeDriverDocs,
   replaceDriverDocs,
   DRIVER_DOC_ACCEPT,
+  useDriverDocAsPod,
 } from '@/lib/driverSubmissionsClient'
 import { queueDriverDocScan } from '@/lib/podsClient'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -75,6 +76,20 @@ export function LoadDriverDocs({
   const { pods, ratecons, misc, loading, error, refresh } = useLoadDriverDocs(loadId, proNumber)
   const user = useAuthUser()
   const [previewing, setPreviewing] = useState<string | null>(null)
+  const [promoting, setPromoting] = useState<string | null>(null)
+  const promote = async (doc: LoadDriverDoc) => {
+    if (!window.confirm(`File "${doc.fileName?.trim() || 'this picture'}" as the POD for this load?`)) return
+    setPromoting(doc.id)
+    try {
+      await useDriverDocAsPod(doc.id, loadId, doc.driverId)
+      toast.success('Filed as the POD')
+      refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not file it as the POD')
+    } finally {
+      setPromoting(null)
+    }
+  }
   const [scanning, setScanning] = useState<string | null>(null)
 
   /**
@@ -136,7 +151,7 @@ export function LoadDriverDocs({
                 <span className="min-w-0">
                   <span className="block truncate text-xs font-medium text-foreground">{name}</span>
                   <span className="block truncate text-[11px] text-muted-foreground">
-                    {doc.driverName} · {who} · {when(doc.uploadedAt)}
+                    {doc.driverName} · {who}{doc.stopLabel ? ` · ${doc.stopLabel}` : ''} · {when(doc.uploadedAt)}
                     {note && (
                       <span
                         className={
@@ -160,6 +175,19 @@ export function LoadDriverDocs({
                   <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                 )}
               </button>
+              {/* A stop photo that is really the POD: file it as one from here. */}
+              {kind === 'MISC' && (
+                <button
+                  type="button"
+                  disabled={promoting === doc.id}
+                  onClick={() => void promote(doc)}
+                  className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-primary disabled:opacity-50"
+                  title="This picture is the proof of delivery — file it as the POD for this load"
+                >
+                  {promoting === doc.id ? <Loader2 className="size-3 animate-spin" /> : <Package className="size-3" />}
+                  Use as POD
+                </button>
+              )}
               {/* Not scanned, or still loose pages: offer to put it right from here. (A photo is not a page.) */}
               {kind !== 'MISC' && needsScanning(doc) && (
                 <button

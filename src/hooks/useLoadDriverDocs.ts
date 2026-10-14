@@ -27,6 +27,9 @@ export interface LoadDriverDoc extends DriverSubmissionDocRecord {
   /** Who sent it, for the office to see at a glance. */
   driverName: string
   source: SubmissionWithDocs['source']
+  /** Where a photo was taken ("Pickup — KELLOGGS"), so a pickup photo is not read as the POD. */
+  stopLabel?: string | null
+  driverId: string
   submittedByEmail: SubmissionWithDocs['submittedByEmail']
   /**
    * Presigned, resolved lazily; null until it loads or if it fails. Points at the CLEANED
@@ -134,6 +137,8 @@ const docs = useMemo<LoadDriverDoc[]>(
               pageNumber: null,
               driverName: sub.driverName,
               source: sub.source,
+              stopLabel: sub.stopLabel ?? null,
+              driverId: sub.driverId,
               submittedByEmail: sub.submittedByEmail,
               url: urls[key] ?? null,
               enhanced: pages.some((d) => d.scanStatus === 'READY'),
