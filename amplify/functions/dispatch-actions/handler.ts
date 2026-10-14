@@ -24,8 +24,8 @@ const WEBHOOK_URL = (process.env.WEBHOOK_URL ?? '').replace(/\/+$/, '')
 const USER_POOL_ID = process.env.USER_POOL_ID || 'us-east-1_IbPKPNJC9'
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const PAGE_GROUP = 'page-dispatch'
-const ADMIN_ONLY = new Set<Action>(['assign', 'link', 'saveSettings'])
-const ADMIN_ONLY_LABEL: Partial<Record<Action, string>> = { assign: 'assign conversations', link: 'change who a number belongs to', saveSettings: 'change Dispatch settings' }
+const ADMIN_ONLY = new Set<Action>(['assign', 'link', 'saveSettings', 'delete'])
+const ADMIN_ONLY_LABEL: Partial<Record<Action, string>> = { assign: 'assign conversations', link: 'change who a number belongs to', saveSettings: 'change Dispatch settings', delete: 'delete a conversation'}
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN ?? ''
 const MAX_NOTE = 4000
 const MAX_LABEL = 80
@@ -36,7 +36,7 @@ interface AppSyncIdentity { sub?: string; username?: string; claims?: Record<str
 interface AppSyncEvent { arguments: { action: string; input?: string | Record<string, unknown> | null }; identity?: AppSyncIdentity | null }
 
 export type Action =
-  | 'send' | 'sendIntro' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel' | 'slackInvite'
+  | 'send' | 'sendIntro' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'delete' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel' | 'slackInvite'
   | 'status' | 'getSettings' | 'saveSettings' | 'listStaff'
 
 export interface Deps {
@@ -165,6 +165,13 @@ export async function runAction(action: Action, input: Record<string, unknown>, 
       const bridge = await slackBridge(deps)
       if (bridge) linked = await renameSlackChannel(bridge, linked)
       return { conversation: linked }
+    }
+    case 'delete': {
+      // Admin only (ADMIN_ONLY). Gone for good: the thread and every message in it.
+      const c = await requireConversation(store, input)
+      const r = await store.deleteConversation(c.id)
+      console.log('[dispatch-actions] conversation deleted', { by: caller.email, conversationId: c.id, phone: c.phone, messages: r.messages })
+      return { deleted: c.id, messages: r.messages }
     }
     case 'archive':
     case 'reopen': {

@@ -7,7 +7,7 @@
  */
 import {
   DynamoDBClient, GetItemCommand, PutItemCommand, QueryCommand, ScanCommand, UpdateItemCommand,
-  type AttributeValue,
+  DeleteItemCommand, type AttributeValue,
 } from '@aws-sdk/client-dynamodb'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomUUID } from 'node:crypto'
@@ -266,6 +266,27 @@ export class DispatchStore {
       Limit: limit,
     }))
     return (r.Items ?? []).map((i) => unmarshall(i) as DispatchMessage).reverse()
+  }
+
+  /**
+   * Remove a conversation and every message in it. An admin's call, for a thread that
+   * should never have existed (a test number, a wrong-number text). Media in S3 and the
+   * Slack channel are left alone: the channel is archived from Slack, where its history
+   * belongs to the workspace.
+   */
+  async deleteConversation(id: string): Promise<{ messages: number }> {
+    let removed = 0
+    for (;;) {
+      const batch = await this.listMessages(id, 500)
+      if (!batch.length) break
+      for (const m of batch) {
+        await this.db.send(new DeleteItemCommand({ TableName: this.t.messages, Key: marshall({ id: m.id }) }))
+        removed++
+      }
+      if (batch.length < 500) break
+    }
+    await this.db.send(new DeleteItemCommand({ TableName: this.t.conversations, Key: marshall({ id }) }))
+    return { messages: removed }
   }
 
   // ── Settings ────────────────────────────────────────────────────────────

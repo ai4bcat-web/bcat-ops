@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal, PanelRightClose } from 'lucide-react'
+import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal, PanelRightClose, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -309,6 +309,15 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
           <Button variant="outline" size="sm" className="h-8" title={selected.status === 'ARCHIVED' ? 'Reopen' : 'Archive'} onClick={() => void act('archive', () => d.setArchived(selected.id, selected.status !== 'ARCHIVED'))}>
             {selected.status === 'ARCHIVED' ? <ArchiveRestore className="size-3.5" /> : <Archive className="size-3.5" />}
           </Button>
+          {canManage ? (
+            <Button variant="outline" size="sm" className="h-8 text-red-600" title="Delete this conversation and every message in it (admins only)"
+              onClick={() => {
+                if (!window.confirm(`Delete the conversation with ${conversationTitle(selected)}?\n\nEvery text, note and status in it is removed for good. The driver's Slack channel, if any, is left for you to archive in Slack.`)) return
+                void act('delete the conversation', () => d.remove(selected.id))
+              }}>
+              <Trash2 className="size-3.5" />
+            </Button>
+          ) : null}
         </div>
       </div>
       {/* Any conversation without a channel gets the prompt: started by the driver or by us. */}

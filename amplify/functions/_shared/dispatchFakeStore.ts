@@ -68,6 +68,7 @@ export class FakeDispatchStore {
     return next
   }
   async listMessages(conversationId: string, _limit = 500) { return [...this.messages.values()].filter((m) => m.conversationId === conversationId).sort((a, b) => (a.at < b.at ? -1 : 1)) }
+  async deleteConversation(id: string) { let n = 0; for (const [k, m] of this.messages) if (m.conversationId === id) { this.messages.delete(k); n++ } this.conversations.delete(id); return { messages: n } }
   async getSettings() { return this.settings }
   async putSettings(value: DispatchSettings) { this.settings = { id: 'default', ...value, updatedAt: this.clock() }; return this.settings }
   async listDrivers() { return this.drivers }

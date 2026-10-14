@@ -2945,7 +2945,7 @@ export async function listAllDispatchMessages(): Promise<DispatchMessage[]> {
 }
 
 export type DispatchAction =
-  | 'send' | 'sendIntro' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel'
+  | 'send' | 'sendIntro' | 'start' | 'markRead' | 'assign' | 'link' | 'archive' | 'reopen' | 'delete' | 'note' | 'mediaUrl' | 'slackUrl' | 'createSlackChannel'
   | 'status' | 'getSettings' | 'saveSettings' | 'listStaff' | 'slackInvite'
 
 export async function dispatchAction<T = Record<string, unknown>>(action: DispatchAction, input: object = {}): Promise<T> {

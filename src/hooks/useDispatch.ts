@@ -31,6 +31,8 @@ export interface UseDispatchResult {
   status: DispatchStatus | null
   selectedId: string | null
   select: (id: string | null) => void
+  /** Admin only: remove a conversation and its messages for good. */
+  remove: (conversationId: string) => Promise<void>
   thread: DispatchMessage[]
   threadLoading: boolean
   refresh: () => Promise<void>
@@ -176,6 +178,12 @@ export function useDispatch(): UseDispatchResult {
     applyConversation(r.conversation)
   }, [applyConversation])
 
+  const remove = useCallback(async (conversationId: string) => {
+    await dispatchAction<{ deleted: string }>('delete', { conversationId })
+    setConversations((rows) => rows.filter((c) => c.id !== conversationId))
+    setSelectedId((cur) => (cur === conversationId ? null : cur))
+  }, [])
+
   const addNote = useCallback(async (conversationId: string, body: string) => {
     const r = await dispatchAction<{ message: DispatchMessage; conversation: DispatchConversation }>('note', { conversationId, body })
     applyConversation(r.conversation)
@@ -199,7 +207,7 @@ export function useDispatch(): UseDispatchResult {
 
   return {
     conversations, loading, error, status, selectedId, select: setSelectedId, thread, threadLoading, refresh,
-    send, sendIntro, start, markRead, assign, listStaff, link, setArchived, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
+    send, sendIntro, start, markRead, assign, listStaff, link, setArchived, remove, addNote, mediaUrl, createSlackChannel, getSettings, saveSettings,
   }
 }
 
