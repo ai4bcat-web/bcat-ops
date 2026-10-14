@@ -29,6 +29,7 @@ import {
 } from '@/lib/otrInvoice'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { assembleInvoice, checkBroker, markManualInvoice, setBrokerMc, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
+import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
 import { setFactoringManualFields } from '@/lib/apiClient'
 import { FactoringDocCell } from './FactoringDocCell'
 import { useAuthUser } from '@/hooks/useAuth'
@@ -125,6 +126,53 @@ export function OtrPanel({ item, onChanged }: Props) {
       .then(() => { setPrepareFailed(false); onChanged() })
       .catch(() => setPrepareFailed(true))
   }, [readiness, submitted, item.id, onChanged])
+
+  /*
+   * A submit or resend is a failure if any document did not land, even though the
+   * invoice was created: the toast says so and the row stays red until the documents
+   * are uploaded again and resent.
+   */
+  const runDocs = useCallback(
+    async (label: string, fn: () => Promise<{ documentErrors: string[] }>, success: string) => {
+      setBusy(label)
+      try {
+        const r = await fn()
+        onChanged()
+        if (r.documentErrors.length) toast.error(otrDocsErrorMessage(r.documentErrors))
+        else toast.success(success)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : `${label} failed`)
+      } finally {
+        setBusy(null)
+      }
+    },
+    [onChanged],
+  )
+
+  // The invoice exists at OTR but a document did not reach it: red, with the way out.
+  if (submitted && otrDocsIncomplete(item)) {
+    return (
+      <div className="rounded-md border border-red-300 bg-red-50 p-3 text-sm" role="alert">
+        <p className="flex items-start gap-1.5 font-semibold text-red-700">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          OTR invoice {item.otrInvoiceId} is missing its documents
+        </p>
+        <p className="mt-1 text-xs text-red-700">{item.otrError ?? 'The POD or rate confirmation did not reach OTR.'}</p>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Upload the document again in the POD / Rate con columns on this row, then press Resend documents. The row stays in Need to factor until OTR has both.
+        </p>
+        <Button
+          size="sm"
+          className="mt-2"
+          disabled={busy !== null}
+          onClick={() => runDocs('docs', () => uploadOtrDocs(item.id), 'Documents sent to OTR — now pending with OTR')}
+        >
+          {busy === 'docs' ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+          Resend documents
+        </Button>
+      </div>
+    )
+  }
 
   // Already at OTR: show their board rather than the assembly panel.
   if (submitted) {
@@ -400,7 +448,7 @@ export function OtrPanel({ item, onChanged }: Props) {
               : `Still needed: ${whatIsMissing(readiness, (f) => OTR_FIELD_LABEL[f])}`
           }
           onClick={() =>
-            run('submit', () => submitToOtr(item.id), 'Submitted to OTR')
+            runDocs('submit', () => submitToOtr(item.id), 'Submitted to OTR with its documents')
           }
         >
           {busy === 'submit' ? (

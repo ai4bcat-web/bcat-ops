@@ -19,6 +19,7 @@ import { FactoringDocCell } from './FactoringDocCell'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
+import { otrDocsIncomplete } from '@/lib/otrSubmitOutcome'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -318,6 +319,20 @@ function NoBuyFlag({ item }: { item: FactoringItem }) {
 /** OTR's label for the row, or the stand-in for one OTR has not reported on. */
 function otrLabelOf(item: FactoringItem): string {
   return otrStatusMeta(item.otrStatus)?.label ?? OTR_UNREPORTED
+}
+
+/** The invoice is at OTR without its paperwork: red until the documents are resent. */
+function OtrDocsFlag({ item }: { item: FactoringItem }) {
+  if (!otrDocsIncomplete(item)) return null
+  return (
+    <span
+      title={item.otrError ?? 'A document did not reach OTR — upload it again and press Resend documents'}
+      aria-label={`OTR documents missing for PRO ${item.proNumber}`}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 999, background: '#fecaca', color: '#b91c1c', border: '1px solid #f87171', fontSize: 11, fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}
+    >
+      DOCS NOT AT OTR
+    </span>
+  )
 }
 
 function StatusBadge({ item }: { item: FactoringItem }) {
@@ -733,6 +748,7 @@ export function FactoringPage() {
                           <StatusBadge item={item} />
                           <OtrStatusFlag item={item} />
                           <NoBuyFlag item={item} />
+                          <OtrDocsFlag item={item} />
                           {pendingIds.has(item.id) && (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           )}

@@ -10,6 +10,8 @@
  * Nothing here submits on its own. `submit` runs only when a human invokes it
  * from the queue row, and it refuses unless assembleOtrInvoice reports ready.
  */
+import { afterOtrDocuments, otrDocsIncomplete } from '../../../src/lib/otrSubmitOutcome'
+import type { FactoringItem } from '../../../src/types'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import {
   DynamoDBDocumentClient,
@@ -1105,14 +1107,26 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         }
 
         const created = await client.createInvoice(payload as unknown as OtrInvoicePayload)
+        // What left here, for the record: the ZIPs and the document keys OTR was given.
+        console.log('[otr-actions] invoice created', {
+          pro: item.proNumber, invoiceId: String(created.invoiceId), actor,
+          FromZip: payload.FromZip, ToZip: payload.ToZip, FromCity: payload.FromCity, ToCity: payload.ToCity,
+        })
 
-        // Documents are best-effort: the invoice already exists at OTR, so a failed
-        // upload must not lose the invoiceId. Retryable on its own afterwards.
+        /*
+         * The invoice already exists at OTR, so a failed upload must not lose the
+         * invoiceId — but it is not best-effort either. OTR will not pay an invoice
+         * without its POD and rate con, so a row whose documents did not land stays in
+         * Need to factor, in red, until they are uploaded again and resent
+         * (afterOtrDocuments). The hourly sync leaves such a row's status alone.
+         */
         const { uploaded, errors: docErrors } = await uploadInvoiceDocuments(
           item,
           load,
           created.invoiceId,
         )
+        const outcome = afterOtrDocuments(docErrors)
+        console.log('[otr-actions] documents after create', { pro: item.proNumber, invoiceId: String(created.invoiceId), uploaded, errors: docErrors, status: outcome.status })
 
         await updateItem(String(item.id), {
           otrInvoiceId: String(created.invoiceId),
@@ -1127,8 +1141,8 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
            */
           otrDocsUploaded: uploaded,
           otrReadiness: readiness,
-          status: 'PENDING_WITH_OTR',
-          otrError: docErrors.length ? docErrors.join('; ') : null,
+          status: outcome.status,
+          otrError: outcome.otrError,
         })
 
         return ok({
@@ -1158,11 +1172,14 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         if (!load) return fail('no load linked to this row')
 
         const { uploaded, errors } = await uploadInvoiceDocuments(item, load, invoiceId)
+        const outcome = afterOtrDocuments(errors)
         await updateItem(String(item.id), {
           otrDocsUploaded: { ...((item.otrDocsUploaded as Row) ?? {}), ...uploaded },
-          otrError: errors.length ? errors.join('; ') : null,
+          otrError: outcome.otrError,
+          // Every document at OTR now: the row is pending. Still short: it stays in red.
+          ...(item.status === 'NEED_TO_FACTOR' || item.status === 'PENDING_WITH_OTR' ? { status: outcome.status } : {}),
         })
-        console.log('[otr-actions] document retry by', actor, { invoiceId, errors })
+        console.log('[otr-actions] document retry by', actor, { invoiceId, uploaded, errors, status: outcome.status })
         return ok({ invoiceId, uploaded, documentErrors: errors })
       }
 
@@ -1293,13 +1310,15 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
              * matched and nothing was ever marked factored. localStatusFor owns that
              * decision now, in the same module that owns the labels.
              */
-            const local = localStatusFor(d.status)
+            // A row still short a document at OTR keeps its red Need to factor until the
+            // documents are resent; OTR's board status is recorded but does not move it.
+            const local = otrDocsIncomplete({ otrInvoiceId: item.otrInvoiceId as string, status: String(item.status) as FactoringItem['status'] }) ? 'NEED_TO_FACTOR' : localStatusFor(d.status)
             await updateItem(id, {
               otrStatus: d.status,
               otrScheduleId: d.scheduleId,
               otrStatusSyncedAt: nowIso(),
               status: local,
-              otrError: null,
+              ...(local === 'NEED_TO_FACTOR' ? {} : { otrError: null }),
             })
             results.push({ id, status: d.status, scheduleId: d.scheduleId })
           } catch (e) {

@@ -54,7 +54,8 @@ export const handler = async () => {
          * one of the terminal ones" as cheaply as a comparison in memory can.
          */
         FilterExpression: 'attribute_exists(otrInvoiceId)',
-        ProjectionExpression: 'id, proNumber, otrInvoiceId, otrStatus',
+        ProjectionExpression: 'id, proNumber, otrInvoiceId, otrStatus, #st',
+        ExpressionAttributeNames: { '#st': 'status' },
         ExclusiveStartKey,
       }),
     )
@@ -75,21 +76,25 @@ export const handler = async () => {
       const d = await client.getInvoice(invoiceId)
       // Nothing moved — skip the write so updatedAt stays meaningful.
       if (d.status && d.status === row.otrStatus) continue
+      const docsShort = String(row.status ?? '') === 'NEED_TO_FACTOR'
 
       await ddb.send(
         new UpdateCommand({
           TableName: FACTORING_TABLE,
           Key: { id },
-          UpdateExpression:
-            'SET otrStatus = :s, otrScheduleId = :sch, otrStatusSyncedAt = :t, #st = :local, updatedAt = :t, otrError = :null',
-          ExpressionAttributeNames: { '#st': 'status' },
+          // A row still short a document at OTR (status NEED_TO_FACTOR with an invoice id) keeps
+          // its red status and its message; OTR's board status is recorded alongside.
+          UpdateExpression: docsShort
+            ? 'SET otrStatus = :s, otrScheduleId = :sch, otrStatusSyncedAt = :t, updatedAt = :t'
+            : 'SET otrStatus = :s, otrScheduleId = :sch, otrStatusSyncedAt = :t, #st = :local, updatedAt = :t, otrError = :null',
+          // DynamoDB refuses a name the expression does not use.
+          ...(docsShort ? {} : { ExpressionAttributeNames: { '#st': 'status' } }),
           ExpressionAttributeValues: {
             ':s': d.status,
             ':sch': d.scheduleId ?? null,
             ':t': new Date().toISOString(),
             // Local queue status follows OTR; only Approved closes a row out.
-            ':local': localStatusFor(d.status),
-            ':null': null,
+            ...(docsShort ? {} : { ':local': localStatusFor(d.status), ':null': null }),
           },
         }),
       )

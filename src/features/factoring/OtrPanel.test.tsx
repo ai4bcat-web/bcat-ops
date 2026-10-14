@@ -264,7 +264,8 @@ describe('an invoice OTR has, whose documents did not land', () => {
   it('offers to send the documents again, without creating a second invoice', async () => {
     render(<OtrPanel item={submitted()} onChanged={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: /Send the documents again/ }))
+    // The row is in the red docs-missing state now; the button there resends without a second invoice.
+    fireEvent.click(screen.getByRole('button', { name: /Resend documents/ }))
     await waitFor(() => expect(uploadOtrDocs).toHaveBeenCalledWith('13364'))
   })
 
@@ -274,7 +275,20 @@ describe('an invoice OTR has, whose documents did not land', () => {
   })
 
   it('does not offer the retry on an invoice that went over cleanly', () => {
-    render(<OtrPanel item={item({ otrInvoiceId: '16222565', otrStatus: 'Pending' })} onChanged={vi.fn()} />)
-    expect(screen.queryByRole('button', { name: /Send the documents again/ })).not.toBeInTheDocument()
+    render(<OtrPanel item={item({ status: 'PENDING_WITH_OTR', otrInvoiceId: '16222565', otrStatus: 'Pending' })} onChanged={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: /Send the documents again|Resend documents/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('an invoice at OTR without its documents', () => {
+  it('shows the red state with Resend documents, not the OTR board', async () => {
+    const onChanged = vi.fn()
+    render(<OtrPanel item={item({ status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR. Upload it again on this row, then press Resend documents. (POD: nothing on file to send)' })} onChanged={onChanged} />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/missing its documents/)
+    expect(screen.getByText(/POD did not reach OTR/)).toBeInTheDocument()
+    expect(screen.queryByText(/waiting for OTR/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Resend documents/ }))
+    await waitFor(() => expect(uploadOtrDocs).toHaveBeenCalledWith('13364'))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
   })
 })

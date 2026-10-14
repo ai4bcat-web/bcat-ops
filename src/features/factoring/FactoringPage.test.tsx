@@ -309,3 +309,11 @@ describe('Pending with OTR shows what OTR says', () => {
     expect(screen.queryByRole('group', { name: 'OTR status' })).not.toBeInTheDocument()
   })
 })
+
+describe('documents that did not reach OTR', () => {
+  it('keeps the row in Need to factor with a red flag', () => {
+    setup([item({ id: 'x', proNumber: '14564', status: 'NEED_TO_FACTOR', otrInvoiceId: '25594544', otrError: 'POD did not reach OTR.' })])
+    expect(screen.getByText('14564')).toBeInTheDocument()
+    expect(screen.getByLabelText('OTR documents missing for PRO 14564')).toHaveTextContent('DOCS NOT AT OTR')
+  })
+})
