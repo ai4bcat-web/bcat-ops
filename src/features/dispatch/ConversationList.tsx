@@ -4,7 +4,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { conversationColor, initialsOf } from './conversationColor'
 import { groupByFleet } from './fleetSections'
 import { unitTypeOf, unitKindLabel } from '@/lib/unitType'
-import { conversationTitle, prettyPhone, type DispatchConversation } from '@/lib/dispatch'
+import { conversationTitle, prettyPhone, type DispatchConversation, signatureName } from '@/lib/dispatch'
 import { listTime, staffName } from './dispatchUi'
 
 interface Props {
@@ -80,8 +80,9 @@ export function ConversationList({ rows, selectedId, onSelect, now, subline, sta
               </span>
               {statusOf?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-t2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Last status update from the driver app"><MapPin className="size-3 inline-block align-[-2px]" style={{ color: 'var(--ds-green)' }} /> {statusOf(c)}</span> : null}
               {subline?.(c) ? <span style={{ gridColumn: '2 / span 2', fontSize: 11, color: 'var(--ds-green)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>📍 {subline(c)}</span> : null}
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                {c.assignedTo ? <span title={c.assignedTo} style={{ fontSize: 10, color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px' }}>{staffName(c.assignedTo)}</span> : null}
+              {/* Pinned beside the preview: left to auto-placement it fell under the avatar once the status and location lines were on the row. */}
+              <span style={{ gridColumn: 3, gridRow: 2, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', alignSelf: 'center' }}>
+                {c.assignedTo ? <span title={`Dispatcher: ${c.assignedTo}`} style={{ fontSize: 10, color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap', maxWidth: 72, overflow: 'hidden', textOverflow: 'ellipsis' }}>{signatureName(c.assignedTo) ?? staffName(c.assignedTo)}</span> : null}
                 {unread ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: color.border, color: '#fff', fontSize: 11, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{c.unreadCount}</span> : null}
               </span>
             </button>
