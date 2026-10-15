@@ -24,7 +24,7 @@ interface Args {
   todayISO?: string
 }
 
-const SCHEMA = {
+export const SCHEMA = {
   type: 'object',
   additionalProperties: false,
   required: ['pickup', 'delivery', 'invoice', 'freight'],
@@ -56,7 +56,8 @@ const SCHEMA = {
         commodity:  { type: ['string', 'null'], description: 'What is being hauled, as the tender names it (e.g. "Frozen foods", "Steel coils"). Null if not stated.' },
         weightLbs:  { type: ['number', 'null'], description: 'Total weight in pounds. Convert from kg or tons if needed. Null if not stated.' },
         pieces:     { type: ['number', 'null'], description: 'Count of pieces/pallets/cases as stated. Null if not stated.' },
-        piecesUnit: { type: ['string', 'null'], enum: ['pallets', 'cases', 'pieces', 'skids', 'rolls', 'bundles', 'drums', 'totes', null], description: 'The unit the count is in. Null if not stated.' },
+        // No enum here: the API refuses an enum mixed with a nullable type ("Enum value 'pallets' does not match declared type"), which failed every rate-con read.
+        piecesUnit: { type: ['string', 'null'], description: 'The unit the count is in, lowercase: one of pallets, cases, pieces, skids, rolls, bundles, drums, totes. Null if not stated.' },
       },
     },
     pickup: {
