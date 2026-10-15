@@ -19,7 +19,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus, Maximize2, Zap, ZapOff } from 'lucide-react'
-import { torchSupported, setTorch } from '@/lib/docScan/torch'
+import { torchSupported, setTorch, frameBrightness, autoTorchWants, nextTorchMode, type TorchMode } from '@/lib/docScan/torch'
 import { Button } from '@/components/ui/button'
 import { scanFrameColor, toGray, assessReadability, enhanceForReading, type Readability } from '@/lib/docScan/capture'
 import { preparePage } from './imagePrep'
@@ -89,10 +89,21 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
   // an iPhone never shows the button rather than showing one that does nothing.
   const [torchAvailable, setTorchAvailable] = useState(false)
   const [torchOn, setTorchOn] = useState(false)
-  const toggleTorch = async () => {
+  // Auto by default: the viewfinder's own light decides (see autoTorchWants). A tap on the
+  // button steps auto → on → off, for the driver who knows better than the meter.
+  const [torchMode, setTorchMode] = useState<TorchMode>('auto')
+  const torchOnRef = useRef(false)
+  const torchModeRef = useRef<TorchMode>('auto')
+  const applyTorch = async (on: boolean) => {
+    if (torchOnRef.current === on) return
     const track = streamRef.current?.getVideoTracks?.()[0] ?? null
-    const next = !torchOn
-    if (await setTorch(track, next)) setTorchOn(next)
+    if (await setTorch(track, on)) { torchOnRef.current = on; setTorchOn(on) }
+  }
+  const cycleTorch = async () => {
+    const next = nextTorchMode(torchModeRef.current)
+    torchModeRef.current = next
+    setTorchMode(next)
+    if (next !== 'auto') await applyTorch(next === 'on')
   }
 
   // ── Camera ────────────────────────────────────────────────────────────────
@@ -201,8 +212,14 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
       const ctx = canvas.getContext('2d', { willReadFrequently: true })
       if (!ctx) return
       ctx.drawImage(video, 0, 0, w, h)
+      const pixels = ctx.getImageData(0, 0, w, h).data
+      // The flash, when the light is poor and the driver has left it on auto.
+      if (torchAvailable && torchModeRef.current === 'auto') {
+        const want = autoTorchWants(frameBrightness(pixels), torchOnRef.current)
+        if (want !== torchOnRef.current) void applyTorch(want)
+      }
       // Colour, not gray: the page is found by being the one uncoloured thing in shot.
-      const result = scanFrameColor({ data: ctx.getImageData(0, 0, w, h).data, width: w, height: h })
+      const result = scanFrameColor({ data: pixels, width: w, height: h })
 
       // Draw the outline over the preview, in the preview's own pixels.
       overlay.width = overlay.clientWidth
@@ -231,7 +248,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
 
     const id = window.setInterval(tick, DETECT_INTERVAL_MS)
     return () => { stop = true; window.clearInterval(id) }
-  }, [ready, shot])
+  }, [ready, shot, torchAvailable])
 
   // ── Shutter ───────────────────────────────────────────────────────────────
   const capture = useCallback(async () => {
@@ -458,12 +475,13 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
           {torchAvailable && (
             <button
               type="button"
-              aria-label={torchOn ? 'Turn the flash off' : 'Turn the flash on'}
-              aria-pressed={torchOn}
-              onClick={() => void toggleTorch()}
-              className={`flex h-12 w-12 items-center justify-center rounded-full border-2 ${torchOn ? 'border-amber-300 bg-amber-300/30 text-amber-200' : 'border-white/60 bg-white/10 text-white/80'}`}
+              aria-label={`Flash: ${torchMode}${torchMode === 'auto' ? (torchOn ? ' (on)' : ' (off)') : ''}`}
+              title="Tap to step auto → on → off"
+              onClick={() => void cycleTorch()}
+              className={`flex h-12 min-w-12 flex-col items-center justify-center rounded-full border-2 px-2 ${torchOn ? 'border-amber-300 bg-amber-300/30 text-amber-200' : 'border-white/60 bg-white/10 text-white/80'}`}
             >
               {torchOn ? <Zap className="h-5 w-5" /> : <ZapOff className="h-5 w-5" />}
+              <span className="text-[9px] font-bold uppercase leading-none">{torchMode}</span>
             </button>
           )}
           <button
