@@ -43,6 +43,19 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
   const [list, setList] = useState<TruckChoice[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  /*
+   * Two guards against the wrong row.
+   *
+   * A driver with a truck on file is asked "still in 780?" and only sees the list if the
+   * answer is no — the morning after a mis-tap, the highlighted row is the one a thumb
+   * lands on. And a pick from the list is confirmed with the number large before it is
+   * saved: a thumb on the row above or below is how Josh spent two days filed in a truck
+   * he was never in.
+   */
+  // Derived at render, not at mount: the profile (and so `truck`) can arrive after the dialog opens.
+  const [wantsList, setWantsList] = useState(false)
+  const showList = !truck || wantsList
+  const [confirming, setConfirming] = useState<TruckChoice | null>(null)
 
   useEffect(() => {
     let stale = false
@@ -52,7 +65,7 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
     return () => { stale = true }
   }, [])
 
-  async function pick(t: TruckChoice) {
+  async function pick(t: Pick<TruckChoice, 'id' | 'unitNumber'>) {
     setBusy(t.id)
     try {
       const res = await selectTruck(t.id)
@@ -71,6 +84,34 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
   if (!list) {
     return <div className="flex justify-center py-6"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" /></div>
   }
+
+  if (confirming) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">Switch to this truck?</p>
+        <p className="text-center text-5xl font-black tabular-nums text-foreground">{confirming.unitNumber}</p>
+        {confirming.holder && !confirming.yours && <p className="text-center text-sm text-amber-300">{confirming.holder} is in it now — they will be taken off it.</p>}
+        <Button type="button" size="lg" className="h-14 w-full text-base font-bold" disabled={busy !== null} onClick={() => void pick(confirming)}>
+          {busy === confirming.id ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : `Yes, I'm in ${confirming.unitNumber}`}
+        </Button>
+        <Button type="button" size="lg" variant="outline" className="h-12 w-full text-base" disabled={busy !== null} onClick={() => setConfirming(null)}>Back to the list</Button>
+      </div>
+    )
+  }
+
+  if (truck && !showList) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-muted-foreground">Still in this truck?</p>
+        <p className="text-center text-5xl font-black tabular-nums text-foreground">{truck.unitNumber}</p>
+        <Button type="button" size="lg" className="h-14 w-full text-base font-bold" disabled={busy !== null} onClick={() => void pick(truck)}>
+          {busy === truck.id ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : `Yes, still in ${truck.unitNumber}`}
+        </Button>
+        <Button type="button" size="lg" variant="outline" className="h-12 w-full text-base" disabled={busy !== null} onClick={() => setWantsList(true)}>No, a different truck</Button>
+      </div>
+    )
+  }
+
   return (
     <ul className="flex flex-col gap-2">
       {list.map((t) => {
@@ -80,7 +121,7 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
             <button
               type="button"
               disabled={busy !== null}
-              onClick={() => void pick(t)}
+              onClick={() => setConfirming(t)}
               aria-label={`Truck ${t.unitNumber}${current ? ' (your current truck)' : ''}`}
               className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${
                 current ? 'border-primary bg-primary/10' : 'border-border bg-card'
@@ -94,7 +135,6 @@ function TruckList({ onClose, onPicked }: { onClose: () => void; onPicked?: () =
                   {t.eld ? ' · ELD' : ' · no ELD gateway'}
                 </span>
               </span>
-              {busy === t.id && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
             </button>
           </li>
         )

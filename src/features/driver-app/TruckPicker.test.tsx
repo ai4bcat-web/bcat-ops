@@ -46,8 +46,24 @@ describe('TruckPickerDialog', () => {
     expect(screen.getByText(/Currently Roy Workman/)).toBeInTheDocument()
     expect(screen.getByText(/no ELD gateway/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /Truck 3114/ }))
+    // A pick is confirmed with the number large before it is saved — a thumb on the wrong row costs nothing.
+    expect(api.selectTruck).not.toHaveBeenCalled()
+    expect(screen.getByText(/Switch to this truck\?/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Yes, I'm in 3114/ }))
     await waitFor(() => expect(api.selectTruck).toHaveBeenCalledWith('eq-3114'))
     await waitFor(() => expect(onPicked).toHaveBeenCalled())
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe('a driver with a truck on file', () => {
+  it('is asked "still in it?" and only sees the list on No', async () => {
+    api.fetchMe.mockResolvedValue({ driverId: 'd1', name: 'Josh', program: 'PAPERWORK', truck: { id: 'eq-780', unitNumber: '780' } })
+    api.selectTruck.mockResolvedValue({ truck: { id: 'eq-780', unitNumber: '780' } })
+    render(<TruckPickerDialog open onClose={vi.fn()} onPicked={vi.fn()} />)
+    expect(await screen.findByRole('button', { name: /Yes, still in 780/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Truck 3114/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /No, a different truck/ }))
+    expect(await screen.findByRole('button', { name: /Truck 3114/ })).toBeInTheDocument()
   })
 })

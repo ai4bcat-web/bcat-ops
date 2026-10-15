@@ -86,8 +86,9 @@ describe('the clock button', () => {
     await waitFor(() => expect(screen.getByText('Clock in')).toBeTruthy())
     fireEvent.click(screen.getByText('Clock in'))
     // Truck first, even though one is already on file — they confirm it every morning.
-    await waitFor(() => expect(screen.getByRole('button', { name: /Truck 3114/ })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /Truck 3114/ }))
+    // Already in 3114: the question is "still in it?", one tap.
+    await waitFor(() => expect(screen.getByRole('button', { name: /Yes, still in 3114/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /Yes, still in 3114/ }))
     await waitFor(() => expect(screen.getByRole('button', { name: /Trailer 5302/ })).toBeTruthy())
     expect(api.punchTimeClock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: /Trailer 5302/ }))
@@ -299,7 +300,9 @@ describe('the truck at clock-in', () => {
     await wf(() => expect(api.fetchMe).toHaveBeenCalled())
     fireEvent.click(clockIn)
     expect(api.punchTimeClock).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: /Truck 3114/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Yes, still in 3114|Truck 3114/ }))
+    const confirm = screen.queryByRole('button', { name: /Yes, I'm in 3114/ })
+    if (confirm) fireEvent.click(confirm)
     await wf(() => expect(api.selectTruck).toHaveBeenCalledWith('eq-3114'))
     await wf(() => expect(api.punchTimeClock).toHaveBeenCalledWith('IN', undefined))
   })
