@@ -18,7 +18,8 @@
  * all is a worse outcome than one who sends a poor photograph of it.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus, Maximize2 } from 'lucide-react'
+import { Camera, X, RotateCcw, Check, Loader2, AlertTriangle, Plus, Maximize2, Zap, ZapOff } from 'lucide-react'
+import { torchSupported, setTorch } from '@/lib/docScan/torch'
 import { Button } from '@/components/ui/button'
 import { scanFrameColor, toGray, assessReadability, enhanceForReading, type Readability } from '@/lib/docScan/capture'
 import { preparePage } from './imagePrep'
@@ -84,6 +85,15 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
    * is what the shutter waits on.
    */
   const [hasFrame, setHasFrame] = useState(false)
+  // The flash as a fill light. Shown only on phones whose camera exposes it (Android);
+  // an iPhone never shows the button rather than showing one that does nothing.
+  const [torchAvailable, setTorchAvailable] = useState(false)
+  const [torchOn, setTorchOn] = useState(false)
+  const toggleTorch = async () => {
+    const track = streamRef.current?.getVideoTracks?.()[0] ?? null
+    const next = !torchOn
+    if (await setTorch(track, next)) setTorchOn(next)
+  }
 
   // ── Camera ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -102,6 +112,7 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
         })
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return }
         streamRef.current = stream
+        setTorchAvailable(torchSupported(stream.getVideoTracks?.()[0]))
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           await videoRef.current.play().catch(() => {})
@@ -444,6 +455,17 @@ export function ScanCamera({ onCapture, onClose, remaining, captured = 0, onDone
           {remaining > 0 ? `${remaining} more page${remaining === 1 ? '' : 's'} can be added` : 'Last page'}
         </p>
         <div className="flex w-full items-center justify-center gap-6">
+          {torchAvailable && (
+            <button
+              type="button"
+              aria-label={torchOn ? 'Turn the flash off' : 'Turn the flash on'}
+              aria-pressed={torchOn}
+              onClick={() => void toggleTorch()}
+              className={`flex h-12 w-12 items-center justify-center rounded-full border-2 ${torchOn ? 'border-amber-300 bg-amber-300/30 text-amber-200' : 'border-white/60 bg-white/10 text-white/80'}`}
+            >
+              {torchOn ? <Zap className="h-5 w-5" /> : <ZapOff className="h-5 w-5" />}
+            </button>
+          )}
           <button
             type="button"
             aria-label="Take the photo"

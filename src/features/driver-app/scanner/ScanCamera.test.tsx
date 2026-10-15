@@ -12,8 +12,8 @@ import { render, screen, waitFor } from '@testing-library/react'
 import '@testing-library/jest-dom/vitest'
 import { ScanCamera } from './ScanCamera'
 
-const track = { stop: vi.fn() }
-const stream = { getTracks: () => [track] } as unknown as MediaStream
+const track = { stop: vi.fn(), getCapabilities: vi.fn(() => ({})), applyConstraints: vi.fn().mockResolvedValue(undefined) }
+const stream = { getTracks: () => [track], getVideoTracks: () => [track] } as unknown as MediaStream
 const getUserMedia = vi.fn<() => Promise<MediaStream>>()
 
 beforeEach(() => {
@@ -124,5 +124,23 @@ describe('ScanCamera — the viewfinder', () => {
     render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} />)
     const shutter = await screen.findByRole('button', { name: /Take the photo/i })
     expect(shutter).toBeDisabled()
+  })
+})
+
+describe('the flash', () => {
+  it('offers a flash button only on a camera that exposes a torch, and switches it on the track', async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    track.getCapabilities.mockReturnValue({ torch: true } as MediaTrackCapabilities)
+    render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} />)
+    const btn = await screen.findByRole('button', { name: 'Turn the flash on' })
+    fireEvent.click(btn)
+    await waitFor(() => expect(track.applyConstraints).toHaveBeenCalledWith({ advanced: [{ torch: true }] }))
+    await screen.findByRole('button', { name: 'Turn the flash off' })
+  })
+  it('shows no flash button on a phone whose camera has none', async () => {
+    track.getCapabilities.mockReturnValue({} as MediaTrackCapabilities)
+    render(<ScanCamera onCapture={vi.fn()} onClose={vi.fn()} remaining={3} />)
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: /flash/ })).toBeNull()
   })
 })
