@@ -245,6 +245,8 @@ export interface Stop {
   city?: string              // e.g. "Chicago, IL"
   locationId?: string | null // Location.id; address below is the booked snapshot, not a live view
   address?: Address | null
+  /** When dispatch was told this driver had sat here two hours (see dwellAlerts.ts); once per stop. */
+  dwellAlertedAt?: string | null
   arrivedAt?: string | null  // actual facility events only — never inferred from the appointment
   departedAt?: string | null
   /**

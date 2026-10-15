@@ -741,6 +741,17 @@ for (const fn of [dispatchWebhookFn, dispatchActionsFn, dispatchSlackBridgeFn, d
   }))
 }
 
+// The five-minute nudge also flags drivers sitting at a stop past two hours
+// (amplify/functions/_shared/dwellAlerts.ts): it reads loads and stamps the flagged stop.
+{
+  const nudgeLoadTable = backend.data.resources.tables['Load']
+  dispatchNudgeFn.addEnvironment('LOAD_TABLE_NAME', nudgeLoadTable.tableName)
+  dispatchNudgeFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:Scan', 'dynamodb:UpdateItem'],
+    resources: [nudgeLoadTable.tableArn],
+  }))
+}
+
 const dispatchWebhookUrl = new FunctionUrl(dispatchWebhookFn.stack, 'DispatchTwilioWebhookUrl', {
   function: dispatchWebhookFn,
   authType: FunctionUrlAuthType.NONE,
