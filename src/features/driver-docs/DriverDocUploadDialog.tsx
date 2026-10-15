@@ -115,7 +115,9 @@ export function DriverDocUploadDialog({
       onSubmitted(submission)
       handleClose()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Upload failed')
+      // A GraphQL failure arrives as a plain object; say what it said rather than "Upload failed".
+      const gql = (err as { errors?: Array<{ message?: string }> })?.errors?.[0]?.message
+      toast.error(err instanceof Error ? err.message : gql ? `Upload failed: ${gql}` : 'Upload failed')
     } finally {
       setUploading(false)
     }

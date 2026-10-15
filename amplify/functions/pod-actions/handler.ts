@@ -1811,15 +1811,31 @@ export async function enhanceDriverDocAction(
       values[`:${k}`] = v
       sets.push(`#${k} = :${k}`)
     }
-    await dynamo.send(
-      new UpdateItemCommand({
-        TableName: DRIVER_SUBMISSION_DOC_TABLE,
-        Key: marshall({ id }),
-        UpdateExpression: `SET ${sets.join(', ')}`,
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }),
-      }),
-    )
+    /*
+     * Only onto a row that still exists. The cleanup runs after the upload returns, and
+     * a page the office removed in the meantime used to be re-created here as a stub
+     * with nothing but scan fields — no submissionId, driverId or kind — and one such
+     * row made every listDriverSubmissionDocs query fail, which took POD uploads and
+     * the drawer's documents down for everyone until it was deleted by hand.
+     */
+    try {
+      await dynamo.send(
+        new UpdateItemCommand({
+          TableName: DRIVER_SUBMISSION_DOC_TABLE,
+          Key: marshall({ id }),
+          UpdateExpression: `SET ${sets.join(', ')}`,
+          ConditionExpression: 'attribute_exists(submissionId)',
+          ExpressionAttributeNames: names,
+          ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }),
+        }),
+      )
+    } catch (err) {
+      if ((err as { name?: string }).name === 'ConditionalCheckFailedException') {
+        console.warn('[pod-actions] scan result dropped: the document row is gone', { id })
+        return
+      }
+      throw err
+    }
   }
 
   try {
