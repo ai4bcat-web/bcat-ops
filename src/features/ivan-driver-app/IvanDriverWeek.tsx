@@ -6,6 +6,7 @@
  * Today's strip places the truck from its taps plus the truck's position; other days are
  * taps only, since a position only means something for the day it was taken on.
  */
+import { stopTapsLine } from '@/lib/stopTimes'
 import { useNavigate } from 'react-router-dom'
 import { Smartphone } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
@@ -29,9 +30,11 @@ function dayHeading(date: string): string {
   return new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
-export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, onOpenLoad }: {
+export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, onOpenLoad, podSentAt }: {
   driver: Driver
   loads: readonly Load[]
+  /** When the POD came in, by load id — shown on delivered stops. */
+  podSentAt?: ReadonlyMap<string, string | null>
   /** Sunday, YYYY-MM-DD. */
   weekStart: string
   today: string
@@ -98,7 +101,9 @@ export function IvanDriverWeek({ driver, loads, weekStart, today, truck, now, on
                     ) : null}
                   </span>
                   <span style={{ fontVariantNumeric: 'tabular-nums', color: apptWarning ? 'var(--ds-amber)' : 'var(--ds-t3)', whiteSpace: 'nowrap', textAlign: 'right' }}>
-                    {state === 'DONE' ? `${stop.type === 'delivery' ? 'delivered' : 'left'} ${time(stop.departedAt)}` : state === 'IN_PROGRESS' ? `on site ${time(stop.arrivedAt)}` : time(stop.appt) || 'TBD'}
+                    {state === 'DONE' || state === 'IN_PROGRESS'
+                      ? (stopTapsLine(stop, stop.type === 'delivery' ? podSentAt?.get(load.id) : null) ?? `${stop.type === 'delivery' ? 'delivered' : 'left'} ${time(stop.departedAt)}`)
+                      : time(stop.appt) || 'TBD'}
                     {etaForStopId?.id === stop.id ? <div style={{ fontSize: 11, color: 'var(--ds-blue)', fontWeight: 600 }}>ETA ~{time(etaForStopId.at)}</div> : null}
                   </span>
                 </div>

@@ -1,3 +1,5 @@
+import { stopTapsLine, podSentAtFrom } from '@/lib/stopTimes'
+import { useLoadDriverDocs } from '@/hooks/useLoadDriverDocs'
 import { paperworkStatusLine } from '@/lib/paperworkLocation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/utils/errorMessage'
@@ -1303,6 +1305,11 @@ export function LoadDrawer() {
   const setPendingIntakeItem  = useAppStore((s) => s.setPendingIntakeItem)
   const { loads, addLoad, updateLoad, deleteLoad } = useLoads()
   const { drivers } = useDrivers()
+  // What the driver app recorded at each stop, plus when the POD came in. Looked up by the
+  // selected load id so the hook runs on every render, ahead of the mode-based early returns.
+  const selectedForTimes = selectedLoadId ? loads.find((l) => l.id === selectedLoadId) : undefined
+  const driverDocsForTimes = useLoadDriverDocs(selectedForTimes?.id, selectedForTimes?.aljexId)
+  const podSentAt = podSentAtFrom(driverDocsForTimes.pods)
   const { user } = useAuth()
 
   const load         = loads.find((l) => l.id === selectedLoadId)
@@ -1795,6 +1802,12 @@ export function LoadDrawer() {
                         label={label}
                         value={[where, when, who !== '—' ? `Driver: ${who}` : null].filter(Boolean).join('  ·  ')}
                       />
+                      {/* In and out times from the driver app, when the driver used it here. */}
+                      {stopTapsLine(s, s.type === 'delivery' ? podSentAt : null) && (
+                        <div className="-mt-1 mb-2 ml-1 text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground">Driver app:</span> {stopTapsLine(s, s.type === 'delivery' ? podSentAt : null)}
+                        </div>
+                      )}
                       {/* What the directory knows about the place — the reason it is filed. */}
                       {place && (place.hours || place.dockNotes || notes.length > 0) && (
                         <div className="-mt-1 mb-2 ml-1 space-y-0.5 text-xs text-muted-foreground">

@@ -237,7 +237,8 @@ export function IvanDriverAppPage() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
             <TruckAssignSelect driverId={selectedRow.driver.id} label={`${selectedRow.driver.name.split(' ')[0]}'s truck`} />
           </div>
-          <IvanDriverWeek key={selectedRow.driver.id} driver={selectedRow.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(selectedRow.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')} />
+          <IvanDriverWeek key={selectedRow.driver.id} driver={selectedRow.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(selectedRow.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')}
+            podSentAt={new Map(selectedRow.loads.map((l) => [l.load.id, l.podUploadedAt]))} />
           {selectedRow.unclassified && (
             <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: '#b45309', fontSize: 11.5 }}>
               <AlertTriangle size={12} style={{ marginTop: 2, flexShrink: 0 }} />
