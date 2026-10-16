@@ -2722,6 +2722,7 @@ export const handler = async (event: FnUrlEvent) => {
           await ddb.send(new PutCommand({ TableName: TIME_CLOCK_TABLE, Item: {
             ...item, __typename: 'TimeClockEntry', createdAt: nowIso, updatedAt: nowIso,
           } }))
+          await postDriverStatus(driver, 'Clocked in', nowIso)
           return reply(200, { ok: true, openShift: item })
         }
 
@@ -2744,6 +2745,7 @@ export const handler = async (event: FnUrlEvent) => {
               ...(clockOutOdometer != null ? { ':odo': clockOutOdometer } : {}),
             },
           }))
+          await postDriverStatus(driver, 'Clocked out', nowIso)
           return reply(200, { ok: true, openShift: null, minutes: rowMinutes(closed) })
         }
 

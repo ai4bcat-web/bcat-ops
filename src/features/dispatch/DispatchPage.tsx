@@ -331,7 +331,7 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
           <Button size="sm" className="h-7" onClick={() => void openSlackWizard(selected)}>Set up channel</Button>
         </div>
       ) : null}
-      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} hasPod={hasPod} onMarkDelivered={(load) => void markDelivered(load)} /> : null}
+      {selectedDriver ? <DriverSchedulePanel driver={selectedDriver} loads={loads} today={chicagoDateStr(now)} weekStart={weekStartOfISO(chicagoDateStr(now))} truck={truckFixOf(selectedDriver)} now={now.getTime()} hasPod={hasPod} onMarkDelivered={(load) => void markDelivered(load)} messages={d.thread} /> : null}
       {filingPod && selectedDriver ? (
         <FileAsPodDialog
           driverName={selectedDriver.name}

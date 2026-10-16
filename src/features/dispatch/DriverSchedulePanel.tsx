@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { ChevronDown, ChevronRight, CheckCircle2, CircleDot, Circle } from 'lucide-react'
 import type { Driver, Load } from '@/types'
+import type { DispatchMessage } from '@/lib/dispatch'
+import { chicagoDateStr } from '@/lib/date'
 import { driverProgramOf } from '@/lib/driverProgram'
 import { ivanDaySchedule, ownerOperatorWeek, type StopState, type LoadState } from '@/lib/driverSchedule'
 import { laneLabel, currentLoadForDriver } from '@/lib/driverJourney'
@@ -39,7 +41,7 @@ export function Progress({ done, total, color }: { done: number; total: number; 
  * The driver's schedule beside their thread: Ivan's drivers get today's stops and how far
  * through them they are; owner operators get the week's shipments and their state.
  */
-export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now, hasPod, onMarkDelivered }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number; hasPod?: (load: Load) => boolean; /** The office's record that an owner operator delivered a shipment the POD has not come in for. */ onMarkDelivered?: (load: Load) => void }) {
+export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, now, hasPod, onMarkDelivered, messages = [] }: { driver: Driver; loads: readonly Load[]; today: string; weekStart: string; truck?: LatLng | null; now: number; hasPod?: (load: Load) => boolean; /** The office's record that an owner operator delivered a shipment the POD has not come in for. */ onMarkDelivered?: (load: Load) => void; /** The driver's thread — the app's STATUS lines in it are today's update log. */ messages?: readonly DispatchMessage[] }) {
   const [open, setOpen] = useState(true)
   const ivan = driverProgramOf(driver) === 'PAPERWORK'
   const dayPlan = ivan ? ivanDaySchedule(loads, driver.id, today) : null
@@ -59,12 +61,15 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
     ? routeProgressForStops(dayStops, truck ?? null, { useTaps: true, nowIso })
     : ivan && current ? routeProgress(current, truck ?? null, { useTaps: true, nowIso })
     : ooCurrent ? routeProgress(ooCurrent, truck ?? null, { useTaps: false, nowIso }) : null
-  // The position-based ETA belongs on the stop the truck is heading for.
-  const etaForStopId = route && route.nextIndex != null && route.etaAt && route.milesToNext ? { id: route.stops[route.nextIndex].id, at: route.etaAt } : null
   const routeTitle = ivan && dayStops.length ? "Today's route" : `Current route · PRO ${(ivan ? current : ooCurrent)?.aljexId || '—'}`
+  // Ivan's drivers: every status the app recorded today (clock in, on site, departed,
+  // delivered, POD sent, paperwork), oldest first — the day as it actually happened.
+  const updates = ivan
+    ? messages.filter((m) => m.kind === 'STATUS' && chicagoDateStr(m.at) === today).sort((a, b) => a.at.localeCompare(b.at))
+    : []
   const title = ivan ? 'Today' : 'This week'
   const summary = ivan
-    ? (dayPlan!.total ? `${dayPlan!.done} of ${dayPlan!.total} stops done${dayPlan!.inProgress ? ` · ${dayPlan!.inProgress} on site` : ''}` : route ? 'No stops scheduled today · route under way' : 'Nothing scheduled today')
+    ? `${updates.length} update${updates.length === 1 ? '' : 's'} from the app${dayPlan!.total ? ` · ${dayPlan!.done} of ${dayPlan!.total} stops done` : ''}`
     : (week!.loads.length ? `${week!.completed} delivered · ${week!.inProgress} under way · ${week!.upcoming} to go` : 'No shipments this week')
 
   return (
@@ -76,27 +81,22 @@ export function DriverSchedulePanel({ driver, loads, today, weekStart, truck, no
       </button>
       {open ? (
         <div style={{ padding: '0 14px 10px', display: 'grid', gap: 6 }}>
-          {route ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--ds-border-soft)', marginBottom: 4 }}><RouteStrip progress={route} title={routeTitle} /></div> : null}
-          {ivan && dayPlan ? (
-            <>
-              {dayPlan.total ? <Progress done={dayPlan.done} total={dayPlan.total} color="var(--ds-green)" /> : null}
-              {dayPlan.stops.map(({ load, stop, state, apptWarning }, i) => (
-                <div key={`${load.id}:${stop.id}`} style={{ display: 'grid', gridTemplateColumns: 'auto auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'DONE' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--ds-t3)', width: 14, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
-                  <StateIcon state={state} />
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textDecoration: state === 'DONE' ? 'line-through' : 'none' }}>
-                    <span style={{ fontWeight: 600 }}>{stop.type === 'delivery' ? 'Deliver' : 'Pick up'}</span> {stop.name || stop.city || '—'}{stop.city && stop.name ? ` · ${stop.city}` : ''} <span style={{ color: 'var(--ds-t3)' }}>· PRO {load.aljexId || '—'}</span>
-                    {apptWarning ? <span title={apptWarning} style={{ marginLeft: 6, color: 'var(--ds-amber)', fontWeight: 700 }}>⚠ time?</span> : null}
-                  </span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', color: apptWarning ? 'var(--ds-amber)' : 'var(--ds-t3)', whiteSpace: 'nowrap', textAlign: 'right' }}>
-                    {state === 'DONE' ? `left ${time(stop.departedAt)}` : state === 'IN_PROGRESS' ? `on site ${time(stop.arrivedAt)}` : time(stop.appt) || 'TBD'}
-                    {etaForStopId?.id === stop.id ? <div style={{ fontSize: 11, color: 'var(--ds-blue)', fontWeight: 600 }}>ETA ~{time(etaForStopId.at)}</div> : null}
-                  </span>
-                </div>
-              ))}
-            </>
+          {ivan ? (
+            updates.length === 0 ? (
+              <div style={{ fontSize: 12, color: 'var(--ds-t3)', padding: '2px 0 4px' }}>No updates from the app yet today.</div>
+            ) : (
+              <div style={{ display: 'grid', gap: 4 }}>
+                {updates.map((m) => (
+                  <div key={m.id} style={{ display: 'grid', gridTemplateColumns: '64px 1fr', gap: 10, alignItems: 'baseline', fontSize: 12 }}>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--ds-t3)', whiteSpace: 'nowrap', textAlign: 'right' }}>{time(m.at)}</span>
+                    <span style={{ color: 'var(--ds-t1)', overflowWrap: 'anywhere' }}>{(m.body ?? '').trim()}</span>
+                  </div>
+                ))}
+              </div>
+            )
           ) : week ? (
             <>
+              {route ? <div style={{ padding: '4px 0 8px', borderBottom: '1px solid var(--ds-border-soft)', marginBottom: 4 }}><RouteStrip progress={route} title={routeTitle} /></div> : null}
               {week.loads.length ? <Progress done={week.completed} total={week.loads.length} color="var(--ds-blue)" /> : null}
               {week.loads.map(({ load, state, startsAt, stopsDone, stopsTotal }) => (
                 <div key={load.id} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 8, alignItems: 'center', fontSize: 12, color: state === 'COMPLETED' ? 'var(--ds-t3)' : 'var(--ds-t1)' }}>
