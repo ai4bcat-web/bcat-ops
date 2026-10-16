@@ -165,47 +165,18 @@ async function loadActiveRecurring(): Promise<RecurringExpenseRow[]> {
 }
 
 async function generateForMonths(months: string[]) {
+  /*
+   * Nothing is written. The expense engine (src/lib/expenseAllocation.ts,
+   * expandRecurringToRecords) projects every active template into its months on read,
+   * day-prorated by the template's effective dates - so a stored copy of the same month
+   * would be counted twice. This ran every month since June and failed every time on a
+   * null index key, which is the only reason it never double-counted. Templates are the
+   * record; the sweep stays as a count for the log.
+   */
   const recurring = await loadActiveRecurring()
-  console.log(`[recurring] ${recurring.length} active templates × ${months.length} target month(s)`)
-
-  let created = 0, skipped = 0, errors = 0
-
-  for (const rec of recurring) {
-    for (const month of months) {
-      if (month < rec.startMonth) { skipped++; continue }
-      if (rec.endMonth && month > rec.endMonth) { skipped++; continue }
-
-      // Deterministic record ID → idempotent by construction
-      const id  = `erec-${createHash('sha256').update(`${rec.id}:${month}`).digest('hex').slice(0, 20)}`
-      const now = new Date().toISOString()
-
-      try {
-        const outcome = await putIfNotExists(EXPENSE_RECORD_TABLE, {
-          __typename: 'ExpenseRecord',
-          id,
-          expenseTypeId:   rec.expenseTypeId,
-          allocationId:    rec.allocationId,
-          amount:          rec.monthlyAmount,
-          periodMonth:     month,
-          transactionDate: null,
-          entryMethod:     'FIXED',
-          directTruckId:   null,
-          notes:           `Auto-generated for ${month}`,
-          source:          'recurring-generator',
-          createdAt:       now,
-          updatedAt:       now,
-        })
-        if (outcome === 'created') created++
-        else skipped++
-      } catch (err) {
-        console.error(`[recurring] failed to create record for ${rec.id} month=${month}`, err)
-        errors++
-      }
-    }
-  }
-
-  console.log(`[recurring] done — created=${created} skipped=${skipped} errors=${errors}`)
-  return { created, skipped, errors }
+  const skipped = recurring.length * months.length
+  console.log(`[recurring] ${recurring.length} active templates; projected on read, nothing generated (skipped=${skipped})`)
+  return { created: 0, skipped, errors: 0 }
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
