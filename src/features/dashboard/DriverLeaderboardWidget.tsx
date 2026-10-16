@@ -92,7 +92,12 @@ export function DriverLeaderboardWidget() {
     return m
   }, [loads, ooBoard])
 
-  const boards: Array<{ key: string; title: string; period: string; unit: 'hours' | 'gross'; rows: LeaderRow[]; loading: boolean; error: string | null; empty: string }> = [
+  // Group totals for the period so far: gross booked (rate on every load delivering in it) and loads.
+  const ivanBooked = useMemo(() => bookedGrossLeaders(loads, ivanLocal, hoursWeek, weekEndOf(hoursWeek)), [loads, ivanLocal, hoursWeek])
+  const totalOf = (rows: LeaderRow[]) => ({ gross: rows.reduce((n, r) => n + r.value, 0), loads: rows.reduce((n, r) => n + r.count, 0) })
+  const totals = { local: totalOf(ivanBooked), oo: totalOf(ooBoard), box: totalOf(boxBoard) }
+
+  const boards: Array<{ key: 'local' | 'oo' | 'box'; title: string; period: string; unit: 'hours' | 'gross'; rows: LeaderRow[]; loading: boolean; error: string | null; empty: string }> = [
     { key: 'local', title: 'Ivan local · hours', period: `${fmtMD(hoursWeek)} – ${fmtMD(weekEndOf(hoursWeek))}`, unit: 'hours', rows: hoursBoard, loading: clock?.week !== hoursWeek && !clockError, error: clockError, empty: 'No hours clocked this week.' },
     { key: 'oo', title: 'Owner-operators · gross booked', period: settlementWeekLabel(ooWeek), unit: 'gross', rows: ooBoard, loading: false, error: null, empty: 'No loads booked this week.' },
     { key: 'box', title: 'Box truck · gross booked', period: periodLabel(boxPeriod), unit: 'gross', rows: boxBoard, loading: false, error: null, empty: 'No loads booked this pay period.' },
@@ -127,9 +132,14 @@ export function DriverLeaderboardWidget() {
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))' }}>
         {boards.map((b, i) => (
           <div key={b.key} style={{ padding: '12px 16px 14px', borderLeft: !isMobile && i > 0 ? '1px solid var(--ds-border)' : undefined, borderTop: isMobile && i > 0 ? '1px solid var(--ds-border)' : undefined }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)' }}>{b.title}</div>
               <div style={{ fontSize: 11, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{b.period}</div>
+            </div>
+            {/* The group's gross booked for the period so far — every load delivering in it, POD or not. */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid var(--ds-border)' }}>
+              <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>Gross booked so far</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums' }}>{money0(totals[b.key].gross)} <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--ds-t3)' }}>· {totals[b.key].loads} {totals[b.key].loads === 1 ? 'load' : 'loads'}</span></span>
             </div>
             {b.error ? (
               <div style={{ padding: '18px 0', fontSize: 12, color: '#dc2626' }}>{b.error}</div>
