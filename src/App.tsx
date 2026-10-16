@@ -16,6 +16,7 @@ import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
 import { TrackPage } from '@/features/tracking/TrackPage'
+import { DriverInfoPage } from '@/features/driver-info/DriverInfoPage'
 import { ProfitReviewPage } from '@/features/finances/ProfitReviewPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
@@ -194,6 +195,7 @@ export default function App() {
               <Route index element={<LandingRedirect />} />
               <Route path="/dashboard" element={<RequirePage page="dashboard"><DashboardPage /></RequirePage>} />
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
+              <Route path="/driver-info" element={<RequirePage page="dispatch"><DriverInfoPage /></RequirePage>} />
               <Route path="/loads" element={<RequirePage page="loads"><GridPage /></RequirePage>} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
               <Route path="/drivers" element={<Navigate to="/files" replace />} />

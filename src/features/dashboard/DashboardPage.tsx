@@ -13,7 +13,6 @@ import { useAppStore } from '@/store/useAppStore'
 import { ComplianceAlertsWidget } from './ComplianceAlertsWidget'
 import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
-import { TruckMapWidget } from './TruckMapWidget'
 import { DriverLeaderboardWidget } from './DriverLeaderboardWidget'
 import { YearProfitWidget } from './YearProfitWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
@@ -464,9 +463,6 @@ export function DashboardPage() {
 
         {/* ── Driver leaderboard: hours (Ivan local), gross (owner-operators, box truck) ─ */}
         <DriverLeaderboardWidget />
-
-        {/* ── Fleet tracking (Motive ELD) ──────────────────────────────────── */}
-        <TruckMapWidget />
 
         {/* ── Current diesel price (fleet average, week-over-week) ──────────── */}
         <DieselPriceWidget />

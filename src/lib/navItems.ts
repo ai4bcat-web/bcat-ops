@@ -39,6 +39,7 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, pageKey: 'dashboard' },
       // Texts and calls with drivers through the Twilio dispatch number.
       { to: '/dispatch',  label: 'Dispatch',  icon: MessageSquare,   pageKey: 'dispatch', badgeKey: 'dispatch' },
+      { to: '/driver-info', label: 'Driver info', icon: MapPin,     pageKey: 'dispatch' },
       { to: '/calendar',  label: 'Calendar',  icon: CalendarDays,    pageKey: 'calendar' },
       // Directly under Calendar — the queue is the worklist for the calendar's blanks.
       { to: '/appts',     label: 'Appts',     icon: CalendarClock,   pageKey: 'appts',  badgeKey: 'appts' },
