@@ -1,3 +1,4 @@
+import { useBoxTruckPayEstimate } from '@/hooks/useBoxTruckPayEstimate'
 import { useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, RotateCw, Scale, Pencil } from 'lucide-react'
 import { isPosted } from '@/lib/invoiceStatus'
@@ -121,13 +122,15 @@ export function MonthlyFleetPL() {
 
   const contrib = useMemo(() => contributionInRange(range), [contributionInRange, range])
   const eld = useMemo(() => eldInRange(range), [eldInRange, range])
+  // The box truck rides inside the Local P&L; its driver's pay is settled separately.
+  const boxTruckPay = useBoxTruckPayEstimate(range, data?.trucks)
 
   const handleEdit = (key: FleetFixedCostKey) => (n: number) => { void setMonthlyAmount(key, n) }
 
   // Derived P&L lines (only the LOCAL fleet has fixed-cost + trailer detail wired).
   const lines = useMemo(
-    () => (r && c ? computeFleetMonthlyLines(r, c, contrib, eld, trailerMaintenance) : null),
-    [r, c, contrib, eld, trailerMaintenance],
+    () => (r && c ? computeFleetMonthlyLines(r, c, contrib, eld, trailerMaintenance, isLocal ? boxTruckPay : 0) : null),
+    [r, c, contrib, eld, trailerMaintenance, boxTruckPay, isLocal],
   )
 
   const margin = lines && r && r.revenue > 0 ? (lines.net / r.revenue) * 100 : null
@@ -250,7 +253,8 @@ export function MonthlyFleetPL() {
 
             {/* Costs */}
             <CostRow label="Fuel" value={r.fuel} />
-            <CostRow label="Driver pay" value={r.driverCost} />
+            <CostRow label="Driver pay" value={r.driverCost} hint={isLocal ? 'Ivan drivers, combined entry' : undefined} />
+            {isLocal && <CostRow label="Box truck driver pay" value={lines.boxTruckPay} hint="settlement rule: pay % of revenue after fixed charges" />}
             <CostRow label="Loan — trucks" value={lines.loanTrucks} hint="from each truck" />
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Loan — trailers" amount={monthlyAmounts.loanTrailers} onCommit={handleEdit('loanTrailers')} /> : <CostRow label="Loan — trailers" value={lines.loanTrailers} />}
             {isLocal && monthOffset === 0 ? <EditableCostRow label="Trailer lease" amount={monthlyAmounts.trailerLease} onCommit={handleEdit('trailerLease')} /> : <CostRow label="Trailer lease" value={lines.trailerLease} />}

@@ -21,6 +21,10 @@ export interface LeaderRow {
   value: number
   /** Loads settled (gross boards) or days worked (hours board). */
   count: number
+  /** Hours board: the driver is clocked in right now; `value` includes the running shift. */
+  live?: boolean
+  /** Hours board: when the running shift started (ISO). */
+  liveSince?: string
 }
 
 interface DriverLike { id: string; name: string; colorKey?: string | null }
@@ -48,23 +52,32 @@ export function withWholeRoster(ranked: LeaderRow[], drivers: DriverLike[]): Lea
  * day is on the paycheck but nobody "ran" those hours. Open shifts count for nothing
  * (rowMinutes), so a driver still on the clock does not lead on hours he has not worked yet.
  */
-export function hoursLeaders(rows: TimeClockRow[], drivers: DriverLike[]): LeaderRow[] {
+export function hoursLeaders(rows: TimeClockRow[], drivers: DriverLike[], nowIso?: string): LeaderRow[] {
   const byId = new Map(drivers.map((d) => [d.id, d]))
-  const acc = new Map<string, { minutes: number; days: Set<string> }>()
+  const acc = new Map<string, { minutes: number; days: Set<string>; liveSince?: string }>()
+  const nowMs = nowIso ? Date.parse(nowIso) : NaN
   for (const row of rows) {
     if (row.kind !== 'WORK') continue
-    const m = rowMinutes(row)
+    let m = rowMinutes(row)
+    let liveSince: string | undefined
+    // A shift still running counts up to now, so today's hours show while the driver is
+    // out instead of appearing only after clock-out.
+    if (m <= 0 && row.clockInAt && !row.clockOutAt && Number.isFinite(nowMs)) {
+      const start = Date.parse(row.clockInAt)
+      if (Number.isFinite(start) && nowMs > start) { m = Math.round((nowMs - start) / 60_000); liveSince = row.clockInAt }
+    }
     if (m <= 0) continue
     const cur = acc.get(row.driverId) ?? { minutes: 0, days: new Set<string>() }
     cur.minutes += m
     cur.days.add(row.workDate)
+    if (liveSince) cur.liveSince = liveSince
     acc.set(row.driverId, cur)
   }
   const out: LeaderRow[] = []
-  for (const [driverId, { minutes, days }] of acc) {
+  for (const [driverId, { minutes, days, liveSince }] of acc) {
     const d = byId.get(driverId)
     if (!d) continue // a row for a deleted driver has no name to put on a board
-    out.push({ driverId, name: d.name, colorKey: d.colorKey ?? null, value: decimalHours(minutes), count: days.size })
+    out.push({ driverId, name: d.name, colorKey: d.colorKey ?? null, value: decimalHours(minutes), count: days.size, ...(liveSince ? { live: true, liveSince } : {}) })
   }
   return rankLeaders(out)
 }

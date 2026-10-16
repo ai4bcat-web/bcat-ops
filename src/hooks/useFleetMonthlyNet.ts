@@ -5,6 +5,7 @@ import { useTrucks } from './useTrucks'
 import { useAppStore } from '@/store/useAppStore'
 import { isPosted } from '@/lib/invoiceStatus'
 import { computeFleetMonthlyLines } from '@/lib/fleetMonthlyPL'
+import { useBoxTruckPayEstimate } from './useBoxTruckPayEstimate'
 import type { DateRange } from '@/lib/fleetProfitability'
 
 /**
@@ -29,10 +30,11 @@ export function useFleetMonthlyNet(range: DateRange): { revenue: number; net: nu
 
   const contrib = useMemo(() => contributionInRange(range), [contributionInRange, range])
   const eld = useMemo(() => eldInRange(range), [eldInRange, range])
+  const boxTruckPay = useBoxTruckPayEstimate(range, data?.trucks)
 
   const net = useMemo(
-    () => (r && c ? computeFleetMonthlyLines(r, c, contrib, eld, trailerMaintenance).net : 0),
-    [r, c, contrib, eld, trailerMaintenance],
+    () => (r && c ? computeFleetMonthlyLines(r, c, contrib, eld, trailerMaintenance, boxTruckPay).net : 0),
+    [r, c, contrib, eld, trailerMaintenance, boxTruckPay],
   )
 
   return { revenue: r?.revenue ?? 0, net, loading }

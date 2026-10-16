@@ -121,3 +121,19 @@ describe('withWholeRoster', () => {
     expect(out.map((r) => [r.name, r.value])).toEqual([['Bea', 10], ['Al', 0], ['Cy', 0]])
   })
 })
+
+describe('hoursLeaders with a running shift', () => {
+  it('counts an open shift up to now and marks the driver live', () => {
+    const rows = [
+      { id: 'a', driverId: 'd1', workDate: '2026-10-15', kind: 'WORK', clockInAt: '2026-10-15T14:00:00Z', clockOutAt: '2026-10-15T22:00:00Z', minutes: 480 },
+      { id: 'b', driverId: 'd1', workDate: '2026-10-16', kind: 'WORK', clockInAt: '2026-10-16T14:00:00Z', clockOutAt: null, minutes: null },
+    ] as unknown as Parameters<typeof hoursLeaders>[0]
+    const [row] = hoursLeaders(rows, [{ id: 'd1', name: 'Jason Smith' }], '2026-10-16T16:30:00Z')
+    expect(row.value).toBeCloseTo(10.5, 6)
+    expect(row.count).toBe(2)
+    expect(row.live).toBe(true)
+    expect(row.liveSince).toBe('2026-10-16T14:00:00Z')
+    // Without a clock, the open shift counts nothing (payroll's rule).
+    expect(hoursLeaders(rows, [{ id: 'd1', name: 'Jason Smith' }])[0].value).toBe(8)
+  })
+})

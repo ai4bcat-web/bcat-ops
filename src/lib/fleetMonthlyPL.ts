@@ -25,6 +25,9 @@ export interface FleetFixedContribution {
 }
 
 export interface FleetMonthlyLines {
+  /** Box-truck driver pay from the settlement rule (pay % of revenue after fixed charges);
+   *  the combined Ivan driver-pay entry does not include the box truck's driver. */
+  boxTruckPay: number
   loanTrucks: number
   loanTrailers: number
   trailerLease: number
@@ -48,6 +51,7 @@ export function computeFleetMonthlyLines(
   contrib: FleetFixedContribution,
   eld: number,
   trailerMaintenance: number,
+  boxTruckPay = 0,
 ): FleetMonthlyLines {
   const loanTrailers = contrib.loanTrailers
   const trailerLease = contrib.trailerLease
@@ -56,7 +60,7 @@ export function computeFleetMonthlyLines(
   const loanTrucks = Math.max(0, c.financing - loanTrailers)
   const maintenance = c.maintenance + trailerMaintenance
   const other = Math.max(0, c.lease - trailerLease) + Math.max(0, c.other - yardRent - eld) + Math.max(0, c.tolls - tolls)
-  const totalExpenses = r.fuel + r.driverCost + loanTrucks + loanTrailers + trailerLease + yardRent + eld + maintenance + c.insurance + tolls + c.permits + other
+  const totalExpenses = r.fuel + r.driverCost + boxTruckPay + loanTrucks + loanTrailers + trailerLease + yardRent + eld + maintenance + c.insurance + tolls + c.permits + other
   const net = r.revenue - totalExpenses
-  return { loanTrucks, loanTrailers, trailerLease, yardRent, tolls, eld, maintenance, other, totalExpenses, net }
+  return { boxTruckPay, loanTrucks, loanTrailers, trailerLease, yardRent, tolls, eld, maintenance, other, totalExpenses, net }
 }

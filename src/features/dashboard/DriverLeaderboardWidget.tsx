@@ -83,18 +83,19 @@ export function DriverLeaderboardWidget() {
   }, [hoursWeek])
   const clockError = clockFailure?.week === hoursWeek ? clockFailure.message : null
 
+  // The clock running shifts and whereabouts are judged against; refreshed by the 30-second
+  // poll below, never read in render.
+  const [nowMs, setNowMs] = useState(0)
   // Every driver in the group is listed, zeros included — a quiet week is information too.
   const hoursBoard = useMemo(
-    () => (clock?.week === hoursWeek ? withWholeRoster(hoursLeaders(clock.rows, ivanLocal), ivanLocal) : []),
-    [clock, hoursWeek, ivanLocal],
+    () => (clock?.week === hoursWeek ? withWholeRoster(hoursLeaders(clock.rows, ivanLocal, nowMs ? new Date(nowMs).toISOString() : undefined), ivanLocal) : []),
+    [clock, hoursWeek, ivanLocal, nowMs],
   )
   const ooBoard = useMemo(() => withWholeRoster(bookedGrossLeaders(loads, ownerOps, ooWeek, shiftDays(ooWeek, 6)), ownerOps), [loads, ownerOps, ooWeek])
   const boxBoard = useMemo(() => withWholeRoster(bookedGrossLeaders(loads, boxDrivers, boxPeriod, shiftDays(boxPeriod, 13)), boxDrivers), [loads, boxDrivers, boxPeriod])
   // Ivan local: each driver's last check-in from the app (on site, departed, delivered, POD…),
   // read off their dispatch conversation and refreshed every 30 s while the tab is visible.
   const [convos, setConvos] = useState<DispatchConversation[]>([])
-  // The clock the whereabouts are judged against, refreshed with the poll (never read in render).
-  const [nowMs, setNowMs] = useState(0)
   useEffect(() => {
     let alive = true
     const tick = async () => {
@@ -187,7 +188,7 @@ export function DriverLeaderboardWidget() {
             ) : (
               <Board rows={b.rows} unit={b.unit} detail={
                 b.key === 'oo' ? (r) => { const a = emptyAt.get(r.driverId); return a ? `Empty ${emptyLabel(a)}` : 'No appointment booked' }
-                : b.key === 'local' ? (r) => lastStatus.get(r.driverId) ?? 'No check-in from the app yet'
+                : b.key === 'local' ? (r) => lastStatus.get(r.driverId) ?? (r.liveSince ? `Clocked in · ${new Date(r.liveSince).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' })}` : 'No check-in from the app yet')
                 : undefined
               } />
             )}
@@ -218,7 +219,7 @@ function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gro
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                 <span style={{ fontSize: 13, color: 'var(--ds-t1)', fontWeight: i === 0 ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
-                <span style={{ fontSize: 11, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{r.count} {unit === 'hours' ? (r.count === 1 ? 'day' : 'days') : (r.count === 1 ? 'load' : 'loads')}</span>
+                <span style={{ fontSize: 11, color: r.live ? '#15803d' : 'var(--ds-t3)', whiteSpace: 'nowrap', fontWeight: r.live ? 600 : 400 }}>{r.live ? 'on the clock · ' : ''}{r.count} {unit === 'hours' ? (r.count === 1 ? 'day' : 'days') : (r.count === 1 ? 'load' : 'loads')}</span>
               </div>
               {detail && (
                 <div style={{ fontSize: 11, color: 'var(--ds-t2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail(r)}</div>
