@@ -1,3 +1,5 @@
+import { errorText } from '@/lib/errorText'
+import { toast } from 'sonner'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { Driver, Load, AuditLogEntry, ViewMode, EntityType, AuditAction } from '@/types'
@@ -701,7 +703,16 @@ export const useAppStore = create<AppState>()(
       addEquipment: (e) => {
         const item: Equipment = { ...e, id: `equip-${Date.now()}`, createdAt: nowIso(), updatedAt: nowIso() }
         set((s) => ({ equipment: [...s.equipment, item] }))
-        api.createEquipment(item).catch((err) => console.error('[store] createEquipment failed', err))
+        // A refused create must not leave a phantom truck in the list: drivers were assigned
+        // to such ids (never saved) and lost their revenue attribution. Roll it back, undo any
+        // assignment made to it meanwhile, and say so.
+        api.createEquipment(item).catch((err) => {
+          console.error('[store] createEquipment failed', err)
+          const { drivers, updateDriver } = get()
+          set((s) => ({ equipment: s.equipment.filter((x) => x.id !== item.id) }))
+          for (const d of drivers.filter((d) => d.assignedTruckId === item.id)) void updateDriver(d.id, { assignedTruckId: null })
+          toast.error(`Could not add unit ${item.unitNumber} to the fleet`, { description: errorText(err) })
+        })
         return item
       },
       updateEquipment: (id, patch) => {

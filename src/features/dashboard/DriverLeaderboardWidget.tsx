@@ -60,10 +60,12 @@ export function DriverLeaderboardWidget() {
   // has been settled — a settlement only counts loads whose POD is in, which hid most of
   // the week until Friday.
   const loads = useAppStore((s) => s.loads)
-  const ownerOps = useMemo(() => drivers.filter((d) => d.active !== false && driverGroupOf(d) === 'OWNER_OP'), [drivers])
-  const boxDrivers = useMemo(() => drivers.filter((d) => d.active !== false && d.fleetGroup === 'BOX_TRUCK'), [drivers])
+  // Real, active drivers only — test accounts stay off the board.
+  const real = useMemo(() => drivers.filter((d) => d.active !== false && d.type !== 'broker' && !/\btest\b/i.test(d.name)), [drivers])
+  const ownerOps = useMemo(() => real.filter((d) => driverGroupOf(d) === 'OWNER_OP'), [real])
+  const boxDrivers = useMemo(() => real.filter((d) => d.fleetGroup === 'BOX_TRUCK'), [real])
   // Ivan local: company drivers on the time clock (not the box truck, which has its own board).
-  const ivanLocal = useMemo(() => drivers.filter((d) => d.active !== false && d.type !== 'broker' && driverGroupOf(d) === 'IVAN' && d.fleetGroup !== 'BOX_TRUCK'), [drivers])
+  const ivanLocal = useMemo(() => real.filter((d) => driverGroupOf(d) === 'IVAN' && d.fleetGroup !== 'BOX_TRUCK'), [real])
 
   const [clock, setClock] = useState<{ week: string; rows: TimeClockRow[] } | null>(null)
   // Both results carry the week they belong to, so a stale answer (or a stale error) from a

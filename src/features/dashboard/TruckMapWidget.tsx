@@ -271,6 +271,10 @@ export function TruckMapWidget() {
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
                       </select>
+                    ) : equipment.length === 0 ? (
+                      // Trucks not loaded yet: every row would look unknown and "Add to fleet"
+                      // would create duplicates (it did — six drivers ended up on phantom trucks).
+                      <span style={{ fontSize: 11.5, color: 'var(--ds-t3)' }}>Loading fleet…</span>
                     ) : (
                       <button
                         type="button"
