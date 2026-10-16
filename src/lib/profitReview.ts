@@ -15,7 +15,10 @@ export interface ReviewTruck {
   revenue:    number
   miles:      number
   fuel:       number
+  /** Gallons bought on the truck's fuel card (price basis). */
   gallons:    number
+  /** Gallons burned per Motive's engine data, driving plus idle (MPG basis). */
+  motiveGallons: number
 }
 
 export interface ReviewCustomer {
@@ -52,6 +55,9 @@ export interface ReviewMonthInput {
   /** True when the month predates the expense data (no fixed costs on file): shown, but
    *  never a baseline and never counted in averages or findings. */
   incomplete?: boolean
+  /** True when insurance and fixed costs are already cut to the days elapsed (month to
+   *  date), so net needs no further proration. */
+  costsToDate?: boolean
 }
 
 /** A finished month with real data behind it. */
@@ -77,6 +83,7 @@ export interface MonthMetrics {
   costPerLoad:    number | null
   variableCostPerMile: number | null  // fuel + pay + maintenance
   pricePerGallon: number | null
+  /** Motive miles over Motive gallons burned — the ELD's own economy figure, not a card estimate. */
   mpg:            number | null
   payShare:       number | null   // driver pay / revenue
   totalCost:      number
@@ -89,11 +96,11 @@ export function monthMetrics(m: ReviewMonthInput): MonthMetrics {
   const net = m.revenue - totalCost
   const isPartial = m.daysElapsed < m.daysInMonth
   const share = m.daysInMonth > 0 ? Math.min(1, Math.max(0, m.daysElapsed / m.daysInMonth)) : 1
-  const proratedNet = isPartial ? m.revenue - (m.fuel + m.driverPay + m.maintenance + (m.insurance + m.fixed) * share) : net
-  // Fuel economy only over trucks that report both miles and gallons.
-  const eco = m.trucks.filter((t) => t.miles > 0 && t.gallons > 0)
+  const proratedNet = isPartial && !m.costsToDate ? m.revenue - (m.fuel + m.driverPay + m.maintenance + (m.insurance + m.fixed) * share) : net
+  // Fuel economy from Motive only: trucks reporting both odometer miles and engine fuel burn.
+  const eco = m.trucks.filter((t) => t.miles > 0 && t.motiveGallons > 0)
   const ecoMiles = eco.reduce((s, t) => s + t.miles, 0)
-  const ecoGal = eco.reduce((s, t) => s + t.gallons, 0)
+  const ecoGal = eco.reduce((s, t) => s + t.motiveGallons, 0)
   return {
     net,
     margin: div(net, m.revenue),
@@ -277,7 +284,7 @@ export function findings(months: ReviewMonthInput[], base: ReviewMonthInput | nu
         out.push({
           severity: excess > 1500 ? 'medium' : 'info',
           title: `Check fuel economy on ${thirsty.map((t) => `#${t.unitNumber}`).join(' and ')}`,
-          detail: `${latest.label}: ${thirsty.map((t) => `#${t.unitNumber} ${usd2(t.fuel / t.miles)}/mi${t.gallons > 0 ? ` (${(t.miles / t.gallons).toFixed(1)} mpg)` : ''}`).join(', ')} vs the best semi at ${usd2(best)}/mi. Idle time, routing and a post-repair economy check are the usual culprits.`,
+          detail: `${latest.label}: ${thirsty.map((t) => `#${t.unitNumber} ${usd2(t.fuel / t.miles)}/mi${t.motiveGallons > 0 ? ` (${(t.miles / t.motiveGallons).toFixed(1)} mpg per Motive)` : ''}`).join(', ')} vs the best semi at ${usd2(best)}/mi. Idle time, routing and a post-repair economy check are the usual culprits.`,
           impact: excess,
         })
       }

@@ -26,7 +26,7 @@ export interface ProfitReviewData {
  * detail the review needs (gallons, per-truck, per-customer, per-unit maintenance).
  */
 export function useProfitReview(monthsBack: number, today: Date = new Date()): ProfitReviewData {
-  const { computeForRange, members, loading, error, fuelTxs } = useFleetProfitability(
+  const { computeForRange, members, loading, error, fuelTxs, mileageRows } = useFleetProfitability(
     { start: format(startOfMonth(today), 'yyyy-MM-dd'), end: format(endOfMonth(today), 'yyyy-MM-dd') },
     'LOCAL',
   )
@@ -52,10 +52,13 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
     const out: ReviewMonthInput[] = []
     for (let offset = monthsBack - 1; offset >= 0; offset--) {
       const base = addMonths(today, -offset)
-      const range: DateRange = { start: format(startOfMonth(base), 'yyyy-MM-dd'), end: format(endOfMonth(base), 'yyyy-MM-dd') }
       const key = format(base, 'yyyy-MM')
       const daysInMonth = getDaysInMonth(base)
       const daysElapsed = offset === 0 ? Math.min(daysInMonth, today.getDate()) : daysInMonth
+      // The current month runs through today only: revenue, loads and the day-prorated
+      // monthly costs all stop at the same point, so "to date" means one thing.
+      const monthEnd = format(endOfMonth(base), 'yyyy-MM-dd')
+      const range: DateRange = { start: format(startOfMonth(base), 'yyyy-MM-dd'), end: offset === 0 && todayKey < monthEnd ? todayKey : monthEnd }
 
       const res = computeForRange(range)
       const r = res.rollup
@@ -70,7 +73,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
 
       // Loads delivered by this fleet's drivers in the month (same attribution as revenue).
       const monthLoads = loads.filter((l) => {
-        if (!inRange(l.deliveryAppt?.slice(0, 10))) return false
+        if (!inRange(l.deliveryAppt?.slice(0, 10))) return false   // range ends today for the current month
         if (l.deliveryDriverId && brokers.has(l.deliveryDriverId)) return false
         const truckId = (l.deliveryDriverId ? truckForDriver.get(l.deliveryDriverId) : null) ?? l.truckId ?? null
         return !!truckId && memberIds.has(truckId)
@@ -92,6 +95,13 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
         const q = t.quantity ?? 0
         gallons += q
         galByTruck.set(t.truckId, (galByTruck.get(t.truckId) ?? 0) + q)
+      }
+
+      // Gallons burned per Motive's engine data (driving + idle), from the DAY mileage rows.
+      const motiveGalByTruck = new Map<string, number>()
+      for (const row of mileageRows) {
+        if (row.periodType !== 'DAY' || !inRange(row.periodStart) || !memberIds.has(row.truckId)) continue
+        if (typeof row.gallons === 'number' && row.gallons > 0) motiveGalByTruck.set(row.truckId, (motiveGalByTruck.get(row.truckId) ?? 0) + row.gallons)
       }
 
       // Posted maintenance invoices on member trucks and trailers, by unit.
@@ -130,15 +140,17 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
           miles: t.miles,
           fuel: t.fuel,
           gallons: galByTruck.get(t.truckId) ?? 0,
+          motiveGallons: motiveGalByTruck.get(t.truckId) ?? 0,
         })),
         customers: [...custMap.values()].sort((a, b) => b.revenue - a.revenue),
         unitMaintenance: [...unitMaint.values()].sort((a, b) => b.amount - a.amount),
         // No fixed costs on file means the month predates the expense setup.
         incomplete: fixed === 0,
+        costsToDate: offset === 0,
       })
     }
     return out
-  }, [computeForRange, members, equipment, drivers, loads, fuelTxs, maintenanceInvoices, contributionInRange, eldInRange, monthsBack, today])
+  }, [computeForRange, members, equipment, drivers, loads, fuelTxs, mileageRows, maintenanceInvoices, contributionInRange, eldInRange, monthsBack, today])
 
   const unattributedFuel = useMemo(() => {
     const first = months[0]?.key

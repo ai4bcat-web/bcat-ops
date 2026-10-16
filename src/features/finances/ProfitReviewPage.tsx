@@ -98,7 +98,7 @@ export function ProfitReviewPage() {
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: 12 }}>
           <Tile label={baseline ? `Baseline · ${baseline.label}` : 'Baseline'} value={baseline ? usd0(metrics.get(baseline.key)!.net) : '—'} sub={baseline ? `${pct0(metrics.get(baseline.key)!.margin)} margin · ${usd2(metrics.get(baseline.key)!.revPerMile)}/mi` : 'No finished month yet'} color={baseline ? tone(metrics.get(baseline.key)!.net) : undefined} />
           <Tile label={latest ? `Latest full month · ${latest.label}` : 'Latest full month'} value={latest ? usd0(metrics.get(latest.key)!.net) : '—'} sub={latest && baseline && latest.key !== baseline.key ? `${signed(metrics.get(latest.key)!.net - metrics.get(baseline.key)!.net)} vs ${baseline.label}` : latest ? `${pct0(metrics.get(latest.key)!.margin)} margin` : ''} color={latest ? tone(metrics.get(latest.key)!.net) : undefined} />
-          <Tile label={current ? `${current.label} to date (day ${current.daysElapsed} of ${current.daysInMonth})` : 'This month'} value={current ? usd0(metrics.get(current.key)!.proratedNet) : '—'} sub={current ? `${pct0(metrics.get(current.key)!.proratedMargin)} margin with fixed costs prorated · ${usd0(metrics.get(current.key)!.net)} against the full month's fixed costs` : ''} color={current ? tone(metrics.get(current.key)!.proratedNet) : undefined} />
+          <Tile label={current ? `${current.label} to date (day ${current.daysElapsed} of ${current.daysInMonth})` : 'This month'} value={current ? usd0(metrics.get(current.key)!.proratedNet) : '—'} sub={current ? `${pct0(metrics.get(current.key)!.proratedMargin)} margin · revenue, costs and ${num0(current.loads)} delivered loads through today; insurance and fixed costs cut to ${current.daysElapsed} days` : ''} color={current ? tone(metrics.get(current.key)!.proratedNet) : undefined} />
         </div>
 
         {/* What to change */}
@@ -135,7 +135,7 @@ export function ProfitReviewPage() {
               <tr><td style={TDL}>Margin</td>{months.map((m) => <td key={m.key} style={TD}>{pct0(metrics.get(m.key)!.margin)}</td>)}</tr>
             </tbody>
           </Wrap>
-          {current && <Note>{current.label} shows {current.daysElapsed} days of revenue against the full month's insurance and fixed costs. Prorated, it is running at {usd0(metrics.get(current.key)!.proratedNet)}.</Note>}
+          {current && <Note>{current.label} is month to date: deliveries through today only (loads booked for later in the month are not counted), with insurance and fixed costs cut to {current.daysElapsed} of {current.daysInMonth} days.</Note>}
         </Card>
 
         {/* Baseline deltas */}
@@ -197,10 +197,11 @@ export function ProfitReviewPage() {
           <Wrap>
             <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Diesel</th>{months.map((m) => <th key={m.key} style={TH}>{m.label}</th>)}</tr></thead>
             <tbody>
-              <LineRow label="Gallons" months={months} get={(m) => m.gallons} fmt={num0} />
+              <LineRow label="Gallons bought (fuel cards)" months={months} get={(m) => m.gallons} fmt={num0} />
               <MetricRow label="Average price per gallon" months={months} metrics={metrics} get={(x) => x.pricePerGallon} />
               <LineRow label="Diesel spend" months={months} get={(m) => m.fuel} />
-              <MetricRow label="Fleet miles per gallon" months={months} metrics={metrics} get={(x) => x.mpg} fmt={(n) => n.toFixed(1)} />
+              <LineRow label="Gallons burned (Motive engine data)" months={months} get={(m) => m.trucks.reduce((s, t) => s + t.motiveGallons, 0)} fmt={num0} />
+              <MetricRow label="Fleet miles per gallon (Motive)" months={months} metrics={metrics} get={(x) => x.mpg} fmt={(n) => n.toFixed(1)} />
               {baseline && (
                 <>
                   <tr><td style={TDL}>Price effect vs {baseline.label}</td>{months.map((m) => { const s = m.key === baseline.key ? null : fuelSplit(m, baseline); return <td key={m.key} style={{ ...TD, color: s ? tone(-s.priceEffect) : 'var(--ds-t3)' }}>{s ? signed(-s.priceEffect) : '—'}</td> })}</tr>
@@ -219,8 +220,8 @@ export function ProfitReviewPage() {
                     const ts = ref.trucks.filter((t) => t.bucket === b)
                     if (ts.length === 0) return null
                     const rev = ts.reduce((s, t) => s + t.revenue, 0), mi = ts.reduce((s, t) => s + t.miles, 0), fu = ts.reduce((s, t) => s + t.fuel, 0)
-                    const eco = ts.filter((t) => t.miles > 0 && t.gallons > 0)
-                    const em = eco.reduce((s, t) => s + t.miles, 0), eg = eco.reduce((s, t) => s + t.gallons, 0)
+                    const eco = ts.filter((t) => t.miles > 0 && t.motiveGallons > 0)
+                    const em = eco.reduce((s, t) => s + t.miles, 0), eg = eco.reduce((s, t) => s + t.motiveGallons, 0)
                     return (
                       <tr key={b}>
                         <td style={{ ...TDL, fontWeight: 600 }}>{LOCAL_SUBGROUP_LABELS[b]}</td>
@@ -234,13 +235,14 @@ export function ProfitReviewPage() {
               </Wrap>
               <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} fuel economy by truck</div>
               <Wrap>
-                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Truck</th><th style={TH}>Miles</th><th style={TH}>Gallons</th><th style={TH}>MPG</th><th style={TH}>Fuel / mi</th></tr></thead>
+                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Truck</th><th style={TH}>Miles (odometer)</th><th style={TH}>Gallons burned (Motive)</th><th style={TH}>MPG (Motive)</th><th style={TH}>Gallons bought</th><th style={TH}>Fuel / mi</th></tr></thead>
                 <tbody>
                   {[...ref.trucks].sort((a, b) => (b.miles > 0 ? b.fuel / b.miles : -1) - (a.miles > 0 ? a.fuel / a.miles : -1)).map((t) => (
                     <tr key={t.unitNumber}>
                       <td style={TDL}><span style={{ fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</span> <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{LOCAL_SUBGROUP_LABELS[t.bucket]}</span></td>
-                      <td style={TD}>{num0(t.miles)}</td><td style={TD}>{num0(t.gallons)}</td>
-                      <td style={TD}>{t.miles > 0 && t.gallons > 0 ? (t.miles / t.gallons).toFixed(1) : '—'}</td>
+                      <td style={TD}>{num0(t.miles)}</td><td style={TD}>{t.motiveGallons > 0 ? num0(t.motiveGallons) : '—'}</td>
+                      <td style={TD}>{t.miles > 0 && t.motiveGallons > 0 ? (t.miles / t.motiveGallons).toFixed(1) : '—'}</td>
+                      <td style={TD}>{num0(t.gallons)}</td>
                       <td style={TD}>{usd2(t.miles > 0 ? t.fuel / t.miles : null)}</td>
                     </tr>
                   ))}
