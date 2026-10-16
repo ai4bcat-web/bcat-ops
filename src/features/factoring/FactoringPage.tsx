@@ -20,7 +20,9 @@ import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem, FactoringItemStatus } from '@/types'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
-import { uploadOtrDocs } from '@/lib/otrClient'
+import { uploadOtrDocs, resolveLoad, assembleInvoice } from '@/lib/otrClient'
+import { loadFromFactoringItem } from './loadFromInvoice'
+import { FilePlus2 } from 'lucide-react'
 import { ManualInvoicePanel } from './ManualInvoicePanel'
 
 // ── Status labels ────────────────────────────────────────────────────────────
@@ -439,6 +441,9 @@ export function FactoringPage() {
   // limited to the two people who run factoring rather than every admin.
   const canDelete = canDeleteFactoringItem(user?.email)
   const staffEmail = user?.email ?? ''
+  // "Create load" on a row whose PRO was never entered in BCAT Ops.
+  const addLoad = useAppStore((s) => s.addLoad)
+  const [creatingLoadFor, setCreatingLoadFor] = useState<string | null>(null)
 
   const counts = useMemo(() => ({
     ALL: items.filter((i) => i.status !== 'ARCHIVED').length,
@@ -745,7 +750,32 @@ export function FactoringPage() {
                         <FactoringRowFields readiness={readinessOf(item)} />
                       </td>
                       <td style={{ padding: '14px 16px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: 5 }}>
+                        <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                          {/* No load in BCAT Ops for this PRO: the documents have nothing to attach to until one exists. */}
+                          {!item.loadId && (
+                            <button
+                              type="button"
+                              disabled={creatingLoadFor === item.id}
+                              title={`No load for PRO ${item.proNumber} in BCAT Ops. Create one from this invoice so the POD and rate confirmation can be attached and the row submitted.`}
+                              onClick={async () => {
+                                setCreatingLoadFor(item.id)
+                                try {
+                                  const created = await addLoad(loadFromFactoringItem(item, readinessOf(item), staffEmail, new Date().toISOString()))
+                                  await resolveLoad(item.id)
+                                  await assembleInvoice(item.id).catch(() => undefined)
+                                  await refresh()
+                                  toast.success(`Load ${created.aljexId} created and linked — upload the POD and rate confirmation now`)
+                                } catch (err) {
+                                  toast.error(err instanceof Error ? err.message : 'Could not create the load')
+                                } finally {
+                                  setCreatingLoadFor(null)
+                                }
+                              }}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 24, padding: '0 7px', borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', border: '1px solid #fcd34d', background: '#fffbeb', color: '#b45309', whiteSpace: 'nowrap' }}
+                            >
+                              <FilePlus2 size={12} /> {creatingLoadFor === item.id ? 'Creating…' : 'Create load'}
+                            </button>
+                          )}
                           <FactoringDocCell
                             kind="POD"
                             present={!missingDocs(item).includes('POD')}
