@@ -187,6 +187,10 @@ export interface FindingOptions {
   rateFloorCushion?: number
   /** Fuel rows the engine could not attribute to any truck in the window. */
   unattributedFuel?: { count: number; amount: number }
+  /** Loaded vs empty miles for the period being judged (from src/lib/deadhead.ts). */
+  deadhead?: { label: string; loadedMiles: number; emptyMiles: number; variableCostPerMile: number }
+  /** Empty miles as a share of all miles to hold to (default 0.25). */
+  emptyShareTarget?: number
 }
 
 const usd = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
@@ -288,6 +292,26 @@ export function findings(months: ReviewMonthInput[], base: ReviewMonthInput | nu
           title: `Check fuel economy on ${thirsty.map((t) => `#${t.unitNumber}`).join(' and ')}`,
           detail: `${latest.label}: ${thirsty.map((t) => `#${t.unitNumber} ${usd2(t.fuel / t.miles)}/mi${t.motiveGallons > 0 && t.motiveMiles > 0 ? ` (${(t.motiveMiles / t.motiveGallons).toFixed(1)} mpg per Motive)` : ''}`).join(', ')} vs the best semi at ${usd2(best)}/mi. Idle time, routing and a post-repair economy check are the usual culprits.`,
           impact: excess,
+        })
+      }
+    }
+  }
+
+  // Deadhead: empty miles above the target share, priced at the variable cost per mile.
+  if (opts.deadhead) {
+    const d = opts.deadhead
+    const all = d.loadedMiles + d.emptyMiles
+    const target = opts.emptyShareTarget ?? 0.25
+    if (all > 0) {
+      const share = d.emptyMiles / all
+      if (share > target) {
+        const excessMiles = d.emptyMiles - all * target
+        const impact = excessMiles * d.variableCostPerMile
+        out.push({
+          severity: impact > 2000 ? 'high' : 'medium',
+          title: `Cut empty miles: ${pct(share)} of miles ran empty in ${d.label}, target ${pct(target)}`,
+          detail: `${Math.round(d.emptyMiles).toLocaleString('en-US')} empty miles against ${Math.round(d.loadedMiles).toLocaleString('en-US')} loaded. At ${usd2(d.variableCostPerMile)} a mile the empty miles cost ${usd(d.emptyMiles * d.variableCostPerMile)}; getting to ${pct(target)} saves ${usd(impact)}. Pair deliveries with the next pickup nearby and stop sending trucks back to the yard between loads.`,
+          impact,
         })
       }
     }

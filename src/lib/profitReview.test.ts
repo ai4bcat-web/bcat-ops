@@ -140,6 +140,20 @@ describe('findings', () => {
   })
 })
 
+describe('deadhead finding', () => {
+  const good = month({ key: '2026-06', label: 'Jun 2026', revenue: 90000, driverPay: 20000, maintenance: 6000 })
+  it('flags empty miles above the target and prices the excess at the variable cost', () => {
+    const f = findings([good], good, { deadhead: { label: 'Jun 2026', loadedMiles: 12000, emptyMiles: 8000, variableCostPerMile: 2.5 } })
+    expect(f).toHaveLength(1)
+    expect(f[0].title).toContain('40% of miles ran empty')
+    // 8,000 empty of 20,000 total; target 25% = 5,000; excess 3,000 miles × $2.50
+    expect(f[0].impact).toBeCloseTo(7500, 6)
+  })
+  it('stays quiet at or under the target', () => {
+    expect(findings([good], good, { deadhead: { label: 'Jun 2026', loadedMiles: 16000, emptyMiles: 4000, variableCostPerMile: 2.5 } })).toEqual([])
+  })
+})
+
 describe('projections', () => {
   const p = { miles: 23000, fixedCost: 16500, variableCostPerMile: 2.25 }
   it('breaks even where revenue covers variable cost plus fixed cost spread over the miles', () => {

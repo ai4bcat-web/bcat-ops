@@ -54,7 +54,16 @@ export function ProfitReviewPage() {
   const finished = months.filter(isComparable)
   const latest = finished[finished.length - 1] ?? null
   const current = months.find((m) => m.daysElapsed < m.daysInMonth && m.daysElapsed > 0) ?? null
-  const found = useMemo(() => findings(months, baseline, { unattributedFuel }), [months, baseline, unattributedFuel])
+  // Deadhead is judged on the latest full month that has readings, else the window so far.
+  const deadheadJudged = useMemo(() => {
+    const lastFull = [...months].reverse().find((m) => isComparable(m) && (deadhead.byMonth.get(m.key)?.loadedMiles ?? 0) + (deadhead.byMonth.get(m.key)?.emptyMiles ?? 0) > 0)
+    const t = lastFull ? deadhead.byMonth.get(lastFull.key)! : deadhead.all
+    const refMonth = lastFull ?? [...months].reverse().find(isComparable) ?? null
+    const vcpm = refMonth ? monthMetrics(refMonth).variableCostPerMile ?? 0 : 0
+    if (t.loadedMiles + t.emptyMiles === 0 || !vcpm) return undefined
+    return { label: lastFull ? lastFull.label : 'the window so far', loadedMiles: t.loadedMiles, emptyMiles: t.emptyMiles, variableCostPerMile: vcpm }
+  }, [months, deadhead.byMonth, deadhead.all])
+  const found = useMemo(() => findings(months, baseline, { unattributedFuel, deadhead: deadheadJudged }), [months, baseline, unattributedFuel, deadheadJudged])
 
   // Projection inputs default to the latest finished month.
   const ref = latest ?? baseline
@@ -344,6 +353,7 @@ export function ProfitReviewPage() {
                     ['Loaded miles', (t: typeof deadhead.all) => num0(t.loadedMiles)],
                     ['Empty miles', (t: typeof deadhead.all) => num0(t.emptyMiles)],
                     ['Empty share', (t: typeof deadhead.all) => pct0(t.emptyShare)],
+                    ['Cost of empty miles at the variable rate', (t: typeof deadhead.all) => usd0(t.emptyMiles * proj.variableCostPerMile)],
                     ['Legs with a missing reading', (t: typeof deadhead.all) => num0(t.unknownLegs)],
                   ] as const).map(([label, fmt]) => (
                     <tr key={label}>
