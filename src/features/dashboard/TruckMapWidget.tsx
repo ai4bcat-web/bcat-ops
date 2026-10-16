@@ -217,9 +217,9 @@ export function TruckMapWidget() {
           {/* The table flexes to whatever the map leaves; columns shrink and clip rather than scroll sideways. */}
           <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0 }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 116px 92px', gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 230px 92px', gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               {([
-                ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking'], ['updated', 'Updated'],
+                ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking · Copy info'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
                 const active = sort.key === key
                 return (
@@ -249,7 +249,7 @@ export function TruckMapWidget() {
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 116px 92px', gap: 10,
+                    display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 230px 92px', gap: 10,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -365,9 +365,9 @@ export function TruckMapWidget() {
                             () => toast.error('Could not copy — clipboard blocked'),
                           )
                         }}
-                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', cursor: 'pointer' }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 26, padding: '0 9px', borderRadius: 6, border: 'none', background: 'var(--ds-blue)', color: '#fff', fontSize: 11.5, fontWeight: 700, fontFamily: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}
                       >
-                        <ClipboardCopy size={12} />
+                        <ClipboardCopy size={12} /> Copy driver info
                       </button>
                     )}
                   </span>
