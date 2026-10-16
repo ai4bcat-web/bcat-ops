@@ -5,6 +5,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { listTimeClockEntries, listDispatchConversations } from '@/lib/apiClient'
 import type { DispatchConversation } from '@/lib/dispatch'
+import { whereaboutsOf } from '@/features/dispatch/driverWhereabouts'
 import { weekStartOf, weekEndOf, type TimeClockRow } from '@/lib/timeClock'
 import { weekStartOfISO, weekLabel as settlementWeekLabel } from '@/features/driver-pay/week'
 import { periodStartOfISO, periodLabel } from '@/lib/biweekly'
@@ -92,25 +93,34 @@ export function DriverLeaderboardWidget() {
   // Ivan local: each driver's last check-in from the app (on site, departed, delivered, POD…),
   // read off their dispatch conversation and refreshed every 30 s while the tab is visible.
   const [convos, setConvos] = useState<DispatchConversation[]>([])
+  // The clock the whereabouts are judged against, refreshed with the poll (never read in render).
+  const [nowMs, setNowMs] = useState(0)
   useEffect(() => {
     let alive = true
     const tick = async () => {
       if (document.visibilityState !== 'visible') return
+      if (alive) setNowMs(Date.now())
       try { const rows = await listDispatchConversations(); if (alive) setConvos(rows) } catch { /* best-effort */ }
     }
     void tick()
     const t = setInterval(tick, 30_000)
     return () => { alive = false; clearInterval(t) }
   }, [])
+  // The same "Last status" Dispatch shows: the conversation's stored status when there is
+  // one, else the latest tap on the driver's loads (on site / departed / delivered).
+  const equipment = useAppStore((s) => s.equipment)
   const lastStatus = useMemo(() => {
     const m = new Map<string, string>()
-    for (const c of convos) {
-      if (!c.driverId || !c.lastStatusText?.trim()) continue
-      const when = c.lastStatusAt ? new Date(c.lastStatusAt).toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: 'numeric', minute: '2-digit' }) : null
-      m.set(c.driverId, when ? `${c.lastStatusText.trim()} · ${when}` : c.lastStatusText.trim())
+    const fmt = (at: string | null | undefined) => at ? new Date(at).toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: 'numeric', minute: '2-digit' }) : null
+    for (const d of drivers) {
+      const c = convos.find((x) => x.driverId === d.id)
+      const text = c?.lastStatusText?.trim()
+      if (text) { const when = fmt(c?.lastStatusAt); m.set(d.id, when ? `${text} · ${when}` : text); continue }
+      const ev = whereaboutsOf(d, loads, equipment, [], nowMs)?.lastEvent
+      if (ev) { const when = fmt(ev.at); m.set(d.id, when ? `${ev.label} · ${when}` : ev.label) }
     }
     return m
-  }, [convos])
+  }, [convos, drivers, loads, equipment, nowMs])
 
   // Owner-operators: their last booked stop tells dispatch when and where each goes empty.
   const emptyAt = useMemo(() => {
