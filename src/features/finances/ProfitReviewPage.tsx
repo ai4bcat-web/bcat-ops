@@ -314,29 +314,30 @@ export function ProfitReviewPage() {
             <tbody>
               <LineRow label="Loads" months={months} get={(m) => m.loads} fmt={num0} />
               <MetricRow label="Revenue per load" months={months} metrics={metrics} get={(x) => x.revPerLoad} fmt={(n) => usd0(n)} />
-              <MetricRow label="All-in cost per load" months={months} metrics={metrics} get={(x) => x.costPerLoad} fmt={(n) => usd0(n)} />
+              <MetricRow label="Revenue per mile" months={months} metrics={metrics} get={(x) => x.revPerMile} />
+              <MetricRow label="Break-even cost per mile (all-in)" months={months} metrics={metrics} get={(x) => x.costPerMile} bold />
             </tbody>
           </Wrap>
           {ref && (
             <>
               <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} by customer</div>
               <Wrap>
-                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Customer</th><th style={TH}>Loads</th><th style={TH}>Revenue</th><th style={TH}>Avg per load</th><th style={TH}>vs cost per load</th></tr></thead>
+                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Customer</th><th style={TH}>Loads</th><th style={TH}>Revenue</th><th style={TH}>Booked miles</th><th style={TH}>Rev / mi</th><th style={TH}>vs break-even {usd2(refM?.costPerMile)}/mi</th></tr></thead>
                 <tbody>
                   {ref.customers.slice(0, 12).map((c) => {
-                    const avg = c.revenue / c.loads
-                    const cpl = refM?.costPerLoad ?? null
-                    const diff = cpl == null ? null : avg - cpl
+                    const rpm = c.miles > 0 ? c.revenue / c.miles : null
+                    const be = refM?.costPerMile ?? null
+                    const diff = rpm == null || be == null ? null : rpm - be
                     return (
                       <tr key={c.name}>
-                        <td style={TDL}>{c.name}</td><td style={TD}>{c.loads}</td><td style={TD}>{usd0(c.revenue)}</td><td style={TD}>{usd0(avg)}</td>
-                        <td style={{ ...TD, color: tone(diff), fontWeight: 600 }}>{diff == null ? '—' : signed(diff)}</td>
+                        <td style={TDL}>{c.name}</td><td style={TD}>{c.loads}</td><td style={TD}>{usd0(c.revenue)}</td><td style={TD}>{c.miles > 0 ? num0(c.miles) : '—'}</td><td style={TD}>{usd2(rpm)}</td>
+                        <td style={{ ...TD, color: tone(diff), fontWeight: 600 }}>{diff == null ? '—' : `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${usd2(Math.abs(diff))}`}</td>
                       </tr>
                     )
                   })}
                 </tbody>
               </Wrap>
-              <Note>Customers whose average is below the all-in cost per load are being carried by the rest of the month. Three or more loads below cost shows up in the list at the top of the page.</Note>
+              <Note>Revenue per booked mile (the miles on the loads) against the month's break-even, the all-in cost per mile. A customer below break-even is being carried by the rest of the month; three or more loads below it shows up in the list at the top of the page. A dash means the loads carry no mileage.</Note>
             </>
           )}
         </Card>

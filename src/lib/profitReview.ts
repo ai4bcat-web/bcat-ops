@@ -34,6 +34,8 @@ export interface ReviewCustomer {
   name:    string
   loads:   number
   revenue: number
+  /** Booked miles on those loads (Load.miles), for revenue per mile against break-even. */
+  miles:   number
 }
 
 export interface ReviewUnitMaintenance {
@@ -243,18 +245,19 @@ export function findings(months: ReviewMonthInput[], base: ReviewMonthInput | nu
     }
   }
 
-  // Customers priced below all-in cost per load.
-  if (latest && latestM?.costPerLoad != null) {
+  // Customers paying below the break-even cost per mile.
+  if (latest && latestM?.costPerMile != null) {
+    const be = latestM.costPerMile
     const cheap = latest.customers
-      .filter((c) => c.loads >= 3 && c.revenue / c.loads < latestM.costPerLoad!)
-      .sort((a, b) => a.revenue / a.loads - b.revenue / b.loads)
+      .filter((c) => c.loads >= 3 && c.miles > 0 && c.revenue / c.miles < be)
+      .sort((a, b) => a.revenue / a.miles - b.revenue / b.miles)
       .slice(0, 4)
     if (cheap.length > 0) {
-      const loss = cheap.reduce((s, c) => s + (latestM.costPerLoad! - c.revenue / c.loads) * c.loads, 0)
+      const loss = cheap.reduce((s, c) => s + (be - c.revenue / c.miles) * c.miles, 0)
       out.push({
         severity: loss > 2000 ? 'high' : 'medium',
-        title: `Reprice or drop fill freight under ${usd(latestM.costPerLoad)} a load`,
-        detail: `${latest.label} all-in cost was ${usd(latestM.costPerLoad)} per load. Below it: ${cheap.map((c) => `${c.name} (${c.loads} loads at ${usd(c.revenue / c.loads)})`).join(', ')}.`,
+        title: `Reprice or drop freight paying under ${usd2(be)} a mile (break-even)`,
+        detail: `${latest.label} all-in cost was ${usd2(be)} per mile. Below it: ${cheap.map((c) => `${c.name} (${c.loads} loads at ${usd2(c.revenue / c.miles)}/mi)`).join(', ')}.`,
         impact: loss,
       })
     }

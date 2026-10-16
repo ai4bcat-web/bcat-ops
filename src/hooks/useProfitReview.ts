@@ -99,9 +99,10 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
       const custMap = new Map<string, ReviewCustomer>()
       for (const l of monthLoads) {
         const name = (l.customer ?? '').trim().toUpperCase() || 'UNKNOWN'
-        const row = custMap.get(name) ?? { name, loads: 0, revenue: 0 }
+        const row = custMap.get(name) ?? { name, loads: 0, revenue: 0, miles: 0 }
         row.loads += 1
         row.revenue += (l.rate ?? 0) / 100
+        row.miles += l.miles ?? 0
         custMap.set(name, row)
       }
 

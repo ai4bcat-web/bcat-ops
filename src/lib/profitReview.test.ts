@@ -102,10 +102,10 @@ describe('findings', () => {
     key: '2026-09', label: 'Sep 2026',
     revenue: 84601, fuel: 23466, driverPay: 29370, maintenance: 14803, insurance: 6395, miles: 26138, loads: 134, gallons: 3806,
     customers: [
-      { name: 'BATORY FOODS', loads: 75, revenue: 57355 },
-      { name: 'TRANSPORTATION ONE', loads: 10, revenue: 5450 },
-      { name: 'TQL', loads: 6, revenue: 2800 },
-      { name: 'ONE-OFF', loads: 1, revenue: 100 },
+      { name: 'BATORY FOODS', loads: 75, revenue: 57355, miles: 15000 },        // $3.82/mi
+      { name: 'TRANSPORTATION ONE', loads: 10, revenue: 5450, miles: 2500 },    // $2.18/mi
+      { name: 'TQL', loads: 6, revenue: 2800, miles: 1400 },                    // $2.00/mi
+      { name: 'ONE-OFF', loads: 1, revenue: 100, miles: 100 },
     ],
     trucks: [
       { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 17004, miles: 4998, fuel: 5590, gallons: 878, motiveGallons: 870, motiveMiles: 4998 },
@@ -120,12 +120,13 @@ describe('findings', () => {
     const titles = f.map((x) => x.title)
     expect(titles.some((t) => t.startsWith('Hold driver pay'))).toBe(true)
     expect(titles.some((t) => t.startsWith('Set a rate floor'))).toBe(true)
-    expect(titles.some((t) => t.startsWith('Reprice or drop fill freight'))).toBe(true)
+    expect(titles.some((t) => t.startsWith('Reprice or drop freight paying under'))).toBe(true)
     expect(titles.some((t) => t.includes('fuel surcharge'))).toBe(true)
     expect(titles.some((t) => t.startsWith('Budget maintenance'))).toBe(true)
     expect(titles.some((t) => t.startsWith('Check fuel economy on #530'))).toBe(true)
     for (let i = 1; i < f.length; i++) expect(f[i - 1].impact).toBeGreaterThanOrEqual(f[i].impact)
     const cheap = f.find((x) => x.title.startsWith('Reprice'))!
+    expect(cheap.detail).toContain('/mi')
     expect(cheap.detail).toContain('TRANSPORTATION ONE')
     expect(cheap.detail).not.toContain('ONE-OFF')
     expect(cheap.detail).not.toContain('BATORY')
