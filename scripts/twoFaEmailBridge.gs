@@ -15,7 +15,8 @@
 //       TWOFA_WEBHOOK_URL = the twofa-intake Function URL (see the Amplify
 //                           stack output TwofaIntakeFunctionUrl, or
 //                           aws lambda get-function-url-config --function-name <twofa-intake fn>)
-//     The shared WEBHOOK_SECRET constant of the project is used as the secret.
+//     (or run setTwoFaWebhookUrl() below). The shared WEBHOOK_SECRET constant
+//     of the project is used as the secret.
 //  4. Run setupTwoFaBridge() once; authorize Gmail read + external requests.
 //     It installs exactly one every-minute trigger for processTwoFaEmails.
 
@@ -73,4 +74,14 @@ function processTwoFaEmails() {
   } finally {
     lock.releaseLock();
   }
+}
+
+// If the editor hides "Script properties" (Project Settings → Script Properties
+// → "Edit script properties"), run this once instead, then run setupTwoFaBridge().
+function setTwoFaWebhookUrl() {
+  PropertiesService.getScriptProperties().setProperty(
+    'TWOFA_WEBHOOK_URL',
+    'https://6izy5uwx53awpbzcwnsuf2tl540pylkv.lambda-url.us-east-1.on.aws/'
+  );
+  console.log('TWOFA_WEBHOOK_URL saved');
 }
