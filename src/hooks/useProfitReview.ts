@@ -38,8 +38,9 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
   const { drivers } = useDrivers()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
 
-  // Box-truck pay is settled separately (pay % of revenue after fixed charges) and is not in
-  // the fleet's combined driver-pay entry, so it is estimated from the pay rule per month.
+  // The combined driver-pay entry includes the box truck's driver. The settlement rule
+  // (pay % of revenue after fixed charges) estimates the box truck's SHARE of it, so the
+  // per-group split can charge that share to the box truck — it is never added on top.
   const [paySettings, setPaySettings] = useState<DriverPaySetting[] | null>(null)
   useEffect(() => {
     let live = true
@@ -160,7 +161,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
       }))
       const boxRevenue = trucks.filter((t) => t.bucket === 'BOX_TRUCK').reduce((sum, t) => sum + t.revenue, 0)
       const elapsed = range.start > todayKey ? 0 : daysElapsed
-      const boxTruckPay = boxRule && boxRevenue > 0 ? boxTruckPayEstimate(boxRevenue, elapsed, boxRule) : 0
+      const boxTruckPay = Math.min(r.driverCost, boxRule && boxRevenue > 0 ? boxTruckPayEstimate(boxRevenue, elapsed, boxRule) : 0)
 
       out.push({
         key,
@@ -169,7 +170,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
         daysElapsed: elapsed,
         revenue: r.revenue,
         fuel: r.fuel,
-        driverPay: r.driverCost + boxTruckPay,
+        driverPay: r.driverCost,
         boxTruckPay,
         trailerMaintenance,
         maintenance: lines.maintenance,

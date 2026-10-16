@@ -142,8 +142,8 @@ export function ProfitReviewPage() {
             <tbody>
               <LineRow label="Revenue" months={months} get={(m) => m.revenue} bold />
               <LineRow label="Fuel" months={months} get={(m) => m.fuel} />
-              <LineRow label="Driver pay (Ivan drivers, combined entry)" months={months} get={(m) => m.driverPay - (m.boxTruckPay ?? 0)} />
-              {months.some((m) => (m.boxTruckPay ?? 0) > 0) && <LineRow label="Box truck driver pay (settlement rule: pay % of revenue after fixed charges)" months={months} get={(m) => m.boxTruckPay ?? 0} />}
+              <LineRow label="Driver pay (combined entry: Ivan drivers + box truck)" months={months} get={(m) => m.driverPay} />
+              {months.some((m) => (m.boxTruckPay ?? 0) > 0) && <LineRow label="   of which box truck, estimated by the settlement rule (not added)" months={months} get={(m) => m.boxTruckPay ?? 0} muted />}
               <LineRow label="Maintenance (trucks + trailers)" months={months} get={(m) => m.maintenance} />
               <LineRow label="Insurance" months={months} get={(m) => m.insurance} />
               <LineRow label="Fixed: loans, trailer lease, yard, tolls, ELD, permits, other" months={months} get={(m) => m.fixed} />
@@ -465,8 +465,9 @@ function Tag({ text }: { text: string }) {
   return <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--ds-t2)', border: '1px solid var(--ds-border)', borderRadius: 4, padding: '1px 5px' }}>{text}</span>
 }
 
-function LineRow({ label, months, get, fmt = usd0, bold }: { label: string; months: ReviewMonthInput[]; get: (m: ReviewMonthInput) => number; fmt?: (n: number) => string; bold?: boolean }) {
-  return <tr><td style={{ ...TDL, fontWeight: bold ? 700 : 500 }}>{label}</td>{months.map((m) => <td key={m.key} style={{ ...TD, fontWeight: bold ? 700 : 500 }}>{fmt(get(m))}</td>)}</tr>
+function LineRow({ label, months, get, fmt = usd0, bold, muted }: { label: string; months: ReviewMonthInput[]; get: (m: ReviewMonthInput) => number; fmt?: (n: number) => string; bold?: boolean; muted?: boolean }) {
+  const color = muted ? 'var(--ds-t3)' : undefined
+  return <tr><td style={{ ...TDL, fontWeight: bold ? 700 : 500, color, fontSize: muted ? 12 : undefined }}>{label}</td>{months.map((m) => <td key={m.key} style={{ ...TD, fontWeight: bold ? 700 : 500, color, fontSize: muted ? 12 : undefined }}>{fmt(get(m))}</td>)}</tr>
 }
 
 function MetricRow({ label, months, metrics, get, fmt = (n) => usd2(n), bold, colored }: { label: string; months: ReviewMonthInput[]; metrics: Map<string, MonthMetrics>; get: (x: MonthMetrics) => number | null; fmt?: (n: number) => string; bold?: boolean; colored?: boolean }) {

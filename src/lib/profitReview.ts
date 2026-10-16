@@ -69,8 +69,9 @@ export interface ReviewMonthInput {
   /** True when insurance and fixed costs are already cut to the days elapsed (month to
    *  date), so net needs no further proration. */
   costsToDate?: boolean
-  /** Box-truck driver pay estimated from the settlement rule (pay % of revenue after fixed
-   *  charges). Included in `driverPay`; kept apart so it lands on the box truck, not the semis. */
+  /** The box truck's estimated share of `driverPay` (settlement rule: pay % of revenue after
+   *  fixed charges). The combined pay entry already includes it; this only decides which
+   *  group carries it. Never added on top of `driverPay`. */
   boxTruckPay?: number
   /** Trailer maintenance — the semis' cost, never the box truck's. */
   trailerMaintenance?: number
