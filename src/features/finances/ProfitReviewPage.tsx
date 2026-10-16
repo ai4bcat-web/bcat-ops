@@ -8,10 +8,10 @@ import { DEADHEAD_START } from '@/lib/deadhead'
 import { format, startOfMonth, subMonths } from 'date-fns'
 import { Route } from 'lucide-react'
 import {
-  monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings, projectProfit, breakEvenRatePerMile, rateLadder, isComparable,
+  monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings, projectProfit, breakEvenRatePerMile, rateLadder, isComparable, groupPerMile,
   type ReviewMonthInput, type MonthMetrics,
 } from '@/lib/profitReview'
-import { LOCAL_SUBGROUP_LABELS, type LocalSubgroup } from '@/lib/localSubgroups'
+import { LOCAL_SUBGROUP_LABELS } from '@/lib/localSubgroups'
 
 const usd0 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 const usd2 = (n: number | null | undefined) => n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -142,7 +142,8 @@ export function ProfitReviewPage() {
             <tbody>
               <LineRow label="Revenue" months={months} get={(m) => m.revenue} bold />
               <LineRow label="Fuel" months={months} get={(m) => m.fuel} />
-              <LineRow label="Driver pay" months={months} get={(m) => m.driverPay} />
+              <LineRow label="Driver pay (Ivan drivers, combined entry)" months={months} get={(m) => m.driverPay - (m.boxTruckPay ?? 0)} />
+              {months.some((m) => (m.boxTruckPay ?? 0) > 0) && <LineRow label="Box truck driver pay (settlement rule: pay % of revenue after fixed charges)" months={months} get={(m) => m.boxTruckPay ?? 0} />}
               <LineRow label="Maintenance (trucks + trailers)" months={months} get={(m) => m.maintenance} />
               <LineRow label="Insurance" months={months} get={(m) => m.insurance} />
               <LineRow label="Fixed: loans, trailer lease, yard, tolls, ELD, permits, other" months={months} get={(m) => m.fixed} />
@@ -230,20 +231,19 @@ export function ProfitReviewPage() {
             <>
               <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{ref.label} by group</div>
               <Wrap>
-                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Group</th><th style={{ ...TH, textAlign: 'left' }}>Trucks</th><th style={TH}>Revenue</th><th style={TH}>Miles</th><th style={TH}>Rev / mi</th><th style={TH}>Fuel</th><th style={TH}>Fuel / mi</th><th style={TH}>MPG</th></tr></thead>
+                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Group</th><th style={{ ...TH, textAlign: 'left' }}>Trucks</th><th style={TH}>Revenue</th><th style={TH}>Miles</th><th style={TH}>Rev / mi</th><th style={TH}>Fuel</th><th style={TH}>Fuel / mi</th><th style={TH}>MPG</th><th style={TH}>Cost / mi</th><th style={TH}>Profit / mi</th></tr></thead>
                 <tbody>
-                  {(['IVAN_LOCAL', 'BOX_TRUCK'] as LocalSubgroup[]).map((b) => {
-                    const ts = ref.trucks.filter((t) => t.bucket === b)
-                    if (ts.length === 0) return null
-                    const rev = ts.reduce((s, t) => s + t.revenue, 0), mi = ts.reduce((s, t) => s + t.miles, 0), fu = ts.reduce((s, t) => s + t.fuel, 0)
+                  {groupPerMile(ref).map((g) => {
+                    const ts = ref.trucks.filter((t) => (g.key === 'FLEET') || t.bucket === g.key)
                     const eco = ts.filter((t) => t.motiveMiles > 0 && t.motiveGallons > 0)
                     const em = eco.reduce((s, t) => s + t.motiveMiles, 0), eg = eco.reduce((s, t) => s + t.motiveGallons, 0)
                     return (
-                      <tr key={b}>
-                        <td style={{ ...TDL, fontWeight: 600 }}>{LOCAL_SUBGROUP_LABELS[b]}</td>
-                        <td style={{ ...TDL, color: 'var(--ds-t3)', fontFamily: 'monospace', fontSize: 12 }}>{ts.map((t) => `#${t.unitNumber}`).join('  ')}</td>
-                        <td style={TD}>{usd0(rev)}</td><td style={TD}>{num0(mi)}</td><td style={TD}>{usd2(mi > 0 ? rev / mi : null)}</td>
-                        <td style={TD}>{usd0(fu)}</td><td style={TD}>{usd2(mi > 0 ? fu / mi : null)}</td><td style={TD}>{eg > 0 ? (em / eg).toFixed(1) : '—'}</td>
+                      <tr key={g.key} style={{ background: g.key === 'FLEET' ? 'var(--ds-bg)' : undefined }}>
+                        <td style={{ ...TDL, fontWeight: 700 }}>{g.label}</td>
+                        <td style={{ ...TDL, color: 'var(--ds-t3)', fontFamily: 'monospace', fontSize: 12 }}>{g.units.map((u) => `#${u}`).join('  ')}</td>
+                        <td style={TD}>{usd0(g.revenue)}</td><td style={TD}>{num0(g.miles)}</td><td style={TD}>{usd2(g.revPerMile)}</td>
+                        <td style={TD}>{usd0(g.fuel)}</td><td style={TD}>{usd2(g.fuelPerMile)}</td><td style={TD}>{eg > 0 ? (em / eg).toFixed(1) : '—'}</td>
+                        <td style={TD}>{usd2(g.costPerMile)}</td><td style={{ ...TD, color: tone(g.profitPerMile), fontWeight: 600 }}>{usd2(g.profitPerMile)}</td>
                       </tr>
                     )
                   })}
@@ -273,7 +273,7 @@ export function ProfitReviewPage() {
           <Wrap>
             <thead><tr><th style={{ ...TH, textAlign: 'left' }}></th>{months.map((m) => <th key={m.key} style={TH}>{m.label}</th>)}</tr></thead>
             <tbody>
-              <LineRow label="Driver pay" months={months} get={(m) => m.driverPay} />
+              <LineRow label="Driver pay (all drivers)" months={months} get={(m) => m.driverPay} />
               <MetricRow label="Share of revenue" months={months} metrics={metrics} get={(x) => x.payShare} fmt={(n) => pct0(n)} />
               <tr><td style={TDL}>Revenue per $1 of pay</td>{months.map((m) => <td key={m.key} style={TD}>{m.driverPay > 0 ? usd2(m.revenue / m.driverPay) : '—'}</td>)}</tr>
             </tbody>

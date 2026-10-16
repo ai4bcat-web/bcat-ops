@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  groupPerMile, monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings,
+  groupPerMile, boxTruckPayEstimate, monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings,
   projectProfit, breakEvenRatePerMile, rateLadder, type ReviewMonthInput,
 } from './profitReview'
 
@@ -176,19 +176,44 @@ describe('projections', () => {
 })
 
 describe('groupPerMile', () => {
-  it('gives each bucket its own fuel and revenue per mile and spreads the fleet costs evenly per mile', () => {
+  const tr = (over: Partial<ReviewMonthInput['trucks'][number]> & { unitNumber: string; bucket: 'IVAN_LOCAL' | 'BOX_TRUCK' }) =>
+    ({ revenue: 0, miles: 0, fuel: 0, gallons: 0, motiveGallons: 0, motiveMiles: 0, ...over })
+
+  it('without per-truck detail, falls back to an even per-mile spread of the fleet costs', () => {
     const m = month({ key: '2026-10', revenue: 47862, fuel: 12635, driverPay: 11651, maintenance: 6898, insurance: 3304, fixed: 5032, miles: 13280, trucks: [
-      { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 20000, miles: 5000, fuel: 5500, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
-      { unitNumber: '685', bucket: 'IVAN_LOCAL', revenue: 22050, miles: 4764, fuel: 5218, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
-      { unitNumber: '3890', bucket: 'BOX_TRUCK', revenue: 5812, miles: 3516, fuel: 1917, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
+      tr({ unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 42050, miles: 9764, fuel: 10718 }),
+      tr({ unitNumber: '3890', bucket: 'BOX_TRUCK', revenue: 5812, miles: 3516, fuel: 1917 }),
     ] })
     const g = groupPerMile(m)
-    expect(g.map((x) => x.key)).toEqual(['IVAN_LOCAL', 'BOX_TRUCK', 'FLEET'])
     const shared = (11651 + 6898 + 3304 + 5032) / 13280
-    expect(g[0].fuelPerMile).toBeCloseTo(10718 / 9764, 6)
     expect(g[0].costPerMile).toBeCloseTo(10718 / 9764 + shared, 6)
-    expect(g[1].profitPerMile).toBeCloseTo(5812 / 3516 - (1917 / 3516 + shared), 6)
     expect(g[2].costPerMile).toBeCloseTo(monthMetrics(m).costPerMile!, 6)
-    expect(g[0].units).toEqual(['530', '685'])
+  })
+
+  it('with detail, each group carries its own trucks, the semis carry the combined pay and trailers, the box truck its own pay, and groups sum to the fleet', () => {
+    const m = month({
+      key: '2026-09', revenue: 84601, fuel: 23466, driverPay: 29370 + 6800, maintenance: 14803, insurance: 6395, fixed: 9879, miles: 26137,
+      boxTruckPay: 6800, trailerMaintenance: 3230,
+      trucks: [
+        tr({ unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 69906, miles: 19487, fuel: 19965, insurance: 5645, loan: 1946, otherExpenses: 11573 + 5200, driverCost: 0 }),
+        tr({ unitNumber: '3890', bucket: 'BOX_TRUCK', revenue: 14695, miles: 6650, fuel: 3501, insurance: 750, loan: 664, otherExpenses: 1217, driverCost: 0 }),
+      ],
+    })
+    const g = groupPerMile(m)
+    const ivan = g[0], box = g[1], fleet = g[2]
+    expect(ivan.cost + box.cost).toBeCloseTo(fleet.cost, 2)
+    // Box truck: its own fuel, insurance, loan, other, plus its driver's pay, plus a mile share of the residual only.
+    const residual = fleet.cost - (19965 + 5645 + 1946 + 16773) - (3501 + 750 + 664 + 1217) - 29370 - 6800 - 3230
+    expect(box.cost).toBeCloseTo(3501 + 750 + 664 + 1217 + 6800 + residual * (6650 / 26137), 2)
+    expect(box.costPerMile!).toBeLessThan(ivan.costPerMile!)
+    expect(ivan.cost).toBeCloseTo(19965 + 5645 + 1946 + 16773 + 29370 + 3230 + residual * (19487 / 26137), 2)
+  })
+})
+
+describe('boxTruckPayEstimate', () => {
+  it('pays the percentage of revenue after the fixed charges for the periods covered', () => {
+    // $14,695 over 30 days ≈ 2.14 periods × $540 fixed = $1,157; 50% of the rest.
+    expect(boxTruckPayEstimate(14695, 30, { payPercent: 0.5, fixedPerPeriod: 540, expensesBeforePercent: true })).toBeCloseTo((14695 - 540 * 30 / 14) * 0.5, 2)
+    expect(boxTruckPayEstimate(100, 30, { payPercent: 0.5, fixedPerPeriod: 540, expensesBeforePercent: true })).toBe(0)
   })
 })

@@ -21,6 +21,13 @@ export interface ReviewTruck {
   motiveGallons: number
   /** Odometer miles on the days that also have Motive gallons, so MPG compares like with like. */
   motiveMiles:   number
+  /** The truck's own costs from the engine (dollars, prorated to the month). */
+  insurance?:     number
+  loan?:          number
+  /** Maintenance, permits, tolls and the truck's allocated shares of fleet costs. */
+  otherExpenses?: number
+  /** Pay attributed to this truck's driver (0 when the fleet's pay is entered combined). */
+  driverCost?:    number
 }
 
 export interface ReviewCustomer {
@@ -60,6 +67,11 @@ export interface ReviewMonthInput {
   /** True when insurance and fixed costs are already cut to the days elapsed (month to
    *  date), so net needs no further proration. */
   costsToDate?: boolean
+  /** Box-truck driver pay estimated from the settlement rule (pay % of revenue after fixed
+   *  charges). Included in `driverPay`; kept apart so it lands on the box truck, not the semis. */
+  boxTruckPay?: number
+  /** Trailer maintenance — the semis' cost, never the box truck's. */
+  trailerMaintenance?: number
 }
 
 /** A finished month with real data behind it. */
@@ -374,30 +386,48 @@ export interface GroupPerMile {
   miles:        number
   revenue:      number
   fuel:         number
+  /** Every cost charged to the group: its trucks' own costs plus its share of fleet costs. */
+  cost:         number
   revPerMile:   number | null
   fuelPerMile:  number | null
-  /** Group fuel per mile plus the fleet's other costs (pay, maintenance, insurance, fixed) spread per mile. */
   costPerMile:  number | null
   profitPerMile: number | null
 }
 
 /**
- * Per-mile economics by reporting bucket. Fuel is the group's own; driver pay, maintenance,
- * insurance and fixed costs are fleet figures, so they are spread evenly over every mile
- * the fleet drove — the box truck and the semis carry the same per-mile share of them.
+ * Per-mile economics by reporting bucket, each group carrying what it actually costs:
+ *   • each truck's own fuel, insurance, loan, maintenance and allocated fixed shares (engine);
+ *   • the combined Ivan driver pay and trailer maintenance → the semis only;
+ *   • box-truck driver pay → the box truck;
+ *   • whatever fleet cost is left (e.g. ELD) → spread by miles.
+ * Groups therefore sum to the fleet. When a month carries no per-truck cost detail, the old
+ * even-per-mile spread is used so the figure is never blank.
  */
 export function groupPerMile(m: ReviewMonthInput): GroupPerMile[] {
-  const sharedPerMile = m.miles > 0 ? (m.driverPay + m.maintenance + m.insurance + m.fixed) / m.miles : null
-  const build = (key: GroupPerMile['key'], label: string, trucks: ReviewTruck[]): GroupPerMile => {
+  const mm = monthMetrics(m)
+  const own = (t: ReviewTruck) => t.fuel + (t.insurance ?? 0) + (t.loan ?? 0) + (t.otherExpenses ?? 0) + (t.driverCost ?? 0)
+  const hasDetail = m.trucks.some((t) => t.insurance != null || t.loan != null || t.otherExpenses != null)
+  const ownAll = m.trucks.reduce((s, t) => s + own(t), 0)
+  const boxPay = m.boxTruckPay ?? 0
+  const combinedPay = Math.max(0, m.driverPay - boxPay - m.trucks.reduce((s, t) => s + (t.driverCost ?? 0), 0))
+  const trailerMaint = m.trailerMaintenance ?? 0
+  const residual = Math.max(0, mm.totalCost - ownAll - combinedPay - boxPay - trailerMaint)
+  const sharedPerMile = m.miles > 0 ? (m.driverPay + m.maintenance + m.insurance + m.fixed) / m.miles : 0
+
+  const build = (key: 'IVAN_LOCAL' | 'BOX_TRUCK', label: string, trucks: ReviewTruck[]): GroupPerMile => {
     const miles = trucks.reduce((s, t) => s + t.miles, 0)
     const revenue = trucks.reduce((s, t) => s + t.revenue, 0)
     const fuel = trucks.reduce((s, t) => s + t.fuel, 0)
+    const cost = hasDetail
+      ? trucks.reduce((s, t) => s + own(t), 0)
+        + (key === 'IVAN_LOCAL' ? combinedPay + trailerMaint : boxPay)
+        + (m.miles > 0 ? residual * (miles / m.miles) : 0)
+      : fuel + sharedPerMile * miles
     const revPerMile = div(revenue, miles)
-    const fuelPerMile = div(fuel, miles)
-    const costPerMile = fuelPerMile != null && sharedPerMile != null ? fuelPerMile + sharedPerMile : null
+    const costPerMile = div(cost, miles)
     return {
       key, label, units: trucks.map((t) => t.unitNumber).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-      miles, revenue, fuel, revPerMile, fuelPerMile, costPerMile,
+      miles, revenue, fuel, cost, revPerMile, fuelPerMile: div(fuel, miles), costPerMile,
       profitPerMile: revPerMile != null && costPerMile != null ? revPerMile - costPerMile : null,
     }
   }
@@ -406,11 +436,19 @@ export function groupPerMile(m: ReviewMonthInput): GroupPerMile[] {
   const box = m.trucks.filter((t) => t.bucket === 'BOX_TRUCK')
   if (ivan.length) out.push(build('IVAN_LOCAL', 'Ivan local', ivan))
   if (box.length) out.push(build('BOX_TRUCK', 'Box truck', box))
-  // The fleet row uses the month's own totals (fleet miles include trucks in neither bucket, if any).
-  const mm = monthMetrics(m)
   out.push({
-    key: 'FLEET', label: 'Fleet', units: [], miles: m.miles, revenue: m.revenue, fuel: m.fuel,
+    key: 'FLEET', label: 'Fleet', units: [], miles: m.miles, revenue: m.revenue, fuel: m.fuel, cost: mm.totalCost,
     revPerMile: mm.revPerMile, fuelPerMile: mm.fuelPerMile, costPerMile: mm.costPerMile, profitPerMile: mm.profitPerMile,
   })
   return out
+}
+
+/** Box-truck driver pay for a stretch of days from the settlement rule: pay% of revenue
+ *  after the fixed charges each 14-day period carries. */
+export function boxTruckPayEstimate(revenue: number, days: number, rule: { payPercent: number; fixedPerPeriod: number; expensesBeforePercent: boolean }): number {
+  const periods = days / 14
+  const fixed = rule.fixedPerPeriod * periods
+  const basis = rule.expensesBeforePercent ? Math.max(0, revenue - fixed) : revenue
+  const pay = basis * rule.payPercent - (rule.expensesBeforePercent ? 0 : fixed)
+  return Math.max(0, pay)
 }

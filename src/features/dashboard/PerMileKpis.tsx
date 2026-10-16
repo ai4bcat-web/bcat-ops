@@ -88,7 +88,7 @@ export function PerMileKpis() {
         </div>
       )}
       <div style={{ padding: '8px 20px', fontSize: 11.5, color: 'var(--ds-t3)' }}>
-        Cost per mile is each group's own fuel plus driver pay, maintenance, insurance and fixed costs spread evenly over every fleet mile. Deliveries through today; monthly costs cut to the days elapsed; odometer miles.
+        Each group carries its own trucks' fuel, insurance, loan, maintenance and allocated fixed costs. The combined Ivan driver pay and trailer maintenance go to the semis; the box truck carries its driver's pay from the settlement rule. Deliveries through today; monthly costs cut to the days elapsed; odometer miles.
       </div>
     </div>
   )

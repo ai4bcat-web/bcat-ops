@@ -1,4 +1,6 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { listDriverPaySettings, type DriverPaySetting } from '@/lib/apiClient'
+import { boxTruckPayEstimate } from '@/lib/profitReview'
 import { startOfMonth, endOfMonth, addMonths, format, getDaysInMonth } from 'date-fns'
 import { useFleetProfitability } from './useFleetProfitability'
 import { useFleetFixedCosts } from './useFleetFixedCosts'
@@ -35,6 +37,22 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
   const { loads } = useLoads()
   const { drivers } = useDrivers()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
+
+  // Box-truck pay is settled separately (pay % of revenue after fixed charges) and is not in
+  // the fleet's combined driver-pay entry, so it is estimated from the pay rule per month.
+  const [paySettings, setPaySettings] = useState<DriverPaySetting[] | null>(null)
+  useEffect(() => {
+    let live = true
+    listDriverPaySettings().then((rows) => { if (live) setPaySettings(rows) }).catch(() => { if (live) setPaySettings([]) })
+    return () => { live = false }
+  }, [])
+  const boxRule = useMemo(() => {
+    const rules = (paySettings ?? []).filter((r) => r.payGroup === 'BOX_TRUCK' && r.active !== false)
+    if (rules.length === 0) return null
+    const r = rules[0]
+    const fixedPerPeriod = (r.fixedExpenses ?? []).reduce((sum, f) => sum + (Number(f.amount) || 0), 0)
+    return { payPercent: Number(r.payPercent) || 0, fixedPerPeriod, expensesBeforePercent: !!r.expensesBeforePercent }
+  }, [paySettings])
 
   const months = useMemo<ReviewMonthInput[]>(() => {
     const memberIds = new Set(members.map((m) => m.truckId))
@@ -125,30 +143,41 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
         unitMaint.set(unitNumber, row)
       }
 
+      const trucks = res.trucks.map((t) => ({
+        unitNumber: t.unitNumber,
+        bucket: localSubgroupOf(t.unitNumber),
+        revenue: t.revenue,
+        miles: t.miles,
+        fuel: t.fuel,
+        gallons: galByTruck.get(t.truckId) ?? 0,
+        motiveGallons: motiveGalByTruck.get(t.truckId) ?? 0,
+        motiveMiles: motiveMilesByTruck.get(t.truckId) ?? 0,
+        insurance: t.insurance,
+        loan: t.loan,
+        otherExpenses: t.otherExpenses,
+        driverCost: t.driverCost,
+      }))
+      const boxRevenue = trucks.filter((t) => t.bucket === 'BOX_TRUCK').reduce((sum, t) => sum + t.revenue, 0)
+      const elapsed = range.start > todayKey ? 0 : daysElapsed
+      const boxTruckPay = boxRule && boxRevenue > 0 ? boxTruckPayEstimate(boxRevenue, elapsed, boxRule) : 0
+
       out.push({
         key,
         label: format(base, 'MMM yyyy'),
         daysInMonth,
-        daysElapsed: range.start > todayKey ? 0 : daysElapsed,
+        daysElapsed: elapsed,
         revenue: r.revenue,
         fuel: r.fuel,
-        driverPay: r.driverCost,
+        driverPay: r.driverCost + boxTruckPay,
+        boxTruckPay,
+        trailerMaintenance,
         maintenance: lines.maintenance,
         insurance: c.insurance,
         fixed,
         miles: r.miles,
         loads: monthLoads.length,
         gallons,
-        trucks: res.trucks.map((t) => ({
-          unitNumber: t.unitNumber,
-          bucket: localSubgroupOf(t.unitNumber),
-          revenue: t.revenue,
-          miles: t.miles,
-          fuel: t.fuel,
-          gallons: galByTruck.get(t.truckId) ?? 0,
-          motiveGallons: motiveGalByTruck.get(t.truckId) ?? 0,
-          motiveMiles: motiveMilesByTruck.get(t.truckId) ?? 0,
-        })),
+        trucks,
         customers: [...custMap.values()].sort((a, b) => b.revenue - a.revenue),
         unitMaintenance: [...unitMaint.values()].sort((a, b) => b.amount - a.amount),
         // No fixed costs on file means the month predates the expense setup.
@@ -157,7 +186,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
       })
     }
     return out
-  }, [computeForRange, members, equipment, drivers, loads, fuelTxs, mileageRows, maintenanceInvoices, contributionInRange, eldInRange, monthsBack, today])
+  }, [computeForRange, members, equipment, drivers, loads, fuelTxs, mileageRows, maintenanceInvoices, contributionInRange, eldInRange, monthsBack, today, boxRule])
 
   const unattributedFuel = useMemo(() => {
     const first = months[0]?.key
