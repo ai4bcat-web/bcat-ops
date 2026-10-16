@@ -23,17 +23,18 @@
 const TWOFA_QUERY = 'from:voice-noreply@google.com subject:"New text message from" newer_than:2d';
 const TWOFA_PROP_NS = 'twofa:msg:';
 const TWOFA_PROCESS_FN = 'processTwoFaEmails';
+// Built-in default so the install needs no script property for the URL.
+const TWOFA_WEBHOOK_URL = 'https://6izy5uwx53awpbzcwnsuf2tl540pylkv.lambda-url.us-east-1.on.aws';
 
 function twofaConfig_() {
   const props = PropertiesService.getScriptProperties();
-  const url = (props.getProperty('TWOFA_WEBHOOK_URL') || '').replace(/\/+$/, '');
+  const url = (props.getProperty('TWOFA_WEBHOOK_URL') || TWOFA_WEBHOOK_URL).replace(/\/+$/, '');
   const secret = props.getProperty('TWOFA_WEBHOOK_SECRET') || (typeof WEBHOOK_SECRET === 'string' ? WEBHOOK_SECRET : '');
   return { url: url, secret: secret };
 }
 
 function setupTwoFaBridge() {
   const cfg = twofaConfig_();
-  if (!cfg.url) throw new Error('Set script property TWOFA_WEBHOOK_URL');
   if (!cfg.secret) throw new Error('No WEBHOOK_SECRET available');
   const has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === TWOFA_PROCESS_FN; });
   if (!has) ScriptApp.newTrigger(TWOFA_PROCESS_FN).timeBased().everyMinutes(1).create();
@@ -76,12 +77,3 @@ function processTwoFaEmails() {
   }
 }
 
-// If the editor hides "Script properties" (Project Settings → Script Properties
-// → "Edit script properties"), run this once instead, then run setupTwoFaBridge().
-function setTwoFaWebhookUrl() {
-  PropertiesService.getScriptProperties().setProperty(
-    'TWOFA_WEBHOOK_URL',
-    'https://6izy5uwx53awpbzcwnsuf2tl540pylkv.lambda-url.us-east-1.on.aws/'
-  );
-  console.log('TWOFA_WEBHOOK_URL saved');
-}
