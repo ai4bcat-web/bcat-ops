@@ -48,8 +48,8 @@ describe('monthMetrics', () => {
 
   it('computes mpg from Motive gallons burned, only over trucks reporting both', () => {
     const m = monthMetrics(month({ key: 'x', trucks: [
-      { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 0, miles: 5000, fuel: 5000, gallons: 1100, motiveGallons: 1000 },
-      { unitNumber: '3114', bucket: 'IVAN_LOCAL', revenue: 0, miles: 0, fuel: 0, gallons: 0, motiveGallons: 0 },
+      { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 0, miles: 5000, fuel: 5000, gallons: 1100, motiveGallons: 1000, motiveMiles: 5000 },
+      { unitNumber: '3114', bucket: 'IVAN_LOCAL', revenue: 0, miles: 0, fuel: 0, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
     ] }))
     expect(m.mpg).toBe(5)
   })
@@ -108,9 +108,9 @@ describe('findings', () => {
       { name: 'ONE-OFF', loads: 1, revenue: 100 },
     ],
     trucks: [
-      { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 17004, miles: 4998, fuel: 5590, gallons: 878, motiveGallons: 870 },
-      { unitNumber: '685', bucket: 'IVAN_LOCAL', revenue: 19626, miles: 4054, fuel: 3701, gallons: 636, motiveGallons: 630 },
-      { unitNumber: '3890', bucket: 'BOX_TRUCK', revenue: 14695, miles: 6650, fuel: 3501, gallons: 551, motiveGallons: 540 },
+      { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 17004, miles: 4998, fuel: 5590, gallons: 878, motiveGallons: 870, motiveMiles: 4998 },
+      { unitNumber: '685', bucket: 'IVAN_LOCAL', revenue: 19626, miles: 4054, fuel: 3701, gallons: 636, motiveGallons: 630, motiveMiles: 4054 },
+      { unitNumber: '3890', bucket: 'BOX_TRUCK', revenue: 14695, miles: 6650, fuel: 3501, gallons: 551, motiveGallons: 540, motiveMiles: 6650 },
     ],
     unitMaintenance: [{ unitNumber: '530', amount: 7959, biggest: { description: 'Transmission', amount: 5178 } }],
   })

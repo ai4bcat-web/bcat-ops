@@ -98,10 +98,16 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
       }
 
       // Gallons burned per Motive's engine data (driving + idle), from the DAY mileage rows.
+      // Only days that carry both miles and gallons count toward MPG; a day with miles but
+      // no fuel figure (older rows) would otherwise inflate the economy.
       const motiveGalByTruck = new Map<string, number>()
+      const motiveMilesByTruck = new Map<string, number>()
       for (const row of mileageRows) {
         if (row.periodType !== 'DAY' || !inRange(row.periodStart) || !memberIds.has(row.truckId)) continue
-        if (typeof row.gallons === 'number' && row.gallons > 0) motiveGalByTruck.set(row.truckId, (motiveGalByTruck.get(row.truckId) ?? 0) + row.gallons)
+        if (typeof row.gallons === 'number' && row.gallons > 0) {
+          motiveGalByTruck.set(row.truckId, (motiveGalByTruck.get(row.truckId) ?? 0) + row.gallons)
+          motiveMilesByTruck.set(row.truckId, (motiveMilesByTruck.get(row.truckId) ?? 0) + (row.miles ?? 0))
+        }
       }
 
       // Posted maintenance invoices on member trucks and trailers, by unit.
@@ -141,6 +147,7 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
           fuel: t.fuel,
           gallons: galByTruck.get(t.truckId) ?? 0,
           motiveGallons: motiveGalByTruck.get(t.truckId) ?? 0,
+          motiveMiles: motiveMilesByTruck.get(t.truckId) ?? 0,
         })),
         customers: [...custMap.values()].sort((a, b) => b.revenue - a.revenue),
         unitMaintenance: [...unitMaint.values()].sort((a, b) => b.amount - a.amount),

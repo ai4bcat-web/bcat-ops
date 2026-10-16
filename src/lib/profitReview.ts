@@ -19,6 +19,8 @@ export interface ReviewTruck {
   gallons:    number
   /** Gallons burned per Motive's engine data, driving plus idle (MPG basis). */
   motiveGallons: number
+  /** Odometer miles on the days that also have Motive gallons, so MPG compares like with like. */
+  motiveMiles:   number
 }
 
 export interface ReviewCustomer {
@@ -98,8 +100,8 @@ export function monthMetrics(m: ReviewMonthInput): MonthMetrics {
   const share = m.daysInMonth > 0 ? Math.min(1, Math.max(0, m.daysElapsed / m.daysInMonth)) : 1
   const proratedNet = isPartial && !m.costsToDate ? m.revenue - (m.fuel + m.driverPay + m.maintenance + (m.insurance + m.fixed) * share) : net
   // Fuel economy from Motive only: trucks reporting both odometer miles and engine fuel burn.
-  const eco = m.trucks.filter((t) => t.miles > 0 && t.motiveGallons > 0)
-  const ecoMiles = eco.reduce((s, t) => s + t.miles, 0)
+  const eco = m.trucks.filter((t) => t.motiveMiles > 0 && t.motiveGallons > 0)
+  const ecoMiles = eco.reduce((s, t) => s + t.motiveMiles, 0)
   const ecoGal = eco.reduce((s, t) => s + t.motiveGallons, 0)
   return {
     net,
@@ -284,7 +286,7 @@ export function findings(months: ReviewMonthInput[], base: ReviewMonthInput | nu
         out.push({
           severity: excess > 1500 ? 'medium' : 'info',
           title: `Check fuel economy on ${thirsty.map((t) => `#${t.unitNumber}`).join(' and ')}`,
-          detail: `${latest.label}: ${thirsty.map((t) => `#${t.unitNumber} ${usd2(t.fuel / t.miles)}/mi${t.motiveGallons > 0 ? ` (${(t.miles / t.motiveGallons).toFixed(1)} mpg per Motive)` : ''}`).join(', ')} vs the best semi at ${usd2(best)}/mi. Idle time, routing and a post-repair economy check are the usual culprits.`,
+          detail: `${latest.label}: ${thirsty.map((t) => `#${t.unitNumber} ${usd2(t.fuel / t.miles)}/mi${t.motiveGallons > 0 && t.motiveMiles > 0 ? ` (${(t.motiveMiles / t.motiveGallons).toFixed(1)} mpg per Motive)` : ''}`).join(', ')} vs the best semi at ${usd2(best)}/mi. Idle time, routing and a post-repair economy check are the usual culprits.`,
           impact: excess,
         })
       }

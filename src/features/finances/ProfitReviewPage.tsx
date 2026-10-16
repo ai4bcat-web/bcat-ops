@@ -226,8 +226,8 @@ export function ProfitReviewPage() {
                     const ts = ref.trucks.filter((t) => t.bucket === b)
                     if (ts.length === 0) return null
                     const rev = ts.reduce((s, t) => s + t.revenue, 0), mi = ts.reduce((s, t) => s + t.miles, 0), fu = ts.reduce((s, t) => s + t.fuel, 0)
-                    const eco = ts.filter((t) => t.miles > 0 && t.motiveGallons > 0)
-                    const em = eco.reduce((s, t) => s + t.miles, 0), eg = eco.reduce((s, t) => s + t.motiveGallons, 0)
+                    const eco = ts.filter((t) => t.motiveMiles > 0 && t.motiveGallons > 0)
+                    const em = eco.reduce((s, t) => s + t.motiveMiles, 0), eg = eco.reduce((s, t) => s + t.motiveGallons, 0)
                     return (
                       <tr key={b}>
                         <td style={{ ...TDL, fontWeight: 600 }}>{LOCAL_SUBGROUP_LABELS[b]}</td>
@@ -247,7 +247,7 @@ export function ProfitReviewPage() {
                     <tr key={t.unitNumber}>
                       <td style={TDL}><span style={{ fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</span> <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>{LOCAL_SUBGROUP_LABELS[t.bucket]}</span></td>
                       <td style={TD}>{num0(t.miles)}</td><td style={TD}>{t.motiveGallons > 0 ? num0(t.motiveGallons) : '—'}</td>
-                      <td style={TD}>{t.miles > 0 && t.motiveGallons > 0 ? (t.miles / t.motiveGallons).toFixed(1) : '—'}</td>
+                      <td style={TD}>{t.motiveMiles > 0 && t.motiveGallons > 0 ? (t.motiveMiles / t.motiveGallons).toFixed(1) : '—'}</td>
                       <td style={TD}>{num0(t.gallons)}</td>
                       <td style={TD}>{usd2(t.miles > 0 ? t.fuel / t.miles : null)}</td>
                     </tr>
