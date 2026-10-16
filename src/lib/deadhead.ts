@@ -115,3 +115,8 @@ export function emptyMilesByCustomer(days: DaySummary[]): Array<{ customer: stri
   }
   return [...by.entries()].map(([customer, v]) => ({ customer, ...v })).sort((a, b) => b.emptyMiles - a.emptyMiles)
 }
+
+/** Where a driver's day starts and ends, by fleet: the Ivan yard, or the box truck's base. */
+export function baseLabelFor(fleetGroup: string | null | undefined): string {
+  return fleetGroup === 'BOX_TRUCK' ? 'Base · 1193 E Higgins Rd, Elk Grove Village' : 'Yard · Pleasant Prairie'
+}

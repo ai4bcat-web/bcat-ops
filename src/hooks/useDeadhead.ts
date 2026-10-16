@@ -4,8 +4,32 @@ import { useDrivers } from './useDrivers'
 import { listTimeClockEntries } from '@/lib/apiClient'
 import { getStops } from '@/lib/stops'
 import { chicagoDateStr } from '@/lib/date'
-import { buildDayLegs, totals, emptyMilesByCustomer, type DayEvent, type DaySummary, type DeadheadTotals } from '@/lib/deadhead'
+import { buildDayLegs, totals, emptyMilesByCustomer, baseLabelFor, type DayEvent, type DaySummary, type DeadheadTotals } from '@/lib/deadhead'
+import { fetchOdometerDays } from './useTruckOdometer'
+import type { TruckOdometerDay } from '@/lib/odometerWeek'
 import type { TimeClockEntry } from '@/types'
+
+/** Sunday that opens the week containing `date` (the odometer ledger's week key). */
+function sundayOf(date: string): string {
+  const d = new Date(date + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() - d.getUTCDay())
+  return d.toISOString().slice(0, 10)
+}
+
+/** Every odometer-ledger row for the weeks covering [from, to]. */
+async function fetchOdometerRange(from: string, to: string): Promise<TruckOdometerDay[]> {
+  const weeks: string[] = []
+  for (let w = sundayOf(from); w <= to; ) {
+    weeks.push(w)
+    const d = new Date(w + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 7); w = d.toISOString().slice(0, 10)
+  }
+  const pages = await Promise.all(weeks.map((w) => fetchOdometerDays(w)))
+  return pages.flat()
+}
+
+function previousDate(date: string): string {
+  const d = new Date(date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10)
+}
 
 export interface DriverDay {
   driverId:   string
@@ -37,16 +61,17 @@ export function useDeadhead(from: string, to: string): DeadheadData {
   // The fetched window is keyed so "loading" is derived (a new range has no result yet)
   // rather than flipped inside the effect.
   const key = `${from}|${to}`
-  const [fetched, setFetched] = useState<{ key: string; rows: TimeClockEntry[]; error: string | null } | null>(null)
+  const [fetched, setFetched] = useState<{ key: string; rows: TimeClockEntry[]; odometer: TruckOdometerDay[]; error: string | null } | null>(null)
   const loading = fetched?.key !== key
   const clock = useMemo(() => (fetched?.key === key ? fetched.rows : []), [fetched, key])
+  const odometerDays = useMemo(() => (fetched?.key === key ? fetched.odometer : []), [fetched, key])
   const error = fetched?.key === key ? fetched.error : null
 
   useEffect(() => {
     let live = true
-    listTimeClockEntries({ from, to })
-      .then((rows) => { if (live) setFetched({ key, rows, error: null }) })
-      .catch((err: unknown) => { if (live) setFetched({ key, rows: [], error: err instanceof Error ? err.message : String(err) }) })
+    Promise.all([listTimeClockEntries({ from, to }), fetchOdometerRange(from, to)])
+      .then(([rows, odometer]) => { if (live) setFetched({ key, rows, odometer, error: null }) })
+      .catch((err: unknown) => { if (live) setFetched({ key, rows: [], odometer: [], error: err instanceof Error ? err.message : String(err) }) })
     return () => { live = false }
   }, [from, to, key])
 
@@ -67,10 +92,13 @@ export function useDeadhead(from: string, to: string): DeadheadData {
     // Loads picked up before the window's day and not yet delivered: on board from clock in.
     const onboardBefore = new Map<string, string[]>()      // `${driverId}|${date}` → loadIds
 
+    const baseOf = new Map(drivers.map((d) => [d.id, baseLabelFor(d.fleetGroup)]))
+    const clockedDays = new Set<string>()
     for (const c of clock) {
       if (c.kind !== 'WORK' || !company.has(c.driverId)) continue
-      if (c.clockInAt) push(c.driverId, { at: c.clockInAt, kind: 'CLOCK_IN', odometer: c.clockInOdometer ?? null, place: 'Yard' })
-      if (c.clockOutAt) push(c.driverId, { at: c.clockOutAt, kind: 'CLOCK_OUT', odometer: c.clockOutOdometer ?? null, place: 'Yard' })
+      const base = baseOf.get(c.driverId) ?? 'Yard'
+      if (c.clockInAt) { push(c.driverId, { at: c.clockInAt, kind: 'CLOCK_IN', odometer: c.clockInOdometer ?? null, place: base }); clockedDays.add(`${c.driverId}|${chicagoDateStr(c.clockInAt)}`) }
+      if (c.clockOutAt) push(c.driverId, { at: c.clockOutAt, kind: 'CLOCK_OUT', odometer: c.clockOutOdometer ?? null, place: base })
     }
 
     for (const load of loads) {
@@ -101,13 +129,41 @@ export function useDeadhead(from: string, to: string): DeadheadData {
       }
     }
 
+    // A driver with no time clock (the box truck) still starts and ends every day at the
+    // base, so the odometer ledger stands in for the punches: the previous day's closing
+    // reading opens the day and this day's closing reading ends it.
+    const ledger = new Map<string, Map<string, TruckOdometerDay>>()
+    for (const r of odometerDays) {
+      let m = ledger.get(r.truckId); if (!m) { m = new Map(); ledger.set(r.truckId, m) }
+      m.set(r.date, r)
+    }
+    const truckOf = new Map(drivers.map((d) => [d.id, d.assignedTruckId ?? null]))
+    for (const [key, evs] of events) {
+      if (clockedDays.has(key)) continue
+      const [driverId, date] = key.split('|')
+      const truckId = truckOf.get(driverId)
+      const days = truckId ? ledger.get(truckId) : undefined
+      if (!days) continue
+      const base = baseOf.get(driverId) ?? 'Yard'
+      let opening: number | null = null
+      for (let d = previousDate(date), i = 0; i < 4 && opening == null; d = previousDate(d), i++) {
+        const row = days.get(d); if (typeof row?.endOdometer === 'number') opening = row.endOdometer
+      }
+      if (opening == null && typeof days.get(date)?.startOdometer === 'number') opening = days.get(date)!.startOdometer!
+      const closing = typeof days.get(date)?.endOdometer === 'number' ? days.get(date)!.endOdometer! : null
+      const first = evs.reduce((a, e) => (e.at < a ? e.at : a), evs[0].at)
+      const last = evs.reduce((a, e) => (e.at > a ? e.at : a), evs[0].at)
+      if (opening != null) evs.push({ at: new Date(Date.parse(first) - 1).toISOString(), kind: 'CLOCK_IN', odometer: opening, place: base })
+      if (closing != null) evs.push({ at: new Date(Date.parse(last) + 1).toISOString(), kind: 'CLOCK_OUT', odometer: closing, place: base })
+    }
+
     const out: DriverDay[] = []
     for (const [key, evs] of events) {
       const [driverId, date] = key.split('|')
       out.push({ driverId, driverName: names.get(driverId) ?? driverId, date, summary: buildDayLegs(evs, onboardBefore.get(key) ?? []) })
     }
     return out.sort((a, b) => a.date.localeCompare(b.date) || a.driverName.localeCompare(b.driverName))
-  }, [loads, drivers, clock, from, to])
+  }, [loads, drivers, clock, odometerDays, from, to])
 
   const byMonth = useMemo(() => {
     const groups = new Map<string, DaySummary[]>()
