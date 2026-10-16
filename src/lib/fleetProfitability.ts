@@ -75,6 +75,10 @@ export interface DriverAssignmentInput {
   assignedTruckId?: string | null
   /** Broker / 3PL driver — their covered loads are excluded from truck revenue. */
   isBroker?:       boolean
+  /** The driver belongs to the fleet being computed (Driver.fleetGroup). Their loads count
+   *  as fleet revenue even when no truck is on file — drivers change trucks and the truck
+   *  of record gets cleared, but the money is still this fleet's. */
+  inFleet?:        boolean
 }
 
 export interface TruckMileageDayInput {
@@ -138,7 +142,9 @@ export interface FleetProfitabilityResult {
    *  • broker — covered by a broker/3PL driver (intentionally excluded from trucks)
    *  • unattributed — a company driver delivered it but has no assigned truck
    */
-  revenueLeakage: { broker: number; unattributed: number }
+  /** broker: covered by a 3PL (excluded). unattributed: a driver outside every fleet with no
+   *  truck (excluded). noTruck: this fleet's driver with no truck on file — INCLUDED in revenue. */
+  revenueLeakage: { broker: number; unattributed: number; noTruck: number }
 }
 
 /** A load's delivery DATE (YYYY-MM-DD), tolerant of full ISO datetimes. */
@@ -201,9 +207,11 @@ export function calcFleetProfitability(
   // ── Driver → assigned truck map (used for BOTH revenue attribution and pay) ───
   const truckForDriver = new Map<string, string>()
   const brokerDrivers = new Set<string>()
+  const fleetDrivers = new Set<string>()
   for (const a of driverAssignments) {
     if (a.assignedTruckId) truckForDriver.set(a.driverId, a.assignedTruckId)
     if (a.isBroker) brokerDrivers.add(a.driverId)
+    if (a.inFleet) fleetDrivers.add(a.driverId)
   }
 
   // ── Revenue per truck: full rate → delivery day (dollars), attributed to the
@@ -214,6 +222,9 @@ export function calcFleetProfitability(
   const revenueByTruck: Record<string, number> = {}
   let brokerRevenue = 0
   let unattributedRevenue = 0
+  // Fleet revenue delivered by one of this fleet's drivers with no member truck on file:
+  // counted in the fleet total, just not on any truck's row.
+  let revenueNoTruck = 0
   for (const load of loads) {
     const d = deliveryDate(load)
     if (d < range.start || d > range.end) continue
@@ -226,8 +237,12 @@ export function calcFleetProfitability(
     const truckId = load.truckId ?? (driverId ? truckForDriver.get(driverId) : undefined)
     if (truckId && memberIds.has(truckId)) {
       revenueByTruck[truckId] = (revenueByTruck[truckId] ?? 0) + rev
+    } else if (driverId && fleetDrivers.has(driverId) && !(truckId && !memberIds.has(truckId) && load.truckId)) {
+      // Our driver, no truck of ours on file (none, or one that was cleared since): the
+      // revenue is this fleet's. Only an explicit load.truckId in another fleet overrides.
+      revenueNoTruck += rev
     } else if (driverId && !truckForDriver.has(driverId)) {
-      // A company driver delivered it but has no assigned truck at all → unattributed.
+      // A driver outside every fleet with no truck at all → unattributed.
       // (Loads on trucks in OTHER fleet groups are left to that group, not counted here.)
       unattributedRevenue += rev
     }
@@ -319,7 +334,7 @@ export function calcFleetProfitability(
 
   // ── Roll-up ──────────────────────────────────────────────────────────────────
   const sum = (f: (t: TruckProfitability) => number) => trucks.reduce((acc, t) => acc + f(t), 0)
-  const revenue = sum((t) => t.revenue)
+  const revenue = sum((t) => t.revenue) + revenueNoTruck
   const miles = sum((t) => t.miles)
   const fuel = sum((t) => t.fuel)
   const insurance = sum((t) => t.insurance)
@@ -359,6 +374,6 @@ export function calcFleetProfitability(
       fuelPerMile:    miles > 0 ? fuel / miles : null,
       categories,
     },
-    revenueLeakage: { broker: brokerRevenue, unattributed: unattributedRevenue },
+    revenueLeakage: { broker: brokerRevenue, unattributed: unattributedRevenue, noTruck: revenueNoTruck },
   }
 }

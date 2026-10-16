@@ -9,7 +9,8 @@ import type { DateRange } from './fleetProfitability'
 export type AuditBucket =
   | 'counted'        // on a member truck of THIS fleet → in the revenue total
   | 'zeroRate'       // on a member truck but rate is null/0 (counts as $0)
-  | 'unattributed'   // company driver, no assigned truck at all
+  | 'noTruck'        // this fleet's driver, no fleet truck on file → STILL in the revenue total
+  | 'unattributed'   // a driver outside every fleet, no assigned truck at all
   | 'otherFleet'     // resolved to a truck that isn't in THIS fleet (e.g. Amazon)
   | 'broker'         // broker/3PL covered — intentionally excluded
   | 'outOfRange'     // delivered outside the month (see deliveredElsewhere)
@@ -62,9 +63,12 @@ export function auditFleetRevenue(params: {
   const driverById = new Map(drivers.map((d) => [d.id, d]))
   const truckForDriver = new Map<string, string>()
   const brokerDrivers = new Set<string>()
+  const fleetDrivers = new Set<string>()
   for (const d of drivers) {
     if (d.assignedTruckId) truckForDriver.set(d.id, d.assignedTruckId)
     if (d.type === 'broker') brokerDrivers.add(d.id)
+    // Same rule as useFleetProfitability: revenue follows the driver's fleet.
+    if (d.fleetGroup === group || (group === 'LOCAL' && d.fleetGroup === 'BOX_TRUCK')) fleetDrivers.add(d.id)
   }
   const truckById = new Map(equipment.map((e) => [e.id, e]))
   const truckLabelFor = (truckId?: string | null): string | null => {
@@ -75,7 +79,7 @@ export function auditFleetRevenue(params: {
   }
 
   const buckets: Record<AuditBucket, { total: number; rows: AuditRow[] }> = {
-    counted: emptyBucket(), zeroRate: emptyBucket(), unattributed: emptyBucket(),
+    counted: emptyBucket(), zeroRate: emptyBucket(), noTruck: emptyBucket(), unattributed: emptyBucket(),
     otherFleet: emptyBucket(), broker: emptyBucket(), outOfRange: emptyBucket(),
   }
   let pickedUpThisMonthDeliveredLater = 0
@@ -106,9 +110,11 @@ export function auditFleetRevenue(params: {
       bucket = 'broker'
     } else if (resolvedTruck && memberIds.has(resolvedTruck)) {
       bucket = rev === 0 ? 'zeroRate' : 'counted'
+    } else if (driverId && fleetDrivers.has(driverId) && !(resolvedTruck && !memberIds.has(resolvedTruck) && load.truckId)) {
+      // Our driver with no fleet truck on file: counted as fleet revenue, no truck row.
+      bucket = 'noTruck'
     } else if (driverId && !truckForDriver.has(driverId)) {
-      // Company driver with NO assigned truck → engine counts this as unattributed
-      // leakage, even if the load carried an explicit (non-member) truckId.
+      // A driver outside every fleet with NO assigned truck → unattributed leakage.
       bucket = 'unattributed'
     } else {
       // Resolved to a truck in another fleet, or driver assigned elsewhere → not ours.
@@ -142,7 +148,7 @@ export function auditFleetRevenue(params: {
   }
 
   return {
-    countedTotal: buckets.counted.total + buckets.zeroRate.total,
+    countedTotal: buckets.counted.total + buckets.zeroRate.total + buckets.noTruck.total,
     buckets,
     pickedUpThisMonthDeliveredLater: { total: pickedUpThisMonthDeliveredLater, count: pickedUpThisMonthDeliveredLaterCount },
   }

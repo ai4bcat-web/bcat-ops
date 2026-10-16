@@ -115,7 +115,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
 
   const computeForRange = useCallback((cfrRange: DateRange): FleetProfitabilityResult => {
     if (members.length === 0) {
-      return { range: cfrRange, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } }, revenueLeakage: { broker: 0, unattributed: 0 } }
+      return { range: cfrRange, trucks: [], rollup: { revenue: 0, miles: 0, fuel: 0, insurance: 0, loan: 0, otherExpenses: 0, driverCost: 0, net: 0, revenuePerMile: null, fuelPerMile: null, categories: { insurance: 0, financing: 0, lease: 0, maintenance: 0, permits: 0, tolls: 0, other: 0 } }, revenueLeakage: { broker: 0, unattributed: 0, noTruck: 0 } }
     }
 
     // Fold MaintenanceInvoice rows (amount in CENTS, attributed to the equipment they
@@ -148,7 +148,9 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       pay.payPeriods
         .filter((p) => !isCombinedPayDriverId(p.driverId) || p.driverId === combinedPayDriverId(group))
         .map((p) => ({ driverId: p.driverId, periodStart: p.periodStart, periodEnd: p.periodEnd, grossPay: p.grossPay, combined: p.driverId === combinedPayDriverId(group) })),
-      drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker' })),
+      // Revenue follows the driver's fleet: a LOCAL driver's load is Ivan revenue whether or
+      // not a truck is on file. The box truck rides inside the LOCAL P&L today.
+      drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker', inFleet: d.fleetGroup === group || (group === 'LOCAL' && d.fleetGroup === 'BOX_TRUCK') })),
       // Insurance override: current-period premiums (truck + trailer share + WC share)
       // prorated to the range, replacing the legacy per-truck insurance in the P&L.
       insuranceRangeByTruck(insurance.allocation.byTruck, cfrRange),

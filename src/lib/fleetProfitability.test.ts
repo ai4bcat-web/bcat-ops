@@ -193,3 +193,28 @@ describe('calcFleetProfitability', () => {
     expect(t530.fuelPerMile).toBeNull()
   })
 })
+
+describe('revenue follows the driver\'s fleet', () => {
+  it('counts a fleet driver\'s load as fleet revenue when no truck is on file, with no truck row taking it', () => {
+    const range = { start: '2026-06-01', end: '2026-06-30' }
+    const members = [{ truckId: 't1', unitNumber: '530', hasEquipment: true, hasFuelCard: true }]
+    const r = calcFleetProfitability(
+      range, members,
+      [
+        { truckId: null, deliveryDriverId: 'drv-on-truck', rate: 100_000, deliveryAppt: '2026-06-02' },
+        { truckId: null, deliveryDriverId: 'drv-no-truck', rate: 50_000, deliveryAppt: '2026-06-03' },   // ours, truck cleared
+        { truckId: null, deliveryDriverId: 'drv-nowhere', rate: 20_000, deliveryAppt: '2026-06-04' },    // in no fleet
+      ],
+      [], [], [], [], [], [], [],
+      [
+        { driverId: 'drv-on-truck', assignedTruckId: 't1', inFleet: true },
+        { driverId: 'drv-no-truck', assignedTruckId: null, inFleet: true },
+        { driverId: 'drv-nowhere', assignedTruckId: null },
+      ],
+    )
+    expect(r.trucks[0].revenue).toBe(1000)
+    expect(r.rollup.revenue).toBe(1500)
+    expect(r.revenueLeakage.noTruck).toBe(500)
+    expect(r.revenueLeakage.unattributed).toBe(200)
+  })
+})

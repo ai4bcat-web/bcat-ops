@@ -54,7 +54,8 @@ function RateCell({ cents, onCommit }: { cents: number; onCommit: (cents: number
 const BUCKETS: { key: AuditBucket; label: string; hint: string; tone: string; countsToward: boolean }[] = [
   { key: 'counted',      label: 'Counted — on a fleet truck',     hint: 'Delivered this month on this fleet’s truck.',                          tone: '#15803d', countsToward: true },
   { key: 'zeroRate',     label: 'On a fleet truck, but $0 rate',  hint: 'Would count, but the load has no rate entered.',                       tone: '#b45309', countsToward: true },
-  { key: 'unattributed', label: 'No truck assigned',              hint: 'A company driver delivered it but has no truck assigned (Drivers page).', tone: '#b45309', countsToward: false },
+  { key: 'noTruck',      label: 'Counted — our driver, no truck on file', hint: 'Delivered by one of this fleet’s drivers; counts as fleet revenue. No truck row gets it until a truck is on file (drivers change trucks and the truck of record gets cleared).', tone: '#15803d', countsToward: true },
+  { key: 'unattributed', label: 'Driver in no fleet, no truck',    hint: 'Delivered by a driver who is in no fleet and has no truck — set the fleet on the Drivers page.', tone: '#b45309', countsToward: false },
   { key: 'otherFleet',   label: 'On another fleet / no driver',   hint: 'Delivered on a truck in a different fleet, or with no resolvable driver/truck.', tone: 'var(--ds-t3)', countsToward: false },
   { key: 'broker',       label: 'Broker-covered (excluded)',      hint: 'Run by a broker / 3PL — intentionally excluded from truck revenue.',   tone: 'var(--ds-t3)', countsToward: false },
 ]
@@ -65,7 +66,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
   expectedRevenue: number
 }) {
   const [open, setOpen] = useState(false)
-  const [expanded, setExpanded] = useState<Set<AuditBucket>>(new Set(['unattributed']))
+  const [expanded, setExpanded] = useState<Set<AuditBucket>>(new Set(['noTruck', 'unattributed']))
   const [q, setQ] = useState('')
 
   const loads = useAppStore((s) => s.loads)
@@ -94,10 +95,10 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
     [equipment, group],
   )
 
-  // Distinct drivers in the "no truck assigned" bucket → one assign control each.
+  // Distinct drivers with no truck on file (either bucket) → one assign control each.
   const unassignedDrivers = useMemo(() => {
     const m = new Map<string, { name: string; count: number; total: number }>()
-    for (const r of audit.buckets.unattributed.rows) {
+    for (const r of [...audit.buckets.noTruck.rows, ...audit.buckets.unattributed.rows]) {
       if (!r.driverId) continue
       const cur = m.get(r.driverId) ?? { name: r.driverName ?? 'Unknown', count: 0, total: 0 }
       cur.count += 1; cur.total += r.rate
@@ -188,7 +189,7 @@ export function RevenueAuditPanel({ range, group, expectedRevenue }: {
                     <div style={{ fontSize: 11, color: 'var(--ds-t3)', padding: '6px 12px', background: 'var(--ds-bg)' }}>{b.hint}</div>
 
                     {/* Inline fix: assign each unattributed driver a fleet truck → loads reattribute live. */}
-                    {b.key === 'unattributed' && unassignedDrivers.length > 0 && (
+                    {(b.key === 'unattributed' || b.key === 'noTruck') && unassignedDrivers.length > 0 && (
                       <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--ds-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {fleetTrucks.length === 0 ? (
                           <div style={{ fontSize: 11.5, color: '#b45309' }}>No {FLEET_GROUP_LABELS[group]} trucks to assign — add or tag a truck to this fleet on the Fleet page first.</div>
