@@ -32,6 +32,17 @@ export function rankLeaders(rows: LeaderRow[]): LeaderRow[] {
     .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
 }
 
+/** The ranked board plus a zero row for every driver in the group who has nothing yet, so the
+ *  whole roster is always on the dashboard — nobody disappears for having a quiet week. */
+export function withWholeRoster(ranked: LeaderRow[], drivers: DriverLike[]): LeaderRow[] {
+  const seen = new Set(ranked.map((r) => r.driverId))
+  const rest = drivers
+    .filter((d) => !seen.has(d.id))
+    .map((d) => ({ driverId: d.id, name: d.name, colorKey: d.colorKey ?? null, value: 0, count: 0 }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return [...ranked, ...rest]
+}
+
 /**
  * Hours clocked per driver over the given rows. WORK rows only — a paid holiday or PTO
  * day is on the paycheck but nobody "ran" those hours. Open shifts count for nothing

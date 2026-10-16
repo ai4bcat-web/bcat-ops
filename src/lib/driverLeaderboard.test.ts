@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hoursLeaders, grossLeaders, bookedGrossLeaders, rankLeaders, shiftDays, lastAppointment } from './driverLeaderboard'
+import { hoursLeaders, grossLeaders, bookedGrossLeaders, rankLeaders, withWholeRoster, shiftDays, lastAppointment } from './driverLeaderboard'
 import type { TimeClockRow } from './timeClock'
 import type { Load } from '@/types'
 
@@ -111,5 +111,13 @@ describe('bookedGrossLeaders', () => {
       { driverId: 'oo1', name: 'Lee Lara', colorKey: null, value: 4300, count: 3 },
       { driverId: 'oo2', name: 'Roy Workman', colorKey: null, value: 3000, count: 1 },
     ])
+  })
+})
+
+describe('withWholeRoster', () => {
+  it('appends a zero row for every driver not yet on the board, after the ranked rows', () => {
+    const ranked = [{ driverId: 'b', name: 'Bea', colorKey: null, value: 10, count: 2 }]
+    const out = withWholeRoster(ranked, [{ id: 'a', name: 'Al' }, { id: 'b', name: 'Bea' }, { id: 'c', name: 'Cy' }])
+    expect(out.map((r) => [r.name, r.value])).toEqual([['Bea', 10], ['Al', 0], ['Cy', 0]])
   })
 })

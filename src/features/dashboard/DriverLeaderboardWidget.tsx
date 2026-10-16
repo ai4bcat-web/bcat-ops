@@ -8,7 +8,7 @@ import { weekStartOf, weekEndOf, type TimeClockRow } from '@/lib/timeClock'
 import { weekStartOfISO, weekLabel as settlementWeekLabel } from '@/features/driver-pay/week'
 import { periodStartOfISO, periodLabel } from '@/lib/biweekly'
 import { todayChicago } from '@/lib/recurringRevision'
-import { hoursLeaders, bookedGrossLeaders, shiftDays, lastAppointment, type LeaderRow, type LastAppointment } from '@/lib/driverLeaderboard'
+import { hoursLeaders, bookedGrossLeaders, withWholeRoster, shiftDays, lastAppointment, type LeaderRow, type LastAppointment } from '@/lib/driverLeaderboard'
 import { driverGroupOf } from '@/lib/driverFilter'
 import { getColor } from '@/lib/driverColors'
 import { errorText } from '@/lib/errorText'
@@ -28,7 +28,7 @@ const hours1 = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigi
 const fmtMD = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
 
 const MEDALS = ['#d4a017', '#9ca3af', '#b87333'] // gold, silver, bronze
-const MAX_ROWS = 8
+const MAX_ROWS = 12
 
 const navBtn = (disabled: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
@@ -62,6 +62,8 @@ export function DriverLeaderboardWidget() {
   const loads = useAppStore((s) => s.loads)
   const ownerOps = useMemo(() => drivers.filter((d) => d.active !== false && driverGroupOf(d) === 'OWNER_OP'), [drivers])
   const boxDrivers = useMemo(() => drivers.filter((d) => d.active !== false && d.fleetGroup === 'BOX_TRUCK'), [drivers])
+  // Ivan local: company drivers on the time clock (not the box truck, which has its own board).
+  const ivanLocal = useMemo(() => drivers.filter((d) => d.active !== false && d.type !== 'broker' && driverGroupOf(d) === 'IVAN' && d.fleetGroup !== 'BOX_TRUCK'), [drivers])
 
   const [clock, setClock] = useState<{ week: string; rows: TimeClockRow[] } | null>(null)
   // Both results carry the week they belong to, so a stale answer (or a stale error) from a
@@ -76,12 +78,13 @@ export function DriverLeaderboardWidget() {
   }, [hoursWeek])
   const clockError = clockFailure?.week === hoursWeek ? clockFailure.message : null
 
+  // Every driver in the group is listed, zeros included — a quiet week is information too.
   const hoursBoard = useMemo(
-    () => (clock?.week === hoursWeek ? hoursLeaders(clock.rows, drivers) : []),
-    [clock, hoursWeek, drivers],
+    () => (clock?.week === hoursWeek ? withWholeRoster(hoursLeaders(clock.rows, ivanLocal), ivanLocal) : []),
+    [clock, hoursWeek, ivanLocal],
   )
-  const ooBoard = useMemo(() => bookedGrossLeaders(loads, ownerOps, ooWeek, shiftDays(ooWeek, 6)), [loads, ownerOps, ooWeek])
-  const boxBoard = useMemo(() => bookedGrossLeaders(loads, boxDrivers, boxPeriod, shiftDays(boxPeriod, 13)), [loads, boxDrivers, boxPeriod])
+  const ooBoard = useMemo(() => withWholeRoster(bookedGrossLeaders(loads, ownerOps, ooWeek, shiftDays(ooWeek, 6)), ownerOps), [loads, ownerOps, ooWeek])
+  const boxBoard = useMemo(() => withWholeRoster(bookedGrossLeaders(loads, boxDrivers, boxPeriod, shiftDays(boxPeriod, 13)), boxDrivers), [loads, boxDrivers, boxPeriod])
   // Owner-operators: their last booked stop tells dispatch when and where each goes empty.
   const emptyAt = useMemo(() => {
     const m = new Map<string, LastAppointment>()
@@ -151,11 +154,12 @@ function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gro
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {top.map((r, i) => {
+        const medal = i < 3 && r.value > 0
         const color = r.colorKey ? getColor(r.colorKey as never) : undefined
         const initials = r.name.split(/\s+/).map((p) => p[0] ?? '').join('').slice(0, 2).toUpperCase()
         return (
           <div key={r.driverId} style={{ display: 'grid', gridTemplateColumns: '18px 28px minmax(0, 1fr) auto', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: i < 3 ? MEDALS[i] : 'var(--ds-t3)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: medal ? MEDALS[i] : 'var(--ds-t3)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.value > 0 ? i + 1 : '–'}</div>
             <Avatar initials={initials} size="xs" style={color ? { background: color.avatarBg, color: '#fff' } : undefined} />
             <div style={{ minWidth: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -166,10 +170,10 @@ function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gro
                 <div style={{ fontSize: 11, color: 'var(--ds-t2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail(r)}</div>
               )}
               <div style={{ height: 4, borderRadius: 2, background: 'var(--ds-bg)', marginTop: 3, overflow: 'hidden' }}>
-                <div style={{ width: `${max > 0 ? Math.max(4, (r.value / max) * 100) : 0}%`, height: '100%', borderRadius: 2, background: i < 3 ? MEDALS[i] : 'var(--ds-blue)', opacity: i < 3 ? 1 : 0.55 }} />
+                <div style={{ width: `${max > 0 && r.value > 0 ? Math.max(4, (r.value / max) * 100) : 0}%`, height: '100%', borderRadius: 2, background: medal ? MEDALS[i] : 'var(--ds-blue)', opacity: medal ? 1 : 0.55 }} />
               </div>
             </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmt(r.value)}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: r.value > 0 ? 'var(--ds-t1)' : 'var(--ds-t3)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmt(r.value)}</div>
           </div>
         )
       })}
