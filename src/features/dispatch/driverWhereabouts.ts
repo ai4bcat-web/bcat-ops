@@ -15,8 +15,8 @@ export interface Whereabouts {
   place: string | null
   /** Minutes since the fix. */
   fixAgeMin: number | null
-  /** The office's words for the last thing they reported, with when. */
-  lastEvent: { label: string; at: string } | null
+  /** The office's words for the last thing they reported, where, and when. */
+  lastEvent: { label: string; at: string; place: string | null } | null
   /** When they are due at the next delivery, and where. */
   eta: { at: string; stopName: string | null; basis: 'motive' | 'appt' } | null
   /** The unit number of the truck on their file. */
@@ -85,7 +85,7 @@ export function whereaboutsOf(
   return {
     place: placeOf(loc),
     fixAgeMin: loc ? Math.max(0, Math.round((now - new Date(loc.locatedAt).getTime()) / 60_000)) : null,
-    lastEvent: ev ? { label: ev.label, at: ev.at } : null,
+    lastEvent: ev ? { label: ev.label, at: ev.at, place: [ev.stopName, ev.city].filter(Boolean).join(', ') || null } : null,
     eta: pending ? { at: pending.etaAt, stopName: etaStop, basis: pending.basis } : null,
     truck: truck ? String(truck.unitNumber) : null,
     trailer: trailerOnDriver(driver, loads, equipment),
@@ -113,7 +113,7 @@ export function whereaboutsLine(w: Whereabouts | null): string | null {
 
 /** "On site at pickup · 2:14 PM": the conversation's own last status, else the load's last event. */
 export function statusLine(c: { lastStatusText?: string | null; lastStatusAt?: string | null }, w: Whereabouts | null): string | null {
-  const text = c.lastStatusText?.trim() || w?.lastEvent?.label || null
+  const text = c.lastStatusText?.trim() || (w?.lastEvent ? [w.lastEvent.label, w.lastEvent.place].filter(Boolean).join(' · ') : null)
   const at = c.lastStatusText?.trim() ? c.lastStatusAt : w?.lastEvent?.at
   if (!text) return null
   const when = at ? new Date(at).toLocaleString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : null

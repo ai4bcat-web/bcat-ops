@@ -118,7 +118,7 @@ export function DriverLeaderboardWidget() {
       const text = c?.lastStatusText?.trim()
       if (text) { const when = fmt(c?.lastStatusAt); m.set(d.id, when ? `${text} · ${when}` : text); continue }
       const ev = whereaboutsOf(d, loads, equipment, [], nowMs)?.lastEvent
-      if (ev) { const when = fmt(ev.at); m.set(d.id, when ? `${ev.label} · ${when}` : ev.label) }
+      if (ev) { const when = fmt(ev.at); m.set(d.id, [ev.label, ev.place, when].filter(Boolean).join(' · ')) }
     }
     return m
   }, [convos, drivers, loads, equipment, nowMs])

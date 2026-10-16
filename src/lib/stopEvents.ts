@@ -150,6 +150,8 @@ export interface LastStopEvent {
   event: StopEvent
   stopType: Stop['type']
   stopName: string | null
+  /** "Chicago, IL" — the stop's city, so a status can say where. */
+  city: string | null
   at: string
   /** The words dispatch uses: On site at pickup / Departed pickup / On site at delivery / Delivered. */
   label: string
@@ -165,7 +167,7 @@ export function lastStopEvent(load: Load): LastStopEvent | null {
       if (best && at <= best.at) continue
       const delivery = s.type === 'delivery'
       best = {
-        event, stopType: s.type, stopName: s.name?.trim() || null, at,
+        event, stopType: s.type, stopName: s.name?.trim() || null, city: s.city?.trim() || null, at,
         label: event === 'ARRIVED'
           ? (delivery ? 'On site at delivery' : 'On site at pickup')
           : (delivery ? 'Delivered' : 'Departed pickup'),

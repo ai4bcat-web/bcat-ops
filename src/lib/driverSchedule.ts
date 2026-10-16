@@ -157,6 +157,8 @@ export interface DriverStopEvent {
   event: 'ARRIVED' | 'DEPARTED'
   stopType: Stop['type']
   stopName: string | null
+  /** The stop's city, so a status line can say where. */
+  city: string | null
   at: string
   /** The words dispatch uses: On site at pickup / Departed pickup / On site at delivery / Delivered. */
   label: string
@@ -179,7 +181,7 @@ export function lastStopEventForDriver(loads: readonly Load[], driverId: string)
         if (best && at <= best.at) continue
         const delivery = s.type === 'delivery'
         best = {
-          event, stopType: s.type, stopName: s.name?.trim() || null, at, load,
+          event, stopType: s.type, stopName: s.name?.trim() || null, city: s.city?.trim() || null, at, load,
           label: event === 'ARRIVED' ? (delivery ? 'On site at delivery' : 'On site at pickup') : (delivery ? 'Delivered' : 'Departed pickup'),
         }
       }
