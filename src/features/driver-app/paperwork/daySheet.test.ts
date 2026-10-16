@@ -39,6 +39,17 @@ describe('stopsForDay', () => {
   })
 })
 
+describe('a load keeps its pickup before its delivery', () => {
+  it('does not let an earlier delivery window sort ahead of the pickup that feeds it', () => {
+    // 14712: delivery window opens 08:00, pickup is 09:00–11:00. The pickup still comes first.
+    const items = stopsForDay([
+      load('14712', [stop('pu', 'pickup', '2026-10-16', '2026-10-16T14:00:00Z', 0), stop('de', 'delivery', '2026-10-16', '2026-10-16T13:00:00Z', 1)]),
+      load('14705', [stop('pu2', 'pickup', '2026-10-16', '2026-10-16T11:30:00Z', 0), stop('de2', 'delivery', '2026-10-16', '2026-10-16T16:00:00Z', 1)]),
+    ], '2026-10-16')
+    expect(items.map((i) => `${i.load.id}:${i.stop.id}`)).toEqual(['14705:pu2', '14705:de2', '14712:pu', '14712:de'])
+  })
+})
+
 describe('untimed stops', () => {
   it('lists a first-come-first-served stop after the timed appointments of the day', async () => {
     const { stopsForDay } = await import('./daySheet')

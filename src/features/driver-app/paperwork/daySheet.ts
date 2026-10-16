@@ -24,12 +24,20 @@ export function stopsForDay(loads: PaperworkLoad[], today: string): TodayStop[] 
       if (stop.date === today && stop.yours) out.push({ load, stop })
     }
   }
-  // The dispatcher's order on the calendar first (the numbers on the schedule), then timed
-  // appointments in time order, then first-come-first-served / date-only stops (stored at
-  // midnight), then a load's pickup before its delivery.
+  // A load's stops stay in route order — its pickup always before its delivery — whatever
+  // the clock says: a delivery window that opens at 08:00 must not sort ahead of the 09:00
+  // pickup that feeds it (Josh was shown "Delivered — send POD" before he had picked up).
+  // Loads order by the dispatcher's calendar order first, then by each load's earliest
+  // appointment (timed before first-come-first-served / date-only, see apptOrder.ts).
+  const anchor = new Map<string, string>()
+  for (const { load, stop } of out) {
+    const key = `${String(scheduleRank(load)).padStart(16, '0')}|${apptSortKey(stop)}`
+    const cur = anchor.get(load.id)
+    if (cur === undefined || key < cur) anchor.set(load.id, key)
+  }
   return out.sort((a, b) =>
-    scheduleRank(a.load) - scheduleRank(b.load) ||
-    apptSortKey(a.stop).localeCompare(apptSortKey(b.stop)) ||
+    (anchor.get(a.load.id) ?? '').localeCompare(anchor.get(b.load.id) ?? '') ||
+    a.load.id.localeCompare(b.load.id) ||
     a.stop.sequence - b.stop.sequence)
 }
 
