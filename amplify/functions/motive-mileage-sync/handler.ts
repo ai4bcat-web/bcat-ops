@@ -15,6 +15,10 @@
  * Motive API key lives ONLY in process.env.MOTIVE_API_KEY (Amplify Secret).
  * Never logged or committed.
  *
+ * Miles come from the odometer ledger (TruckOdometerDay: end-of-day odometer deltas,
+ * live odometer for today) wherever it has a reading; Motive's IFTA trip feed, which
+ * lags a day or two and misses trips, is only the fallback for days before the ledger.
+ *
  * Idempotent: TruckMileage records use (truckId, periodStart, periodType) as
  * composite primary key, so re-syncing overwrites rather than duplicates.
  */
@@ -26,17 +30,25 @@ import {
   PutCommand,
 } from '@aws-sdk/lib-dynamodb'
 import { fetchVehicleMap, fetchMilesForVehicle, fetchFuelByVehicle } from './motiveClient'
+import { fetchVehicleOdometers } from '../motive-odometer-sync/motiveClient'
+import { indexOdometerRows, dayMilesFromOdometer, rangeMilesFromOdometer, type OdometerIndex, type OdometerDayRow } from './odometerMiles'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
 const EQUIPMENT_TABLE      = process.env.EQUIPMENT_TABLE_NAME!
 const TRUCK_MILEAGE_TABLE  = process.env.TRUCK_MILEAGE_TABLE_NAME!
+const TRUCK_ODOMETER_DAY_TABLE = process.env.TRUCK_ODOMETER_DAY_TABLE_NAME ?? ''
 const MOTIVE_API_KEY       = process.env.MOTIVE_API_KEY!
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 function toIso(d: Date): string {
   return d.toISOString().slice(0, 10)
+}
+
+/** America/Chicago calendar date for an instant — the day the odometer ledger closes on. */
+function centralDate(d: Date): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago' }).format(d)
 }
 
 /** Returns the Monday (week start) of the week containing d. */
@@ -183,6 +195,32 @@ async function fetchEquipmentByMotiveNumber(): Promise<Map<string, { id: string;
   return map
 }
 
+/** Every odometer-ledger row dated on or after `fromDate`, for all trucks. */
+async function fetchOdometerRows(fromDate: string): Promise<OdometerDayRow[]> {
+  if (!TRUCK_ODOMETER_DAY_TABLE) return []
+  const rows: OdometerDayRow[] = []
+  let token: Record<string, unknown> | undefined
+  do {
+    const result = await dynamo.send(new ScanCommand({
+      TableName:                 TRUCK_ODOMETER_DAY_TABLE,
+      FilterExpression:          '#d >= :from',
+      ExpressionAttributeNames:  { '#d': 'date' },
+      ExpressionAttributeValues: { ':from': fromDate },
+      ExclusiveStartKey:         token as Record<string, never> | undefined,
+    }))
+    for (const item of result.Items ?? []) {
+      rows.push({
+        truckId:     String(item.truckId),
+        date:        String(item.date),
+        miles:       typeof item.miles === 'number' ? item.miles : null,
+        endOdometer: typeof item.endOdometer === 'number' ? item.endOdometer : null,
+      })
+    }
+    token = result.LastEvaluatedKey
+  } while (token)
+  return rows
+}
+
 async function upsertMileage(
   truckId:     string,
   unitNumber:  string,
@@ -190,6 +228,7 @@ async function upsertMileage(
   periodType:  string,
   miles:       number,
   gallons?:    number,
+  milesSource: 'odometer' | 'ifta' = 'ifta',
 ) {
   const now = new Date().toISOString()
   await dynamo.send(new PutCommand({
@@ -208,13 +247,15 @@ async function upsertMileage(
       // burned no fuel, and MPG computed from it would be nonsense.
       ...(typeof gallons === 'number' && gallons > 0 ? { gallons } : {}),
       source:    'motive',
+      // 'odometer': end-of-day odometer deltas (live odometer for today); 'ifta': Motive trip feed.
+      milesSource,
       syncedAt:  now,
       createdAt: now,
       updatedAt: now,
     },
   }))
   console.log(
-    `[mileage] upserted truck=${unitNumber} ${periodType} ${periodStart} → ${miles.toFixed(1)} mi` +
+    `[mileage] upserted truck=${unitNumber} ${periodType} ${periodStart} → ${miles.toFixed(1)} mi (${milesSource})` +
     (typeof gallons === 'number' ? ` / ${gallons.toFixed(1)} gal` : ''),
   )
 }
@@ -229,18 +270,32 @@ interface Period {
   type:  PeriodType
 }
 
+interface OdometerSource {
+  index: OdometerIndex
+  /** Live odometer by Motive vehicle id, for today's not-yet-closed miles. */
+  live:  Map<number, number>
+  today: string
+}
+
 async function syncTruck(
   truck: SyncTarget,
   periods: Period[],
   /** Gallons for the whole fleet, by period start then Motive vehicle id. */
   fuel: Map<string, Map<number, number>>,
+  odo: OdometerSource,
 ): Promise<void> {
   for (const period of periods) {
     try {
-      const miles = await fetchMilesForVehicle(MOTIVE_API_KEY, truck.motiveVehicleId, period.start, period.end)
+      // Odometer ledger first (exact, no lag); Motive's IFTA trip feed only where the
+      // ledger has no reading for the truck on that day / at the range start.
+      const liveOdo = odo.live.get(truck.motiveVehicleId) ?? null
+      const fromOdometer = period.type === 'DAY'
+        ? dayMilesFromOdometer(odo.index, truck.truckId, period.start, odo.today, liveOdo)
+        : rangeMilesFromOdometer(odo.index, truck.truckId, period.start, period.end, odo.today, liveOdo)
+      const miles = fromOdometer ?? await fetchMilesForVehicle(MOTIVE_API_KEY, truck.motiveVehicleId, period.start, period.end)
       // undefined, not 0, when Motive reported no fuel for this truck — see the model.
       const gallons = fuel.get(`${period.start}#${period.type}`)?.get(truck.motiveVehicleId)
-      await upsertMileage(truck.truckId, truck.unitNumber, period.start, period.type, miles, gallons)
+      await upsertMileage(truck.truckId, truck.unitNumber, period.start, period.type, miles, gallons, fromOdometer != null ? 'odometer' : 'ifta')
     } catch (err) {
       // Log and continue — one period failing shouldn't abort the whole sync
       console.error(`[mileage] failed truck=${truck.unitNumber} ${period.type} ${period.start}:`, err)
@@ -351,9 +406,23 @@ export const handler = async (event: Record<string, unknown> = {}): Promise<void
    */
   const fuel = await fetchFuelForPeriods(periods)
 
+  // Odometer ledger covering every period, plus each truck's live odometer for today.
+  const earliest = periods.reduce((min, p) => (p.start < min ? p.start : min), periods[0]?.start ?? toIso(new Date()))
+  const odoRows = await fetchOdometerRows(earliest)
+  const live = new Map<number, number>()
+  try {
+    for (const v of await fetchVehicleOdometers(MOTIVE_API_KEY)) {
+      if (v.odometer != null) live.set(v.vehicleId, v.odometer)
+    }
+  } catch (err) {
+    console.error('[mileage] live odometers unavailable — today falls back to the IFTA feed', err)
+  }
+  const odo: OdometerSource = { index: indexOdometerRows(odoRows), live, today: centralDate(new Date()) }
+  console.log(`[mileage] odometer ledger: ${odoRows.length} day rows since ${earliest}; live readings for ${live.size} vehicle(s)`)
+
   // Bounded concurrency across (truck × period) so big backfills stay under the timeout.
   const jobs = trucks.flatMap((truck) => periods.map((period) => ({ truck, period })))
-  await runPooled(jobs, 5, ({ truck, period }) => syncTruck(truck, [period], fuel))
+  await runPooled(jobs, 5, ({ truck, period }) => syncTruck(truck, [period], fuel, odo))
 
   console.log(`[motive-mileage-sync] complete — ${jobs.length} (truck × period) writes`)
 }

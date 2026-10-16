@@ -892,18 +892,21 @@ const truckConfigTable  = backend.data.resources.tables['TruckConfig']
 const truckMileageTable = backend.data.resources.tables['TruckMileage']
 const equipmentTable    = backend.data.resources.tables['Equipment']
 
+const odometerDayTableForMileage = backend.data.resources.tables['TruckOdometerDay']
 backend.motiveMileageSync.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions:   ['dynamodb:Scan', 'dynamodb:PutItem'],
     resources: [
       equipmentTable.tableArn,
       truckMileageTable.tableArn,
+      odometerDayTableForMileage.tableArn,   // read-only: miles come from the odometer ledger
     ],
   })
 )
 
-motiveFn.addEnvironment('EQUIPMENT_TABLE_NAME',     equipmentTable.tableName)
-motiveFn.addEnvironment('TRUCK_MILEAGE_TABLE_NAME', truckMileageTable.tableName)
+motiveFn.addEnvironment('EQUIPMENT_TABLE_NAME',          equipmentTable.tableName)
+motiveFn.addEnvironment('TRUCK_MILEAGE_TABLE_NAME',      truckMileageTable.tableName)
+motiveFn.addEnvironment('TRUCK_ODOMETER_DAY_TABLE_NAME', odometerDayTableForMileage.tableName)
 
 // EventBridge daily cron — 02:05 UTC every day
 const dailyMileageRule = new Rule(motiveFn.stack, 'MotiveMileageDailySyncRule', {
@@ -911,6 +914,13 @@ const dailyMileageRule = new Rule(motiveFn.stack, 'MotiveMileageDailySyncRule', 
   description: 'Sync Motive ELD mileage for every Motive vehicle daily',
 })
 dailyMileageRule.addTarget(new EventsLambdaTarget(motiveFn))
+// Second pass 06:30 UTC — right after the odometer ledger closes the previous Central
+// day (06:00 UTC), so yesterday's miles are final by the morning.
+const mileageAfterCloseRule = new Rule(motiveFn.stack, 'MotiveMileageAfterOdometerCloseRule', {
+  schedule:    Schedule.cron({ minute: '30', hour: '6', day: '*', month: '*' }),
+  description: 'Re-sync Motive mileage after the odometer ledger closes the previous day',
+})
+mileageAfterCloseRule.addTarget(new EventsLambdaTarget(motiveFn))
 
 // ── motiveLocationSync Lambda ──────────────────────────────────────────────
 

@@ -11,6 +11,8 @@
  *                                sum across jurisdictions = total truck miles for period
  */
 
+import { chunkRange } from './odometerMiles'
+
 const BASE_URL = 'https://api.gomotive.com'
 
 export interface MotiveVehicle {
@@ -79,6 +81,21 @@ export async function fetchVehicleMap(apiKey: string): Promise<Map<string, Motiv
  * Date strings: YYYY-MM-DD.
  */
 export async function fetchMilesForVehicle(
+  apiKey: string,
+  vehicleId: number,
+  startDate: string,
+  endDate: string,
+): Promise<number> {
+  // Motive rejects IFTA queries longer than 3 months, so a year-to-date range is fetched
+  // in 90-day windows and summed.
+  let totalMiles = 0
+  for (const window of chunkRange(startDate, endDate)) {
+    totalMiles += await fetchMilesForVehicleWindow(apiKey, vehicleId, window.start, window.end)
+  }
+  return totalMiles
+}
+
+async function fetchMilesForVehicleWindow(
   apiKey: string,
   vehicleId: number,
   startDate: string,

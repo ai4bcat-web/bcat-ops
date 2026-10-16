@@ -4,6 +4,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { useFleetProfitability } from '@/hooks/useFleetProfitability'
 import { monthRange, monthLabel } from '@/features/fleet-profitability/monthRange'
 import { weekRange, weekLabel } from '@/features/fleet-profitability/weekRange'
+import { aggregateLocalSubgroups } from '@/lib/localSubgroups'
 
 const money2 = (n: number | null) =>
   n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -50,6 +51,13 @@ export function PerMileWidget() {
   // Jason visible even while their mileage feed is still being reconciled).
   const trucks = (data?.trucks ?? []).filter((t) => t.miles > 0 || t.revenue > 0)
   const fleet = data?.rollup
+  // Reported per bucket (Ivan local vs box truck), not per truck or driver: revenue and
+  // miles are summed independently, so a driver whose revenue lands on one truck while
+  // his ELD miles arrive on another still nets out inside the bucket.
+  const groups = aggregateLocalSubgroups(trucks).map((g) => {
+    const fuel = trucks.filter((t) => g.units.includes(t.unitNumber)).reduce((s, t) => s + t.fuel, 0)
+    return { ...g, fuel, fuelPerMile: g.miles > 0 ? fuel / g.miles : null }
+  })
 
   // Fleet history (oldest → newest) for the comparison line chart — a window of
   // TREND_WINDOW periods ending at the selected offset, period-aware.
@@ -80,7 +88,7 @@ export function PerMileWidget() {
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Revenue &amp; fuel per mile</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
               Ivan fleet · {view === 'table'
-                ? `Per truck · ${rangeLabel}`
+                ? `Ivan local vs box truck · ${rangeLabel}`
                 : `${period === 'week' ? 'Weekly' : 'Monthly'} trend · last ${TREND_WINDOW[period]} ${period}s${offset > 0 ? ` through ${rangeLabel}` : ''}`}
             </div>
           </div>
@@ -155,8 +163,8 @@ export function PerMileWidget() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                <th style={{ ...TH, textAlign: 'left' }}>Truck</th>
-                <th style={{ ...TH, textAlign: 'left' }}>Driver</th>
+                <th style={{ ...TH, textAlign: 'left' }}>Group</th>
+                <th style={{ ...TH, textAlign: 'left' }}>Trucks</th>
                 <th style={TH}>Miles</th>
                 <th style={TH}>Total rev</th>
                 <th style={TH}>Total fuel</th>
@@ -165,15 +173,15 @@ export function PerMileWidget() {
               </tr>
             </thead>
             <tbody>
-              {trucks.map((t) => (
-                <tr key={t.truckId} style={{ borderBottom: '1px solid var(--ds-border)' }}>
-                  <td style={{ ...TD, textAlign: 'left', fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</td>
-                  <td style={{ ...TD, textAlign: 'left', color: t.driverName ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t.driverName ?? '—'}</td>
-                  <td style={{ ...TD, color: t.miles ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{miles0(t.miles)}</td>
-                  <td style={{ ...TD, color: COLORS.rev, fontWeight: 600 }}>{money0(t.revenue)}</td>
-                  <td style={{ ...TD, color: t.hasFuelCard ? COLORS.fuel : 'var(--ds-t3)' }}>{t.hasFuelCard ? money0(t.fuel) : '—'}</td>
-                  <td style={{ ...TD, color: COLORS.rev }}>{money2(t.revenuePerMile)}</td>
-                  <td style={{ ...TD, color: t.hasFuelCard ? COLORS.fuel : 'var(--ds-t3)' }}>{t.hasFuelCard ? money2(t.fuelPerMile) : '—'}</td>
+              {groups.map((g) => (
+                <tr key={g.key} style={{ borderBottom: '1px solid var(--ds-border)' }}>
+                  <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }}>{g.label}</td>
+                  <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t3)', fontFamily: 'monospace', fontSize: 12 }}>{g.units.map((u) => `#${u}`).join('  ')}</td>
+                  <td style={{ ...TD, color: g.miles ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{miles0(g.miles)}</td>
+                  <td style={{ ...TD, color: COLORS.rev, fontWeight: 600 }}>{money0(g.revenue)}</td>
+                  <td style={{ ...TD, color: COLORS.fuel }}>{money0(g.fuel)}</td>
+                  <td style={{ ...TD, color: COLORS.rev }}>{money2(g.revenuePerMile)}</td>
+                  <td style={{ ...TD, color: COLORS.fuel }}>{money2(g.fuelPerMile)}</td>
                 </tr>
               ))}
             </tbody>
