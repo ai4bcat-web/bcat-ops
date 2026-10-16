@@ -20,6 +20,7 @@ import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
 import { TruckMapWidget } from './TruckMapWidget'
 import { PerMileWidget } from './PerMileWidget'
+import { PerMileKpis } from './PerMileKpis'
 import { DieselPriceWidget } from './DieselPriceWidget'
 import { MonthlyComparisonWidget } from './MonthlyComparisonWidget'
 import { getColor } from '@/lib/driverColors'
@@ -574,6 +575,9 @@ export function DashboardPage() {
             sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
           />
         </div>
+
+        {/* ── Ivan local, this month to date: cost / revenue / profit per mile ─ */}
+        <PerMileKpis />
 
         {/* ── Fleet tracking (Motive ELD) ──────────────────────────────────── */}
         <TruckMapWidget />
