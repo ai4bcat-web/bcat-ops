@@ -178,6 +178,10 @@ const schema = a.schema({
       note:        a.string(),
       /** Who entered it. A driver's own clock, or staff adding/fixing it for them. */
       source:      a.enum(['DRIVER', 'STAFF']),
+      /** Truck on file at clock in, and its odometer at each punch — the yard legs of loaded-vs-empty miles. */
+      truckId:         a.string(),
+      clockInOdometer: a.float(),
+      clockOutOdometer: a.float(),
       /*
        * Corrections are recorded, never silent. Staff are the only ones who may change a
        * row after the fact, and the original minutes are kept beside the new figure so a

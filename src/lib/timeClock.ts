@@ -31,6 +31,9 @@ export interface TimeClockRow {
   source?: 'DRIVER' | 'STAFF' | null
   correctedBy?: string | null
   correctedAt?: string | null
+  truckId?: string | null
+  clockInOdometer?: number | null
+  clockOutOdometer?: number | null
   originalMinutes?: number | null
 }
 

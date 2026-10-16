@@ -1806,6 +1806,45 @@ async function trailerForDriver(driver: DriverRow): Promise<{ id: string; unitNu
 }
 
 /** The latest ELD fix for the driver's assigned truck, or null when there is none. */
+/**
+ * The driver's truck odometer right now, for the loaded-vs-empty mile markers. The
+ * location feed refreshes every 10 minutes and a truck is parked when the driver taps,
+ * so the last synced reading is the reading — unless it is stale, then Motive is asked
+ * directly. Null when there is no truck on file or no reading: the leg is then UNKNOWN,
+ * never guessed.
+ */
+const ODOMETER_FRESH_MS = 30 * 60_000
+async function truckOdometerForDriver(driver: DriverRow): Promise<number | null> {
+  const truckId = (driver.assignedTruckId ?? '').trim()
+  if (!truckId) return null
+  let unitNumber: string | null = null
+  try {
+    if (TRUCK_LOCATION_TABLE) {
+      const loc = (await ddb.send(new GetCommand({ TableName: TRUCK_LOCATION_TABLE, Key: { truckId } }))).Item as
+        | { odometer?: unknown; locatedAt?: unknown; unitNumber?: unknown } | undefined
+      const at = typeof loc?.locatedAt === 'string' ? Date.parse(loc.locatedAt) : NaN
+      if (typeof loc?.odometer === 'number' && Number.isFinite(at) && Date.now() - at < ODOMETER_FRESH_MS) return loc.odometer
+      if (typeof loc?.unitNumber === 'string') unitNumber = loc.unitNumber
+    }
+    if (!MOTIVE_API_KEY) return null
+    if (!unitNumber && EQUIPMENT_TABLE) {
+      const truck = (await ddb.send(new GetCommand({ TableName: EQUIPMENT_TABLE, Key: { id: truckId } }))).Item as EquipmentRow | undefined
+      unitNumber = (truck?.motiveVehicleNumber ?? truck?.unitNumber ?? null) as string | null
+    }
+    if (!unitNumber) return null
+    const res = await fetch(`${MOTIVE_BASE}/vehicle_locations?per_page=100`, { headers: { 'X-Api-Key': MOTIVE_API_KEY, 'X-Metric-Units': 'false' } })
+    if (!res.ok) return null
+    const data = (await res.json()) as { vehicles?: Array<{ vehicle?: { number?: string; current_location?: { odometer?: unknown; true_odometer?: unknown } | null } }> }
+    const v = (data.vehicles ?? []).map((r) => r.vehicle).find((x) => x?.number === unitNumber)
+    const loc = v?.current_location
+    const odo = typeof loc?.true_odometer === 'number' ? loc.true_odometer : typeof loc?.odometer === 'number' ? loc.odometer : null
+    return odo
+  } catch (err) {
+    console.error('[driver-app-api] could not read the truck odometer', { truckId, err })
+    return null
+  }
+}
+
 async function truckFixForDriver(driver: DriverRow): Promise<LatLng | null> {
   const truckId = (driver.assignedTruckId ?? '').trim()
   if (!truckId || !TRUCK_LOCATION_TABLE) return null
@@ -2666,6 +2705,7 @@ export const handler = async (event: FnUrlEvent) => {
           const already = openShiftIn(rows)
           // Idempotent rather than an error: a double tap should not be a failure screen.
           if (already) return reply(200, { ok: true, openShift: already, alreadyOpen: true })
+          const clockInOdometer = await truckOdometerForDriver(driver)
           const item: TimeClockRow = {
             id: randomUUID(),
             driverId,
@@ -2675,6 +2715,9 @@ export const handler = async (event: FnUrlEvent) => {
             clockOutAt: null,
             minutes: null,
             source: 'DRIVER',
+            // The yard reading that opens the day's loaded-vs-empty chain.
+            truckId: (driver.assignedTruckId ?? '').trim() || null,
+            clockInOdometer,
           }
           await ddb.send(new PutCommand({ TableName: TIME_CLOCK_TABLE, Item: {
             ...item, __typename: 'TimeClockEntry', createdAt: nowIso, updatedAt: nowIso,
@@ -2685,17 +2728,20 @@ export const handler = async (event: FnUrlEvent) => {
         if (action === 'OUT') {
           const open = openShiftIn(rows)
           if (!open) return reply(200, { ok: true, openShift: null, alreadyClosed: true })
-          const closed = { ...open, clockOutAt: nowIso }
+          const clockOutOdometer = await truckOdometerForDriver(driver)
+          const closed = { ...open, clockOutAt: nowIso, clockOutOdometer }
           await ddb.send(new UpdateCommand({
             TableName: TIME_CLOCK_TABLE,
             Key: { id: open.id },
-            UpdateExpression: 'SET clockOutAt = :o, #m = :m, updatedAt = :u',
+            UpdateExpression: `SET clockOutAt = :o, #m = :m, updatedAt = :u${clockOutOdometer != null ? ', clockOutOdometer = :odo' : ''}`,
             ExpressionAttributeNames: { '#m': 'minutes' },
             ExpressionAttributeValues: {
               ':o': nowIso,
               // Totalled on close, so the figure is fixed at the moment it was earned.
               ':m': rowMinutes(closed),
               ':u': nowIso,
+              // The yard reading that closes the day's loaded-vs-empty chain.
+              ...(clockOutOdometer != null ? { ':odo': clockOutOdometer } : {}),
             },
           }))
           return reply(200, { ok: true, openShift: null, minutes: rowMinutes(closed) })
@@ -2915,7 +2961,9 @@ export const handler = async (event: FnUrlEvent) => {
       }
 
       const now = nowIso()
-      let next = applyStopEvent(stops, stopId, ev as StopEvent, now)
+      // Odometer at the tap: the mile marker loaded-vs-empty miles are measured from.
+      const odometer = await truckOdometerForDriver(driver)
+      let next = applyStopEvent(stops, stopId, ev as StopEvent, now, odometer)
       let eta: { stopId: string; etaAt: string; basis: 'motive' | 'appt' } | null = null
 
       // Leaving the pickup is when the delivery ETA becomes worth stating.
@@ -2946,7 +2994,7 @@ export const handler = async (event: FnUrlEvent) => {
           ...(load.updatedAt ? { ':prev': load.updatedAt } : {}),
         },
       }))
-      console.log('[driver-app-api] stop event', { driverId, loadId, stopId, event: ev, eta })
+      console.log('[driver-app-api] stop event', { driverId, loadId, stopId, event: ev, eta, odometer })
       {
         const delivery = stop.type === 'delivery'
         const label = ev === 'ARRIVED' ? (delivery ? 'On site at delivery' : 'On site at pickup') : (delivery ? 'Delivered' : 'Departed pickup')

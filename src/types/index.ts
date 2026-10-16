@@ -249,6 +249,9 @@ export interface Stop {
   dwellAlertedAt?: string | null
   arrivedAt?: string | null  // actual facility events only — never inferred from the appointment
   departedAt?: string | null
+  /** Truck odometer (miles) at the tap, for loaded-vs-empty miles (src/lib/deadhead.ts). Absent when no truck/reading. */
+  arrivedOdometer?: number | null
+  departedOdometer?: number | null
   /**
    * When the truck is expected here, set when the driver departs the pickup. 'motive' is
    * computed from the truck's ELD fix (same driver, delivering today); 'appt' means a
@@ -506,6 +509,10 @@ export interface TimeClockEntry {
   /** Staff email. Set only on a corrected row. */
   correctedBy?: string | null
   correctedAt?: string | null
+  /** Truck on file at clock in, and its odometer at each punch (deadhead tracking). */
+  truckId?: string | null
+  clockInOdometer?: number | null
+  clockOutOdometer?: number | null
   /** What the row said before the FIRST correction. */
   originalMinutes?: number | null
   createdAt?: string

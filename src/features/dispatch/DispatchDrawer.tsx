@@ -39,7 +39,9 @@ export function DispatchDrawer({ isDesktop }: { isDesktop: boolean }) {
         type="button"
         onClick={() => set(true)}
         title="Show the dispatch drawer"
-        style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 60, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 999, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}
+        // Below the side panels (zIndex 50): when a load drawer is open its scrim covers this
+        // button instead of the button sitting on top of the drawer's Edit Load control.
+        style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 40, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 999, border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', boxShadow: 'var(--sh-sm)', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}
       >
         <MessageSquare className="size-4" style={{ color: 'var(--ds-blue)' }} /> Dispatch
         {unread ? <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: 'var(--ds-blue)', color: '#fff', fontSize: 11, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>{unread}</span> : null}

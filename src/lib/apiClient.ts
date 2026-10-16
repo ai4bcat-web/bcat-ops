@@ -2845,7 +2845,7 @@ export async function notifyApptNeeded(args: {
 
 const TIME_CLOCK_FIELDS = `
   id driverId workDate kind clockInAt clockOutAt minutes note source
-  correctedBy correctedAt originalMinutes createdAt updatedAt
+  correctedBy correctedAt originalMinutes truckId clockInOdometer clockOutOdometer createdAt updatedAt
 `
 
 /**

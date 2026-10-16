@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, AlertTriangle, TrendingUp, Fuel, Users, Wrench, Package, Calculator, ListChecks } from 'lucide-react'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useProfitReview } from '@/hooks/useProfitReview'
+import { useDeadhead } from '@/hooks/useDeadhead'
+import { format, startOfMonth, subMonths } from 'date-fns'
+import { Route } from 'lucide-react'
 import {
   monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings, projectProfit, breakEvenRatePerMile, rateLadder, isComparable,
   type ReviewMonthInput, type MonthMetrics,
@@ -41,6 +44,9 @@ export function ProfitReviewPage() {
   const [monthsBack, setMonthsBack] = useState(6)
   const [baselineKey, setBaselineKey] = useState<string>('auto')
   const { months, loading, error, unattributedFuel } = useProfitReview(monthsBack)
+  const deadheadFrom = format(startOfMonth(subMonths(new Date(), monthsBack - 1)), 'yyyy-MM-dd')
+  const deadheadTo = format(new Date(), 'yyyy-MM-dd')
+  const deadhead = useDeadhead(deadheadFrom, deadheadTo)
 
   const metrics = useMemo(() => new Map(months.map((m) => [m.key, monthMetrics(m)])), [months])
   const autoBaseline = useMemo(() => pickBaseline(months), [months])
@@ -321,6 +327,60 @@ export function ProfitReviewPage() {
                 </tbody>
               </Wrap>
               <Note>Customers whose average is below the all-in cost per load are being carried by the rest of the month. Three or more loads below cost shows up in the list at the top of the page.</Note>
+            </>
+          )}
+        </Card>
+
+        {/* Loaded vs empty miles */}
+        <Card title="Loaded vs empty miles" icon={<Route size={15} />}>
+          {deadhead.days.length === 0 ? (
+            <Note>{deadhead.loading ? 'Loading…' : 'No odometer readings yet. Readings are taken at clock in, at each on-site / departed / delivered tap, and at clock out, starting now; the first full days will appear here tomorrow.'}</Note>
+          ) : (
+            <>
+              <Wrap>
+                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Fleet</th>{months.map((m) => <th key={m.key} style={TH}>{m.label}</th>)}<th style={TH}>Window</th></tr></thead>
+                <tbody>
+                  {([
+                    ['Loaded miles', (t: typeof deadhead.all) => num0(t.loadedMiles)],
+                    ['Empty miles', (t: typeof deadhead.all) => num0(t.emptyMiles)],
+                    ['Empty share', (t: typeof deadhead.all) => pct0(t.emptyShare)],
+                    ['Legs with a missing reading', (t: typeof deadhead.all) => num0(t.unknownLegs)],
+                  ] as const).map(([label, fmt]) => (
+                    <tr key={label}>
+                      <td style={TDL}>{label}</td>
+                      {months.map((m) => { const t = deadhead.byMonth.get(m.key); return <td key={m.key} style={{ ...TD, color: t ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t ? fmt(t) : '—'}</td> })}
+                      <td style={{ ...TD, fontWeight: 700 }}>{fmt(deadhead.all)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Wrap>
+              <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>By driver</div>
+              <Wrap>
+                <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Driver</th><th style={TH}>Days</th><th style={TH}>Loaded</th><th style={TH}>Empty</th><th style={TH}>Empty share</th><th style={TH}>Missing readings</th></tr></thead>
+                <tbody>
+                  {deadhead.byDriver.map((d) => (
+                    <tr key={d.driverId}>
+                      <td style={TDL}>{d.driverName}</td><td style={TD}>{d.days}</td><td style={TD}>{num0(d.loadedMiles)}</td><td style={TD}>{num0(d.emptyMiles)}</td>
+                      <td style={{ ...TD, color: d.emptyShare != null && d.emptyShare > 0.4 ? BAD : 'var(--ds-t1)' }}>{pct0(d.emptyShare)}</td>
+                      <td style={{ ...TD, color: d.unknownLegs ? '#b45309' : 'var(--ds-t3)' }}>{d.unknownLegs || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Wrap>
+              {deadhead.byCustomer.length > 0 && (
+                <>
+                  <div style={{ padding: '10px 18px 0', fontSize: 12, fontWeight: 600, color: 'var(--ds-t3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Empty miles by the customer the truck was heading to</div>
+                  <Wrap>
+                    <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Customer</th><th style={TH}>Empty legs</th><th style={TH}>Empty miles</th><th style={TH}>Cost at variable rate</th></tr></thead>
+                    <tbody>
+                      {deadhead.byCustomer.slice(0, 10).map((c) => (
+                        <tr key={c.customer}><td style={TDL}>{c.customer}</td><td style={TD}>{c.legs}</td><td style={TD}>{num0(c.emptyMiles)}</td><td style={TD}>{usd0(c.emptyMiles * proj.variableCostPerMile)}</td></tr>
+                      ))}
+                    </tbody>
+                  </Wrap>
+                </>
+              )}
+              <Note>A leg is loaded from the moment a driver departs a pickup until they arrive at that load's delivery; everything else (yard to first pickup, delivery to next pickup, the ride home, trailer moves) is empty. A load picked up but not delivered by clock out stays on board overnight. A leg shows as missing when a reading was not captured, for example a status set from the office; its miles are not guessed.</Note>
             </>
           )}
         </Card>

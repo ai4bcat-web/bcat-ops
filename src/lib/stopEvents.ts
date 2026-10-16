@@ -80,10 +80,13 @@ export function closeDeliveries(stops: Stop[], closing: readonly Pick<Stop, 'id'
 }
 
 /** The stops with one event stamped. Arrival is left alone on a departure: see loadStatus. */
-export function applyStopEvent(stops: Stop[], stopId: string, event: StopEvent, atIso: string): Stop[] {
+export function applyStopEvent(stops: Stop[], stopId: string, event: StopEvent, atIso: string, odometer: number | null = null): Stop[] {
   return stops.map((s) => {
     if (s.id !== stopId) return s
-    return event === 'ARRIVED' ? { ...s, arrivedAt: atIso } : { ...s, departedAt: atIso }
+    // The odometer travels with the timestamp so the day's legs can be measured later.
+    return event === 'ARRIVED'
+      ? { ...s, arrivedAt: atIso, ...(odometer != null ? { arrivedOdometer: odometer } : {}) }
+      : { ...s, departedAt: atIso, ...(odometer != null ? { departedOdometer: odometer } : {}) }
   })
 }
 
