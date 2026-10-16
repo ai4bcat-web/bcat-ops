@@ -47,24 +47,25 @@ export function YearProfitWidget() {
   return (
     <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', alignItems: 'stretch' }}>
-        {/* Year to date, by source */}
+        {/* This month to date, by source; the year so far underneath */}
         <div style={{ padding: '14px 20px', minWidth: isMobile ? undefined : 300, borderRight: isMobile ? 'none' : '1px solid var(--ds-border)', borderBottom: isMobile ? '1px solid var(--ds-border)' : 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Wallet size={15} style={{ color: 'var(--ds-blue)' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>Combined profit · {data[0]?.month ?? 'Jun'} {now.getFullYear()} to date</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>Combined profit · {thisMonth ? `${thisMonth.month} ${now.getFullYear()}${thisMonth.partial ? ' to date' : ''}` : 'this month'}</span>
           </div>
-          <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginTop: 6, color: netColor(ytd.total), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{loading ? '…' : money0(ytd.total)}</div>
+          <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginTop: 6, color: netColor(thisMonth?.total ?? 0), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{loading || !thisMonth ? '…' : money0(thisMonth.total)}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, auto)', gap: '6px 16px', marginTop: 10, fontSize: 11.5 }}>
-            {([['Ivan + box truck', ytd.ivan, COLORS.ivan], ['Owner operators', ytd.oo, COLORS.oo], ['Amazon', ytd.amazon, COLORS.amazon]] as const).map(([label, v, color]) => (
+            {([['Ivan + box truck', thisMonth?.ivan ?? 0, COLORS.ivan], ['Owner operators', thisMonth?.oo ?? 0, COLORS.oo], ['Amazon', thisMonth?.amazon ?? 0, COLORS.amazon]] as const).map(([label, v, color]) => (
               <div key={label}>
                 <div style={{ color: 'var(--ds-t3)', display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 8, height: 8, borderRadius: 2, background: color, display: 'inline-block' }} />{label}</div>
                 <div style={{ fontWeight: 700, color: netColor(v), fontVariantNumeric: 'tabular-nums' }}>{loading ? '…' : money0(v)}</div>
               </div>
             ))}
           </div>
-          {thisMonth && !loading && (
-            <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--ds-t3)' }}>
-              {thisMonth.month}{thisMonth.partial ? ' to date' : ''}: <span style={{ fontWeight: 700, color: netColor(thisMonth.total) }}>{money0(thisMonth.total)}</span>
+          {!loading && data.length > 0 && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--ds-border)', fontSize: 11.5, color: 'var(--ds-t3)' }}>
+              {data[0].month} {now.getFullYear()} to date: <span style={{ fontWeight: 700, color: netColor(ytd.total) }}>{money0(ytd.total)}</span>
+              <span style={{ marginLeft: 8 }}>· Ivan {money0(ytd.ivan)} · OO {money0(ytd.oo)} · Amazon {money0(ytd.amazon)}</span>
             </div>
           )}
         </div>
