@@ -14,6 +14,7 @@ import { getColor } from '@/lib/driverColors'
 import { errorText } from '@/lib/errorText'
 import { useAppStore } from '@/store/useAppStore'
 import { formatApptTime } from '@/lib/date'
+import { PerMileKpis } from './PerMileKpis'
 
 /** "Thu 10/16 · 14:30 · Indianapolis, IN" — when and where the truck goes empty. */
 function emptyLabel(a: LastAppointment): string {
@@ -155,6 +156,9 @@ export function DriverLeaderboardWidget() {
           </div>
         ))}
       </div>
+
+      {/* The money behind the miles, in the same section: cost, revenue and profit per mile this month. */}
+      <PerMileKpis embedded />
     </div>
   )
 }

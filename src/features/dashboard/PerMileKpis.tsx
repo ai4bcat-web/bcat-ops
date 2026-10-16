@@ -18,7 +18,7 @@ const GOOD = '#15803d', BAD = '#dc2626'
  * Same math as the Profit Review: deliveries through today; driver pay, maintenance,
  * insurance and fixed costs cut to the days elapsed and spread evenly over every mile.
  */
-export function PerMileKpis() {
+export function PerMileKpis({ embedded = false }: { embedded?: boolean } = {}) {
   const isMobile = useIsMobile()
   const { months, loading } = useProfitReview(2)
   const current = months[months.length - 1]
@@ -44,13 +44,14 @@ export function PerMileKpis() {
     )
   }
 
+  // Embedded (inside the driver leaderboard) it drops its own card chrome and reads as a section.
   return (
-    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Gauge size={16} style={{ color: 'var(--ds-blue)' }} />
+    <div style={embedded ? { borderTop: '1px solid var(--ds-border)' } : { background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+      <div style={{ padding: embedded ? '12px 20px 6px' : '14px 20px', borderBottom: embedded ? undefined : '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Gauge size={embedded ? 14 : 16} style={{ color: 'var(--ds-blue)' }} />
         <div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Per mile</div>
-          <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Ivan fleet · {current ? `${current.label} to date` : 'this month'}{previous ? ` · fleet row vs ${previous.label}` : ''}</div>
+          <div style={{ fontSize: embedded ? 12 : 14, fontWeight: 700, color: 'var(--ds-t1)' }}>Per mile</div>
+          <div style={{ fontSize: embedded ? 11 : 12, color: 'var(--ds-t3)' }}>Ivan fleet · {current ? `${current.label} to date` : 'this month'}{previous ? ` · fleet row vs ${previous.label}` : ''}</div>
         </div>
       </div>
       {loading && rows.length === 0 ? (
