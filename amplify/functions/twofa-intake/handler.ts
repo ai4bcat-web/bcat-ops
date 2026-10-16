@@ -47,7 +47,14 @@ export const handler = async (event: FnUrlEvent) => {
   }
 
   const code = extractVerificationCode(parsed.text)
-  await postToSlack(slackMessage({ code, from: parsed.from, text: parsed.text, receivedAt: payload.receivedAt ?? null }))
+  try {
+    await postToSlack(slackMessage({ code, from: parsed.from, text: parsed.text, receivedAt: payload.receivedAt ?? null }))
+  } catch (err) {
+    // Non-2xx keeps the bridge from marking the email done, so the text posts on a later
+    // poll once the channel exists / the bot is invited.
+    console.error('[twofa-intake] slack failed', { messageId: payload.messageId, err: String(err) })
+    return respond(502, { error: String(err), channel: CHANNEL })
+  }
   console.log('[twofa-intake] posted', { messageId: payload.messageId, from: parsed.from, code: code ? 'yes' : 'no' })
   return respond(200, { ok: true, code })
 }
