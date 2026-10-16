@@ -135,13 +135,20 @@ function resolveCorePath(): string {
   )
 }
 
+// One cache directory per process. A fresh mkdtemp on every scan left a new 20 MB language
+// cache behind each time — in a warm Lambda that eats /tmp, and a night of test runs left
+// 3,800 of them (83 GB) in the developer's temp folder.
+let cachePath: string | null = null
 function resolveCachePath(): string {
+  if (cachePath && existsSync(cachePath)) return cachePath
   const envPath = process.env.POD_SCAN_CACHE_PATH
   if (envPath) {
     mkdirSync(envPath, { recursive: true })
-    return envPath
+    cachePath = envPath
+  } else {
+    cachePath = mkdtempSync(join(tmpdir(), 'tesseract-cache-'))
   }
-  return mkdtempSync(join(tmpdir(), 'tesseract-cache-'))
+  return cachePath
 }
 
 function isJpegOrPng(bytes: Buffer): { jpeg: boolean; png: boolean } {
