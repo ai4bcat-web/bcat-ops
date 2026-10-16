@@ -4,6 +4,7 @@ import { ArrowLeft, AlertTriangle, TrendingUp, Fuel, Users, Wrench, Package, Cal
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useProfitReview } from '@/hooks/useProfitReview'
 import { useDeadhead } from '@/hooks/useDeadhead'
+import { DEADHEAD_START } from '@/lib/deadhead'
 import { format, startOfMonth, subMonths } from 'date-fns'
 import { Route } from 'lucide-react'
 import {
@@ -343,7 +344,7 @@ export function ProfitReviewPage() {
         {/* Loaded vs empty miles */}
         <Card title="Loaded vs empty miles" icon={<Route size={15} />}>
           {deadhead.days.length === 0 ? (
-            <Note>{deadhead.loading ? 'Loading…' : 'No odometer readings yet. Readings are taken at clock in, at each on-site / departed / delivered tap, and at clock out, starting now; the first full days will appear here tomorrow.'}</Note>
+            <Note>{deadhead.loading ? 'Loading…' : `Tracking starts ${new Date(DEADHEAD_START + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. Readings are taken at clock in, at each on-site / departed / delivered tap, and at clock out; each day appears here once it is closed.`}</Note>
           ) : (
             <>
               <Wrap>
@@ -390,7 +391,7 @@ export function ProfitReviewPage() {
                   </Wrap>
                 </>
               )}
-              <Note>A leg is loaded from the moment a driver departs a pickup until they arrive at that load's delivery; everything else (yard to first pickup, delivery to next pickup, the ride home, trailer moves) is empty. A load picked up but not delivered by clock out stays on board overnight. A leg shows as missing when a reading was not captured, for example a status set from the office; its miles are not guessed.</Note>
+              <Note>Tracked from {new Date(DEADHEAD_START + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. A leg is loaded from the moment a driver departs a pickup until they arrive at that load's delivery; everything else (yard to first pickup, delivery to next pickup, the ride home, trailer moves) is empty. A load picked up but not delivered by clock out stays on board overnight. A leg shows as missing when a reading was not captured, for example a status set from the office; its miles are not guessed.</Note>
             </>
           )}
         </Card>

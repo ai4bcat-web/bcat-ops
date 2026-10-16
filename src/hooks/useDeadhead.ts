@@ -4,7 +4,7 @@ import { useDrivers } from './useDrivers'
 import { listTimeClockEntries } from '@/lib/apiClient'
 import { getStops } from '@/lib/stops'
 import { chicagoDateStr } from '@/lib/date'
-import { buildDayLegs, totals, emptyMilesByCustomer, baseLabelFor, type DayEvent, type DaySummary, type DeadheadTotals } from '@/lib/deadhead'
+import { buildDayLegs, totals, emptyMilesByCustomer, baseLabelFor, DEADHEAD_START, type DayEvent, type DaySummary, type DeadheadTotals } from '@/lib/deadhead'
 import { fetchOdometerDays } from './useTruckOdometer'
 import type { TruckOdometerDay } from '@/lib/odometerWeek'
 import type { TimeClockEntry } from '@/types'
@@ -55,20 +55,24 @@ export interface DeadheadData {
  * from the odometer readings taken at clock in, each stop tap, and clock out. Owner-operators
  * are not on Motive and are left out. Days before the readings started simply have no legs.
  */
-export function useDeadhead(from: string, to: string): DeadheadData {
+export function useDeadhead(fromRequested: string, to: string): DeadheadData {
+  // Nothing before the effective date counts, whatever window the page asks for.
+  const from = fromRequested > DEADHEAD_START ? fromRequested : DEADHEAD_START
   const { loads } = useLoads()
   const { drivers } = useDrivers()
   // The fetched window is keyed so "loading" is derived (a new range has no result yet)
   // rather than flipped inside the effect.
   const key = `${from}|${to}`
   const [fetched, setFetched] = useState<{ key: string; rows: TimeClockEntry[]; odometer: TruckOdometerDay[]; error: string | null } | null>(null)
-  const loading = fetched?.key !== key
+  // Before the effective date there is nothing to fetch, so that window is never "loading".
+  const loading = to >= from && fetched?.key !== key
   const clock = useMemo(() => (fetched?.key === key ? fetched.rows : []), [fetched, key])
   const odometerDays = useMemo(() => (fetched?.key === key ? fetched.odometer : []), [fetched, key])
   const error = fetched?.key === key ? fetched.error : null
 
   useEffect(() => {
     let live = true
+    if (to < from) return () => { live = false }
     Promise.all([listTimeClockEntries({ from, to }), fetchOdometerRange(from, to)])
       .then(([rows, odometer]) => { if (live) setFetched({ key, rows, odometer, error: null }) })
       .catch((err: unknown) => { if (live) setFetched({ key, rows: [], odometer: [], error: err instanceof Error ? err.message : String(err) }) })

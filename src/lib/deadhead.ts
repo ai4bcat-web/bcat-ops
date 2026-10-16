@@ -14,6 +14,9 @@
  * that leg's miles are UNKNOWN rather than guessed.
  */
 
+/** Loaded-vs-empty tracking is effective from this Chicago date; earlier readings are ignored. */
+export const DEADHEAD_START = '2026-10-19'
+
 export type DayEventKind = 'CLOCK_IN' | 'ARRIVED' | 'DEPARTED' | 'CLOCK_OUT'
 
 export interface DayEvent {
