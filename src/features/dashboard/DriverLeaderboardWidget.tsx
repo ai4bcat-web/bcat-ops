@@ -1,0 +1,179 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Trophy, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Avatar } from '@/components/ui/avatar'
+import { useDrivers } from '@/hooks/useDrivers'
+import { useOwnerOperatorPay } from '@/hooks/useOwnerOperatorPay'
+import { useBoxTruckPay } from '@/hooks/useBoxTruckPay'
+import { useIsMobile } from '@/hooks/useIsMobile'
+import { listTimeClockEntries } from '@/lib/apiClient'
+import { weekStartOf, weekEndOf, type TimeClockRow } from '@/lib/timeClock'
+import { weekStartOfISO, weekLabel as settlementWeekLabel } from '@/features/driver-pay/week'
+import { periodStartOfISO, periodLabel } from '@/lib/biweekly'
+import { todayChicago } from '@/lib/recurringRevision'
+import { hoursLeaders, grossLeaders, shiftDays, lastAppointment, type LeaderRow, type LastAppointment } from '@/lib/driverLeaderboard'
+import { getColor } from '@/lib/driverColors'
+import { errorText } from '@/lib/errorText'
+import { useAppStore } from '@/store/useAppStore'
+import { formatApptTime } from '@/lib/date'
+
+/** "Thu 10/16 · 14:30 · Indianapolis, IN" — when and where the truck goes empty. */
+function emptyLabel(a: LastAppointment): string {
+  const d = new Date(a.at)
+  const day = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'short', month: 'numeric', day: 'numeric' }).format(d)
+  const time = formatApptTime(a.at, a.apptType, a.apptEnd)
+  return [day, time, a.city ?? 'city TBD'].join(' · ')
+}
+
+const money0 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
+const hours1 = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} h`
+const fmtMD = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', timeZone: 'UTC' })
+
+const MEDALS = ['#d4a017', '#9ca3af', '#b87333'] // gold, silver, bronze
+const MAX_ROWS = 8
+
+const navBtn = (disabled: boolean): React.CSSProperties => ({
+  display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26,
+  borderRadius: 6, border: 'none', background: 'transparent', padding: 0,
+  cursor: disabled ? 'default' : 'pointer',
+  color: disabled ? 'var(--ds-t3)' : 'var(--ds-t1)', opacity: disabled ? 0.4 : 1,
+})
+
+/**
+ * Who is winning the week: Ivan local drivers by hours on the clock, owner-operators and
+ * the box truck drivers by gross on their settlement. Each board uses its program's own
+ * period (Mon–Sun time-clock week, Sun–Sat settlement week, 14-day box-truck period), so
+ * the numbers match the Hours and pay pages exactly; the arrows step the reference day
+ * back a week at a time.
+ */
+export function DriverLeaderboardWidget() {
+  const isMobile = useIsMobile()
+  const { drivers } = useDrivers()
+  const [offset, setOffset] = useState(0) // 0 = the week containing today, 1 = last week, …
+  const today = todayChicago()
+  const ref = useMemo(() => shiftDays(today, -7 * offset), [today, offset])
+
+  // Three calendars, one reference day.
+  const hoursWeek = weekStartOf(ref)
+  const ooWeek = weekStartOfISO(ref)
+  const boxPeriod = periodStartOfISO(ref)
+
+  const oo = useOwnerOperatorPay(ooWeek)
+  const box = useBoxTruckPay(boxPeriod)
+
+  const [clock, setClock] = useState<{ week: string; rows: TimeClockRow[] } | null>(null)
+  // Both results carry the week they belong to, so a stale answer (or a stale error) from a
+  // week the user has already stepped past is simply ignored rather than cleared by hand.
+  const [clockFailure, setClockFailure] = useState<{ week: string; message: string } | null>(null)
+  useEffect(() => {
+    let live = true
+    listTimeClockEntries({ from: hoursWeek, to: weekEndOf(hoursWeek) })
+      .then((rows) => { if (live) setClock({ week: hoursWeek, rows: rows as TimeClockRow[] }) })
+      .catch((e) => { if (live) setClockFailure({ week: hoursWeek, message: errorText(e) }) })
+    return () => { live = false }
+  }, [hoursWeek])
+  const clockError = clockFailure?.week === hoursWeek ? clockFailure.message : null
+
+  const hoursBoard = useMemo(
+    () => (clock?.week === hoursWeek ? hoursLeaders(clock.rows, drivers) : []),
+    [clock, hoursWeek, drivers],
+  )
+  const ooBoard = useMemo(() => grossLeaders(oo.rows), [oo.rows])
+  const boxBoard = useMemo(() => grossLeaders(box.rows), [box.rows])
+  // Owner-operators: their last booked stop tells dispatch when and where each goes empty.
+  const loads = useAppStore((s) => s.loads)
+  const emptyAt = useMemo(() => {
+    const m = new Map<string, LastAppointment>()
+    for (const r of ooBoard) { const a = lastAppointment(loads, r.driverId); if (a) m.set(r.driverId, a) }
+    return m
+  }, [loads, ooBoard])
+
+  const boards: Array<{ key: string; title: string; period: string; unit: 'hours' | 'gross'; rows: LeaderRow[]; loading: boolean; error: string | null; empty: string }> = [
+    { key: 'local', title: 'Ivan local · hours', period: `${fmtMD(hoursWeek)} – ${fmtMD(weekEndOf(hoursWeek))}`, unit: 'hours', rows: hoursBoard, loading: clock?.week !== hoursWeek && !clockError, error: clockError, empty: 'No hours clocked this week.' },
+    { key: 'oo', title: 'Owner-operators · gross', period: settlementWeekLabel(ooWeek), unit: 'gross', rows: ooBoard, loading: oo.loading && oo.rows.length === 0, error: oo.error, empty: 'No settled loads this week.' },
+    { key: 'box', title: 'Box truck · gross', period: periodLabel(boxPeriod), unit: 'gross', rows: boxBoard, loading: box.loading && box.rows.length === 0, error: box.error, empty: 'No shipments this pay period.' },
+  ]
+
+  return (
+    <div style={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: 12, boxShadow: 'var(--sh-sm)', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--ds-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Trophy size={16} style={{ color: 'var(--ds-blue)' }} />
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Driver leaderboard</div>
+            <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
+              {offset === 0 ? 'This week' : offset === 1 ? 'Last week' : `${offset} weeks ago`} · hours for Ivan local, gross pay for owner-operators and box truck
+            </div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {offset > 0 && (
+            <button onClick={() => setOffset(0)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--ds-blue)', fontFamily: 'inherit', padding: '0 2px' }}>
+              Now
+            </button>
+          )}
+          <div style={{ display: 'flex', gap: 2, background: 'var(--ds-bg)', borderRadius: 8, padding: 2 }}>
+            <button onClick={() => setOffset((o) => o + 1)} aria-label="Previous week" style={navBtn(false)}><ChevronLeft size={15} /></button>
+            <button onClick={() => setOffset((o) => Math.max(0, o - 1))} disabled={offset === 0} aria-label="Next week" style={navBtn(offset === 0)}><ChevronRight size={15} /></button>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))' }}>
+        {boards.map((b, i) => (
+          <div key={b.key} style={{ padding: '12px 16px 14px', borderLeft: !isMobile && i > 0 ? '1px solid var(--ds-border)' : undefined, borderTop: isMobile && i > 0 ? '1px solid var(--ds-border)' : undefined }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ds-t1)' }}>{b.title}</div>
+              <div style={{ fontSize: 11, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{b.period}</div>
+            </div>
+            {b.error ? (
+              <div style={{ padding: '18px 0', fontSize: 12, color: '#dc2626' }}>{b.error}</div>
+            ) : b.loading ? (
+              <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--ds-t3)' }}>Loading…</div>
+            ) : b.rows.length === 0 ? (
+              <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--ds-t3)' }}>{b.empty}</div>
+            ) : (
+              <Board rows={b.rows} unit={b.unit} detail={b.key === 'oo' ? (r) => { const a = emptyAt.get(r.driverId); return a ? `Empty ${emptyLabel(a)}` : 'No appointment booked' } : undefined} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Board({ rows, unit, detail }: { rows: LeaderRow[]; unit: 'hours' | 'gross'; detail?: (r: LeaderRow) => string }) {
+  const top = rows.slice(0, MAX_ROWS)
+  const max = top[0]?.value ?? 0
+  const fmt = unit === 'hours' ? hours1 : money0
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {top.map((r, i) => {
+        const color = r.colorKey ? getColor(r.colorKey as never) : undefined
+        const initials = r.name.split(/\s+/).map((p) => p[0] ?? '').join('').slice(0, 2).toUpperCase()
+        return (
+          <div key={r.driverId} style={{ display: 'grid', gridTemplateColumns: '18px 28px minmax(0, 1fr) auto', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: i < 3 ? MEDALS[i] : 'var(--ds-t3)', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
+            <Avatar initials={initials} size="xs" style={color ? { background: color.avatarBg, color: '#fff' } : undefined} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ fontSize: 13, color: 'var(--ds-t1)', fontWeight: i === 0 ? 700 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+                <span style={{ fontSize: 11, color: 'var(--ds-t3)', whiteSpace: 'nowrap' }}>{r.count} {unit === 'hours' ? (r.count === 1 ? 'day' : 'days') : (r.count === 1 ? 'load' : 'loads')}</span>
+              </div>
+              {detail && (
+                <div style={{ fontSize: 11, color: 'var(--ds-t2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{detail(r)}</div>
+              )}
+              <div style={{ height: 4, borderRadius: 2, background: 'var(--ds-bg)', marginTop: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${max > 0 ? Math.max(4, (r.value / max) * 100) : 0}%`, height: '100%', borderRadius: 2, background: i < 3 ? MEDALS[i] : 'var(--ds-blue)', opacity: i < 3 ? 1 : 0.55 }} />
+              </div>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ds-t1)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{fmt(r.value)}</div>
+          </div>
+        )
+      })}
+      {rows.length > MAX_ROWS && (
+        <div style={{ fontSize: 11, color: 'var(--ds-t3)', paddingLeft: 54 }}>+{rows.length - MAX_ROWS} more</div>
+      )}
+    </div>
+  )
+}

@@ -20,6 +20,7 @@ import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
 import { TruckMapWidget } from './TruckMapWidget'
 import { PerMileKpis } from './PerMileKpis'
+import { DriverLeaderboardWidget } from './DriverLeaderboardWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
 import { MonthlyComparisonWidget } from './MonthlyComparisonWidget'
 import { getColor } from '@/lib/driverColors'
@@ -574,6 +575,9 @@ export function DashboardPage() {
             sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
           />
         </div>
+
+        {/* ── Driver leaderboard: hours (Ivan local), gross (owner-operators, box truck) ─ */}
+        <DriverLeaderboardWidget />
 
         {/* ── Ivan fleet per mile, this month to date (Ivan local / box truck / fleet) ─ */}
         <PerMileKpis />
