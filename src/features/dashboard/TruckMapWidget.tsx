@@ -12,6 +12,7 @@ import { currentLoadForDriver, laneLabel, fixAge } from '@/lib/driverJourney'
 import { lastStopEvent, pendingDeliveryEta } from '@/lib/stopEvents'
 import { trailerOnDriver } from '@/features/dispatch/driverWhereabouts'
 import { driverInfoText } from '@/lib/driverInfoText'
+import { trackingLinkFor } from '@/lib/trackingClient'
 import { formatPhone } from '@/lib/utils'
 import { fleetBucketOf, type FleetBucket } from '@/lib/revenueByFleet'
 import { formatTime } from '@/lib/date'
@@ -357,7 +358,7 @@ export function TruckMapWidget() {
                             truck: unit,
                             vin: equip?.vin ?? null,
                             trailer: trailerOnDriver(assigned, loads, equipment),
-                            trackingUrl: equip?.trackingUrl ?? null,
+                            trackingUrl: equip?.trackingCode ? trackingLinkFor(equip.trackingCode) : (equip?.trackingUrl ?? null),
                           })
                           void navigator.clipboard.writeText(text).then(
                             () => toast.success(`Copied ${assigned.name}'s info`, { description: text.replace(/\n/g, ' · ') }),

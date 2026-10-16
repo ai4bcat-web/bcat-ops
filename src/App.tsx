@@ -15,6 +15,7 @@ import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
+import { TrackPage } from '@/features/tracking/TrackPage'
 import { ProfitReviewPage } from '@/features/finances/ProfitReviewPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
@@ -175,6 +176,8 @@ export default function App() {
           {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
           <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
+          {/* Public truck tracking page — the code in the URL is the key; no sign-in. */}
+          <Route path="/track/:code" element={<TrackPage />} />
           {/* Driver PWA — separate Cognito pool, separate layout, outside staff AuthGuard */}
           <Route
             path="/driver/*"

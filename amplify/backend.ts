@@ -46,6 +46,7 @@ import { dispatchNudge } from './functions/dispatch-nudge/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { disputePortalApi } from './functions/dispute-portal-api/resource'
+import { trackingApi } from './functions/tracking-api/resource'
 import { tripScreenshotParser } from './functions/trip-screenshot-parser/resource'
 import { Bucket, HttpMethods } from 'aws-cdk-lib/aws-s3'
 import { rateconParser } from './functions/ratecon-parser/resource'
@@ -96,6 +97,7 @@ const backend = defineBackend({
   apptRequestEmailer,
   amazonDisputeIntake,
   disputePortalApi,
+  trackingApi,
   tripScreenshotParser,
   tmsDirectoryActions,
   tmsGeocode,
@@ -1239,8 +1241,33 @@ new CfnOutput(disputePortalApiFn.stack, 'DisputePortalApiFunctionUrl', {
   description: 'Public driver dispute portal API URL',
 })
 
+// ── trackingApi Lambda (public truck tracking page) ────────────────────────
+const trackingApiFn = backend.trackingApi.resources.lambda as LambdaFunction
+backend.trackingApi.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan', 'dynamodb:GetItem'],
+    resources: [
+      backend.data.resources.tables['Equipment'].tableArn,
+      backend.data.resources.tables['TruckLocation'].tableArn,
+      backend.data.resources.tables['Driver'].tableArn,
+      backend.data.resources.tables['Load'].tableArn,
+    ],
+  })
+)
+trackingApiFn.addEnvironment('EQUIPMENT_TABLE_NAME', backend.data.resources.tables['Equipment'].tableName)
+trackingApiFn.addEnvironment('TRUCK_LOCATION_TABLE_NAME', backend.data.resources.tables['TruckLocation'].tableName)
+trackingApiFn.addEnvironment('DRIVER_TABLE_NAME', backend.data.resources.tables['Driver'].tableName)
+trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['Load'].tableName)
+const trackingApiUrl = new FunctionUrl(trackingApiFn.stack, 'TrackingApiUrl', {
+  function: trackingApiFn,
+  authType: FunctionUrlAuthType.NONE,
+  cors: { allowedOrigins: PORTAL_ORIGINS, allowedMethods: [HttpMethod.GET], allowedHeaders: ['content-type'] },
+})
+new CfnOutput(trackingApiFn.stack, 'TrackingApiFunctionUrl', { value: trackingApiUrl.url, description: 'Public truck tracking API URL' })
+
 backend.addOutput({
   custom: {
+    trackingApiUrl: trackingApiUrl.url,
     disputePortalUrl: disputePortalApiUrl.url,
     driverUserPoolId: driverPool.userPoolId,
     driverUserPoolClientId: driverPoolClient.userPoolClientId,

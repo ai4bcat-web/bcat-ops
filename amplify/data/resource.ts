@@ -1206,6 +1206,8 @@ const schema = a.schema({
       motiveVehicleId:     a.integer(),             // Motive integer vehicle ID
       // Motive "Share Live Location" link for this truck, pasted once; the dashboard copies it.
       trackingUrl:         a.string(),
+      // Code behind this truck's permanent BCAT tracking link (/track/<code>); regenerate to revoke.
+      trackingCode:        a.string(),
       motiveVehicleNumber: a.string(),              // Motive 'number' field (should = unitNumber)
       // ── DOT onboarding / compliance (internal only — trucks have no portal) ──
       onboardingStatus:       a.enum(['NOT_STARTED', 'IN_PROGRESS', 'COMPLETE']),
