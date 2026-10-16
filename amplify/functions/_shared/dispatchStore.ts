@@ -193,7 +193,7 @@ export class DispatchStore {
     const row = { __typename: 'DispatchMessage', id: input.id ?? randomUUID(), ...input, createdAt: now, updatedAt: now }
     await this.db.send(new PutItemCommand({
       TableName: this.t.messages,
-      Item: marshall(row, { removeUndefinedValues: true }),
+      Item: marshall(withoutNullIndexKeys(row), { removeUndefinedValues: true }),
       ConditionExpression: 'attribute_not_exists(id)',
     }))
     return row
@@ -328,6 +328,17 @@ export class DispatchStore {
 }
 
 /** Build a message row for the common inbound/outbound cases without repeating nulls. */
+/**
+ * The messages table indexes `twilioSid`, and DynamoDB refuses an index key written as NULL
+ * ("Type mismatch for Index Key twilioSid Expected: S Actual: NULL"). A status line from the
+ * driver app, or a note typed in Slack, has no Twilio id — leave the attribute off instead
+ * of writing null, or the put fails and the status is lost (every one was, until this).
+ */
+export function withoutNullIndexKeys<T extends { twilioSid?: string | null }>(row: T): Omit<T, 'twilioSid'> & { twilioSid?: string } {
+  const { twilioSid, ...rest } = row
+  return twilioSid ? { ...rest, twilioSid } : rest
+}
+
 export function messageRow(input: {
   conversationId: string
   phone: string
