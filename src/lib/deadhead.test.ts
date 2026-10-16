@@ -79,6 +79,20 @@ describe('buildDayLegs', () => {
   })
 })
 
+describe('truck changes', () => {
+  it('never measures a leg whose two readings came from different trucks', () => {
+    const d = buildDayLegs([
+      ev({ at: '2026-10-15T11:00:00Z', kind: 'CLOCK_IN', odometer: 391000, truckId: 't-530', place: 'Yard' }),
+      ev({ at: '2026-10-15T12:00:00Z', kind: 'ARRIVED', odometer: 631100, truckId: 't-780', stopType: 'pickup', loadId: 'L1', place: 'Batory' }),   // switched trucks
+      ev({ at: '2026-10-15T12:30:00Z', kind: 'DEPARTED', odometer: 631100, truckId: 't-780', stopType: 'pickup', loadId: 'L1', place: 'Batory' }),
+      ev({ at: '2026-10-15T14:00:00Z', kind: 'ARRIVED', odometer: 631145, truckId: 't-780', stopType: 'delivery', loadId: 'L1', place: 'Eagle' }),
+    ])
+    expect(d.unknownLegs).toBe(1)
+    expect(d.emptyMiles).toBe(0)
+    expect(d.loadedMiles).toBe(45)
+  })
+})
+
 describe('totals and emptyMilesByCustomer', () => {
   const day = buildDayLegs([
     ev({ at: '2026-10-15T11:00:00Z', kind: 'CLOCK_IN', odometer: 0, place: 'Yard' }),

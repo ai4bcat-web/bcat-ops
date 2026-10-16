@@ -252,6 +252,9 @@ export interface Stop {
   /** Truck odometer (miles) at the tap, for loaded-vs-empty miles (src/lib/deadhead.ts). Absent when no truck/reading. */
   arrivedOdometer?: number | null
   departedOdometer?: number | null
+  /** Truck on file at the tap, so a mid-day truck change never pairs two odometers. */
+  arrivedTruckId?: string | null
+  departedTruckId?: string | null
   /**
    * When the truck is expected here, set when the driver departs the pickup. 'motive' is
    * computed from the truck's ELD fix (same driver, delivering today); 'appt' means a

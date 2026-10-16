@@ -23,6 +23,8 @@ export interface DayEvent {
   at:        string               // ISO
   kind:      DayEventKind
   odometer:  number | null
+  /** Truck the reading came from; two readings from different trucks never form a leg. */
+  truckId?:  string | null
   stopType?: 'pickup' | 'delivery'
   loadId?:   string
   /** Short place name for the leg labels (facility, or "Yard"). */
@@ -66,7 +68,8 @@ export function buildDayLegs(events: DayEvent[], onboardAtStart: string[] = []):
   for (const ev of sorted) {
     if (prev) {
       const loaded = onboard.size > 0
-      const miles = prev.odometer != null && ev.odometer != null ? Math.max(0, ev.odometer - prev.odometer) : null
+      const sameTruck = !prev.truckId || !ev.truckId || prev.truckId === ev.truckId
+      const miles = sameTruck && prev.odometer != null && ev.odometer != null ? Math.max(0, ev.odometer - prev.odometer) : null
       // Zero-mile hops (arrive → depart at the same dock) add nothing and only clutter the day.
       if (miles !== 0) {
         const leg: Leg = {

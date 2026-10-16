@@ -2963,7 +2963,7 @@ export const handler = async (event: FnUrlEvent) => {
       const now = nowIso()
       // Odometer at the tap: the mile marker loaded-vs-empty miles are measured from.
       const odometer = await truckOdometerForDriver(driver)
-      let next = applyStopEvent(stops, stopId, ev as StopEvent, now, odometer)
+      let next = applyStopEvent(stops, stopId, ev as StopEvent, now, odometer, (driver.assignedTruckId ?? '').trim() || null)
       let eta: { stopId: string; etaAt: string; basis: 'motive' | 'appt' } | null = null
 
       // Leaving the pickup is when the delivery ETA becomes worth stating.

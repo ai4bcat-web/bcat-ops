@@ -101,8 +101,8 @@ export function useDeadhead(fromRequested: string, to: string): DeadheadData {
     for (const c of clock) {
       if (c.kind !== 'WORK' || !company.has(c.driverId)) continue
       const base = baseOf.get(c.driverId) ?? 'Yard'
-      if (c.clockInAt) { push(c.driverId, { at: c.clockInAt, kind: 'CLOCK_IN', odometer: c.clockInOdometer ?? null, place: base }); clockedDays.add(`${c.driverId}|${chicagoDateStr(c.clockInAt)}`) }
-      if (c.clockOutAt) push(c.driverId, { at: c.clockOutAt, kind: 'CLOCK_OUT', odometer: c.clockOutOdometer ?? null, place: base })
+      if (c.clockInAt) { push(c.driverId, { at: c.clockInAt, kind: 'CLOCK_IN', odometer: c.clockInOdometer ?? null, truckId: c.truckId ?? null, place: base }); clockedDays.add(`${c.driverId}|${chicagoDateStr(c.clockInAt)}`) }
+      if (c.clockOutAt) push(c.driverId, { at: c.clockOutAt, kind: 'CLOCK_OUT', odometer: c.clockOutOdometer ?? null, truckId: c.truckId ?? null, place: base })
     }
 
     for (const load of loads) {
@@ -112,8 +112,8 @@ export function useDeadhead(fromRequested: string, to: string): DeadheadData {
         if (!driverId || !company.has(driverId)) continue
         const place = s.name?.trim() || s.city?.trim() || (s.type === 'pickup' ? 'Pickup' : 'Delivery')
         const base = { stopType: s.type as 'pickup' | 'delivery', loadId: load.id, place, customer: load.customer ?? null }
-        if (s.arrivedAt) push(driverId, { at: s.arrivedAt, kind: 'ARRIVED', odometer: s.arrivedOdometer ?? null, ...base })
-        if (s.departedAt) push(driverId, { at: s.departedAt, kind: 'DEPARTED', odometer: s.departedOdometer ?? null, ...base })
+        if (s.arrivedAt) push(driverId, { at: s.arrivedAt, kind: 'ARRIVED', odometer: s.arrivedOdometer ?? null, truckId: s.arrivedTruckId ?? null, ...base })
+        if (s.departedAt) push(driverId, { at: s.departedAt, kind: 'DEPARTED', odometer: s.departedOdometer ?? null, truckId: s.departedTruckId ?? null, ...base })
       }
       // A pickup departed on day X with its delivery arrived on a later day (or not yet)
       // rides along overnight: the delivering driver starts day X+1.. loaded.
