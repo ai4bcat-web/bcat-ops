@@ -209,10 +209,11 @@ export function TruckMapWidget() {
             No truck positions yet. Locations sync from Motive every 10 minutes.
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-          <div style={{ overflowX: 'auto', display: 'flex', flexDirection: 'column', flex: '1 1 480px', minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
+          {/* The table flexes to whatever the map leaves; columns shrink and clip rather than scroll sideways. */}
+          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0 }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', minWidth: 780, gap: 12, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 84px 92px', gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               {([
                 ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
@@ -244,7 +245,7 @@ export function TruckMapWidget() {
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '52px 1fr 150px 1fr 170px 120px auto', minWidth: 780, gap: 12,
+                    display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 84px 92px', gap: 10,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -253,7 +254,7 @@ export function TruckMapWidget() {
                   <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--ds-t1)' }}>
                     {unit}
                   </div>
-                  <div style={{ color: 'var(--ds-t1)' }}>
+                  <div style={{ color: 'var(--ds-t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cityState(loc)}>
                     {cityState(loc)}
                   </div>
 
@@ -350,8 +351,8 @@ export function TruckMapWidget() {
             })}
           </div>
 
-          {/* Mini map of current truck positions, beside the table */}
-          <div style={{ flex: '1 1 320px', minWidth: 280, borderLeft: '1px solid var(--ds-border)' }}>
+          {/* Mini map of current truck positions: a fixed strip beside the table on wide screens, below it on narrow ones. */}
+          <div style={{ flex: '0 1 300px', minWidth: 260, borderLeft: '1px solid var(--ds-border)' }}>
             <FleetMiniMap locations={rows} />
           </div>
           </div>
