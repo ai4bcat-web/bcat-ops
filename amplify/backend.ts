@@ -18,6 +18,7 @@ import { storage } from './storage/resource'
 import { userManagement } from './functions/userManagement/resource'
 import { slackIntakeWebhook } from './functions/slack-intake-webhook/resource'
 import { gmailTaskIntake } from './functions/gmail-task-intake/resource'
+import { twofaIntake } from './functions/twofa-intake/resource'
 import { factoringIntake } from './functions/factoring-intake/resource'
 import { vendorApActions } from './functions/vendor-ap-actions/resource'
 import { vendorApIntake } from './functions/vendor-ap-intake/resource'
@@ -69,6 +70,7 @@ const backend = defineBackend({
   userManagement,
   slackIntakeWebhook,
   gmailTaskIntake,
+  twofaIntake,
   factoringIntake,
   vendorApActions,
   vendorApIntake,
@@ -605,6 +607,13 @@ new CfnOutput(gmailTaskFn.stack, 'GmailTaskIntakeFunctionUrl', {
   value:       gmailTaskUrl.url,
   description: 'POST tasks@ emails here from the Apps Script (JSON with the shared secret)',
 })
+
+// ── twofaIntake Lambda (Google Voice text forwards → Slack #2fa) ───────────
+const twofaFn = backend.twofaIntake.resources.lambda as LambdaFunction
+// Channel id or name; plain env so a missing value never blocks the deploy (defaults to #2fa).
+twofaFn.addEnvironment('TWO_FA_SLACK_CHANNEL', process.env.TWO_FA_SLACK_CHANNEL ?? '#2fa')
+const twofaUrl = new FunctionUrl(twofaFn.stack, 'TwofaIntakeUrl', { function: twofaFn, authType: FunctionUrlAuthType.NONE })
+new CfnOutput(twofaFn.stack, 'TwofaIntakeFunctionUrl', { value: twofaUrl.url, description: 'POST Google Voice text-forward emails here from the Apps Script (JSON with the shared secret)' })
 
 // ── factoringIntake Lambda (factor@ email → FactoringItem) ──────────────────
 const factoringIntakeFn = backend.factoringIntake.resources.lambda as LambdaFunction
