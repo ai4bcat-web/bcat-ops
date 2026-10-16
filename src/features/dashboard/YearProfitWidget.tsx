@@ -19,11 +19,15 @@ const COLORS = { ivan: '#2563eb', oo: '#7c3aed', amazon: '#f59e0b', total: '#111
  * (profit to the company) and Amazon (profit to the company), with the combined line on
  * top. Kept short so the rest of the dashboard stays above the fold.
  */
+/** Expense data starts here; earlier months have revenue but no costs and read as losses. */
+const PROFIT_START = '2026-06'
+
 export function YearProfitWidget() {
   const isMobile = useIsMobile()
   const now = new Date()
   const monthsThisYear = getMonth(now) + 1
-  const { months: ivanMonths, loading: ivanLoading } = useProfitReview(monthsThisYear)
+  const { months: allIvanMonths, loading: ivanLoading } = useProfitReview(monthsThisYear)
+  const ivanMonths = useMemo(() => allIvanMonths.filter((m) => m.key >= PROFIT_START), [allIvanMonths])
   const { rows: amzRows, loading: amzLoading } = useAmazonProfitability()
   const { rows: ooRows, loading: ooLoading } = useOwnerOperatorProfitability()
 
@@ -47,7 +51,7 @@ export function YearProfitWidget() {
         <div style={{ padding: '14px 20px', minWidth: isMobile ? undefined : 300, borderRight: isMobile ? 'none' : '1px solid var(--ds-border)', borderBottom: isMobile ? '1px solid var(--ds-border)' : 'none' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Wallet size={15} style={{ color: 'var(--ds-blue)' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>Combined profit · {now.getFullYear()} to date</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-t1)' }}>Combined profit · {data[0]?.month ?? 'Jun'} {now.getFullYear()} to date</span>
           </div>
           <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1, marginTop: 6, color: netColor(ytd.total), fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.02em' }}>{loading ? '…' : money0(ytd.total)}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, auto)', gap: '6px 16px', marginTop: 10, fontSize: 11.5 }}>
