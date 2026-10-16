@@ -2,15 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { Trophy, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useDrivers } from '@/hooks/useDrivers'
-import { useOwnerOperatorPay } from '@/hooks/useOwnerOperatorPay'
-import { useBoxTruckPay } from '@/hooks/useBoxTruckPay'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { listTimeClockEntries } from '@/lib/apiClient'
 import { weekStartOf, weekEndOf, type TimeClockRow } from '@/lib/timeClock'
 import { weekStartOfISO, weekLabel as settlementWeekLabel } from '@/features/driver-pay/week'
 import { periodStartOfISO, periodLabel } from '@/lib/biweekly'
 import { todayChicago } from '@/lib/recurringRevision'
-import { hoursLeaders, grossLeaders, shiftDays, lastAppointment, type LeaderRow, type LastAppointment } from '@/lib/driverLeaderboard'
+import { hoursLeaders, bookedGrossLeaders, shiftDays, lastAppointment, type LeaderRow, type LastAppointment } from '@/lib/driverLeaderboard'
+import { driverGroupOf } from '@/lib/driverFilter'
 import { getColor } from '@/lib/driverColors'
 import { errorText } from '@/lib/errorText'
 import { useAppStore } from '@/store/useAppStore'
@@ -57,8 +56,12 @@ export function DriverLeaderboardWidget() {
   const ooWeek = weekStartOfISO(ref)
   const boxPeriod = periodStartOfISO(ref)
 
-  const oo = useOwnerOperatorPay(ooWeek)
-  const box = useBoxTruckPay(boxPeriod)
+  // Gross is what is BOOKED for the period (every load delivering in it, by rate), not what
+  // has been settled — a settlement only counts loads whose POD is in, which hid most of
+  // the week until Friday.
+  const loads = useAppStore((s) => s.loads)
+  const ownerOps = useMemo(() => drivers.filter((d) => d.active !== false && driverGroupOf(d) === 'OWNER_OP'), [drivers])
+  const boxDrivers = useMemo(() => drivers.filter((d) => d.active !== false && d.fleetGroup === 'BOX_TRUCK'), [drivers])
 
   const [clock, setClock] = useState<{ week: string; rows: TimeClockRow[] } | null>(null)
   // Both results carry the week they belong to, so a stale answer (or a stale error) from a
@@ -77,10 +80,9 @@ export function DriverLeaderboardWidget() {
     () => (clock?.week === hoursWeek ? hoursLeaders(clock.rows, drivers) : []),
     [clock, hoursWeek, drivers],
   )
-  const ooBoard = useMemo(() => grossLeaders(oo.rows), [oo.rows])
-  const boxBoard = useMemo(() => grossLeaders(box.rows), [box.rows])
+  const ooBoard = useMemo(() => bookedGrossLeaders(loads, ownerOps, ooWeek, shiftDays(ooWeek, 6)), [loads, ownerOps, ooWeek])
+  const boxBoard = useMemo(() => bookedGrossLeaders(loads, boxDrivers, boxPeriod, shiftDays(boxPeriod, 13)), [loads, boxDrivers, boxPeriod])
   // Owner-operators: their last booked stop tells dispatch when and where each goes empty.
-  const loads = useAppStore((s) => s.loads)
   const emptyAt = useMemo(() => {
     const m = new Map<string, LastAppointment>()
     for (const r of ooBoard) { const a = lastAppointment(loads, r.driverId); if (a) m.set(r.driverId, a) }
@@ -89,8 +91,8 @@ export function DriverLeaderboardWidget() {
 
   const boards: Array<{ key: string; title: string; period: string; unit: 'hours' | 'gross'; rows: LeaderRow[]; loading: boolean; error: string | null; empty: string }> = [
     { key: 'local', title: 'Ivan local · hours', period: `${fmtMD(hoursWeek)} – ${fmtMD(weekEndOf(hoursWeek))}`, unit: 'hours', rows: hoursBoard, loading: clock?.week !== hoursWeek && !clockError, error: clockError, empty: 'No hours clocked this week.' },
-    { key: 'oo', title: 'Owner-operators · gross', period: settlementWeekLabel(ooWeek), unit: 'gross', rows: ooBoard, loading: oo.loading && oo.rows.length === 0, error: oo.error, empty: 'No settled loads this week.' },
-    { key: 'box', title: 'Box truck · gross', period: periodLabel(boxPeriod), unit: 'gross', rows: boxBoard, loading: box.loading && box.rows.length === 0, error: box.error, empty: 'No shipments this pay period.' },
+    { key: 'oo', title: 'Owner-operators · gross booked', period: settlementWeekLabel(ooWeek), unit: 'gross', rows: ooBoard, loading: false, error: null, empty: 'No loads booked this week.' },
+    { key: 'box', title: 'Box truck · gross booked', period: periodLabel(boxPeriod), unit: 'gross', rows: boxBoard, loading: false, error: null, empty: 'No loads booked this pay period.' },
   ]
 
   return (
@@ -101,7 +103,7 @@ export function DriverLeaderboardWidget() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)' }}>Driver leaderboard</div>
             <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>
-              {offset === 0 ? 'This week' : offset === 1 ? 'Last week' : `${offset} weeks ago`} · hours for Ivan local, gross pay for owner-operators and box truck
+              {offset === 0 ? 'This week' : offset === 1 ? 'Last week' : `${offset} weeks ago`} · hours for Ivan local, gross booked (every load delivering in the period, POD or not) for owner-operators and box truck
             </div>
           </div>
         </div>

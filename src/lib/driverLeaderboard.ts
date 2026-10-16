@@ -10,6 +10,7 @@
  */
 import { rowMinutes, decimalHours, type TimeClockRow } from './timeClock'
 import { getStops } from './stops'
+import { chicagoDateStr } from './date'
 import type { Load, Stop } from '@/types'
 
 export interface LeaderRow {
@@ -55,6 +56,32 @@ export function hoursLeaders(rows: TimeClockRow[], drivers: DriverLike[]): Leade
     out.push({ driverId, name: d.name, colorKey: d.colorKey ?? null, value: decimalHours(minutes), count: days.size })
   }
   return rankLeaders(out)
+}
+
+/**
+ * Gross booked per driver: the rate on every load whose delivery falls in [start, end]
+ * (Chicago dates), POD or no POD — settlement rows only count loads already papered,
+ * which hid most of the week until Friday. A load is the delivering driver's: the
+ * delivery stop's driver, else the load's delivery driver.
+ */
+export function bookedGrossLeaders(loads: readonly Load[], drivers: DriverLike[], start: string, end: string): LeaderRow[] {
+  const byId = new Map(drivers.map((d) => [d.id, d]))
+  const acc = new Map<string, { gross: number; loads: number }>()
+  for (const load of loads) {
+    const day = load.deliveryAppt ? chicagoDateStr(load.deliveryAppt) : ''
+    if (!day || day < start || day > end) continue
+    const delivery = getStops(load).find((s) => s.type === 'delivery')
+    const driverId = delivery?.driverId ?? load.deliveryDriverId
+    if (!driverId || !byId.has(driverId)) continue
+    const cur = acc.get(driverId) ?? { gross: 0, loads: 0 }
+    cur.gross += (load.rate ?? 0) / 100
+    cur.loads += 1
+    acc.set(driverId, cur)
+  }
+  return rankLeaders([...acc].map(([driverId, { gross, loads: n }]) => {
+    const d = byId.get(driverId)!
+    return { driverId, name: d.name, colorKey: d.colorKey ?? null, value: Math.round(gross * 100) / 100, count: n }
+  }))
 }
 
 /** Gross pay per driver from settlement rows (owner-operator or box truck). */

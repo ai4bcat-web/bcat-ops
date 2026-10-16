@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hoursLeaders, grossLeaders, rankLeaders, shiftDays, lastAppointment } from './driverLeaderboard'
+import { hoursLeaders, grossLeaders, bookedGrossLeaders, rankLeaders, shiftDays, lastAppointment } from './driverLeaderboard'
 import type { TimeClockRow } from './timeClock'
 import type { Load } from '@/types'
 
@@ -91,5 +91,25 @@ describe('rankLeaders / shiftDays', () => {
   it('shifts calendar days across a DST change without moving the date', () => {
     expect(shiftDays('2026-11-02', -7)).toBe('2026-10-26')
     expect(shiftDays('2026-10-16', 7)).toBe('2026-10-23')
+  })
+})
+
+describe('bookedGrossLeaders', () => {
+  const drivers = [{ id: 'oo1', name: 'Lee Lara' }, { id: 'oo2', name: 'Roy Workman' }]
+  const load = (id: string, deliveryAppt: string, rate: number | null, driverId: string): Load =>
+    ({ id, deliveryAppt, rate, deliveryDriverId: driverId, pickupDriverId: driverId, stops: [] } as unknown as Load)
+  it('totals the rate on every load delivering in the week, POD or not, per delivering driver', () => {
+    const rows = bookedGrossLeaders([
+      load('a', '2026-10-13T15:00:00Z', 250000, 'oo1'),
+      load('b', '2026-10-16T15:00:00Z', 180000, 'oo1'),
+      load('c', '2026-10-17T15:00:00Z', 300000, 'oo2'),   // Saturday, still in a Sun–Sat week
+      load('d', '2026-10-18T15:00:00Z', 999900, 'oo2'),   // next week
+      load('e', '2026-10-14T15:00:00Z', null, 'oo1'),      // booked, no rate yet: counts as a load
+      load('f', '2026-10-14T15:00:00Z', 100000, 'someone-else'),
+    ], drivers, '2026-10-11', '2026-10-17')
+    expect(rows).toEqual([
+      { driverId: 'oo1', name: 'Lee Lara', colorKey: null, value: 4300, count: 3 },
+      { driverId: 'oo2', name: 'Roy Workman', colorKey: null, value: 3000, count: 1 },
+    ])
   })
 })
