@@ -1,3 +1,4 @@
+import { TruckAssignSelect } from '@/components/TruckAssignSelect'
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowLeft, Archive, ArchiveRestore, MessageSquarePlus, RefreshCw, Search, Settings, UserPlus, UserCheck, Loader2, AlertTriangle, Phone, MessageSquare, Hash, ExternalLink, Send, SlidersHorizontal, PanelRightClose, Trash2 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -278,6 +279,8 @@ export function DispatchPage({ compact = false, onHide }: { compact?: boolean; o
             ) : null}
             {selectedStatus ? <span style={{ color: 'var(--ds-t2)', fontWeight: 600 }}>Last status: {selectedStatus}</span> : null}
             {selectedUnits ? <span title="The truck on their file and the trailer on the load they are hauling" style={{ color: 'var(--ds-t2)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>🚛 {selectedUnits}</span> : null}
+            {/* Staff can move the driver to the right truck from here when they picked the wrong one. */}
+            {selectedDriver && selectedDriver.fleetGroup !== 'AMAZON' ? <TruckAssignSelect driverId={selectedDriver.id} label="Truck" compact /> : null}
             {selectedWhere ? <span style={{ color: 'var(--ds-green)', fontWeight: 600 }}>📍 {selectedWhere}</span> : null}
             {(() => {
               const primary = selected.assignedTo || selectedDispatchers[0] || null

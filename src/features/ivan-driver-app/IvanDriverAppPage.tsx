@@ -6,6 +6,7 @@
  * navigation, invites and view-as all work the way they do on the settlements page, because
  * this is the same job for the other fleet.
  */
+import { TruckAssignSelect } from '@/components/TruckAssignSelect'
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, Camera, FileWarning, Check, AlertTriangle, ArrowUpDown } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
@@ -232,6 +233,10 @@ export function IvanDriverAppPage() {
 
       {selectedRow && (
         <div style={{ marginBottom: 18 }}>
+          {/* Staff fix for a driver who picked the wrong truck: the ELD, map and mile readings follow this. */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <TruckAssignSelect driverId={selectedRow.driver.id} label={`${selectedRow.driver.name.split(' ')[0]}'s truck`} />
+          </div>
           <IvanDriverWeek key={selectedRow.driver.id} driver={selectedRow.driver} loads={loads} weekStart={periodStart} today={chicagoDateStr(new Date(now))} truck={truckFixOf(selectedRow.driver)} now={now} onOpenLoad={(id) => setSelectedLoad(id, 'view')} />
           {selectedRow.unclassified && (
             <p style={{ display: 'flex', alignItems: 'flex-start', gap: 5, margin: '6px 2px 0', color: '#b45309', fontSize: 11.5 }}>
