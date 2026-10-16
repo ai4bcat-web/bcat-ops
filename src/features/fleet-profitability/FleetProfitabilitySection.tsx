@@ -5,7 +5,8 @@ import { useDriverPay } from '@/hooks/useDriverPay'
 import { useDrivers } from '@/hooks/useDrivers'
 import { FLEET_GROUPS, FLEET_GROUP_LABELS, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import type { FleetGroup } from '@/types/equipment'
-import type { TruckProfitability, DateRange } from '@/lib/fleetProfitability'
+import type { DateRange } from '@/lib/fleetProfitability'
+import { aggregateLocalSubgroups, type SubgroupRow } from '@/lib/localSubgroups'
 import { weekRange, weekLabel } from './weekRange'
 import { biweeklyPeriodOf } from '@/lib/payPeriods'
 import { useFleetFixedCosts } from '@/hooks/useFleetFixedCosts'
@@ -58,6 +59,8 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
 
   const r = data?.rollup
   const trucks = data?.trucks ?? []
+  // Revenue and miles are reported per bucket (Ivan local vs box truck), not per truck/driver.
+  const subgroups = aggregateLocalSubgroups(trucks)
   const totalExpenses = r ? r.revenue - r.net : 0
   // AMAZON and OWNER_OPERATOR are per-driver settlement views, not truck fleets: they
   // replace the whole truck P&L body with their own panel.
@@ -150,14 +153,14 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
         </div>
       )}
 
-      {/* Revenue by truck */}
-      <SectionTitle>Revenue by truck</SectionTitle>
+      {/* Revenue by group — Ivan local vs box truck (truck/driver detail intentionally not shown) */}
+      <SectionTitle>Revenue by group</SectionTitle>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-              <th style={{ ...TH, textAlign: 'left' }}>Truck</th>
-              <th style={{ ...TH, textAlign: 'left' }}>Driver</th>
+              <th style={{ ...TH, textAlign: 'left' }}>Group</th>
+              <th style={{ ...TH, textAlign: 'left' }}>Trucks</th>
               <th style={TH}>Revenue</th>
               <th style={TH}>Miles</th>
               <th style={TH}>Rev / mi</th>
@@ -170,7 +173,7 @@ export function FleetProfitabilitySection({ externalRange }: { externalRange?: D
             {!loading && trucks.length === 0 && (
               <tr><td colSpan={5} style={{ ...TD, textAlign: 'center', color: 'var(--ds-t3)', padding: '24px' }}>No trucks in this fleet group yet. Set a truck's fleet group to “{FLEET_GROUP_LABELS[group]}” in Fleet.</td></tr>
             )}
-            {trucks.map((t) => <RevenueRow key={t.truckId} t={t} />)}
+            {subgroups.map((g) => <SubgroupRevenueRow key={g.key} g={g} />)}
             {r && trucks.length > 0 && (
               <tr style={{ borderTop: '2px solid var(--ds-border)', background: 'var(--ds-bg)' }}>
                 <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }} colSpan={2}>Fleet total</td>
@@ -296,27 +299,16 @@ function CostRow({ label, value }: { label: string; value: number }) {
   )
 }
 
-function RevenueRow({ t }: { t: TruckProfitability }) {
+function SubgroupRevenueRow({ g }: { g: SubgroupRow }) {
   return (
     <tr style={{ borderBottom: '1px solid var(--ds-border)' }}>
-      <td style={{ ...TD, textAlign: 'left' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>#{t.unitNumber}</span>
-          {!t.hasEquipment && <Flag text="not in truck details" />}
-        </div>
+      <td style={{ ...TD, textAlign: 'left', fontWeight: 700 }}>{g.label}</td>
+      <td style={{ ...TD, textAlign: 'left', color: 'var(--ds-t3)', fontFamily: 'monospace', fontSize: 12 }}>
+        {g.units.map((u) => `#${u}`).join('  ')}
       </td>
-      <td style={{ ...TD, textAlign: 'left', color: t.driverName ? 'var(--ds-t1)' : 'var(--ds-t3)' }}>{t.driverName ?? '—'}</td>
-      <td style={{ ...TD, fontWeight: 600 }}>{money(t.revenue)}</td>
-      <td style={TD}>{miles(t.miles)}</td>
-      <td style={TD}>{money2(t.revenuePerMile)}</td>
+      <td style={{ ...TD, fontWeight: 600 }}>{money(g.revenue)}</td>
+      <td style={TD}>{miles(g.miles)}</td>
+      <td style={TD}>{money2(g.revenuePerMile)}</td>
     </tr>
-  )
-}
-
-function Flag({ text }: { text: string }) {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 9.5, fontWeight: 600, color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '1px 5px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-      <AlertCircle size={9} /> {text}
-    </span>
   )
 }
