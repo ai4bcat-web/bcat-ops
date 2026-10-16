@@ -9,6 +9,7 @@
  * Pure parts (channel naming, event classification, message formatting) live apart from
  * the API calls so they are tested without Slack.
  */
+import { slackEmojiToUnicode } from './slackEmoji'
 import type { DispatchConversation, DispatchMessage, DispatchSettings } from '../../../src/lib/dispatch'
 import { conversationTitle, formatDuration, prettyPhone, slackChannelNameFor, slackNoteBody } from '../../../src/lib/dispatch'
 import type { DispatchStore } from './dispatchStore'
@@ -49,7 +50,7 @@ export type SlackIntent =
  * to the driver, so an empty result after cleaning means "skip".
  */
 export function cleanSlackText(raw: string): string {
-  return raw
+  return slackEmojiToUnicode(raw)
     .replace(/<@[A-Z0-9]+(?:\|[^>]*)?>/g, '')
     .replace(/<!(?:here|channel|everyone)(?:\|[^>]*)?>/g, '')
     .replace(/<#[A-Z0-9]+\|([^>]*)>/g, '#$1')
