@@ -366,3 +366,51 @@ export function rateLadder(from: number, to: number, step: number): number[] {
   for (let r = from; r <= to + 1e-9; r += step) out.push(Math.round(r * 100) / 100)
   return out
 }
+
+export interface GroupPerMile {
+  key:          'IVAN_LOCAL' | 'BOX_TRUCK' | 'FLEET'
+  label:        string
+  units:        string[]
+  miles:        number
+  revenue:      number
+  fuel:         number
+  revPerMile:   number | null
+  fuelPerMile:  number | null
+  /** Group fuel per mile plus the fleet's other costs (pay, maintenance, insurance, fixed) spread per mile. */
+  costPerMile:  number | null
+  profitPerMile: number | null
+}
+
+/**
+ * Per-mile economics by reporting bucket. Fuel is the group's own; driver pay, maintenance,
+ * insurance and fixed costs are fleet figures, so they are spread evenly over every mile
+ * the fleet drove — the box truck and the semis carry the same per-mile share of them.
+ */
+export function groupPerMile(m: ReviewMonthInput): GroupPerMile[] {
+  const sharedPerMile = m.miles > 0 ? (m.driverPay + m.maintenance + m.insurance + m.fixed) / m.miles : null
+  const build = (key: GroupPerMile['key'], label: string, trucks: ReviewTruck[]): GroupPerMile => {
+    const miles = trucks.reduce((s, t) => s + t.miles, 0)
+    const revenue = trucks.reduce((s, t) => s + t.revenue, 0)
+    const fuel = trucks.reduce((s, t) => s + t.fuel, 0)
+    const revPerMile = div(revenue, miles)
+    const fuelPerMile = div(fuel, miles)
+    const costPerMile = fuelPerMile != null && sharedPerMile != null ? fuelPerMile + sharedPerMile : null
+    return {
+      key, label, units: trucks.map((t) => t.unitNumber).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      miles, revenue, fuel, revPerMile, fuelPerMile, costPerMile,
+      profitPerMile: revPerMile != null && costPerMile != null ? revPerMile - costPerMile : null,
+    }
+  }
+  const out: GroupPerMile[] = []
+  const ivan = m.trucks.filter((t) => t.bucket === 'IVAN_LOCAL')
+  const box = m.trucks.filter((t) => t.bucket === 'BOX_TRUCK')
+  if (ivan.length) out.push(build('IVAN_LOCAL', 'Ivan local', ivan))
+  if (box.length) out.push(build('BOX_TRUCK', 'Box truck', box))
+  // The fleet row uses the month's own totals (fleet miles include trucks in neither bucket, if any).
+  const mm = monthMetrics(m)
+  out.push({
+    key: 'FLEET', label: 'Fleet', units: [], miles: m.miles, revenue: m.revenue, fuel: m.fuel,
+    revPerMile: mm.revPerMile, fuelPerMile: mm.fuelPerMile, costPerMile: mm.costPerMile, profitPerMile: mm.profitPerMile,
+  })
+  return out
+}

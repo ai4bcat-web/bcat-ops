@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings,
+  groupPerMile, monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings,
   projectProfit, breakEvenRatePerMile, rateLadder, type ReviewMonthInput,
 } from './profitReview'
 
@@ -172,5 +172,23 @@ describe('projections', () => {
   })
   it('rateLadder is inclusive and rounds to cents', () => {
     expect(rateLadder(2.5, 3.25, 0.25)).toEqual([2.5, 2.75, 3, 3.25])
+  })
+})
+
+describe('groupPerMile', () => {
+  it('gives each bucket its own fuel and revenue per mile and spreads the fleet costs evenly per mile', () => {
+    const m = month({ key: '2026-10', revenue: 47862, fuel: 12635, driverPay: 11651, maintenance: 6898, insurance: 3304, fixed: 5032, miles: 13280, trucks: [
+      { unitNumber: '530', bucket: 'IVAN_LOCAL', revenue: 20000, miles: 5000, fuel: 5500, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
+      { unitNumber: '685', bucket: 'IVAN_LOCAL', revenue: 22050, miles: 4764, fuel: 5218, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
+      { unitNumber: '3890', bucket: 'BOX_TRUCK', revenue: 5812, miles: 3516, fuel: 1917, gallons: 0, motiveGallons: 0, motiveMiles: 0 },
+    ] })
+    const g = groupPerMile(m)
+    expect(g.map((x) => x.key)).toEqual(['IVAN_LOCAL', 'BOX_TRUCK', 'FLEET'])
+    const shared = (11651 + 6898 + 3304 + 5032) / 13280
+    expect(g[0].fuelPerMile).toBeCloseTo(10718 / 9764, 6)
+    expect(g[0].costPerMile).toBeCloseTo(10718 / 9764 + shared, 6)
+    expect(g[1].profitPerMile).toBeCloseTo(5812 / 3516 - (1917 / 3516 + shared), 6)
+    expect(g[2].costPerMile).toBeCloseTo(monthMetrics(m).costPerMile!, 6)
+    expect(g[0].units).toEqual(['530', '685'])
   })
 })
