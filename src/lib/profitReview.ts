@@ -49,6 +49,14 @@ export interface ReviewMonthInput {
   trucks:      ReviewTruck[]
   customers:   ReviewCustomer[]
   unitMaintenance: ReviewUnitMaintenance[]
+  /** True when the month predates the expense data (no fixed costs on file): shown, but
+   *  never a baseline and never counted in averages or findings. */
+  incomplete?: boolean
+}
+
+/** A finished month with real data behind it. */
+export function isComparable(m: ReviewMonthInput): boolean {
+  return m.daysElapsed >= m.daysInMonth && m.revenue > 0 && !m.incomplete
 }
 
 export interface MonthMetrics {
@@ -111,7 +119,7 @@ export function monthMetrics(m: ReviewMonthInput): MonthMetrics {
 
 /** The finished month with the highest net — the yardstick everything else is measured against. */
 export function pickBaseline(months: ReviewMonthInput[]): ReviewMonthInput | null {
-  const finished = months.filter((m) => m.daysElapsed >= m.daysInMonth && m.revenue > 0)
+  const finished = months.filter(isComparable)
   if (finished.length === 0) return null
   return finished.reduce((best, m) => (monthMetrics(m).net > monthMetrics(best).net ? m : best))
 }
@@ -181,7 +189,7 @@ export function findings(months: ReviewMonthInput[], base: ReviewMonthInput | nu
   const payTarget = opts.payShareTarget ?? 0.28
   const cushion = opts.rateFloorCushion ?? 0.05
   const out: Finding[] = []
-  const finished = months.filter((m) => m.daysElapsed >= m.daysInMonth && m.revenue > 0)
+  const finished = months.filter(isComparable)
   const latest = finished.length > 0 ? finished[finished.length - 1] : null
   const latestM = latest ? monthMetrics(latest) : null
 
@@ -281,7 +289,7 @@ export function findings(months: ReviewMonthInput[], base: ReviewMonthInput | nu
     out.push({
       severity: 'info',
       title: 'Fuel purchases with no truck on file',
-      detail: `${opts.unattributedFuel.count} fuel transactions (${usd(opts.unattributedFuel.amount)}) have no truck and their card is not on any truck record, so they are left out of the P&L. Add the card number to the truck in Fleet.`,
+      detail: `${opts.unattributedFuel.count} fuel ${opts.unattributedFuel.count === 1 ? 'purchase' : 'purchases'} (${usd(opts.unattributedFuel.amount)}) ${opts.unattributedFuel.count === 1 ? 'has' : 'have'} no truck and the card is not on any truck record, so it is left out of the P&L. Add the card number to the truck in Fleet.`,
       impact: opts.unattributedFuel.amount,
     })
   }

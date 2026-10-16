@@ -133,6 +133,8 @@ export function useProfitReview(monthsBack: number, today: Date = new Date()): P
         })),
         customers: [...custMap.values()].sort((a, b) => b.revenue - a.revenue),
         unitMaintenance: [...unitMaint.values()].sort((a, b) => b.amount - a.amount),
+        // No fixed costs on file means the month predates the expense setup.
+        incomplete: fixed === 0,
       })
     }
     return out

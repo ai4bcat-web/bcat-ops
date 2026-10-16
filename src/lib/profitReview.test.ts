@@ -59,6 +59,8 @@ describe('pickBaseline', () => {
     ]
     expect(pickBaseline(months)?.key).toBe('2026-08')
     expect(pickBaseline([])).toBeNull()
+    // A month that predates the expense data never wins, however good it looks.
+    expect(pickBaseline([...months, month({ key: '2026-05', revenue: 300000, fixed: 0, incomplete: true })])?.key).toBe('2026-08')
   })
 })
 

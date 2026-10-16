@@ -4,7 +4,7 @@ import { ArrowLeft, AlertTriangle, TrendingUp, Fuel, Users, Wrench, Package, Cal
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useProfitReview } from '@/hooks/useProfitReview'
 import {
-  monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings, projectProfit, breakEvenRatePerMile, rateLadder,
+  monthMetrics, pickBaseline, deltasVsBaseline, fuelSplit, findings, projectProfit, breakEvenRatePerMile, rateLadder, isComparable,
   type ReviewMonthInput, type MonthMetrics,
 } from '@/lib/profitReview'
 import { LOCAL_SUBGROUP_LABELS, type LocalSubgroup } from '@/lib/localSubgroups'
@@ -45,7 +45,7 @@ export function ProfitReviewPage() {
   const metrics = useMemo(() => new Map(months.map((m) => [m.key, monthMetrics(m)])), [months])
   const autoBaseline = useMemo(() => pickBaseline(months), [months])
   const baseline = months.find((m) => m.key === baselineKey) ?? autoBaseline
-  const finished = months.filter((m) => m.daysElapsed >= m.daysInMonth && m.revenue > 0)
+  const finished = months.filter(isComparable)
   const latest = finished[finished.length - 1] ?? null
   const current = months.find((m) => m.daysElapsed < m.daysInMonth && m.daysElapsed > 0) ?? null
   const found = useMemo(() => findings(months, baseline, { unattributedFuel }), [months, baseline, unattributedFuel])
@@ -122,7 +122,7 @@ export function ProfitReviewPage() {
         {/* Monthly P&L */}
         <Card title="Monthly P&L" icon={<TrendingUp size={15} />}>
           <Wrap>
-            <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Line</th>{months.map((m) => <th key={m.key} style={{ ...TH, background: baseline?.key === m.key ? 'var(--ds-bg)' : undefined }}>{m.label}{m.daysElapsed < m.daysInMonth ? ' (to date)' : ''}{baseline?.key === m.key ? ' · baseline' : ''}</th>)}</tr></thead>
+            <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Line</th>{months.map((m) => <th key={m.key} style={{ ...TH, background: baseline?.key === m.key ? 'var(--ds-bg)' : undefined }}>{m.label}{m.daysElapsed < m.daysInMonth ? ' (to date)' : ''}{m.incomplete ? ' (incomplete data)' : ''}{baseline?.key === m.key ? ' · baseline' : ''}</th>)}</tr></thead>
             <tbody>
               <LineRow label="Revenue" months={months} get={(m) => m.revenue} bold />
               <LineRow label="Fuel" months={months} get={(m) => m.fuel} />
@@ -142,10 +142,10 @@ export function ProfitReviewPage() {
         {baseline && (
           <Card title={`Compared with ${baseline.label}: what each line did to profit`} icon={<TrendingUp size={15} />}>
             <Wrap>
-              <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Line</th>{months.filter((m) => m.key !== baseline.key && m.daysElapsed >= m.daysInMonth).map((m) => <th key={m.key} style={TH}>{m.label}</th>)}</tr></thead>
+              <thead><tr><th style={{ ...TH, textAlign: 'left' }}>Line</th>{months.filter((m) => m.key !== baseline.key && isComparable(m)).map((m) => <th key={m.key} style={TH}>{m.label}</th>)}</tr></thead>
               <tbody>
                 {(['revenue', 'fuel', 'driverPay', 'maintenance', 'insurance', 'fixed', 'net'] as const).map((key) => {
-                  const cols = months.filter((m) => m.key !== baseline.key && m.daysElapsed >= m.daysInMonth)
+                  const cols = months.filter((m) => m.key !== baseline.key && isComparable(m))
                   const maxAbs = Math.max(1, ...cols.map((m) => Math.abs(deltasVsBaseline(m, baseline).find((d) => d.key === key)!.effect)))
                   return (
                     <tr key={key}>
