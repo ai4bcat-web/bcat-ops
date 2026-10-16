@@ -1554,6 +1554,9 @@ backend.storage.resources.bucket.grantRead(podActionsFn, 'pods/*')
 // beside the original there, never over it.
 backend.storage.resources.bucket.grantRead(podActionsFn, 'driver-docs/*')
 backend.storage.resources.bucket.grantPut(podActionsFn, 'driver-docs/*')
+// Pictures texted to dispatch are filed as PODs straight from the dispatch media folder
+// (dispatchAutoPod), so the cleanup must be able to read originals from there too.
+backend.storage.resources.bucket.grantRead(podActionsFn, 'dispatch-media/*')
 
 // The frontend downloads presigned POD originals/enhanced images with fetch(),
 // so the bucket must answer CORS GETs from the app origins.
