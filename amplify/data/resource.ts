@@ -2063,6 +2063,7 @@ const schema = a.schema({
       introText:        a.string(),           // the first text to a driver; {name} and {number} are filled in
       slackMirror:      a.boolean(),          // one Slack channel per driver, both ways
       slackInviteEmails: a.json(),            // staff emails invited into every driver channel
+      dispatcherContacts: a.json(),           // [{ email, name, phone }] — a driver's dispatcher's own number, shown in their app
     })
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),

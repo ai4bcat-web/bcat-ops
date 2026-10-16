@@ -26,6 +26,7 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { DynamoDBClient as DispatchDynamo } from '@aws-sdk/client-dynamodb'
 import { DispatchStore, tablesFromEnv as dispatchTablesFromEnv, recordDriverStatus } from '../_shared/dispatchStore'
+import { dispatcherContactFor } from '../../../src/lib/dispatch'
 import { slackClient } from '../_shared/slackApi'
 import { mirrorInbound, slackMirrorEnabled } from '../_shared/slackDispatch'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
@@ -132,6 +133,20 @@ async function postDriverStatus(driver: DriverRow, text: string, at: string): Pr
     await mirrorInbound({ slack: slackClient(SLACK_BOT_TOKEN_FOR_DISPATCH), store, settings }, r.conversation, r.message, () => Promise.reject(new Error('no media')))
   } catch (err) {
     console.warn('[driver-app-api] dispatch status not recorded', String(err))
+  }
+}
+
+/** The driver's own dispatcher's number, when Dispatch settings list one for them. */
+async function dispatcherFor(driver: DriverRow): Promise<{ name: string; phone: string } | null> {
+  const tables = dispatchTablesFromEnv()
+  if (!tables.conversations || !tables.messages) return null
+  try {
+    const settings = await new DispatchStore(dispatchDynamo, tables).getSettings()
+    const c = dispatcherContactFor(settings, driver)
+    return c ? { name: c.name, phone: c.phone } : null
+  } catch (err) {
+    console.warn('[driver-app-api] dispatcher contact unavailable', String(err))
+    return null
   }
 }
 
@@ -257,6 +272,9 @@ interface DriverRow {
   active: boolean
   email?: string | null
   phone?: string | null
+  /** Staff emails from the Drivers page; matched to Dispatch settings' dispatcher contacts. */
+  dispatcherPrimary?: string | null
+  dispatcherBackup?: string | null
   ivanApp?: boolean | null
   timeClock?: boolean | null
   // Which fleet they run in. These two decide whether the app shows a settlement or
@@ -2438,6 +2456,8 @@ export const handler = async (event: FnUrlEvent) => {
         trailer: await trailerForDriver(driver),
         // The number to call or text dispatch, pinned to the top of the app.
         dispatchPhone: await dispatchPhone(),
+        // Their own dispatcher's name and number, when one is on file — shown above it.
+        dispatcher: await dispatcherFor(driver),
         // Whether the Hours tab shows: Ivan's own fleet, or a staff override on the file.
         timeClock: timeClockFor({ fleetGroup: driver.fleetGroup, driverType: driver.driverType, payGroup: setting.payGroup, ivanApp: driver.ivanApp, timeClock: driver.timeClock }),
         // Must say which trailer they used when leaving a pickup (Ivan local, not box trucks).

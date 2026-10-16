@@ -162,6 +162,8 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
   const [introText, setIntroText] = useState('')
   const [slackMirror, setSlackMirror] = useState(true)
   const [slackInvites, setSlackInvites] = useState('')
+  // One dispatcher per line: "email, Name, phone".
+  const [contactsText, setContactsText] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -178,12 +180,17 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
       setIntroText(s?.introText ?? '')
       setSlackMirror(s?.slackMirror !== false)
       setSlackInvites((s?.slackInviteEmails ?? []).join(', '))
+      setContactsText((s?.dispatcherContacts ?? []).map((c) => `${c.email}, ${c.name}, ${prettyPhone(c.phone)}`).join('\n'))
     }).catch((err) => toast.error(err instanceof Error ? err.message : 'Could not load settings')).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
   }, [load])
 
   const submit = async () => {
-    const r = normalizeSettings({ forwardTo: forwards, ringSeconds: ring, greeting, voicemailEnabled: voicemail, slackChannelId: slack, autoReply, introText, slackMirror, slackInviteEmails: slackInvites.split(/[\s,;]+/).filter(Boolean) })
+    const dispatcherContacts = contactsText.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
+      const [email = '', name = '', ...rest] = line.split(',').map((x) => x.trim())
+      return { email, name, phone: rest.join('') }
+    })
+    const r = normalizeSettings({ forwardTo: forwards, ringSeconds: ring, greeting, voicemailEnabled: voicemail, slackChannelId: slack, autoReply, introText, slackMirror, slackInviteEmails: slackInvites.split(/[\s,;]+/).filter(Boolean), dispatcherContacts })
     if (!r.ok) { toast.error(r.problem.message); return }
     setSaving(true)
     try { await save(r.value); toast.success('Dispatch settings saved'); onClose() } catch (err) { toast.error(err instanceof Error ? err.message : 'Could not save settings') } finally { setSaving(false) }
@@ -230,6 +237,11 @@ export function DispatchSettingsDialog({ onClose, dispatchNumber, load, save }: 
               <Label htmlFor="dispatch-intro">Intro text (the Intro button; {'{name}'} and {'{number}'} are filled in)</Label>
               <Textarea id="dispatch-intro" rows={3} placeholder={DEFAULT_INTRO_TEXT} value={introText} onChange={(e) => setIntroText(e.target.value)} />
               <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>Sent with a contact card so the driver can save the number in one tap. Leave blank for the standard text.</div>
+            </section>
+            <section style={{ display: 'grid', gap: 6 }}>
+              <Label htmlFor="dispatch-contacts">Dispatcher contacts — shown in a driver's app as their dispatcher</Label>
+              <Textarea id="dispatch-contacts" rows={3} placeholder={'arcie@bcatcorp.com, Arcie, (224) 555-0100'} value={contactsText} onChange={(e) => setContactsText(e.target.value)} />
+              <div style={{ fontSize: 12, color: 'var(--ds-t3)' }}>One per line: login email, name the driver sees, phone. A driver whose dispatcher (Drivers page) is listed here gets that person's Call and Text buttons above the main dispatch line.</div>
             </section>
             <section style={{ display: 'grid', gap: 6 }}>
               <Label htmlFor="dispatch-autoreply">First-text auto-reply (optional)</Label>

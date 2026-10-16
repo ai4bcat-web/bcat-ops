@@ -78,6 +78,13 @@ export interface DispatchForward {
   phone: string
 }
 
+/** A dispatcher's own number, shown in a driver's app when they are that driver's dispatcher. */
+export interface DispatcherContact {
+  email: string   // the staff login, matched against Driver.dispatcherPrimary / dispatcherBackup
+  name: string    // what the driver sees, e.g. "Arcie"
+  phone: string   // E.164
+}
+
 export interface DispatchSettings {
   id?: string
   forwardTo?: DispatchForward[] | null
@@ -92,6 +99,8 @@ export interface DispatchSettings {
   slackMirror?: boolean | null
   /** Staff emails invited into every driver channel as it is created. */
   slackInviteEmails?: string[] | null
+  /** Dispatchers' own numbers; a driver whose dispatcher is listed gets that number in the app. */
+  dispatcherContacts?: DispatcherContact[] | null
   updatedAt?: string
 }
 
@@ -336,9 +345,21 @@ export function normalizeSettings(input: Partial<DispatchSettings>): { ok: true;
     if (!invites.includes(e)) invites.push(e)
   }
   if (invites.length > MAX_SLACK_INVITES) return { ok: false, problem: { field: 'slackInviteEmails', message: `At most ${MAX_SLACK_INVITES} people can be auto-invited` } }
+  const contacts: DispatcherContact[] = []
+  for (const c of input.dispatcherContacts ?? []) {
+    const email = String(c?.email ?? '').trim().toLowerCase()
+    if (!email) continue
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, problem: { field: 'dispatcherContacts', message: `"${c?.email ?? ''}" is not an email address` } }
+    const phone = toE164Strict(c?.phone)
+    if (!phone) return { ok: false, problem: { field: 'dispatcherContacts', message: `"${c?.phone ?? ''}" is not a US phone number (dispatcher ${email})` } }
+    const name = String(c?.name ?? '').trim().slice(0, 60) || email.split('@')[0]
+    if (contacts.some((x) => x.email === email)) continue
+    contacts.push({ email, name, phone })
+  }
   return {
     ok: true,
     value: {
+      dispatcherContacts: contacts,
       forwardTo: forwards,
       ringSeconds: ring,
       greeting: greeting || null,
@@ -380,4 +401,21 @@ export function callPlan(settings: DispatchSettings | null | undefined): { ring:
     voicemail: settings?.voicemailEnabled !== false,
     greeting: settings?.greeting?.trim() || DEFAULT_GREETING,
   }
+}
+
+/**
+ * The dispatcher a driver should see in their app: their primary dispatcher if that person
+ * has a number on file in Dispatch settings, else their backup. Null when neither does —
+ * the app then shows only the main dispatch line.
+ */
+export function dispatcherContactFor(
+  settings: Pick<DispatchSettings, 'dispatcherContacts'> | null | undefined,
+  driver: Pick<DispatchDriver, 'dispatcherPrimary' | 'dispatcherBackup'> | null | undefined,
+): DispatcherContact | null {
+  const contacts = settings?.dispatcherContacts ?? []
+  for (const email of dispatchersOf(driver)) {
+    const hit = contacts.find((c) => c.email.toLowerCase() === email && c.phone)
+    if (hit) return hit
+  }
+  return null
 }

@@ -104,6 +104,8 @@ export interface DriverProfile {
   trailer?: DriverTruck | null
   /** The dispatch number to call or text, E.164; null until Dispatch is set up. Optional: older API. */
   dispatchPhone?: string | null
+  /** The driver's own dispatcher, when Dispatch settings list a number for them. Optional: older API. */
+  dispatcher?: { name: string; phone: string } | null
   /** Hours tab on? Ivan's fleet by default; staff can override on the driver file. Optional: older API. */
   timeClock?: boolean | null
   /** Must name the trailer when leaving a pickup (Ivan local drivers). Optional: older API. */
