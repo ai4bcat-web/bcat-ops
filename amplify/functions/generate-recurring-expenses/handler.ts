@@ -9,16 +9,14 @@
  * Idempotent: uses deterministic IDs + attribute_not_exists(id) condition.
  */
 
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
-import { DynamoDBDocumentClient, ScanCommand, PutCommand } from '@aws-sdk/lib-dynamodb'
-import { createHash } from 'crypto'
+import {DynamoDBClient} from '@aws-sdk/client-dynamodb'
+import {DynamoDBDocumentClient, ScanCommand, PutCommand} from '@aws-sdk/lib-dynamodb'
 
 const dynamo = DynamoDBDocumentClient.from(new DynamoDBClient({}))
 
 const EXPENSE_TYPE_TABLE   = process.env.EXPENSE_TYPE_TABLE_NAME!
 const ALLOCATION_TABLE     = process.env.ALLOCATION_TABLE_NAME!
 const RECURRING_TABLE      = process.env.RECURRING_TABLE_NAME!
-const EXPENSE_RECORD_TABLE = process.env.EXPENSE_RECORD_TABLE_NAME!
 
 // ── Stable seed IDs ───────────────────────────────────────────────────────────
 
