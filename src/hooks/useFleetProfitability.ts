@@ -2,7 +2,7 @@ import { useMemo, useCallback } from 'react'
 import { useLoads } from './useLoads'
 import { useDrivers } from './useDrivers'
 import { useTrucks } from './useTrucks'
-import { useFuelTransactions } from './useFuelTransactions'
+import { useFuelTransactions, type FuelTransaction } from './useFuelTransactions'
 import { useExpenseData } from './useExpenseData'
 import { useTruckMileage } from './useTruckMileage'
 import { useDriverPay } from './useDriverPay'
@@ -11,6 +11,7 @@ import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPa
 import { useCurrentInsurance } from './useCurrentInsurance'
 import { insuranceRangeByTruck } from '@/lib/insuranceAllocation'
 import { isPosted } from '@/lib/invoiceStatus'
+import { withResolvedTruckIds } from '@/lib/fuelTruckResolve'
 import { calcFleetProfitability } from '@/lib/fleetProfitability'
 import type { DateRange, MemberTruck, FleetProfitabilityResult } from '@/lib/fleetProfitability'
 import type { ExpenseRecordInput, ExpenseTypeRecord } from '@/lib/expenseAllocation'
@@ -28,6 +29,8 @@ export interface FleetProfitabilityHookResult {
   refresh: () => void
   /** Compute the result for any range from the same assembled data (for trend charts). */
   computeForRange: (range: DateRange) => FleetProfitabilityResult
+  /** Fuel transactions with truckId resolved from the card number where it was missing. */
+  fuelTxs: FuelTransaction[]
 }
 
 /**
@@ -46,6 +49,10 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
   const pay = useDriverPay()
   const insurance = useCurrentInsurance()
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
+
+  // Fuel rows imported before their card was mapped on the truck record have no truckId;
+  // attribute them by card number so the P&L counts every gallon.
+  const fuelTxs = useMemo(() => withResolvedTruckIds(fuel.transactions, equipment), [fuel.transactions, equipment])
 
   const loading = fuel.loading || exp.loading || mileage.loading || pay.loading
   const error = fuel.error || exp.error || mileage.error || pay.error || null
@@ -121,7 +128,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       cfrRange,
       members,
       loads.map((l) => ({ truckId: l.truckId, deliveryDriverId: l.deliveryDriverId, rate: l.rate, deliveryAppt: l.deliveryAppt })),
-      fuel.transactions.map((t) => ({ truckId: t.truckId, transactionDate: t.transactionDate, amount: t.amount, itemCategory: t.itemCategory ?? '' })),
+      fuelTxs.map((t) => ({ truckId: t.truckId, transactionDate: t.transactionDate, amount: t.amount, itemCategory: t.itemCategory ?? '' })),
       expenseRecords,
       exp.recurring.map((r) => ({ expenseTypeId: r.expenseTypeId, allocationId: r.allocationId, monthlyAmount: r.monthlyAmount, startMonth: r.startMonth, endMonth: r.endMonth, active: r.active })),
       exp.allocations.map((a) => ({ id: a.id, expenseTypeId: a.expenseTypeId, allocationMethod: a.allocationMethod, truckIds: a.truckIds ?? [] })),
@@ -136,9 +143,9 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       // prorated to the range, replacing the legacy per-truck insurance in the P&L.
       insuranceRangeByTruck(insurance.allocation.byTruck, cfrRange),
     )
-  }, [members, loads, fuel.transactions, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group, insurance.allocation])
+  }, [members, loads, fuelTxs, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group, insurance.allocation])
 
   const data = useMemo<FleetProfitabilityResult | null>(() => computeForRange(range), [computeForRange, range])
 
-  return { data, members, loading, error, refresh, computeForRange }
+  return { data, members, loading, error, refresh, computeForRange, fuelTxs }
 }

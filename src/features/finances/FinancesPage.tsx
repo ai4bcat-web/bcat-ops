@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+import { ClipboardList } from 'lucide-react'
 import { FleetPLTrendChart } from '@/features/fleet-profitability/FleetPLTrendChart'
 import { FleetProfitabilitySection } from '@/features/fleet-profitability/FleetProfitabilitySection'
 import { MonthlyFleetPL } from '@/features/fleet-profitability/MonthlyFleetPL'
@@ -37,6 +39,9 @@ export function FinancesPage() {
         </div>
 
         <SectionHeading>Profitability</SectionHeading>
+        <Link to="/finances/review" style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--ds-t1)', textDecoration: 'none', border: '1px solid var(--ds-border)', borderRadius: 8, padding: '6px 10px', background: 'var(--ds-surface)' }}>
+          <ClipboardList size={14} /> Profit Review — month over month, what to change, rate-per-mile projections
+        </Link>
         <CombinedMonthlyProfit />
         <FleetPLTrendChart />
         <FleetProfitabilitySection />

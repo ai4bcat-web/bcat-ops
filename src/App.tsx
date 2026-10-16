@@ -15,6 +15,7 @@ import { TrucksPage } from '@/features/trucks/TrucksPage'
 import { TruckDocumentsPage } from '@/features/truck-docs/TruckDocumentsPage'
 import { FuelPage } from '@/features/fuel/FuelPage'
 import { FinancesPage } from '@/features/finances/FinancesPage'
+import { ProfitReviewPage } from '@/features/finances/ProfitReviewPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
@@ -200,6 +201,7 @@ export default function App() {
               <Route path="/invoices" element={<RequirePage page="invoices"><InvoicesPage /></RequirePage>} />
               <Route path="/fuel" element={<RequirePage page="fuel"><FuelPage /></RequirePage>} />
               <Route path="/finances" element={<RequirePage page="finances"><FinancesPage /></RequirePage>} />
+              <Route path="/finances/review" element={<RequirePage page="finances"><ProfitReviewPage /></RequirePage>} />
               <Route path="/finance/cash-checkin" element={<RequirePage page="cashCheckIn"><WeeklyCashCheckInPage /></RequirePage>} />
               <Route path="/factoring" element={<RequirePage page="factoring"><FactoringPage /></RequirePage>} />
               <Route path="/hours" element={<RequirePage page="hours"><HoursPage /></RequirePage>} />

@@ -89,6 +89,7 @@ export const NAV_GROUPS: NavSection[] = [
     title: 'Finance',
     items: [
       { to: '/finances',  label: 'Finances',  icon: LineChart, pageKey: 'finances' },
+      { to: '/finances/review', label: 'Profit Review', icon: ClipboardList, pageKey: 'finances' },
       { to: '/finance/cash-checkin', label: 'Weekly Cash Check-in', icon: Wallet, pageKey: 'cashCheckIn' },
       { to: '/insurance', label: 'Insurance', icon: Umbrella,  pageKey: 'insurance' },
     ],
