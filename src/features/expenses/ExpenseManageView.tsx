@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { reviseRecurringAmount, todayChicago } from '@/lib/recurringRevision'
 import { Plus, Pencil, Trash2, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -390,10 +391,19 @@ function RecurringTab({ data }: { data: ExpenseDataState }) {
         notes:         form.notes || null,
       }
       if (editId) {
-        await data.updateRecur(editId, payload)
+        const before = data.recurring.find((r) => r.id === editId)
+        if (before && before.monthlyAmount !== payload.monthlyAmount && !before.endMonth) {
+          // A new amount takes effect today; the months before keep the old one. See recurringRevision.ts.
+          const rev = reviseRecurringAmount(before, payload.monthlyAmount, todayChicago())
+          if (rev.kind === 'update') await data.updateRecur(rev.id, { ...rev.patch, notes: payload.notes, allocationId: payload.allocationId })
+          else if (rev.kind === 'end') await data.updateRecur(rev.id, rev.patch)
+          else { await data.updateRecur(rev.endId, rev.endPatch); await data.createRecur({ ...rev.create, allocationId: payload.allocationId, notes: payload.notes, active: payload.active }) }
+        } else {
+          await data.updateRecur(editId, payload)
+        }
         setEditId(null)
       } else {
-        await data.createRecur(payload)
+        await data.createRecur({ ...payload, startDate: payload.startMonth === todayChicago().slice(0, 7) ? todayChicago() : null })
         setAdding(false)
       }
     } finally {

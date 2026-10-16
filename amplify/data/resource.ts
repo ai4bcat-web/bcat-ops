@@ -1172,6 +1172,10 @@ const schema = a.schema({
       monthlyAmount: a.float().required(),
       startMonth:    a.string().required(),  // "2026-05"
       endMonth:      a.string(),             // null = ongoing
+      // The day the amount took effect / stopped. Set by every change made on the Finances or
+      // Expenses page; the boundary months are prorated by day. Null = the whole month.
+      startDate:     a.date(),
+      endDate:       a.date(),
       active:        a.boolean().required(),
       notes:         a.string(),
     })

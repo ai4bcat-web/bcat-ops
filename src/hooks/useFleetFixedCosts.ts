@@ -4,6 +4,7 @@ import { useTrucks } from './useTrucks'
 import { getFleetExpenses } from '@/lib/expenseAllocation'
 import type { ExpenseCategory } from '@/lib/expenseAllocation'
 import type { DateRange } from '@/lib/fleetProfitability'
+import { reviseRecurringAmount, todayChicago } from '@/lib/recurringRevision'
 
 /**
  * Editable, fleet-level fixed monthly costs for the LOCAL (Ivan) fleet — surfaced and
@@ -51,7 +52,7 @@ export function useFleetFixedCosts() {
     const out = { loanTrailers: 0, trailerLease: 0, yardRent: 0, tolls: 0 } as Record<FleetFixedCostKey, number>
     for (const def of FLEET_FIXED_COSTS) {
       const typeId = exp.expenseTypes.find((t) => t.name === def.name)?.id
-      const rec = typeId ? exp.recurring.find((r) => r.expenseTypeId === typeId && r.active) : undefined
+      const rec = typeId ? exp.recurring.filter((r) => r.expenseTypeId === typeId && r.active && !r.endMonth).sort((a, b) => b.startMonth.localeCompare(a.startMonth))[0] : undefined
       out[def.key] = rec?.monthlyAmount ?? 0
     }
     return out
@@ -105,9 +106,14 @@ export function useFleetFixedCosts() {
     async (key: FleetFixedCostKey, monthlyAmount: number) => {
       const def = FLEET_FIXED_COSTS.find((d) => d.key === key)!
       let type = exp.expenseTypes.find((t) => t.name === def.name)
-      const existing = type ? exp.recurring.find((r) => r.expenseTypeId === type!.id) : undefined
+      // The open row — the one with no end — is the amount in force now.
+      const existing = type ? exp.recurring.filter((r) => r.expenseTypeId === type!.id && r.active && !r.endMonth).sort((a, b) => b.startMonth.localeCompare(a.startMonth))[0] : undefined
       if (existing) {
-        await exp.updateRecur(existing.id, { monthlyAmount, active: true })
+        // From today, not from the beginning: earlier months keep what they were. See recurringRevision.ts.
+        const rev = reviseRecurringAmount(existing, monthlyAmount, todayChicago())
+        if (rev.kind === 'update') await exp.updateRecur(rev.id, rev.patch)
+        else if (rev.kind === 'end') await exp.updateRecur(rev.id, rev.patch)
+        else { await exp.updateRecur(rev.endId, rev.endPatch); await exp.createRecur(rev.create) }
       } else {
         if (!type) {
           type = await exp.createType({ name: def.name, category: def.category, defaultEntryMethod: 'FIXED', active: true })
@@ -116,7 +122,7 @@ export function useFleetFixedCosts() {
         if (!alloc) {
           alloc = await exp.createAlloc({ expenseTypeId: type.id, allocationMethod: 'SPLIT_EVEN', truckIds: localTruckIds, notes: 'Fleet-wide monthly cost' })
         }
-        await exp.createRecur({ expenseTypeId: type.id, allocationId: alloc.id, monthlyAmount, startMonth: thisMonth(), active: true })
+        await exp.createRecur({ expenseTypeId: type.id, allocationId: alloc.id, monthlyAmount, startMonth: thisMonth(), startDate: todayChicago(), active: true })
       }
       exp.refresh()
     },

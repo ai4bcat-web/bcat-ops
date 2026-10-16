@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { expandRecurringToRecords } from './expenseAllocation'
 import { getExpensesByTruck } from './expenseAllocation'
 import type { AllocationRecord, ExpenseTypeRecord, ExpenseRecordInput, FuelTxInput } from './expenseAllocation'
 
@@ -232,5 +233,20 @@ describe('edge cases', () => {
     ]
     const res = getExpensesByTruck(MAY.start, MAY.end, fuelTxs, [], [], [])
     expect(Object.keys(res)).toHaveLength(0)
+  })
+})
+
+describe('effective dates on a recurring expense', () => {
+  const base = { expenseTypeId: 't', allocationId: 'a', active: true }
+  it('scales the first and last months by the days the amount was in force', () => {
+    const old = { ...base, monthlyAmount: 2000, startMonth: '2026-06', endMonth: '2026-10', endDate: '2026-10-14' }
+    const neu = { ...base, monthlyAmount: 2500, startMonth: '2026-10', startDate: '2026-10-15', endMonth: null }
+    const oct = expandRecurringToRecords([old, neu], '2026-10-01', '2026-10-31')
+    expect(oct.map((r) => Math.round(r.amount))).toEqual([Math.round(2000 * 14 / 31), Math.round(2500 * 17 / 31)])
+    const sep = expandRecurringToRecords([old, neu], '2026-09-01', '2026-09-30')
+    expect(sep.map((r) => r.amount)).toEqual([2000])
+  })
+  it('a row with no dates is the whole month, as before', () => {
+    expect(expandRecurringToRecords([{ ...base, monthlyAmount: 40, startMonth: '2026-06', endMonth: null }], '2026-10-01', '2026-10-31').map((r) => r.amount)).toEqual([40])
   })
 })

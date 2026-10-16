@@ -1867,6 +1867,9 @@ export interface RecurringExpenseData {
   monthlyAmount: number
   startMonth: string
   endMonth?: string | null
+  /** The day the amount took effect / stopped (YYYY-MM-DD); the boundary months are prorated by day. */
+  startDate?: string | null
+  endDate?: string | null
   active: boolean
   notes?: string | null
   createdAt: string
@@ -1876,7 +1879,7 @@ export interface RecurringExpenseData {
 const EXPENSE_TYPE_FIELDS = `id name category defaultEntryMethod active notes createdAt updatedAt`
 const ALLOCATION_FIELDS   = `id expenseTypeId allocationMethod truckIds notes createdAt updatedAt`
 const EXPENSE_REC_FIELDS  = `id expenseTypeId allocationId amount periodMonth transactionDate entryMethod directTruckId notes source createdAt updatedAt`
-const RECURRING_FIELDS    = `id expenseTypeId allocationId monthlyAmount startMonth endMonth active notes createdAt updatedAt`
+const RECURRING_FIELDS    = `id expenseTypeId allocationId monthlyAmount startMonth endMonth startDate endDate active notes createdAt updatedAt`
 
 export async function listExpenseTypes(): Promise<ExpenseTypeData[]> {
   const result = await client.graphql({

@@ -69,6 +69,9 @@ export interface RecurringInput {
   monthlyAmount: number
   startMonth:    string                 // "2026-05" (or "2026-5")
   endMonth:      string | null | undefined
+  /** Effective day inside the first / last month; that month's amount is scaled by the days covered. */
+  startDate?:    string | null
+  endDate?:      string | null
   active:        boolean
 }
 
@@ -129,10 +132,18 @@ export function expandRecurringToRecords(
     let month = rStart > startMonth ? rStart : startMonth
     const hi   = rEnd && rEnd < endMonth ? rEnd : endMonth
     while (month <= hi) {
-      out.push({
+      // A change made mid-month counts for the days it was in force: Oct 15 onward is 17/31
+      // of October for the new amount, and the row it replaced carries the first 14 days.
+      const y0 = +month.slice(0, 4), m0 = +month.slice(5, 7)
+      const days = new Date(Date.UTC(y0, m0, 0)).getUTCDate()
+      const mStart = `${month}-01`, mEnd = `${month}-${String(days).padStart(2, '0')}`
+      const from = r.startDate && r.startDate > mStart ? r.startDate : mStart
+      const to = r.endDate && r.endDate < mEnd ? r.endDate : mEnd
+      const share = from > to ? 0 : inclusiveDays(from, to) / days
+      if (share > 0) out.push({
         expenseTypeId:   r.expenseTypeId,
         allocationId:    r.allocationId,
-        amount:          r.monthlyAmount,
+        amount:          r.monthlyAmount * share,
         periodMonth:     month,
         transactionDate: null,
         directTruckId:   null,
