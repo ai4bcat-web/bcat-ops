@@ -3,7 +3,8 @@ import { Trophy, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Avatar } from '@/components/ui/avatar'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useIsMobile } from '@/hooks/useIsMobile'
-import { listTimeClockEntries } from '@/lib/apiClient'
+import { listTimeClockEntries, listDispatchConversations } from '@/lib/apiClient'
+import type { DispatchConversation } from '@/lib/dispatch'
 import { weekStartOf, weekEndOf, type TimeClockRow } from '@/lib/timeClock'
 import { weekStartOfISO, weekLabel as settlementWeekLabel } from '@/features/driver-pay/week'
 import { periodStartOfISO, periodLabel } from '@/lib/biweekly'
@@ -88,6 +89,29 @@ export function DriverLeaderboardWidget() {
   )
   const ooBoard = useMemo(() => withWholeRoster(bookedGrossLeaders(loads, ownerOps, ooWeek, shiftDays(ooWeek, 6)), ownerOps), [loads, ownerOps, ooWeek])
   const boxBoard = useMemo(() => withWholeRoster(bookedGrossLeaders(loads, boxDrivers, boxPeriod, shiftDays(boxPeriod, 13)), boxDrivers), [loads, boxDrivers, boxPeriod])
+  // Ivan local: each driver's last check-in from the app (on site, departed, delivered, POD…),
+  // read off their dispatch conversation and refreshed every 30 s while the tab is visible.
+  const [convos, setConvos] = useState<DispatchConversation[]>([])
+  useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return
+      try { const rows = await listDispatchConversations(); if (alive) setConvos(rows) } catch { /* best-effort */ }
+    }
+    void tick()
+    const t = setInterval(tick, 30_000)
+    return () => { alive = false; clearInterval(t) }
+  }, [])
+  const lastStatus = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of convos) {
+      if (!c.driverId || !c.lastStatusText?.trim()) continue
+      const when = c.lastStatusAt ? new Date(c.lastStatusAt).toLocaleString('en-US', { timeZone: 'America/Chicago', weekday: 'short', hour: 'numeric', minute: '2-digit' }) : null
+      m.set(c.driverId, when ? `${c.lastStatusText.trim()} · ${when}` : c.lastStatusText.trim())
+    }
+    return m
+  }, [convos])
+
   // Owner-operators: their last booked stop tells dispatch when and where each goes empty.
   const emptyAt = useMemo(() => {
     const m = new Map<string, LastAppointment>()
@@ -151,7 +175,11 @@ export function DriverLeaderboardWidget() {
             ) : b.rows.length === 0 ? (
               <div style={{ padding: '18px 0', textAlign: 'center', fontSize: 12, color: 'var(--ds-t3)' }}>{b.empty}</div>
             ) : (
-              <Board rows={b.rows} unit={b.unit} detail={b.key === 'oo' ? (r) => { const a = emptyAt.get(r.driverId); return a ? `Empty ${emptyLabel(a)}` : 'No appointment booked' } : undefined} />
+              <Board rows={b.rows} unit={b.unit} detail={
+                b.key === 'oo' ? (r) => { const a = emptyAt.get(r.driverId); return a ? `Empty ${emptyLabel(a)}` : 'No appointment booked' }
+                : b.key === 'local' ? (r) => lastStatus.get(r.driverId) ?? 'No check-in from the app yet'
+                : undefined
+              } />
             )}
           </div>
         ))}
