@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatDistanceToNow, formatDistanceToNowStrict } from 'date-fns'
-import { MapPin, Plus } from 'lucide-react'
+import { MapPin, Plus, ClipboardCopy } from 'lucide-react'
 import { toast } from 'sonner'
 import { listTruckLocations, type TruckLocation } from '@/lib/apiClient'
 import { TrackingLinkCell } from './TrackingLinkCell'
@@ -10,6 +10,9 @@ import { canonicalUnit } from '@/lib/fleetGroups'
 import { FleetMiniMap } from './FleetMiniMap'
 import { currentLoadForDriver, laneLabel, fixAge } from '@/lib/driverJourney'
 import { lastStopEvent, pendingDeliveryEta } from '@/lib/stopEvents'
+import { trailerOnDriver } from '@/features/dispatch/driverWhereabouts'
+import { driverInfoText } from '@/lib/driverInfoText'
+import { formatPhone } from '@/lib/utils'
 import { fleetBucketOf, type FleetBucket } from '@/lib/revenueByFleet'
 import { formatTime } from '@/lib/date'
 
@@ -213,7 +216,7 @@ export function TruckMapWidget() {
           {/* The table flexes to whatever the map leaves; columns shrink and clip rather than scroll sideways. */}
           <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 560px', minWidth: 0 }}>
             {/* Header row: every column sorts; tap again to flip. */}
-            <div style={{ display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 84px 92px', gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 116px 92px', gap: 10, padding: '8px 20px', fontSize: 11, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--ds-t3)', borderBottom: '1px solid var(--ds-border)' }}>
               {([
                 ['unit', 'Unit'], ['location', 'Location'], ['driver', 'Driver'], ['load', 'Load'], ['status', 'Status'], ['tracking', 'Tracking'], ['updated', 'Updated'],
               ] as Array<[SortKey, string]>).map(([key, label]) => {
@@ -245,7 +248,7 @@ export function TruckMapWidget() {
                 <div
                   key={loc.truckId}
                   style={{
-                    display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 84px 92px', gap: 10,
+                    display: 'grid', gridTemplateColumns: '48px minmax(80px, 1fr) 132px 84px minmax(130px, 1.3fr) 116px 92px', gap: 10,
                     padding: '9px 20px', fontSize: 13, alignItems: 'center',
                     borderBottom: '1px solid var(--ds-border)',
                     opacity: stale ? 0.55 : 1,
@@ -339,7 +342,34 @@ export function TruckMapWidget() {
                     )}
                   </div>
                   {/* Motive share link, pasted once, copied on every call with a customer. */}
-                  <TrackingLinkCell equip={equip} unit={unit} />
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <TrackingLinkCell equip={equip} unit={unit} />
+                    {/* One block to paste to a broker: driver, cell, truck, VIN, trailer, tracking link. */}
+                    {assigned && (
+                      <button
+                        type="button"
+                        title="Copy driver, cell, truck, VIN, trailer and tracking link"
+                        aria-label={`Copy ${assigned.name}'s info`}
+                        onClick={() => {
+                          const text = driverInfoText({
+                            name: assigned.name,
+                            phone: assigned.phone ? formatPhone(assigned.phone) : null,
+                            truck: unit,
+                            vin: equip?.vin ?? null,
+                            trailer: trailerOnDriver(assigned, loads, equipment),
+                            trackingUrl: equip?.trackingUrl ?? null,
+                          })
+                          void navigator.clipboard.writeText(text).then(
+                            () => toast.success(`Copied ${assigned.name}'s info`, { description: text.replace(/\n/g, ' · ') }),
+                            () => toast.error('Could not copy — clipboard blocked'),
+                          )
+                        }}
+                        style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 6, border: '1px solid var(--ds-border)', background: 'var(--ds-bg)', color: 'var(--ds-t2)', cursor: 'pointer' }}
+                      >
+                        <ClipboardCopy size={12} />
+                      </button>
+                    )}
+                  </span>
                   <div style={{ textAlign: 'right', color: 'var(--ds-t3)', fontSize: 12, whiteSpace: 'nowrap' }}>
                     <span style={{ color: age.stale ? '#b45309' : 'inherit', fontWeight: age.stale ? 600 : 400 }}
                           title={age.stale ? 'No fresh ELD fix — this position may be out of date' : undefined}>
