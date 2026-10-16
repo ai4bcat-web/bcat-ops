@@ -20,6 +20,7 @@ import { RepairInvoicesWidget } from './RepairInvoicesWidget'
 import { VendorApCard } from './VendorApCard'
 import { TruckMapWidget } from './TruckMapWidget'
 import { DriverLeaderboardWidget } from './DriverLeaderboardWidget'
+import { YearProfitWidget } from './YearProfitWidget'
 import { DieselPriceWidget } from './DieselPriceWidget'
 import { MonthlyComparisonWidget } from './MonthlyComparisonWidget'
 import { getColor } from '@/lib/driverColors'
@@ -575,6 +576,9 @@ export function DashboardPage() {
             sublabel={`vs. previous ${RANGES.find((r) => r.value === rangeKey)?.label.toLowerCase()}`}
           />
         </div>
+
+        {/* ── The year so far: combined profit, month over month by source ─── */}
+        <YearProfitWidget />
 
         {/* ── Driver leaderboard: hours (Ivan local), gross (owner-operators, box truck) ─ */}
         <DriverLeaderboardWidget />
