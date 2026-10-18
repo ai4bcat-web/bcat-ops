@@ -243,6 +243,25 @@ export function errorHint(code: string): string {
 
 // ── Calls ───────────────────────────────────────────────────────────────────
 
+/** The ring plan for this caller: their dispatcher first when we know who they are. */
+async function planFor(deps: Deps, from: string, conversation: DispatchConversation): Promise<ReturnType<typeof callPlan>> {
+  const roster = await drivers(deps.store, deps.now().getTime())
+  const driver = (conversation.driverId ? roster.find((d) => d.id === conversation.driverId) : null) ?? matchDriverByPhone(roster, from)
+  return callPlan(await deps.store.getSettings().catch(() => null), driver)
+}
+
+/** TwiML that rings one stage of the plan; the after-dial callback carries the stage index. */
+function dialStage(event: FnUrlEvent, deps: Deps, plan: ReturnType<typeof callPlan>, stage: number, label: string): string {
+  const secret = deps.config.webhookSecret
+  return twiml(dialTwiml({
+    numbers: plan.stages[stage].map((f) => f.phone),
+    callerId: deps.config.dispatchNumber,
+    timeoutSec: plan.ringSeconds,
+    actionUrl: selfUrl(event, 'voice/after', secret, stage > 0 ? { stage: String(stage) } : undefined),
+    whisperUrl: selfUrl(event, 'voice/whisper', secret, { who: label }),
+  }))
+}
+
 async function inboundCall(event: FnUrlEvent, p: Record<string, string>, deps: Deps): Promise<Reply> {
   const { store, config } = deps
   const from = p.From
@@ -261,20 +280,14 @@ async function inboundCall(event: FnUrlEvent, p: Record<string, string>, deps: D
     await store.touchConversation(conversation.id, message, { unread: 'keep' })
   }
 
-  const plan = callPlan(await store.getSettings().catch(() => null))
+  const plan = await planFor(deps, from, conversation)
   const secret = config.webhookSecret
-  if (plan.ring.length === 0) {
+  if (plan.stages.length === 0) {
     return xml(plan.voicemail ? voicemailTwiml(voicemailPlan(event, plan.greeting, secret)) : hangupTwiml('Nobody is available at dispatch right now. Please text this number instead.'))
   }
-  const label = conversationTitle(conversation)
-  return xml(twiml(dialTwiml({
-    numbers: plan.ring.map((f) => f.phone),
-    callerId: config.dispatchNumber,
-    timeoutSec: plan.ringSeconds,
-    actionUrl: selfUrl(event, 'voice/after', secret),
-    whisperUrl: selfUrl(event, 'voice/whisper', secret, { who: label }),
-  })))
+  return xml(dialStage(event, deps, plan, 0, conversationTitle(conversation)))
 }
+
 
 function voicemailPlan(event: FnUrlEvent, greeting: string, secret: string) {
   return {
@@ -302,7 +315,16 @@ async function afterDial(event: FnUrlEvent, p: Record<string, string>, deps: Dep
     }
     return xml(hangupTwiml())
   }
-  const plan = callPlan(await store.getSettings().catch(() => null))
+  // Nobody in this stage picked up: ring the next group before giving up.
+  const stage = Number(event.queryStringParameters?.stage ?? '0') || 0
+  const from = p.From ?? msg?.phone ?? ''
+  const conversation = msg ? await store.getConversation(msg.conversationId).catch(() => null) : null
+  const plan = conversation && from
+    ? await planFor(deps, from, conversation)
+    : callPlan(await store.getSettings().catch(() => null))
+  if (outcome !== 'completed' && plan.stages.length > stage + 1 && conversation) {
+    return xml(dialStage(event, deps, plan, stage + 1, conversationTitle(conversation)))
+  }
   if (msg) {
     const updated = await store.updateMessage(msg.id, { status: plan.voicemail ? 'voicemail' : 'missed' })
     // A missed call is work for someone; a call that rolls to voicemail counts when the

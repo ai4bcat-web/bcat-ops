@@ -174,6 +174,25 @@ describe('calls', () => {
     expect(m.status).toBe('ringing')
     expect([...store.conversations.values()][0].unreadCount).toBe(0)
   })
+  it('rings the driver\'s dispatcher first and the office after a no-answer', async () => {
+    store.settings = {
+      forwardTo: [{ name: 'Ryne', phone: '+18475550199' }],
+      dispatcherContacts: [{ email: 'arcie@bcatcorp.com', name: 'Arcie', phone: '+18475550177' }],
+    }
+    store.drivers = store.drivers.map((d) => d.id === 'd-jason' ? { ...d, dispatcherPrimary: 'arcie@bcatcorp.com' } : d)
+    const r = await handleEvent(post('/voice', { From: '+18475550100', CallSid: 'CA9' }), deps())
+    expect(r.body).toContain('+18475550177</Number>')
+    expect(r.body).not.toContain('+18475550199</Number>')
+    expect(r.body).toContain(`action="https://${HOST}/voice/after?t=${SECRET}"`)
+    const next = await handleEvent(post('/voice/after', { From: '+18475550100', CallSid: 'CA9', DialCallStatus: 'no-answer' }), deps())
+    expect(next.body).toContain('+18475550199</Number>')
+    expect(next.body).not.toContain('+18475550177</Number>')
+    expect(next.body).toContain(`action="https://${HOST}/voice/after?t=${SECRET}&amp;stage=1"`)
+    expect([...store.messages.values()].find((m) => m.twilioSid === 'CA9')?.status).toBe('ringing')
+    const end = await handleEvent(post('/voice/after', { From: '+18475550100', CallSid: 'CA9', DialCallStatus: 'no-answer' }, { query: { stage: '1' } }), deps())
+    expect(end.body).toContain('<Record')
+    expect([...store.messages.values()].find((m) => m.twilioSid === 'CA9')?.status).toBe('voicemail')
+  })
   it('goes straight to voicemail when nobody is set to ring', async () => {
     const r = await handleEvent(post('/voice', { From: '+18475550100', CallSid: 'CA2' }), deps())
     expect(r.body).toContain('<Record')

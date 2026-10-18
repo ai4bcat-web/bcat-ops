@@ -393,10 +393,48 @@ export function slackNoteBody(text: string): string | null {
 }
 
 /** What a voice call should do, from the settings as saved. */
-export function callPlan(settings: DispatchSettings | null | undefined): { ring: DispatchForward[]; ringSeconds: number; voicemail: boolean; greeting: string } {
-  const ring = (settings?.forwardTo ?? []).filter((f) => toE164Strict(f.phone))
+export interface CallPlan {
+  /** Who rings first; kept for callers that only need the first group. */
+  ring: DispatchForward[]
+  /**
+   * Ring groups in order. A known driver's call rings their assigned dispatcher first,
+   * then the backup dispatcher together with the office forward list, then voicemail.
+   * An unknown caller rings the office forward list only.
+   */
+  stages: DispatchForward[][]
+  ringSeconds: number
+  voicemail: boolean
+  greeting: string
+}
+
+export function callPlan(
+  settings: DispatchSettings | null | undefined,
+  driver?: Pick<DispatchDriver, 'dispatcherPrimary' | 'dispatcherBackup'> | null,
+): CallPlan {
+  const office = (settings?.forwardTo ?? []).filter((f) => toE164Strict(f.phone))
+  const contacts = settings?.dispatcherContacts ?? []
+  const contactFor = (email: string | null | undefined): DispatchForward | null => {
+    const want = (email ?? '').trim().toLowerCase()
+    if (!want) return null
+    const hit = contacts.find((c) => c.email.toLowerCase() === want && toE164Strict(c.phone))
+    return hit ? { name: hit.name, phone: hit.phone } : null
+  }
+  const primary = contactFor(driver?.dispatcherPrimary)
+  const backup = contactFor(driver?.dispatcherBackup)
+
+  const stages: DispatchForward[][] = []
+  const seen = new Set<string>()
+  const push = (group: (DispatchForward | null)[]) => {
+    const fresh = group.filter((f): f is DispatchForward => !!f && !seen.has(phoneDigits(f.phone) ?? f.phone))
+    for (const f of fresh) seen.add(phoneDigits(f.phone) ?? f.phone)
+    if (fresh.length) stages.push(fresh)
+  }
+  push([primary ?? backup])
+  push([primary ? backup : null, ...office])
+
   return {
-    ring,
+    ring: stages[0] ?? [],
+    stages,
     ringSeconds: settings?.ringSeconds ?? DEFAULT_RING_SECONDS,
     voicemail: settings?.voicemailEnabled !== false,
     greeting: settings?.greeting?.trim() || DEFAULT_GREETING,

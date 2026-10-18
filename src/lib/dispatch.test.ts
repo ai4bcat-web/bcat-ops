@@ -119,6 +119,23 @@ describe('settings', () => {
     expect(plan.greeting).toBe(DEFAULT_GREETING)
     expect(callPlan(null).ring).toEqual([])
   })
+  it('rings a driver\'s dispatcher first, then the backup with the office, then nobody', () => {
+    const settings = {
+      forwardTo: [{ name: 'Ryne', phone: '+18475550100' }, { name: 'Arcie', phone: '+18475550102' }],
+      dispatcherContacts: [
+        { email: 'arcie@bcatcorp.com', name: 'Arcie', phone: '+18475550102' },
+        { email: 'kel@bcatcorp.com', name: 'Kel', phone: '+18475550103' },
+      ],
+    }
+    const plan = callPlan(settings, { dispatcherPrimary: 'Arcie@bcatcorp.com', dispatcherBackup: 'kel@bcatcorp.com' })
+    expect(plan.stages.map((g) => g.map((f) => f.name))).toEqual([['Arcie'], ['Kel', 'Ryne']])   // Arcie not rung twice
+    expect(plan.ring).toEqual([{ name: 'Arcie', phone: '+18475550102' }])
+    // Only a backup on file: they ring first, then the office.
+    expect(callPlan(settings, { dispatcherBackup: 'kel@bcatcorp.com' }).stages.map((g) => g.map((f) => f.name))).toEqual([['Kel'], ['Ryne', 'Arcie']])
+    // Dispatcher without a number on file, or an unknown caller: office list only.
+    expect(callPlan(settings, { dispatcherPrimary: 'jenny@bcatcorp.com' }).stages).toHaveLength(1)
+    expect(callPlan(settings, null).stages).toEqual([settings.forwardTo])
+  })
 })
 
 describe('slack bridge helpers', () => {

@@ -5,10 +5,10 @@ import { defineFunction, secret } from '@aws-amplify/backend'
  *
  *   POST /sms                 inbound text or picture from a driver
  *   POST /status              delivery receipt for something the office sent
- *   POST /voice               inbound call: ring the office phones, else voicemail
+ *   POST /voice               inbound call: ring the driver's dispatcher, then the office, else voicemail
  *   POST /voice/whisper       screen on the answering phone (press a key to accept)
  *   POST /voice/accept        the key was pressed; bridge the call
- *   POST /voice/after         how the dial ended; missed calls fall to voicemail
+ *   POST /voice/after         how the dial ended (?stage=n); rings the next group, else voicemail
  *   POST /voice/recording     the voicemail audio is ready
  *   POST /voice/transcription the voicemail transcript is ready
  *
