@@ -31,9 +31,9 @@ import { useTripDocs, type TripDoc } from '../settlement/useTripDocs'
 import { DocPreviewSheet } from '../settlement/DocPreviewSheet'
 import { apptTimeLabel } from '@/lib/date'
 import { errorText } from '@/lib/errorText'
-import { addLocationNote, recordStopEvent, setStopDetention, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
+import { addLocationNote, editLocationNote, removeLocationNote, recordStopEvent, setStopDetention, type LocationDriverNote, type PaperworkLoad, type PaperworkStop, type StopEvent } from '../driverApi'
 
-import { DETENTION_HOURS, isDelivery, stopsForDay, type TodayStop } from './daySheet'
+import { DETENTION_HOURS, isDelivery, stopsForDay, type TodayStop, orderOpenStops } from './daySheet'
 
 function DetentionBox({ item, onChange }: { item: TodayStop; onChange: (next: TodayStop) => void }) {
   const [saving, setSaving] = useState(false)
@@ -120,25 +120,46 @@ function PodStatus({ load, doc, onView }: { load: PaperworkLoad; doc: TripDoc | 
 
 /**
  * What the office and other drivers know about this place, and a way to add to it.
- * Hours and dock notes come from the directory; the comments are other drivers'.
+ * Hours and dock notes come from the directory; the comments are other drivers'. A
+ * driver's own comments can be reworded or taken back (a note left on the wrong stop).
  */
-function PlaceNotes({ item, onAdded }: { item: TodayStop; onAdded: (note: { at: string; by: string; text: string }) => void }) {
+function PlaceNotes({ item, onNotes }: { item: TodayStop; onNotes: (notes: LocationDriverNote[]) => void }) {
   const [text, setText] = useState('')
-  const [writing, setWriting] = useState(false)
+  // null: not writing; 'new': adding; an ISO stamp: editing the driver's own note made then.
+  const [writing, setWriting] = useState<null | 'new' | string>(null)
   const [busy, setBusy] = useState(false)
   const loc = item.stop.location
   if (!loc) return null
   const notes = loc.driverNotes ?? []
 
-  async function send() {
-    if (!text.trim()) return
+  async function save() {
+    if (!text.trim() || !writing) return
     setBusy(true)
     try {
-      const res = await addLocationNote({ loadId: item.load.id, locationId: loc!.id, text: text.trim() })
-      onAdded(res.note)
+      if (writing === 'new') {
+        const res = await addLocationNote({ loadId: item.load.id, locationId: loc!.id, text: text.trim() })
+        onNotes([...notes, { ...res.note, mine: true }])
+        toast.success('Noted — the next driver here will see it')
+      } else {
+        const res = await editLocationNote({ locationId: loc!.id, at: writing, text: text.trim() })
+        onNotes(res.notes)
+        toast.success('Note updated')
+      }
       setText('')
-      setWriting(false)
-      toast.success('Noted — the next driver here will see it')
+      setWriting(null)
+    } catch (err) {
+      toast.error(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function remove(at: string) {
+    setBusy(true)
+    try {
+      const res = await removeLocationNote({ locationId: loc!.id, at })
+      onNotes(res.notes)
+      toast.success('Note removed — add it on the right place')
     } catch (err) {
       toast.error(errorText(err))
     } finally {
@@ -161,7 +182,15 @@ function PlaceNotes({ item, onAdded }: { item: TodayStop; onAdded: (note: { at: 
           {notes.slice(-5).map((n, i) => (
             <li key={`${n.at}-${i}`} className="flex items-start gap-2 text-muted-foreground">
               <MessageSquare className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span><span className="font-semibold text-foreground">{n.by}:</span> {n.text}</span>
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold text-foreground">{n.by}:</span> {n.text}
+                {n.mine && writing !== n.at && (
+                  <span className="ml-2 inline-flex gap-3 whitespace-nowrap">
+                    <button type="button" disabled={busy} onClick={() => { setWriting(n.at); setText(n.text) }} className="text-xs font-semibold text-primary">Edit</button>
+                    <button type="button" disabled={busy} onClick={() => void remove(n.at)} className="text-xs font-semibold text-destructive">Remove</button>
+                  </span>
+                )}
+              </span>
             </li>
           ))}
         </ul>
@@ -176,14 +205,14 @@ function PlaceNotes({ item, onAdded }: { item: TodayStop; onAdded: (note: { at: 
             className="min-h-[72px] w-full rounded-md border border-input bg-background p-2 text-sm text-foreground"
           />
           <div className="flex gap-2">
-            <Button className="h-10 flex-1 font-semibold" disabled={busy || !text.trim()} onClick={() => void send()}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : 'Save note'}
+            <Button className="h-10 flex-1 font-semibold" disabled={busy || !text.trim()} onClick={() => void save()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : writing === 'new' ? 'Save note' : 'Update note'}
             </Button>
-            <Button variant="outline" className="h-10" disabled={busy} onClick={() => { setWriting(false); setText('') }}>Cancel</Button>
+            <Button variant="outline" className="h-10" disabled={busy} onClick={() => { setWriting(null); setText('') }}>Cancel</Button>
           </div>
         </div>
       ) : (
-        <button type="button" onClick={() => setWriting(true)} className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+        <button type="button" onClick={() => setWriting('new')} className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
           <MessageSquare className="h-4 w-4" aria-hidden="true" /> Add a note about this place
         </button>
       )}
@@ -332,7 +361,8 @@ export function TodayStops({
 
   // Done stops drop to a Completed section so the next load is at the top; they stay
   // openable for a late POD, a trailer change or where the paperwork went.
-  const openItems = items.filter((it) => !it.stop.departedAt)
+  // The stop the driver is at right now leads, then the load with freight on board.
+  const openItems = orderOpenStops(items.filter((it) => !it.stop.departedAt), items)
   const doneItems = items.filter((it) => !!it.stop.departedAt)
 
   // One card per stop, used for today's list and the completed section alike.
@@ -428,7 +458,7 @@ export function TodayStops({
 
             <PlaceNotes
               item={item}
-              onAdded={(note) => patch(item, { location: item.stop.location ? { ...item.stop.location, driverNotes: [...(item.stop.location.driverNotes ?? []), note] } : null })}
+              onNotes={(driverNotes) => patch(item, { location: item.stop.location ? { ...item.stop.location, driverNotes } : null })}
             />
 
             <StopProgress

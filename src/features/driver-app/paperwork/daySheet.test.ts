@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stopsForDay, isDelivery } from './daySheet'
+import { stopsForDay, isDelivery, orderOpenStops } from './daySheet'
 import type { PaperworkLoad, PaperworkStop } from '../driverApi'
 
 const stop = (id: string, type: string, date: string, appt: string, sequence = 0): PaperworkStop =>
@@ -68,5 +68,31 @@ describe('the schedule order', () => {
     const first = mk('first', '2026-10-13T16:00:00.000Z', 1)
     const unordered = mk('unordered', '2026-10-13T11:00:00.000Z', null)
     expect(stopsForDay([unordered, second, first], '2026-10-13').map((x) => x.load.reference)).toEqual(['first', 'second', 'unordered'])
+  })
+})
+
+describe('orderOpenStops', () => {
+  const at = (s: PaperworkStop, p: Partial<PaperworkStop>): PaperworkStop => ({ ...s, ...p })
+  it('keeps the stop the driver is on site at on top, whatever the calendar says', () => {
+    // Calendar: next load's FCFS pickup (A) is slotted before the delivery (B) the driver is sitting at.
+    const aPu = stop('a-pu', 'pickup', '2026-10-19', '2026-10-19T05:00:00Z')
+    const bPu = at(stop('b-pu', 'pickup', '2026-10-19', '2026-10-19T13:00:00Z'), { departedAt: '2026-10-19T14:24:00Z', arrivedAt: '2026-10-19T13:26:00Z' })
+    const bDe = at(stop('b-de', 'delivery', '2026-10-19', '2026-10-19T14:30:00Z', 1), { arrivedAt: '2026-10-19T16:37:00Z' })
+    const all = [{ load: load('A', [aPu]), stop: aPu }, { load: load('B', [bPu, bDe]), stop: bPu }, { load: load('B', [bPu, bDe]), stop: bDe }]
+    const open = all.filter((it) => !it.stop.departedAt)
+    expect(orderOpenStops(open, all).map((it) => it.stop.id)).toEqual(['b-de', 'a-pu'])
+  })
+  it('puts a load with freight on board ahead of one not started, and leaves the plan alone otherwise', () => {
+    const aPu = stop('a-pu', 'pickup', '2026-10-19', '2026-10-19T05:00:00Z')
+    const bPu = at(stop('b-pu', 'pickup', '2026-10-19', '2026-10-19T13:00:00Z'), { arrivedAt: '2026-10-19T13:00:00Z', departedAt: '2026-10-19T13:30:00Z' })
+    const bDe = stop('b-de', 'delivery', '2026-10-19', '2026-10-19T15:00:00Z', 1)
+    const cPu = stop('c-pu', 'pickup', '2026-10-19', '2026-10-19T16:00:00Z')
+    const B = load('B', [bPu, bDe])
+    const all = [{ load: load('A', [aPu]), stop: aPu }, { load: B, stop: bPu }, { load: B, stop: bDe }, { load: load('C', [cPu]), stop: cPu }]
+    const open = all.filter((it) => !it.stop.departedAt)
+    expect(orderOpenStops(open, all).map((it) => it.stop.id)).toEqual(['b-de', 'a-pu', 'c-pu'])
+    // Nothing started: the calendar order stands.
+    const plain = [{ load: load('A', [aPu]), stop: aPu }, { load: load('C', [cPu]), stop: cPu }]
+    expect(orderOpenStops(plain, plain).map((it) => it.stop.id)).toEqual(['a-pu', 'c-pu'])
   })
 })

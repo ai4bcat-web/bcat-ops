@@ -136,7 +136,7 @@ export interface PaperworkStopLocation {
   hours: string | null
   dockNotes: string | null
   notes: string | null
-  driverNotes: Array<{ at: string; by: string; text: string }>
+  driverNotes: Array<{ at: string; by: string; text: string; mine?: boolean }>
 }
 
 export type PodLegibility = 'OK' | 'LOW' | 'UNREADABLE' | 'UNKNOWN'

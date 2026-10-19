@@ -49,3 +49,25 @@ function scheduleRank(load: Pick<PaperworkLoad, 'sortOrder'>): number {
 export function isDelivery(stop: PaperworkStop): boolean {
   return stop.type.toLowerCase() === 'delivery'
 }
+
+/**
+ * Where the driver is right now comes first. The dispatcher's calendar order is the plan;
+ * the day rarely runs exactly to it. A stop the driver has tapped "on site" at but not left
+ * stays at the top until they depart, and a load with freight on board (its pickup done,
+ * its delivery open) stays ahead of loads not started. Jason sat at a delivery while the
+ * sheet put the next load's first-come pickup above it, because that pickup was slotted
+ * earlier on the calendar.
+ */
+export function openStopRank(item: TodayStop, all: readonly TodayStop[]): number {
+  if (item.stop.arrivedAt && !item.stop.departedAt) return 0
+  const loadStarted = all.some((it) => it.load.id === item.load.id && !!it.stop.departedAt)
+  return loadStarted ? 1 : 2
+}
+
+/** Open stops in the order to show them: on-site first, in-progress loads next, then the plan. */
+export function orderOpenStops(open: readonly TodayStop[], all: readonly TodayStop[]): TodayStop[] {
+  return open
+    .map((item, i) => ({ item, i, rank: openStopRank(item, all) }))
+    .sort((a, b) => a.rank - b.rank || a.i - b.i)
+    .map((x) => x.item)
+}

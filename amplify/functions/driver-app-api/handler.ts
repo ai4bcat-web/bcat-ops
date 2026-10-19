@@ -78,6 +78,7 @@ import {
 } from '../../../src/lib/timeClock'
 import { isOvernightLoad } from '../../../src/lib/overnightLoads'
 import { getStops } from '../../../src/lib/stops'
+import { parseDriverNotes, ownNoteIndex, withNoteText, withoutNote } from './locationNotes'
 import { chicagoDateStr } from '../../../src/lib/date'
 import { locateCity } from '../../../src/lib/eldRadius'
 import {
@@ -1010,6 +1011,9 @@ function parsePath(rawPath: string): { path: string; id?: string; docId?: string
   }
   if (segments[0] === 'paperwork' && segments[1] === 'location-note') {
     return { path: '/paperwork/location-note' }
+  }
+  if (segments[0] === 'paperwork' && segments[1] === 'location-note-edit') {
+    return { path: '/paperwork/location-note-edit' }
   }
   if (segments[0] === 'maintenance-tasks' && !segments[1]) {
     return { path: '/maintenance-tasks' }
@@ -2889,9 +2893,10 @@ export const handler = async (event: FnUrlEvent) => {
               dockNotes: loc.dockNotes?.trim() || null,
               notes: loc.notes?.trim() || null,
               driverNotes: Array.isArray(rawNotes)
-                ? (rawNotes as Array<{ at?: string; by?: string; text?: string }>)
+                ? (rawNotes as Array<{ at?: string; driverId?: string; by?: string; text?: string }>)
                     .filter((n) => n && typeof n.text === 'string')
-                    .map((n) => ({ at: String(n.at ?? ''), by: String(n.by ?? ''), text: String(n.text) }))
+                    // `mine` lets the app offer edit/remove on the driver's own comments only.
+                    .map((n) => ({ at: String(n.at ?? ''), by: String(n.by ?? ''), text: String(n.text), mine: n.driverId === driverId }))
                 : [],
             }
           }
@@ -3104,7 +3109,35 @@ export const handler = async (event: FnUrlEvent) => {
         ExpressionAttributeValues: { ':empty': [], ':note': [note], ':u': nowIso() },
       }))
       console.log('[driver-app-api] location note', { driverId, locationId, loadId })
-      return reply(200, { ok: true, note: { at: note.at, by: note.by, text: note.text } })
+      return reply(200, { ok: true, note: { at: note.at, by: note.by, text: note.text, mine: true } })
+    }
+
+    /* The driver fixes or removes a comment they left on a place (a note on the wrong stop). */
+    if (method === 'POST' && path === '/paperwork/location-note-edit') {
+      if (!LOCATION_TABLE_NAME) return reply(503, { error: 'The directory is not configured' })
+      const body = JSON.parse(event.body || '{}') as { locationId?: string; at?: string; text?: string; remove?: unknown }
+      const locationId = (body.locationId ?? '').trim()
+      const at = (body.at ?? '').trim()
+      const remove = body.remove === true
+      const text = (body.text ?? '').trim().slice(0, 1000)
+      if (!locationId) return reply(400, { error: 'locationId is required' })
+      if (!at) return reply(400, { error: 'at is required' })
+      if (!remove && !text) return reply(400, { error: 'say something first' })
+      const found = await ddb.send(new GetCommand({ TableName: LOCATION_TABLE_NAME, Key: { id: locationId } }))
+      if (!found.Item) return reply(404, { error: 'place not found' })
+      const notes = parseDriverNotes((found.Item as { driverNotes?: unknown }).driverNotes)
+      const i = ownNoteIndex(notes, driverId, at)
+      if (i < 0) return reply(404, { error: 'that note is not yours, or is already gone' })
+      const next = remove ? withoutNote(notes, i) : withNoteText(notes, i, text)
+      await ddb.send(new UpdateCommand({
+        TableName: LOCATION_TABLE_NAME,
+        Key: { id: locationId },
+        UpdateExpression: 'SET driverNotes = :n, updatedAt = :u',
+        ConditionExpression: 'attribute_exists(id)',
+        ExpressionAttributeValues: { ':n': next, ':u': nowIso() },
+      }))
+      console.log('[driver-app-api] location note ' + (remove ? 'removed' : 'edited'), { driverId, locationId, at })
+      return reply(200, { ok: true, notes: next.map((n) => ({ at: String(n.at ?? ''), by: String(n.by ?? ''), text: String(n.text ?? ''), mine: n.driverId === driverId })) })
     }
 
     /* The driver flags (or clears) detention at one stop. */

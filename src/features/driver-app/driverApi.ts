@@ -538,7 +538,7 @@ export interface PaperworkStop {
     hours: string | null
     dockNotes: string | null
     notes: string | null
-    driverNotes: Array<{ at: string; by: string; text: string }>
+    driverNotes: Array<{ at: string; by: string; text: string; mine?: boolean }>
   } | null
   /** The driver flagged detention here — two hours or more past the appointment. */
   detention: boolean
@@ -681,9 +681,21 @@ export async function reportMaintenanceTask(input: { title: string; notes?: stri
 
 /** Leave a note about a place for the next driver and the office. */
 export async function addLocationNote(input: { loadId: string; locationId: string; text: string }): Promise<{
-  note: { at: string; by: string; text: string }
+  note: { at: string; by: string; text: string; mine?: boolean }
 }> {
   return request('/paperwork/location-note', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export type LocationDriverNote = { at: string; by: string; text: string; mine?: boolean }
+
+/** Change the wording of a note the driver left (only their own). Returns the place's notes afterwards. */
+export async function editLocationNote(input: { locationId: string; at: string; text: string }): Promise<{ notes: LocationDriverNote[] }> {
+  return request('/paperwork/location-note-edit', { method: 'POST', body: JSON.stringify(input) })
+}
+
+/** Take back a note the driver left, e.g. one put on the wrong place. */
+export async function removeLocationNote(input: { locationId: string; at: string }): Promise<{ notes: LocationDriverNote[] }> {
+  return request('/paperwork/location-note-edit', { method: 'POST', body: JSON.stringify({ ...input, remove: true }) })
 }
 
 /** Flag or clear detention at one stop. The in/out times go on the BOL, not here. */
