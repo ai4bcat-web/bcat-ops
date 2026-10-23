@@ -160,10 +160,9 @@ function matchesSearch(item: FactoringItem, query: string) {
  * What the invoice is worth.
  *
  * Pulled from the same resolved payload the invoice is submitted with, so the column and
- * the invoice can never disagree. When nothing has resolved a rate — the email carried no
- * amount and the load has no rate on it — this is a way in rather than a dash: the rate is
- * typed in the row's own editor, and a red cell that does nothing when clicked is how a
- * queue ends up with rows nobody ever priced.
+ * the invoice can never disagree. The rate is typed on the row by the office, so until it
+ * is this is a way in rather than a dash: a red cell that does nothing when clicked is how
+ * a queue ends up with rows nobody ever priced.
  */
 function AmountCell({ item, onEdit }: { item: FactoringItem; onEdit: () => void }) {
   const amount = invoiceAmountOf(item)
@@ -179,7 +178,7 @@ function AmountCell({ item, onEdit }: { item: FactoringItem; onEdit: () => void 
       type="button"
       onClick={onEdit}
       aria-label={`Add the rate for PRO ${item.proNumber}`}
-      title="No rate came through on the email or the load \u2014 add it here"
+      title="Type the invoice amount for this row"
       style={{
         border: '1px solid #fca5a5', background: '#fee2e2', color: '#b91c1c',
         borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700,

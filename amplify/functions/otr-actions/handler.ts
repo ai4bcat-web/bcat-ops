@@ -52,7 +52,6 @@ const s3 = new S3Client({})
 const FACTORING_TABLE = process.env.FACTORING_ITEM_TABLE_NAME!
 const LOAD_TABLE = process.env.LOAD_TABLE_NAME!
 const CUSTOMER_TABLE = process.env.CUSTOMER_TABLE_NAME!
-const LOCATION_TABLE = process.env.LOCATION_TABLE_NAME
 const POD_TABLE = process.env.POD_DOCUMENT_TABLE_NAME
 const SUBMISSION_TABLE = process.env.DRIVER_SUBMISSION_TABLE_NAME
 const SUBMISSION_DOC_TABLE = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME
@@ -201,12 +200,6 @@ async function findCustomerByName(name: string): Promise<Row | null> {
     ExclusiveStartKey = r.LastEvaluatedKey
   } while (ExclusiveStartKey)
   return null
-}
-
-async function getLocation(id?: string | null): Promise<Row | null> {
-  if (!id || !LOCATION_TABLE) return null
-  const r = await ddb.send(new GetCommand({ TableName: LOCATION_TABLE, Key: { id } }))
-  return (r.Item as Row) ?? null
 }
 
 /** Newest POD from JobsDone that a human linked to this load. */
@@ -469,22 +462,20 @@ export const __testEnhancedPodForSend = enhancedPodForSend
 /** Exported for findRatecon.test.ts only, for the same reason as __testFindPod. */
 export const __testFindRatecon = findRatecon
 
-/** First pickup and last delivery stop, for Location lookups. */
-function endpointStops(load: Row): { origin?: Row; destination?: Row } {
-  const raw = load.stops
-  const stops: Row[] = Array.isArray(raw)
-    ? (raw as Row[])
-    : typeof raw === 'string'
-      ? (JSON.parse(raw || '[]') as Row[])
-      : []
-  const ordered = [...stops].sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0))
-  return {
-    origin: ordered.find((s) => s.type === 'pickup'),
-    destination: [...ordered].reverse().find((s) => s.type === 'delivery'),
-  }
-}
-
-/** Everything assembleOtrInvoice needs, gathered from the row's linked records. */
+/**
+ * Everything assembleOtrInvoice needs for a factoring row.
+ *
+ * The PRO comes from the invoice email's subject and the invoice date is the day this runs —
+ * submit rebuilds readiness, so the invoice carries the day Submit was pressed. Every other
+ * OTR field is typed on the row by the office. Nothing is filled in from the load, its Locations, the broker's Customer
+ * record or a freshly read rate confirmation — those guesses put wrong values on invoices.
+ *
+ * The one carry-over is `rateConExtract` already stored on a row from before this rule:
+ * those values were kept on purpose. Nothing writes new ones.
+ *
+ * The load is still looked up, for the documents OTR wants and the customer name the queue
+ * shows — neither is a field we send.
+ */
 async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; load: Row | null }> {
   const loadId = trim(item.loadId)
   const load = loadId
@@ -492,76 +483,27 @@ async function buildReadiness(item: Row): Promise<{ readiness: OtrReadiness; loa
       null
     : await findLoadByPro(String(item.proNumber ?? ''))
 
-  if (!load) {
-    /*
-     * No load has been built in BCAT Ops for this PRO.
-     *
-     * Everything else on the row is genuinely unknown, but the PRO is not — the Aljex
-     * invoice email that created this row names it in its subject and it is the row's own
-     * id. Passing it through is why 14529 showed "Invoice number (PRO)" as missing while
-     * sitting in a row titled 14529. Nor is the broker, once an MC has been entered on
-     * the row: setMc records the customer on the item itself for exactly this case.
-     */
-    const customer = await getCustomer(item.customerId as string | undefined)
-    return {
-      readiness: assembleOtrInvoice({
-        load: {},
-        proNumber: trim(item.proNumber) || trim(item.id) || null,
-        customerMcNumber: customer?.mcNumber as string | undefined,
-        customerName: customer?.name as string | undefined,
-        customerNameVerified: customer?.mcNameVerified === true,
-        manual: (item.otrManualFields as ManualOverrides) ?? null,
-        submissionDate: today(),
-      }),
-      load: null,
-    }
-  }
-
-  const { origin, destination } = endpointStops(load)
-  const [customer, originLoc, destLoc, pod, ratecon] = await Promise.all([
-    getCustomer(load.customerId as string | undefined),
-    getLocation(origin?.locationId as string | undefined),
-    getLocation(destination?.locationId as string | undefined),
-    findPod(String(load.id), String(item.proNumber ?? '')),
-    findRatecon(load, String(item.proNumber ?? '')),
+  const [rowCustomer, pod, ratecon] = await Promise.all([
+    getCustomer((item.customerId ?? load?.customerId) as string | undefined),
+    load ? findPod(String(load.id), String(item.proNumber ?? '')) : Promise.resolve(null),
+    // Counts a rate con from EITHER store — see findRatecon. Reading only the key on the
+    // Load reported one missing while it sat in a submission, and blocked the invoice.
+    load ? findRatecon(load, String(item.proNumber ?? '')) : Promise.resolve(null),
   ])
-
-  // Fall back to a name match so a load booked before the directory existed
-  // still finds its broker MC.
-  const resolvedCustomer =
-    customer ?? (load.customer ? await findCustomerByName(String(load.customer)) : null)
+  // Fall back to a name match so a load booked before the directory existed still names its broker.
+  const customer =
+    rowCustomer ?? (load?.customer ? await findCustomerByName(String(load.customer)) : null)
 
   const readiness = assembleOtrInvoice({
-    load: {
-      aljexId: load.aljexId as string,
-      pickupNumber: load.pickupNumber as string,
-      rate: load.rate as number,
-      originCity: load.originCity as string,
-      destinationCity: load.destinationCity as string,
-      customerId: load.customerId as string,
-      customer: load.customer as string,
-      rateConfirmKey: load.rateConfirmKey as string,
-    },
-    // Populated once the rate-con parser is extended; absent is handled.
+    load: {},
     rateCon: (item.rateConExtract as RateConExtract) ?? null,
-    // The row's own PRO, so a factoring row whose load was never built still knows it.
     proNumber: trim(item.proNumber) || trim(item.id) || null,
-    customerMcNumber: resolvedCustomer?.mcNumber as string | undefined,
-    // The name on the broker record, and whether anything ever checked it against the MC.
-    // Nothing does today, so this is false everywhere until a lookup exists.
-    customerName: resolvedCustomer?.name as string | undefined,
-    customerNameVerified: resolvedCustomer?.mcNameVerified === true,
-    originLocation: originLoc
-      ? { city: originLoc.city as string, state: originLoc.state as string, zip: originLoc.zip as string }
-      : null,
-    destinationLocation: destLoc
-      ? { city: destLoc.city as string, state: destLoc.state as string, zip: destLoc.zip as string }
-      : null,
+    // For the humans only; never sent to OTR and never counted as a field.
+    customerName: (customer?.name as string | undefined) ?? (load?.customer as string | undefined),
+    customerNameVerified: customer?.mcNameVerified === true,
     manual: (item.otrManualFields as ManualOverrides) ?? null,
     submissionDate: today(),
     hasPod: Boolean(pod),
-    // Counts a rate con from EITHER store — see findRatecon. Reading only the key on the
-    // Load reported one missing while it sat in a submission, and blocked the invoice.
     hasRateConfirmation: Boolean(ratecon),
   })
 
@@ -883,9 +825,12 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           )
         }
 
-        // The row remembers its broker itself, so a row with no load still assembles.
+        // The row remembers its broker itself, so a row with no load still assembles. The
+        // MC is also the row's own typed value: OTR fields are entered per row, never filled
+        // in from the Customer record, so the next load from this broker is typed again.
         await updateItem(String(item.id), {
           customerId: customer.id,
+          otrManualFields: { ...((item.otrManualFields as ManualOverrides) ?? {}), BrokerMC: mc },
           ...(check
             ? { brokerMcChecked: mc, brokerCheckResult: check.decision.replace(' ', '_'), brokerCheckedAt: nowIso() }
             : {}),

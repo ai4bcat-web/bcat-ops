@@ -4,14 +4,13 @@
  * Shows every field OTR requires, the value we resolved, and WHERE it came from,
  * so a wrong ZIP is traceable rather than mysterious.
  *
- * Anything still blank can be typed in right here. A typed value is the highest
- * precedence tier in src/lib/otrInvoice.ts, and it is also read by the owner-operator
- * settlement, so filling a gap in this queue fills it on the settlement too — the two
- * pages describe the same load rather than disagreeing about it.
+ * Every field but the PRO (from the invoice email's subject) and the invoice date (the day
+ * Submit is pressed) is typed in right here; nothing is filled in from the load, the broker record or the rate confirmation.
+ * Typed values are also read by the owner-operator settlement, so filling one here fills
+ * it there too — the two pages describe the same load rather than disagreeing about it.
  *
- * Broker MC is the one exception and keeps its own control: it saves onto the CUSTOMER,
- * so the next load from that broker is already filled in. Storing it as a per-row
- * override would fix one invoice and leave the next one just as blank.
+ * Broker MC keeps its own control: it is saved on the row like the rest, and also checked
+ * with OTR, which is what names the customer.
  *
  * Submit is deliberately a human action and is disabled until every field and
  * both documents are present.
@@ -290,7 +289,7 @@ export function OtrPanel({ item, onChanged }: Props) {
 
   /**
    * Save one typed field. The whole override map is rewritten, so it is merged first;
-   * an empty value removes the override and lets the load or rate con speak again.
+   * an empty value clears the field.
    * Re-assembling afterwards is what turns the typed value into a resolved field.
    */
   const saveField = (field: EditableField, label: string, value: string) =>
@@ -326,13 +325,13 @@ export function OtrPanel({ item, onChanged }: Props) {
             saving={busy === (f === 'BrokerMC' ? 'mc' : `field:${f}`)}
             editable
             /*
-             * Broker MC saves onto the CUSTOMER, not as a row override: it is entered once
-             * per broker, not once per invoice, and saving it is what resolves the name in
-             * the row above. Everything else is a per-row override.
+             * Broker MC goes through its own action: it is saved on this row like every
+             * other field, and also checked with OTR, which is what names the customer in
+             * the row above.
              */
             onSave={(v) =>
               f === 'BrokerMC'
-                ? void run('mc', () => setBrokerMc(item.id, v), 'Broker MC saved \u2014 customer resolved from it')
+                ? void run('mc', () => setBrokerMc(item.id, v), 'Broker MC saved \u2014 checked with OTR')
                 : void saveField(f, OTR_FIELD_LABEL[f], v)
             }
           />
@@ -647,7 +646,8 @@ function FieldRow({
         </span>
         {source && (
           <span className="shrink-0 text-[10px] text-muted-foreground">
-            ({SOURCE_LABEL[source] ?? source})
+            {/* The date is the day Submit is pressed, which assembly records as a 'load' value. */}
+            ({field === 'InvoiceDate' && source === 'load' ? 'date of submit' : SOURCE_LABEL[source] ?? source})
           </span>
         )}
         {editable && (
