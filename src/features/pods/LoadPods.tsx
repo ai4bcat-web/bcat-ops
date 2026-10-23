@@ -9,35 +9,19 @@ export function LoadPods({ loadId }: { loadId: string }) {
   const { status, statusLoading, statusError, docs, loading, error, refresh } = usePodDocuments({ loadId })
   const [previewDoc, setPreviewDoc] = useState<PodDocument | null>(null)
 
-  if (statusLoading && !status) {
-    return (
-      <div className="text-sm text-muted-foreground flex items-center gap-2 py-2">
-        <Loader2 size={14} className="animate-spin" /> Loading PODs…
-      </div>
-    )
-  }
-
-  if (statusError) {
-    return (
-      <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-        {statusError}
-      </div>
-    )
-  }
-
-  if (!status?.configured) {
-    return (
-      <div className="text-sm text-muted-foreground py-2">
-        JobsDone is not connected yet, so no PODs can be linked to this load. An admin can connect it from the PODs page.
-      </div>
-    )
-  }
+  /*
+   * PODs that came in by text through JobsDone before that connection was removed. Kept so
+   * a load's history still shows them; a load without any shows nothing here at all — its
+   * driver-app POD is in the documents panel and on the PODs review page.
+   */
+  if (statusError || !status?.configured || (!loading && !error && docs.length === 0)) return null
+  if (statusLoading && !status) return null
 
   return (
     <div className="space-y-3 pt-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Package size={16} /> PODs
+          <Package size={16} /> Earlier PODs (JobsDone)
         </div>
         <button
           onClick={() => refresh()}
@@ -59,10 +43,6 @@ export function LoadPods({ loadId }: { loadId: string }) {
         <div className="text-sm text-muted-foreground flex items-center gap-2 py-2">
           <Loader2 size={14} className="animate-spin" /> Loading PODs…
         </div>
-      )}
-
-      {docs.length === 0 && !loading && !error && (
-        <div className="text-sm text-muted-foreground py-2">No PODs linked to this load.</div>
       )}
 
       {docs.length > 0 && (

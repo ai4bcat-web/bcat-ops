@@ -1563,6 +1563,14 @@ podActionsFn.addToRolePolicy(
     resources: [loadTable.tableArn],
   }),
 )
+// The POD review check finds a driver's load by the PRO they typed when the submission has
+// no loadId yet, which is a scan.
+podActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan'],
+    resources: [loadTable.tableArn],
+  }),
+)
 podActionsFn.addToRolePolicy(
   new PolicyStatement({
     actions:   ['cognito-idp:AdminGetUser'],
@@ -1594,6 +1602,8 @@ backend.storage.resources.bucket.grantPut(podActionsFn, 'driver-docs/*')
 // (dispatchAutoPod); the cleanup reads the original there and writes the cleaned page
 // beside it, so it needs both directions on that prefix.
 backend.storage.resources.bucket.grantReadWrite(podActionsFn, 'dispatch-media/*')
+// The POD review check reads the load's rate confirmation to compare addresses with.
+backend.storage.resources.bucket.grantRead(podActionsFn, 'rate-confirms/*')
 
 // The frontend downloads presigned POD originals/enhanced images with fetch(),
 // so the bucket must answer CORS GETs from the app origins.
@@ -1635,19 +1645,10 @@ podActionsFn.addToRolePolicy(
 // Scanner layer/env wiring and memory/timeout for document enhancement.
 configurePodScanner(podActionsFn)
 
-// Background ingestion: every 15 minutes walk the last 7 days of the JobsDone feed
-// (each tick walks every page because JobsDone's cursor is not time-ordered). This
-// rule is deliberately NOT disabled under BCAT_ISOLATED_PREVIEW: it only reads
-// JobsDone and writes this stack's own tables, the same reasoning that keeps
-// podActions callable there, and "new images keep arriving" cannot be verified
-// on a preview stack otherwise.
-const podBackgroundSyncRule = new Rule(podActionsFn.stack, 'PodBackgroundSyncRule', {
-  schedule:    Schedule.rate(Duration.minutes(15)),
-  description: 'JobsDone PODs: import and scan the last 7 days every 15 minutes',
-})
-podBackgroundSyncRule.addTarget(new EventsLambdaTarget(podActionsFn, {
-  event: RuleTargetInput.fromObject({ action: 'backfillSchedule' }),
-}))
+// JobsDone is disconnected: PODs now come only from the driver apps and are reviewed on
+// the PODs page. The 15-minute JobsDone import that ran here is gone; PODs already
+// imported stay readable on their loads.
+
 podActionsFn.addEnvironment('POD_BACKGROUND_SYNC_ENABLED', 'true')
 
 // ── Isolated preview guard ──────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { defineFunction } from '@aws-amplify/backend'
+import { defineFunction, secret } from '@aws-amplify/backend'
 
 /**
  * Custom AppSync action handler for PODs (Proof of Delivery photos from JobsDone).
@@ -18,4 +18,8 @@ export const podActions = defineFunction({
   resourceGroupName: 'data',
   timeoutSeconds: 60,
   memoryMB: 1024,
+  environment: {
+    // The POD review check reads each driver POD against its rate confirmation.
+    ANTHROPIC_API_KEY: secret('ANTHROPIC_API_KEY'),
+  },
 })

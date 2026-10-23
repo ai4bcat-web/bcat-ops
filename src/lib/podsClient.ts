@@ -93,6 +93,11 @@ export async function finalizeDriverDocs(submissionId: string, kind: 'POD' | 'RA
  * Nothing is lost by not waiting. The pages are in S3 and readable the moment they land,
  * and every reader falls back to the original until a cleaned copy exists.
  */
+/** Re-read a merged driver POD against its rate confirmation. Queued; the result lands on the submission. */
+export async function queueDriverPodCheck(submissionId: string): Promise<{ queued: boolean; error?: string }> {
+  return podAction<{ queued: boolean; error?: string }>('checkDriverPod', { submissionId })
+}
+
 export async function queueDriverDocScan(submissionId: string, kind: 'POD' | 'RATECON'): Promise<void> {
   try {
     await podAction<{ queued: boolean }>('queueDriverDocScan', { submissionId, kind })

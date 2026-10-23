@@ -44,6 +44,7 @@ let loadsHaveEldReview = true
 let loadsHavePaperworkLocation = true
 let loadsHaveTrailer = true
 let loadsHaveFreight = true
+let loadsHavePodNotes = true
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -54,6 +55,7 @@ const loadFields = () => {
   if (loadsHavePaperworkLocation) f += ' paperworkLocation'
   if (loadsHaveTrailer) f += ' trailerNumber'
   if (loadsHaveFreight) f += ' commodity weight pieces piecesUnit'
+  if (loadsHavePodNotes) f += ' podNotes'
   return f
 }
 
@@ -122,7 +124,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; podNotes: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -134,6 +136,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     paperworkLocation: /'paperworkLocation'/i.test(msg),
     trailer: /'trailerNumber'/i.test(msg),
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
+    podNotes: /'podNotes'/i.test(msg),
   }
 }
 
@@ -184,6 +187,10 @@ export async function listLoads(): Promise<Load[]> {
         console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
         loadsHaveFreight = false; changed = true
       }
+      if (loadsHavePodNotes && u.podNotes) {
+        console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
+        loadsHavePodNotes = false; changed = true
+      }
       if (!changed) throw err
     }
   }
@@ -199,6 +206,10 @@ function serializeLoadInput<T extends { stops?: unknown; sortOrder?: unknown; cu
   let out: T = input
   if (!loadsHaveSortOrder && 'sortOrder' in (out as object)) {
     const { sortOrder: _drop, ...rest } = out as T & { sortOrder?: unknown }
+    out = rest as T
+  }
+  if (!loadsHavePodNotes && 'podNotes' in (out as object)) {
+    const { podNotes: _drop, ...rest } = out as T & { podNotes?: unknown }
     out = rest as T
   }
   if (!loadsHaveCustomerId && 'customerId' in (out as object)) {

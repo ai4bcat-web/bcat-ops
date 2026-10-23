@@ -353,6 +353,8 @@ export interface Load {
   daySlot?: number | null     // MANUAL number badge — independent label, no effect on order
   sortOrder?: number | null   // persisted drag-reorder position within a day (hidden; drives sort)
   notes?: string | null       // short free-text notes
+  /** Why the POD is what it is, written when it is reviewed on the PODs page. */
+  podNotes?: string | null
   hot?: boolean | null        // urgent/"hot" load — flagged with 🔥 in schedule
   unscheduled?: boolean | null // true = orphan (no firm date) → calendar's Unscheduled lane
   stops?: Stop[] | null       // canonical multi-stop array; legacy pickup*/delivery* are derived mirrors

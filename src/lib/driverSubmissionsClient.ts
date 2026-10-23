@@ -151,7 +151,7 @@ export function driverDocValidationError(files: File[]): string | null {
 
 // ── Field selection sets ──────────────────────────────────────────────────────
 
-const SUBMISSION_FIELDS = `
+export const SUBMISSION_FIELDS = `
   id driverId driverName status source submittedByEmail externalMessageId loadId
   referenceNumber note stopId stopLabel slackChannelId slackMessageTs emailMessageId emailSubject
   notifiedAt combinedPodKey combinedRateconKey combinedAt createdAt updatedAt
@@ -208,7 +208,7 @@ export async function listDriverSubmissionsByDriver(driverId: string, limit = 10
  * The whole table is a few dozen rows, so fetching it once and grouping in memory is both
  * faster and incapable of failing halfway.
  */
-async function attachDocs(
+export async function attachDocs(
   submissions: DriverSubmissionRecord[],
   limit: number,
 ): Promise<SubmissionWithDocs[]> {

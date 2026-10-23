@@ -22,6 +22,7 @@ import { useDrivers } from '@/hooks/useDrivers'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadPods } from '@/features/pods/LoadPods'
 import { LoadDriverDocs } from './LoadDriverDocs'
+import { LoadPodNotes } from './LoadPodNotes'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
 import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm, createLocation } from '@/lib/apiClient'
 import { matchStopLocation, locationInputForStop } from '@/lib/locationAutoSave'
@@ -1914,6 +1915,7 @@ export function LoadDrawer() {
                 <div className="pt-4 border-t border-border mt-4 space-y-3">
                   <LoadPods loadId={load.id} />
                   <LoadDriverDocs loadId={load.id} proNumber={load.aljexId} kind="POD" />
+                  <LoadPodNotes key={`${load.id}:${load.podNotes ?? ''}`} load={load} />
                   <LoadDriverDocs loadId={load.id} proNumber={load.aljexId} kind="MISC" />
                 </div>
               )}

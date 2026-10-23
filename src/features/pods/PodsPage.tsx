@@ -1,539 +1,272 @@
-import { useMemo, useState } from 'react'
+/**
+ * PODs — the review queue for proof of delivery from the driver apps.
+ *
+ * Every POD a driver sends from the Ivan driver app or the owner operator app lands here
+ * and waits for a person: right addresses, every page, readable. Each one is read first
+ * against the load's rate confirmation (pod-actions/podCheck.ts) so the reviewer starts
+ * from what looks wrong. The reviewer approves it, or asks the driver for a better one.
+ *
+ * This page used to be the JobsDone inbox (texted images imported from app.jobsdone.io).
+ * That connection is gone; PODs already imported from it stay on their loads.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { toast } from 'sonner'
+import { PackageCheck, Search, RefreshCw, Loader2, Upload, X, CheckCircle2, AlertTriangle, HelpCircle, Clock } from 'lucide-react'
 import { useAppStore } from '@/store/useAppStore'
 import { useAuth } from '@/hooks/useAuth'
-import { usePodDocuments } from '@/hooks/usePodDocuments'
-import { toast } from 'sonner'
-import {
-  PackageCheck, Search, RefreshCw, Loader2, AlertCircle,
-  Settings2, X, CheckCircle2, Upload,
-} from 'lucide-react'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
-import { PodTable } from './PodTable'
-import { PodPreviewDialog } from './PodPreviewDialog'
-import { AssignLoadDialog } from './AssignLoadDialog'
-import { PodSenderMappingDialog } from './PodSenderMappingDialog'
-import { PodsConnectionForm } from './PodsConnectionForm'
-import { assignPod, retryPod } from '@/lib/podsClient'
-import { graphqlErrorText } from '@/lib/apiClient'
-import type { PodDocument, PodConnectionStatus, PodSenderMapping } from '@/types/pods'
-import type { Driver } from '@/types'
-
-import { matchPodDriver } from '@/lib/podDriver'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
+import { normalizePro } from '@/lib/podPresence'
+import { formatDateTime } from '@/lib/date'
+import { graphqlErrorText } from '@/lib/apiClient'
+import { listReviewSubmissions } from '@/lib/podReviewClient'
+import {
+  appLabel,
+  isDriverAppPod,
+  pagesLabel,
+  parseCheck,
+  podPages,
+  proOf,
+  reviewStatusOf,
+  supersededBy,
+  type CheckVerdict,
+  type PodReviewStatus,
+  type ReviewSubmission,
+} from '@/lib/podReview'
+import { PodReviewPanel } from './PodReviewPanel'
+import type { Load } from '@/types'
 
-const FILTER_LABELS: Record<string, string> = {
-  ALL: 'All',
-  ASSIGNED: 'Assigned',
-  UNASSIGNED: 'Unassigned',
+type Tab = PodReviewStatus | 'ALL'
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'PENDING', label: 'To review' },
+  { key: 'NEEDS_REPLACEMENT', label: 'Waiting on driver' },
+  { key: 'APPROVED', label: 'Approved' },
+  { key: 'ALL', label: 'All' },
+]
+
+function Dot({ v, label }: { v: CheckVerdict | null | undefined; label: string }) {
+  const color = v === 'PASS' ? '#15803d' : v === 'FAIL' ? '#b91c1c' : '#b45309'
+  const Icon = v === 'PASS' ? CheckCircle2 : v === 'FAIL' ? AlertTriangle : HelpCircle
+  return (
+    <span title={`${label}: ${v === 'PASS' ? 'looks right' : v === 'FAIL' ? 'problem' : 'can’t tell'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color, fontSize: 11.5, fontWeight: 600 }}>
+      <Icon size={12} /> {label}
+    </span>
+  )
 }
 
-type SortKey = 'receivedDesc' | 'receivedAsc' | 'senderAsc' | 'driverAsc'
-
-function useFilteredDocs(
-  docs: PodDocument[],
-  query: string,
-  filter: 'ALL' | 'ASSIGNED' | 'UNASSIGNED',
-  drivers: Driver[],
-  mappings: PodSenderMapping[],
-  driverFilter: 'ALL' | 'ROSTER' | 'UNKNOWN' | string,
-  sort: SortKey,
-) {
-  return useMemo(() => {
-    const q = query.trim().toLowerCase()
-    let rows = docs.filter((d) => {
-      const matchesQuery = !q || [
-        d.companyName,
-        d.senderName,
-        d.senderContact,
-        d.referenceNumber,
-      ].some((v) => (v ?? '').toLowerCase().includes(q))
-      const matchesFilter =
-        filter === 'ALL' ? true : filter === 'ASSIGNED' ? !!d.loadId : !d.loadId
-      const matchedDriver = matchPodDriver(d, drivers, mappings)
-      const matchesDriver =
-        driverFilter === 'ALL' ? true :
-        driverFilter === 'ROSTER' ? matchedDriver != null :
-        driverFilter === 'UNKNOWN' ? matchedDriver == null :
-        matchedDriver?.id === driverFilter
-      return matchesQuery && matchesFilter && matchesDriver
-    })
-
-    rows = [...rows].sort((a, b) => {
-      switch (sort) {
-        case 'receivedAsc':
-          return Date.parse(a.receivedAt) - Date.parse(b.receivedAt)
-        case 'senderAsc':
-          return (a.senderName || a.senderContact || '').localeCompare(b.senderName || b.senderContact || '')
-        case 'driverAsc': {
-          const da = matchPodDriver(a, drivers, mappings)?.name || ''
-          const db = matchPodDriver(b, drivers, mappings)?.name || ''
-          return da.localeCompare(db)
-        }
-        case 'receivedDesc':
-        default:
-          return Date.parse(b.receivedAt) - Date.parse(a.receivedAt)
-      }
-    })
-
-    return rows
-  }, [docs, query, filter, drivers, mappings, driverFilter, sort])
+const btn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8,
+  border: '1px solid var(--ds-border)', background: 'var(--ds-surface)', color: 'var(--ds-t2)',
+  fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
 }
 
 export function PodsPage() {
-  const { isAdmin, isOwner, user } = useAuth()
+  const { user } = useAuth()
   const loads = useAppStore((s) => s.loads)
   const drivers = useAppStore((s) => s.drivers)
-  const setSelectedLoad = useAppStore((s) => s.setSelectedLoad)
 
-  const {
-    status,
-    statusLoading,
-    statusError,
-    docs,
-    nextToken,
-    loading,
-    error,
-    syncing,
-    syncQueued,
-    syncError,
-    refresh,
-    refreshStatus,
-    loadMore,
-    startBackfill,
-    patchDoc,
-    senderMappings,
-    saveSenderMapping,
-  } = usePodDocuments()
-
+  const [subs, setSubs] = useState<ReviewSubmission[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [tab, setTab] = useState<Tab>('PENDING')
+  const [app, setApp] = useState<'ALL' | 'IVAN' | 'OO'>('ALL')
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL')
-  const [driverFilter, setDriverFilter] = useState<'ALL' | 'ROSTER' | 'UNKNOWN' | string>('ALL')
-  const [sort, setSort] = useState<SortKey>('receivedDesc')
-  const [previewDoc, setPreviewDoc] = useState<PodDocument | null>(null)
-  const [assignDoc, setAssignDoc] = useState<PodDocument | null>(null)
-  const [showMapDialog, setShowMapDialog] = useState(false)
-  const [showConfig, setShowConfig] = useState(false)
-  const [configuredOverride, setConfiguredOverride] = useState<PodConnectionStatus | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
   const [showUploadPod, setShowUploadPod] = useState(false)
 
-  const activeStatus = configuredOverride ?? status
+  // Bumped to reload; `loadedKey` trails it, so the two differ exactly while a load is in flight.
+  const [reloadKey, setReloadKey] = useState(0)
+  const [loadedKey, setLoadedKey] = useState(-1)
+  const loading = loadedKey !== reloadKey
+  const refresh = useCallback(() => setReloadKey((n) => n + 1), [])
 
-  const filteredDocs = useFilteredDocs(docs, query, filter, drivers, senderMappings, driverFilter, sort)
+  // A promise chain, not an async function: every state write lands after the fetch.
+  useEffect(() => {
+    let cancelled = false
+    listReviewSubmissions()
+      .then((rows) => { if (!cancelled) { setSubs(rows); setError(null) } })
+      .catch((err: unknown) => { if (!cancelled) setError(graphqlErrorText(err) || 'Could not load the POD queue — try Refresh.') })
+      .finally(() => { if (!cancelled) setLoadedKey(reloadKey) })
+    return () => { cancelled = true }
+  }, [reloadKey])
 
-  const handleAssign = async (doc: PodDocument, loadId: string | null) => {
-    try {
-      const res = await assignPod({ id: doc.id, loadId, expectedVersion: doc.version })
-      patchDoc(doc.id, () => res.item)
-      toast.success(loadId ? 'POD assigned to load' : 'POD unassigned')
-    } catch (err) {
-      toast.error(graphqlErrorText(err) || (loadId ? 'Assign failed' : 'Unassign failed'))
-      // Any failure may mean the document moved on (version conflict, load gone):
-      // pull the latest state so the next attempt uses a current version.
-      await refresh()
+  // A check still running finishes in about a minute; look again until it has.
+  const running = (subs ?? []).some((s) => s.podCheckStatus === 'RUNNING')
+  useEffect(() => {
+    if (!running) return
+    const t = setTimeout(refresh, 15_000)
+    return () => clearTimeout(t)
+  }, [running, refresh, subs])
+
+  const loadFor = useCallback((s: ReviewSubmission): Load | null => {
+    if (s.loadId) {
+      const byId = loads.find((l) => l.id === s.loadId)
+      if (byId) return byId
     }
-  }
+    const pro = normalizePro(s.referenceNumber)
+    return pro ? loads.find((l) => normalizePro(l.aljexId) === pro) ?? null : null
+  }, [loads])
+  const driverFor = useCallback((s: ReviewSubmission) => drivers.find((d) => d.id === s.driverId) ?? null, [drivers])
 
-  const handleRetry = async (doc: PodDocument) => {
-    try {
-      const res = await retryPod({ id: doc.id })
-      patchDoc(doc.id, () => res.item)
-      toast.success('Retry queued')
-    } catch (err) {
-      toast.error(graphqlErrorText(err) || 'Retry failed')
-    }
-  }
+  const queue = useMemo(() => (subs ?? []).filter(isDriverAppPod), [subs])
 
-  const openLoad = (loadId: string) => setSelectedLoad(loadId, 'view')
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return queue
+      .filter((s) => tab === 'ALL' || reviewStatusOf(s) === tab)
+      .filter((s) => {
+        if (app === 'ALL') return true
+        const oo = driverFor(s)?.driverType === 'OWNER_OPERATOR'
+        return app === 'OO' ? oo : !oo
+      })
+      .filter((s) => !q || [s.driverName, s.referenceNumber, loadFor(s)?.aljexId, loadFor(s)?.customer]
+        .some((v) => (v ?? '').toLowerCase().includes(q)))
+      // Oldest first while there is work to do: the POD waiting longest is the invoice waiting longest.
+      .sort((a, b) => tab === 'PENDING'
+        ? String(a.createdAt).localeCompare(String(b.createdAt))
+        : String(b.createdAt).localeCompare(String(a.createdAt)))
+  }, [queue, tab, app, query, loadFor, driverFor])
 
-  const canConfigure = isAdmin || isOwner
-  const configured = activeStatus?.configured ?? false
-  const connectionLabel = configured
-    ? `Connected · ${activeStatus?.companyName || activeStatus?.clientId || 'JobsDone'}`
-    : 'Not connected'
+  const counts = useMemo(() => {
+    const c: Record<Tab, number> = { PENDING: 0, NEEDS_REPLACEMENT: 0, APPROVED: 0, ALL: queue.length }
+    for (const s of queue) c[reviewStatusOf(s)]++
+    return c
+  }, [queue])
+
+  const open = openId ? queue.find((s) => s.id === openId) ?? null : null
 
   return (
     <div style={{ height: '100%', overflowY: 'auto', background: 'var(--ds-bg)' }}>
-      {/* Header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--ds-surface)', borderBottom: '1px solid var(--ds-border)' }}>
         <div style={{ padding: '20px 32px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <PackageCheck size={22} style={{ color: 'var(--ds-blue)' }} />
-              <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ds-t1)', margin: 0 }}>PODs</h1>
-            </div>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                fontSize: 11,
-                fontWeight: 600,
-                padding: '3px 10px',
-                borderRadius: 999,
-                background: configured ? '#f0fdf4' : '#fef2f2',
-                color: configured ? '#15803d' : '#b91c1c',
-              }}
-            >
-              {configured ? <CheckCircle2 size={12} /> : <AlertCircle size={12} />}
-              {connectionLabel}
-            </span>
+            <PackageCheck size={22} style={{ color: 'var(--ds-blue)' }} />
+            <h1 style={{ fontSize: 20, fontWeight: 700, color: 'var(--ds-t1)', margin: 0 }}>POD review</h1>
+            <span style={{ fontSize: 12.5, color: 'var(--ds-t3)' }}>From the Ivan driver app and the owner operator app</span>
             <div style={{ flex: 1 }} />
-            {configured && (
-              <button
-                onClick={() => startBackfill()}
-                disabled={syncing}
-                title="Import and scan every image from the past seven days in the background"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  height: 32,
-                  padding: '0 12px',
-                  borderRadius: 8,
-                  border: '1px solid var(--ds-border)',
-                  background: 'var(--ds-surface)',
-                  color: 'var(--ds-t2)',
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: syncing ? 'wait' : 'pointer',
-                  fontFamily: 'inherit',
-                }}
-              >
-                {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                {syncing ? 'Starting…' : 'Scan past 7 days'}
-              </button>
-            )}
-            {canConfigure && (
-              <button
-                onClick={() => setShowConfig((v) => !v)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  height: 32,
-                  padding: '0 12px',
-                  borderRadius: 8,
-                  border: '1px solid var(--ds-border)',
-                  background: 'var(--ds-surface)',
-                  color: 'var(--ds-t2)',
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                }}
-              >
-                <Settings2 size={14} /> {showConfig ? 'Close' : 'Configure'}
-              </button>
-            )}
-            <button
-              onClick={() => setShowUploadPod(true)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 32,
-                padding: '0 12px',
-                borderRadius: 8,
-                border: '1px solid var(--ds-border)',
-                background: 'var(--ds-surface)',
-                color: 'var(--ds-t2)',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              <Upload size={14} /> Upload POD
+            <button onClick={refresh} disabled={loading} style={btn}>
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
             </button>
-            <button
-              onClick={() => setShowMapDialog(true)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                height: 32,
-                padding: '0 12px',
-                borderRadius: 8,
-                border: '1px solid var(--ds-border)',
-                background: 'var(--ds-surface)',
-                color: 'var(--ds-t2)',
-                fontSize: 12.5,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              Map senders
-            </button>
+            <button onClick={() => setShowUploadPod(true)} style={btn}><Upload size={14} /> Upload POD</button>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+            {TABS.map(({ key, label }) => {
+              const active = tab === key
+              return (
+                <button key={key} onClick={() => setTab(key)} style={{
+                  ...btn, height: 30,
+                  border: active ? '1px solid var(--ds-blue)' : '1px solid var(--ds-border)',
+                  background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
+                  color: active ? 'var(--ds-blue)' : 'var(--ds-t2)',
+                }}>
+                  {label} <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{counts[key]}</span>
+                </button>
+              )
+            })}
+            <select value={app} onChange={(e) => setApp(e.target.value as typeof app)} style={{ ...btn, height: 30, padding: '0 8px' }} aria-label="App">
+              <option value="ALL">Both apps</option>
+              <option value="IVAN">Ivan driver app</option>
+              <option value="OO">Owner operator app</option>
+            </select>
             <div style={{ position: 'relative', flex: 1, minWidth: 220, maxWidth: 360 }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)' }} />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search company, sender, reference…"
-                style={{
-                  height: 32,
-                  width: '100%',
-                  borderRadius: 8,
-                  border: '1px solid var(--ds-border)',
-                  padding: '0 10px 0 30px',
-                  fontSize: 13,
-                  background: 'var(--ds-surface)',
-                  color: 'var(--ds-t1)',
-                  boxSizing: 'border-box',
-                  fontFamily: 'inherit',
-                }}
-              />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search PRO, driver, customer…"
+                style={{ height: 32, width: '100%', borderRadius: 8, border: '1px solid var(--ds-border)', padding: '0 10px 0 30px', fontSize: 13, background: 'var(--ds-surface)', color: 'var(--ds-t1)', boxSizing: 'border-box', fontFamily: 'inherit' }} />
               {query && (
-                <button
-                  onClick={() => setQuery('')}
-                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}
-                >
+                <button onClick={() => setQuery('')} aria-label="Clear search" style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--ds-t3)', background: 'none', border: 'none', cursor: 'pointer', padding: 2 }}>
                   <X size={12} />
                 </button>
               )}
             </div>
-            {(['ALL', 'ASSIGNED', 'UNASSIGNED'] as const).map((key) => {
-              const active = filter === key
-              const count = docs.filter((d) =>
-                key === 'ALL' ? true : key === 'ASSIGNED' ? !!d.loadId : !d.loadId,
-              ).length
-              return (
-                <button
-                  key={key}
-                  onClick={() => setFilter(key)}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    height: 30,
-                    padding: '0 12px',
-                    borderRadius: 8,
-                    border: active ? '1px solid var(--ds-blue)' : '1px solid var(--ds-border)',
-                    background: active ? 'var(--ds-blue-soft, #eff6ff)' : 'var(--ds-surface)',
-                    color: active ? 'var(--ds-blue)' : 'var(--ds-t2)',
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                  }}
-                >
-                  {FILTER_LABELS[key]}
-                  <span style={{ fontSize: 11.5, color: 'var(--ds-t3)', fontWeight: 500 }}>{count}</span>
-                </button>
-              )
-            })}
-            <select
-              value={driverFilter}
-              onChange={(e) => setDriverFilter(e.target.value)}
-              style={{
-                height: 30,
-                borderRadius: 8,
-                border: '1px solid var(--ds-border)',
-                padding: '0 8px',
-                fontSize: 12.5,
-                background: 'var(--ds-surface)',
-                color: 'var(--ds-t2)',
-                fontWeight: 600,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="ALL">All senders</option>
-              <option value="ROSTER">On driver roster</option>
-              <option value="UNKNOWN">Not on roster</option>
-              {drivers.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-            <select
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-              style={{
-                height: 30,
-                borderRadius: 8,
-                border: '1px solid var(--ds-border)',
-                padding: '0 8px',
-                fontSize: 12.5,
-                background: 'var(--ds-surface)',
-                color: 'var(--ds-t2)',
-                fontWeight: 600,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-              }}
-            >
-              <option value="receivedDesc">Newest first</option>
-              <option value="receivedAsc">Oldest first</option>
-              <option value="senderAsc">Sender A-Z</option>
-              <option value="driverAsc">Driver A-Z</option>
-            </select>
           </div>
         </div>
       </div>
 
-      {/* Content */}
       <div style={{ padding: '20px 32px 40px', maxWidth: 1400, margin: '0 auto' }}>
-        {statusLoading && docs.length === 0 && (
-          <div className="text-sm text-muted-foreground flex items-center gap-2 py-4">
-            <Loader2 size={14} className="animate-spin" /> Loading connection status…
+        {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</div>}
+        {subs == null && !error && (
+          <div className="text-sm text-muted-foreground flex items-center gap-2 py-4"><Loader2 size={14} className="animate-spin" /> Loading PODs…</div>
+        )}
+        {subs != null && rows.length === 0 && (
+          <div style={{ border: '1px dashed var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', padding: 40, textAlign: 'center', color: 'var(--ds-t3)' }}>
+            {tab === 'PENDING' ? 'Nothing to review. New PODs from the driver apps appear here.' : 'No PODs match.'}
           </div>
         )}
-
-        {statusError && (
-          <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-4 py-3 mb-4">
-            {statusError}
+        {rows.length > 0 && (
+          <div style={{ border: '1px solid var(--ds-border)', borderRadius: 12, background: 'var(--ds-surface)', overflowX: 'auto' }}>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted-foreground border-b">
+                  <th className="px-4 py-2 font-semibold">PRO</th>
+                  <th className="px-4 py-2 font-semibold">Driver</th>
+                  <th className="px-4 py-2 font-semibold">Sent</th>
+                  <th className="px-4 py-2 font-semibold">Pages</th>
+                  <th className="px-4 py-2 font-semibold">Automated check</th>
+                  <th className="px-4 py-2 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((s) => {
+                  const load = loadFor(s)
+                  const driver = driverFor(s)
+                  const check = parseCheck(s)
+                  const status = reviewStatusOf(s)
+                  const newer = status === 'NEEDS_REPLACEMENT' ? supersededBy(s, queue) : null
+                  return (
+                    <tr key={s.id} onClick={() => setOpenId(s.id)} className="border-b last:border-0 hover:bg-muted/40 cursor-pointer">
+                      <td className="px-4 py-2.5">
+                        <div className="font-semibold">{proOf(s, load) ?? '—'}</div>
+                        <div className="text-xs text-muted-foreground">{load?.customer ?? (load ? '' : 'no load linked')}</div>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div>{s.driverName}</div>
+                        <div className="text-xs text-muted-foreground">{appLabel(driver)}</div>
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{formatDateTime(s.createdAt)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">{pagesLabel(check?.pages.received ?? podPages(s).length, check)}</td>
+                      <td className="px-4 py-2.5">
+                        {check ? (
+                          <span className="inline-flex gap-3 flex-wrap">
+                            <Dot v={check.addresses.verdict} label="Addresses" />
+                            <Dot v={check.pages.verdict} label="Pages" />
+                            <Dot v={check.legibility.verdict} label="Legible" />
+                          </span>
+                        ) : s.podCheckStatus === 'RUNNING' ? (
+                          <span className="text-xs text-muted-foreground inline-flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Checking…</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{s.podCheckStatus === 'FAILED' ? 'Check failed' : 'Not checked'}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {status === 'APPROVED' && <span className="text-green-700 text-xs font-semibold inline-flex items-center gap-1"><CheckCircle2 size={12} /> Approved</span>}
+                        {status === 'PENDING' && <span className="text-amber-700 text-xs font-semibold inline-flex items-center gap-1"><Clock size={12} /> To review</span>}
+                        {status === 'NEEDS_REPLACEMENT' && (
+                          <span className="text-red-700 text-xs font-semibold">
+                            {newer ? 'Driver resent — review the new one' : `New POD requested${s.podReplacementRequestedAt ? ` ${formatDateTime(s.podReplacementRequestedAt)}` : ''}`}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-
-        {showConfig && canConfigure && (
-          <div
-            className="mb-4"
-            style={{
-              border: '1px solid var(--ds-border)',
-              borderRadius: 12,
-              background: 'var(--ds-surface)',
-              padding: 18,
-              boxShadow: 'var(--sh-sm)',
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ds-t1)', marginBottom: 12 }}>JobsDone connection</div>
-            <PodsConnectionForm onConfigured={(s) => { setShowConfig(false); setConfiguredOverride(s); void refreshStatus(); }} />
-          </div>
-        )}
-
-        {!configured && !statusLoading && (
-          <div
-            style={{
-              border: '1px solid var(--ds-border)',
-              borderRadius: 12,
-              background: 'var(--ds-surface)',
-              padding: 24,
-              textAlign: 'center',
-              boxShadow: 'var(--sh-sm)',
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--ds-t1)' }}>JobsDone is not connected</div>
-            <p style={{ fontSize: 13, color: 'var(--ds-t3)', marginTop: 8, lineHeight: 1.5 }}>
-              Ask an admin to add the JobsDone client ID and API key. PODs cannot be imported until the connection is configured.
-            </p>
-            {canConfigure && (
-              <button
-                onClick={() => setShowConfig(true)}
-                className="mt-4 inline-flex items-center gap-2 h-9 px-4 rounded-md bg-foreground text-background text-sm font-medium"
-              >
-                <Settings2 size={14} /> Connect JobsDone
-              </button>
-            )}
-          </div>
-        )}
-
-        {configured && (
-          <>
-            <p className="mb-3 text-sm text-muted-foreground">
-              {activeStatus?.backgroundSyncEnabled
-                ? 'New images are imported and scanned automatically, even when this page is closed.'
-                : 'Scheduled imports are disabled in this environment. Use Scan past 7 days to run a background scan.'}
-            </p>
-            {syncQueued && (
-              <div role="status" className="mb-3 text-sm text-green-800 bg-green-50 border border-green-200 rounded-md px-3 py-2">
-                Seven-day scan queued. Processing continues when you close this page; results appear here as each image finishes.
-              </div>
-            )}
-            {syncError && (
-              <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                Sync failed: {syncError}
-              </div>
-            )}
-            {error && (
-              <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                {error}
-              </div>
-            )}
-
-            {(query || filter !== 'ALL') && nextToken && (
-              <div className="mb-3 text-xs text-muted-foreground">
-                Filtering only the documents already loaded. Use “Load more” to search older PODs.
-              </div>
-            )}
-
-            {filteredDocs.length === 0 && !loading ? (
-              <div
-                style={{
-                  border: '1px dashed var(--ds-border)',
-                  borderRadius: 12,
-                  background: 'var(--ds-surface)',
-                  padding: 40,
-                  textAlign: 'center',
-                  color: 'var(--ds-t3)',
-                }}
-              >
-                {docs.length === 0 ? 'No PODs yet. Use Scan past 7 days to import recent images.' : 'No PODs match the current filters.'}
-              </div>
-            ) : (
-              <PodTable
-                docs={filteredDocs}
-                loads={loads}
-                drivers={drivers}
-                mappings={senderMappings}
-                onPreview={setPreviewDoc}
-                onAssign={setAssignDoc}
-                onUnassign={(d) => {
-                  if (confirm('Unassign this POD from its load?')) {
-                    handleAssign(d, null)
-                  }
-                }}
-                onRetry={handleRetry}
-                onViewLoad={openLoad}
-              />
-            )}
-
-            {nextToken && (
-              <div className="mt-6 text-center">
-                <button
-                  onClick={() => loadMore()}
-                  disabled={loading}
-                  className="inline-flex items-center gap-2 h-9 px-5 rounded-md border text-sm font-semibold disabled:opacity-50"
-                >
-                  {loading && <Loader2 size={14} className="animate-spin" />}
-                  Load more
-                </button>
-              </div>
-            )}
-
-            {loading && docs.length === 0 && (
-              <div className="text-sm text-muted-foreground mt-4 flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin" /> Loading PODs…
-              </div>
-            )}
-          </>
         )}
       </div>
 
-      {previewDoc && <PodPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
-      {assignDoc && (
-        <AssignLoadDialog
-          assignedLoadId={assignDoc.loadId}
-          /* A JobsDone POD names its sender by phone number, so the driver has to be
-             matched off the sender mappings before the dialog can offer their loads. */
-          driver={matchPodDriver(assignDoc, drivers, senderMappings)}
-          senderLabel={assignDoc.senderName || assignDoc.senderContact || 'unknown'}
-          loads={loads}
-          onAssign={(loadId) => handleAssign(assignDoc, loadId)}
-          onUnassign={() => handleAssign(assignDoc, null)}
-          onClose={() => setAssignDoc(null)}
-        />
-      )}
-      {showMapDialog && (
-        <PodSenderMappingDialog
-          open
-          onClose={() => setShowMapDialog(false)}
-          docs={docs}
-          drivers={drivers}
-          mappings={senderMappings}
-          onSave={saveSenderMapping}
+      {open && (
+        <PodReviewPanel
+          key={open.id}
+          submission={open}
+          load={loadFor(open)}
+          driver={driverFor(open)}
+          reviewer={user?.email ?? 'unknown'}
+          onSaved={(next) => {
+            setSubs((prev) => (prev ?? []).map((s) => (s.id === next.id ? { ...s, ...next, docs: s.docs } : s)))
+            if (reviewStatusOf(next) !== 'PENDING' && next.podCheckStatus !== 'RUNNING') setOpenId(null)
+          }}
+          onClose={() => setOpenId(null)}
         />
       )}
       <DriverDocUploadDialog
@@ -542,9 +275,7 @@ export function PodsPage() {
         drivers={drivers}
         preselectedKind="POD"
         staffEmail={user?.email ?? ''}
-        onSubmitted={() => {
-          toast.success('POD uploaded on driver\'s behalf')
-        }}
+        onSubmitted={() => toast.success("POD uploaded on the driver's behalf")}
       />
       <LoadDrawer />
     </div>

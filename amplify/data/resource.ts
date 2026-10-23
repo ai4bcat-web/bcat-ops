@@ -48,6 +48,9 @@ const schema = a.schema({
       daySlot:         a.integer(),  // MANUAL number badge — independent label, no effect on order
       sortOrder:       a.float(),    // persisted drag-reorder position within a day (hidden; drives sort)
       notes:           a.string(),   // short free-text notes
+      // Why this load's POD is what it is ("BOL is one page, no page 2"), written when the POD
+      // is reviewed on the PODs page and shown with the load's paperwork.
+      podNotes:        a.string(),
       hot:             a.boolean(),  // urgent/"hot" load — flagged with 🔥 in schedule
       // ELD oversight: a run outside the 150 air-mile radius needs logs, and somebody has
       // to confirm they were kept. Set from the fleet manager dashboard. See src/lib/eldMonitor.ts.
@@ -502,6 +505,25 @@ const schema = a.schema({
       combinedPodKey:     a.string(),
       combinedRateconKey: a.string(),
       combinedAt:         a.string(),
+      // ── POD review (the PODs page) ───────────────────────────────────────
+      // Every POD from the driver apps is checked by a person before it counts: the right
+      // addresses, every page, readable. The automated read below is advice for that person.
+      // 'PENDING' (or absent) | 'APPROVED' | 'NEEDS_REPLACEMENT'
+      podReviewStatus:    a.string(),
+      podReviewNote:      a.string(),
+      podReviewedBy:      a.string(),
+      podReviewedAt:      a.string(),
+      // What the reviewer confirmed, as JSON: { addresses, allPages, legible } booleans.
+      podReviewChecks:    a.string(),
+      // When the driver was asked for a better POD, and what they were told.
+      podReplacementRequestedAt: a.string(),
+      podReplacementMessage:     a.string(),
+      // The automated read (amplify/functions/pod-actions/podCheck.ts), as JSON.
+      // 'RUNNING' | 'DONE' | 'FAILED' | 'SKIPPED'
+      podCheckStatus:     a.string(),
+      podCheck:           a.string(),
+      podCheckedAt:       a.string(),
+      podCheckError:      a.string(),
       createdAt:         a.string().required(),
       updatedAt:         a.string(),
     })

@@ -42,6 +42,7 @@ import { enhancePodImage } from './scan'
 import { POD_SCAN_VERSION } from './scan-version.js'
 import { pagesToPdf } from '../../../src/lib/pagesToPdf'
 import { extractPagePhotos, rebuildPdfWithPhotos } from './pdfPhotos'
+import { checkPod } from './podCheck'
 
 // ── AWS clients ────────────────────────────────────────────────────────────
 
@@ -131,11 +132,18 @@ interface ScanDriverDocsEvent {
   kind: 'POD' | 'RATECON'
 }
 
+/** Read a merged driver POD against its rate confirmation, for the review queue. */
+interface CheckDriverPodEvent {
+  action: 'checkDriverPod'
+  submissionId: string
+}
+
 type SelfInvokeEvent =
   | ProcessPodInvokeEvent
   | BackfillScheduleEvent
   | BackfillPageEvent
   | ScanDriverDocsEvent
+  | CheckDriverPodEvent
 
 type LambdaEvent = AppSyncEvent | SelfInvokeEvent
 
@@ -154,6 +162,7 @@ type ManageAction =
   | 'enhanceDriverDoc'
   | 'finalizeDriverDocs'
   | 'queueDriverDocScan'
+  | 'checkDriverPod'
 
 interface Caller {
   email: string
@@ -295,7 +304,7 @@ export async function authorize(
   } else if (
     action === 'list' || action === 'assets' || action === 'status' ||
     action === 'process' || action === 'senderMappings' ||
-    action === 'enhanceDriverDoc' || action === 'finalizeDriverDocs'
+    action === 'enhanceDriverDoc' || action === 'finalizeDriverDocs' || action === 'checkDriverPod'
   ) {
     // enhanceDriverDoc only ever cleans up a document that already exists and writes a
     // second copy beside it; it exposes nothing and destroys nothing, so authentication
@@ -1978,6 +1987,10 @@ export async function finalizeDriverDocsAction(
       }),
     )
 
+    // A finished POD goes straight to its first check, so it reaches the review queue
+    // already read against the rate confirmation.
+    if (kind === 'POD') await queueDriverPodCheck(submissionId)
+
     return { submissionId, kind, pages: combined.pageCount, key }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
@@ -1985,6 +1998,117 @@ export async function finalizeDriverDocsAction(
     // present as a lost document.
     console.error('[pod-actions] finalizeDriverDocs failed', { submissionId, kind, message })
     return { submissionId, kind, pages: 0, error: message }
+  }
+}
+
+// ── POD review check ─────────────────────────────────────────────────────────
+
+export async function queueDriverPodCheck(submissionId: string): Promise<{ queued: boolean; error?: string }> {
+  if (!DRIVER_SUBMISSION_TABLE) return { queued: false, error: 'driver submissions are not configured' }
+  try {
+    await setPodCheckState(submissionId, { podCheckStatus: 'RUNNING' })
+    await lambda.send(
+      new InvokeCommand({
+        FunctionName: POD_FUNCTION_NAME,
+        InvocationType: 'Event',
+        Payload: Buffer.from(JSON.stringify({ action: 'checkDriverPod', submissionId })),
+      }),
+    )
+    return { queued: true }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Never thrown: the POD is stored and reviewable without the check.
+    console.error('[pod-actions] could not queue the POD check', { submissionId, message })
+    return { queued: false, error: message }
+  }
+}
+
+async function setPodCheckState(submissionId: string, fields: Record<string, string | null>): Promise<void> {
+  const now = new Date().toISOString()
+  const all: Record<string, string | null> = { ...fields, updatedAt: now }
+  const names: Record<string, string> = {}
+  const values: Record<string, unknown> = {}
+  const sets = Object.entries(all).map(([k, v], i) => {
+    names[`#f${i}`] = k
+    values[`:v${i}`] = v
+    return `#f${i} = :v${i}`
+  })
+  await dynamo.send(
+    new UpdateItemCommand({
+      TableName: DRIVER_SUBMISSION_TABLE,
+      Key: marshall({ id: submissionId }),
+      UpdateExpression: `SET ${sets.join(', ')}`,
+      ExpressionAttributeNames: names,
+      ExpressionAttributeValues: marshall(values, { removeUndefinedValues: true }),
+    }),
+  )
+}
+
+/** The load a submission is for: its loadId, else the PRO the driver typed. */
+async function loadForSubmission(sub: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const loadId = typeof sub.loadId === 'string' ? sub.loadId.trim() : ''
+  if (loadId) {
+    const r = await dynamo.send(new GetItemCommand({ TableName: LOAD_TABLE_NAME, Key: marshall({ id: loadId }) }))
+    if (r.Item) return unmarshall(r.Item)
+  }
+  const pro = String(sub.referenceNumber ?? '').replace(/\D/g, '')
+  if (!pro) return null
+  let ExclusiveStartKey: Record<string, AttributeValue> | undefined
+  do {
+    const r = await dynamo.send(new ScanCommand({
+      TableName: LOAD_TABLE_NAME,
+      ProjectionExpression: 'id, aljexId, stops, rateConfirmKey',
+      ExclusiveStartKey,
+    }))
+    const hit = (r.Items ?? []).map((i) => unmarshall(i)).find((l) => String(l.aljexId ?? '').trim() === pro)
+    if (hit) return hit
+    ExclusiveStartKey = r.LastEvaluatedKey
+  } while (ExclusiveStartKey)
+  return null
+}
+
+export async function runDriverPodCheck(submissionId: string): Promise<void> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  try {
+    const got = await dynamo.send(new GetItemCommand({ TableName: DRIVER_SUBMISSION_TABLE, Key: marshall({ id: submissionId }) }))
+    const sub = got.Item ? unmarshall(got.Item) : null
+    if (!sub?.combinedPodKey) {
+      await setPodCheckState(submissionId, { podCheckStatus: 'SKIPPED', podCheckError: 'The POD pages have not been merged yet' })
+      return
+    }
+    if (!apiKey) {
+      await setPodCheckState(submissionId, { podCheckStatus: 'FAILED', podCheckError: 'ANTHROPIC_API_KEY is not set for pod-actions' })
+      return
+    }
+    const load = await loadForSubmission(sub)
+    const { bytes: podPdf } = await getObjectBytes(String(sub.combinedPodKey))
+    let rateConPdf: Buffer | null = null
+    if (load?.rateConfirmKey) {
+      try {
+        const { bytes, contentType } = await getObjectBytes(String(load.rateConfirmKey))
+        // An image rate con cannot ride as a PDF document; the load's stops stand in for it.
+        rateConPdf = isPdf(bytes, contentType ?? '') ? bytes : null
+      } catch (err) {
+        console.warn('[pod-actions] rate con unreadable for POD check', { submissionId, err: String(err) })
+      }
+    }
+    const result = await checkPod({
+      apiKey,
+      podPdf,
+      rateConPdf,
+      stops: Array.isArray(load?.stops) ? (load.stops as Array<Record<string, unknown>>) : null,
+      pro: String(load?.aljexId ?? sub.referenceNumber ?? '').trim(),
+    })
+    await setPodCheckState(submissionId, {
+      podCheckStatus: 'DONE',
+      podCheck: JSON.stringify(result),
+      podCheckedAt: result.checkedAt,
+      podCheckError: null,
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[pod-actions] POD check failed', { submissionId, message })
+    await setPodCheckState(submissionId, { podCheckStatus: 'FAILED', podCheckError: message.slice(0, 500) }).catch(() => {})
   }
 }
 
@@ -2128,7 +2252,8 @@ function isSelfInvoke(event: LambdaEvent): event is SelfInvokeEvent {
     (event.action === 'processPodId' ||
       event.action === 'backfillSchedule' ||
       event.action === 'backfillPage' ||
-      event.action === 'scanDriverDocs')
+      event.action === 'scanDriverDocs' ||
+      event.action === 'checkDriverPod')
   )
 }
 
@@ -2153,6 +2278,10 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
     }
     if (event.action === 'scanDriverDocs') {
       await scanDriverDocsAction(event.submissionId, event.kind)
+      return { ok: true }
+    }
+    if (event.action === 'checkDriverPod') {
+      await runDriverPodCheck(event.submissionId)
       return { ok: true }
     }
     return { ok: false }
@@ -2197,6 +2326,9 @@ export const handler = async (event: LambdaEvent): Promise<unknown> => {
     case 'queueDriverDocScan':
       await authorize(action, appSyncEvent.identity)
       return queueDriverDocScanAction(input)
+    case 'checkDriverPod':
+      await authorize(action, appSyncEvent.identity)
+      return queueDriverPodCheck(assertString(input.submissionId, 'submissionId', 200))
     default:
       throw new Error(`Unknown action: ${action}`)
   }
