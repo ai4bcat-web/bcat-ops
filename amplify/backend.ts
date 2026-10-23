@@ -45,6 +45,7 @@ import { dispatchTwilioWebhook } from './functions/dispatch-twilio-webhook/resou
 import { dispatchSlackBridge } from './functions/dispatch-slack-bridge/resource'
 import { dispatchNudge } from './functions/dispatch-nudge/resource'
 import { brokerLoadAlert } from './functions/broker-load-alert/resource'
+import { rateconAssignedText } from './functions/ratecon-assigned-text/resource'
 import { amazonDisputeIntake } from './functions/amazon-dispute-intake/resource'
 import { disputePortalApi } from './functions/dispute-portal-api/resource'
 import { trackingApi } from './functions/tracking-api/resource'
@@ -93,6 +94,7 @@ const backend = defineBackend({
   googleReviews,
   paychexPaySync,
   brokerLoadAlert,
+  rateconAssignedText,
   rateconParser,
   apptReport,
   cashCheckinReminder,
@@ -795,6 +797,51 @@ dispatchActionsFn.addToRolePolicy(new PolicyStatement({
   actions: ['cognito-idp:AdminGetUser', 'cognito-idp:ListUsers'],
   resources: [backend.auth.resources.userPool.userPoolArn],
 }))
+
+// ── rateconAssignedText Lambda (Load stream → "new ratecon" text to owner operators) ──
+// An owner operator put on a load with a rate con gets one text from the dispatch number.
+// Same stream as brokerLoadAlert; mapped in the Lambda's own stack for the same reason.
+{
+  const rateconTextFn = backend.rateconAssignedText.resources.lambda as LambdaFunction
+  const rateconLoadTable = backend.data.resources.tables['Load']
+  const rateconPayTable = backend.data.resources.tables['DriverPaySetting']
+  rateconTextFn.addEnvironment('CONVERSATION_TABLE_NAME', dispatchConversationTable.tableName)
+  rateconTextFn.addEnvironment('MESSAGE_TABLE_NAME', dispatchMessageTable.tableName)
+  rateconTextFn.addEnvironment('SETTINGS_TABLE_NAME', dispatchSettingsTable.tableName)
+  rateconTextFn.addEnvironment('DRIVER_TABLE_NAME', dispatchDriverTable.tableName)
+  rateconTextFn.addEnvironment('PAY_SETTING_TABLE_NAME', rateconPayTable.tableName)
+  rateconTextFn.addEnvironment('LOAD_TABLE_NAME', rateconLoadTable.tableName)
+  rateconTextFn.addEnvironment('DISPATCH_PARAM_PATH', dispatchParamPath)
+  rateconTextFn.addEnvironment('WEBHOOK_URL', dispatchWebhookUrl.url)
+  rateconTextFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query', 'dynamodb:Scan'],
+    resources: [...dispatchTableArns, ...dispatchTableArns.map((arn) => `${arn}/index/*`)],
+  }))
+  rateconTextFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:Scan'],
+    resources: [dispatchDriverTable.tableArn, rateconPayTable.tableArn],
+  }))
+  rateconTextFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:UpdateItem'],
+    resources: [rateconLoadTable.tableArn],
+  }))
+  rateconTextFn.addToRolePolicy(new PolicyStatement({
+    actions: ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+    resources: [rateconLoadTable.tableStreamArn!],
+  }))
+  rateconTextFn.addToRolePolicy(new PolicyStatement({
+    actions: ['ssm:GetParametersByPath', 'ssm:GetParameter'],
+    resources: [dispatchParamArn],
+  }))
+  new EventSourceMapping(Stack.of(rateconTextFn), 'RateconAssignedTextStreamMapping', {
+    target:           rateconTextFn,
+    eventSourceArn:   rateconLoadTable.tableStreamArn,
+    startingPosition: StartingPosition.LATEST,
+    batchSize:        10,
+    retryAttempts:    2,
+    enabled:          process.env.BCAT_ISOLATED_PREVIEW !== 'true',
+  })
+}
 
 // ── amazonDisputeIntake Lambda (Google Form → AmazonDispute) ────────────────
 
