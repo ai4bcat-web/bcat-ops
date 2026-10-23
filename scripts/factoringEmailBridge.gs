@@ -141,15 +141,21 @@ function factoringBuildGmailQuery_() {
   // Explicit operators cover To/Cc/Delivered-To/List-ID; the quoted address
   // fallback catches X-Original-To and any other indexed header. Never uses
   // is:unread / is:unseen so archived/read mail is included.
+  //
+  // Spam is searched too. This mailbox is a consumer Gmail account and now and
+  // then files one of a burst of identical Aljex invoice mails as spam; excluding
+  // spam meant that invoice never reached the queue and nothing said so (PROs
+  // 14567, 14691, 14711, 14729 were lost that way). The recipient check below
+  // still decides what counts, and a rescued message is moved back to the inbox.
   const email = FACTORING_RECIPIENT;
   const listId = email.replace('@', '.');
-  return [
+  return '{' + [
     'to:' + email,
     'cc:' + email,
     'deliveredto:' + email,
     'list:' + listId,
     '"' + email + '"',
-  ].join(' OR ') + ' -in:trash -in:spam';
+  ].join(' ') + '} in:anywhere -in:trash';
 }
 
 function factoringProcessThreadPage_(start, max, cfg, props, startTime) {
@@ -207,6 +213,7 @@ function factoringProcessMessage_(message, cfg, props) {
 }
 
 function factoringProcessMessageInternal_(message, cfg, props, msgId) {
+  factoringRescueFromSpam_(message);
   const subject = (message.getSubject() || '').trim();
   const from = message.getFrom() || '';
   const receivedAt = message.getDate().toISOString();
@@ -312,6 +319,19 @@ function factoringHeaderContainsListId_(headerValue, email) {
     if (expectedIds.indexOf(id) !== -1) return true;
   }
   return false;
+}
+
+/** Moves a factoring mail Gmail filed as spam back to the inbox, so the filter learns. */
+function factoringRescueFromSpam_(message) {
+  try {
+    const thread = message.getThread();
+    if (thread && typeof thread.isInSpam === 'function' && thread.isInSpam()) {
+      thread.moveToInbox();
+      console.log('[Factoring] rescued from spam:', message.getSubject());
+    }
+  } catch (e) {
+    console.error('[Factoring] spam rescue failed for', message.getId(), ':', e);
+  }
 }
 
 function factoringApplyNeedsReviewLabel_(message) {

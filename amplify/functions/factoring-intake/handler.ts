@@ -140,6 +140,11 @@ function secretEquals(provided: unknown): boolean {
  * Leading zeros are preserved and letters are upper-cased so the same PRO
  * always maps to the same row. Rejects subjects with no matching phrase or
  * with invoice phrases that name different PROs.
+ *
+ * Two more shapes are accepted, both seen in the real mailbox and both lost
+ * before: Aljex's Transflo template ("SUBMIT TO TRANSFLO Pro # 14589 Ref # …")
+ * and a subject that is nothing but the PRO ("14589", "Fwd: PRO #14589"), which
+ * is how staff resend one by hand.
  */
 export function extractProNumber(subject: string): string | null {
   const normalized = subject.replace(/\s+/g, ' ').trim().toUpperCase()
@@ -148,9 +153,14 @@ export function extractProNumber(subject: string): string | null {
   // run of letters/digits/dashes right after it, so ",", "." or " — attached"
   // end it. A dashed id is kept whole rather than truncated to a different row.
   const matches = [
-    ...normalized.matchAll(/(?<!\w)INVOICE\s+FOR\s+PRO\s*#?\s*([A-Z0-9-]*[A-Z0-9])/g),
+    ...normalized.matchAll(
+      /(?<!\w)(?:INVOICE\s+FOR|SUBMIT\s+TO\s+TRANSFLO)\s+PRO\s*#?\s*([A-Z0-9-]*[A-Z0-9])/g,
+    ),
   ]
-  if (matches.length === 0) return null
+  if (matches.length === 0) {
+    const bare = normalized.match(/^(?:(?:FWD?|RE):\s*)*(?:PRO\s*#?\s*)?([A-Z0-9-]*[A-Z0-9])$/)
+    return bare && /\d/.test(bare[1]) ? bare[1] : null
+  }
 
   // A real PRO always carries a digit; without this, "Invoice for PRO number
   // 12345" or "Invoice for PRO from OTR" would file under NUMBER / FROM.

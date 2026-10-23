@@ -196,7 +196,22 @@ describe('factoringEmailBridge.gs', () => {
     expect(state.properties['factoring:msg:m1']).toMatch(/^ok:/);
     expect(state.searchCalls[0].query).toContain('to:ivanfactoring@bcatcorp.com');
     expect(state.searchCalls[0].query).toContain('list:ivanfactoring.bcatcorp.com');
-    expect(state.searchCalls[0].query).toContain('-in:trash -in:spam');
+    expect(state.searchCalls[0].query).toContain('in:anywhere -in:trash');
+    expect(state.searchCalls[0].query).not.toContain('-in:spam');
+  });
+
+  it('processes an invoice Gmail filed as spam and moves it back to the inbox', () => {
+    const m = makeMessage({ id: 'spam1' });
+    const { ctx, state } = makeBridge({ messages: [m] });
+    let inSpam = true;
+    m._thread.isInSpam = () => inSpam;
+    m._thread.moveToInbox = () => { inSpam = false; };
+
+    ctx.processFactoringEmails();
+
+    expect(state.fetched).toHaveLength(1);
+    expect(state.fetched[0].payload.messageId).toBe('spam1');
+    expect(inSpam).toBe(false);
   });
 
   it('skips already-acked messages and processes a new message in the same thread', () => {

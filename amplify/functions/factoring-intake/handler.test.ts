@@ -66,7 +66,21 @@ describe('extractProNumber', () => {
   it('returns null when no invoice PRO phrase is present', () => {
     expect(extractProNumber('Random subject')).toBeNull()
     expect(extractProNumber('Invoice for PO #01234')).toBeNull()
-    expect(extractProNumber('PRO #01234')).toBeNull()
+    expect(extractProNumber('Ref # 01234 attached')).toBeNull()
+    expect(extractProNumber('Please factor PRO #01234 today')).toBeNull()
+  })
+
+  it("accepts Aljex's Transflo template", () => {
+    expect(
+      extractProNumber('SUBMIT TO TRANSFLO Pro # 14589 Ref # 2284206 Attached from IVAN CARTAGE CO'),
+    ).toBe('14589')
+  })
+
+  it('accepts a subject that is only the PRO, as staff resend one by hand', () => {
+    expect(extractProNumber('14589')).toBe('14589')
+    expect(extractProNumber('Fwd: 14589')).toBe('14589')
+    expect(extractProNumber('PRO #01234')).toBe('01234')
+    expect(extractProNumber('Invoice')).toBeNull()
   })
 
   it('accepts alphanumeric PROs and upper-cases them', () => {
