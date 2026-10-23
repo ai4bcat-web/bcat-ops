@@ -117,6 +117,30 @@ describe('SubmissionsPage', () => {
     expect(titles[1]?.textContent).toContain('OLD-REF')
   })
 
+  it('shows a multi-photo POD as one combined document, not one tile per photo', async () => {
+    const page = (n: number) => ({
+      id: `p${n}`, kind: 'POD' as const, fileName: `IMG_${n}.jpg`, contentType: 'image/jpeg',
+      pageNumber: n, uploadedAt: '2026-10-01T10:00:00.000Z',
+    })
+    apiMocks.fetchSubmissions.mockResolvedValue([
+      {
+        id: 's1', status: 'LINKED', referenceNumber: '14726', loadId: 'L1',
+        createdAt: '2026-10-01T10:00:00.000Z',
+        docs: [page(1), page(2), page(3), page(4)],
+        documents: [{ kind: 'POD', docId: 'combined-POD', pageCount: 4, enhanced: true, contentType: 'application/pdf', combined: true }],
+      },
+    ] satisfies SubmissionSummary[])
+    apiMocks.fetchDocUrl.mockResolvedValue('https://example.com/combined.pdf')
+
+    renderWithRouter()
+
+    const link = await screen.findByRole('link', { name: 'Open POD, 4 pages' })
+    expect(link.getAttribute('href')).toBe('https://example.com/combined.pdf')
+    expect(apiMocks.fetchDocUrl).toHaveBeenCalledTimes(1)
+    expect(apiMocks.fetchDocUrl).toHaveBeenCalledWith('s1', 'combined-POD')
+    expect(screen.queryAllByRole('img')).toHaveLength(0)
+  })
+
   it('shows an empty state when the driver has no submissions', async () => {
     apiMocks.fetchSubmissions.mockResolvedValue([])
 

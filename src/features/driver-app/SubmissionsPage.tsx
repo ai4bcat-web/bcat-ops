@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Package, Plus, Loader2, AlertCircle, ImageIcon } from 'lucide-react'
+import { Package, Plus, Loader2, AlertCircle, ImageIcon, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -8,7 +8,7 @@ import {
   DriverApiError,
   fetchDocUrl,
   fetchSubmissions,
-  type SubmissionDoc,
+  type SubmissionDocument,
   type SubmissionStatus,
   type SubmissionSummary,
 } from './driverApi'
@@ -38,43 +38,92 @@ function formatDate(iso: string): string {
   }
 }
 
-function DocThumbnail({
+const KIND_LABEL: Record<SubmissionDocument['kind'], string> = {
+  POD: 'POD',
+  RATECON: 'Rate con',
+  MISC: 'Photo',
+}
+
+/**
+ * What the card shows: one tile per finished document, not one per photo.
+ *
+ * A POD the driver shot as five pictures is merged on the server into a single PDF, and
+ * that PDF is the POD — it is what the office sends on. Listing the five photos made one
+ * document look like five. An older server reply with no `documents` falls back to the
+ * pages so the card is never blank.
+ */
+function documentsOf(submission: SubmissionSummary): SubmissionDocument[] {
+  if (submission.documents) return submission.documents
+  return submission.docs.map((d) => ({
+    kind: d.kind,
+    docId: d.id,
+    pageCount: 1,
+    enhanced: false,
+    contentType: d.contentType,
+    combined: false,
+  }))
+}
+
+function DocTile({
   submissionId,
   doc,
 }: {
   submissionId: string
-  doc: SubmissionDoc
+  doc: SubmissionDocument
 }) {
   const [url, setUrl] = useState<string | null>(null)
+  const isImage = doc.contentType.startsWith('image/')
 
   useEffect(() => {
     let cancelled = false
-    fetchDocUrl(submissionId, doc.id)
+    fetchDocUrl(submissionId, doc.docId)
       .then((u) => {
         if (!cancelled) setUrl(u)
       })
       .catch(() => {
-        // A broken thumbnail does not block the list.
+        // A broken tile does not block the list.
       })
     return () => {
       cancelled = true
     }
-  }, [submissionId, doc.id])
+  }, [submissionId, doc.docId])
 
-  if (!url) {
+  const label = KIND_LABEL[doc.kind]
+  const pages = doc.pageCount > 1 ? `${doc.pageCount} pages` : '1 page'
+
+  if (isImage && url) {
     return (
-      <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50">
-        <ImageIcon className="h-6 w-6 text-slate-400" aria-hidden="true" />
-      </div>
+      <a href={url} target="_blank" rel="noreferrer" className="relative shrink-0">
+        <img
+          src={url}
+          alt={label}
+          className="h-20 w-20 rounded-md border border-slate-200 object-cover"
+        />
+        {/* Still a photo only while the merge runs; say it stands for the whole set. */}
+        {doc.pageCount > 1 && (
+          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 text-[10px] font-semibold text-white">
+            {pages}
+          </span>
+        )}
+      </a>
     )
   }
 
-  return (
-    <img
-      src={url}
-      alt={doc.fileName}
-      className="h-20 w-20 shrink-0 rounded-md border border-slate-200 object-cover"
-    />
+  const Icon = isImage ? ImageIcon : FileText
+  const body = (
+    <>
+      <Icon className="h-6 w-6 text-slate-500" aria-hidden="true" />
+      <span className="text-xs font-semibold text-slate-700">{label}</span>
+      <span className="text-[11px] text-slate-500">{pages}</span>
+    </>
+  )
+  const box = 'flex h-20 w-20 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-slate-200 bg-slate-50'
+  return url ? (
+    <a href={url} target="_blank" rel="noreferrer" aria-label={`Open ${label}, ${pages}`} className={box}>
+      {body}
+    </a>
+  ) : (
+    <div className={box}>{body}</div>
   )
 }
 
@@ -101,10 +150,10 @@ function SubmissionCard({ submission }: { submission: SubmissionSummary }) {
         <p className="mt-2 line-clamp-2 text-sm text-slate-600">{submission.note}</p>
       )}
 
-      {submission.docs.length > 0 && (
+      {documentsOf(submission).length > 0 && (
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {submission.docs.map((doc) => (
-            <DocThumbnail key={doc.id} submissionId={submission.id} doc={doc} />
+          {documentsOf(submission).map((doc) => (
+            <DocTile key={doc.docId} submissionId={submission.id} doc={doc} />
           ))}
         </div>
       )}
