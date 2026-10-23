@@ -14,7 +14,6 @@ import { MaintenanceTasksWidget } from './MaintenanceTasksWidget'
 import { PmDueWidget } from './PmDueWidget'
 import { FaultCodesWidget } from './FaultCodesWidget'
 import { DotDueWidget } from './DotDueWidget'
-import { EldLogsWidget } from './EldLogsWidget'
 import { LoadDrawer } from '@/features/loads/LoadDrawer'
 
 // ── Time-off labels ─────────────────────────────────────────────────────────────
@@ -170,9 +169,6 @@ export function FleetManagerDashboardPage() {
 
         {/* Open engine fault codes from the same Motive feed the PM tracker reads */}
         <FaultCodesWidget />
-
-        {/* Runs that left the 150 air-mile radius, and whether their ELD logs were checked */}
-        <EldLogsWidget />
 
         {/* Repair spend by month (filterable by equipment + date) */}
         <RepairSpendWidget />
