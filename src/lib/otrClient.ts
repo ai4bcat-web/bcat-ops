@@ -77,6 +77,14 @@ export function setBrokerMc(
   return otrAction('setMc', { id, mcNumber })
 }
 
+/**
+ * Save one typed OTR field on a queue row (empty clears it) and rebuild readiness. The
+ * server writes only that field, so saves made close together cannot undo each other.
+ */
+export function setOtrField(id: string, field: string, value: string): Promise<{ readiness: OtrReadiness }> {
+  return otrAction('setField', { id, field, value })
+}
+
 /** Take the row out of the OTR queue to be billed by hand. NO_BUY says OTR refused the broker. */
 export function markManualInvoice(id: string, opts: { apEmail?: string; reason?: 'NO_BUY' | 'MANUAL' } = {}): Promise<{ status: string }> {
   return otrAction('manualInvoice', { id, ...(opts.apEmail ? { apEmail: opts.apEmail } : {}), ...(opts.reason ? { reason: opts.reason } : {}) })

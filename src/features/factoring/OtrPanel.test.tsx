@@ -11,15 +11,16 @@ import { OtrPanel } from './OtrPanel'
 import type { OtrReadiness } from '@/lib/otrInvoice'
 import type { FactoringItem } from '@/types'
 
-const setFactoringManualFields = vi.hoisted(() => vi.fn())
+const setOtrField = vi.hoisted(() => vi.fn())
 const assembleInvoice = vi.hoisted(() => vi.fn())
 const setBrokerMc = vi.hoisted(() => vi.fn())
 const uploadOtrDocs = vi.hoisted(() => vi.fn().mockResolvedValue({ documentErrors: [] }))
 
-vi.mock('@/lib/apiClient', () => ({ setFactoringManualFields }))
+vi.mock('@/lib/apiClient', () => ({}))
 vi.mock('@/lib/otrClient', () => ({
   assembleInvoice,
   setBrokerMc,
+  setOtrField,
   checkBroker: vi.fn(),
   submitToOtr: vi.fn(),
   uploadOtrDocs,
@@ -61,7 +62,7 @@ function item(over: Partial<FactoringItem> = {}): FactoringItem {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  setFactoringManualFields.mockResolvedValue(undefined)
+  setOtrField.mockResolvedValue({ readiness: readiness() })
   assembleInvoice.mockResolvedValue(undefined)
 })
 afterEach(() => vi.restoreAllMocks())
@@ -95,11 +96,10 @@ describe('OtrPanel', () => {
     fireEvent.change(screen.getByLabelText('Destination ZIP for PRO 13364'), { target: { value: '48201' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Destination ZIP for PRO 13364' }))
 
-    await waitFor(() => expect(setFactoringManualFields).toHaveBeenCalledTimes(1))
-    // Existing overrides are preserved — a save is a merge, not a replacement.
-    expect(setFactoringManualFields).toHaveBeenCalledWith('13364', { FromZip: '60601', ToZip: '48201' })
-    // Typing a value is not enough; the payload has to be reassembled from it.
-    await waitFor(() => expect(assembleInvoice).toHaveBeenCalledWith('13364'))
+    await waitFor(() => expect(setOtrField).toHaveBeenCalledTimes(1))
+    // Only the one field is sent: the server writes it in place, so the FromZip already
+    // on the row (and anything saved a moment ago that this page has not reloaded) stays.
+    expect(setOtrField).toHaveBeenCalledWith('13364', 'ToZip', '48201')
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
   })
 
@@ -115,7 +115,7 @@ describe('OtrPanel', () => {
     fireEvent.change(input, { target: { value: '48202' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Destination ZIP for PRO 13364' }))
 
-    await waitFor(() => expect(setFactoringManualFields).toHaveBeenCalledWith('13364', { ToZip: '48202' }))
+    await waitFor(() => expect(setOtrField).toHaveBeenCalledWith('13364', 'ToZip', '48202'))
   })
 
   it('pre-fills a value someone already typed so it can be corrected', () => {
@@ -138,7 +138,7 @@ describe('OtrPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Broker MC for PRO 13364' }))
 
     await waitFor(() => expect(setBrokerMc).toHaveBeenCalledWith('13364', '123456'))
-    expect(setFactoringManualFields).not.toHaveBeenCalled()
+    expect(setOtrField).not.toHaveBeenCalled()
   })
 
   it('says where the customer name came from, rather than calling it confirmed', () => {

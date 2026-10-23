@@ -24,6 +24,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda'
 import { randomUUID } from 'crypto'
 import {
+  OTR_REQUIRED_FIELDS,
   assembleOtrInvoice,
   toOtrPayload,
   type ManualOverrides,
@@ -545,6 +546,43 @@ async function updateItem(id: string, fields: Record<string, unknown>) {
   )
 }
 
+/**
+ * Write ONE typed field in place.
+ *
+ * The page used to send the whole map back, merged from the row as it last loaded. Two
+ * saves inside one refresh (type a city, Save, type the state, Save) each sent a map
+ * missing the other, so the second wiped the first; setMc did the same from a read taken
+ * before its seconds-long OTR call. Fields typed one after another vanished, and the MC
+ * with them (PRO 14677, 23 Oct). A path update cannot lose a sibling field.
+ */
+async function setManualField(id: string, field: string, value: string): Promise<void> {
+  const v = value.trim()
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: FACTORING_TABLE,
+        Key: { id },
+        UpdateExpression: v ? 'SET otrManualFields.#k = :v, updatedAt = :u' : 'REMOVE otrManualFields.#k SET updatedAt = :u',
+        ConditionExpression: 'attribute_type(otrManualFields, :m)',
+        ExpressionAttributeNames: { '#k': field },
+        ExpressionAttributeValues: { ...(v ? { ':v': v } : {}), ':u': nowIso(), ':m': 'M' },
+      }),
+    )
+    return
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err
+  }
+  // No map on the row yet (or one stored as JSON text): start it from what is there.
+  const item = await getFactoringItem(id)
+  if (!item) throw new Error('factoring item not found')
+  const raw = item.otrManualFields
+  const current = (typeof raw === 'string' ? JSON.parse(raw) : raw ?? {}) as Record<string, string>
+  const next = { ...current }
+  if (v) next[field] = v
+  else delete next[field]
+  await updateItem(id, { otrManualFields: next })
+}
+
 async function s3Bytes(key: string): Promise<{ bytes: Uint8Array; contentType: string }> {
   const r = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }))
   const bytes = await r.Body!.transformToByteArray()
@@ -682,6 +720,19 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
           loadId: load ? String(load.id) : undefined,
         })
         return ok(readiness)
+      }
+
+      /** Save one typed OTR field (empty clears it), then rebuild readiness. */
+      case 'setField': {
+        const field = trim(input.field)
+        if (!(OTR_REQUIRED_FIELDS as readonly string[]).includes(field) && field !== 'CustomerName') return fail(`unknown field ${field}`)
+        const id = String(input.id)
+        if (!(await getFactoringItem(id))) return fail('factoring item not found')
+        await setManualField(id, field, String(input.value ?? ''))
+        const item = (await getFactoringItem(id)) as Row
+        const { readiness, load } = await buildReadiness(item)
+        await updateItem(id, { otrReadiness: readiness, loadId: load ? String(load.id) : undefined })
+        return ok({ readiness, otrManualFields: item.otrManualFields ?? {} })
       }
 
       /**
@@ -830,13 +881,14 @@ export const handler = async (event: { arguments: Args; identity?: { claims?: { 
         // in from the Customer record, so the next load from this broker is typed again.
         await updateItem(String(item.id), {
           customerId: customer.id,
-          otrManualFields: { ...((item.otrManualFields as ManualOverrides) ?? {}), BrokerMC: mc },
           ...(check
             ? { brokerMcChecked: mc, brokerCheckResult: check.decision.replace(' ', '_'), brokerCheckedAt: nowIso() }
             : {}),
           ...noBuyFlag(item, check?.decision ?? null),
           otrError: null,
         })
+
+        await setManualField(String(item.id), 'BrokerMC', mc)
 
         const { readiness } = await buildReadiness(await getFactoringItem(String(item.id)) as Row)
         await updateItem(String(item.id), { otrReadiness: readiness })

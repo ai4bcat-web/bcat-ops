@@ -27,9 +27,8 @@ import {
   type OtrRequiredField,
 } from '@/lib/otrInvoice'
 import { otrStatusMeta } from '@/lib/otrInvoiceStatus'
-import { assembleInvoice, checkBroker, markManualInvoice, setBrokerMc, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
+import { assembleInvoice, checkBroker, markManualInvoice, setBrokerMc, setOtrField, submitToOtr, uploadOtrDocs } from '@/lib/otrClient'
 import { otrDocsIncomplete, otrDocsErrorMessage } from '@/lib/otrSubmitOutcome'
-import { setFactoringManualFields } from '@/lib/apiClient'
 import { FactoringDocCell } from './FactoringDocCell'
 import { useAuthUser } from '@/hooks/useAuth'
 import { isReadyToSubmit, whatIsMissing } from './factoringFields'
@@ -285,20 +284,15 @@ export function OtrPanel({ item, onChanged }: Props) {
   const needsMc = missing.has('BrokerMC')
   // From the lists the chips are drawn from, never the cached `ready` flag beside them.
   const canSubmit = isReadyToSubmit(readiness)
-  const manual = (item.otrManualFields ?? {}) as Record<string, string>
 
   /**
-   * Save one typed field. The whole override map is rewritten, so it is merged first;
-   * an empty value clears the field.
-   * Re-assembling afterwards is what turns the typed value into a resolved field.
+   * Save one typed field; an empty value clears it. Only that field is sent: merging into
+   * the row as this page last loaded it let a second quick save erase the first.
    */
   const saveField = (field: EditableField, label: string, value: string) =>
     run(
       `field:${field}`,
-      async () => {
-        await setFactoringManualFields(item.id, { ...manual, [field]: value })
-        await assembleInvoice(item.id)
-      },
+      () => setOtrField(item.id, field, value),
       value.trim() ? `${label} saved` : `${label} cleared`,
     )
 
