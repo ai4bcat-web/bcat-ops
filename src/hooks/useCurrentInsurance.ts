@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { listInsurancePeriods, listInsuranceLineItems, type InsuranceLineItem } from '@/lib/insuranceClient'
 import { listDriverPaySettings, type DriverPaySetting } from '@/lib/apiClient'
 import { useAppStore } from '@/store/useAppStore'
-import { computeInsuranceAllocation, type InsItem, type TruckLite, type DriverLite } from '@/lib/insuranceAllocation'
+import { computeInsuranceAllocation, insuranceRangeByTruckDated, truckActiveOn, type InsItem, type TruckLite, type DriverLite } from '@/lib/insuranceAllocation'
+import { todayChicago } from '@/lib/recurringRevision'
 
 /**
  * Loads the CURRENT insurance period's line items and derives the per-truck annual
@@ -33,9 +34,9 @@ export function useCurrentInsurance() {
     return () => { active = false }
   }, [refresh])
 
-  const allocation = useMemo(() => {
+  const inputs = useMemo(() => {
     const insItems: InsItem[] = items.map((i) => ({ kind: i.kind, equipmentId: i.equipmentId, annualCents: i.annualCents }))
-    const trucks: TruckLite[] = equipment.filter((e) => e.type === 'truck').map((e) => ({ id: e.id, active: e.active !== false }))
+    const trucks: TruckLite[] = equipment.filter((e) => e.type === 'truck').map((e) => ({ id: e.id, active: e.active !== false, inactiveSince: e.inactiveSince ?? null }))
     // Drivers on the BOX_TRUCK pay group run box trucks — they share the trailer split
     // but their WC lands on their assigned truck (or spreads if unassigned) like any driver's.
     const boxTruckDriverIds = new Set(paySettings.filter((s) => s.payGroup === 'BOX_TRUCK' && s.active !== false).map((s) => s.driverId))
@@ -43,8 +44,21 @@ export function useCurrentInsurance() {
     const drv: DriverLite[] = drivers.map((d) => ({
       id: d.id, assignedTruckId: d.assignedTruckId, active: d.active && d.type !== 'broker', boxTruck: boxTruckDriverIds.has(d.id),
     }))
-    return computeInsuranceAllocation(insItems, trucks, drv)
+    return { insItems, trucks, drv }
   }, [items, equipment, drivers, paySettings])
 
-  return { items, allocation, periodLabel, loading, refresh }
+  /** Today's picture: trucks parked as of today carry no insurance. */
+  const allocation = useMemo(() => {
+    const today = todayChicago()
+    const live = inputs.trucks.map((t) => ({ id: t.id, active: truckActiveOn(t, today) }))
+    return computeInsuranceAllocation(inputs.insItems, live, inputs.drv)
+  }, [inputs])
+
+  /** Insurance $ per truck over a range, stopping on each truck's inactive date. */
+  const rangeByTruck = useCallback(
+    (range: { start: string; end: string }) => insuranceRangeByTruckDated(inputs.insItems, inputs.trucks, inputs.drv, range),
+    [inputs],
+  )
+
+  return { items, allocation, rangeByTruck, periodLabel, loading, refresh }
 }

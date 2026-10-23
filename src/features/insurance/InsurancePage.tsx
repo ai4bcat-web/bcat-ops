@@ -248,9 +248,9 @@ function EditView({
   onSetWc: (cents: number) => void
   onRemoveOrphan: (r: UnitRow) => void
 }) {
-  const trucksPriced = truckRows.filter((r) => !r.orphaned && r.annualCents > 0).length
+  const trucksPriced = truckRows.filter((r) => !r.orphaned && !r.inactive && r.annualCents > 0).length
   const trailersPriced = trailerRows.filter((r) => !r.orphaned && r.annualCents > 0).length
-  const trucksLive = truckRows.filter((r) => !r.orphaned).length
+  const trucksLive = truckRows.filter((r) => !r.orphaned && !r.inactive).length
   const trailersLive = trailerRows.filter((r) => !r.orphaned).length
 
   return (
@@ -305,12 +305,13 @@ function UnitTable({
               <tr><td colSpan={5} style={{ ...tdStyle, textAlign: 'center', padding: '24px 16px', color: 'var(--ds-t3)' }}>No units in the fleet.</td></tr>
             )}
             {rows.map((r) => {
-              const pct = totalCents > 0 ? (r.annualCents / totalCents) * 100 : 0
+              const pct = totalCents > 0 && !r.inactive ? (r.annualCents / totalCents) * 100 : 0
               return (
-                <tr key={r.key} style={{ borderBottom: '1px solid var(--ds-border)', opacity: r.orphaned ? 0.7 : 1 }}>
+                <tr key={r.key} style={{ borderBottom: '1px solid var(--ds-border)', opacity: r.orphaned || r.inactive ? 0.6 : 1 }}>
                   <td style={{ ...tdStyle, fontWeight: 600, color: 'var(--ds-t1)' }}>
                     #{r.unitNumber}
                     {r.orphaned && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: 'var(--ds-amber)', background: 'var(--ds-amber-bg)', borderRadius: 999, padding: '1px 7px' }}>not in fleet</span>}
+                    {r.inactive && <span title="Truck is marked inactive — its premium is not in the totals" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: 'var(--ds-t3)', background: 'var(--ds-bg-2)', borderRadius: 999, padding: '1px 7px' }}>inactive · not counted</span>}
                   </td>
                   <td style={tdStyle}>{r.equipment ? `${r.equipment.make} ${r.equipment.model}${r.equipment.year ? ` · ${r.equipment.year}` : ''}` : '—'}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>

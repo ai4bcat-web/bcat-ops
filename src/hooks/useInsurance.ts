@@ -7,6 +7,8 @@ import {
   type InsurancePeriod, type InsuranceLineItem, type InsuranceKind,
 } from '@/lib/insuranceClient'
 import type { Equipment } from '@/types/equipment'
+import { truckActiveOn } from '@/lib/insuranceAllocation'
+import { todayChicago } from '@/lib/recurringRevision'
 
 export interface CategoryTotals { truckCents: number; trailerCents: number; wcCents: number; totalCents: number }
 
@@ -18,6 +20,8 @@ export interface UnitRow {
   item?: InsuranceLineItem
   annualCents: number
   orphaned: boolean   // a line item whose equipment no longer exists in the fleet
+  /** A parked truck in the current period: its premium is kept but not counted. */
+  inactive?: boolean
 }
 
 export interface CategoryDelta { a: number; b: number; delta: number; pct: number | null }
@@ -63,13 +67,26 @@ export function useInsurance() {
 
   const itemsFor = useCallback((periodId: string) => items.filter((i) => i.periodId === periodId), [items])
 
+  /*
+   * A truck marked inactive is off the road and off the policy, so its premium leaves the
+   * CURRENT period's totals (the line item is kept, so reactivating brings it back). Past
+   * periods are what was actually paid and are left alone.
+   */
+  const inactiveTruckIds = useMemo(() => {
+    const today = todayChicago()
+    return new Set(trucks.filter((t) => !truckActiveOn({ id: t.id, active: t.active, inactiveSince: t.inactiveSince }, today)).map((t) => t.id))
+  }, [trucks])
+  const isParked = useCallback((periodId: string, i: InsuranceLineItem) =>
+    i.kind === 'TRUCK' && !!i.equipmentId && inactiveTruckIds.has(i.equipmentId) && periodId === currentPeriod?.id,
+  [inactiveTruckIds, currentPeriod])
+
   const summary = useCallback((periodId: string): CategoryTotals => {
-    const list = itemsFor(periodId)
+    const list = itemsFor(periodId).filter((i) => !isParked(periodId, i))
     const truckCents = list.filter((i) => i.kind === 'TRUCK').reduce((s, i) => s + (i.annualCents || 0), 0)
     const trailerCents = list.filter((i) => i.kind === 'TRAILER').reduce((s, i) => s + (i.annualCents || 0), 0)
     const wcCents = list.filter((i) => i.kind === 'WORKMANS_COMP').reduce((s, i) => s + (i.annualCents || 0), 0)
     return { truckCents, trailerCents, wcCents, totalCents: truckCents + trailerCents + wcCents }
-  }, [itemsFor])
+  }, [itemsFor, isParked])
 
   /** Per-unit rows: every live unit of `kind`, joined to its line item, plus any orphaned items. */
   const unitRows = useCallback((periodId: string, kind: 'TRUCK' | 'TRAILER'): UnitRow[] => {
@@ -78,7 +95,8 @@ export function useInsurance() {
     const byEquip = new Map(list.filter((i) => i.equipmentId).map((i) => [i.equipmentId as string, i]))
     const rows: UnitRow[] = fleet.map((e) => {
       const item = byEquip.get(e.id)
-      return { key: e.id, equipment: e, unitNumber: e.unitNumber, item, annualCents: item?.annualCents ?? 0, orphaned: false }
+      const inactive = !!item && isParked(periodId, item)
+      return { key: e.id, equipment: e, unitNumber: e.unitNumber, item, annualCents: item?.annualCents ?? 0, orphaned: false, inactive }
     })
     // Line items whose equipment is gone (truck sold/removed) — still real spend on the policy.
     const liveIds = new Set(fleet.map((e) => e.id))
@@ -88,7 +106,7 @@ export function useInsurance() {
       }
     }
     return rows.sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
-  }, [trucks, trailers, itemsFor])
+  }, [trucks, trailers, itemsFor, isParked])
 
   const wcItem = useCallback((periodId: string) => itemsFor(periodId).find((i) => i.kind === 'WORKMANS_COMP') ?? null, [itemsFor])
 

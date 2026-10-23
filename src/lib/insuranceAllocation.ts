@@ -14,7 +14,12 @@
 
 export type InsuranceKind = 'TRUCK' | 'TRAILER' | 'WORKMANS_COMP'
 export interface InsItem { kind: InsuranceKind; equipmentId?: string | null; annualCents: number }
-export interface TruckLite { id: string; active: boolean }
+export interface TruckLite {
+  id: string
+  active: boolean
+  /** The day the truck was parked (YYYY-MM-DD). Insurance counts only for the days before it. */
+  inactiveSince?: string | null
+}
 // `boxTruck` drivers run box trucks (BOX_TRUCK pay group) — not Fleet equipment. They
 // count toward the shared trailer split (so Ivan/Amazon trucks bear a smaller share);
 // their WC share is attributed like any other driver's (assigned truck, else spread).
@@ -125,4 +130,45 @@ export function insuranceRangeForTrucks(
   let sum = 0
   for (const id of truckIds) sum += (annualByTruck[id] ?? 0) * factor
   return sum
+}
+
+/** Whether a truck is on the road on `day`: dated parking wins over the plain flag. */
+export function truckActiveOn(t: TruckLite, day: string): boolean {
+  if (t.inactiveSince) return day < t.inactiveSince
+  return t.active
+}
+
+const nextDay = (iso: string) => {
+  const d = new Date(`${iso}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Insurance $ per truck over a date range, following the day each truck was parked.
+ *
+ * A truck parked on Oct 20 still carries its premium for Oct 1–19 and none after, and the
+ * trailer and workmans-comp shares re-spread over the trucks still running from that day.
+ * The range is cut at every parking date inside it and each piece is allocated with the
+ * trucks active on it, so a month before the date is untouched and a month after has none.
+ */
+export function insuranceRangeByTruckDated(
+  items: InsItem[],
+  trucks: TruckLite[],
+  drivers: DriverLite[],
+  range: { start: string; end: string },
+): Record<string, number> {
+  const cuts = [...new Set(trucks.map((t) => t.inactiveSince).filter((d): d is string => !!d && d > range.start && d <= range.end))].sort()
+  const out: Record<string, number> = {}
+  let from = range.start
+  for (const cut of [...cuts, nextDay(range.end)]) {
+    const to = cut > range.end ? range.end : (() => { const d = new Date(`${cut}T12:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10) })()
+    if (from <= to) {
+      const live = trucks.map((t) => ({ id: t.id, active: truckActiveOn(t, from) }))
+      const piece = insuranceRangeByTruck(computeInsuranceAllocation(items, live, drivers).byTruck, { start: from, end: to })
+      for (const [id, v] of Object.entries(piece)) out[id] = (out[id] ?? 0) + v
+    }
+    from = cut
+  }
+  return out
 }

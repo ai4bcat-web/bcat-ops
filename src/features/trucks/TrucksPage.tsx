@@ -10,6 +10,9 @@ import type { TruckConfig } from '@/lib/apiClient'
 import { provisionTruckCosts, applyTruckCosts, readTruckCosts, hasAnyTruckCost, type TruckCostInputs } from '@/lib/truckCosts'
 import { getUnitPremiumCents, setUnitPremiumCurrentPeriod } from '@/lib/insuranceClient'
 import { useExpenseData } from '@/hooks/useExpenseData'
+import { holdingArea } from '@/lib/truckInactive'
+import { todayChicago } from '@/lib/recurringRevision'
+import { MarkInactiveDialog, HoldingArea } from './TruckParking'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,7 +23,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetBody, SheetFooter, SheetCloseButton } from '@/components/ui/sheet'
 import { FormSection, Field } from '@/components/ui/form-section'
 import {
-  Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp, ArrowUp, ArrowDown,
+  Truck, Container, Plus, Pencil, Trash2, ChevronDown, ChevronUp, ArrowUp, ArrowDown, PauseCircle, PlayCircle,
   CheckCircle2, AlertTriangle, Clock, Wrench, FileText, X, Search, ShieldCheck, Gauge, DollarSign,
 } from 'lucide-react'
 import { thBase, tdBase } from '@/features/maintenance/maintenanceUi'
@@ -423,7 +426,9 @@ function EquipmentForm({ initial, onSave, onClose, onDelete, initialCosts }: Equ
               {/* Status chips */}
               <Field label="Status">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {([['insured', 'Insured'], ['active', 'Active'], ['onTollwayAccount', 'On Tollway Account']] as [string, string][]).map(([key, label]) => {
+                  {/* An existing truck is parked with "Mark inactive" on its row, which asks about
+                      its plates and ELD; the bare toggle would skip that. */}
+                  {([['insured', 'Insured'], ...(isTruck && initial?.id ? [] : [['active', 'Active']]), ['onTollwayAccount', 'On Tollway Account']] as [string, string][]).map(([key, label]) => {
                     const on = form[key as keyof typeof form] as boolean
                     return (
                       <button key={key} type="button" onClick={() => set(key, !on)}
@@ -823,6 +828,7 @@ interface EquipRowProps {
   onOwnershipChange: (truckId: string, unitNumber: string, type: TruckOwnership) => void
   onEdit:            (e: Equipment) => void
   onDelete:          (id: string) => void
+  onPark:            (e: Equipment) => void
 }
 
 function OwnershipBadge({
@@ -848,7 +854,7 @@ function OwnershipBadge({
   )
 }
 
-function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete }: EquipRowProps) {
+function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershipType, onOwnershipChange, onEdit, onDelete, onPark }: EquipRowProps) {
   const navigate = useNavigate()
   const { hasPageAccess } = useAuth()
   const canFiles = hasPageAccess('files')
@@ -947,6 +953,16 @@ function EquipRow({ equip, dates, tasks, invoices, driverName, colSpan, ownershi
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Compliance &amp; onboarding</TooltipContent>
+              </Tooltip>
+            )}
+            {isTruck && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => onPark(equip)}>
+                    {equip.active ? <PauseCircle className="size-3.5" /> : <PlayCircle className="size-3.5" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{equip.active ? 'Mark inactive' : 'Reactivate'}</TooltipContent>
               </Tooltip>
             )}
             <Tooltip>
@@ -1145,6 +1161,25 @@ export function TrucksPage() {
     setShowForm(null)
   }
 
+  // ── Parking a truck ───────────────────────────────────────────────────────
+  const [parkTruck, setParkTruck] = useState<Equipment | null>(null)
+  const [parkPremium, setParkPremium] = useState(0)
+  function handlePark(e: Equipment) {
+    if (!e.active) {
+      // Back on the road: insurance counts again from today's totals, and any plates/ELD
+      // still held on it are simply its own costs again.
+      updateEquipment(e.id, { active: true, inactiveSince: null })
+      toast.success(`Unit ${e.unitNumber} is active again`)
+      return
+    }
+    setParkPremium(0)
+    setParkTruck(e)
+    getUnitPremiumCents(e.id).then((c) => setParkPremium(c / 100)).catch(() => {})
+  }
+  const held = holdingArea(equipment, todayChicago(), expenseData.recurring, expenseData.allocations, expenseData.expenseTypes)
+  const activeTrucks = equipment.filter((e) => e.type === 'truck' && e.active)
+    .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }))
+
   function handleDelete(id: string) {
     if (!confirm('Delete this equipment and all its tasks/invoices?')) return
     deleteEquipment(id)
@@ -1193,6 +1228,8 @@ export function TrucksPage() {
       </div>
 
       <div style={{ padding: isMobile ? '16px 12px' : '24px 32px' }}>
+        <HoldingArea held={held} activeTrucks={activeTrucks} onChanged={() => expenseData.refresh()} />
+
         {/* Toolbar */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', background: 'var(--ds-bg)', border: '1px solid var(--ds-border)', borderRadius: 9, padding: 3, gap: 2 }}>
@@ -1254,7 +1291,7 @@ export function TrucksPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 14, color: 'var(--ds-t1)' }}>#{e.unitNumber}</span>
                       <span style={{ fontSize: 11, color: 'var(--ds-t3)', textTransform: 'capitalize' }}>{e.type}</span>
-                      {!e.active && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>· inactive</span>}
+                      {!e.active && <span style={{ fontSize: 11, color: 'var(--ds-t3)' }}>· inactive{e.inactiveSince ? ` from ${e.inactiveSince}` : ''}</span>}
                       {taskCount > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#dc2626' }}>{taskCount} task{taskCount !== 1 ? 's' : ''}</span>}
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--ds-t2)', marginTop: 3 }}>
@@ -1322,6 +1359,7 @@ export function TrucksPage() {
                         onOwnershipChange={handleOwnershipChange}
                         onEdit={setShowForm}
                         onDelete={handleDelete}
+                        onPark={handlePark}
                       />
                     )
                   })}
@@ -1332,6 +1370,15 @@ export function TrucksPage() {
         </div>
       </div>
 
+      {parkTruck && (
+        <MarkInactiveDialog
+          truck={parkTruck}
+          insuranceAnnual={parkPremium}
+          expenses={{ recurring: expenseData.recurring, allocations: expenseData.allocations, expenseTypes: expenseData.expenseTypes }}
+          onDone={(patch) => { updateEquipment(parkTruck.id, patch); expenseData.refresh() }}
+          onClose={() => setParkTruck(null)}
+        />
+      )}
       {showForm !== null && (
         <EquipmentForm
           initial={showForm === 'new' ? undefined : showForm}

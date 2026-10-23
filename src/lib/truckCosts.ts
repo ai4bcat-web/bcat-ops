@@ -84,8 +84,11 @@ export function readTruckCosts(
   const inputs: TruckCostInputs = {}
   const existing: ExistingTruckCost[] = []
 
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Chicago' })
   for (const r of recurring) {
     if (!r.active) continue
+    // Ended already (stopped, or moved to another truck): history, not this truck's cost.
+    if (r.endDate && r.endDate < today) continue
     if (!isSingleTruckAlloc(allocById.get(r.allocationId), truckId)) continue
     const type = typeById.get(r.expenseTypeId)
     if (!type) continue

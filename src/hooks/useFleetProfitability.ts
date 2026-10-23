@@ -10,7 +10,6 @@ import { useDriverPay } from './useDriverPay'
 import { driverForTruck } from '@/lib/assignments'
 import { ORPHAN_UNITS_BY_GROUP, orphanTruckId, combinedPayDriverId, isCombinedPayDriverId } from '@/lib/fleetGroups'
 import { useCurrentInsurance } from './useCurrentInsurance'
-import { insuranceRangeByTruck } from '@/lib/insuranceAllocation'
 import { isPosted } from '@/lib/invoiceStatus'
 import { withResolvedTruckIds } from '@/lib/fuelTruckResolve'
 import { calcFleetProfitability } from '@/lib/fleetProfitability'
@@ -51,6 +50,7 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
   const mileage = useTruckMileage('DAY')
   const pay = useDriverPay()
   const insurance = useCurrentInsurance()
+  const insuranceRange = insurance.rangeByTruck
   const maintenanceInvoices = useAppStore((s) => s.maintenanceInvoices)
 
   // Fuel rows imported before their card was mapped on the truck record have no truckId;
@@ -153,9 +153,9 @@ export function useFleetProfitability(range: DateRange, group: FleetGroup): Flee
       drivers.map((d) => ({ driverId: d.id, assignedTruckId: d.assignedTruckId, isBroker: d.type === 'broker', inFleet: d.fleetGroup === group || (group === 'LOCAL' && d.fleetGroup === 'BOX_TRUCK') })),
       // Insurance override: current-period premiums (truck + trailer share + WC share)
       // prorated to the range, replacing the legacy per-truck insurance in the P&L.
-      insuranceRangeByTruck(insurance.allocation.byTruck, cfrRange),
+      insuranceRange(cfrRange),
     )
-  }, [members, deliveredLoads, fuelTxs, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group, insurance.allocation])
+  }, [members, deliveredLoads, fuelTxs, exp.records, exp.recurring, exp.allocations, exp.expenseTypes, mileage.rows, pay.payPeriods, drivers, maintenanceInvoices, group, insuranceRange])
 
   const data = useMemo<FleetProfitabilityResult | null>(() => computeForRange(range), [computeForRange, range])
 

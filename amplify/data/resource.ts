@@ -218,6 +218,9 @@ const schema = a.schema({
       ownership:               a.string(),             // 'owned' | 'leased' | 'rented' | 'financed'
       insured:                 a.boolean(),
       active:                  a.boolean(),
+      // The day the truck was parked (YYYY-MM-DD), set by Mark inactive on the Trucks page.
+      // Its insurance stops counting; plates/ELD kept on it sit in the holding area.
+      inactiveSince:           a.string(),
       dotInspectionDate:       a.string(),             // YYYY-MM-DD
       iftaExpirationDate:      a.string(),
       irpExpirationDate:       a.string(),
