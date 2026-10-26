@@ -34,6 +34,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 DEFAULT_LEDGER = Path.home() / ".hermes" / "maintenance-invoice-ledger.json"
@@ -351,26 +352,37 @@ def query_repairs_group(folder, page_size=DEFAULT_PAGE_SIZE):
     return results
 
 
-def query_all_mail_by_keyword(work_dir, page_size=DEFAULT_PAGE_SIZE, max_pages=30):
-    """Return envelopes from All Mail that match subject/vendor keywords."""
+def query_all_mail_by_keyword(work_dir, page_size=DEFAULT_PAGE_SIZE, max_pages=30, page_cache_ttl_hours=4):
+    """Return envelopes from All Mail that match subject/vendor keywords.
+
+    Caches page dumps to work_dir/mailbox_p<N>.json with a freshness TTL so
+    repeated runs within the window don't re-list the whole mailbox.
+    """
     results = []
     maybe_truncated = False
     for page in range(1, max_pages + 1):
         path = work_dir / f"mailbox_p{page}.json"
-        try:
-            raw = run_himalaya(
-                [
-                    "envelope", "list",
-                    "--folder", ALL_MAIL_FOLDER,
-                    "--page", str(page),
-                    "--page-size", str(page_size),
-                    "--output", "json",
-                ],
-                timeout=120,
-            )
-        except EndOfData:
-            break
-        path.write_text(raw, encoding="utf-8", errors="replace")
+        raw = None
+        # Reuse a fresh page dump instead of re-listing the whole mailbox.
+        if path.exists():
+            age_hours = (time.time() - path.stat().st_mtime) / 3600
+            if age_hours < page_cache_ttl_hours:
+                raw = path.read_text(encoding="utf-8", errors="replace")
+        if raw is None:
+            try:
+                raw = run_himalaya(
+                    [
+                        "envelope", "list",
+                        "--folder", ALL_MAIL_FOLDER,
+                        "--page", str(page),
+                        "--page-size", str(page_size),
+                        "--output", "json",
+                    ],
+                    timeout=120,
+                )
+            except EndOfData:
+                break
+            path.write_text(raw, encoding="utf-8", errors="replace")
         data = parse_himalaya_json(raw)
         log(f"keyword scan page {page}: {len(data)} envelopes")
         if not data:
@@ -480,7 +492,7 @@ def discover(ledger, ledger_path, work_dir, max_pages=30, include_done=False):
         save_ledger(ledger_path, ledger)
         status = entry.get("status", "pending")
 
-        if status == "done":
+        if status in ("done", "skipped"):
             skipped_done += 1
             if not include_done:
                 continue
