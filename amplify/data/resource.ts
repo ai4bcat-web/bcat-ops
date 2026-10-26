@@ -221,6 +221,10 @@ const schema = a.schema({
       // The day the truck was parked (YYYY-MM-DD), set by Mark inactive on the Trucks page.
       // Its insurance stops counting; plates/ELD kept on it sit in the holding area.
       inactiveSince:           a.string(),
+      // Motive "Share Live Location" link for this truck, pasted once; the dashboard copies it.
+      trackingUrl:             a.string(),
+      // Code behind this truck's permanent BCAT tracking link (/track/<code>); regenerate to revoke.
+      trackingCode:            a.string(),
       dotInspectionDate:       a.string(),             // YYYY-MM-DD
       iftaExpirationDate:      a.string(),
       irpExpirationDate:       a.string(),
@@ -1229,10 +1233,6 @@ const schema = a.schema({
       // existing records and the motive-mileage-sync filter keep working unchanged.
       ownershipType:       a.enum(['COMPANY', 'OWNER_OPERATOR', 'LEASED']),
       motiveVehicleId:     a.integer(),             // Motive integer vehicle ID
-      // Motive "Share Live Location" link for this truck, pasted once; the dashboard copies it.
-      trackingUrl:         a.string(),
-      // Code behind this truck's permanent BCAT tracking link (/track/<code>); regenerate to revoke.
-      trackingCode:        a.string(),
       motiveVehicleNumber: a.string(),              // Motive 'number' field (should = unitNumber)
       // ── DOT onboarding / compliance (internal only — trucks have no portal) ──
       onboardingStatus:       a.enum(['NOT_STARTED', 'IN_PROGRESS', 'COMPLETE']),
