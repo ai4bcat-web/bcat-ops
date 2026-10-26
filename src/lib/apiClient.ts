@@ -141,9 +141,22 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
 }
 
 export async function listLoads(): Promise<Load[]> {
-  const run = async () => client.graphql({
-    query: `query ListLoads { listLoads(limit: 10000) { items { ${loadFields()} } } }`,
-  }) as Promise<{ data: { listLoads: { items: (Load & { rateConfirmKey?: string })[] } } }>
+  // Every page: one DynamoDB scan stops at 1 MB whatever the limit, and the Load table
+  // passed that in Oct 2026 — the loads past the first page silently vanished app-wide.
+  type LoadPage = { items: (Load & { rateConfirmKey?: string })[]; nextToken?: string | null }
+  const run = async () => {
+    const items: LoadPage['items'] = []
+    let nextToken: string | null = null
+    do {
+      const r = await client.graphql({
+        query: `query ListLoads($nextToken: String) { listLoads(limit: 10000, nextToken: $nextToken) { items { ${loadFields()} } nextToken } }`,
+        variables: { nextToken },
+      }) as { data: { listLoads: LoadPage } }
+      items.push(...(r.data.listLoads.items ?? []))
+      nextToken = r.data.listLoads.nextToken ?? null
+    } while (nextToken)
+    return { data: { listLoads: { items } } }
+  }
 
   // The customer policy map must be current before loads are stamped with it.
   const customersReady = listCustomers({ includeArchived: true })
