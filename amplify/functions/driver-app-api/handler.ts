@@ -1343,6 +1343,18 @@ async function appendPendingUploads(
   kind: DocKind,
   pages: PendingPage[],
 ) {
+  // A nested SET fails ("document path ... invalid") when the row has no `pendingUploads`
+  // map at all — true of every submission the office creates — so make sure the map
+  // exists first. Without this a driver adding a POD to one got "Internal error".
+  await ddb.send(
+    new UpdateCommand({
+      TableName: DRIVER_SUBMISSION_TABLE,
+      Key: { id: submissionId },
+      UpdateExpression: 'SET pendingUploads = if_not_exists(pendingUploads, :none)',
+      ExpressionAttributeValues: { ':none': {} },
+      ConditionExpression: 'attribute_exists(id)',
+    }),
+  )
   await ddb.send(
     new UpdateCommand({
       TableName: DRIVER_SUBMISSION_TABLE,
