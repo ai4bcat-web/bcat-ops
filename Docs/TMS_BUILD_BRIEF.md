@@ -90,7 +90,11 @@ J. Integration framework + every provider settings page (spec §8.1, §9) — st
 K. Workflows page: Errors + AI Agents, WorkflowRun model, the four email-agent inbox roles,
    org/party AI memory (spec §8.2).
 L. My Brokerage: every settings page in spec §8.3 not already built.
-M. Academy: in-app help, glossary, FAQ, updates, training (spec §8.4).
+M. Academy: in-app help, glossary, FAQ, updates, training (spec §8.4) and the **Ask assistant**
+   (spec §8.5): an in-app AI that answers how the combined BCAT Ops + TMS system works, from
+   every page, citing the Academy articles. From step B onward, every step also writes or
+   updates the Academy articles (`Docs/academy/**`) for what it shipped, so the assistant's
+   knowledge base grows with the build.
 
 Scope note (added 2026-10-27): Ryne wants all of MVMNT, including every integration, the
 Workflows page, all of My Brokerage and the Academy — not only the core TMS.

@@ -401,4 +401,33 @@ Brokerage (Company Details: name, MC/DOT, tax ids, address, primary contact, Ter
 | **J. Integration framework + settings pages** | `Integration` model (provider, status, masked credentials in SSM/Secrets Manager under the dev/prod stack, settings JSON, last check, health), one settings page per provider in §8.1 with the common pattern (credentials card → validate → state badge; behaviour card; disconnect), a provider adapter interface (`connect / validate / post / track / quote / factor / sync`) with a working **stub mode** for every provider and live implementations for the ones BCAT holds credentials for today (OTR Solutions ≈ HaulPay/Denim role, Motive/Blue Ink ≈ ELD tracking role, Google Maps, Anthropic, Slack, Twilio, Gmail, QuickBooks if Ryne connects it). Credentials needed from Ryne are listed in the build log per provider. Shared tracking toggles, postal-code aliases, OpenAPI-style client credentials for BCAT's own API, EDI transaction log model. |
 | **K. Workflows** | `WorkflowRun` + steps + documents, Workflows page (Errors + AI Agents), unify the existing intake Lambdas into the four agent inbox roles, org/party AI memory, run traces with feedback, Retry semantics per integration, unknown-customer resolution dialog. |
 | **L. My Brokerage** | Every settings page in §8.3 that doesn't already exist: company details, users (seats aside), teams, customer settings, charge codes, carrier documents (rate con + agreement templates), billing (entities, payment instructions, contacts, payment terms), branding (logos, accent, theme, senders, signature, white-label domain with DNS instructions), consolidation rules, notifications (event catalog, channels, webhooks), data migration (spreadsheet import), account page (BCAT has no subscription; show stack/environment info instead). |
-| **M. Academy** | Help module per §8.4 (articles, categories, search, bookmarks, feedback, glossary, FAQ, updates, ask-assistant), contextual help menu, keyboard-shortcut reference, training courses/policies/enrollments, admin get-started checklist. |
+| **M. Academy + Ask assistant** | Help module per §8.4 (articles, categories, search, bookmarks, feedback, glossary, FAQ, updates), the **Ask assistant** per §8.5 (RAG over the in-app docs, cited answers, context-aware from every page, usage caps, history, feedback, admin view of unanswered questions), contextual help menu, keyboard-shortcut reference, training courses/policies/enrollments, admin get-started checklist. Every earlier step must leave its Academy articles behind so the assistant can answer about it. |
+
+### 8.5 Ask assistant (explicit requirement, added 2026-10-27)
+
+An in-app assistant that answers "how does this work?" questions about the **combined**
+BCAT Ops + MVMNT-style system — not MVMNT's product, ours — from every page.
+
+- **Where:** the Academy page (Ask assistant button, as in MVMNT) and the help menu (question-mark /
+  `Q`) on every page, opening a side panel. The panel knows the current route and record (e.g.
+  "you're on load 14819 in Dispatched") and offers that as context.
+- **Knowledge base:** the in-app Academy articles (`Docs/academy/**`, Markdown), plus
+  `CONTEXT.md`, `Docs/WORKFLOWS.md`, `Docs/WELCOME.md`, `Docs/MVMNT_TMS_SPEC.md` §6–8 and the
+  glossary. Indexed at build time (chunked, embedded or keyword-indexed — pick the simplest that
+  works; a small JSON index shipped with the frontend plus a Lambda-side search is fine) and
+  refreshed by a script in CI whenever Docs change. Answers cite the articles they used and link
+  to them; when the answer isn't in the knowledge base it says so and offers "Email support".
+- **Backend:** a Lambda (`academy-assistant`) behind an authenticated AppSync query, using the
+  Anthropic key already in the stack (`ANTHROPIC_API_KEY`) with an inexpensive model
+  (Haiku 4.5 or Sonnet 5.5), streaming or chunked replies, a per-user daily request cap and a
+  per-org monthly token budget in `TmsSettings`, and every exchange logged (question, answer,
+  cited articles, user, page) so the BUILD_LOG / Academy owner can see what people ask.
+- **Per-user chat history** (last N conversations), thumbs up/down feedback per answer, a
+  "was this helpful" that feeds the article feedback counts, and an admin view of unanswered
+  questions so new articles can be written.
+- **Scope guard:** the assistant explains the system and its workflows; it does not take actions
+  or write data. It may deep-link to the right page/record.
+- **Training content:** the Academy articles are written as part of each build step (every
+  step adds/updates the articles for what it shipped), so the assistant's knowledge grows with
+  the system; `Docs/academy/README.md` defines the article front-matter (title, slug, type,
+  category, product areas, related).
