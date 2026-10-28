@@ -1889,9 +1889,27 @@ if (process.env.BCAT_DEV_STACK === 'true') {
   for (const construct of devRootStack.node.findAll()) {
     if (construct instanceof CfnRule) construct.state = 'DISABLED'
   }
+  // Secrets that reach a third party with side effects are replaced by a placeholder on
+  // dev. Amplify resolves `secret()` values at cold start from the SSM paths listed in
+  // AMPLIFY_SSM_ENV_CONFIG; dropping a name from that list and setting the variable to a
+  // plain string leaves the Lambda running with a token that no provider will accept.
+  // Read-only providers (Motive, Google, Anthropic) keep their real keys.
+  const NEUTERED_SECRETS = ['SLACK_BOT_TOKEN', 'OTR_USERNAME', 'OTR_PASSWORD', 'OTR_SUBSCRIPTION_KEY', 'PAYCHEX_CLIENT_ID', 'PAYCHEX_CLIENT_SECRET', 'BLUE_INK_TECH_API_KEY']
   for (const construct of Object.values(backend)) {
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
     if (!lambda) continue
     lambda.addToRolePolicy(new PolicyStatement({ effect: Effect.DENY, actions: ['ses:*'], resources: ['*'] }))
+    lambda.addEnvironment('BCAT_DEV_STACK', 'true')
+    const envMap = (lambda as unknown as { environment?: Record<string, { value?: unknown }> }).environment
+    const ssmConfig = envMap?.AMPLIFY_SSM_ENV_CONFIG?.value
+    if (typeof ssmConfig !== 'string') continue
+    const parsed = JSON.parse(ssmConfig) as Record<string, unknown>
+    const removed = NEUTERED_SECRETS.filter((name) => name in parsed)
+    if (removed.length === 0) continue
+    for (const name of removed) {
+      delete parsed[name]
+      lambda.addEnvironment(name, 'disabled-on-dev')
+    }
+    lambda.addEnvironment('AMPLIFY_SSM_ENV_CONFIG', JSON.stringify(parsed))
   }
 }
