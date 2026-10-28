@@ -32,6 +32,7 @@ import {
 } from '@/lib/timeClock'
 import { fetchMotiveDays, type MotiveDaysByDriver } from '@/lib/staffMotiveDays'
 import { errorText } from '@/lib/errorText'
+import { defaultHiddenDriverIds, readSavedHiddenIds, saveHiddenDriverIds, toggleHidden } from '@/lib/hoursDriverFilter'
 
 /** How far a time card may differ from the truck before the office is asked to look. */
 const MOTIVE_GAP_TOLERANCE_MIN = 60
@@ -92,10 +93,16 @@ export function HoursPage() {
    * Only drivers who clock. Everyone else would be an empty row forever, and a page of
    * empty rows makes the ones that matter harder to find.
    */
-  const clocking = useMemo(
-    () => drivers.filter((d) => d.fleetGroup === 'LOCAL' && d.active !== false && d.type !== 'broker'),
+  const roster = useMemo(
+    () => drivers.filter((d) => d.fleetGroup === 'LOCAL' && d.active !== false && d.type !== 'broker').sort((a, b) => a.name.localeCompare(b.name)),
     [drivers],
   )
+  // Driver filter: Ryne's test driver and Dan Palmer start hidden; the choice sticks per browser.
+  const storage = typeof localStorage === 'undefined' ? null : localStorage
+  const [savedHidden, setSavedHidden] = useState<string[] | null>(() => readSavedHiddenIds(storage))
+  const hidden = useMemo(() => savedHidden ?? defaultHiddenDriverIds(roster), [savedHidden, roster])
+  const setHidden = (ids: string[]) => { setSavedHidden(ids); saveHiddenDriverIds(ids, storage) }
+  const clocking = useMemo(() => roster.filter((d) => !hidden.includes(d.id)), [roster, hidden])
 
   useEffect(() => {
     const ids = clocking.map((d) => d.id)
@@ -166,6 +173,26 @@ export function HoursPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <details className="relative">
+            <summary className="flex h-9 cursor-pointer select-none items-center rounded-md border border-input bg-background px-3 text-sm list-none">
+              Drivers · {clocking.length} of {roster.length}
+            </summary>
+            <div className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-border bg-background p-2 shadow-lg">
+              <div className="mb-1 flex items-center justify-between px-1 text-[11px] uppercase tracking-wide text-muted-foreground">
+                <span>Show on this page</span>
+                <span className="flex gap-2 normal-case tracking-normal">
+                  <button type="button" className="text-primary hover:underline" onClick={() => setHidden([])}>All</button>
+                  <button type="button" className="text-primary hover:underline" onClick={() => setHidden(defaultHiddenDriverIds(roster))}>Default</button>
+                </span>
+              </div>
+              {roster.map((d) => (
+                <label key={d.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted">
+                  <input type="checkbox" checked={!hidden.includes(d.id)} onChange={() => setHidden(toggleHidden(hidden, d.id))} />
+                  <span>{d.name}</span>
+                </label>
+              ))}
+            </div>
+          </details>
           <select
             aria-label="Pay period"
             value={periodStart}
@@ -191,7 +218,7 @@ export function HoursPage() {
 
       <div className="flex-1 overflow-auto px-8 py-6">
         {byDriver.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No Ivan drivers on the roster.</p>
+          <p className="text-sm text-muted-foreground">{roster.length === 0 ? 'No Ivan drivers on the roster.' : 'Every driver is hidden — use the Drivers filter to show some.'}</p>
         ) : (
           <div className="flex flex-col gap-5">
             {byDriver.map(({ driver, period }) => (
