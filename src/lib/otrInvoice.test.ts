@@ -420,3 +420,23 @@ describe('the invoice amount is the load\'s rate', () => {
     expect(priced.sources.InvoiceAmount).toBe('load')
   })
 })
+
+describe('naming the customer from a typed MC', () => {
+  it('shows the directory name once the MC is on the row, even with no MC on the customer record yet', () => {
+    const r = assembleOtrInvoice({
+      load: {},
+      proNumber: '14711',
+      customerName: 'Wayfinder Logistics',
+      customerNameVerified: true,
+      manual: { BrokerMC: '561981' },
+      submissionDate: '2026-10-28',
+    })
+    expect(r.customerName).toBe('Wayfinder Logistics')
+    expect(r.customerSource).toBe('verified')
+    expect(r.payload.BrokerMC).toBe('561981')
+  })
+  it('still stays blank with no MC anywhere, so a booked name is never mistaken for a checked one', () => {
+    const r = assembleOtrInvoice({ load: { customer: 'Some Shipper' }, proNumber: '1', customerName: 'Some Shipper', submissionDate: '2026-10-28' })
+    expect(r.customerName).toBeNull()
+  })
+})
