@@ -1,6 +1,6 @@
 import { generateClient } from 'aws-amplify/data'
 import { uploadData, getUrl, remove } from 'aws-amplify/storage'
-import type { Load, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
+import type { Load, Stop, Driver, AuditLogEntry, EntityType, AuditAction, FactoringItem, FactoringItemStatus, TimeClockEntry } from '@/types'
 import type { RateConExtract, RateConFreight } from '@/lib/otrInvoice'
 import type { Equipment, MaintenanceTask, MaintenanceInvoice } from '@/types/equipment'
 import { fuelDedupKey } from '@/lib/driverFuel'
@@ -8,7 +8,14 @@ import { fileContentType } from '@/lib/disputeFiles'
 import type { FixedExpenseInput } from './driverPay'
 import type { DispatchConversation, DispatchMessage } from './dispatch'
 import type { VendorPayable, VendorApAttachment, VendorPayableDetails, VendorPayment } from '@/types/vendorAp'
-import type { CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion, LocationMergePreview, LocationMergeJob } from '@/types/tms'
+import type {
+  CustomerRecord, LocationRecord, Division, TmsSettings, GeocodeResult, AutocompleteSuggestion,
+  LocationMergePreview, LocationMergeJob,
+  ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
+  LoadChargeInput, ShipmentBundle, ShipmentLoadFields, ShipmentStatus, ShipmentMode,
+  LoadWorkflowStatus, AssignmentType,
+} from '@/types/tms'
+import type { CreditSummary } from '@/lib/customerCredit'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
 
 // Untyped client — our own types from src/types handle type safety
@@ -45,6 +52,14 @@ let loadsHavePaperworkLocation = true
 let loadsHaveTrailer = true
 let loadsHaveFreight = true
 let loadsHavePodNotes = true
+// Step B's shipment layer: the link to Shipment/Order plus the carrier-side status
+// and assignment. One flag for the whole group — they deploy together.
+let loadsHaveShipment = true
+const LOAD_SHIPMENT_FIELDS = `
+  shipmentId orderId loadNumber leg status statusChangedAt statusChangedBy statusSource
+  carrierRepId assignmentType activeLoadCarrierId carrierName equipmentType divisionKey
+  trackingProvider nextCheckCallAt nextCheckCallNote checkCallOpen pickupMonth
+`
 const loadFields = () => {
   let f = LOAD_FIELDS
   if (loadsHaveHot) f += ' hot unscheduled'
@@ -56,6 +71,7 @@ const loadFields = () => {
   if (loadsHaveTrailer) f += ' trailerNumber'
   if (loadsHaveFreight) f += ' commodity weight pieces piecesUnit'
   if (loadsHavePodNotes) f += ' podNotes'
+  if (loadsHaveShipment) f += LOAD_SHIPMENT_FIELDS
   return f
 }
 
@@ -124,7 +140,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; podNotes: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; podNotes: boolean; shipment: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -137,6 +153,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     trailer: /'trailerNumber'/i.test(msg),
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
+    shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth)'/i.test(msg),
   }
 }
 
@@ -203,6 +220,10 @@ export async function listLoads(): Promise<Load[]> {
       if (loadsHavePodNotes && u.podNotes) {
         console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
         loadsHavePodNotes = false; changed = true
+      }
+      if (loadsHaveShipment && u.shipment) {
+        console.warn('[apiClient] backend has no shipment fields on Load yet — querying loads without them until deploy')
+        loadsHaveShipment = false; changed = true
       }
       if (!changed) throw err
     }
@@ -1042,12 +1063,23 @@ const TMS_SETTINGS_V2_FIELDS = [
   'defaultCreditLimitCents', 'defaultFreeCreditRequired', 'defaultCreditUsageWarningBps', 'defaultMaxDaysLate',
   'requireCustomerApproval', 'defaultRequiredDocs', 'defaultRequiredReferences', 'chargeCodes', 'rateConTerms',
 ]
+// Step B's settings. A separate flag from V2 so a backend that has the credit fields
+// but not these keeps serving the credit ones instead of losing both.
+const TMS_SETTINGS_V3_FIELDS = [
+  'shipmentPrefix', 'nextShipmentNumber', 'cancelDeleteAdminOnly',
+  'arUnbilledStage', 'apInReviewStage', 'defaultMode',
+]
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes']
 let settingsHaveV2 = true
-const tmsSettingsFields = () => settingsHaveV2 ? `${TMS_SETTINGS_FIELDS_BASE} ${TMS_SETTINGS_V2_FIELDS.join(' ')}` : TMS_SETTINGS_FIELDS_BASE
-function tmsSettingsFieldUndefined(err: unknown): boolean {
+let settingsHaveV3 = true
+const tmsSettingsFields = () => [
+  TMS_SETTINGS_FIELDS_BASE,
+  settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
+  settingsHaveV3 ? TMS_SETTINGS_V3_FIELDS.join(' ') : '',
+].filter(Boolean).join(' ')
+const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
-  return TMS_SETTINGS_V2_FIELDS.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
+  return names.some((f) => new RegExp(`['"]${f}['"]`).test(msg))
 }
 const MERGE_JOB_FIELDS = `id sourceId targetId status processedCount remainingCount error createdAt updatedAt`
 
@@ -1188,18 +1220,401 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     return r.data.getTmsSettings ? unwrapJsonFields(r.data.getTmsSettings, TMS_SETTINGS_JSON_FIELDS) : null
   }
 
+  // Each generation drops on its own, so a backend missing only the newest group
+  // keeps serving every older one.
   for (let attempt = 0; ; attempt++) {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 2 || !settingsHaveV2 || !tmsSettingsFieldUndefined(err)) throw err
-      console.warn('[apiClient] backend has no TmsSettings v2 fields yet — querying without them until deploy')
-      settingsHaveV2 = false
+      if (attempt >= 3) throw err
+      if (settingsHaveV3 && fieldNamed(TMS_SETTINGS_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings shipment fields yet — querying without them until deploy')
+        settingsHaveV3 = false
+        continue
+      }
+      if (settingsHaveV2 && fieldNamed(TMS_SETTINGS_V2_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings v2 fields yet — querying without them until deploy')
+        settingsHaveV2 = false
+        continue
+      }
+      throw err
     }
   }
 }
 export async function saveTmsSettings(patch: Partial<Omit<TmsSettings, 'id' | 'createdAt' | 'updatedAt'>>, expectedUpdatedAt?: string): Promise<TmsSettings> {
   return directoryAction<TmsSettings>('SAVE_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+// ── Shipments · Orders · Load money (tmsShipmentActions) ─────────────────────
+//
+// Reads come straight off the generated queries and their GSIs; every write goes
+// through the one Lambda, which owns the transaction across the five tables. The
+// board polls — these models have no subscriptions.
+
+export type {
+  ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
+  LoadChargeInput, ShipmentBundle, ShipmentLoad, ShipmentStatus, LoadWorkflowStatus,
+  ShipmentMode, ArStatus, AssignmentType,
+} from '@/types/tms'
+
+const SHIPMENT_FIELDS = `
+  id number status previousStatus statusChangedAt statusChangedBy
+  holdReason cancelReason tenderRejectReason deletedAt deletedBy
+  customerId customerName mode parentShipmentId orderIds loadIds
+  pickupAppt deliveryAppt pickupMonth originCity destinationCity searchKey source
+  createdBy updatedBy version createdAt updatedAt
+`
+const ORDER_FIELDS = `
+  id shipmentId customerId customerName customerContactId customerRepId billToId costCenter
+  mode rateType references equipmentType equipmentLengthFt specialRequirements freight
+  customerNotes internalNotes customerRateCents revenueCents
+  arStatus arStatusChangedAt invoiceId invoiceEarly readyToInvoiceAt pickupAppt
+  createdBy updatedBy version createdAt updatedAt
+`
+const ORDER_JSON_FIELDS: (keyof OrderRecord)[] = ['references', 'specialRequirements', 'freight']
+const LOAD_CARRIER_FIELDS = `
+  id loadId shipmentId kind status removalReason removedAt removedBy sequence
+  carrierId carrierName carrierMc carrierRepId dispatcherName dispatcherPhone dispatcherEmail
+  driverId driverName driverPhone driver2Name driver2Phone
+  truckId truckNumber trailerId trailerNumber plates vin sealNumber tripNumber
+  pickupEtaAt deliveryEtaAt priorDeliveryAt priorDeliveryNote
+  rateConSignedAt rateConKey chargesFinalizedAt
+  carrierRateCents costCents apStatus invoiceId createdBy updatedBy createdAt updatedAt
+`
+const LOAD_FINANCIALS_FIELDS = `
+  id loadId shipmentId orderId customerRateCents revenueCents carrierRateCents costCents
+  profitCents marginBps topSpendCents targetBuyCents frozenAt frozenBy updatedBy version
+  createdAt updatedAt
+`
+const LOAD_CHARGE_FIELDS = `
+  id shipmentId side orderId loadId loadCarrierId code label calculatedBy
+  rateCents count amountCents isRate release sortOrder note createdBy createdAt updatedAt
+`
+
+/**
+ * Page a secondary-index query to the end. `args` maps the generated argument names to
+ * their values; most index keys are Strings, but an enum-backed key (Shipment.status) is
+ * generated as its own GraphQL type and AppSync rejects a `String!` variable there, so
+ * `argTypes` names the exception.
+ */
+async function listAllByIndex<T>(
+  name: string,
+  args: Record<string, string>,
+  fields: string,
+  limit: number,
+  argTypes: Record<string, string> = {},
+): Promise<T[]> {
+  const names = Object.keys(args)
+  const decls = names.map((n) => `$${n}: ${argTypes[n] ?? 'String!'}`).join(', ')
+  const passed = names.map((n) => `${n}: $${n}`).join(', ')
+  const rows: T[] = []
+  let nextToken: string | null = null
+  do {
+    const r = await client.graphql({
+      query: `query ${name}(${decls}, $nextToken: String) { ${name}(${passed}, limit: ${limit}, nextToken: $nextToken) { items { ${fields} } nextToken } }`,
+      variables: { ...args, nextToken },
+    }) as { data: Record<string, { items: (T | null)[]; nextToken?: string | null }> }
+    const page = r.data[name]
+    for (const item of page.items) if (item) rows.push(item)
+    nextToken = page.nextToken ?? null
+  } while (nextToken)
+  return rows
+}
+
+/**
+ * Every shipment write. Same contract as `directoryAction`: the Lambda's own message
+ * is rethrown, so a refusal ("customer is on credit hold") reaches the toast intact
+ * instead of `[object Object]`.
+ */
+export async function shipmentAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsShipmentActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsShipmentActions($action: String!, $input: AWSJSON!) { tmsShipmentActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsShipmentActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsShipmentActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+// Every one takes the action's input object verbatim and returns the whole
+// ShipmentBundle, already parsed out of AWSJSON, so a caller swaps the response in
+// rather than re-reading the shipment. `expectedUpdatedAt` is the CAS token: the
+// record as the caller last saw it. It is optional only on the actions whose target
+// row the board does not hold a copy of.
+
+export interface CreateShipmentInput {
+  customerId: string
+  mode?: ShipmentMode
+}
+export async function createShipment(input: CreateShipmentInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('CREATE_SHIPMENT', input)
+}
+
+export interface SaveOrderFormInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  order: Partial<Omit<OrderRecord, 'id' | 'shipmentId' | 'createdAt' | 'updatedAt'>>
+  stops?: Stop[]
+  charges?: LoadChargeInput[]
+  loadFields?: Partial<ShipmentLoadFields> & { miles?: number | null; notes?: string | null }
+}
+export async function saveOrderForm(input: SaveOrderFormInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SAVE_ORDER_FORM', input)
+}
+
+/** Read-only: what the customer owes today, and whether `projectedCents` would fit. */
+export interface CheckCreditInput {
+  customerId: string
+  projectedCents?: number
+}
+export async function checkCredit(input: CheckCreditInput): Promise<CreditSummary> {
+  return shipmentAction<CreditSummary>('CHECK_CREDIT', { projectedCents: 0, ...input })
+}
+
+export interface SubmitOrderInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  carrierRepId?: string
+}
+export async function submitOrder(input: SubmitOrderInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SUBMIT_ORDER', input)
+}
+
+/** UNCANCEL is its own verb: it restores `previousStatus`, it does not set one. */
+export type ShipmentStatusAction = 'ON_HOLD' | 'OPEN' | 'CANCELED' | 'UNCANCEL'
+export interface SetShipmentStatusInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  status: ShipmentStatusAction
+  reason?: string
+}
+export async function setShipmentStatus(input: SetShipmentStatusInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_SHIPMENT_STATUS', input)
+}
+
+export interface SetLoadStatusInput {
+  loadId: string
+  status: LoadWorkflowStatus
+  expectedUpdatedAt?: string
+}
+export async function setLoadStatus(input: SetLoadStatusInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_LOAD_STATUS', input)
+}
+
+export async function deleteShipment(input: { shipmentId: string; expectedUpdatedAt: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('DELETE_SHIPMENT', input)
+}
+export async function restoreShipment(input: { shipmentId: string; expectedUpdatedAt?: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('RESTORE_SHIPMENT', input)
+}
+
+export interface TenderRespondInput {
+  shipmentId: string
+  expectedUpdatedAt: string
+  decision: 'ACCEPT' | 'REJECT' | 'RESET'
+  reason?: string
+}
+export async function tenderRespond(input: TenderRespondInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('TENDER_RESPOND', input)
+}
+
+export interface DuplicateShipmentCopy {
+  pickupAppt: string
+  deliveryAppt: string
+}
+export interface DuplicateShipmentInput {
+  shipmentId: string
+  copies: DuplicateShipmentCopy[]
+  /** Carry the source shipment's carrier assignment onto every copy. */
+  sameCarrier?: boolean
+}
+/** Returns the SOURCE shipment's bundle; the copies are new rows the board picks up. */
+export async function duplicateShipment(input: DuplicateShipmentInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('DUPLICATE_SHIPMENT', input)
+}
+
+export type StopOp =
+  | 'ADD' | 'REMOVE' | 'SWAP' | 'SET_APPT' | 'SET_REQUESTED'
+  | 'SET_TIMES' | 'SET_TYPE' | 'SET_REFS' | 'SET_LOCATION'
+export interface UpdateStopInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  op: StopOp
+  stopId?: string
+  patch?: Partial<Stop> & { withStopId?: string }
+}
+export async function updateStop(input: UpdateStopInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('UPDATE_STOP', input)
+}
+
+/**
+ * Mirrors what `ASSIGN_ASSET` actually reads. The second driver is a nested object
+ * server-side — the Lambda flattens it onto `LoadCarrier.driver2Name/driver2Phone` —
+ * so sending flat `driver2Name` here would silently drop it.
+ */
+export interface AssignAssetInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  driverId: string
+  driverName?: string | null
+  driverPhone?: string | null
+  truckId?: string | null
+  truckNumber?: string | null
+  trailerId?: string | null
+  trailerNumber?: string | null
+  driver2?: { name?: string | null; phone?: string | null } | null
+}
+export async function assignAsset(input: AssignAssetInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ASSIGN_ASSET', input)
+}
+
+/**
+ * Mirrors what `ASSIGN_CARRIER` actually reads. Equipment is the ORDER's (the customer
+ * agreed to it), not the assignment's, so it is edited on the order form and is not
+ * part of this call.
+ */
+export interface AssignCarrierInput {
+  loadId: string
+  expectedUpdatedAt?: string
+  carrierName: string
+  carrierMc?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  carrierRateCents?: number | null
+}
+export async function assignCarrier(input: AssignCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('ASSIGN_CARRIER', input)
+}
+
+/** A removal always has a reason — it is the carrier history the next booker reads. */
+export interface RemoveLoadCarrierInput {
+  loadCarrierId: string
+  outcome: 'BOUNCED' | 'TONU'
+  reason: string
+}
+export async function removeLoadCarrier(input: RemoveLoadCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('REMOVE_LOAD_CARRIER', input)
+}
+
+/** Full replace per side. `expectedVersion` is the LoadFinancials row's. */
+export interface RecalcChargesInput {
+  shipmentId: string
+  expectedVersion: number
+  charges: LoadChargeInput[]
+}
+export async function recalcCharges(input: RecalcChargesInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('RECALC_CHARGES', input)
+}
+
+/** UNPAID and PAID belong to step F's invoicing and are refused here. */
+export interface SetArStatusInput {
+  orderId: string
+  status: 'DOCS_NEEDED' | 'UNBILLED' | 'INVOICE_NOT_NEEDED'
+  expectedUpdatedAt?: string
+}
+export async function setArStatus(input: SetArStatusInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_AR_STATUS', input)
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+export async function listShipmentsByStatus(status: ShipmentStatus): Promise<ShipmentRecord[]> {
+  // The index key is the Shipment.status enum, so the variable must be declared as one.
+  return listAllByIndex<ShipmentRecord>(
+    'listShipmentByStatusAndPickupAppt', { status }, SHIPMENT_FIELDS, 1000, { status: 'ShipmentStatus!' },
+  )
+}
+export async function listShipmentsByCustomer(customerId: string): Promise<ShipmentRecord[]> {
+  return listAllByIndex<ShipmentRecord>('listShipmentByCustomerIdAndPickupAppt', { customerId }, SHIPMENT_FIELDS, 1000)
+}
+/** `month` is 'YYYY-MM' — the board's default window. */
+export async function listShipmentsByMonth(month: string): Promise<ShipmentRecord[]> {
+  return listAllByIndex<ShipmentRecord>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, SHIPMENT_FIELDS, 1000)
+}
+export async function listShipments(): Promise<ShipmentRecord[]> {
+  return listAll<ShipmentRecord>('listShipments', SHIPMENT_FIELDS, 1000)
+}
+
+export async function listOrders(): Promise<OrderRecord[]> {
+  return (await listAll<OrderRecord>('listOrders', ORDER_FIELDS, 1000)).map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+}
+export async function listOrdersByCustomer(customerId: string): Promise<OrderRecord[]> {
+  const rows = await listAllByIndex<OrderRecord>('listOrderByCustomerIdAndPickupAppt', { customerId }, ORDER_FIELDS, 1000)
+  return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+}
+
+/**
+ * Everything one shipment page renders, in one round trip's worth of parallel reads.
+ * LoadFinancials has no index — its `id` IS the load id, so each one is a GetItem.
+ */
+export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBundle> {
+  const [shipment, orders, loads, loadCarriers, charges] = await Promise.all([
+    getShipment(shipmentId),
+    listAllByIndex<OrderRecord>('listOrderByShipmentId', { shipmentId }, ORDER_FIELDS, 1000),
+    listAllByIndex<Load>('listLoadByShipmentId', { shipmentId }, loadFields(), 1000),
+    listAllByIndex<LoadCarrierRecord>('listLoadCarrierByShipmentId', { shipmentId }, LOAD_CARRIER_FIELDS, 1000),
+    listAllByIndex<LoadChargeRecord>('listLoadChargeByShipmentIdAndSortOrder', { shipmentId }, LOAD_CHARGE_FIELDS, 1000),
+  ])
+  if (!shipment) throw new Error('Shipment not found')
+  const financials = (await Promise.all(loads.map((l) => getLoadFinancials(l.id))))
+    .filter((f): f is LoadFinancialsRecord => f != null)
+  return {
+    shipment,
+    orders: orders.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS)),
+    loads: loads.map((l) => unwrapJsonFields(l, ['stops'])),
+    loadCarriers,
+    charges,
+    financials,
+  }
+}
+
+export async function getShipment(id: string): Promise<ShipmentRecord | null> {
+  const r = await client.graphql({
+    query: `query GetShipment($id: ID!) { getShipment(id: $id) { ${SHIPMENT_FIELDS} } }`,
+    variables: { id },
+  }) as { data: { getShipment: ShipmentRecord | null } }
+  return r.data.getShipment
+}
+
+export async function getLoadFinancials(loadId: string): Promise<LoadFinancialsRecord | null> {
+  const r = await client.graphql({
+    query: `query GetLoadFinancials($id: ID!) { getLoadFinancials(id: $id) { ${LOAD_FINANCIALS_FIELDS} } }`,
+    variables: { id: loadId },
+  }) as { data: { getLoadFinancials: LoadFinancialsRecord | null } }
+  return r.data.getLoadFinancials
+}
+
+/** Just enough of every load to colour a board row: no stops, no rate-con URLs. */
+export interface LoadBoardSummary {
+  id: string
+  shipmentId?: string | null
+  orderId?: string | null
+  status?: LoadWorkflowStatus | null
+  assignmentType?: AssignmentType | null
+}
+export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
+  if (!loadsHaveShipment) return []
+  try {
+    return await listAll<LoadBoardSummary>('listLoads', 'id shipmentId orderId status assignmentType', 10000)
+  } catch (err) {
+    if (!undefinedLoadFields(err).shipment) throw err
+    console.warn('[apiClient] backend has no shipment fields on Load yet — board facets stay empty until deploy')
+    loadsHaveShipment = false
+    return []
+  }
 }
 
 // ── Google geocoding proxy (tmsGeocode) — real upstream errors, no fallbacks ─────

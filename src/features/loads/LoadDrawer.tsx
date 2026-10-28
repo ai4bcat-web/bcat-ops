@@ -43,6 +43,7 @@ import {
 } from '@/lib/date'
 import { toast } from 'sonner'
 import { proConflict } from '@/lib/proConflict'
+import { syncLoadRateToShipment } from '@/features/shipments/loadRateSync'
 import type { ApptType, Load, Stop } from '@/types'
 import type { CustomerRecord, LocationRecord } from '@/types/tms'
 import type { TenderPrefill } from '@/lib/intakeTender'
@@ -1095,11 +1096,13 @@ function NewLoadDialog({
                       position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
                       fontSize: 14, color: 'var(--ds-t3)', pointerEvents: 'none',
                     }}>$</span>
+                    {/* Emptying the box must mean "no rate", not NaN: the schema rejects
+                        NaN, so a cleared field refused the save with no message on it. */}
                     <Input
                       type="number"
                       min={0}
                       step={0.01}
-                      {...register('rate', { valueAsNumber: true })}
+                      {...register('rate', { setValueAs: (v) => (v === '' || v == null ? null : Number(v)) })}
                       placeholder="0.00"
                       className="h-9"
                       style={{ paddingLeft: 22 }}
@@ -1599,6 +1602,12 @@ export function LoadDrawer() {
     // Slack notices are decided BEFORE the save, so the comparison is against what was on
     // screen rather than what we just wrote.
     const notices = apptNotices(stops, prevStops)
+    // Once a load belongs to a shipment, `rate` is a mirror of the customer linehaul
+    // charge line. Writing it here would desync the order's revenue and LoadFinancials,
+    // so the shipment layer rewrites both and the mirror with it. A cleared field is a
+    // deliberate zero — leaving the old linehaul standing would contradict the form.
+    const rateCents = values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined
+    const shipmentId = !isCreate ? load?.shipmentId ?? null : null
     const payload = {
       aljexId: values.aljexId,
       tmsId: values.tmsId,
@@ -1606,7 +1615,7 @@ export function LoadDrawer() {
       stops,
       ...deriveLegacyFields(stops), // pickupAppt/deliveryAppt/origin*/dest*/drivers (store re-derives; idempotent)
       readyToInvoice: values.readyToInvoice,
-      rate: values.rate != null && !isNaN(values.rate) ? Math.round(values.rate * 100) : undefined,
+      rate: shipmentId ? undefined : rateCents,
       miles: values.miles ?? undefined,
       commodity: values.commodity?.trim() || undefined,
       weight: values.weight != null && !isNaN(values.weight) ? Math.round(values.weight) : undefined,
@@ -1666,6 +1675,15 @@ export function LoadDrawer() {
         }
         toast.success('Load created')
       } else if (load) {
+        // The rate goes first: RECALC_CHARGES rewrites the `rate` mirror server-side, so
+        // a sync that fails after the load was written would leave the drawer's number
+        // saved and the shipment's money untouched.
+        if (shipmentId) {
+          const nextRateCents = rateCents ?? 0
+          if (nextRateCents !== (load.rate ?? 0)) {
+            await syncLoadRateToShipment(shipmentId, load.id, nextRateCents)
+          }
+        }
         await updateLoad(load.id, payload)
         toast.success('Load updated')
       }

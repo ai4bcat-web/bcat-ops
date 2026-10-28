@@ -1,10 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import type { Load, Stop } from '@/types'
-import type { CustomerRecord, TmsSettings } from '@/types/tms'
+import type { CustomerRecord, OrderRecord, ShipmentRecord, ShipmentStatus, TmsSettings } from '@/types/tms'
 import {
   boardTab,
   creditBucketForLoad,
+  creditBucketForOrder,
+  creditExposure,
   creditExposureForCustomer,
+  creditExposureForOrders,
+  creditSummaryForCustomer,
   effectiveCustomerStatus,
   resolveCreditPolicy,
   summarizeCredit,
@@ -341,5 +345,186 @@ describe('boardTab', () => {
 
   it.each(cases)('$status → $tab', ({ status, tab }) => {
     expect(boardTab(status)).toBe(tab)
+  })
+})
+
+// ── Order-based exposure (step B) ────────────────────────────────────────────
+
+const makeShipment = (over: Partial<ShipmentRecord> = {}): ShipmentRecord => ({
+  id: 's1',
+  number: 'S000001',
+  status: 'OPEN',
+  customerId: 'c1',
+  mode: 'FTL',
+  source: 'MANUAL',
+  createdBy: 'u',
+  updatedBy: 'u',
+  createdAt: '2026-10-01T00:00:00Z',
+  updatedAt: '2026-10-01T00:00:00Z',
+  ...over,
+})
+
+const makeOrder = (over: Partial<OrderRecord> = {}): OrderRecord => ({
+  id: 'o1',
+  shipmentId: 's1',
+  customerId: 'c1',
+  mode: 'FTL',
+  revenueCents: 100_000,
+  arStatus: 'DOCS_NEEDED',
+  createdBy: 'u',
+  updatedBy: 'u',
+  createdAt: '2026-10-01T00:00:00Z',
+  updatedAt: '2026-10-01T00:00:00Z',
+  ...over,
+})
+
+describe('creditBucketForOrder', () => {
+  const cases: Array<{ status: ShipmentStatus; bucket: 'OPEN' | 'ACTIVE' | 'DELIVERED' | null }> = [
+    { status: 'DRAFT', bucket: null },
+    { status: 'TENDER_PENDING', bucket: null },
+    { status: 'TENDER_REJECTED', bucket: null },
+    { status: 'CANCELED', bucket: null },
+    { status: 'OPEN', bucket: 'OPEN' },
+    { status: 'ON_HOLD', bucket: 'OPEN' },
+    { status: 'BOOKED', bucket: 'ACTIVE' },
+    { status: 'PLANNED', bucket: 'ACTIVE' },
+    { status: 'DISPATCHED', bucket: 'ACTIVE' },
+    { status: 'LOADING', bucket: 'ACTIVE' },
+    { status: 'PICKED_UP', bucket: 'ACTIVE' },
+    { status: 'IN_TRANSIT', bucket: 'ACTIVE' },
+    { status: 'RECOVERED', bucket: 'ACTIVE' },
+    { status: 'ARRIVED_AT_DELIVERY_TERMINAL', bucket: 'ACTIVE' },
+    { status: 'OUT_FOR_DELIVERY', bucket: 'ACTIVE' },
+    { status: 'UNLOADING', bucket: 'ACTIVE' },
+    { status: 'DELIVERED', bucket: 'DELIVERED' },
+  ]
+
+  it.each(cases)('$status → $bucket', ({ status, bucket }) => {
+    expect(creditBucketForOrder({ status, deletedAt: null }, 'DOCS_NEEDED')).toBe(bucket)
+  })
+
+  it('carries a delivered order through docs-needed and unbilled alike', () => {
+    const delivered = { status: 'DELIVERED' as ShipmentStatus, deletedAt: null }
+    expect(creditBucketForOrder(delivered, 'DOCS_NEEDED')).toBe('DELIVERED')
+    expect(creditBucketForOrder(delivered, 'UNBILLED')).toBe('DELIVERED')
+    expect(creditBucketForOrder(delivered, null)).toBe('DELIVERED')
+  })
+
+  it('moves an invoiced order to INVOICED wherever the truck is', () => {
+    expect(creditBucketForOrder({ status: 'IN_TRANSIT', deletedAt: null }, 'UNPAID')).toBe('INVOICED')
+    expect(creditBucketForOrder({ status: 'DELIVERED', deletedAt: null }, 'UNPAID')).toBe('INVOICED')
+  })
+
+  it('drops paid and never-to-be-billed orders entirely', () => {
+    expect(creditBucketForOrder({ status: 'DELIVERED', deletedAt: null }, 'PAID')).toBeNull()
+    expect(creditBucketForOrder({ status: 'DELIVERED', deletedAt: null }, 'INVOICE_NOT_NEEDED')).toBeNull()
+  })
+
+  it('drops a deleted shipment even when it is mid-transit and unpaid', () => {
+    expect(creditBucketForOrder({ status: 'IN_TRANSIT', deletedAt: '2026-10-05T00:00:00Z' }, 'UNPAID')).toBeNull()
+  })
+})
+
+describe('creditExposureForOrders', () => {
+  const c = baseCustomer()
+
+  it('counts only this customer\'s orders', () => {
+    const shipments = [makeShipment(), makeShipment({ id: 's2', customerId: 'c2' })]
+    const orders = [makeOrder(), makeOrder({ id: 'o2', shipmentId: 's2', customerId: 'c2', revenueCents: 900_000 })]
+    expect(creditExposureForOrders(c, orders, shipments)).toEqual([{ bucket: 'OPEN', amountCents: 100_000 }])
+  })
+
+  it('skips an order whose shipment was not supplied rather than guessing its bucket', () => {
+    expect(creditExposureForOrders(c, [makeOrder({ shipmentId: 'missing' })], [makeShipment()])).toEqual([])
+  })
+
+  it('treats a null revenue as zero and still counts the order', () => {
+    const items = creditExposureForOrders(c, [makeOrder({ revenueCents: null })], [makeShipment()])
+    expect(items).toEqual([{ bucket: 'OPEN', amountCents: 0 }])
+  })
+
+  it('splits a customer\'s book across the four buckets', () => {
+    const shipments = [
+      makeShipment({ id: 's-open', status: 'OPEN' }),
+      makeShipment({ id: 's-active', status: 'IN_TRANSIT' }),
+      makeShipment({ id: 's-delivered', status: 'DELIVERED' }),
+      makeShipment({ id: 's-invoiced', status: 'DELIVERED' }),
+      makeShipment({ id: 's-draft', status: 'DRAFT' }),
+      makeShipment({ id: 's-paid', status: 'DELIVERED' }),
+    ]
+    const orders: OrderRecord[] = [
+      makeOrder({ id: 'o-open', shipmentId: 's-open', revenueCents: 100_000 }),
+      makeOrder({ id: 'o-active', shipmentId: 's-active', revenueCents: 200_000 }),
+      makeOrder({ id: 'o-delivered', shipmentId: 's-delivered', revenueCents: 300_000, arStatus: 'UNBILLED' }),
+      makeOrder({ id: 'o-invoiced', shipmentId: 's-invoiced', revenueCents: 400_000, arStatus: 'UNPAID' }),
+      makeOrder({ id: 'o-draft', shipmentId: 's-draft', revenueCents: 500_000 }),
+      makeOrder({ id: 'o-paid', shipmentId: 's-paid', revenueCents: 600_000, arStatus: 'PAID' }),
+    ]
+    const summary = summarizeCredit(
+      resolveCreditPolicy(c, orgDefaults),
+      creditExposureForOrders(c, orders, shipments),
+      { hold: false },
+    )
+    expect(summary.byBucket).toEqual({ OPEN: 100_000, ACTIVE: 200_000, DELIVERED: 300_000, INVOICED: 400_000 })
+    expect(summary.usedCents).toBe(1_000_000)
+  })
+})
+
+describe('creditExposure', () => {
+  const c = baseCustomer()
+
+  it('counts a mapped load once, through its order', () => {
+    const items = creditExposure(c, {
+      orders: [makeOrder({ revenueCents: 250_000 })],
+      shipments: [makeShipment()],
+      loads: [makeLoad({ customerId: c.id, orderId: 'o1', rate: 250_000 })],
+    })
+    expect(items).toEqual([{ bucket: 'OPEN', amountCents: 250_000 }])
+  })
+
+  it('keeps an unmapped legacy load in the number', () => {
+    const items = creditExposure(c, {
+      orders: [makeOrder({ revenueCents: 250_000 })],
+      shipments: [makeShipment()],
+      loads: [makeLoad({ id: 'legacy', customerId: c.id, rate: 75_000 })],
+    })
+    expect(items).toHaveLength(2)
+    expect(items.reduce((sum, i) => sum + i.amountCents, 0)).toBe(325_000)
+  })
+})
+
+describe('creditSummaryForCustomer', () => {
+  const c = baseCustomer({ creditLimitCents: 500_000, creditUsageWarningBps: 8_000 })
+  const settings: TmsSettings = { id: 'default' }
+  const data = { orders: [makeOrder({ revenueCents: 300_000 })], shipments: [makeShipment()] }
+
+  it('reports what is left before the projected order is added', () => {
+    const summary = creditSummaryForCustomer(c, settings, data)
+    expect(summary.usedCents).toBe(300_000)
+    expect(summary.availableCents).toBe(200_000)
+    expect(summary.blockReasons).toEqual([])
+  })
+
+  it('blocks when the projected order would break the limit', () => {
+    const summary = creditSummaryForCustomer(c, settings, data, { projectedCents: 250_000 })
+    expect(summary.blockReasons).toContain('CREDIT_LIMIT_REACHED')
+    // The projection never inflates what is actually used.
+    expect(summary.usedCents).toBe(300_000)
+  })
+
+  it('allows a projected order that exactly fills the limit', () => {
+    const summary = creditSummaryForCustomer(c, settings, data, { projectedCents: 200_000 })
+    expect(summary.blockReasons).toEqual([])
+  })
+
+  it('carries the customer\'s credit hold through', () => {
+    const held = baseCustomer({ creditLimitCents: 500_000, creditHoldFlag: true })
+    expect(creditSummaryForCustomer(held, settings, data).hold).toBe(true)
+  })
+
+  it('blocks a free-credit customer who has no limit set anywhere', () => {
+    const noLimit = baseCustomer({ freeCreditRequired: true })
+    const summary = creditSummaryForCustomer(noLimit, settings, data)
+    expect(summary.blockReasons).toEqual(['NO_CREDIT_LIMIT'])
   })
 })

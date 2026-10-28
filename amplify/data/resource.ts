@@ -11,6 +11,7 @@ import { googleReviews } from '../functions/google-reviews/resource'
 import { apptNeedNotifier } from '../functions/appt-need-notifier/resource'
 import { vendorApActions } from '../functions/vendor-ap-actions/resource'
 import { tmsDirectoryActions } from '../functions/tms-directory-actions/resource'
+import { tmsShipmentActions } from '../functions/tms-shipment-actions/resource'
 import { tmsGeocode } from '../functions/tms-geocode/resource'
 import { podActions } from '../functions/pod-actions/resource'
 import { otrActions } from '../functions/otr-actions/resource'
@@ -74,10 +75,49 @@ const schema = a.schema({
       // delivery*/origin*/destination*/*DriverId fields above are dual-written mirrors
       // derived from stops (first pickup → pickup*, last delivery → delivery*).
       stops:           a.json(),
+
+      // ── Shipment / Order / Load (Step B) ─────────────────────────────────
+      // Additive only. A Load with no `status` is a legacy own-fleet row: the
+      // calendar, /loads, settlements, the driver app, PODs and factoring all keep
+      // reading `rate`/`readyToInvoice`/`stops`/the driver fields above untouched.
+      shipmentId:      a.string(),   // parent Shipment (movement)
+      orderId:         a.string(),   // the Order this leg bills against
+      loadNumber:      a.string(),   // `<shipment number>-<leg>`
+      leg:             a.integer(),  // 1-based leg within the shipment
+      status: a.enum([
+        'SOURCING', 'BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP',
+        'IN_TRANSIT', 'RECOVERED', 'ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY',
+        'UNLOADING', 'DELIVERED', 'INVOICING', 'CANCELED',
+      ]),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+      statusSource:    a.enum(['USER', 'DRIVER_APP', 'CHECK_CALL', 'BACKFILL']),
+      carrierRepId:    a.string(),   // Cognito username of the rep covering the load
+      assignmentType:  a.enum(['OWN_ASSET', 'CARRIER', 'NEED_TO_COVER']),
+      activeLoadCarrierId: a.string(),  // the ACTIVE LoadCarrier row, if any
+      carrierName:     a.string(),   // snapshot of the active carrier's name
+      equipmentType:   a.string(),
+      divisionKey:     a.string(),
+      trackingProvider: a.enum(['NONE', 'MANUAL', 'LINK', 'DRIVER_APP', 'MOTIVE']),
+      nextCheckCallAt: a.datetime(),
+      nextCheckCallNote: a.string(),
+      // Sparse marker: the literal 'OPEN' only while a check call is outstanding, so
+      // the checkCallOpen index holds the worklist and nothing else.
+      checkCallOpen:   a.string(),
+      pickupMonth:     a.string(),   // 'YYYY-MM' of the first pickup, for month boards
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
-    .secondaryIndexes((index) => [index('customerId')])
+    .secondaryIndexes((index) => [
+      index('customerId'),
+      // Step B board queries: one shipment's legs, the status tabs, and the
+      // outstanding check-call worklist (sparse — only rows with checkCallOpen set).
+      // Status is deliberately not sorted by pickupAppt: own-fleet saves often
+      // write '' for undated stops, and DynamoDB GSI sort keys cannot be empty.
+      index('shipmentId'),
+      index('status'),
+      index('checkCallOpen').sortKeys(['nextCheckCallAt']),
+    ])
     .authorization((allow) => [
       // Phase 1: Load remains userPool-editable; merge repoints use schema-level IAM auth.
       allow.authenticated(),
@@ -876,6 +916,18 @@ const schema = a.schema({
       defaultRequiredReferences: a.json(),        // RequiredReference[]
       chargeCodes: a.json(),                      // ChargeCodeDef[]
       rateConTerms: a.string(),                   // default rate-con terms
+
+      // ── Shipment / Order / Load org defaults (Step B) ──────────────────────
+      shipmentPrefix: a.string(),                 // 'S' → S000001
+      // Counter behind the shipment number. Incremented with an atomic ADD so two
+      // dispatchers building loads at the same second cannot land on one number.
+      nextShipmentNumber: a.integer(),
+      cancelDeleteAdminOnly: a.boolean(),         // cancel/delete restricted to owner/ADMIN
+      arUnbilledStage: a.string(),                // label for the UNBILLED AR stage
+      apInReviewStage: a.string(),                // label for the IN_REVIEW AP stage
+      defaultMode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -894,6 +946,215 @@ const schema = a.schema({
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Shipment / Order / Load (Step B) ───────────────────────────────────────
+  // Three records describe one piece of freight: the Shipment is the movement and
+  // owns the single customer-facing status, the Order is the sell side (and AR),
+  // and the existing Load is the buy side — one row per leg, with LoadCarrier
+  // assignment rows, cached LoadFinancials, and LoadCharge line items.
+  //
+  // Every one of them is written by tmsShipmentActions only: the client reads, and
+  // the Lambda owns the transactions that keep the five tables agreeing with each
+  // other. Subscriptions are dropped (see TMS_DESIGN §12) — the board polls.
+
+  Shipment: a
+    .model({
+      // `TmsSettings.shipmentPrefix` + the zero-padded counter, or 'L<aljexId>'
+      // for the rows the backfill created from legacy loads.
+      number:          a.string().required(),
+      status: a.enum([
+        'DRAFT', 'TENDER_PENDING', 'TENDER_REJECTED', 'OPEN', 'ON_HOLD',
+        'BOOKED', 'PLANNED', 'DISPATCHED', 'LOADING', 'PICKED_UP', 'IN_TRANSIT',
+        'RECOVERED', 'ARRIVED_AT_DELIVERY_TERMINAL', 'OUT_FOR_DELIVERY',
+        'UNLOADING', 'DELIVERED', 'CANCELED',
+      ]),
+      // What to go back to when a hold is lifted or a cancel is undone.
+      previousStatus:  a.string(),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+      holdReason:      a.string(),
+      cancelReason:    a.string(),
+      tenderRejectReason: a.string(),
+      // Soft delete: a deleted shipment keeps its row so the number is never reused.
+      deletedAt:       a.datetime(),
+      deletedBy:       a.string(),
+      customerId:      a.string().required(),
+      customerName:    a.string(),           // booked-name snapshot
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      parentShipmentId: a.string(),          // consolidation parent (unused in B)
+      orderIds:        a.string().array(),
+      loadIds:         a.string().array(),
+      // Mirrors of the first pickup / last delivery across the shipment's loads.
+      pickupAppt:      a.string(),
+      deliveryAppt:    a.string(),
+      pickupMonth:     a.string(),           // 'YYYY-MM'
+      originCity:      a.string(),
+      destinationCity: a.string(),
+      // Lower-cased number · customer · cities · reference values, so the board can
+      // answer "find me 12345" without scanning five tables.
+      searchKey:       a.string(),
+      source:          a.enum(['MANUAL', 'TENDER', 'DUPLICATE', 'BACKFILL']),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('number'),
+      index('status').sortKeys(['pickupAppt']),
+      index('customerId').sortKeys(['pickupAppt']),
+      index('pickupMonth').sortKeys(['pickupAppt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // The sell side of a shipment: what the customer ordered and what they owe.
+  Order: a
+    .model({
+      shipmentId:      a.string().required(),
+      customerId:      a.string().required(),
+      customerName:    a.string(),
+      customerContactId: a.string(),
+      customerRepId:   a.string(),           // Cognito username
+      billToId:        a.string(),           // Customer.billToParties[].id
+      costCenter:      a.string(),
+      mode: a.enum([
+        'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
+      ]),
+      rateType:        a.enum(['SPOT', 'CONTRACT']),
+      references:      a.json(),             // OrderReference[]
+      equipmentType:   a.string(),
+      equipmentLengthFt: a.integer(),
+      specialRequirements: a.json(),         // SpecialRequirements
+      freight:         a.json(),             // FreightItem[]
+      customerNotes:   a.string(),           // travels onto customer paperwork
+      internalNotes:   a.string(),           // never leaves the office
+      // Cached from LoadCharge CUSTOMER lines by RECALC_CHARGES.
+      customerRateCents: a.integer(),
+      revenueCents:    a.integer(),
+      // Invoicing and payment are never inferred: B writes DOCS_NEEDED, UNBILLED
+      // and INVOICE_NOT_NEEDED only. UNPAID/PAID belong to step F.
+      arStatus:        a.enum(['DOCS_NEEDED', 'UNBILLED', 'UNPAID', 'PAID', 'INVOICE_NOT_NEEDED']),
+      arStatusChangedAt: a.datetime(),
+      invoiceId:       a.string(),
+      invoiceEarly:    a.boolean(),          // bill before delivery
+      readyToInvoiceAt: a.datetime(),
+      pickupAppt:      a.string(),           // mirror, sort key of the customer index
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId'),
+      index('customerId').sortKeys(['pickupAppt']),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Who is pulling one leg. A bounce or a TONU does not erase the row: it is marked
+  // and a new ACTIVE row is written, so the history of who dropped a load survives.
+  LoadCarrier: a
+    .model({
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      kind:            a.enum(['OWN_ASSET', 'CARRIER']),
+      status:          a.enum(['ACTIVE', 'BOUNCED', 'TONU']),
+      removalReason:   a.string(),
+      removedAt:       a.datetime(),
+      removedBy:       a.string(),
+      sequence:        a.integer(),          // 1-based assignment attempt
+      carrierId:       a.string(),           // directory Carrier (step C)
+      carrierName:     a.string(),
+      carrierMc:       a.string(),
+      carrierRepId:    a.string(),
+      dispatcherName:  a.string(),
+      dispatcherPhone: a.string(),
+      dispatcherEmail: a.string(),
+      driverId:        a.string(),           // own-fleet Driver.id
+      driverName:      a.string(),
+      driverPhone:     a.string(),
+      driver2Name:     a.string(),
+      driver2Phone:    a.string(),
+      truckId:         a.string(),
+      truckNumber:     a.string(),
+      trailerId:       a.string(),
+      trailerNumber:   a.string(),
+      plates:          a.string(),
+      vin:             a.string(),
+      sealNumber:      a.string(),
+      tripNumber:      a.string(),
+      pickupEtaAt:     a.datetime(),
+      deliveryEtaAt:   a.datetime(),
+      priorDeliveryAt: a.datetime(),
+      priorDeliveryNote: a.string(),
+      rateConSignedAt: a.datetime(),
+      rateConKey:      a.string(),           // S3 key of the signed rate confirmation
+      chargesFinalizedAt: a.datetime(),
+      // Cached from LoadCharge CARRIER lines by RECALC_CHARGES.
+      carrierRateCents: a.integer(),
+      costCents:       a.integer(),
+      // B writes AWAITING_INVOICE only; the rest is step G.
+      apStatus:        a.enum(['AWAITING_INVOICE', 'IN_REVIEW', 'TO_BE_PAID', 'PAID']),
+      invoiceId:       a.string(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('loadId'), index('shipmentId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Cached totals for one load. `id` IS the load id, so a bundle read is a GetItem
+  // and the row can never drift onto a second record for the same load.
+  LoadFinancials: a
+    .model({
+      // The row's `id` IS the load id — set explicitly on write, never generated.
+      loadId:          a.string().required(),
+      shipmentId:      a.string().required(),
+      orderId:         a.string(),
+      customerRateCents: a.integer().required(),
+      revenueCents:    a.integer().required(),
+      carrierRateCents: a.integer().required(),
+      costCents:       a.integer().required(),
+      profitCents:     a.integer().required(),
+      marginBps:       a.integer().required(),
+      topSpendCents:   a.integer(),
+      targetBuyCents:  a.integer(),
+      // Set once the money is committed (step F). RECALC_CHARGES refuses after this.
+      frozenAt:        a.datetime(),
+      frozenBy:        a.string(),
+      updatedBy:       a.string().required(),
+      version:         a.integer().required(),
+    })
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // One financial line item — MVMNT's FinancialLineItem. CUSTOMER lines sum into the
+  // order's revenue, CARRIER lines into the assignment's cost.
+  LoadCharge: a
+    .model({
+      shipmentId:      a.string().required(),
+      side:            a.enum(['CUSTOMER', 'CARRIER']),
+      orderId:         a.string(),           // CUSTOMER lines
+      loadId:          a.string(),
+      loadCarrierId:   a.string(),           // CARRIER lines
+      code:            a.string().required(),
+      label:           a.string(),
+      calculatedBy:    a.enum(['FLAT', 'PER_MILE', 'PER_CWT', 'PERCENT']),
+      rateCents:       a.integer().required(),
+      count:           a.integer().default(1),
+      amountCents:     a.integer().required(),
+      // LINEHAUL and FSC are the rate: they are what "Customer Rate" and "Carrier
+      // Rate" mean, and they are the base a PERCENT line is taken from.
+      isRate:          a.boolean().required(),
+      release:         a.string(),
+      sortOrder:       a.integer().required(),
+      note:            a.string(),
+      createdBy:       a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('shipmentId').sortKeys(['sortOrder'])])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -2054,6 +2315,23 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsDirectoryActions)),
 
+  // Step B: every Shipment / Order / Load-carrier / charge write goes through this
+  // Lambda. Actions: CREATE_SHIPMENT, SAVE_ORDER_FORM, CHECK_CREDIT, SUBMIT_ORDER,
+  // SET_SHIPMENT_STATUS, SET_LOAD_STATUS, DELETE_SHIPMENT, RESTORE_SHIPMENT,
+  // TENDER_RESPOND, DUPLICATE_SHIPMENT, UPDATE_STOP, ASSIGN_ASSET, ASSIGN_CARRIER,
+  // REMOVE_LOAD_CARRIER, RECALC_CHARGES, SET_AR_STATUS, GET_SHIPMENT_BUNDLE.
+  // Load itself is written with the generated updateLoad mutation so the calendar's
+  // subscriptions still fire.
+  tmsShipmentActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsShipmentActions)),
+
   // Phase 1: server-side geocoding, Places autocomplete, and place details.
   tmsGeocode: a
     .query()
@@ -2179,6 +2457,9 @@ const schema = a.schema({
   // Phase 1: tmsDirectoryActions Lambda invokes the AppSync API via IAM auth
   // (generated mutations for Load, plus queries for Customer/Location/Division/etc.).
   allow.resource(tmsDirectoryActions).to(['query', 'mutate']),
+  // Step B: tmsShipmentActions writes Load through the generated updateLoad mutation
+  // for the same reason (subscriptions), and reads Customer/TmsSettings/Driver.
+  allow.resource(tmsShipmentActions).to(['query', 'mutate']),
 ])
 
 export type Schema = ClientSchema<typeof schema>

@@ -1,3 +1,7 @@
+// `Stop` lives in ./index, which imports Address and the step-B stop fields from
+// here. Type-only in both directions, so the cycle never reaches runtime.
+import type { Stop } from './index'
+
 export interface Address {
   street?: string | null
   city?: string | null
@@ -296,6 +300,18 @@ export interface TmsSettings {
   chargeCodes?: ChargeCodeDef[] | null
   rateConTerms?: string | null
 
+  // Step B — shipment numbering and workflow toggles
+  /** Prefix for generated shipment numbers; `nextShipmentNumber` is the atomic counter. */
+  shipmentPrefix?: string | null
+  nextShipmentNumber?: number | null
+  /** Cancel / delete a shipment is an ADMIN-only action when true. */
+  cancelDeleteAdminOnly?: boolean | null
+  /** Whether the optional AR "Unbilled" and AP "In review" stages are in use. */
+  arUnbilledStage?: boolean | null
+  apInReviewStage?: boolean | null
+  /** Mode a new shipment starts in when the customer has no default. */
+  defaultMode?: ShipmentMode | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -332,4 +348,427 @@ export interface LocationMergeJob {
   error?: string | null
   createdAt?: string
   updatedAt?: string
+}
+
+// ── Step B — Shipment · Order · Load ─────────────────────────────────────────
+//
+// Three records describe one movement: the Shipment is the movement itself and
+// carries the single customer-facing status, the Order is the sell side (what the
+// customer bought and owes), and the existing Load is the buy side (who hauls a leg
+// and what that costs). Money is integer cents, percentages basis points, timestamps
+// ISO 8601. Enum values are the wire values AppSync stores; short board labels live
+// in src/lib/shipmentStatus.ts.
+
+/** Shipment movement status (spec §6.8). Truckload uses BOOKED→LOADING→UNLOADING;
+ *  LTL / forwarding uses PLANNED→PICKED_UP→RECOVERED→OUT_FOR_DELIVERY. */
+export type ShipmentStatus =
+  | 'DRAFT'
+  | 'TENDER_PENDING'
+  | 'TENDER_REJECTED'
+  | 'OPEN'
+  | 'ON_HOLD'
+  | 'BOOKED'
+  | 'PLANNED'
+  | 'DISPATCHED'
+  | 'LOADING'
+  | 'PICKED_UP'
+  | 'IN_TRANSIT'
+  | 'RECOVERED'
+  | 'ARRIVED_AT_DELIVERY_TERMINAL'
+  | 'OUT_FOR_DELIVERY'
+  | 'UNLOADING'
+  | 'DELIVERED'
+  | 'CANCELED'
+
+/**
+ * Load status: every shipment movement label plus the two the buy side owns —
+ * SOURCING (needs a carrier) and INVOICING (delivered, carrier invoice in review).
+ * Named `LoadWorkflowStatus` because `LoadStatusId` in src/lib/loadStatus.ts is the
+ * *derived* own-fleet status and the two are read side by side on the board.
+ */
+export type LoadWorkflowStatus =
+  | 'SOURCING'
+  | 'BOOKED'
+  | 'PLANNED'
+  | 'DISPATCHED'
+  | 'LOADING'
+  | 'PICKED_UP'
+  | 'IN_TRANSIT'
+  | 'RECOVERED'
+  | 'ARRIVED_AT_DELIVERY_TERMINAL'
+  | 'OUT_FOR_DELIVERY'
+  | 'UNLOADING'
+  | 'DELIVERED'
+  | 'INVOICING'
+  | 'CANCELED'
+
+export type ShipmentMode =
+  | 'FTL'
+  | 'PTL'
+  | 'BULK'
+  | 'DRAYAGE'
+  | 'INTERMODAL'
+  | 'RLTL'
+  | 'LTL'
+  | 'AIR'
+  | 'OCEAN'
+  | 'RAIL'
+
+/** How the shipment came to exist. BACKFILL marks rows minted from legacy loads. */
+export type ShipmentSource = 'MANUAL' | 'TENDER' | 'DUPLICATE' | 'BACKFILL'
+
+/** Who moved a load's status last — the driver app and check calls write their own. */
+export type LoadStatusSource = 'USER' | 'DRIVER_APP' | 'CHECK_CALL' | 'BACKFILL'
+
+export type AssignmentType = 'OWN_ASSET' | 'CARRIER' | 'NEED_TO_COVER'
+
+export type TrackingProvider = 'NONE' | 'MANUAL' | 'LINK' | 'DRIVER_APP' | 'MOTIVE'
+
+export type LoadCarrierKind = 'OWN_ASSET' | 'CARRIER'
+
+/** BOUNCED = the carrier fell off and kept nothing; TONU = truck ordered not used, paid. */
+export type LoadCarrierStatus = 'ACTIVE' | 'BOUNCED' | 'TONU'
+
+export type ArStatus = 'DOCS_NEEDED' | 'UNBILLED' | 'UNPAID' | 'PAID' | 'INVOICE_NOT_NEEDED'
+
+export type ApStatus = 'AWAITING_INVOICE' | 'IN_REVIEW' | 'TO_BE_PAID' | 'PAID'
+
+export type RateType = 'SPOT' | 'CONTRACT'
+
+export type ChargeSide = 'CUSTOMER' | 'CARRIER'
+
+export type ReferenceVisibility = 'INTERNAL' | 'CUSTOMER' | 'CARRIER' | 'ALL'
+
+export type HandlingUnit =
+  | 'PALLET'
+  | 'SKID'
+  | 'CRATE'
+  | 'BOX'
+  | 'DRUM'
+  | 'TOTE'
+  | 'BUNDLE'
+  | 'ROLL'
+  | 'OTHER'
+
+/** Who asked for the appointment window on a stop. */
+export type ApptRequestedBy = 'CUSTOMER' | 'CARRIER' | 'BROKER'
+
+/**
+ * One reference number on an order (PO, BOL, pickup number…). `level` says what it
+ * identifies and `visibility` who may see it; a STOP-level reference names its stop.
+ */
+export interface OrderReference {
+  code: string
+  label?: string | null
+  value: string
+  level: ReferenceLevel
+  stopId?: string | null
+  visibility: ReferenceVisibility
+}
+
+/** Same shape, stored on the stop rather than the order. */
+export type StopReference = OrderReference
+
+export interface FreightDimensions {
+  l: number
+  w: number
+  h: number
+  unit: 'IN' | 'CM'
+}
+
+export interface FreightHazmat {
+  un: string
+  hazClass: string
+  packingGroup?: string | null
+  emergencyContact: string
+}
+
+/** One line of what is on the truck. */
+export interface FreightItem {
+  id: string
+  handlingUnit: HandlingUnit
+  qty: number
+  description?: string | null
+  dims?: FreightDimensions | null
+  weightLbs?: number | null
+  freightClass?: string | null
+  nmfc?: string | null
+  hazmat?: FreightHazmat | null
+  stackable?: boolean | null
+  highValue?: boolean | null
+}
+
+export interface TemperatureRange {
+  target: number
+  min: number
+  max: number
+}
+
+export interface SpecialRequirements {
+  team?: boolean | null
+  tarps?: boolean | null
+  straps?: boolean | null
+  liftgate?: boolean | null
+  hazmat?: boolean | null
+  tempF?: TemperatureRange | null
+  other?: string[] | null
+}
+
+/** Who to hand paperwork to at a stop. */
+export interface StopDocumentContact {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+}
+
+export interface ShipmentRecord {
+  id: string
+  /** `shipmentPrefix` + padded counter; backfilled rows keep `L<aljexId>`. */
+  number: string
+  status: ShipmentStatus
+  /** What ON_HOLD / CANCELED interrupted, so un-hold and un-cancel can put it back. */
+  previousStatus?: ShipmentStatus | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  holdReason?: string | null
+  cancelReason?: string | null
+  tenderRejectReason?: string | null
+  deletedAt?: string | null
+  deletedBy?: string | null
+  customerId: string
+  customerName?: string | null
+  mode: ShipmentMode
+  /** Consolidation parent. Always null in step B. */
+  parentShipmentId?: string | null
+  orderIds?: string[] | null
+  loadIds?: string[] | null
+  // Mirrors of the first pickup / last delivery, kept so the board sorts and filters
+  // without reading every load.
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  pickupMonth?: string | null
+  originCity?: string | null
+  destinationCity?: string | null
+  /** Lower-cased number · customer · cities · reference values, for board search. */
+  searchKey?: string | null
+  source: ShipmentSource
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OrderRecord {
+  id: string
+  shipmentId: string
+  customerId: string
+  customerName?: string | null
+  customerContactId?: string | null
+  customerRepId?: string | null
+  billToId?: string | null
+  costCenter?: string | null
+  mode: ShipmentMode
+  rateType?: RateType | null
+  references?: OrderReference[] | null
+  equipmentType?: string | null
+  equipmentLengthFt?: number | null
+  specialRequirements?: SpecialRequirements | null
+  freight?: FreightItem[] | null
+  customerNotes?: string | null
+  internalNotes?: string | null
+  /** Cached from the CUSTOMER charge lines: rate = linehaul + FSC, revenue = all lines. */
+  customerRateCents?: number | null
+  revenueCents?: number | null
+  arStatus?: ArStatus | null
+  arStatusChangedAt?: string | null
+  invoiceId?: string | null
+  /** Lets AR move ahead of delivery for customers that bill on pickup. */
+  invoiceEarly?: boolean | null
+  readyToInvoiceAt?: string | null
+  pickupAppt?: string | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * One assignment of a load to somebody who can haul it — our own driver and truck, or
+ * an outside carrier. Bounces and TONUs keep their row; only one is ACTIVE at a time.
+ */
+export interface LoadCarrierRecord {
+  id: string
+  loadId: string
+  shipmentId: string
+  kind: LoadCarrierKind
+  status: LoadCarrierStatus
+  removalReason?: string | null
+  removedAt?: string | null
+  removedBy?: string | null
+  /** 1-based order of assignment attempts on this load. */
+  sequence?: number | null
+  carrierId?: string | null
+  carrierName?: string | null
+  carrierMc?: string | null
+  carrierRepId?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  driverId?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  driver2Name?: string | null
+  driver2Phone?: string | null
+  truckId?: string | null
+  truckNumber?: string | null
+  trailerId?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  sealNumber?: string | null
+  tripNumber?: string | null
+  pickupEtaAt?: string | null
+  deliveryEtaAt?: string | null
+  priorDeliveryAt?: string | null
+  priorDeliveryNote?: string | null
+  rateConSignedAt?: string | null
+  rateConKey?: string | null
+  chargesFinalizedAt?: string | null
+  /** Cached from the CARRIER charge lines for this assignment. */
+  carrierRateCents?: number | null
+  costCents?: number | null
+  apStatus?: ApStatus | null
+  invoiceId?: string | null
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Cached money for one load. `id` is the load id, so there is exactly one per load. */
+export interface LoadFinancialsRecord {
+  id: string
+  loadId: string
+  shipmentId: string
+  orderId?: string | null
+  customerRateCents: number
+  revenueCents: number
+  carrierRateCents: number
+  costCents: number
+  profitCents: number
+  marginBps: number
+  /** Most we may pay a carrier before booking warns; null when no floor is configured. */
+  topSpendCents?: number | null
+  targetBuyCents?: number | null
+  /** Set once invoicing freezes the numbers (step F); recalculation is refused after. */
+  frozenAt?: string | null
+  frozenBy?: string | null
+  updatedBy: string
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** MVMNT's FinancialLineItem: one charge on one side of one shipment. */
+export interface LoadChargeRecord {
+  id: string
+  shipmentId: string
+  side: ChargeSide
+  orderId?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  code: string
+  label?: string | null
+  calculatedBy: ChargeCalc
+  rateCents: number
+  count?: number | null
+  amountCents: number
+  /** LINEHAUL and FSC only — these sum to the Customer Rate / Carrier Rate. */
+  isRate: boolean
+  release?: string | null
+  sortOrder: number
+  note?: string | null
+  createdBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** What RECALC_CHARGES accepts: the stored row minus everything the server derives. */
+export interface LoadChargeInput {
+  id?: string | null
+  side: ChargeSide
+  orderId?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  code: string
+  label?: string | null
+  calculatedBy: ChargeCalc
+  rateCents: number
+  count?: number | null
+  isRate: boolean
+  release?: string | null
+  sortOrder: number
+  note?: string | null
+}
+
+/** Everything one shipment page needs, returned by every shipment mutation. */
+export interface ShipmentBundle {
+  shipment: ShipmentRecord
+  orders: OrderRecord[]
+  loads: ShipmentLoad[]
+  loadCarriers: LoadCarrierRecord[]
+  charges: LoadChargeRecord[]
+  financials: LoadFinancialsRecord[]
+}
+
+/**
+ * The Load fields the shipment layer added. Declared here (not only on `Load`) so the
+ * Lambda and the backfill script can talk about a load without importing the whole
+ * own-fleet Load type.
+ */
+export interface ShipmentLoadFields {
+  shipmentId?: string | null
+  orderId?: string | null
+  /** `<shipment number>-<leg>`. */
+  loadNumber?: string | null
+  leg?: number | null
+  /** Absent on legacy rows that predate the shipment layer. */
+  status?: LoadWorkflowStatus | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  statusSource?: LoadStatusSource | null
+  carrierRepId?: string | null
+  assignmentType?: AssignmentType | null
+  activeLoadCarrierId?: string | null
+  carrierName?: string | null
+  equipmentType?: string | null
+  divisionKey?: string | null
+  trackingProvider?: TrackingProvider | null
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  /** Sparse GSI key: literally `'OPEN'` while a check call is due, otherwise absent. */
+  checkCallOpen?: 'OPEN' | null
+  /** `YYYY-MM` of the first pickup, for the board's month GSI. */
+  pickupMonth?: string | null
+}
+
+/**
+ * The shipment layer's view of a load: identity, schedule mirrors, the shipment
+ * fields, and the stops the drawer renders. A `Load` satisfies it, so the bundle
+ * can carry whichever subset the query selected.
+ */
+export interface ShipmentLoad extends ShipmentLoadFields {
+  id: string
+  aljexId?: string | null
+  pickupAppt?: string | null
+  deliveryAppt?: string | null
+  originCity?: string | null
+  destinationCity?: string | null
+  customer?: string | null
+  rate?: number | null
+  miles?: number | null
+  stops?: Stop[] | null
+  updatedAt?: string | null
 }

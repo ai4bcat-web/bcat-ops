@@ -1,8 +1,18 @@
 import { loadStatus } from './loadStatus'
 import { normalizeName } from './tmsDirectory'
 import type { LoadStatusId } from './loadStatus'
-import type { Load } from '@/types'
-import type { CustomerRecord, CustomerStatus, TmsSettings } from '@/types/tms'
+// Relative, not `@/` — the tmsShipmentActions Lambda bundles this file by path for
+// its CHECK_CREDIT action, and the alias does not exist in the function build.
+import type { Load } from '../types'
+import type {
+  ArStatus,
+  CustomerRecord,
+  CustomerStatus,
+  OrderRecord,
+  ShipmentRecord,
+  ShipmentStatus,
+  TmsSettings,
+} from '../types/tms'
 
 export type CreditBucket = 'OPEN' | 'ACTIVE' | 'DELIVERED' | 'INVOICED'
 export type CreditBlockReason = 'NO_CREDIT_LIMIT' | 'CREDIT_LIMIT_REACHED' | 'INVOICE_PAST_MAX_DAYS_LATE'
@@ -121,6 +131,105 @@ export function creditExposureForCustomer(
     items.push({ bucket, amountCents: load.rate ?? 0 })
   }
   return items
+}
+
+/**
+ * Which credit bucket one customer order sits in, or null when it is no exposure
+ * at all.
+ *
+ * Where the money is decides the bucket, and the AR ladder outranks the movement:
+ * once an invoice exists the exposure is INVOICED wherever the truck is, and once
+ * it is paid — or was never going to be billed — there is nothing left to carry.
+ * A draft, a tender nobody accepted, a cancelation and a deleted shipment are all
+ * work we have not committed to, so none of them consume credit.
+ */
+export function creditBucketForOrder(
+  shipment: Pick<ShipmentRecord, 'status' | 'deletedAt'>,
+  arStatus: ArStatus | null | undefined,
+): CreditBucket | null {
+  if (shipment.deletedAt) return null
+  if (arStatus === 'PAID' || arStatus === 'INVOICE_NOT_NEEDED') return null
+  if (arStatus === 'UNPAID') return 'INVOICED'
+  return MOVEMENT_BUCKET[shipment.status]
+}
+
+const MOVEMENT_BUCKET: Record<ShipmentStatus, CreditBucket | null> = {
+  DRAFT: null,
+  TENDER_PENDING: null,
+  TENDER_REJECTED: null,
+  CANCELED: null,
+  OPEN: 'OPEN',
+  ON_HOLD: 'OPEN',
+  BOOKED: 'ACTIVE',
+  PLANNED: 'ACTIVE',
+  DISPATCHED: 'ACTIVE',
+  LOADING: 'ACTIVE',
+  PICKED_UP: 'ACTIVE',
+  IN_TRANSIT: 'ACTIVE',
+  RECOVERED: 'ACTIVE',
+  ARRIVED_AT_DELIVERY_TERMINAL: 'ACTIVE',
+  OUT_FOR_DELIVERY: 'ACTIVE',
+  UNLOADING: 'ACTIVE',
+  DELIVERED: 'DELIVERED',
+}
+
+/**
+ * One exposure item per order that still owes this customer's credit something.
+ * Orders always carry a real `customerId`, so there is no name matching here — an
+ * order whose shipment is missing from `shipments` is skipped rather than guessed
+ * at, because its status is what decides the bucket.
+ */
+export function creditExposureForOrders(
+  c: CustomerRecord,
+  orders: OrderRecord[],
+  shipments: ShipmentRecord[],
+): CreditExposureItem[] {
+  const byId = new Map(shipments.map((s) => [s.id, s]))
+  const items: CreditExposureItem[] = []
+  for (const order of orders) {
+    if (order.customerId !== c.id) continue
+    const shipment = byId.get(order.shipmentId)
+    if (!shipment) continue
+    const bucket = creditBucketForOrder(shipment, order.arStatus)
+    if (!bucket) continue
+    items.push({ bucket, amountCents: order.revenueCents ?? 0 })
+  }
+  return items
+}
+
+/**
+ * Everything this customer currently owes us against, from both eras.
+ *
+ * Orders are the truth for every shipment built since step B. Loads that were never
+ * mapped to an order — the legacy own-fleet rows — keep their load-derived exposure,
+ * so nothing drops out of the number during the migration and nothing is counted
+ * twice once a load has an `orderId`.
+ */
+export function creditExposure(
+  c: CustomerRecord,
+  data: { orders?: OrderRecord[]; shipments?: ShipmentRecord[]; loads?: Load[] },
+): CreditExposureItem[] {
+  const items = creditExposureForOrders(c, data.orders ?? [], data.shipments ?? [])
+  const legacy = (data.loads ?? []).filter((l) => !l.orderId)
+  return [...items, ...creditExposureForCustomer(c, legacy)]
+}
+
+/**
+ * The credit answer for one customer, optionally including an order we have not
+ * booked yet. `projectedCents` is what CHECK_CREDIT and SUBMIT_ORDER add on top of
+ * current exposure before deciding whether the limit is blown.
+ */
+export function creditSummaryForCustomer(
+  c: CustomerRecord,
+  settings: TmsSettings | null,
+  data: { orders?: OrderRecord[]; shipments?: ShipmentRecord[]; loads?: Load[] },
+  opts: { projectedCents?: number; oldestOpenInvoiceDays?: number | null } = {},
+): CreditSummary {
+  return summarizeCredit(resolveCreditPolicy(c, settings), creditExposure(c, data), {
+    hold: c.creditHoldFlag === true,
+    projectedCents: opts.projectedCents,
+    oldestOpenInvoiceDays: opts.oldestOpenInvoiceDays,
+  })
 }
 
 /**

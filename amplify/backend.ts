@@ -57,6 +57,7 @@ import { apptReport } from './functions/appt-report/resource'
 import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
+import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
 import { otrActions, otrStatusSync } from './functions/otr-actions/resource'
@@ -105,6 +106,7 @@ const backend = defineBackend({
   trackingApi,
   tripScreenshotParser,
   tmsDirectoryActions,
+  tmsShipmentActions,
   tmsGeocode,
   podActions,
   driverSignupGate,
@@ -1491,6 +1493,85 @@ directoryActionsFn.addToRolePolicy(
   }),
 )
 
+// ── tmsShipmentActions Lambda (Step B) ──────────────────────────────────────
+// Shipment/Order/LoadCarrier/LoadFinancials/LoadCharge are written with the raw
+// SDK (TransactWriteItems keeps the five tables agreeing); Load goes through the
+// generated updateLoad mutation (allow.resource(tmsShipmentActions) on the schema)
+// so the calendar's subscriptions still fire. Customer/TmsSettings are read-only
+// here — their writes stay with tmsDirectoryActions.
+const shipmentActionsFn = backend.tmsShipmentActions.resources.lambda as LambdaFunction
+const shipmentTable          = backend.data.resources.tables['Shipment']
+const orderTable             = backend.data.resources.tables['Order']
+const loadCarrierTable       = backend.data.resources.tables['LoadCarrier']
+const loadFinancialsTable    = backend.data.resources.tables['LoadFinancials']
+const loadChargeTable        = backend.data.resources.tables['LoadCharge']
+const shipmentLoadTable      = backend.data.resources.tables['Load']
+const shipmentCustomerTable  = backend.data.resources.tables['Customer']
+const shipmentSettingsTable  = backend.data.resources.tables['TmsSettings']
+const shipmentAuditLogTable  = backend.data.resources.tables['AuditLog']
+// The backfill needs the driver roster to tell an own-asset load from one that only
+// ever sat on a "Broker Need to Cover" pseudo-driver.
+const shipmentDriverTable    = backend.data.resources.tables['Driver']
+
+shipmentActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+    ],
+    resources: [
+      shipmentTable.tableArn,
+      orderTable.tableArn,
+      loadCarrierTable.tableArn,
+      loadFinancialsTable.tableArn,
+      loadChargeTable.tableArn,
+      shipmentLoadTable.tableArn,
+      shipmentAuditLogTable.tableArn,
+      // Read-only here, but DynamoDB scopes by table, not by action/attribute.
+      shipmentCustomerTable.tableArn,
+      shipmentSettingsTable.tableArn,
+      shipmentDriverTable.tableArn,
+    ],
+  }),
+)
+// Board and bundle reads come off the GSIs declared on these models.
+shipmentActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['dynamodb:Query'],
+    resources: [
+      `${shipmentTable.tableArn}/index/*`,
+      `${orderTable.tableArn}/index/*`,
+      `${loadCarrierTable.tableArn}/index/*`,
+      `${loadChargeTable.tableArn}/index/*`,
+      `${shipmentLoadTable.tableArn}/index/*`,
+      `${shipmentCustomerTable.tableArn}/index/*`,
+    ],
+  }),
+)
+
+shipmentActionsFn.addEnvironment('SHIPMENT_TABLE_NAME',        shipmentTable.tableName)
+shipmentActionsFn.addEnvironment('ORDER_TABLE_NAME',           orderTable.tableName)
+shipmentActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    loadCarrierTable.tableName)
+shipmentActionsFn.addEnvironment('LOAD_FINANCIALS_TABLE_NAME', loadFinancialsTable.tableName)
+shipmentActionsFn.addEnvironment('LOAD_CHARGE_TABLE_NAME',     loadChargeTable.tableName)
+shipmentActionsFn.addEnvironment('LOAD_TABLE_NAME',            shipmentLoadTable.tableName)
+shipmentActionsFn.addEnvironment('CUSTOMER_TABLE_NAME',        shipmentCustomerTable.tableName)
+shipmentActionsFn.addEnvironment('SETTINGS_TABLE_NAME',        shipmentSettingsTable.tableName)
+shipmentActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',       shipmentAuditLogTable.tableName)
+shipmentActionsFn.addEnvironment('DRIVER_TABLE_NAME',          shipmentDriverTable.tableName)
+shipmentActionsFn.addEnvironment('USER_POOL_ID',               backend.auth.resources.userPool.userPoolId)
+shipmentActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+)
+
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
 // IntakeItem task for Arcie and posts to the BCAT global Slack channel.
@@ -1718,7 +1799,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
 
-  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsGeocode', 'podActions'])
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsGeocode', 'podActions'])
   for (const [name, construct] of Object.entries(backend)) {
     if (previewCallable.has(name)) continue
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda

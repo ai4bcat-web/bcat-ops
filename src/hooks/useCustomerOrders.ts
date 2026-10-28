@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { listCustomers, listLoads } from '@/lib/apiClient'
+import { listCustomers, listLoads, listOrdersByCustomer } from '@/lib/apiClient'
 import { customerMatchesLoad, customerNameKeys } from '@/lib/customerCredit'
 import type { Load } from '@/types'
-import type { CustomerRecord } from '@/types/tms'
+import type { CustomerRecord, OrderRecord } from '@/types/tms'
 
 /**
- * Load the matched order history for a customer. Uses the same attribution rule as
- * credit exposure: `customerId` link first, then normalized name/alias fallback.
+ * A customer's order history, from both eras.
+ *
+ * `orders` is the shipment layer's record — everything booked since step B, read
+ * straight off the customer index. `loads` is every load attributed to this customer
+ * by the same rule credit exposure uses: `customerId` link first, then normalized
+ * name/alias fallback. `legacyLoads` narrows that to the ones no order covers, which
+ * is the fallback section the profile shows beneath the orders.
  *
  * The optional `customer` record is accepted so callers that already have it (e.g.
  * the profile drawer) can avoid an extra customer scan.
  */
 export function useCustomerOrders(customerId: string, customer?: CustomerRecord) {
   const [allLoads, setAllLoads] = useState<Load[]>([])
+  const [orders, setOrders] = useState<OrderRecord[]>([])
   const [customerRecord, setCustomerRecord] = useState<CustomerRecord | null>(customer ?? null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -20,17 +26,20 @@ export function useCustomerOrders(customerId: string, customer?: CustomerRecord)
   const load = useCallback(() =>
     Promise.all([
       listLoads(),
+      listOrdersByCustomer(customerId),
       customer
         ? Promise.resolve<CustomerRecord | null>(customer)
         : listCustomers({ includeArchived: true }).then((rows) => rows.find((c) => c.id === customerId) ?? null),
     ])
-      .then(([loads, customerFromServer]) => {
+      .then(([loads, customerOrders, customerFromServer]) => {
         if (!customerFromServer) {
           setAllLoads([])
+          setOrders([])
           setCustomerRecord(null)
           setError('Customer not found')
         } else {
           setAllLoads(loads)
+          setOrders(customerOrders)
           setCustomerRecord(customerFromServer)
           setError(null)
         }
@@ -61,5 +70,8 @@ export function useCustomerOrders(customerId: string, customer?: CustomerRecord)
     return loads.reduce((latest, l) => (l.pickupAppt > latest ? l.pickupAppt : latest), loads[0].pickupAppt)
   }, [loads])
 
-  return { loads, lastLoadAt, loading, error, refetch }
+  // Loads an order already accounts for would show the same job twice.
+  const legacyLoads = useMemo(() => loads.filter((l) => !l.orderId), [loads])
+
+  return { orders, loads, legacyLoads, lastLoadAt, loading, error, refetch }
 }

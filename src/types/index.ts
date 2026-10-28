@@ -1,4 +1,10 @@
-import type { Address } from './tms'
+import type {
+  Address,
+  ApptRequestedBy,
+  ShipmentLoadFields,
+  StopDocumentContact,
+  StopReference,
+} from './tms'
 
 export type ColorKey =
   | 'driver-1' | 'driver-2' | 'driver-3' | 'driver-4' | 'driver-5' | 'driver-6'
@@ -300,6 +306,18 @@ export interface Stop {
   /** Manually cleared from the Appts queue (Ryne/Ruben's per-day Clear) — the row
    *  leaves the working view and stops counting as open, whatever its dates. */
   apptCleared?: boolean
+  // ── Step B: the broker-side stop card (src/features/shipments) ─────────────
+  /** The window we ASKED for, before anybody confirmed a hard appointment. */
+  requestedStart?: string | null
+  requestedEnd?: string | null
+  apptRequestedBy?: ApptRequestedBy | null
+  apptNote?: string | null
+  /** Stop-level reference numbers (PO at this dock, delivery number, seal…). */
+  refs?: StopReference[] | null
+  /** Who takes the paperwork here. */
+  documentContact?: StopDocumentContact | null
+  /** Free text about this stop; `Load.notes` is the load's, this one is the stop's. */
+  stopNotes?: string | null
 }
 
 export type ApptWorkflowStatus =
@@ -309,7 +327,13 @@ export type ApptWorkflowStatus =
   | 'confirmed'      // confirmed-email + E2Open screenshots on file
   | 'change_needed'  // Ruben/Ryne want it moved to apptChangeTo — ladder restarts
 
-export interface Load {
+/**
+ * A load. Since step B it is also the buy side of a shipment: `ShipmentLoadFields`
+ * carries the link to its shipment/order plus the carrier-side status and assignment.
+ * Those fields are absent on every load that predates the shipment layer, and are
+ * written only by the tmsShipmentActions Lambda.
+ */
+export interface Load extends ShipmentLoadFields {
   id: string
   aljexId: string
   tmsId: string
@@ -364,7 +388,7 @@ export interface Load {
   updatedBy: string
 }
 
-export type EntityType = 'Driver' | 'Load'
+export type EntityType = 'Driver' | 'Load' | 'Shipment' | 'Order' | 'LoadCarrier' | 'LoadCharge' | 'LoadFinancials'
 export type AuditAction = 'create' | 'update' | 'delete'
 
 export interface AuditLogEntry {

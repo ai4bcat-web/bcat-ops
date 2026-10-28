@@ -181,6 +181,18 @@ export function createTmsClient({ endpoint, token, fetch: fetchFn = globalThis.f
     return typeof raw === 'string' ? JSON.parse(raw) : raw ?? null;
   };
 
+  const tmsShipmentActions = async (action, input) => {
+    const payload = typeof input === 'string' ? input : JSON.stringify(input);
+    const data = await gql(
+      `mutation S($action: String!, $input: AWSJSON!) {
+        tmsShipmentActions(action: $action, input: $input)
+      }`,
+      { action, input: payload }
+    );
+    const raw = data?.tmsShipmentActions;
+    return typeof raw === 'string' ? JSON.parse(raw) : raw ?? null;
+  };
+
   return {
     endpoint,
     token,
@@ -192,6 +204,7 @@ export function createTmsClient({ endpoint, token, fetch: fetchFn = globalThis.f
     getTmsSettings,
     updateLoad,
     tmsDirectoryActions,
+    tmsShipmentActions,
   };
 }
 

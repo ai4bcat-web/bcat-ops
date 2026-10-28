@@ -21,6 +21,8 @@ import { ProfitReviewPage } from '@/features/finances/ProfitReviewPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
+import { ShipmentsBoard } from '@/features/shipments/ShipmentsBoard'
+import { ShipmentPage } from '@/features/shipments/ShipmentPage'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
 import { AuditPage } from '@/features/audit/AuditPage'
 import { SchedulePage } from '@/features/schedule/SchedulePage'
@@ -197,6 +199,9 @@ export default function App() {
               <Route path="/calendar" element={<RequirePage page="calendar"><CalendarPage /></RequirePage>} />
               <Route path="/driver-info" element={<RequirePage page="dispatch"><DriverInfoPage /></RequirePage>} />
               <Route path="/loads" element={<RequirePage page="loads"><GridPage /></RequirePage>} />
+              {/* The MVMNT-style shipment layer; it shares the `loads` page permission. */}
+              <Route path="/shipments" element={<RequirePage page="loads"><ShipmentsBoard /></RequirePage>} />
+              <Route path="/shipments/:id" element={<RequirePage page="loads"><ShipmentPage /></RequirePage>} />
               {/* Retired: the driver roster and editor now live in the Files hub. */}
               <Route path="/drivers" element={<Navigate to="/files" replace />} />
               <Route path="/fleet-dashboard" element={<RequirePage page="fleetManagerDashboard"><FleetManagerDashboardPage /></RequirePage>} />
