@@ -977,6 +977,36 @@ describe('DELETE_SHIPMENT', () => {
     const deleted = (await remove()) as { shipment: Row }
     expect(deleted.shipment.deletedAt).toBeTruthy()
   })
+
+  it('takes the shipment’s carrier legs off the AP board, and puts back the ones still owed', async () => {
+    const { shipmentId, loadId } = await createDraft()
+    const seedLeg = (id: string, extra: Row): void => {
+      table(TABLES.carrier).set(id, {
+        id, shipmentId, loadId, kind: 'CARRIER', status: 'ACTIVE',
+        apStatus: 'AWAITING_INVOICE', apOpen: 'OPEN',
+        apStatusChangedAt: '2026-10-01T00:00:00.000Z',
+        carrierName: 'Test Carrier', createdAt: '2026-10-01T00:00:00.000Z',
+        updatedAt: '2026-10-01T00:00:00.000Z',
+        ...extra,
+      })
+    }
+    seedLeg('lcr-open', {})
+    seedLeg('lcr-paid', { apStatus: 'PAID', apOpen: undefined })
+    seedLeg('lcr-own', { kind: 'OWN_ASSET', apStatus: undefined, apOpen: undefined })
+
+    await call('DELETE_SHIPMENT', { shipmentId, expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt })
+    // A leg nobody can reach is not work: the sparse marker leaves with the shipment,
+    // and everything else on the row stays exactly where it was.
+    expect(table(TABLES.carrier).get('lcr-open')!.apOpen).toBeUndefined()
+    expect(table(TABLES.carrier).get('lcr-open')!.apStatus).toBe('AWAITING_INVOICE')
+    expect(table(TABLES.carrier).get('lcr-open')!.updatedAt).toBe('2026-10-01T00:00:00.000Z')
+
+    await call('RESTORE_SHIPMENT', { shipmentId, expectedUpdatedAt: table(TABLES.shipment).get(shipmentId)!.updatedAt })
+    expect(table(TABLES.carrier).get('lcr-open')!.apOpen).toBe('OPEN')
+    // Settled and own-fleet legs were never on the board and do not arrive on it now.
+    expect(table(TABLES.carrier).get('lcr-paid')!.apOpen).toBeUndefined()
+    expect(table(TABLES.carrier).get('lcr-own')!.apOpen).toBeUndefined()
+  })
 })
 
 // ── Stops ────────────────────────────────────────────────────────────────────

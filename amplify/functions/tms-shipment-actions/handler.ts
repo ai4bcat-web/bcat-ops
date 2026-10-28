@@ -1660,6 +1660,19 @@ async function setLoadStatus(input: Row, caller: Caller): Promise<Row> {
 
 const DELETABLE_STATUSES: readonly string[] = ['DRAFT', 'CANCELED', 'TENDER_REJECTED']
 
+/**
+ * The carrier legs of one shipment that are sitting on the AP board.
+ *
+ * `apOpen` is the sparse marker behind "every outside carrier we still owe money on".
+ * A deleted shipment is one nobody can open, so a leg of it is work no one can do —
+ * it comes off the board with the shipment and goes back on if the shipment is restored.
+ * A leg that is paid, bounced or own-fleet never carried the marker in the first place.
+ */
+async function apBoardLegsOf(shipmentId: string): Promise<Row[]> {
+  const assignments = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  return assignments.filter((row) => row.kind === 'CARRIER')
+}
+
 async function deleteShipment(input: Row, caller: Caller): Promise<Row> {
   const shipmentId = assertString(input.shipmentId, 'shipmentId')
   const expectedUpdatedAt = assertExpectedUpdatedAt(input)
@@ -1674,17 +1687,27 @@ async function deleteShipment(input: Row, caller: Caller): Promise<Row> {
   }
   await assertNoInvoicedOrders(shipmentId, 'delete')
   const now = nowIso()
+  // The marker, and only the marker: the leg keeps its charges, its rung and its
+  // timestamps, so a restore is a re-SET rather than a reconstruction, and `updatedAt`
+  // does not move under a client holding the assignment's CAS token.
+  const openLegs = (await apBoardLegsOf(shipmentId)).filter((row) => row.apOpen)
   await transact(
-    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-      deletedAt: now,
-      deletedBy: caller.email,
-      updatedBy: caller.email,
-      updatedAt: now,
-      version: (numberOrNull(shipment.version) ?? 1) + 1,
-    }, expectedUpdatedAt)],
+    [
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        deletedAt: now,
+        deletedBy: caller.email,
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, expectedUpdatedAt),
+      ...openLegs.map((row) => updateItemTx(LOAD_CARRIER_TABLE_NAME, String(row.id), {}, null, { remove: ['apOpen'] })),
+    ],
     'shipment',
   )
-  await writeAudit('SHIPMENT', shipmentId, 'DELETE_SHIPMENT', caller, { status })
+  await writeAudit('SHIPMENT', shipmentId, 'DELETE_SHIPMENT', caller, {
+    status,
+    apBoardLegsClosed: openLegs.map((row) => String(row.id)),
+  })
   return readBundle(shipmentId) as unknown as Row
 }
 
@@ -1697,17 +1720,31 @@ async function restoreShipment(input: Row, caller: Caller): Promise<Row> {
   const settings = await getSettings()
   await requireAdminForCancelDelete('RESTORE_SHIPMENT', caller, settings)
   const now = nowIso()
+  // Back on the board under the same rule the rest of AP uses: an outside carrier we
+  // are still on the hook for. A leg paid or bounced while the shipment was away stays
+  // off, and one with no `apStatusChangedAt` was never in the sparse index to begin with.
+  const reopen = (await apBoardLegsOf(shipmentId)).filter((row) =>
+    !row.apOpen
+    && (row.status === 'ACTIVE' || row.status === 'TONU')
+    && row.apStatus !== 'PAID'
+    && typeof row.apStatusChangedAt === 'string'
+    && row.apStatusChangedAt !== '')
   await transact(
-    [updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
-      deletedAt: null,
-      deletedBy: null,
-      updatedBy: caller.email,
-      updatedAt: now,
-      version: (numberOrNull(shipment.version) ?? 1) + 1,
-    }, expectedUpdatedAt)],
+    [
+      updateItemTx(SHIPMENT_TABLE_NAME, shipmentId, {
+        deletedAt: null,
+        deletedBy: null,
+        updatedBy: caller.email,
+        updatedAt: now,
+        version: (numberOrNull(shipment.version) ?? 1) + 1,
+      }, expectedUpdatedAt),
+      ...reopen.map((row) => updateItemTx(LOAD_CARRIER_TABLE_NAME, String(row.id), { apOpen: 'OPEN' }, null)),
+    ],
     'shipment',
   )
-  await writeAudit('SHIPMENT', shipmentId, 'RESTORE_SHIPMENT', caller, {})
+  await writeAudit('SHIPMENT', shipmentId, 'RESTORE_SHIPMENT', caller, {
+    apBoardLegsReopened: reopen.map((row) => String(row.id)),
+  })
   return readBundle(shipmentId) as unknown as Row
 }
 
