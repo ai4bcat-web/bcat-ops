@@ -9,9 +9,17 @@ One entry per unit of work (newest first). Decisions needed from Ryne go under *
   invoice detail + six dialogs, ArCard on the shipment, customer AR tab, AR settings card,
   additive ShipmentDocument lookup in `otr-actions`, two refusals in `tms-shipment-actions`,
   `scripts/backfillLegacyAr.mjs`, Academy article). Amplify dev job `22` status `SUCCEED`.
-  Follow-up commit `66785d3` — the AR worklist failed to load on the deployed stack
-  because the index query declared its enum argument as `ArStatus!` while Amplify generates
-  `OrderArStatus`; found by opening the page, not by a test.
+  Two follow-up commits, both found by opening the page on the deployed stack rather than
+  by a test, and both deployed and re-checked in the browser: `66785d3` (dev job `23`) —
+  the AR worklist failed to load because the index query declared its enum argument as
+  `ArStatus!` while Amplify names an inline model enum `<Model><Field>`, so the deployed
+  schema calls it `OrderArStatus` and AppSync refused the whole document; and `8c747fa`
+  (dev job `24`) — the Unpaid and Aging tabs failed with "Field 'paidCents' in type
+  'Invoice' is undefined", because a mis-ranged edit while adding `markedSentNote` had
+  deleted `paidCents` from the model. Nothing caught either one: the Lambda's in-memory
+  test engine never validates a row against the GraphQL schema, and the client's field
+  list is a plain string. After both, `/ar` loads with To invoice 845 · Docs needed 4 and
+  no error anywhere on the page.
 - Required gates passed before each commit: `npm run typecheck`, `npm run lint` (3
   pre-existing warnings), `npm run test` (336 files, 4212 tests — 232 more than Step E's
   3980).
@@ -76,6 +84,15 @@ One entry per unit of work (newest first). Decisions needed from Ryne go under *
   outright, but has **not been applied** — the 890 backfilled orders are still DOCS_NEEDED /
   UNBILLED. Run it (plan → review → `--apply`) before anyone works the To-invoice tab on dev,
   or that tab is the whole Aljex era.
+- Step G plan written: `Docs/tms-build/G-plan.md` (AP — carrier bills, AP payments and
+  remittance). It spends `LoadCarrier`'s one free GSI on a sparse `apOpen` +
+  `apStatusChangedAt` worklist, extends `tms-finance-actions` behind a new `carrierPay`
+  page key rather than adding a sibling router, and names three things in the existing code
+  that G has to correct: `ASSIGN_ASSET` and the backfill stamp `apStatus AWAITING_INVOICE`
+  on own-fleet assignments that must never reach an AP worklist; `LoadCarrier
+  .chargesFinalizedAt` is refused on but never written; and `GENERATE_INVOICE` freezes the
+  carrier-side lines too, so a carrier accessorial arriving after the customer was billed
+  needs its own action.
 - **Decisions needed (Ryne):** Step F shipped its plan's defaults — `{prefix}{n:6}` from 1
   with the division's prefix; one invoice per order, no consolidation; one e-mail per invoice;
   owner/ADMIN for void/payment/credit/write-off/reversal and `page-invoicing` for
