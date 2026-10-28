@@ -2,6 +2,22 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step B done on dev; backfill complete
+
+- Commit `ee5b2cd` pushed to `origin dev` (Shipment/Order/Load model, board, draft editor,
+  status axes, financial line items, Lambda router, backfill script, Academy Step B article).
+  Amplify dev job `11` status `SUCCEED`.
+- Required gates passed: `npm run typecheck`, `npm run lint` (3 pre-existing warnings),
+  `npm run test` (3528 tests passed). Fable review blockers fixed before commit.
+- Backfill: all 890 copied loads now linked to Shipment/Order. Initial run applied 698;
+  192 unmatched by name. Created 117 dev-only Customer records for unique unmatched names,
+  1 "Legacy Unmatched" fallback for loads with no booked customer, and patched 60 loads.
+  Final counts: Shipment 890, Order 890, LoadCarrier 670, LoadFinancials 890, LoadCharge 889.
+- Verification: authenticated dev browser at `https://dev.d3dejqzs77khq6.amplifyapp.com/shipments`
+  shows 890 shipments, status tabs (All/Draft/Tender/Open/On hold/Booked/In transit/Delivered/Canceled),
+  customer/origin/destination columns, search and filters. Temporary backfill admin identity removed.
+- Next: Step C — Carriers & booking.
+
 ## 2026-10-28 — Step A done; log update deployed; Step B starting
 
 - Step A log-only update commit `46d2943` pushed to `origin dev`. Amplify dev job `8` status `SUCCEED`.
