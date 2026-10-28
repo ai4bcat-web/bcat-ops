@@ -97,6 +97,8 @@ export const loadSchema = z.object({
   weight: z.number().min(0).optional().nullable(),
   pieces: z.number().int().min(0).optional().nullable(),
   piecesUnit: z.string().optional().nullable(),
+  // Declared value of the freight, in cents — the carrier insurance check reads it.
+  cargoValueCents: z.number().int().min(0).optional().nullable(),
 
   stops: stopsSchema,
   readyToInvoice: z.boolean(),

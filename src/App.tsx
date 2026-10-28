@@ -21,6 +21,8 @@ import { ProfitReviewPage } from '@/features/finances/ProfitReviewPage'
 import { WeeklyCashCheckInPage } from '@/features/cash-checkin/WeeklyCashCheckInPage'
 import { ApptsPage } from '@/features/appts/ApptsPage'
 import { CustomersPage, LocationsPage } from '@/features/directory/DirectoryPages'
+import { CarriersPage } from '@/features/carriers/CarriersPage'
+import { RateConSignPage } from '@/features/carriers/RateConSignPage'
 import { ShipmentsBoard } from '@/features/shipments/ShipmentsBoard'
 import { ShipmentPage } from '@/features/shipments/ShipmentPage'
 import { InsurancePage } from '@/features/insurance/InsurancePage'
@@ -178,6 +180,8 @@ export default function App() {
         <Routes>
           {/* Public, tokenized driver portal — OUTSIDE the authenticated app shell */}
           <Route path="/onboard/:token" element={<DriverPortalPage />} />
+          {/* Public, tokenized rate confirmation signing for an outside carrier */}
+          <Route path="/sign/rate-con/:token" element={<RateConSignPage />} />
           <Route path="/amazon-disputes" element={<DriverDisputesPage />} />
           {/* Public truck tracking page — the code in the URL is the key; no sign-in. */}
           <Route path="/track/:code" element={<TrackPage />} />
@@ -220,6 +224,9 @@ export default function App() {
               <Route path="/appts" element={<RequirePage page="appts"><ApptsPage /></RequirePage>} />
               <Route path="/customers" element={<RequirePage page="customers"><CustomersPage /></RequirePage>} />
               <Route path="/locations" element={<RequirePage page="locations"><LocationsPage /></RequirePage>} />
+              {/* Outside carriers: the directory, and one carrier's own URL. */}
+              <Route path="/carriers" element={<RequirePage page="carriers"><CarriersPage /></RequirePage>} />
+              <Route path="/carriers/:id" element={<RequirePage page="carriers"><CarriersPage /></RequirePage>} />
               <Route path="/insurance" element={<RequirePage page="insurance"><InsurancePage /></RequirePage>} />
               <Route path="/schedule" element={<RequirePage page="schedule"><SchedulePage /></RequirePage>} />
               <Route path="/time-off" element={<RequirePage page="timeOff"><TimeOffPage /></RequirePage>} />
@@ -257,8 +264,6 @@ export default function App() {
               <Route path="/expenses" element={<Navigate to="/fuel" replace />} />
               <Route path="/grid" element={<Navigate to="/loads" replace />} />
               <Route path="/audit" element={<Navigate to="/audit-log" replace />} />
-              {/* Retired: the Instantly.ai carrier email blast was removed; bookmarks land on the user's home page. */}
-              <Route path="/carriers" element={<Navigate to="/" replace />} />
                 </Route>
               </Routes>
             </AuthGuard>

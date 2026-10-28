@@ -1,11 +1,11 @@
 /**
  * The body of a shipment, shared by the drawer and the full page: Summary · Details ·
- * Stops · Documents · Financials (spec §6.4 "Board"). A DRAFT shipment shows the draft
- * order editor instead of the tabs, because a draft has nothing to track yet — that is
- * the only shape difference between the two.
+ * Stops · Carrier · Documents · Financials (spec §6.4 "Board"). A DRAFT shipment shows the
+ * draft order editor instead of the tabs, because a draft has nothing to track yet — that
+ * is the only shape difference between the two.
  */
 import { useMemo, useState } from 'react'
-import { ClipboardList, FileText, MapPin, DollarSign, Info } from 'lucide-react'
+import { Building2, ClipboardList, FileText, MapPin, DollarSign, Info } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { formatCents } from '@/lib/tmsDirectory'
@@ -18,6 +18,7 @@ import { useTrucks } from '@/hooks/useTrucks'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
+import { CarrierSection } from './CarrierSection'
 import { LoadActions } from './StatusActions'
 import { DraftOrderEditor } from './DraftOrderEditor'
 import type { ShipmentActions } from '../useShipmentActions'
@@ -29,6 +30,7 @@ const TABS = [
   { key: 'summary', label: 'Summary', icon: Info },
   { key: 'details', label: 'Details', icon: ClipboardList },
   { key: 'stops', label: 'Stops', icon: MapPin },
+  { key: 'carrier', label: 'Carrier', icon: Building2 },
   { key: 'documents', label: 'Documents', icon: FileText },
   { key: 'financials', label: 'Financials', icon: DollarSign },
 ] as const
@@ -45,11 +47,15 @@ export interface ShipmentDetailProps {
   requiredReferences: RequiredReference[]
   credit: CreditSummary | null
   currentUser: string
+  isAdmin: boolean
   actions: ShipmentActions
 }
 
 export function ShipmentDetail(props: ShipmentDetailProps) {
-  const { bundle, customer, locations, catalog, pricing, marginFloorBps, requiredReferences, credit, currentUser, actions } = props
+  const {
+    bundle, customer, locations, catalog, pricing, marginFloorBps, requiredReferences, credit, currentUser,
+    isAdmin, actions,
+  } = props
   const [tab, setTab] = useState<TabKey>('summary')
   const { drivers } = useDrivers()
   const { equipment } = useTrucks()
@@ -149,12 +155,15 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
               <LoadActions
                 load={load}
                 mode={shipment.mode}
+                bundle={bundle}
                 activeCarrier={activeCarrier}
                 drivers={drivers}
                 trucks={trucks}
                 trailers={trailers}
                 arStatus={order?.arStatus ?? null}
+                isAdmin={isAdmin}
                 handlers={actions.load}
+                onRateCon={() => setTab('carrier')}
               />
             )}
           </div>
@@ -206,6 +215,8 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
           onAction={actions.stopAction}
         />
       )}
+
+      {tab === 'carrier' && <CarrierSection bundle={bundle} actions={actions} />}
 
       {tab === 'documents' && (
         <div className="space-y-4">

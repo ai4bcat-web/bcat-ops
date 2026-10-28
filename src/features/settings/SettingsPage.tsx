@@ -6,6 +6,7 @@ import { PrivateDocsModal } from '@/features/files/PrivateDocsModal'
 import { useAuth } from '@/hooks/useAuth'
 import { DivisionCard } from './DivisionCard'
 import { TmsSettingsCard } from './TmsSettingsCard'
+import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
 
 export function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -45,6 +46,7 @@ export function SettingsPage() {
 
             <DivisionCard />
             <TmsSettingsCard />
+            <CarrierBookingSettingsCard />
           </>
         )}
 

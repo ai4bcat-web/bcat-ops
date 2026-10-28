@@ -312,6 +312,26 @@ export interface TmsSettings {
   /** Mode a new shipment starts in when the customer has no default. */
   defaultMode?: ShipmentMode | null
 
+  // Step C — carrier approval gates, booking checks and quick pay
+  /** Carrier statuses a load may be booked to. Default `['ACTIVE']`. */
+  allowedCarrierStatuses?: string[] | null
+  /** A new carrier starts PENDING and an admin must approve it before it may be booked. */
+  requireCarrierApproval?: boolean | null
+  /** Document types a carrier is warned about when missing. Default COI_CARGO/COI_AUTO/W9/CARRIER_AGREEMENT. */
+  requiredCarrierDocs?: string[] | null
+  /** Load fields booking warns about when blank. See `BookingRequiredField`. */
+  bookingRequiredFields?: string[] | null
+  /** Payment terms a new carrier starts with. */
+  defaultCarrierTermsDays?: number | null
+  /** Quick-pay ladder, ascending by days; a longer wait never costs more. */
+  quickPayTiers?: QuickPayTier[] | null
+  /** How long a sent rate confirmation stays signable. */
+  rateConExpiryHours?: number | null
+  /** Fields the carrier must fill in before signing. See `RateConRequiredField`. */
+  rateConRequiredFields?: string[] | null
+  /** How many days ahead an expiring insurance policy starts warning. Default 30. */
+  insuranceWarnDays?: number | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -641,6 +661,30 @@ export interface LoadCarrierRecord {
   costCents?: number | null
   apStatus?: ApStatus | null
   invoiceId?: string | null
+  // Step C — quick pay, the rate confirmation and the booking trail
+  /** Free text behind `removalReason`, which is an enum. */
+  removalNote?: string | null
+  quickPay?: boolean | null
+  quickPayDays?: number | null
+  quickPayFeeBps?: number | null
+  /** The AP deduction, cached at booking. Never a CARRIER charge line. */
+  quickPayFeeCents?: number | null
+  paymentTermsDays?: number | null
+  rateConStatus?: RateConStatus | null
+  /** Opaque token in the signing link; looked up by scan, so it is never a key. */
+  rateConToken?: string | null
+  rateConSentAt?: string | null
+  rateConSentTo?: string | null
+  rateConExpiresAt?: string | null
+  rateConDocumentId?: string | null
+  rateConSignerName?: string | null
+  rateConSignerIp?: string | null
+  rateConVersion?: number | null
+  bookedAt?: string | null
+  /** Findings the booker acknowledged, kept as the record of what they were told. */
+  bookingWarnings?: string[] | null
+  dispatchedAt?: string | null
+  dispatchNote?: string | null
   createdBy: string
   updatedBy: string
   createdAt: string
@@ -769,6 +813,237 @@ export interface ShipmentLoad extends ShipmentLoadFields {
   customer?: string | null
   rate?: number | null
   miles?: number | null
+  /** What is on the truck, as the booking gates read it. */
+  commodity?: string | null
+  weight?: number | null
+  cargoValueCents?: number | null
+  freightDescription?: string | null
   stops?: Stop[] | null
   updatedAt?: string | null
+}
+
+// ── Step C — carriers ───────────────────────────────────────────────────────
+
+export type CarrierType = 'TL' | 'LTL' | 'CARTAGE' | 'LINEHAUL' | 'AIR' | 'OCEAN' | 'RAIL' | 'AGENT'
+export type CarrierStatus = 'PENDING' | 'REVIEW' | 'ACTIVE' | 'INACTIVE' | 'DO_NOT_USE'
+export type CarrierInactiveReason =
+  | 'EXPIRED_INSURANCE'
+  | 'INACTIVE_AUTHORITY'
+  | 'INACTIVE_AGREEMENT'
+  | 'SAFETY_ISSUES'
+  | 'OTHER'
+export type CarrierDoNotUseReason =
+  | 'DOUBLE_BROKERING'
+  | 'CARGO_CLAIM'
+  | 'THEFT'
+  | 'FRAUD'
+  | 'SUSPICIOUS_ACTIVITY'
+export type CarrierStatusReason = CarrierInactiveReason | CarrierDoNotUseReason
+export type AuthorityStatus = 'ACTIVE' | 'INACTIVE' | 'NONE' | 'UNKNOWN'
+export type SafetyRating = 'SATISFACTORY' | 'CONDITIONAL' | 'UNSATISFACTORY' | 'NONE' | 'UNKNOWN'
+export type ComplianceCheckStatus = 'PASS' | 'FAIL' | 'INCOMPLETE' | 'PARTIAL' | 'NONE'
+export type CarrierEquipment =
+  | 'CONTAINER'
+  | 'FLATBED'
+  | 'POWER_ONLY'
+  | 'REEFER'
+  | 'SPECIALIZED'
+  | 'TANKER'
+  | 'VAN'
+export type InsurancePolicyType =
+  | 'AUTO_LIABILITY'
+  | 'CARGO'
+  | 'GENERAL_LIABILITY'
+  | 'WORKERS_COMP'
+  | 'OTHER'
+export type CarrierContactType =
+  | 'ACCOUNTING'
+  | 'AFTER_HOURS'
+  | 'CLAIMS'
+  | 'DISPATCH'
+  | 'DRIVER'
+  | 'EMERGENCY'
+  | 'MANAGER'
+  | 'OWNER'
+export type CarrierPaymentMethodKind = 'ACH' | 'WIRE' | 'CHECK' | 'ZELLE' | 'VENMO' | 'EFT'
+export type CarrierPayeeType = 'CARRIER' | 'FACTOR'
+export type CarrierDocumentType =
+  | 'AUTHORITY'
+  | 'COI_AUTO'
+  | 'COI_CARGO'
+  | 'COI_GENERAL'
+  | 'W9'
+  | 'CARRIER_AGREEMENT'
+  | 'FACTOR_NOA'
+  | 'CDL'
+  | 'RATE_CON'
+  | 'OTHER'
+export type CarrierDocumentSource = 'UPLOAD' | 'GENERATED' | 'SIGNED'
+export type RateConStatus =
+  | 'NOT_SENT'
+  | 'SENT'
+  | 'OPENED'
+  | 'SIGNED'
+  | 'DECLINED'
+  | 'VOIDED'
+  | 'EXPIRED'
+export type RateConRequiredField =
+  | 'DRIVER_NAME'
+  | 'DRIVER_PHONE'
+  | 'TRUCK_NUMBER'
+  | 'TRAILER_NUMBER'
+  | 'PICKUP_ETA'
+  | 'PLATES'
+  | 'VIN'
+export type BookingRequiredField = 'COMMODITY' | 'DESCRIPTION' | 'VALUE' | 'WEIGHT'
+
+/** One certificate of insurance, as the carrier record stores it. */
+export interface InsurancePolicy {
+  id: string
+  type: InsurancePolicyType
+  company?: string | null
+  policyNumber?: string | null
+  agentName?: string | null
+  agentPhone?: string | null
+  limitCents?: number | null
+  deductibleCents?: number | null
+  effectiveAt?: string | null
+  expiresAt?: string | null
+  exclusions?: string | null
+}
+
+/** One rung of the quick-pay ladder: pay in `days`, keep `feeBps` of the rate. */
+export interface QuickPayTier {
+  days: number
+  feeBps: number
+}
+
+/**
+ * An outside carrier. `status` is what somebody set; what booking actually reads is
+ * `effectiveCarrierStatus`, which can demote an ACTIVE carrier whose cargo insurance
+ * has run out. Compliance portals (Highway, RMIS, MCP) are typed in by hand for now.
+ */
+export interface CarrierRecord {
+  id: string
+  name: string
+  dbaName?: string | null
+  normalizedName?: string | null
+  type: CarrierType
+  status: CarrierStatus
+  statusReason?: CarrierStatusReason | null
+  statusNote?: string | null
+  statusChangedAt?: string | null
+  statusChangedBy?: string | null
+  mcNumber?: string | null
+  dotNumber?: string | null
+  scac?: string | null
+  einNumber?: string | null
+  inFmcsa?: boolean | null
+  authorityStatus?: AuthorityStatus | null
+  authorityGrantedAt?: string | null
+  authorityExpiresAt?: string | null
+  safetyRating?: SafetyRating | null
+  safetyRatingAt?: string | null
+  reviewType?: string | null
+  reviewedAt?: string | null
+  driverInspections?: number | null
+  driverOos?: number | null
+  vehicleInspections?: number | null
+  vehicleOos?: number | null
+  insurancePolicies?: InsurancePolicy[] | null
+  equipment?: string[] | null
+  cargoTypes?: string[] | null
+  powerUnits?: number | null
+  trailerCount?: number | null
+  driverCount?: number | null
+  address?: Record<string, unknown> | null
+  phone?: string | null
+  email?: string | null
+  website?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  paymentTermsDays?: number | null
+  quickPayEligible?: boolean | null
+  defaultQuickPayDays?: number | null
+  factorPaymentMethodId?: string | null
+  highwayStatus?: ComplianceCheckStatus | null
+  rmisStatus?: ComplianceCheckStatus | null
+  mcpStatus?: string | null
+  accountOwnerIds?: string[] | null
+  teamKey?: string | null
+  internalNotes?: string | null
+  loadCount?: number | null
+  lastLoadAt?: string | null
+  createdBy: string
+  updatedBy: string
+  version?: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** A person at the carrier. At most one is `isPrimary`. */
+export interface CarrierContactRecord {
+  id: string
+  carrierId: string
+  name: string
+  types?: CarrierContactType[] | null
+  email?: string | null
+  phone?: string | null
+  isPrimary?: boolean | null
+  rateConRecipient?: boolean | null
+  active?: boolean | null
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Where the carrier's money goes. Only the last four digits are ever stored here. */
+export interface CarrierPaymentMethodRecord {
+  id: string
+  carrierId: string
+  method: CarrierPaymentMethodKind
+  recipientType: CarrierPayeeType
+  factorName?: string | null
+  factorAddress?: Record<string, unknown> | null
+  bankName?: string | null
+  accountName?: string | null
+  accountLast4?: string | null
+  routingLast4?: string | null
+  bankDetailsKey?: string | null
+  payeeEmail?: string | null
+  remitToAddress?: Record<string, unknown> | null
+  isPreferred?: boolean | null
+  status?: 'ACTIVE' | 'INACTIVE' | null
+  createdBy: string
+  updatedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** A file on the carrier — uploaded by us, or generated and signed by them. */
+export interface CarrierDocumentRecord {
+  id: string
+  carrierId: string
+  type: CarrierDocumentType
+  name: string
+  s3Key: string
+  contentType: string
+  sizeBytes: number
+  expiresAt?: string | null
+  loadCarrierId?: string | null
+  source: CarrierDocumentSource
+  uploadedBy: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** Everything one carrier page needs, returned by every carrier mutation. */
+export interface CarrierBundle {
+  carrier: CarrierRecord
+  contacts: CarrierContactRecord[]
+  paymentMethods: CarrierPaymentMethodRecord[]
+  documents: CarrierDocumentRecord[]
+  loadCarriers: LoadCarrierRecord[]
 }

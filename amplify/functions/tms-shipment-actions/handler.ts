@@ -15,6 +15,12 @@
  * Money is integer cents and percentages are basis points, everywhere. Invoicing
  * and payment are never inferred: this handler writes DOCS_NEEDED, UNBILLED and
  * INVOICE_NOT_NEEDED only — UNPAID/PAID belong to step F.
+ *
+ * Step C adds the outside-carrier side: BOOK_CARRIER runs the shared eligibility
+ * gate before it writes an assignment, SET_QUICK_PAY caches the AP deduction,
+ * SEND_RATE_CON/VOID_RATE_CON own the rate confirmation's token and S3 copy, and
+ * DISPATCH_LOAD moves a booked load onto the road. They reuse the same helpers as
+ * everything above — one transaction, one audit row, one CAS.
  */
 import { getAmplifyDataClientConfig, type DataClientEnv } from '@aws-amplify/backend-function/runtime'
 import { Amplify } from 'aws-amplify'
@@ -32,8 +38,10 @@ import {
   type TransactWriteItem,
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
-import { createHash, randomUUID } from 'crypto'
+import { createHash, randomBytes, randomUUID } from 'crypto'
 
 import {
   computeFinancials,
@@ -48,9 +56,13 @@ import {
   shipmentStatusFromLoads,
 } from '../../../src/lib/shipmentStatus'
 import { creditSummaryForCustomer, resolveCreditPolicy, type CreditSummary } from '../../../src/lib/customerCredit'
+import { evaluateCarrierBooking } from '../../../src/lib/carrierEligibility'
+import { quickPayFee, quickPayTiersOf, tierFor } from '../../../src/lib/quickPay'
 import type { Load as LoadForCredit } from '../../../src/types'
 import type {
   ArStatus,
+  CarrierDocumentRecord,
+  CarrierRecord,
   ChargeCalc,
   ChargeSide,
   CustomerRecord,
@@ -67,6 +79,9 @@ import type {
 
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
+// Step C: the rate confirmation's PDF lands on S3 and its email goes out through SES.
+const s3 = new S3Client({})
+const ses = new SESv2Client({})
 
 const SHIPMENT_TABLE_NAME = process.env.SHIPMENT_TABLE_NAME ?? ''
 const ORDER_TABLE_NAME = process.env.ORDER_TABLE_NAME ?? ''
@@ -79,6 +94,13 @@ const SETTINGS_TABLE_NAME = process.env.SETTINGS_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
 const DRIVER_TABLE_NAME = process.env.DRIVER_TABLE_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
+// Step C tables. The carrier directory is written by tms-carrier-actions; this
+// handler only reads it, and writes the booking counters back onto the row.
+const CARRIER_TABLE_NAME = process.env.CARRIER_TABLE_NAME ?? ''
+const CARRIER_DOCUMENT_TABLE_NAME = process.env.CARRIER_DOCUMENT_TABLE_NAME ?? ''
+const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
+const FROM_ADDRESS = process.env.FROM_ADDRESS ?? 'ai4bcat@gmail.com'
+const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -92,6 +114,8 @@ const IDX_ORDERS_BY_CUSTOMER = 'ordersByCustomerIdAndPickupAppt'
 const IDX_CARRIERS_BY_SHIPMENT = 'loadCarriersByShipmentId'
 const IDX_CARRIERS_BY_LOAD = 'loadCarriersByLoadId'
 const IDX_CHARGES_BY_SHIPMENT = 'loadChargesByShipmentIdAndSortOrder'
+const IDX_CARRIERS_BY_CARRIER_ID = 'loadCarriersByCarrierId'
+const IDX_CARRIER_DOCS_BY_CARRIER = 'carrierDocumentsByCarrierIdAndType'
 
 /** DUPLICATE_SHIPMENT ceiling — one transaction per copy, and 20 is the plan's cap. */
 const MAX_DUPLICATE_COPIES = 20
@@ -184,6 +208,20 @@ const STOP_OPS = [
 ] as const
 type StopOp = (typeof STOP_OPS)[number]
 
+// Step C. Why a carrier came off a load is a code, not a sentence — these are the
+// two lists the bounce/TONU dialog offers, one per outcome.
+const BOUNCE_REASONS = ['CARRIER_CANNOT_TAKE', 'GAVE_BACK', 'REJECTED_RATE_CON', 'OTHER'] as const
+const TONU_REASONS = ['CUSTOMER_NOT_READY', 'CONSIGNEE_NOT_READY', 'FORGOT_TO_BOUNCE', 'OTHER'] as const
+/** A bounce/TONU note is a sentence for the next dispatcher, not a narrative. */
+const MAX_REMOVAL_NOTE = 250
+const TRACKING_PROVIDERS = ['NONE', 'MANUAL', 'LINK', 'DRIVER_APP', 'MOTIVE'] as const
+/** A rate con anybody could still sign; sending a new one or bouncing voids it. */
+const OPEN_RATE_CON_STATUSES: readonly string[] = ['SENT', 'OPENED']
+/** Nobody emails a ten-megabyte rate confirmation, and SES would refuse it anyway. */
+const MAX_RATE_CON_BYTES = 10 * 1024 * 1024
+/** How long a signing link lives when neither the caller nor settings say. */
+const DEFAULT_RATE_CON_EXPIRY_HOURS = 48
+
 type Action =
   | 'CREATE_SHIPMENT'
   | 'SAVE_ORDER_FORM'
@@ -198,6 +236,11 @@ type Action =
   | 'UPDATE_STOP'
   | 'ASSIGN_ASSET'
   | 'ASSIGN_CARRIER'
+  | 'BOOK_CARRIER'
+  | 'SET_QUICK_PAY'
+  | 'SEND_RATE_CON'
+  | 'VOID_RATE_CON'
+  | 'DISPATCH_LOAD'
   | 'REMOVE_LOAD_CARRIER'
   | 'RECALC_CHARGES'
   | 'SET_AR_STATUS'
@@ -517,6 +560,24 @@ function updateItemTx(
 
 function deleteItemTx(tableName: string, id: string): TransactWriteItem {
   return { Delete: { TableName: tableName, Key: marshall({ id }) } }
+}
+
+/**
+ * Guard a row this transaction does not itself write: the whole thing is refused
+ * if that row has moved since we read it. Used for the Load behind a booking,
+ * whose own mutation goes through AppSync a moment later.
+ */
+function conditionCheckUpdatedAtTx(tableName: string, id: string, expectedUpdatedAt: string): TransactWriteItem {
+  const values: Record<string, AttributeValue> = {}
+  const ConditionExpression = casCondition(values, expectedUpdatedAt)
+  return {
+    ConditionCheck: {
+      TableName: tableName,
+      Key: marshall({ id }),
+      ConditionExpression,
+      ExpressionAttributeValues: values,
+    },
+  }
 }
 
 async function transact(items: TransactWriteItem[], label: string): Promise<void> {
@@ -2326,13 +2387,23 @@ async function updateStop(input: Row, caller: Caller): Promise<Row> {
  * Retire whichever carrier currently holds the load. Nothing is deleted: the row
  * keeps why it stopped being the answer, which is the entire point of having it.
  */
-function retireCarrier(existing: Row, reason: string, outcome: 'BOUNCED' | 'TONU', caller: Caller): TransactWriteItem {
+function retireCarrier(
+  existing: Row,
+  reason: string,
+  outcome: 'BOUNCED' | 'TONU',
+  caller: Caller,
+  extra: Row = {},
+): TransactWriteItem {
   const now = nowIso()
   return updateItemTx(LOAD_CARRIER_TABLE_NAME, String(existing.id), {
     status: outcome,
     removalReason: reason,
     removedAt: now,
     removedBy: caller.email,
+    // Whatever else leaves with the assignment — the dispatcher's note, a rate con
+    // nobody may sign any more — rides the same update, because DynamoDB refuses two
+    // writes to one item inside one transaction.
+    ...extra,
     updatedBy: caller.email,
     updatedAt: now,
   }, null)
@@ -2419,6 +2490,11 @@ async function assignAsset(input: Row, caller: Caller): Promise<Row> {
 }
 
 async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
+  // A carrier out of the directory goes through the booking gate, which checks its
+  // authority, insurance and documents before it is allowed to hold freight.
+  if (input.carrierId != null) {
+    throw new Error('Use BOOK_CARRIER for a directory carrier')
+  }
   const loadId = assertString(input.loadId, 'loadId')
   const carrierName = assertString(input.carrierName, 'carrierName')
   const carrierRateCents = optionalInteger(input.carrierRateCents, { min: 0, label: 'carrierRateCents' })
@@ -2520,8 +2596,10 @@ async function assignCarrier(input: Row, caller: Caller): Promise<Row> {
 async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
   const outcome = assertEnum(input.outcome, ['BOUNCED', 'TONU'] as const, 'outcome')
-  // Why a carrier came off a load is the whole record; it is never optional.
-  const reason = assertString(input.reason, 'reason')
+  // Why a carrier came off a load is the whole record; it is never optional, and it
+  // is one of the codes that fits the outcome rather than whatever was typed.
+  const reason = assertEnum(input.reason, outcome === 'BOUNCED' ? BOUNCE_REASONS : TONU_REASONS, 'reason')
+  const note = optionalString(input.note, MAX_REMOVAL_NOTE)
 
   const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
   if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
@@ -2531,7 +2609,15 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
   const load = await getById(LOAD_TABLE_NAME, loadId)
   if (!load) throw new Error(`Load not found: ${loadId}`)
 
-  await transact([retireCarrier(carrier, reason, outcome, caller)], 'assignment')
+  // A rate con the carrier could still open is dead the moment they come off.
+  const voidsRateCon = OPEN_RATE_CON_STATUSES.includes(String(carrier.rateConStatus ?? ''))
+  await transact(
+    [retireCarrier(carrier, reason, outcome, caller, {
+      removalNote: note,
+      ...(voidsRateCon ? { rateConStatus: 'VOIDED', rateConToken: null } : {}),
+    })],
+    'assignment',
+  )
 
   // A bounce takes the carrier's money off the load with it. A TONU does not: the
   // truck showed up and is owed, so that line stays and keeps being paid.
@@ -2563,7 +2649,648 @@ async function removeLoadCarrier(input: Row, caller: Caller): Promise<Row> {
     'Load update',
   )
 
-  await writeAudit('LOAD_CARRIER', loadCarrierId, `REMOVE_LOAD_CARRIER:${outcome}`, caller, { loadId, reason })
+  await writeAudit('LOAD_CARRIER', loadCarrierId, `REMOVE_LOAD_CARRIER:${outcome}`, caller, {
+    loadId, reason, note, voidedRateCon: voidsRateCon,
+  })
+  return rederiveShipmentStatus(shipmentId, caller)
+}
+
+// ── Carrier booking (step C) ─────────────────────────────────────────────────
+
+/** A recipient line in an email header; a comma or a newline in one is an attack. */
+function assertEmail(value: unknown, label: string): string {
+  const v = assertString(value, label)
+  if (v.length > 200 || !/^[^\s@,;<>"]+@[^\s@,;<>"]+\.[^\s@,;<>"]+$/.test(v)) {
+    throw new Error(`${label} must be an email address`)
+  }
+  return v
+}
+
+/** What is on the truck, as the order described it — the gate's DESCRIPTION field. */
+function freightDescriptionOf(order: Row | null): string | null {
+  const freight = Array.isArray(order?.freight) ? (order?.freight as Row[]) : []
+  const described = freight
+    .map((f) => (typeof f?.description === 'string' ? f.description.trim() : ''))
+    .filter(Boolean)
+  return described.length > 0 ? described.join('; ') : null
+}
+
+/**
+ * The quick-pay cache carried on a LoadCarrier row. `days` of null clears it; any
+ * other number has to be one of the configured tiers exactly, because a fee nobody
+ * agreed to is a fee we cannot deduct.
+ */
+function quickPayPatch(days: number | null, rateCents: number, settings: Row | null): Row {
+  if (days == null) {
+    return { quickPay: false, quickPayDays: null, quickPayFeeBps: null, quickPayFeeCents: null }
+  }
+  const tier = tierFor(days, quickPayTiersOf(settings as unknown as TmsSettingsRecord | null))
+  if (!tier) throw new Error(`${days} days is not one of the quick-pay tiers`)
+  return {
+    quickPay: true,
+    quickPayDays: tier.days,
+    quickPayFeeBps: tier.feeBps,
+    quickPayFeeCents: quickPayFee(rateCents, tier.feeBps),
+  }
+}
+
+/**
+ * What one carrier alone is owed: their own CARRIER-side charge lines. The load's
+ * cached totals are the whole load's and, after a TONU and a rebook, still carry
+ * the retired carrier's retained line — never the basis for this carrier's pay.
+ */
+function carrierOwnCostCents(charges: Row[], loadCarrierId: string): number {
+  return charges
+    .filter((c) => c.side === 'CARRIER' && String(c.loadCarrierId ?? '') === loadCarrierId)
+    .reduce((sum, c) => sum + (numberOrNull(c.amountCents) ?? 0), 0)
+}
+
+/**
+ * Book a directory carrier onto a load.
+ *
+ * Everything that could stop the booking is decided by `evaluateCarrierBooking`,
+ * the same library the dialog previewed with: blocks refuse, warnings have to be
+ * acknowledged by key, and the keys that were acknowledged are kept on the row so
+ * the next person can see what was waved through and by whom.
+ */
+async function bookCarrier(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const expectedUpdatedAt = assertExpectedUpdatedAt(input)
+  const carrierId = assertString(input.carrierId, 'carrierId')
+  // Read without a floor: a negative buy is NEGATIVE_CARRIER_CHARGE, refused by the
+  // gate with every other reason rather than on its own.
+  const carrierRateCents = optionalInteger(input.carrierRateCents, { label: 'carrierRateCents' })
+  if (carrierRateCents == null) throw new Error('carrierRateCents is required')
+  const acknowledged = input.acknowledgeWarnings == null
+    ? []
+    : assertArrayOf(input.acknowledgeWarnings, 'acknowledgeWarnings', (v, i) =>
+        assertString(v, `acknowledgeWarnings[${i}]`))
+  const contactId = optionalString(input.contactId, 100)
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  if (String(load.updatedAt ?? '') !== expectedUpdatedAt) throw conflictError('load', null)
+  if (String(load.status ?? '') !== 'SOURCING') {
+    throw new Error('Only a load that is still sourcing can be booked')
+  }
+
+  const bundle = await readBundle(shipmentId)
+  const { shipment } = bundle
+  if (shipment.deletedAt) throw new Error('That shipment is deleted')
+  const mode = optionalEnum(shipment.mode, SHIPMENT_MODES, 'mode')
+  if (!isTruckloadMode(mode)) throw new Error('Only a truckload shipment books an outside carrier')
+  if (bundle.loadCarriers.some((c) => c.loadId === loadId && c.status === 'ACTIVE')) {
+    throw new Error('That load already has an active assignment')
+  }
+  const order = bundle.orders.find((o) => o.id === load.orderId) ?? bundle.orders[0] ?? null
+  const orderId = optionalString(load.orderId, 100) ?? optionalString(order?.id, 100) ?? ''
+  const existingFinancials = bundle.financials.find((f) => f.id === loadId) ?? null
+  if (existingFinancials?.frozenAt) {
+    throw new Error('This load\'s financials are frozen and can no longer be changed')
+  }
+
+  const [carrier, documents, settings] = await Promise.all([
+    getById(CARRIER_TABLE_NAME, carrierId),
+    queryIndex(CARRIER_DOCUMENT_TABLE_NAME, IDX_CARRIER_DOCS_BY_CARRIER, 'carrierId', carrierId),
+    getSettings(),
+  ])
+  if (!carrier) throw new Error(`Carrier not found: ${carrierId}`)
+  const carrierName = optionalString(carrier.name, 200)
+
+  // Everything else this carrier is already holding, with the day it loads: a truck
+  // promised to two shippers at the same hour is the oldest way to lose freight.
+  const otherRows = (await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_CARRIER_ID, 'carrierId', carrierId))
+    .filter((c) => c.status === 'ACTIVE' && String(c.loadId) !== loadId)
+  const otherLoads = await batchGetByIds(LOAD_TABLE_NAME, otherRows.map((c) => String(c.loadId)))
+  const pickupByLoad = new Map(otherLoads.map((l) => [String(l.id), optionalString(l.pickupAppt, 60)]))
+
+  const { blocks, warnings } = evaluateCarrierBooking({
+    carrier: carrier as unknown as CarrierRecord,
+    documents: documents as unknown as CarrierDocumentRecord[],
+    load: {
+      id: loadId,
+      pickupAppt: optionalString(load.pickupAppt, 60),
+      commodity: optionalString(load.commodity, 200),
+      weight: numberOrNull(load.weight),
+      cargoValueCents: numberOrNull(load.cargoValueCents),
+      freightDescription: freightDescriptionOf(order),
+      activeLoadCarrierId: optionalString(load.activeLoadCarrierId, 100),
+      assignmentType: optionalString(load.assignmentType, 40),
+    },
+    financials: existingFinancials ? { topSpendCents: numberOrNull(existingFinancials.topSpendCents) } : null,
+    carrierRateCents,
+    otherActiveLoadCarriers: otherRows.map((c) => ({
+      loadId: String(c.loadId),
+      pickupAppt: pickupByLoad.get(String(c.loadId)) ?? null,
+    })),
+    settings: settings as unknown as TmsSettingsRecord | null,
+    now: nowIso(),
+    isAdmin: caller.isAdmin,
+  })
+
+  if (blocks.length > 0) {
+    throw new Error(`${carrierName ?? 'That carrier'} cannot be booked: ${blocks.map((b) => b.detail).join(' ')}`)
+  }
+  const acknowledgedKeys = new Set(acknowledged)
+  const unacknowledged = warnings.filter((w) => !acknowledgedKeys.has(w.key))
+  if (unacknowledged.length > 0) {
+    throw new Error(`Acknowledge these before booking: ${unacknowledged.map((w) => w.detail).join(' ')}`)
+  }
+  // Defence in depth: an admin-only finding is already a block for everybody else,
+  // so a non-admin arriving here having ticked one is not to be taken at their word.
+  if (!caller.isAdmin) {
+    const adminOnly = warnings.filter((w) => w.adminOnly && acknowledgedKeys.has(w.key))
+    if (adminOnly.length > 0) {
+      throw new Error(`Only an admin can book past: ${adminOnly.map((w) => w.detail).join(' ')}`)
+    }
+  }
+
+  const customer = await getById(CUSTOMER_TABLE_NAME, String(shipment.customerId))
+  const rules = chargeCodeRules(settings, customer)
+  const newCarrierId = `lcr-${randomUUID()}`
+  const linehaul: ChargeInput = {
+    id: null,
+    side: 'CARRIER',
+    code: 'LINEHAUL',
+    label: 'Linehaul',
+    calculatedBy: 'FLAT',
+    rateCents: carrierRateCents,
+    count: 1,
+    isRate: true,
+    release: null,
+    sortOrder: 0,
+    note: null,
+    loadId,
+    loadCarrierId: newCarrierId,
+  }
+  const added: ChargeInput[] = [
+    linehaul,
+    ...(input.charges == null
+      ? []
+      : assertArrayOf(input.charges, 'charges', (item, i) => validateChargeInput(item, i, rules))
+    ).map((c) => ({
+      ...c,
+      loadId: c.loadId ?? loadId,
+      loadCarrierId: c.side === 'CARRIER' ? c.loadCarrierId ?? newCarrierId : null,
+    })),
+  ]
+  // The load's existing lines are priced again with the new ones so the cached
+  // totals are the whole load's, not just the carrier's slice of it.
+  const kept = bundle.charges.filter((c) =>
+    c.loadId ? String(c.loadId) === loadId : String(c.orderId ?? '') === orderId)
+  const { amounts, totals } = priceFor(
+    [...kept.map(chargeRowToInput), ...added],
+    { miles: numberOrNull(load.miles), weightLbs: numberOrNull(load.weight) },
+    pricingDefaultsOf(customer),
+    marginFloorBpsOf(settings),
+  )
+  const addedRows = added.map((c, i) =>
+    chargeRow(c, amounts[kept.length + i], { shipmentId, orderId, loadId }, caller))
+  // Money on a LoadCarrier is that carrier's own — the rate agreed with them and
+  // the charge lines booked against their row. Money on LoadFinancials is the
+  // whole load's, which after a TONU still carries the retired carrier's line.
+  // Mixing the two pays a new carrier a previous carrier's money on the rate con.
+  const carrierCostCents = carrierOwnCostCents(addedRows, newCarrierId)
+
+  const now = nowIso()
+  const sequence = bundle.loadCarriers
+    .filter((c) => c.loadId === loadId)
+    .reduce((max, c) => Math.max(max, numberOrNull(c.sequence) ?? 0), 0) + 1
+  const equipmentType = optionalString(input.equipmentType, 80) ?? optionalString(load.equipmentType, 80)
+  const trackingProvider = optionalEnum(input.trackingProvider, TRACKING_PROVIDERS, 'trackingProvider') ?? 'MANUAL'
+  const paymentTermsDays =
+    optionalInteger(input.paymentTermsDays, { min: 0, max: 365, label: 'paymentTermsDays' }) ??
+    numberOrNull(carrier.paymentTermsDays) ??
+    numberOrNull(settings?.defaultCarrierTermsDays)
+  const quickPay = quickPayPatch(
+    optionalInteger(input.quickPayDays, { min: 1, max: 365, label: 'quickPayDays' }),
+    carrierRateCents,
+    settings,
+  )
+
+  const loadCarrier: Row = {
+    id: newCarrierId,
+    __typename: 'LoadCarrier',
+    loadId,
+    shipmentId,
+    kind: 'CARRIER',
+    status: 'ACTIVE',
+    sequence,
+    // A snapshot of who was booked: the directory may be edited afterwards, but
+    // this is the carrier the rate confirmation names.
+    carrierId,
+    carrierName,
+    carrierMc: optionalString(carrier.mcNumber, 40),
+    carrierRepId: optionalString(input.carrierRepId, 100) ?? optionalString(load.carrierRepId, 100),
+    dispatcherName: optionalString(input.dispatcherName, 120) ?? optionalString(carrier.dispatcherName, 120),
+    dispatcherPhone: optionalString(input.dispatcherPhone, 40) ?? optionalString(carrier.dispatcherPhone, 40),
+    dispatcherEmail: optionalString(input.dispatcherEmail, 200) ?? optionalString(carrier.dispatcherEmail, 200),
+    driverName: optionalString(input.driverName, 120),
+    driverPhone: optionalString(input.driverPhone, 40),
+    driver2Name: optionalString(input.driver2Name, 120),
+    driver2Phone: optionalString(input.driver2Phone, 40),
+    truckNumber: optionalString(input.truckNumber, 40),
+    trailerNumber: optionalString(input.trailerNumber, 40),
+    plates: optionalString(input.plates, 40),
+    vin: optionalString(input.vin, 40),
+    paymentTermsDays,
+    ...quickPay,
+    rateConStatus: 'NOT_SENT',
+    rateConVersion: 0,
+    bookedAt: now,
+    bookingWarnings: warnings.map((w) => w.key),
+    carrierRateCents,
+    costCents: carrierCostCents,
+    apStatus: 'AWAITING_INVOICE',
+    createdBy: caller.email,
+    updatedBy: caller.email,
+    createdAt: now,
+    updatedAt: now,
+  }
+
+  await transact(
+    [
+      // The Load itself is written through AppSync a moment later, under the same
+      // CAS. Guarding it here too means a load that moved since we read it leaves
+      // no ACTIVE assignment, no charges and no bumped loadCount behind.
+      conditionCheckUpdatedAtTx(LOAD_TABLE_NAME, loadId, expectedUpdatedAt),
+      putItem(LOAD_CARRIER_TABLE_NAME, loadCarrier),
+      ...addedRows.map((row) => putItem(LOAD_CHARGE_TABLE_NAME, row)),
+      putItem(
+        LOAD_FINANCIALS_TABLE_NAME,
+        financialsRow(
+          loadId,
+          shipmentId,
+          orderId || null,
+          totals,
+          (numberOrNull(existingFinancials?.version) ?? 0) + 1,
+          caller,
+          existingFinancials,
+        ),
+        false,
+      ),
+      // How much freight a carrier has hauled for us, kept on their own row so the
+      // directory can sort by it without reading every load.
+      updateItemTx(CARRIER_TABLE_NAME, carrierId, {
+        loadCount: (numberOrNull(carrier.loadCount) ?? 0) + 1,
+        lastLoadAt: now,
+        updatedBy: caller.email,
+        updatedAt: now,
+      }, null),
+    ],
+    'booking',
+  )
+
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update(
+      {
+        id: loadId,
+        assignmentType: 'CARRIER',
+        activeLoadCarrierId: newCarrierId,
+        carrierName,
+        equipmentType,
+        trackingProvider,
+        status: 'BOOKED',
+        statusChangedAt: now,
+        statusChangedBy: caller.email,
+        statusSource: 'USER',
+        updatedBy: caller.email,
+      },
+      { condition: { updatedAt: { eq: expectedUpdatedAt } } },
+    ),
+    'Load update',
+  )
+
+  await writeAudit('LOAD_CARRIER', newCarrierId, 'BOOK_CARRIER', caller, {
+    loadId,
+    carrierId,
+    carrierRateCents,
+    contactId,
+    blocks: [],
+    warnings: warnings.map((w) => w.key),
+    acknowledged,
+  })
+  return rederiveShipmentStatus(shipmentId, caller)
+}
+
+// ── SET_QUICK_PAY ────────────────────────────────────────────────────────────
+
+/**
+ * Quick pay is a deduction from what we owe the carrier, cached here so AP never
+ * has to re-derive it. It is not a charge line: the rate confirmation prints it as
+ * an informational net-payable, and the money moves in step G.
+ */
+async function setQuickPay(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const quickPayDays = optionalInteger(input.quickPayDays, { min: 1, max: 365, label: 'quickPayDays' })
+
+  const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  const status = String(carrier.status ?? '')
+  if (status !== 'ACTIVE' && status !== 'TONU') {
+    throw new Error('Quick pay belongs to an assignment that is still owed money')
+  }
+  if (carrier.chargesFinalizedAt) {
+    throw new Error('This assignment\'s charges are finalized and can no longer be changed')
+  }
+  const loadId = String(carrier.loadId)
+  const shipmentId = String(carrier.shipmentId)
+  const financials = await getById(LOAD_FINANCIALS_TABLE_NAME, loadId)
+  if (financials?.frozenAt) {
+    throw new Error('This load\'s financials are frozen and can no longer be changed')
+  }
+
+  const settings = quickPayDays == null ? null : await getSettings()
+  // The fee is a deduction from what THIS carrier is owed. Their own lines are the
+  // basis; the row's cached rate is the fallback for an assignment that has none.
+  const ownCharges = quickPayDays == null
+    ? []
+    : await queryIndex(LOAD_CHARGE_TABLE_NAME, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const ownCostCents = carrierOwnCostCents(ownCharges, loadCarrierId)
+  const basisCents = ownCostCents > 0 ? ownCostCents : numberOrNull(carrier.carrierRateCents) ?? 0
+  const patch = quickPayPatch(quickPayDays, basisCents, settings)
+  const now = nowIso()
+  await transact(
+    [updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
+      ...patch,
+      updatedBy: caller.email,
+      updatedAt: now,
+    }, null)],
+    'quick pay',
+  )
+
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'SET_QUICK_PAY', caller, { loadId, ...patch })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+// ── Rate confirmation ────────────────────────────────────────────────────────
+
+/** Split a base64 blob into 76-char MIME lines (RFC 2045). */
+function wrap76(b64: string): string {
+  return (b64.match(/.{1,76}/g) ?? []).join('\r\n')
+}
+
+/**
+ * The rate confirmation, as the carrier receives it: the PDF attached, and the
+ * signing link they open to agree to it. Built as raw MIME because SES's simple
+ * content has nowhere to put an attachment.
+ */
+async function sendRateConEmail(args: {
+  to: string[]
+  cc: string[]
+  subject: string
+  body: string
+  filename: string
+  pdfBase64: string
+}): Promise<void> {
+  const boundary = `=_bcatratecon_${Date.now().toString(36)}`
+  const raw =
+    `From: ${FROM_ADDRESS}\r\n` +
+    `To: ${args.to.join(', ')}\r\n` +
+    (args.cc.length > 0 ? `Cc: ${args.cc.join(', ')}\r\n` : '') +
+    `Subject: ${args.subject}\r\n` +
+    `MIME-Version: 1.0\r\n` +
+    `Content-Type: multipart/mixed; boundary="${boundary}"\r\n` +
+    `\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: text/plain; charset=UTF-8\r\n` +
+    `Content-Transfer-Encoding: 7bit\r\n` +
+    `\r\n` +
+    `${args.body}\r\n` +
+    `\r\n` +
+    `--${boundary}\r\n` +
+    `Content-Type: application/pdf; name="${args.filename}"\r\n` +
+    `Content-Transfer-Encoding: base64\r\n` +
+    `Content-Disposition: attachment; filename="${args.filename}"\r\n` +
+    `\r\n` +
+    `${wrap76(args.pdfBase64)}\r\n` +
+    `--${boundary}--\r\n`
+
+  await ses.send(new SendEmailCommand({
+    FromEmailAddress: FROM_ADDRESS,
+    Destination: { ToAddresses: args.to, CcAddresses: args.cc.length > 0 ? args.cc : undefined },
+    Content: { Raw: { Data: new TextEncoder().encode(raw) } },
+  }))
+}
+
+/**
+ * Send the rate confirmation the browser built.
+ *
+ * Each send is a new version: a fresh PDF on S3, a fresh CarrierDocument row, and a
+ * fresh token — which is exactly what voids the previous link, since the token is
+ * the only way into the signing page.
+ */
+async function sendRateCon(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const pdfBase64 = assertString(input.pdfBase64, 'pdfBase64')
+  const to = assertArrayOf(input.to, 'to', (v, i) => assertEmail(v, `to[${i}]`), 20)
+  if (to.length === 0) throw new Error('A rate confirmation needs at least one recipient')
+  const cc = input.cc == null ? [] : assertArrayOf(input.cc, 'cc', (v, i) => assertEmail(v, `cc[${i}]`), 20)
+  const expiresHours = optionalInteger(input.expiresHours, { min: 1, max: 720, label: 'expiresHours' })
+
+  const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (carrier.status !== 'ACTIVE') {
+    throw new Error('Only the carrier currently on the load can be sent a rate confirmation')
+  }
+  const carrierId = optionalString(carrier.carrierId, 100)
+  if (!carrierId) throw new Error('That assignment is not a directory carrier; book it with BOOK_CARRIER first')
+  const loadId = String(carrier.loadId)
+  const shipmentId = String(carrier.shipmentId)
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  if (!BUCKET_NAME) throw new Error('Document storage is not configured')
+
+  const bytes = Buffer.from(pdfBase64, 'base64')
+  if (bytes.length === 0) throw new Error('pdfBase64 is not a readable document')
+  if (bytes.length > MAX_RATE_CON_BYTES) throw new Error('That rate confirmation is too large to send')
+
+  const settings = await getSettings()
+  const version = (numberOrNull(carrier.rateConVersion) ?? 0) + 1
+  const loadNumber = optionalString(load.loadNumber, 60) ?? loadId
+  const s3Key = `rate-confirms/carrier/${loadId}/${loadCarrierId}-v${version}.pdf`
+  await s3.send(new PutObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: s3Key,
+    Body: bytes,
+    ContentType: 'application/pdf',
+  }))
+
+  const hours = expiresHours ?? numberOrNull(settings?.rateConExpiryHours) ?? DEFAULT_RATE_CON_EXPIRY_HOURS
+  const now = nowIso()
+  const expiresAt = new Date(Date.now() + hours * 3_600_000).toISOString()
+  const token = randomBytes(32).toString('base64url')
+  const documentId = `cdoc-${randomUUID()}`
+  const filename = `rate-con-${loadNumber}-v${version}.pdf`
+
+  await transact(
+    [
+      putItem(CARRIER_DOCUMENT_TABLE_NAME, {
+        id: documentId,
+        __typename: 'CarrierDocument',
+        carrierId,
+        type: 'RATE_CON',
+        name: filename,
+        s3Key,
+        contentType: 'application/pdf',
+        sizeBytes: bytes.length,
+        expiresAt: null,
+        loadCarrierId,
+        source: 'GENERATED',
+        uploadedBy: caller.email,
+        createdAt: now,
+        updatedAt: now,
+      }),
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
+        rateConStatus: 'SENT',
+        rateConToken: token,
+        rateConSentAt: now,
+        rateConSentTo: to.join(', '),
+        rateConExpiresAt: expiresAt,
+        rateConDocumentId: documentId,
+        rateConVersion: version,
+        // The signing API's per-token rate limit counts from zero for each new link.
+        rateConRequestCount: 0,
+        updatedBy: caller.email,
+        updatedAt: now,
+      }, null),
+    ],
+    'rate confirmation',
+  )
+
+  const signUrl = PORTAL_ORIGIN
+    ? `${PORTAL_ORIGIN.replace(/\/+$/, '')}/sign/rate-con/${token}`
+    : ''
+  const body =
+    `Attached is the rate confirmation for load ${loadNumber}.\r\n\r\n` +
+    (signUrl ? `Review and sign it here: ${signUrl}\r\n\r\n` : '') +
+    `This link expires ${expiresAt}.\r\n\r\n— Ivan Cartage`
+  try {
+    await sendRateConEmail({
+      to,
+      cc,
+      subject: `Rate confirmation — load ${loadNumber}`,
+      body,
+      filename,
+      pdfBase64,
+    })
+  } catch (err) {
+    console.error('[tms-shipment-actions] rate con email failed', err)
+    // ES2020 lib lacks the ErrorOptions constructor; attach the cause explicitly.
+    const failure = new Error(`The rate confirmation was saved but the email could not be sent: ${String(err)}`)
+    ;(failure as Error & { cause?: unknown }).cause = err
+    throw failure
+  }
+
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'SEND_RATE_CON', caller, {
+    loadId, version, to, cc, expiresAt, documentId, s3Key,
+  })
+  return readBundle(shipmentId) as unknown as Row
+}
+
+/** Kill the open link without putting anybody else on the load. */
+async function voidRateCon(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const carrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!carrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  const status = String(carrier.rateConStatus ?? 'NOT_SENT')
+  if (!OPEN_RATE_CON_STATUSES.includes(status)) {
+    throw new Error('Only a rate confirmation that has been sent and not yet signed can be voided')
+  }
+  const now = nowIso()
+  await transact(
+    [updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
+      rateConStatus: 'VOIDED',
+      rateConToken: null,
+      updatedBy: caller.email,
+      updatedAt: now,
+    }, null)],
+    'rate confirmation',
+  )
+  await writeAudit('LOAD_CARRIER', loadCarrierId, 'VOID_RATE_CON', caller, {
+    loadId: String(carrier.loadId), from: status,
+  })
+  return readBundle(String(carrier.shipmentId)) as unknown as Row
+}
+
+// ── DISPATCH_LOAD ────────────────────────────────────────────────────────────
+
+/**
+ * Put a booked load on the road. An unsigned rate confirmation does not stop a
+ * dispatch — the truck is already rolling — but it is written onto the assignment
+ * so nobody has to remember it was never signed.
+ */
+async function dispatchLoad(input: Row, caller: Caller): Promise<Row> {
+  const loadId = assertString(input.loadId, 'loadId')
+  const dispatchedAt = assertIso(input.dispatchedAt, 'dispatchedAt')
+
+  const load = await getById(LOAD_TABLE_NAME, loadId)
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  const shipmentId = optionalString(load.shipmentId, 100)
+  if (!shipmentId) throw new Error('That load is not part of a shipment yet')
+  const current = (optionalEnum(load.status, LOAD_STATUS_VALUES, 'status') ?? null) as LoadWorkflowStatus | null
+  if (current !== 'BOOKED') throw new Error('Only a booked load can be dispatched')
+  if (!canTransitionLoadStatus(current, 'DISPATCHED')) {
+    throw new Error(`A load cannot go from ${current ?? 'SOURCING'} to DISPATCHED`)
+  }
+
+  const carriers = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_LOAD, 'loadId', loadId)
+  const active = carriers.find((c) => c.status === 'ACTIVE') ?? null
+  if (!active) throw new Error('That load has nobody on it to dispatch')
+
+  const warnings = new Set(
+    (Array.isArray(active.bookingWarnings) ? active.bookingWarnings : []).map((w) => String(w)),
+  )
+  if (String(active.rateConStatus ?? '') !== 'SIGNED') warnings.add('RATE_CON_NOT_SIGNED')
+
+  const now = nowIso()
+  const patch: Row = {
+    dispatchedAt,
+    dispatchNote: optionalString(input.note, 1000),
+    bookingWarnings: [...warnings],
+    updatedBy: caller.email,
+    updatedAt: now,
+  }
+  // Only what the dispatcher filled in moves; a blank box never clears what the
+  // carrier already told us at booking.
+  const pickupEtaAt = optionalIso(input.pickupEtaAt, 'pickupEtaAt')
+  if (pickupEtaAt) patch.pickupEtaAt = pickupEtaAt
+  const driverName = optionalString(input.driverName, 120)
+  if (driverName) patch.driverName = driverName
+  const driverPhone = optionalString(input.driverPhone, 40)
+  if (driverPhone) patch.driverPhone = driverPhone
+  const truckNumber = optionalString(input.truckNumber, 40)
+  if (truckNumber) patch.truckNumber = truckNumber
+  const trailerNumber = optionalString(input.trailerNumber, 40)
+  if (trailerNumber) patch.trailerNumber = trailerNumber
+  await transact([updateItemTx(LOAD_CARRIER_TABLE_NAME, String(active.id), patch, null)], 'dispatch')
+
+  const trackingProvider = optionalEnum(input.trackingProvider, TRACKING_PROVIDERS, 'trackingProvider')
+  const nextCheckCallAt = optionalIso(input.nextCheckCallAt, 'nextCheckCallAt')
+  const nextCheckCallNote = optionalString(input.nextCheckCallNote, 1000)
+  const client = await getDataClient()
+  assertLoadWriteOk(
+    await client.models.Load.update({
+      id: loadId,
+      status: 'DISPATCHED',
+      statusChangedAt: now,
+      statusChangedBy: caller.email,
+      statusSource: 'USER',
+      ...(trackingProvider ? { trackingProvider } : {}),
+      // The sparse marker is what the check-call worklist is built from.
+      ...(nextCheckCallAt ? { nextCheckCallAt, checkCallOpen: 'OPEN' } : {}),
+      ...(nextCheckCallNote ? { nextCheckCallNote } : {}),
+      updatedBy: caller.email,
+    }),
+    'Load update',
+  )
+
+  await writeAudit('LOAD_CARRIER', String(active.id), 'DISPATCH_LOAD', caller, {
+    loadId, dispatchedAt, warnings: [...warnings],
+  })
   return rederiveShipmentStatus(shipmentId, caller)
 }
 
@@ -2636,9 +3363,19 @@ async function recalcCharges(input: Row, caller: Caller): Promise<Row> {
     }, String(shipment.updatedAt ?? '')),
   ]
   if (activeCarrier) {
-    writes.push(updateItemTx(LOAD_CARRIER_TABLE_NAME, String(activeCarrier.id), {
-      carrierRateCents: totals.carrierRateCents,
-      costCents: totals.costCents,
+    const activeCarrierId = String(activeCarrier.id)
+    // Their own lines, not the load's totals: a TONU'd carrier's retained line is
+    // still on the load and is not this carrier's money.
+    const ownCostCents = carrierOwnCostCents(chargeRows, activeCarrierId)
+    const ownRateCents = carrierOwnCostCents(chargeRows.filter((r) => r.isRate === true), activeCarrierId)
+    writes.push(updateItemTx(LOAD_CARRIER_TABLE_NAME, activeCarrierId, {
+      carrierRateCents: ownRateCents,
+      costCents: ownCostCents,
+      // The quick-pay fee is cached off that money, so an edited rate moves it;
+      // left alone it prints a stale fee and net payable on the rate con.
+      ...(activeCarrier.quickPay === true
+        ? { quickPayFeeCents: quickPayFee(ownCostCents, numberOrNull(activeCarrier.quickPayFeeBps) ?? 0) }
+        : {}),
       updatedBy: caller.email,
       updatedAt: now,
     }, null))
@@ -3088,6 +3825,16 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return assignAsset(input, caller)
     case 'ASSIGN_CARRIER':
       return assignCarrier(input, caller)
+    case 'BOOK_CARRIER':
+      return bookCarrier(input, caller)
+    case 'SET_QUICK_PAY':
+      return setQuickPay(input, caller)
+    case 'SEND_RATE_CON':
+      return sendRateCon(input, caller)
+    case 'VOID_RATE_CON':
+      return voidRateCon(input, caller)
+    case 'DISPATCH_LOAD':
+      return dispatchLoad(input, caller)
     case 'REMOVE_LOAD_CARRIER':
       return removeLoadCarrier(input, caller)
     case 'RECALC_CHARGES':

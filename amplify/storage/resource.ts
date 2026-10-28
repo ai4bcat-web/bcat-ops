@@ -99,5 +99,18 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
+    /*
+     * Carrier paperwork (Step C): authority, COIs, W9, the signed agreement, and
+     * every rate confirmation we generate or get back signed. Staff upload with
+     * a presigned PUT from tms-carrier-actions; the public signing Lambda writes
+     * the countersigned PDF with its own role.
+     *
+     * No delete for authenticated: DELETE_DOCUMENT removes the row and leaves
+     * the object, so what a carrier actually sent us survives a mis-click.
+     */
+    'carrier-docs/*': [
+      allow.authenticated.to(['read', 'write']),
+      allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
+    ],
   })
 })

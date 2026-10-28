@@ -7,7 +7,7 @@
  * menu honest, but nothing here is a security boundary.
  */
 import { useState } from 'react'
-import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Trash2, Check, X, Truck, Building2, UserMinus } from 'lucide-react'
+import { MoreHorizontal, Copy, PauseCircle, PlayCircle, Ban, RotateCcw, Trash2, Check, X, Truck, Building2, UserMinus, FileSignature } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,14 +17,40 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { MoneyField } from '@/features/directory/components/MoneyField'
-import { nextLoadStatuses, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
+import { nextLoadStatuses, LOAD_WORKFLOW_STATUS_LABELS, isTruckloadMode } from '@/lib/shipmentStatus'
 import { formatDateTimeInput, fromDateTimeInput } from '@/lib/date'
+import { formatCents } from '@/lib/tmsDirectory'
+import { BookCarrierDialog, type BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
+import type { RemoveLoadCarrierReason } from '@/lib/apiClient'
 import type { Driver } from '@/types'
 import type { Equipment } from '@/types/equipment'
-import type { ArStatus, LoadCarrierRecord, LoadWorkflowStatus, ShipmentLoad, ShipmentMode, ShipmentRecord } from '@/types/tms'
+import type {
+  ArStatus, LoadCarrierRecord, LoadWorkflowStatus, ShipmentBundle, ShipmentLoad, ShipmentMode, ShipmentRecord,
+} from '@/types/tms'
 
 /** UNPAID and PAID are written by invoicing (step F), never set by hand here. */
 const SETTABLE_AR_STATUSES = ['DOCS_NEEDED', 'UNBILLED', 'INVOICE_NOT_NEEDED'] as const
+
+/**
+ * Why an assignment ended. A bounce is the carrier falling off and keeping nothing; a
+ * TONU is the truck showing up to nothing and being paid for it — so the two lists are
+ * different questions, not two spellings of one.
+ */
+const BOUNCE_REASONS: { value: RemoveLoadCarrierReason; label: string }[] = [
+  { value: 'CARRIER_CANNOT_TAKE', label: 'Carrier cannot take it' },
+  { value: 'GAVE_BACK', label: 'Carrier gave it back' },
+  { value: 'REJECTED_RATE_CON', label: 'Rejected the rate con' },
+  { value: 'OTHER', label: 'Other' },
+]
+const TONU_REASONS: { value: RemoveLoadCarrierReason; label: string }[] = [
+  { value: 'CUSTOMER_NOT_READY', label: 'Customer not ready' },
+  { value: 'CONSIGNEE_NOT_READY', label: 'Consignee not ready' },
+  { value: 'FORGOT_TO_BOUNCE', label: 'Forgot to bounce' },
+  { value: 'OTHER', label: 'Other' },
+]
+
+/** A removal note is a sentence for the next booker, not a file. */
+const REMOVAL_NOTE_MAX = 250
 
 export interface ShipmentActionHandlers {
   onDuplicate: (copies: { pickupAppt: string; deliveryAppt: string }[], sameCarrier: boolean) => Promise<void>
@@ -169,25 +195,39 @@ export interface LoadActionHandlers {
     carrierName: string; carrierMc?: string; dispatcherName?: string; dispatcherPhone?: string
     driverName?: string; driverPhone?: string; carrierRateCents?: number
   }) => Promise<void>
-  onRemoveCarrier: (loadCarrierId: string, outcome: 'BOUNCED' | 'TONU', reason: string) => Promise<void>
+  /** A directory carrier: everything the gate checks, acknowledged warnings included. */
+  onBookCarrier: (input: BookCarrierFields) => Promise<void>
+  onRemoveCarrier: (
+    loadCarrierId: string, outcome: 'BOUNCED' | 'TONU', reason: RemoveLoadCarrierReason, note?: string,
+  ) => Promise<void>
   onSetArStatus: (status: 'DOCS_NEEDED' | 'UNBILLED' | 'INVOICE_NOT_NEEDED') => Promise<void>
 }
 
-type LoadDialog = { kind: 'asset' } | { kind: 'carrier' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
+type LoadDialog =
+  | { kind: 'asset' } | { kind: 'carrier' } | { kind: 'book' } | { kind: 'remove'; outcome: 'BOUNCED' | 'TONU' } | null
 
-export function LoadActions({ load, mode, activeCarrier, drivers, trucks, trailers, arStatus, handlers }: {
+export function LoadActions({
+  load, mode, bundle, activeCarrier, drivers, trucks, trailers, arStatus, isAdmin, handlers, onRateCon,
+}: {
   load: ShipmentLoad
   mode: ShipmentMode
+  bundle: ShipmentBundle
   activeCarrier: LoadCarrierRecord | null
   drivers: Driver[]
   trucks: Equipment[]
   trailers: Equipment[]
   arStatus: ArStatus | null
+  isAdmin: boolean
   handlers: LoadActionHandlers
+  /** The booker asked for the rate con straight after booking. */
+  onRateCon: () => void
 }) {
   const [dialog, setDialog] = useState<LoadDialog>(null)
   const [busy, setBusy] = useState(false)
   const nextStatuses = load.status ? nextLoadStatuses(load.status, mode) : []
+  // BOOK_CARRIER is the truckload path and only exists while the load is still being
+  // covered; everything else keeps the name-only assignment it always had.
+  const bookable = load.status === 'SOURCING' && isTruckloadMode(mode) && !activeCarrier
 
   // Same contract as the shipment menu: the error is already on screen as a toast.
   const run = async (fn: () => Promise<void>) => {
@@ -208,8 +248,13 @@ export function LoadActions({ load, mode, activeCarrier, drivers, trucks, traile
           <DropdownMenuItem onSelect={() => setDialog({ kind: 'asset' })}>
             <Truck size={14} className="mr-2" />Assign own asset
           </DropdownMenuItem>
+          {bookable && (
+            <DropdownMenuItem onSelect={() => setDialog({ kind: 'book' })}>
+              <FileSignature size={14} className="mr-2" />Book carrier
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onSelect={() => setDialog({ kind: 'carrier' })}>
-            <Building2 size={14} className="mr-2" />Assign carrier
+            <Building2 size={14} className="mr-2" />Assign carrier (name only)
           </DropdownMenuItem>
           {activeCarrier && (
             <>
@@ -258,14 +303,23 @@ export function LoadActions({ load, mode, activeCarrier, drivers, trucks, traile
           onConfirm={(input) => run(() => handlers.onAssignCarrier(input))}
         />
       )}
-      {dialog?.kind === 'remove' && activeCarrier && (
-        <ReasonDialog
-          title={dialog.outcome === 'TONU' ? 'Report TONU' : 'Bounce carrier'}
-          label="Reason"
-          required
+      {dialog?.kind === 'book' && (
+        <BookCarrierDialog
+          bundle={bundle}
+          isAdmin={isAdmin}
           busy={busy}
           onClose={() => setDialog(null)}
-          onConfirm={(reason) => run(() => handlers.onRemoveCarrier(activeCarrier.id, dialog.outcome, reason))}
+          onConfirm={(input) => handlers.onBookCarrier(input)}
+          onRateCon={onRateCon}
+        />
+      )}
+      {dialog?.kind === 'remove' && activeCarrier && (
+        <RemoveCarrierDialog
+          outcome={dialog.outcome}
+          loadCarrier={activeCarrier}
+          busy={busy}
+          onClose={() => setDialog(null)}
+          onConfirm={(reason, note) => run(() => handlers.onRemoveCarrier(activeCarrier.id, dialog.outcome, reason, note))}
         />
       )}
     </>
@@ -493,6 +547,78 @@ function AssignCarrierDialog({ busy, onClose, onConfirm }: {
             disabled={busy}
           >
             {busy ? 'Booking…' : 'Assign'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Ending an assignment. The reason is a code rather than a sentence because the next
+ * booker reads it as carrier history — and because bounce and TONU answer different
+ * questions. The note is the colour, capped so it stays a note.
+ *
+ * A TONU keeps the carrier's money; a bounce takes the charges away with it.
+ */
+export function RemoveCarrierDialog({ outcome, loadCarrier, busy, onClose, onConfirm }: {
+  outcome: 'BOUNCED' | 'TONU'
+  loadCarrier: LoadCarrierRecord
+  busy: boolean
+  onClose: () => void
+  onConfirm: (reason: RemoveLoadCarrierReason, note?: string) => void
+}) {
+  const [reason, setReason] = useState('')
+  const [note, setNote] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const options = outcome === 'TONU' ? TONU_REASONS : BOUNCE_REASONS
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>{outcome === 'TONU' ? 'Report TONU' : 'Bounce carrier'}</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reason</Label>
+            <select
+              aria-label="Reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="">— select —</option>
+              {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Note (optional)</Label>
+            <Textarea
+              aria-label="Note"
+              rows={3}
+              maxLength={REMOVAL_NOTE_MAX}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="text-sm"
+            />
+            <p className="mt-1 text-[10px] text-muted-foreground">{note.length}/{REMOVAL_NOTE_MAX}</p>
+          </div>
+          {outcome === 'TONU' && (
+            <p className="rounded-lg border border-border bg-muted/30 p-2 text-xs">
+              The carrier keeps ${formatCents(loadCarrier.carrierRateCents ?? 0)} — the cost line stays on the load.
+            </p>
+          )}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button
+            onClick={() => {
+              if (!reason) { setError('Pick a reason.'); return }
+              onConfirm(reason as RemoveLoadCarrierReason, note.trim() || undefined)
+            }}
+            disabled={busy}
+          >
+            {busy ? 'Working…' : 'Confirm'}
           </Button>
         </DialogFooter>
       </DialogContent>

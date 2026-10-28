@@ -39,6 +39,8 @@ const TABLES = {
   customer: 'Customer-test',
   settings: 'TmsSettings-test',
   audit: 'AuditLog-test',
+  carrierDirectory: 'Carrier-test',
+  carrierDoc: 'CarrierDocument-test',
   driver: 'Driver-test',
 }
 
@@ -53,6 +55,10 @@ const store = vi.hoisted(() => {
   process.env.SETTINGS_TABLE_NAME = 'TmsSettings-test'
   process.env.AUDIT_LOG_TABLE_NAME = 'AuditLog-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
+  process.env.CARRIER_TABLE_NAME = 'Carrier-test'
+  process.env.CARRIER_DOCUMENT_TABLE_NAME = 'CarrierDocument-test'
+  process.env.BUCKET_NAME = 'bcat-test-bucket'
+  process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
   return new Map<string, Map<string, Record<string, unknown>>>()
 })
@@ -158,6 +164,35 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
   }
 })
 
+// ── S3 / SES mocks — the rate confirmation's PDF and its email ───────────────
+const s3Send = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-s3', () => {
+  class S3Client {
+    send = s3Send
+  }
+  class PutObjectCommand {
+    input: unknown
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  return { S3Client, PutObjectCommand }
+})
+
+const sesSend = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-sesv2', () => {
+  class SESv2Client {
+    send = sesSend
+  }
+  class SendEmailCommand {
+    input: unknown
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  return { SESv2Client, SendEmailCommand }
+})
+
 // ── Amplify data client mock — Load writes land in the same store ────────────
 const loadCreate = vi.hoisted(() => vi.fn())
 const loadUpdate = vi.hoisted(() => vi.fn())
@@ -241,6 +276,26 @@ function runCommand(cmd: MockCommand): unknown {
           } else if (entry.Delete) {
             const del = entry.Delete as { TableName: string; Key: Record<string, unknown> }
             table(del.TableName).delete(String((unmarshall(del.Key as never) as { id: string }).id))
+          } else if (entry.ConditionCheck) {
+            // Guards a row the transaction does not write; the whole thing is
+            // refused when that row no longer matches.
+            const check = entry.ConditionCheck as {
+              TableName: string
+              Key: Record<string, unknown>
+              ConditionExpression: string
+              ExpressionAttributeValues?: Record<string, unknown>
+            }
+            const key = unmarshall(check.Key as never) as { id: string }
+            const id = String(key.id)
+            const values = check.ExpressionAttributeValues
+              ? (unmarshall(check.ExpressionAttributeValues as never) as Row)
+              : {}
+            if (check.ConditionExpression.includes('casExpectedUpdatedAt')) {
+              const actual = table(check.TableName).get(id)?.updatedAt ?? ''
+              if (String(values[':casExpectedUpdatedAt'] ?? '') !== String(actual ?? '')) {
+                throw new ConditionalCheckFailed(`CAS on ${check.TableName}/${id}`)
+              }
+            }
           }
         }
       } catch (err) {
@@ -359,6 +414,10 @@ beforeEach(() => {
   cognitoSend.mockReset()
   loadCreate.mockReset()
   loadUpdate.mockReset()
+  s3Send.mockReset()
+  sesSend.mockReset()
+  s3Send.mockResolvedValue({})
+  sesSend.mockResolvedValue({ MessageId: 'msg-1' })
 
   send.mockImplementation(async (cmd: MockCommand) => runCommand(cmd))
   loadCreate.mockImplementation(async (input: Row) => {
@@ -939,14 +998,14 @@ describe('assignment', () => {
     const { loadId } = await openLoad()
     await call('ASSIGN_CARRIER', { loadId, carrierName: 'SWIFT', carrierRateCents: 180_000 })
     const bouncedId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
-    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: bouncedId, outcome: 'BOUNCED', reason: 'no truck' })
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: bouncedId, outcome: 'BOUNCED', reason: 'CARRIER_CANNOT_TAKE' })
     expect([...table(TABLES.charge).values()].some((c) => c.side === 'CARRIER')).toBe(false)
     expect(table(TABLES.load).get(loadId)!.status).toBe('SOURCING')
     expect(table(TABLES.load).get(loadId)!.activeLoadCarrierId).toBeNull()
 
     await call('ASSIGN_CARRIER', { loadId, carrierName: 'WERNER', carrierRateCents: 190_000 })
     const tonuId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
-    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: tonuId, outcome: 'TONU', reason: 'shipper had nothing' })
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: tonuId, outcome: 'TONU', reason: 'CUSTOMER_NOT_READY' })
     const kept = [...table(TABLES.charge).values()].filter((c) => c.side === 'CARRIER')
     expect(kept).toHaveLength(1)
     expect(kept[0].amountCents).toBe(190_000)
@@ -956,10 +1015,378 @@ describe('assignment', () => {
     const { loadId } = await openLoad()
     await call('ASSIGN_ASSET', { loadId, driverId: 'drv-1' })
     const carrierId = String([...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!.id)
-    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'driver called off' })
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK' })
     await expect(
-      call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'again' }),
+      call('REMOVE_LOAD_CARRIER', { loadCarrierId: carrierId, outcome: 'BOUNCED', reason: 'GAVE_BACK' }),
     ).rejects.toThrow(/already been removed/)
+  })
+})
+
+// ── Carrier booking (step C) ─────────────────────────────────────────────────
+
+describe('carrier booking', () => {
+  const PDF_BASE64 = Buffer.from('%PDF-1.4 rate con').toString('base64')
+
+  async function bookableLoad(): Promise<{ shipmentId: string; loadId: string }> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    return ids
+  }
+
+  function seedCarrier(extra: Row = {}): void {
+    table(TABLES.carrierDirectory).set('car-1', {
+      id: 'car-1',
+      __typename: 'Carrier',
+      name: 'SWIFT TRANSPORTATION',
+      type: 'TL',
+      status: 'ACTIVE',
+      authorityStatus: 'ACTIVE',
+      mcNumber: '123456',
+      dotNumber: '77',
+      paymentTermsDays: 30,
+      insurancePolicies: [
+        { id: 'ins-1', type: 'AUTO_LIABILITY', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
+        { id: 'ins-2', type: 'CARGO', limitCents: 100_000_00, expiresAt: '2030-01-01T00:00:00.000Z' },
+      ],
+      loadCount: 2,
+      createdBy: 'admin@bcatcorp.com',
+      updatedBy: 'admin@bcatcorp.com',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      ...extra,
+    })
+  }
+
+  /** The four documents the default settings require, so booking is warning-free. */
+  function seedCarrierDocs(): void {
+    for (const type of ['COI_CARGO', 'COI_AUTO', 'W9', 'CARRIER_AGREEMENT']) {
+      table(TABLES.carrierDoc).set(`cdoc-${type}`, {
+        id: `cdoc-${type}`,
+        __typename: 'CarrierDocument',
+        carrierId: 'car-1',
+        type,
+        name: `${type}.pdf`,
+        s3Key: `carrier-docs/car-1/${type}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        source: 'UPLOAD',
+        uploadedBy: 'admin@bcatcorp.com',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      })
+    }
+  }
+
+  async function book(loadId: string, input: Row = {}): Promise<Row> {
+    return call('BOOK_CARRIER', {
+      loadId,
+      expectedUpdatedAt: table(TABLES.load).get(loadId)!.updatedAt,
+      carrierId: 'car-1',
+      carrierRateCents: 180_000,
+      ...input,
+    })
+  }
+
+  function activeCarrier(): Row {
+    return [...table(TABLES.carrier).values()].find((c) => c.status === 'ACTIVE')!
+  }
+
+  it('sends a directory carrier to BOOK_CARRIER instead of ASSIGN_CARRIER', async () => {
+    const { loadId } = await bookableLoad()
+    await expect(
+      call('ASSIGN_CARRIER', { loadId, carrierName: 'SWIFT', carrierId: 'car-1', carrierRateCents: 180_000 }),
+    ).rejects.toThrow(/BOOK_CARRIER/)
+  })
+
+  it('books the carrier, prices the linehaul and moves the load to BOOKED', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+
+    await book(loadId, { quickPayDays: 7 })
+
+    const assignment = activeCarrier()
+    expect(assignment).toMatchObject({
+      kind: 'CARRIER',
+      carrierId: 'car-1',
+      carrierName: 'SWIFT TRANSPORTATION',
+      carrierMc: '123456',
+      paymentTermsDays: 30,
+      rateConStatus: 'NOT_SENT',
+      rateConVersion: 0,
+      // 7 days is the 250 bps tier: 180_000 * 250 / 10_000.
+      quickPay: true,
+      quickPayDays: 7,
+      quickPayFeeBps: 250,
+      quickPayFeeCents: 4_500,
+    })
+    expect(assignment.bookingWarnings).toEqual([])
+
+    const load = table(TABLES.load).get(loadId)!
+    expect(load.status).toBe('BOOKED')
+    expect(load.assignmentType).toBe('CARRIER')
+    expect(load.activeLoadCarrierId).toBe(assignment.id)
+    expect([...table(TABLES.charge).values()].find((c) => c.side === 'CARRIER')).toMatchObject({
+      code: 'LINEHAUL', amountCents: 180_000, loadCarrierId: assignment.id,
+    })
+    expect(table(TABLES.financials).get(loadId)!.costCents).toBe(180_000)
+    // The directory keeps its own count of what it has hauled for us.
+    expect(table(TABLES.carrierDirectory).get('car-1')!.loadCount).toBe(3)
+  })
+
+  it('refuses a rate over the load\'s top spend, and leaves nothing behind', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+
+    // Revenue 250_000 at a 1500 bps floor tops out at 212_500.
+    await expect(book(loadId, { carrierRateCents: 230_000 })).rejects.toThrow(/top spend/)
+    expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+    expect(table(TABLES.load).get(loadId)!.status).toBe('SOURCING')
+  })
+
+  it('refuses a carrier whose authority is inactive', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier({ authorityStatus: 'INACTIVE' })
+    seedCarrierDocs()
+    await expect(book(loadId)).rejects.toThrow(/operating authority is inactive/)
+  })
+
+  it('needs every warning acknowledged by key before it books', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+
+    await expect(book(loadId)).rejects.toThrow(/Acknowledge these before booking/)
+
+    const keys = ['MISSING_DOC:COI_CARGO', 'MISSING_DOC:COI_AUTO', 'MISSING_DOC:W9', 'MISSING_DOC:CARRIER_AGREEMENT']
+    await book(loadId, { acknowledgeWarnings: keys })
+    expect(activeCarrier().bookingWarnings).toEqual(expect.arrayContaining(keys))
+  })
+
+  it('refuses to book onto a load that already has a carrier', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    await expect(book(loadId)).rejects.toThrow(/sourcing/)
+  })
+
+  it('only caches a quick-pay fee for a configured tier', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+
+    await expect(call('SET_QUICK_PAY', { loadCarrierId, quickPayDays: 9 })).rejects.toThrow(/quick-pay tiers/)
+
+    await call('SET_QUICK_PAY', { loadCarrierId, quickPayDays: 1 })
+    expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({
+      quickPay: true, quickPayDays: 1, quickPayFeeBps: 300, quickPayFeeCents: 5_400,
+    })
+
+    await call('SET_QUICK_PAY', { loadCarrierId, quickPayDays: null })
+    expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({
+      quickPay: false, quickPayDays: null, quickPayFeeCents: null,
+    })
+  })
+
+  it('pays the rebooked carrier their own rate, not the load\'s total with the TONU on it', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+
+    await book(loadId, { carrierRateCents: 60_000 })
+    const first = String(activeCarrier().id)
+    await call('REMOVE_LOAD_CARRIER', { loadCarrierId: first, outcome: 'TONU', reason: 'CUSTOMER_NOT_READY' })
+
+    await book(loadId, { carrierRateCents: 120_000 })
+    const second = activeCarrier()
+    expect(second.id).not.toBe(first)
+    // The row the rate confirmation and the carrier portal read carries this
+    // carrier's money alone — the TONU'd carrier's 60_000 is not theirs.
+    expect(second).toMatchObject({ carrierRateCents: 120_000, costCents: 120_000 })
+    // The load's cached totals are still the whole load's, TONU included.
+    expect(table(TABLES.financials).get(loadId)).toMatchObject({ carrierRateCents: 180_000, costCents: 180_000 })
+
+    await call('SET_QUICK_PAY', { loadCarrierId: String(second.id), quickPayDays: 1 })
+    // 300 bps of 120_000, not of the load's 180_000.
+    expect(table(TABLES.carrier).get(String(second.id))).toMatchObject({
+      quickPay: true, quickPayFeeBps: 300, quickPayFeeCents: 3_600,
+    })
+  })
+
+  it('moves the cached quick-pay fee when the rate is edited on the financials tab', async () => {
+    const { shipmentId, loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId, { carrierRateCents: 180_000, quickPayDays: 7 })
+    const loadCarrierId = String(activeCarrier().id)
+    expect(table(TABLES.carrier).get(loadCarrierId)!.quickPayFeeCents).toBe(4_500)
+
+    await call('RECALC_CHARGES', {
+      shipmentId,
+      expectedVersion: Number(table(TABLES.shipment).get(shipmentId)!.version),
+      charges: [
+        { side: 'CUSTOMER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 300_000, sortOrder: 0 },
+        { side: 'CARRIER', code: 'LINEHAUL', calculatedBy: 'FLAT', rateCents: 200_000, sortOrder: 0 },
+      ],
+    })
+
+    // 250 bps of the new 200_000, and the row's own money followed the edit.
+    expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({
+      carrierRateCents: 200_000, costCents: 200_000, quickPayFeeCents: 5_000,
+    })
+  })
+
+  it('writes nothing when the load moves between the read and the booking transaction', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+
+    // Someone else touches the load after BOOK_CARRIER read it and before its
+    // transaction lands: the booking must leave no assignment behind.
+    let raced = false
+    send.mockImplementation(async (cmd: MockCommand) => {
+      if (!raced && cmd.__type === 'Transact') {
+        raced = true
+        const load = table(TABLES.load).get(loadId)!
+        table(TABLES.load).set(loadId, { ...load, updatedAt: '2026-04-01T00:00:00.000Z' })
+      }
+      return runCommand(cmd)
+    })
+
+    await expect(book(loadId)).rejects.toThrow(/changed by someone else/)
+    expect([...table(TABLES.carrier).values()]).toHaveLength(0)
+    expect([...table(TABLES.charge).values()].filter((c) => c.side === 'CARRIER')).toHaveLength(0)
+    expect(table(TABLES.carrierDirectory).get('car-1')!.loadCount).toBe(2)
+    expect(table(TABLES.load).get(loadId)!.status).toBe('SOURCING')
+  })
+
+  it('mints a token per send, and a re-send replaces the one before it', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+    const first = table(TABLES.carrier).get(loadCarrierId)!
+    expect(first).toMatchObject({ rateConStatus: 'SENT', rateConVersion: 1, rateConSentTo: 'dispatch@swift.com' })
+    expect(String(first.rateConToken)).toHaveLength(43)
+    expect(s3Send).toHaveBeenCalledTimes(1)
+    expect(sesSend).toHaveBeenCalledTimes(1)
+    const generated = [...table(TABLES.carrierDoc).values()].filter((d) => d.type === 'RATE_CON')
+    expect(generated).toHaveLength(1)
+    expect(generated[0]).toMatchObject({ source: 'GENERATED', carrierId: 'car-1', loadCarrierId })
+
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+    const second = table(TABLES.carrier).get(loadCarrierId)!
+    expect(second.rateConVersion).toBe(2)
+    expect(second.rateConToken).not.toBe(first.rateConToken)
+  })
+
+  it('refuses a recipient that is not an email address', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+    await expect(
+      call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com\r\nBcc: x@y.com'] }),
+    ).rejects.toThrow(/email address/)
+  })
+
+  it('voids the open link without touching the assignment', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+
+    await call('VOID_RATE_CON', { loadCarrierId })
+    expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({ rateConStatus: 'VOIDED', rateConToken: null, status: 'ACTIVE' })
+    await expect(call('VOID_RATE_CON', { loadCarrierId })).rejects.toThrow(/sent and not yet signed/)
+  })
+
+  it('dispatches a booked load and remembers the rate con was never signed', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+
+    await call('DISPATCH_LOAD', {
+      loadId,
+      dispatchedAt: '2026-03-02T11:00:00.000Z',
+      driverName: 'Yuri',
+      truckNumber: '4471',
+      nextCheckCallAt: '2026-03-02T18:00:00.000Z',
+      note: 'Loaded and rolling',
+    })
+
+    const load = table(TABLES.load).get(loadId)!
+    expect(load.status).toBe('DISPATCHED')
+    expect(load.checkCallOpen).toBe('OPEN')
+    expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({
+      dispatchedAt: '2026-03-02T11:00:00.000Z',
+      dispatchNote: 'Loaded and rolling',
+      driverName: 'Yuri',
+      truckNumber: '4471',
+      bookingWarnings: ['RATE_CON_NOT_SIGNED'],
+    })
+  })
+
+  it('refuses to dispatch a load nobody is on', async () => {
+    const { loadId } = await bookableLoad()
+    await expect(call('DISPATCH_LOAD', { loadId, dispatchedAt: '2026-03-02T11:00:00.000Z' }))
+      .rejects.toThrow(/booked load/)
+  })
+
+  it('takes the reason from the list that fits the outcome, and voids an open rate con', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+    await call('SEND_RATE_CON', { loadCarrierId, pdfBase64: PDF_BASE64, to: ['dispatch@swift.com'] })
+
+    // FORGOT_TO_BOUNCE is a TONU reason; a bounce may not borrow it.
+    await expect(
+      call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'BOUNCED', reason: 'FORGOT_TO_BOUNCE' }),
+    ).rejects.toThrow(/reason must be one of/)
+
+    await call('REMOVE_LOAD_CARRIER', {
+      loadCarrierId,
+      outcome: 'BOUNCED',
+      reason: 'REJECTED_RATE_CON',
+      note: 'Driver would not sign at that rate',
+    })
+    expect(table(TABLES.carrier).get(loadCarrierId)).toMatchObject({
+      status: 'BOUNCED',
+      removalReason: 'REJECTED_RATE_CON',
+      removalNote: 'Driver would not sign at that rate',
+      rateConStatus: 'VOIDED',
+      rateConToken: null,
+    })
+  })
+
+  it('refuses a note longer than 250 characters', async () => {
+    const { loadId } = await bookableLoad()
+    seedCarrier()
+    seedCarrierDocs()
+    await book(loadId)
+    const loadCarrierId = String(activeCarrier().id)
+    await expect(
+      call('REMOVE_LOAD_CARRIER', { loadCarrierId, outcome: 'TONU', reason: 'OTHER', note: 'x'.repeat(251) }),
+    ).rejects.toThrow(/maximum length/)
   })
 })
 

@@ -24,6 +24,7 @@ import { LoadPods } from '@/features/pods/LoadPods'
 import { LoadDriverDocs } from './LoadDriverDocs'
 import { LoadPodNotes } from './LoadPodNotes'
 import { DriverDocUploadDialog } from '@/features/driver-docs'
+import { MoneyField } from '@/features/directory/components/MoneyField'
 import { updateIntakeItem, notifySlackStatusChange, uploadRateConfirm, createLocation } from '@/lib/apiClient'
 import { matchStopLocation, locationInputForStop } from '@/lib/locationAutoSave'
 import { uploadRateconAndApply } from '@/lib/rateconUpload'
@@ -952,7 +953,7 @@ function NewLoadDialog({
                 </Field>
               </div>
               {/* What is on the truck — read off the rate con when one is uploaded, editable here. */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[2fr_1fr_1fr_1fr]">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-[2fr_1fr_1fr_1fr_1.4fr]">
                 <Field label="Commodity" error={errors.commodity?.message}>
                   <Input {...register('commodity')} placeholder="Paper goods" className="h-9" />
                 </Field>
@@ -972,6 +973,20 @@ function NewLoadDialog({
                     {PIECES_UNITS.filter((u) => u !== 'pieces').map((u) => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </Field>
+                {/* Declared value of the freight — the carrier booking insurance check reads it. */}
+                <Controller
+                  name="cargoValueCents"
+                  control={control}
+                  render={({ field }) => (
+                    <MoneyField
+                      label="Cargo value"
+                      value={field.value}
+                      onChange={field.onChange}
+                      placeholder="25000.00"
+                      error={errors.cargoValueCents?.message}
+                    />
+                  )}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <Controller
@@ -1383,7 +1398,7 @@ export function LoadDrawer() {
     resolver: zodResolver(factoredAwareSchema),
     defaultValues: {
       aljexId: '', tmsId: '', pickupNumber: '', trailerNumber: '',
-      commodity: '', weight: null, pieces: null, piecesUnit: '',
+      commodity: '', weight: null, pieces: null, piecesUnit: '', cargoValueCents: null,
       stops: emptyStopForms(), readyToInvoice: false,
       customer: '', customerId: '', miles: null, rate: null, notes: '', hot: false, unscheduled: false,
     },
@@ -1401,6 +1416,7 @@ export function LoadDrawer() {
         weight: load.weight ?? null,
         pieces: load.pieces ?? null,
         piecesUnit: load.piecesUnit ?? '',
+        cargoValueCents: load.cargoValueCents ?? null,
         stops: loadToStopForms(load),
         readyToInvoice:   load.readyToInvoice,
         customer: load.customer ?? '',
@@ -1431,8 +1447,9 @@ export function LoadDrawer() {
         aljexId: '', tmsId: tender?.reference ?? '',
         pickupNumber: tender?.pickupNumber ?? '',
         trailerNumber: '',
-        // The tender email states the weight; the commodity and count wait for the rate con.
-        commodity: '', weight: tender?.weightLb ?? null, pieces: null, piecesUnit: '',
+        // The tender email states the weight; the commodity, count and declared value wait
+        // for the rate con.
+        commodity: '', weight: tender?.weightLb ?? null, pieces: null, piecesUnit: '', cargoValueCents: null,
         stops: tender
           ? tenderStopForms(tender, preDate, createPreFill?.driverId ?? null, tenderIsBatory, formDirectory.locations)
           : emptyStopForms(preDate, createPreFill?.driverId ?? null),
@@ -1621,6 +1638,7 @@ export function LoadDrawer() {
       weight: values.weight != null && !isNaN(values.weight) ? Math.round(values.weight) : undefined,
       pieces: values.pieces != null && !isNaN(values.pieces) ? Math.round(values.pieces) : undefined,
       piecesUnit: values.pieces != null && !isNaN(values.pieces) ? (values.piecesUnit || 'pieces') : undefined,
+      cargoValueCents: values.cargoValueCents != null && !isNaN(values.cargoValueCents) ? Math.round(values.cargoValueCents) : undefined,
       customer: values.customer || undefined,
       customerId: values.customerId?.trim() || undefined,
       notes: values.notes || undefined,

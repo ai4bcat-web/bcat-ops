@@ -2,6 +2,11 @@
 
 Markdown knowledge base for the in-app Help/Academy module and Ask assistant.
 
+## Articles
+
+- [Shipments, Orders, and Loads](shipments-orders-loads.md) — how a freight move is modelled as a Shipment, an Order, and its Loads, and how status is derived.
+- [Carriers and Booking](carriers-and-booking.md) — the carrier directory, the booking gates, quick pay, the rate confirmation, and bounce vs TONU.
+
 ## Article front-matter
 
 Every article must begin with a YAML front-matter block:

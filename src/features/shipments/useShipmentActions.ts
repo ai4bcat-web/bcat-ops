@@ -9,12 +9,14 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  assignAsset, assignCarrier, deleteShipment, duplicateShipment, recalcCharges, removeLoadCarrier,
-  restoreShipment, saveOrderForm, setArStatus, setLoadStatus, setShipmentStatus, submitOrder,
-  tenderRespond, updateStop,
+  assignAsset, assignCarrier, bookCarrier, deleteShipment, dispatchLoad, duplicateShipment, recalcCharges,
+  removeLoadCarrier, restoreShipment, saveOrderForm, sendRateCon, setArStatus, setLoadStatus, setQuickPay,
+  setShipmentStatus, submitOrder, tenderRespond, updateStop, voidRateCon,
 } from '@/lib/apiClient'
 import type { LoadChargeInput, ShipmentBundle } from '@/types/tms'
+import type { BookCarrierFields } from '@/features/carriers/components/BookCarrierDialog'
 import type { OrderFormValues } from './components/DraftOrderEditor'
+import type { DispatchFields } from './components/DispatchDialog'
 import type { StopActionInput } from './components/StopCards'
 import type { ShipmentActionHandlers, LoadActionHandlers } from './components/StatusActions'
 
@@ -25,6 +27,12 @@ export interface ShipmentActions {
   submit: (carrierRepId: string | undefined) => Promise<void>
   stopAction: (input: StopActionInput) => Promise<void>
   saveCharges: (charges: LoadChargeInput[]) => Promise<void>
+  /** Step C — the carrier side of a load, all CAS-checked against the bundle on screen. */
+  bookCarrier: (input: BookCarrierFields) => Promise<void>
+  setQuickPay: (input: { loadCarrierId: string; quickPayDays: number | null }) => Promise<void>
+  sendRateCon: (input: { loadCarrierId: string; pdfBase64: string; to: string[]; cc?: string[]; expiresHours?: number }) => Promise<void>
+  voidRateCon: (input: { loadCarrierId: string }) => Promise<void>
+  dispatchLoad: (input: DispatchFields) => Promise<void>
   busy: boolean
 }
 
@@ -53,6 +61,16 @@ export function useShipmentActions(
   const expectedUpdatedAt = bundle?.shipment.updatedAt ?? ''
   const order = bundle?.orders[0]
   const load = bundle?.loads[0]
+
+  // Booking is reachable from the load menu and from the actions object; one definition
+  // so the two can never drift apart.
+  const book = async (input: BookCarrierFields) => {
+    await call('Book carrier', () => bookCarrier({
+      loadId: load?.id ?? '',
+      expectedUpdatedAt: load?.updatedAt ?? expectedUpdatedAt,
+      ...input,
+    }))
+  }
 
   return {
     busy,
@@ -98,6 +116,19 @@ export function useShipmentActions(
         charges,
       }))
     },
+    bookCarrier: book,
+    setQuickPay: async (input) => {
+      await call('Quick pay', () => setQuickPay(input))
+    },
+    sendRateCon: async (input) => {
+      await call('Send rate con', () => sendRateCon(input))
+    },
+    voidRateCon: async (input) => {
+      await call('Void rate con', () => voidRateCon(input))
+    },
+    dispatchLoad: async (input) => {
+      await call('Dispatch', () => dispatchLoad({ loadId: load?.id ?? '', ...input }))
+    },
     shipment: {
       onDuplicate: async (copies, sameCarrier) => {
         await call('Duplicate', () => duplicateShipment({ shipmentId, copies, sameCarrier }))
@@ -126,8 +157,9 @@ export function useShipmentActions(
       onAssignCarrier: async (input) => {
         await call('Assign carrier', () => assignCarrier({ loadId: load?.id ?? '', ...input }))
       },
-      onRemoveCarrier: async (loadCarrierId, outcome, reason) => {
-        await call('Remove carrier', () => removeLoadCarrier({ loadCarrierId, outcome, reason }))
+      onBookCarrier: book,
+      onRemoveCarrier: async (loadCarrierId, outcome, reason, note) => {
+        await call('Remove carrier', () => removeLoadCarrier({ loadCarrierId, outcome, reason, note }))
       },
       onSetArStatus: async (status) => {
         await call('AR status', () => setArStatus({ orderId: order?.id ?? '', status }))

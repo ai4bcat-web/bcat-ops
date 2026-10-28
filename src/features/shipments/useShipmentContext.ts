@@ -89,6 +89,7 @@ export function useShipmentContext(
       requiredReferences,
       credit,
       currentUser: options.currentUser,
+      isAdmin: options.isAdmin,
       actions,
     },
   }

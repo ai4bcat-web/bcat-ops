@@ -54,6 +54,8 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/vendor-ap', label: 'Vendor AP Queue', icon: Receipt, pageKey: 'vendorAp' },
       // The directory: reusable customers + locations behind the Load form.
       { to: '/customers', label: 'Customers', icon: Building2,       pageKey: 'customers' },
+      // Outside carriers: the directory the booking flow picks from.
+      { to: '/carriers',  label: 'Carriers',  icon: Truck,           pageKey: 'carriers' },
       { to: '/locations', label: 'Locations', icon: MapPin,          pageKey: 'locations' },
     ],
   },

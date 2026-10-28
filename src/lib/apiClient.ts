@@ -14,6 +14,9 @@ import type {
   ShipmentRecord, OrderRecord, LoadCarrierRecord, LoadFinancialsRecord, LoadChargeRecord,
   LoadChargeInput, ShipmentBundle, ShipmentLoadFields, ShipmentStatus, ShipmentMode,
   LoadWorkflowStatus, AssignmentType,
+  CarrierRecord, CarrierContactRecord, CarrierPaymentMethodRecord, CarrierDocumentRecord,
+  CarrierBundle, CarrierStatus, CarrierStatusReason, CarrierContactType, CarrierDocumentType,
+  CarrierPaymentMethodKind, CarrierPayeeType, QuickPayTier,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
@@ -51,6 +54,8 @@ let loadsHaveEldReview = true
 let loadsHavePaperworkLocation = true
 let loadsHaveTrailer = true
 let loadsHaveFreight = true
+// Step C's declared cargo value — read by the carrier booking gates.
+let loadsHaveCargoValue = true
 let loadsHavePodNotes = true
 // Step B's shipment layer: the link to Shipment/Order plus the carrier-side status
 // and assignment. One flag for the whole group — they deploy together.
@@ -71,6 +76,7 @@ const loadFields = () => {
   if (loadsHaveTrailer) f += ' trailerNumber'
   if (loadsHaveFreight) f += ' commodity weight pieces piecesUnit'
   if (loadsHavePodNotes) f += ' podNotes'
+  if (loadsHaveCargoValue) f += ' cargoValueCents'
   if (loadsHaveShipment) f += LOAD_SHIPMENT_FIELDS
   return f
 }
@@ -140,7 +146,7 @@ const AUDIT_FIELDS = `
 
 // Which newer fields the backend is rejecting (not deployed yet). Used to clear the
 // corresponding flag and retry.
-function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; podNotes: boolean; shipment: boolean } {
+function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sortOrder: boolean; customerId: boolean; eldReview: boolean; paperworkLocation: boolean; trailer: boolean; freight: boolean; cargoValue: boolean; podNotes: boolean; shipment: boolean } {
   const errs = (err as { errors?: { message?: string }[] })?.errors
   const msg = Array.isArray(errs) ? errs.map((e) => e?.message ?? '').join(' ') : ''
   return {
@@ -152,6 +158,7 @@ function undefinedLoadFields(err: unknown): { hot: boolean; stops: boolean; sort
     paperworkLocation: /'paperworkLocation'/i.test(msg),
     trailer: /'trailerNumber'/i.test(msg),
     freight: /'(commodity|weight|pieces|piecesUnit)'/i.test(msg),
+    cargoValue: /'cargoValueCents'/i.test(msg),
     podNotes: /'podNotes'/i.test(msg),
     shipment: /'(shipmentId|orderId|loadNumber|leg|status|statusChangedAt|statusChangedBy|statusSource|carrierRepId|assignmentType|activeLoadCarrierId|carrierName|equipmentType|divisionKey|trackingProvider|nextCheckCallAt|nextCheckCallNote|checkCallOpen|pickupMonth)'/i.test(msg),
   }
@@ -216,6 +223,10 @@ export async function listLoads(): Promise<Load[]> {
       if (loadsHaveFreight && u.freight) {
         console.warn("[apiClient] backend has no freight fields yet — querying loads without them until deploy")
         loadsHaveFreight = false; changed = true
+      }
+      if (loadsHaveCargoValue && u.cargoValue) {
+        console.warn("[apiClient] backend has no cargoValueCents yet — querying loads without it until deploy")
+        loadsHaveCargoValue = false; changed = true
       }
       if (loadsHavePodNotes && u.podNotes) {
         console.warn("[apiClient] backend has no podNotes yet — querying loads without it until deploy")
@@ -1069,13 +1080,21 @@ const TMS_SETTINGS_V3_FIELDS = [
   'shipmentPrefix', 'nextShipmentNumber', 'cancelDeleteAdminOnly',
   'arUnbilledStage', 'apInReviewStage', 'defaultMode',
 ]
-const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes']
+// Step C's carrier booking settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V4_FIELDS = [
+  'allowedCarrierStatuses', 'requireCarrierApproval', 'requiredCarrierDocs',
+  'bookingRequiredFields', 'defaultCarrierTermsDays', 'quickPayTiers',
+  'rateConExpiryHours', 'rateConRequiredFields', 'insuranceWarnDays',
+]
+const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
+let settingsHaveV4 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
   settingsHaveV3 ? TMS_SETTINGS_V3_FIELDS.join(' ') : '',
+  settingsHaveV4 ? TMS_SETTINGS_V4_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1227,6 +1246,11 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
       return await run()
     } catch (err) {
       if (attempt >= 3) throw err
+      if (settingsHaveV4 && fieldNamed(TMS_SETTINGS_V4_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings carrier fields yet — querying without them until deploy')
+        settingsHaveV4 = false
+        continue
+      }
       if (settingsHaveV3 && fieldNamed(TMS_SETTINGS_V3_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings shipment fields yet — querying without them until deploy')
         settingsHaveV3 = false
@@ -1281,6 +1305,31 @@ const LOAD_CARRIER_FIELDS = `
   rateConSignedAt rateConKey chargesFinalizedAt
   carrierRateCents costCents apStatus invoiceId createdBy updatedBy createdAt updatedAt
 `
+// Step C's booking layer on the assignment row: quick pay, the rate-con lifecycle and
+// dispatch. One flag for the whole group — they deploy together — and the same self-heal
+// as the settings generations, because one unhandled throw here blanks the shipment drawer.
+const LOAD_CARRIER_V2_FIELDS = [
+  'quickPay', 'quickPayDays', 'quickPayFeeBps', 'quickPayFeeCents', 'paymentTermsDays',
+  'rateConStatus', 'rateConToken', 'rateConSentAt', 'rateConSentTo', 'rateConExpiresAt',
+  'rateConDocumentId', 'rateConSignerName', 'rateConSignerIp', 'rateConVersion',
+  'bookedAt', 'bookingWarnings', 'dispatchedAt', 'dispatchNote', 'removalNote',
+]
+let loadCarriersHaveCarrierV2 = true
+const loadCarrierFields = () =>
+  loadCarriersHaveCarrierV2 ? `${LOAD_CARRIER_FIELDS} ${LOAD_CARRIER_V2_FIELDS.join(' ')}` : LOAD_CARRIER_FIELDS
+
+/** Every LoadCarrier index read, with that group dropped and retried once if the backend predates it. */
+async function listLoadCarriersByIndex(name: string, args: Record<string, string>): Promise<LoadCarrierRecord[]> {
+  for (;;) {
+    try {
+      return await listAllByIndex<LoadCarrierRecord>(name, args, loadCarrierFields(), 1000)
+    } catch (err) {
+      if (!loadCarriersHaveCarrierV2 || !fieldNamed(LOAD_CARRIER_V2_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no carrier booking fields on LoadCarrier yet — querying without them until deploy')
+      loadCarriersHaveCarrierV2 = false
+    }
+  }
+}
 const LOAD_FINANCIALS_FIELDS = `
   id loadId shipmentId orderId customerRateCents revenueCents carrierRateCents costCents
   profitCents marginBps topSpendCents targetBuyCents frozenAt frozenBy updatedBy version
@@ -1499,11 +1548,20 @@ export async function assignCarrier(input: AssignCarrierInput): Promise<Shipment
   return shipmentAction<ShipmentBundle>('ASSIGN_CARRIER', input)
 }
 
-/** A removal always has a reason — it is the carrier history the next booker reads. */
+/**
+ * A removal always has a reason — it is the carrier history the next booker reads. The
+ * reason is a code so the history is countable; anything the dispatcher wants to say in
+ * their own words goes in `note` (<=250 chars).
+ */
+export type RemoveLoadCarrierReason =
+  | 'CARRIER_CANNOT_TAKE' | 'GAVE_BACK' | 'REJECTED_RATE_CON'
+  | 'CUSTOMER_NOT_READY' | 'CONSIGNEE_NOT_READY' | 'FORGOT_TO_BOUNCE'
+  | 'OTHER'
 export interface RemoveLoadCarrierInput {
   loadCarrierId: string
   outcome: 'BOUNCED' | 'TONU'
-  reason: string
+  reason: RemoveLoadCarrierReason
+  note?: string
 }
 export async function removeLoadCarrier(input: RemoveLoadCarrierInput): Promise<ShipmentBundle> {
   return shipmentAction<ShipmentBundle>('REMOVE_LOAD_CARRIER', input)
@@ -1565,7 +1623,7 @@ export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBun
     getShipment(shipmentId),
     listAllByIndex<OrderRecord>('listOrderByShipmentId', { shipmentId }, ORDER_FIELDS, 1000),
     listAllByIndex<Load>('listLoadByShipmentId', { shipmentId }, loadFields(), 1000),
-    listAllByIndex<LoadCarrierRecord>('listLoadCarrierByShipmentId', { shipmentId }, LOAD_CARRIER_FIELDS, 1000),
+    listLoadCarriersByIndex('listLoadCarrierByShipmentId', { shipmentId }),
     listAllByIndex<LoadChargeRecord>('listLoadChargeByShipmentIdAndSortOrder', { shipmentId }, LOAD_CHARGE_FIELDS, 1000),
   ])
   if (!shipment) throw new Error('Shipment not found')
@@ -1615,6 +1673,321 @@ export async function listLoadSummaries(): Promise<LoadBoardSummary[]> {
     loadsHaveShipment = false
     return []
   }
+}
+
+// ── Carriers (tmsCarrierActions) ─────────────────────────────────────────────
+//
+// The outside-carrier directory: who we may book, what they are insured for, who to
+// pay and the paperwork behind it. Reads come off the generated queries and their
+// GSIs; every write goes through the one Lambda, which owns the dedupe, the status
+// table and the document protocol. No subscriptions — the board refreshes.
+
+export type {
+  CarrierRecord, CarrierContactRecord, CarrierPaymentMethodRecord, CarrierDocumentRecord,
+  CarrierBundle, CarrierType, CarrierStatus, CarrierStatusReason, CarrierInactiveReason,
+  CarrierDoNotUseReason, CarrierContactType, CarrierDocumentType, CarrierDocumentSource,
+  CarrierPaymentMethodKind, CarrierPayeeType, AuthorityStatus, SafetyRating,
+  ComplianceCheckStatus, CarrierEquipment, InsurancePolicy, InsurancePolicyType,
+  QuickPayTier, RateConStatus, RateConRequiredField, BookingRequiredField,
+} from '@/types/tms'
+
+const CARRIER_FIELDS = `
+  id name dbaName normalizedName type status statusReason statusNote statusChangedAt statusChangedBy
+  mcNumber dotNumber scac einNumber inFmcsa
+  authorityStatus authorityGrantedAt authorityExpiresAt
+  safetyRating safetyRatingAt reviewType reviewedAt
+  driverInspections driverOos vehicleInspections vehicleOos
+  insurancePolicies equipment cargoTypes powerUnits trailerCount driverCount
+  address phone email website dispatcherName dispatcherPhone dispatcherEmail
+  paymentTermsDays quickPayEligible defaultQuickPayDays factorPaymentMethodId
+  highwayStatus rmisStatus mcpStatus accountOwnerIds teamKey internalNotes
+  loadCount lastLoadAt createdBy updatedBy version createdAt updatedAt
+`
+const CARRIER_JSON_FIELDS: (keyof CarrierRecord)[] = ['insurancePolicies', 'address']
+const CARRIER_CONTACT_FIELDS = `
+  id carrierId name types email phone isPrimary rateConRecipient active
+  createdBy updatedBy createdAt updatedAt
+`
+const CARRIER_PAYMENT_METHOD_FIELDS = `
+  id carrierId method recipientType factorName factorAddress bankName accountName
+  accountLast4 routingLast4 bankDetailsKey payeeEmail remitToAddress isPreferred status
+  createdBy updatedBy createdAt updatedAt
+`
+const CARRIER_PAYMENT_METHOD_JSON_FIELDS: (keyof CarrierPaymentMethodRecord)[] = ['factorAddress', 'remitToAddress']
+const CARRIER_DOCUMENT_FIELDS = `
+  id carrierId type name s3Key contentType sizeBytes expiresAt loadCarrierId source
+  uploadedBy createdAt updatedAt
+`
+
+/**
+ * Every carrier write. Same contract as `directoryAction`: the Lambda's own message is
+ * rethrown, so a refusal ("MC 123456 already belongs to Acme Trucking") reaches the
+ * toast intact instead of `[object Object]`.
+ */
+export async function carrierAction<T>(action: string, input: unknown): Promise<T> {
+  let r: { data: { tmsCarrierActions: unknown } }
+  try {
+    r = await client.graphql({
+      query: `mutation TmsCarrierActions($action: String!, $input: AWSJSON!) { tmsCarrierActions(action: $action, input: $input) }`,
+      variables: { action, input: JSON.stringify(input) },
+    }) as { data: { tmsCarrierActions: unknown } }
+  } catch (err) {
+    throw new Error(graphqlErrorText(err) || `${action} failed`, { cause: err })
+  }
+  const v = unwrapJson(r.data.tmsCarrierActions)
+  if (v == null) throw new Error(`${action} returned no result`)
+  return v as T
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────────
+
+export async function listCarriers(): Promise<CarrierRecord[]> {
+  const rows = await listAll<CarrierRecord>('listCarriers', CARRIER_FIELDS, 1000)
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+export async function listCarriersByStatus(status: CarrierStatus): Promise<CarrierRecord[]> {
+  // The index key is the Carrier.status enum, so the variable must be declared as one.
+  const rows = await listAllByIndex<CarrierRecord>(
+    'listCarrierByStatusAndName', { status }, CARRIER_FIELDS, 1000, { status: 'CarrierStatus!' },
+  )
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+/** MC and DOT are the two numbers a broker dedupes on; both indexes answer with a list. */
+export async function carriersByMc(mcNumber: string): Promise<CarrierRecord[]> {
+  const rows = await listAllByIndex<CarrierRecord>('listCarrierByMcNumber', { mcNumber }, CARRIER_FIELDS, 1000)
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+export async function carriersByDot(dotNumber: string): Promise<CarrierRecord[]> {
+  const rows = await listAllByIndex<CarrierRecord>('listCarrierByDotNumber', { dotNumber }, CARRIER_FIELDS, 1000)
+  return rows.map((c) => unwrapJsonFields(c, CARRIER_JSON_FIELDS))
+}
+export async function getCarrier(id: string): Promise<CarrierRecord | null> {
+  const r = await client.graphql({
+    query: `query GetCarrier($id: ID!) { getCarrier(id: $id) { ${CARRIER_FIELDS} } }`,
+    variables: { id },
+  }) as { data: { getCarrier: CarrierRecord | null } }
+  return r.data.getCarrier ? unwrapJsonFields(r.data.getCarrier, CARRIER_JSON_FIELDS) : null
+}
+/** Every document in the system — the board's "missing required docs" filter reads it. */
+export async function listCarrierDocuments(): Promise<CarrierDocumentRecord[]> {
+  return listAll<CarrierDocumentRecord>('listCarrierDocuments', CARRIER_DOCUMENT_FIELDS, 1000)
+}
+
+/** Everything one carrier profile renders, in one round trip's worth of parallel reads. */
+export async function getCarrierBundle(id: string): Promise<CarrierBundle> {
+  const [carrier, contacts, paymentMethods, documents, loadCarriers] = await Promise.all([
+    getCarrier(id),
+    listAllByIndex<CarrierContactRecord>('listCarrierContactByCarrierId', { carrierId: id }, CARRIER_CONTACT_FIELDS, 1000),
+    listAllByIndex<CarrierPaymentMethodRecord>('listCarrierPaymentMethodByCarrierId', { carrierId: id }, CARRIER_PAYMENT_METHOD_FIELDS, 1000),
+    listAllByIndex<CarrierDocumentRecord>('listCarrierDocumentByCarrierIdAndType', { carrierId: id }, CARRIER_DOCUMENT_FIELDS, 1000),
+    listLoadCarriersByIndex('listLoadCarrierByCarrierId', { carrierId: id }),
+  ])
+  if (!carrier) throw new Error('Carrier not found')
+  return {
+    carrier,
+    contacts,
+    paymentMethods: paymentMethods.map((p) => unwrapJsonFields(p, CARRIER_PAYMENT_METHOD_JSON_FIELDS)),
+    documents,
+    loadCarriers,
+  }
+}
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+// `expectedUpdatedAt` is the CAS token: the record as the caller last saw it. It is
+// absent on a create. The server derives normalizedName, the status audit stamps and
+// the load counters, so none of them are part of an input.
+
+export type UpsertCarrierInput = { id?: string; expectedUpdatedAt?: string } & Partial<Omit<
+  CarrierRecord,
+  'id' | 'createdAt' | 'updatedAt' | 'createdBy' | 'updatedBy' | 'version'
+  | 'normalizedName' | 'statusChangedAt' | 'statusChangedBy' | 'loadCount' | 'lastLoadAt'
+>>
+export async function upsertCarrier(input: UpsertCarrierInput): Promise<CarrierRecord> {
+  return carrierAction<CarrierRecord>('UPSERT_CARRIER', input)
+}
+
+/** Status transitions go through a dedicated action so CAS and the transition table live server-side. */
+export interface SetCarrierStatusInput {
+  id: string
+  expectedUpdatedAt: string
+  status: CarrierStatus
+  reason?: CarrierStatusReason
+  note?: string
+}
+export async function setCarrierStatus(input: SetCarrierStatusInput): Promise<CarrierRecord> {
+  return carrierAction<CarrierRecord>('SET_CARRIER_STATUS', input)
+}
+
+export interface UpsertCarrierContactInput {
+  id?: string
+  carrierId: string
+  expectedUpdatedAt?: string
+  name: string
+  types?: CarrierContactType[]
+  email?: string | null
+  phone?: string | null
+  isPrimary?: boolean
+  rateConRecipient?: boolean
+  active?: boolean
+}
+export async function upsertCarrierContact(input: UpsertCarrierContactInput): Promise<CarrierContactRecord> {
+  return carrierAction<CarrierContactRecord>('UPSERT_CONTACT', input)
+}
+export async function archiveCarrierContact(input: { id: string; expectedUpdatedAt: string }): Promise<CarrierContactRecord> {
+  return carrierAction<CarrierContactRecord>('ARCHIVE_CONTACT', input)
+}
+
+/** Only the last four digits ever leave the browser — the full numbers live in `bankDetailsKey`. */
+export interface UpsertCarrierPaymentMethodInput {
+  id?: string
+  carrierId: string
+  expectedUpdatedAt?: string
+  method: CarrierPaymentMethodKind
+  recipientType: CarrierPayeeType
+  factorName?: string | null
+  factorAddress?: Record<string, unknown> | null
+  bankName?: string | null
+  accountName?: string | null
+  accountLast4?: string | null
+  routingLast4?: string | null
+  bankDetailsKey?: string | null
+  payeeEmail?: string | null
+  remitToAddress?: Record<string, unknown> | null
+  isPreferred?: boolean
+  status?: 'ACTIVE' | 'INACTIVE'
+}
+export async function upsertCarrierPaymentMethod(input: UpsertCarrierPaymentMethodInput): Promise<CarrierPaymentMethodRecord> {
+  return carrierAction<CarrierPaymentMethodRecord>('UPSERT_PAYMENT_METHOD', input)
+}
+export async function archiveCarrierPaymentMethod(input: { id: string; expectedUpdatedAt: string }): Promise<CarrierPaymentMethodRecord> {
+  return carrierAction<CarrierPaymentMethodRecord>('ARCHIVE_PAYMENT_METHOD', input)
+}
+
+/** Two steps, as in vendor-ap intake: presign, upload straight to S3, then commit the row. */
+export async function prepareCarrierDocument(input: {
+  carrierId: string
+  type: CarrierDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+}): Promise<{ uploadUrl: string; s3Key: string }> {
+  return carrierAction<{ uploadUrl: string; s3Key: string }>('PREPARE_DOCUMENT', input)
+}
+export async function commitCarrierDocument(input: {
+  carrierId: string
+  type: CarrierDocumentType
+  name: string
+  s3Key: string
+  contentType: string
+  sizeBytes: number
+  expiresAt?: string | null
+}): Promise<CarrierDocumentRecord> {
+  return carrierAction<CarrierDocumentRecord>('COMMIT_DOCUMENT', input)
+}
+export async function deleteCarrierDocument(input: { id: string }): Promise<{ id: string }> {
+  return carrierAction<{ id: string }>('DELETE_DOCUMENT', input)
+}
+
+/** The nine booking fields on TmsSettings. Admin only, server-side. */
+export interface CarrierSettingsPatch {
+  allowedCarrierStatuses?: string[] | null
+  requireCarrierApproval?: boolean | null
+  requiredCarrierDocs?: string[] | null
+  bookingRequiredFields?: string[] | null
+  defaultCarrierTermsDays?: number | null
+  quickPayTiers?: QuickPayTier[] | null
+  rateConExpiryHours?: number | null
+  rateConRequiredFields?: string[] | null
+  insuranceWarnDays?: number | null
+}
+export async function saveCarrierSettings(patch: CarrierSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return carrierAction<TmsSettings>('SAVE_CARRIER_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+/** Upload to the presigned PUT from PREPARE_DOCUMENT. `contentType` must be the value the
+ *  URL was signed for (the browser's file.type may be empty) — so must the length. */
+export async function uploadCarrierDocumentFile(file: File, uploadUrl: string, contentType: string): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'content-type': contentType, 'content-length': String(file.size) },
+  })
+  if (!res.ok) throw new Error(`Upload failed: ${res.status} ${res.statusText}`)
+}
+
+export async function getCarrierDocumentUrl(s3Key: string): Promise<string> {
+  return getRateConfirmUrl(s3Key) // same bucket, same presigned URL mechanism
+}
+
+// ── Booking · rate con · dispatch (tmsShipmentActions) ───────────────────────
+// These five live on the shipment Lambda, not the carrier one: they move load money
+// and load status inside its transaction, so they answer with the whole ShipmentBundle.
+
+export interface BookCarrierInput {
+  loadId: string
+  expectedUpdatedAt: string
+  carrierId: string
+  carrierRepId?: string | null
+  carrierRateCents: number
+  /** Extra CARRIER-side lines beside the LINEHAUL the rate itself creates. */
+  charges?: LoadChargeInput[]
+  contactId?: string | null
+  dispatcherName?: string | null
+  dispatcherPhone?: string | null
+  dispatcherEmail?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  driver2Name?: string | null
+  driver2Phone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  plates?: string | null
+  vin?: string | null
+  equipmentType?: string | null
+  trackingProvider?: string | null
+  quickPayDays?: number | null
+  paymentTermsDays?: number | null
+  /** The `key` of every warning the booker ticked off. Blocks can never be acknowledged. */
+  acknowledgeWarnings?: string[]
+}
+export async function bookCarrier(input: BookCarrierInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('BOOK_CARRIER', input)
+}
+
+/** `quickPayDays: null` clears the election; any other value must match a configured tier. */
+export async function setQuickPay(input: { loadCarrierId: string; quickPayDays: number | null }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SET_QUICK_PAY', input)
+}
+
+/** The PDF is built in the browser (`buildRateConPdf`); a re-send voids the prior token. */
+export async function sendRateCon(input: {
+  loadCarrierId: string
+  pdfBase64: string
+  to: string[]
+  cc?: string[]
+  expiresHours?: number
+}): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('SEND_RATE_CON', input)
+}
+export async function voidRateCon(input: { loadCarrierId: string }): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('VOID_RATE_CON', input)
+}
+
+export interface DispatchLoadInput {
+  loadId: string
+  dispatchedAt: string
+  pickupEtaAt?: string | null
+  driverName?: string | null
+  driverPhone?: string | null
+  truckNumber?: string | null
+  trailerNumber?: string | null
+  trackingProvider?: string | null
+  nextCheckCallAt?: string | null
+  nextCheckCallNote?: string | null
+  note?: string | null
+}
+export async function dispatchLoad(input: DispatchLoadInput): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('DISPATCH_LOAD', input)
 }
 
 // ── Google geocoding proxy (tmsGeocode) — real upstream errors, no fallbacks ─────

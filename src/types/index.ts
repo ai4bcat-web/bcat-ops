@@ -365,6 +365,8 @@ export interface Load extends ShipmentLoadFields {
   weight?: number | null       // pounds
   pieces?: number | null
   piecesUnit?: string | null   // pallets | cases | pieces | skids | rolls | bundles
+  /** Declared value of what is on the truck, in cents. Read by the carrier booking checks. */
+  cargoValueCents?: number | null
   /** The trailer carrying the load, named by the driver as they leave the pickup. */
   trailerNumber?: string | null
   /** Where the pickup's paperwork is at end of day, answered in the Ivan app at clock-out. */

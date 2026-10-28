@@ -18,6 +18,20 @@ vi.mock('@/hooks/useTrucks', () => ({ useTrucks: () => ({ equipment: [] }) }))
 vi.mock('@/features/loads/LoadDriverDocs', () => ({
   LoadDriverDocs: ({ kind }: { kind: string }) => <div>docs:{kind}</div>,
 }))
+vi.mock('@/lib/apiClient', () => ({
+  getTmsSettings: vi.fn(async () => null),
+  getCarrierBundle: vi.fn(async () => null),
+  listDivisions: vi.fn(async () => []),
+  getRateConfirmUrl: vi.fn(async () => ''),
+}))
+vi.mock('@/lib/carrierRateCon', () => ({
+  buildRateConPdf: vi.fn(),
+  rateConPdfBase64: vi.fn(() => ''),
+  rateConFilename: vi.fn(() => 'rate-con.pdf'),
+}))
+vi.mock('@/hooks/useCarriers', () => ({
+  useCarriers: () => ({ carriers: [], loading: false, error: null, refresh: vi.fn(), replace: vi.fn() }),
+}))
 
 const stops: Stop[] = [
   { id: 'p1', type: 'pickup', sequence: 0, appt: '2026-04-01T13:00:00.000Z', driverId: null, name: 'Acme Dock 4', city: 'Chicago, IL' },
@@ -55,9 +69,14 @@ const actions = {
     onDuplicate: vi.fn(async () => {}), onSetStatus: vi.fn(async () => {}), onDelete: vi.fn(async () => {}),
     onRestore: vi.fn(async () => {}), onTenderRespond: vi.fn(async () => {}),
   },
+  bookCarrier: vi.fn(async () => {}),
+  setQuickPay: vi.fn(async () => {}),
+  sendRateCon: vi.fn(async () => {}),
+  voidRateCon: vi.fn(async () => {}),
+  dispatchLoad: vi.fn(async () => {}),
   load: {
     onSetLoadStatus: vi.fn(async () => {}), onAssignAsset: vi.fn(async () => {}), onAssignCarrier: vi.fn(async () => {}),
-    onRemoveCarrier: vi.fn(async () => {}), onSetArStatus: vi.fn(async () => {}),
+    onBookCarrier: vi.fn(async () => {}), onRemoveCarrier: vi.fn(async () => {}), onSetArStatus: vi.fn(async () => {}),
   },
 } satisfies ShipmentActions
 
@@ -73,6 +92,7 @@ function renderDetail(status: ShipmentStatus = 'BOOKED') {
       requiredReferences={[]}
       credit={null}
       currentUser="ryne@bcatcorp.com"
+      isAdmin={false}
       actions={actions}
     />,
   )

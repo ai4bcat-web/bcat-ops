@@ -16,6 +16,7 @@ import { tmsGeocode } from '../functions/tms-geocode/resource'
 import { podActions } from '../functions/pod-actions/resource'
 import { otrActions } from '../functions/otr-actions/resource'
 import { dispatchActions } from '../functions/dispatch-actions/resource'
+import { tmsCarrierActions } from '../functions/tms-carrier-actions/resource'
 
 // ExpenseCategory and ExpenseEntryMethod enums are defined inline on each
 // model field — Amplify Gen 2 does not require top-level enum declarations.
@@ -105,6 +106,9 @@ const schema = a.schema({
       // the checkCallOpen index holds the worklist and nothing else.
       checkCallOpen:   a.string(),
       pickupMonth:     a.string(),   // 'YYYY-MM' of the first pickup, for month boards
+      // What the freight is worth. Checked against the carrier's cargo policy
+      // limit when a load is booked out — cents, like every other money field.
+      cargoValueCents: a.integer(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -928,6 +932,19 @@ const schema = a.schema({
       defaultMode: a.enum([
         'FTL', 'PTL', 'BULK', 'DRAYAGE', 'INTERMODAL', 'RLTL', 'LTL', 'AIR', 'OCEAN', 'RAIL',
       ]),
+
+      // ── Carrier booking org defaults (Step C) ─────────────────────────────
+      allowedCarrierStatuses:  a.string().array(),  // defaults to ['ACTIVE']
+      requireCarrierApproval:  a.boolean(),         // non-admin creates land on PENDING
+      requiredCarrierDocs:     a.string().array(),  // ['COI_CARGO','COI_AUTO','W9','CARRIER_AGREEMENT']
+      bookingRequiredFields:   a.string().array(),  // COMMODITY | DESCRIPTION | VALUE | WEIGHT
+      defaultCarrierTermsDays: a.integer(),
+      // QuickPayTier[] — [{ days, feeBps }], longest wait first and never more
+      // expensive than a shorter one. Validated on save, not here.
+      quickPayTiers:           a.json(),
+      rateConExpiryHours:      a.integer(),         // how long a signing link lives (48)
+      rateConRequiredFields:   a.string().array(),  // what the carrier must type to sign
+      insuranceWarnDays:       a.integer(),         // expiring-soon window (30)
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1063,6 +1080,8 @@ const schema = a.schema({
       kind:            a.enum(['OWN_ASSET', 'CARRIER']),
       status:          a.enum(['ACTIVE', 'BOUNCED', 'TONU']),
       removalReason:   a.string(),
+      // Whatever the dispatcher typed alongside the reason code (<=250 chars).
+      removalNote:     a.string(),
       removedAt:       a.datetime(),
       removedBy:       a.string(),
       sequence:        a.integer(),          // 1-based assignment attempt
@@ -1099,10 +1118,43 @@ const schema = a.schema({
       // B writes AWAITING_INVOICE only; the rest is step G.
       apStatus:        a.enum(['AWAITING_INVOICE', 'IN_REVIEW', 'TO_BE_PAID', 'PAID']),
       invoiceId:       a.string(),
+
+      // ── Carriers & booking (Step C) ──────────────────────────────────────
+      // Quick pay: what we keep for paying early. Cached as both the bps the
+      // tier charged and the cents it works out to, so AP, the rate con and
+      // the booking screen can never disagree about the number.
+      quickPay:          a.boolean(),
+      quickPayDays:      a.integer(),
+      quickPayFeeBps:    a.integer(),
+      quickPayFeeCents:  a.integer(),
+      paymentTermsDays:  a.integer(),
+      // The rate confirmation the carrier signs. `rateConToken` is the one-time
+      // secret in the emailed link, cleared the moment it is used or voided;
+      // the public sign API finds the row by scanning for it. There is
+      // deliberately no index on it — DynamoDB allows one new GSI per table
+      // update, and carrierId below is the one the directory cannot do without.
+      rateConStatus: a.enum([
+        'NOT_SENT', 'SENT', 'OPENED', 'SIGNED', 'DECLINED', 'VOIDED', 'EXPIRED',
+      ]),
+      rateConToken:      a.string(),
+      rateConSentAt:     a.datetime(),
+      rateConSentTo:     a.string(),          // comma-joined recipients
+      rateConExpiresAt:  a.datetime(),
+      rateConDocumentId: a.string(),          // CarrierDocument holding the PDF
+      rateConSignerName: a.string(),
+      rateConSignerIp:   a.string(),
+      rateConVersion:    a.integer(),         // bumped on every re-send
+      bookedAt:          a.datetime(),
+      // The eligibility findings whoever booked this carrier acknowledged, kept
+      // as the record of what was waived — and appended to when a carrier's
+      // status changes underneath a load that is already covered.
+      bookingWarnings:   a.string().array(),
+      dispatchedAt:      a.datetime(),
+      dispatchNote:      a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
-    .secondaryIndexes((index) => [index('loadId'), index('shipmentId')])
+    .secondaryIndexes((index) => [index('loadId'), index('shipmentId'), index('carrierId')])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -1155,6 +1207,174 @@ const schema = a.schema({
       createdBy:       a.string().required(),
     })
     .secondaryIndexes((index) => [index('shipmentId').sortKeys(['sortOrder'])])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Carriers (Step C) ──────────────────────────────────────────────────────
+  // Outside carriers only: a row here is somebody we pay by the load. The own
+  // fleet stays Driver + Equipment and books through the existing ASSIGN_ASSET
+  // picker, so nothing on the calendar, settlements or the driver app changes.
+  //
+  // All four carrier models are written by tmsCarrierActions alone — the client
+  // reads. Subscriptions are dropped (see TMS_DESIGN §12); the directory polls.
+  //
+  // `type`, `status` and the rest of the enums below cannot carry .required():
+  // Amplify Gen 2 enum fields take no modifiers. The Lambda demands them.
+  Carrier: a
+    .model({
+      name:           a.string().required(),
+      dbaName:        a.string(),
+      normalizedName: a.string(),            // dedupe key (lower, strip punctuation)
+      type: a.enum(['TL', 'LTL', 'CARTAGE', 'LINEHAUL', 'AIR', 'OCEAN', 'RAIL', 'AGENT']),
+      status: a.enum(['PENDING', 'REVIEW', 'ACTIVE', 'INACTIVE', 'DO_NOT_USE']),
+      // One list, both halves: the first five reasons belong to INACTIVE, the
+      // last five to DO_NOT_USE. Which ones a status may use is a lib decision
+      // (src/lib/carrierStatus.ts), not a schema one.
+      statusReason: a.enum([
+        'EXPIRED_INSURANCE', 'INACTIVE_AUTHORITY', 'INACTIVE_AGREEMENT', 'SAFETY_ISSUES', 'OTHER',
+        'DOUBLE_BROKERING', 'CARGO_CLAIM', 'THEFT', 'FRAUD', 'SUSPICIOUS_ACTIVITY',
+      ]),
+      statusNote:      a.string(),
+      statusChangedAt: a.datetime(),
+      statusChangedBy: a.string(),
+
+      // Authority and identity
+      mcNumber:   a.string(),
+      dotNumber:  a.string(),
+      scac:       a.string(),
+      einNumber:  a.string(),
+      inFmcsa:    a.boolean(),
+      authorityStatus: a.enum(['ACTIVE', 'INACTIVE', 'NONE', 'UNKNOWN']),
+      authorityGrantedAt: a.datetime(),
+      authorityExpiresAt: a.datetime(),
+
+      // Safety profile, typed in from SAFER until J brings an integration.
+      safetyRating: a.enum(['SATISFACTORY', 'CONDITIONAL', 'UNSATISFACTORY', 'NONE', 'UNKNOWN']),
+      safetyRatingAt:     a.datetime(),
+      reviewType:         a.string(),
+      reviewedAt:         a.datetime(),
+      driverInspections:  a.integer(),
+      driverOos:          a.integer(),
+      vehicleInspections: a.integer(),
+      vehicleOos:         a.integer(),
+
+      // InsurancePolicy[] — validated element-by-element in tmsCarrierActions,
+      // capped at 50. Expiry against the pickup date is what blocks a booking.
+      insurancePolicies: a.json(),
+      equipment:    a.string().array(),      // CONTAINER | FLATBED | POWER_ONLY | REEFER | SPECIALIZED | TANKER | VAN
+      cargoTypes:   a.string().array(),
+      powerUnits:   a.integer(),
+      trailerCount: a.integer(),
+      driverCount:  a.integer(),
+
+      address:  a.json(),                    // { street, city, state, zip, country }
+      phone:    a.string(),
+      email:    a.string(),
+      website:  a.string(),
+      // Mirror of the primary DISPATCH contact, so booking a load does not have
+      // to read the contact table to fill in who answers the phone.
+      dispatcherName:  a.string(),
+      dispatcherPhone: a.string(),
+      dispatcherEmail: a.string(),
+
+      paymentTermsDays:      a.integer(),
+      quickPayEligible:      a.boolean(),
+      defaultQuickPayDays:   a.integer(),
+      factorPaymentMethodId: a.string(),     // CarrierPaymentMethod the factor is paid through
+
+      // Manual compliance status until the Highway / RMIS / MyCarrierPackets
+      // integrations land in J. MCP is free text — their statuses are theirs.
+      highwayStatus: a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
+      rmisStatus:    a.enum(['PASS', 'FAIL', 'INCOMPLETE', 'PARTIAL', 'NONE']),
+      mcpStatus:     a.string(),
+
+      accountOwnerIds: a.string().array(),   // [0] is primary owner
+      teamKey:         a.string(),
+      internalNotes:   a.string(),
+      loadCount:       a.integer(),          // cached by BOOK_CARRIER
+      lastLoadAt:      a.datetime(),
+      createdBy:       a.string().required(),
+      updatedBy:       a.string().required(),
+      version:         a.integer(),
+    })
+    .secondaryIndexes((index) => [
+      index('normalizedName'),
+      index('status').sortKeys(['name']),
+      index('mcNumber'),
+      index('dotNumber'),
+    ])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Who to call at a carrier. One row may wear several hats (`types`), and at
+  // most one row per carrier is `isPrimary` — enforced in the Lambda, which
+  // demotes the previous primary in the same write.
+  CarrierContact: a
+    .model({
+      carrierId: a.string().required(),
+      name:      a.string().required(),
+      types:     a.string().array(),         // ACCOUNTING | AFTER_HOURS | CLAIMS | DISPATCH | DRIVER | EMERGENCY | MANAGER | OWNER
+      email:     a.string(),
+      phone:     a.string(),
+      isPrimary: a.boolean(),
+      rateConRecipient: a.boolean(),         // defaulted into the rate-con To: line
+      active:    a.boolean(),
+      createdBy: a.string().required(),
+      updatedBy: a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Where the money goes. Full account and routing numbers are never stored on
+  // the item — only the last four and a `bankDetailsKey` pointing at the
+  // document in S3 — so a read of this table can never leak a bank account.
+  CarrierPaymentMethod: a
+    .model({
+      carrierId:     a.string().required(),
+      method:        a.enum(['ACH', 'WIRE', 'CHECK', 'ZELLE', 'VENMO', 'EFT']),
+      // A factored carrier is paid through its factor, not through itself.
+      recipientType: a.enum(['CARRIER', 'FACTOR']),
+      factorName:    a.string(),
+      factorAddress: a.json(),               // Address
+      bankName:      a.string(),
+      accountName:   a.string(),
+      accountLast4:  a.string(),
+      routingLast4:  a.string(),
+      bankDetailsKey: a.string(),            // carrier-docs/{carrierId}/private/…
+      payeeEmail:    a.string(),
+      remitToAddress: a.json(),              // Address
+      isPreferred:   a.boolean(),            // at most one per carrier
+      status:        a.enum(['ACTIVE', 'INACTIVE']),
+      createdBy:     a.string().required(),
+      updatedBy:     a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // A carrier's paperwork: the packet they send us (authority, COIs, W9, the
+  // signed agreement) plus every rate confirmation we generate for them. The
+  // bytes live under carrier-docs/{carrierId}/; this row is the index of them.
+  CarrierDocument: a
+    .model({
+      carrierId: a.string().required(),
+      type: a.enum([
+        'AUTHORITY', 'COI_AUTO', 'COI_CARGO', 'COI_GENERAL', 'W9', 'CARRIER_AGREEMENT',
+        'FACTOR_NOA', 'CDL', 'RATE_CON', 'OTHER',
+      ]),
+      name:        a.string().required(),
+      s3Key:       a.string().required(),
+      contentType: a.string().required(),
+      sizeBytes:   a.integer().required(),
+      expiresAt:   a.datetime(),             // COIs expire; a missing date is "never checked"
+      loadCarrierId: a.string(),             // RATE_CON rows only
+      // UPLOAD is a file somebody sent us, GENERATED is a rate con we built,
+      // SIGNED is the copy that came back with a signature on it.
+      source:      a.enum(['UPLOAD', 'GENERATED', 'SIGNED']),
+      uploadedBy:  a.string().required(),
+    })
+    .secondaryIndexes((index) => [index('carrierId').sortKeys(['type'])])
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 
@@ -2332,6 +2552,22 @@ const schema = a.schema({
     .authorization((allow) => [allow.authenticated()])
     .handler(a.handler.function(tmsShipmentActions)),
 
+  // Step C: every carrier-directory write goes through this Lambda. Actions:
+  // UPSERT_CARRIER, SET_CARRIER_STATUS, UPSERT_CONTACT, ARCHIVE_CONTACT,
+  // UPSERT_PAYMENT_METHOD, ARCHIVE_PAYMENT_METHOD, PREPARE_DOCUMENT,
+  // COMMIT_DOCUMENT, DELETE_DOCUMENT, SAVE_CARRIER_SETTINGS.
+  // Booking a carrier onto a load is tmsShipmentActions' BOOK_CARRIER — that is
+  // where the transaction across the shipment tables already lives.
+  tmsCarrierActions: a
+    .mutation()
+    .arguments({
+      action: a.string().required(),
+      input:  a.json(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.authenticated()])
+    .handler(a.handler.function(tmsCarrierActions)),
+
   // Phase 1: server-side geocoding, Places autocomplete, and place details.
   tmsGeocode: a
     .query()
@@ -2460,6 +2696,9 @@ const schema = a.schema({
   // Step B: tmsShipmentActions writes Load through the generated updateLoad mutation
   // for the same reason (subscriptions), and reads Customer/TmsSettings/Driver.
   allow.resource(tmsShipmentActions).to(['query', 'mutate']),
+  // Step C: tmsCarrierActions owns the four carrier tables through the SDK and
+  // reaches the generated queries over IAM for the rows it only reads.
+  allow.resource(tmsCarrierActions).to(['query', 'mutate']),
 ])
 
 export type Schema = ClientSchema<typeof schema>

@@ -58,6 +58,8 @@ import { cashCheckinReminder } from './functions/cash-checkin-reminder/resource'
 import { apptRequestEmailer } from './functions/appt-request-emailer/resource'
 import { tmsDirectoryActions } from './functions/tms-directory-actions/resource'
 import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
+import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
+import { rateConSignApi } from './functions/rate-con-sign-api/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
 import { podActions } from './functions/pod-actions/resource'
 import { otrActions, otrStatusSync } from './functions/otr-actions/resource'
@@ -107,6 +109,8 @@ const backend = defineBackend({
   tripScreenshotParser,
   tmsDirectoryActions,
   tmsShipmentActions,
+  tmsCarrierActions,
+  rateConSignApi,
   tmsGeocode,
   podActions,
   driverSignupGate,
@@ -1324,6 +1328,84 @@ const trackingApiUrl = new FunctionUrl(trackingApiFn.stack, 'TrackingApiUrl', {
 })
 new CfnOutput(trackingApiFn.stack, 'TrackingApiFunctionUrl', { value: trackingApiUrl.url, description: 'Public truck tracking API URL' })
 
+// ── rateConSignApi Lambda (public rate-confirmation signing page) ──────────
+// A carrier signs without an account: the emailed link carries a one-time token
+// on the LoadCarrier row, and this Lambda is the only thing that can read it.
+// Kept OUT of the isolated-preview allowlist further down — it serves a public
+// Function URL, so a preview stack must never be able to answer on it.
+const rateConSignApiFn      = backend.rateConSignApi.resources.lambda as LambdaFunction
+const signLoadCarrierTable  = backend.data.resources.tables['LoadCarrier']
+const signLoadTable         = backend.data.resources.tables['Load']
+const signCarrierDocTable   = backend.data.resources.tables['CarrierDocument']
+const signDivisionTable     = backend.data.resources.tables['Division']
+const signSettingsTable     = backend.data.resources.tables['TmsSettings']
+const signAuditLogTable     = backend.data.resources.tables['AuditLog']
+
+// The token is found by scanning LoadCarrier (the table may only gain one GSI
+// per deploy and carrierId is that one), exactly as validateInvite does.
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Scan'],
+    resources: [signLoadCarrierTable.tableArn],
+  })
+)
+// Everything the signing page displays: the load behind the assignment, the
+// division letterhead, the carrier-settings row and the unsigned document. This
+// role answers an unauthenticated Function URL, so a table the handler never
+// opens is a table it must not be able to open.
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:GetItem'],
+    resources: [
+      signLoadTable.tableArn,
+      signCarrierDocTable.tableArn,
+      signDivisionTable.tableArn,
+      signSettingsTable.tableArn,
+    ],
+  })
+)
+// In-place writes touch one row and one table: the assignment the token belongs
+// to (status, request counter, the driver fields the carrier typed).
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:UpdateItem'],
+    resources: [signLoadCarrierTable.tableArn],
+  })
+)
+// Signing writes exactly two new rows: the signed-copy CarrierDocument and the
+// audit trail of who typed their name into the page.
+rateConSignApiFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:PutItem'],
+    resources: [signCarrierDocTable.tableArn, signAuditLogTable.tableArn],
+  })
+)
+// Reads the unsigned PDF to presign a GET of it, writes the stamped copy back.
+backend.storage.resources.bucket.grantReadWrite(rateConSignApiFn, 'rate-confirms/*')
+
+rateConSignApiFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',    signLoadCarrierTable.tableName)
+rateConSignApiFn.addEnvironment('LOAD_TABLE_NAME',            signLoadTable.tableName)
+rateConSignApiFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', signCarrierDocTable.tableName)
+rateConSignApiFn.addEnvironment('DIVISION_TABLE_NAME',        signDivisionTable.tableName)
+rateConSignApiFn.addEnvironment('SETTINGS_TABLE_NAME',        signSettingsTable.tableName)
+rateConSignApiFn.addEnvironment('AUDIT_LOG_TABLE_NAME',       signAuditLogTable.tableName)
+rateConSignApiFn.addEnvironment('BUCKET_NAME',                backend.storage.resources.bucket.bucketName)
+
+const rateConSignApiUrl = new FunctionUrl(rateConSignApiFn.stack, 'RateConSignApiUrl', {
+  function: rateConSignApiFn,
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    allowedOrigins: PORTAL_ORIGINS,
+    allowedMethods: [HttpMethod.POST],
+    allowedHeaders: ['content-type'],
+  },
+})
+
+new CfnOutput(rateConSignApiFn.stack, 'RateConSignApiFunctionUrl', {
+  value:       rateConSignApiUrl.url,
+  description: 'Public carrier rate-confirmation signing API URL',
+})
+
 backend.addOutput({
   custom: {
     trackingApiUrl: trackingApiUrl.url,
@@ -1331,6 +1413,7 @@ backend.addOutput({
     driverUserPoolId: driverPool.userPoolId,
     driverUserPoolClientId: driverPoolClient.userPoolClientId,
     driverApiUrl: driverApiUrl.url,
+    rateConSignUrl: rateConSignApiUrl.url,
   },
 })
 
@@ -1512,6 +1595,12 @@ const shipmentAuditLogTable  = backend.data.resources.tables['AuditLog']
 // The backfill needs the driver roster to tell an own-asset load from one that only
 // ever sat on a "Broker Need to Cover" pseudo-driver.
 const shipmentDriverTable    = backend.data.resources.tables['Driver']
+// Step C: booking reads the directory carrier and its documents, and the rate
+// confirmation is printed on the division's letterhead. All read-only here —
+// carrier writes belong to tmsCarrierActions.
+const shipmentCarrierTable   = backend.data.resources.tables['Carrier']
+const shipmentCarrierDocTable = backend.data.resources.tables['CarrierDocument']
+const shipmentDivisionTable  = backend.data.resources.tables['Division']
 
 shipmentActionsFn.addToRolePolicy(
   new PolicyStatement({
@@ -1536,6 +1625,9 @@ shipmentActionsFn.addToRolePolicy(
       shipmentCustomerTable.tableArn,
       shipmentSettingsTable.tableArn,
       shipmentDriverTable.tableArn,
+      shipmentCarrierTable.tableArn,
+      shipmentCarrierDocTable.tableArn,
+      shipmentDivisionTable.tableArn,
     ],
   }),
 )
@@ -1550,6 +1642,8 @@ shipmentActionsFn.addToRolePolicy(
       `${loadChargeTable.tableArn}/index/*`,
       `${shipmentLoadTable.tableArn}/index/*`,
       `${shipmentCustomerTable.tableArn}/index/*`,
+      `${shipmentCarrierTable.tableArn}/index/*`,
+      `${shipmentCarrierDocTable.tableArn}/index/*`,
     ],
   }),
 )
@@ -1571,6 +1665,97 @@ shipmentActionsFn.addToRolePolicy(
     resources: [backend.auth.resources.userPool.userPoolArn],
   }),
 )
+
+// Step C: BOOK_CARRIER reads the carrier and its paperwork, SEND_RATE_CON
+// stores the generated PDF and emails it to the carrier with SES.
+shipmentActionsFn.addEnvironment('CARRIER_TABLE_NAME',          shipmentCarrierTable.tableName)
+shipmentActionsFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME', shipmentCarrierDocTable.tableName)
+shipmentActionsFn.addEnvironment('DIVISION_TABLE_NAME',         shipmentDivisionTable.tableName)
+shipmentActionsFn.addEnvironment('BUCKET_NAME',                 backend.storage.resources.bucket.bucketName)
+shipmentActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
+// The signing link in the email points at the app, not at the Function URL.
+shipmentActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+// The rate con is sent as raw MIME with the PDF attached (SESv2 Content.Raw
+// maps to ses:SendRawEmail), the same way the driver-pay statement goes out.
+shipmentActionsFn.addToRolePolicy(
+  new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
+)
+backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'rate-confirms/*')
+backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'carrier-docs/*')
+
+// ── tmsCarrierActions Lambda (Step C) ───────────────────────────────────────
+// The carrier directory's single writer: Carrier, CarrierContact,
+// CarrierPaymentMethod and CarrierDocument are written with the raw SDK, the
+// way tmsDirectoryActions owns Customer and Location. LoadCarrier and Load are
+// read-only here — a status change annotates covered loads, it never bounces
+// them, and booking itself stays with tmsShipmentActions.
+const carrierActionsFn        = backend.tmsCarrierActions.resources.lambda as LambdaFunction
+const carrierTable            = backend.data.resources.tables['Carrier']
+const carrierContactTable     = backend.data.resources.tables['CarrierContact']
+const carrierPaymentTable     = backend.data.resources.tables['CarrierPaymentMethod']
+const carrierDocumentTable    = backend.data.resources.tables['CarrierDocument']
+const carrierLoadCarrierTable = backend.data.resources.tables['LoadCarrier']
+const carrierLoadTable        = backend.data.resources.tables['Load']
+const carrierSettingsTable    = backend.data.resources.tables['TmsSettings']
+const carrierAuditLogTable    = backend.data.resources.tables['AuditLog']
+
+carrierActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:DeleteItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+    ],
+    resources: [
+      carrierTable.tableArn,
+      carrierContactTable.tableArn,
+      carrierPaymentTable.tableArn,
+      carrierDocumentTable.tableArn,
+      carrierLoadCarrierTable.tableArn,
+      carrierAuditLogTable.tableArn,
+      // Read-only here, but DynamoDB scopes by table, not by action/attribute.
+      carrierLoadTable.tableArn,
+      carrierSettingsTable.tableArn,
+    ],
+  })
+)
+// Dedupe by normalizedName/MC/DOT, the per-carrier child lists, and the covered
+// loads a status change has to annotate all come off GSIs.
+carrierActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${carrierTable.tableArn}/index/*`,
+      `${carrierContactTable.tableArn}/index/*`,
+      `${carrierPaymentTable.tableArn}/index/*`,
+      `${carrierDocumentTable.tableArn}/index/*`,
+      `${carrierLoadCarrierTable.tableArn}/index/*`,
+    ],
+  })
+)
+
+carrierActionsFn.addEnvironment('CARRIER_TABLE_NAME',                carrierTable.tableName)
+carrierActionsFn.addEnvironment('CARRIER_CONTACT_TABLE_NAME',        carrierContactTable.tableName)
+carrierActionsFn.addEnvironment('CARRIER_PAYMENT_METHOD_TABLE_NAME', carrierPaymentTable.tableName)
+carrierActionsFn.addEnvironment('CARRIER_DOCUMENT_TABLE_NAME',       carrierDocumentTable.tableName)
+carrierActionsFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',           carrierLoadCarrierTable.tableName)
+carrierActionsFn.addEnvironment('LOAD_TABLE_NAME',                   carrierLoadTable.tableName)
+carrierActionsFn.addEnvironment('SETTINGS_TABLE_NAME',               carrierSettingsTable.tableName)
+carrierActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',              carrierAuditLogTable.tableName)
+carrierActionsFn.addEnvironment('BUCKET_NAME',                       backend.storage.resources.bucket.bucketName)
+carrierActionsFn.addEnvironment('USER_POOL_ID',                      backend.auth.resources.userPool.userPoolId)
+carrierActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions:   ['cognito-idp:AdminGetUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  })
+)
+// PREPARE_DOCUMENT presigns the PUT and COMMIT_DOCUMENT HEADs the object back.
+// No delete: DELETE_DOCUMENT removes the row and leaves the file.
+backend.storage.resources.bucket.grantReadWrite(carrierActionsFn, 'carrier-docs/*')
 
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
@@ -1799,7 +1984,7 @@ if (process.env.BCAT_ISOLATED_PREVIEW === 'true') {
     (rule.node.defaultChild as CfnRule).state = 'DISABLED'
   }
 
-  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsGeocode', 'podActions'])
+  const previewCallable = new Set(['userManagement', 'vendorApActions', 'tmsDirectoryActions', 'tmsShipmentActions', 'tmsCarrierActions', 'tmsGeocode', 'podActions'])
   for (const [name, construct] of Object.entries(backend)) {
     if (previewCallable.has(name)) continue
     const lambda = (construct as { resources?: { lambda?: LambdaFunction } }).resources?.lambda
