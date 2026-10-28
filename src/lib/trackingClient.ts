@@ -1,9 +1,11 @@
 // Public truck tracking: the page behind a truck's permanent link.
 // URL priority: VITE_TRACKING_API_URL env var → amplify_outputs.json custom.trackingApiUrl.
 import outputs from '../../amplify_outputs.json'
-import type { CarrierTrackingView, CustomerTrackingView } from '../types/tms'
+import type {
+  CarrierTrackingView, CarrierUploadView, CustomerTrackingView, ShipmentDocumentType,
+} from '../types/tms'
 
-export type { CarrierTrackingView, CustomerTrackingView }
+export type { CarrierTrackingView, CarrierUploadView, CustomerTrackingView }
 
 const envUrl: string | undefined =
   typeof import.meta.env.VITE_TRACKING_API_URL === 'string' ? import.meta.env.VITE_TRACKING_API_URL : undefined
@@ -63,6 +65,56 @@ export async function postTrackingPing(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fix),
+  })
+}
+
+/**
+ * The carrier upload portal, step E's third tokenised link. Three calls in order: read
+ * what the load still needs, ask for a presigned PUT, send the bytes with
+ * `putPresignedFile`, then commit so the file becomes a document somebody can review.
+ * Nothing but the token identifies the caller, and nothing about the customer or the
+ * money is in the view at all.
+ */
+export async function fetchCarrierUpload(token: string): Promise<CarrierUploadView> {
+  return linkFetch<CarrierUploadView>(`/u/${encodeURIComponent(token)}`)
+}
+
+/** The file the carrier picked, as both the sign and the commit call describe it. */
+export interface PortalUploadMeta {
+  type: ShipmentDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+}
+
+/** A presigned PUT pinned to that type and length. 429 means the link is full. */
+export interface PortalUploadTicket {
+  uploadUrl: string
+  s3Key: string
+  documentId: string
+}
+
+export async function requestUpload(token: string, meta: PortalUploadMeta): Promise<PortalUploadTicket> {
+  return linkFetch<PortalUploadTicket>(`/u/${encodeURIComponent(token)}/upload`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
+  })
+}
+
+/**
+ * Records the file as a document pending review. A 409 means the bytes have not
+ * landed in S3 yet — retryable, unlike the 400s. Answers with the row it wrote, not a
+ * view, so the page re-fetches `fetchCarrierUpload` to refresh its checklist.
+ */
+export async function commitUpload(
+  token: string,
+  meta: PortalUploadMeta & { documentId: string; s3Key: string },
+): Promise<{ ok: true; documentId: string; uploadedAt?: string }> {
+  return linkFetch<{ ok: true; documentId: string; uploadedAt?: string }>(`/u/${encodeURIComponent(token)}/commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
   })
 }
 

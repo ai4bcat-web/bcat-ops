@@ -33,6 +33,14 @@ export type ShipmentRow = ShipmentRecord & {
   nextCheckCallAt?: string | null
   checkCallOpen?: 'OPEN' | null
   openIncidentCount?: number | null
+  /**
+   * Step E. `[]` means every required document is in hand, a non-empty array names what
+   * is still missing, and `null` means the gate has never run for this shipment — three
+   * different answers the Docs column must not flatten into one.
+   */
+  docsMissing?: string[] | null
+  /** Carrier uploads on this shipment still waiting on a reviewer. */
+  pendingDocReviewCount?: number | null
 }
 
 export type BoardTabKey =
@@ -104,11 +112,19 @@ export interface BoardFilters {
   checkCallDue: true | null
   checkCallOverdue: true | null
   openExceptions: true | null
+  /**
+   * Step E toggles, same `null`-is-off rule. "Docs missing" is the cached gate result;
+   * "Uploads to review" is work sitting in the review queue, which is a different
+   * problem — paperwork that has arrived but nobody has accepted.
+   */
+  docsMissing: true | null
+  uploadsToReview: true | null
 }
 
 export const EMPTY_FILTERS: BoardFilters = {
   customerId: null, pickupFrom: null, pickupTo: null, mode: null, arStatus: null, assignmentType: null,
   checkCallDue: null, checkCallOverdue: null, openExceptions: null,
+  docsMissing: null, uploadsToReview: null,
 }
 
 export function activeFilterCount(f: BoardFilters): number {
@@ -145,6 +161,10 @@ export function matchesFilters(row: ShipmentRow, f: BoardFilters): boolean {
     if (f.checkCallDue && !f.checkCallOverdue && state !== 'DUE' && state !== 'OVERDUE') return false
   }
   if (f.openExceptions && (row.openIncidentCount ?? 0) === 0) return false
+  // A shipment whose gate has never run is not evidence of missing paperwork, so the
+  // filter shows only shipments that are known to owe something.
+  if (f.docsMissing && (row.docsMissing?.length ?? 0) === 0) return false
+  if (f.uploadsToReview && (row.pendingDocReviewCount ?? 0) === 0) return false
   return true
 }
 
@@ -209,11 +229,19 @@ export const BOARD_COLUMNS: BoardColumn[] = [
   { key: 'lastUpdateAt', label: 'Last update', value: (r) => [shortDateTime(r.lastUpdateAt), r.lastUpdatePlace].filter(Boolean).join(' · ') },
   { key: 'nextCheckCallAt', label: 'Next check call', value: (r) => shortDateTime(r.nextCheckCallAt) },
   { key: 'openIncidentCount', label: 'Exceptions', value: (r) => ((r.openIncidentCount ?? 0) > 0 ? String(r.openIncidentCount) : '') },
+  /*
+   * Three states, and the CSV says which in words: nothing at all when the gate has
+   * never run for this shipment, "Complete" when it has and found everything, and the
+   * count when paperwork is outstanding. A blank cell is not "complete".
+   */
+  { key: 'docsMissing', label: 'Docs', value: (r) => (
+    r.docsMissing == null ? '' : r.docsMissing.length === 0 ? 'Complete' : `${r.docsMissing.length} missing`
+  ) },
 ]
 
 export const DEFAULT_COLUMN_KEYS = [
   'number', 'status', 'customerName', 'mode', 'originCity', 'destinationCity', 'pickupAppt', 'deliveryAppt',
-  'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount',
+  'lastUpdateAt', 'nextCheckCallAt', 'openIncidentCount', 'docsMissing',
 ]
 
 export function visibleColumns(keys: readonly string[]): BoardColumn[] {
@@ -268,6 +296,8 @@ function sanitizeFilters(v: unknown): BoardFilters {
     checkCallDue: raw.checkCallDue === true ? true : null,
     checkCallOverdue: raw.checkCallOverdue === true ? true : null,
     openExceptions: raw.openExceptions === true ? true : null,
+    docsMissing: raw.docsMissing === true ? true : null,
+    uploadsToReview: raw.uploadsToReview === true ? true : null,
   }
 }
 

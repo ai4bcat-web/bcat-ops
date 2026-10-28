@@ -1,8 +1,8 @@
 /**
  * The body of a shipment, shared by the drawer and the full page: Summary · Details ·
- * Stops · Carrier · Documents · Financials (spec §6.4 "Board"). A DRAFT shipment shows the
- * draft order editor instead of the tabs, because a draft has nothing to track yet — that
- * is the only shape difference between the two.
+ * Stops · Carrier · Tracking · Documents · Financials (spec §6.4 "Board"). A DRAFT shipment
+ * shows the draft order editor instead of the tabs, because a draft has nothing to track
+ * yet — that is the only shape difference between the two.
  */
 import { useMemo, useState } from 'react'
 import { Building2, ClipboardList, FileText, MapPin, DollarSign, Info, Radar } from 'lucide-react'
@@ -12,7 +12,6 @@ import { formatCents } from '@/lib/tmsDirectory'
 import { formatDateTime } from '@/lib/date'
 import { computeFinancials } from '@/lib/shipmentCharges'
 import { SHIPMENT_STATUS_LABELS, LOAD_WORKFLOW_STATUS_LABELS } from '@/lib/shipmentStatus'
-import { LoadDriverDocs } from '@/features/loads/LoadDriverDocs'
 import { useDrivers } from '@/hooks/useDrivers'
 import { useTrucks } from '@/hooks/useTrucks'
 import type { CreditSummary } from '@/lib/customerCredit'
@@ -20,6 +19,8 @@ import { StopCards } from './StopCards'
 import { FinancialLines } from './FinancialLines'
 import { CarrierSection } from './CarrierSection'
 import { TrackingSection } from './TrackingSection'
+import { DocumentsSection } from './DocumentsSection'
+import { DeliveryCard } from './DeliveryCard'
 import { LoadActions } from './StatusActions'
 import { DraftOrderEditor } from './DraftOrderEditor'
 import type { ShipmentActions } from '../useShipmentActions'
@@ -157,6 +158,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
               </p>
             </div>
           )}
+          <DeliveryCard bundle={bundle} onReload={actions.reload} />
         </div>
       )}
 
@@ -175,6 +177,7 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
                 arStatus={order?.arStatus ?? null}
                 isAdmin={isAdmin}
                 handlers={actions.load}
+                onReload={actions.reload}
                 onRateCon={() => setTab('carrier')}
               />
             )}
@@ -235,11 +238,15 @@ export function ShipmentDetail(props: ShipmentDetailProps) {
       )}
 
       {tab === 'documents' && (
-        <div className="space-y-4">
-          <LoadDriverDocs loadId={load?.id} proNumber={load?.aljexId} kind="RATECON" />
-          <LoadDriverDocs loadId={load?.id} proNumber={load?.aljexId} kind="POD" />
-          <LoadDriverDocs loadId={load?.id} proNumber={load?.aljexId} kind="MISC" />
-        </div>
+        <DocumentsSection
+          bundle={bundle}
+          customer={customer}
+          locations={locations}
+          catalog={catalog}
+          currentUser={currentUser}
+          isAdmin={isAdmin}
+          onReload={actions.reload}
+        />
       )}
 
       {tab === 'financials' && (

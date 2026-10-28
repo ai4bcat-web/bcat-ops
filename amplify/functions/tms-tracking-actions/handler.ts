@@ -11,6 +11,9 @@
  *   SEND_CUSTOMER_LINK, REVOKE_CUSTOMER_LINK
  *   TEXT_DRIVER
  *   SAVE_TRACKING_SETTINGS
+ *   SEND_UPLOAD_LINK, REVOKE_UPLOAD_LINK      (step E — the carrier upload portal)
+ *   SEND_MILESTONE_NOTICE, EMAIL_DOCUMENTS    (step E — what customers are told)
+ *   SAVE_DOCUMENT_SETTINGS
  *
  * Deliberately separate from tms-shipment-actions: logging a check call moves Load
  * status and money and belongs on that router, but Twilio, SES, Cognito and the
@@ -36,10 +39,14 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { AdminGetUserCommand, CognitoIdentityProviderClient } from '@aws-sdk/client-cognito-identity-provider'
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2'
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb'
 import { randomBytes, randomUUID } from 'crypto'
 
 import {
+  IDX_CARRIERS_BY_SHIPMENT,
+  IDX_LOADS_BY_SHIPMENT,
   IDX_ORDERS_BY_SHIPMENT,
   casCondition,
   getById as storeGetById,
@@ -54,6 +61,7 @@ import {
   transact as storeTransact,
   updateItemTx,
   type Row,
+  type StopShape,
 } from '../_shared/shipmentStore'
 import { DispatchStore, tablesFromEnv } from '../_shared/dispatchStore'
 import { loadDispatchConfig, type DispatchConfig } from '../_shared/dispatchConfig'
@@ -61,8 +69,32 @@ import { sendDispatchText, type SendDeps } from '../_shared/dispatchSend'
 import { sendMessage } from '../_shared/twilio'
 import { MAX_SMS_BODY, toE164Strict } from '../../../src/lib/dispatch'
 import { linkExpiry, smsBodyFor } from '../../../src/lib/trackingLink'
+import {
+  DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES,
+  DEFAULT_UPLOAD_LINK_EXPIRY_DAYS,
+  MAX_UPLOAD_LINK_EXPIRY_DAYS,
+  MIN_UPLOAD_LINK_EXPIRY_DAYS,
+  canEmailTo,
+  normalizeRequiredDocTypes,
+} from '../../../src/lib/shipmentDocuments'
+import {
+  MAX_NOTICE_BODY_CHARS,
+  milestoneRecipients,
+  noticeId,
+  renderDocumentsEmail,
+  renderMilestoneEmail,
+  renderPodRequestEmail,
+  templateHasUrl,
+  uploadLinkExpiry,
+  type NoticeStop,
+} from '../../../src/lib/shipmentNotices'
+import { deliverNotice, type EmailAttachment } from '../_shared/shipmentNotices'
 import type {
   CheckCallNotifyChannel,
+  CustomerNotification,
+  CustomerRecord,
+  ShipmentDocumentRecord,
+  ShipmentDocumentType,
   TrackingContact,
   TrackingLinkChannel,
   TrackingLinkStatus,
@@ -71,6 +103,7 @@ import type {
 const dynamo = new DynamoDBClient({})
 const cognito = new CognitoIdentityProviderClient({})
 const ses = new SESv2Client({})
+const s3 = new S3Client({})
 
 const TRACKING_LINK_TABLE_NAME = process.env.TRACKING_LINK_TABLE_NAME ?? ''
 const LOAD_CHECK_CALL_TABLE_NAME = process.env.LOAD_CHECK_CALL_TABLE_NAME ?? ''
@@ -81,6 +114,10 @@ const LOAD_CARRIER_TABLE_NAME = process.env.LOAD_CARRIER_TABLE_NAME ?? ''
 const TMS_SETTINGS_TABLE_NAME = process.env.TMS_SETTINGS_TABLE_NAME ?? ''
 const DIVISION_TABLE_NAME = process.env.DIVISION_TABLE_NAME ?? ''
 const AUDIT_LOG_TABLE_NAME = process.env.AUDIT_LOG_TABLE_NAME ?? ''
+const SHIPMENT_DOCUMENT_TABLE_NAME = process.env.SHIPMENT_DOCUMENT_TABLE_NAME ?? ''
+const SHIPMENT_NOTICE_TABLE_NAME = process.env.SHIPMENT_NOTICE_TABLE_NAME ?? ''
+const CUSTOMER_TABLE_NAME = process.env.CUSTOMER_TABLE_NAME ?? ''
+const BUCKET_NAME = process.env.BUCKET_NAME ?? ''
 const USER_POOL_ID = process.env.USER_POOL_ID ?? 'us-east-1_IbPKPNJC9'
 const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
 const WEBHOOK_URL = process.env.WEBHOOK_URL ?? ''
@@ -124,6 +161,38 @@ const MAX_LINK_EXPIRY_HOURS = 720
 const MIN_CUSTOMER_LINK_DAYS = 1
 const MAX_CUSTOMER_LINK_DAYS = 90
 
+/** A carrier is only chased for paperwork once their load is off the truck. */
+const DELIVERED_LOAD_STATUSES: readonly string[] = ['DELIVERED', 'INVOICING']
+/** The e-mail vocabulary for a manual milestone send. */
+const MILESTONES: readonly CustomerNotification[] = [
+  'APPT_SCHEDULED',
+  'LOADING',
+  'PICKED_UP',
+  'IN_TRANSIT',
+  'OUT_FOR_DELIVERY',
+  'UNLOADING',
+  'DELIVERED',
+  'INVOICE_SENT',
+]
+const RECIPIENT_KINDS: readonly ('CUSTOMER' | 'CARRIER')[] = ['CUSTOMER', 'CARRIER']
+
+/** Document e-mail bounds. SES refuses a message over 10 MB, so we refuse it first. */
+const MAX_EMAIL_DOCUMENTS = 20
+const MAX_EMAIL_ATTACHMENT_BYTES = 10 * 1024 * 1024
+const MAX_SUBJECT = 200
+/** Long enough for the operator who has to forward the files by hand. */
+const DOWNLOAD_URL_TTL_SECONDS = 3600
+/**
+ * Where a shipment document's bytes may live: step E's own prefix, plus the two a
+ * pointer row points at (a driver-app POD, a customer's own rate confirmation).
+ * Anything else is not ours to read, and this Lambda is not granted it either.
+ */
+const EMAILABLE_KEY_PREFIXES: readonly string[] = [
+  'shipment-docs/',
+  'driver-docs/',
+  'rate-confirms/',
+]
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type Action =
@@ -133,6 +202,11 @@ type Action =
   | 'REVOKE_CUSTOMER_LINK'
   | 'TEXT_DRIVER'
   | 'SAVE_TRACKING_SETTINGS'
+  | 'SEND_UPLOAD_LINK'
+  | 'REVOKE_UPLOAD_LINK'
+  | 'SEND_MILESTONE_NOTICE'
+  | 'EMAIL_DOCUMENTS'
+  | 'SAVE_DOCUMENT_SETTINGS'
 
 /**
  * What an audit row is about. `AuditLog.entityType` is an open string in the schema,
@@ -199,9 +273,10 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   const groups = getGroups(identity)
   const isAdmin = email === OWNER_EMAIL || groups.includes(ADMIN_GROUP)
 
-  // How long every link lives and who the customer page says to call is org-wide
-  // configuration, not a dispatcher's call on one load.
-  if (action === 'SAVE_TRACKING_SETTINGS') {
+  // How long every link lives, who the customer page says to call, and what every
+  // carrier is asked to upload is org-wide configuration, not a dispatcher's call on
+  // one load.
+  if (action === 'SAVE_TRACKING_SETTINGS' || action === 'SAVE_DOCUMENT_SETTINGS') {
     if (!isAdmin) throw new Error(`Forbidden: ${action} requires owner or ADMIN`)
   } else if (!isAdmin && !groups.includes(LOAD_PAGE_GROUP)) {
     throw new Error(`Forbidden: ${action} requires owner, ADMIN, or ${LOAD_PAGE_GROUP}`)
@@ -265,6 +340,18 @@ function assertEmailList(value: unknown, label: string): string[] {
   if (!Array.isArray(value)) throw new Error(`${label} must be a list of email addresses`)
   if (value.length > MAX_RECIPIENTS) throw new Error(`${label} is limited to ${MAX_RECIPIENTS} addresses`)
   return [...new Set(value.map((v, i) => assertEmail(v, `${label}[${i}]`)))]
+}
+
+/**
+ * An address somebody else stored — a carrier's dispatcher, a customer's contact —
+ * which nothing on the way in ever validated. A malformed one is not an error here:
+ * it simply is not a recipient, and the caller says so in its own words.
+ */
+function emailOrNull(value: unknown): string | null {
+  const raw = optionalString(value, 254)
+  if (!raw) return null
+  const email = raw.toLowerCase()
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null
 }
 
 function assertOneOf<T extends string>(value: unknown, label: string, allowed: readonly T[]): T {
@@ -447,7 +534,7 @@ function linkSettings(settings: Row | null): { trackingLinkExpiryHours: number |
   }
 }
 
-function publicUrl(path: 'l' | 's', token: string): string {
+function publicUrl(path: 'l' | 's' | 'u', token: string): string {
   const origin = PORTAL_ORIGIN.replace(/\/+$/, '')
   return origin ? `${origin}/track/${path}/${token}` : `/track/${path}/${token}`
 }
@@ -1111,10 +1198,14 @@ function trackingSettingsPatch(input: Row): Row {
   return patch
 }
 
-async function saveTrackingSettings(input: Row, caller: Caller): Promise<Row> {
+/**
+ * The one writer for the settings singleton. Both save actions build their own patch
+ * of the keys they own and share the create-or-CAS-update below, so a key added in a
+ * later step never gets a second, subtly different write path.
+ */
+async function saveSettings(input: Row, caller: Caller, action: Action, patch: Row): Promise<Row> {
   const id = optionalString(input.id, 40) ?? SETTINGS_ID
   if (id !== SETTINGS_ID) throw new Error(`Settings id must be '${SETTINGS_ID}'`)
-  const patch = trackingSettingsPatch(input)
   if (Object.keys(patch).length === 0) throw new Error('Nothing to save')
 
   const expectedUpdatedAt = optionalString(input.expectedUpdatedAt, 40)
@@ -1157,10 +1248,544 @@ async function saveTrackingSettings(input: Row, caller: Caller): Promise<Row> {
   }
 
   const saved = (await getById(TMS_SETTINGS_TABLE_NAME, SETTINGS_ID)) ?? { id: SETTINGS_ID, ...patch }
-  await writeAudit('TMS_SETTINGS', SETTINGS_ID, 'SAVE_TRACKING_SETTINGS', caller, {
+  await writeAudit('TMS_SETTINGS', SETTINGS_ID, action, caller, {
     created: !existing, keys: Object.keys(patch),
   })
   return saved
+}
+
+// ── SAVE_DOCUMENT_SETTINGS ───────────────────────────────────────────────────
+
+/** Only the keys step E owns; everything else on the row is another router's. */
+function documentSettingsPatch(input: Row): Row {
+  const patch: Row = {}
+  if ('milestoneNoticesEnabled' in input) {
+    patch.milestoneNoticesEnabled = assertBoolean(input.milestoneNoticesEnabled, 'milestoneNoticesEnabled')
+  }
+  if ('podRequestEnabled' in input) {
+    patch.podRequestEnabled = assertBoolean(input.podRequestEnabled, 'podRequestEnabled')
+  }
+  if ('requiredCarrierUploadTypes' in input) {
+    const raw = input.requiredCarrierUploadTypes
+    if (raw == null) {
+      patch.requiredCarrierUploadTypes = null
+    } else {
+      if (!Array.isArray(raw)) throw new Error('requiredCarrierUploadTypes must be a list of document types')
+      const { types, unrecognised } = normalizeRequiredDocTypes(raw as string[])
+      // A string nobody can map to a type cannot gate anything and cannot be asked
+      // for on the portal, so it is refused here rather than stored as a requirement
+      // no upload will ever satisfy.
+      if (unrecognised.length > 0) {
+        throw new Error(`requiredCarrierUploadTypes does not recognise: ${unrecognised.join(', ')}`)
+      }
+      patch.requiredCarrierUploadTypes = types
+    }
+  }
+  if ('uploadLinkExpiryDays' in input) {
+    patch.uploadLinkExpiryDays = input.uploadLinkExpiryDays == null
+      ? null
+      : assertInteger(
+          input.uploadLinkExpiryDays,
+          'uploadLinkExpiryDays',
+          MIN_UPLOAD_LINK_EXPIRY_DAYS,
+          MAX_UPLOAD_LINK_EXPIRY_DAYS,
+        )
+  }
+  for (const key of ['milestoneEmailTemplate', 'podRequestEmailTemplate'] as const) {
+    if (!(key in input)) continue
+    const template = optionalString(input[key], MAX_NOTICE_BODY_CHARS)
+    // A template that cannot carry the link is an e-mail nobody can act on.
+    if (template && !templateHasUrl(template)) throw new Error(`${key} must contain {url}`)
+    patch[key] = template
+  }
+  if ('bolTerms' in input) patch.bolTerms = optionalString(input.bolTerms, MAX_NOTICE_BODY_CHARS)
+  if ('documentDeleteAdminOnly' in input) {
+    patch.documentDeleteAdminOnly = assertBoolean(input.documentDeleteAdminOnly, 'documentDeleteAdminOnly')
+  }
+  return patch
+}
+
+// ── Shipment reading (step E) ────────────────────────────────────────────────
+
+/** A stop as the notice templates want it; `address` carries the state, `stops` not. */
+function noticeStop(stop: StopShape): NoticeStop {
+  const address = (stop.address ?? null) as Row | null
+  return {
+    type: String(stop.type ?? ''),
+    name: optionalString(stop.name, 200),
+    city: optionalString(stop.city ?? address?.city, 120),
+    state: optionalString(address?.state, 40),
+    appt: optionalString(stop.appt, 60),
+    arrivedAt: optionalString(stop.arrivedAt, 60),
+    departedAt: optionalString(stop.departedAt, 60),
+  }
+}
+
+/** Every stop of the shipment, in load order — what the customer's e-mail describes. */
+async function shipmentLoads(shipmentId: string): Promise<Row[]> {
+  const loads = await queryIndex(LOAD_TABLE_NAME, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  return loads.sort((a, b) => String(a.loadNumber ?? a.id).localeCompare(String(b.loadNumber ?? b.id)))
+}
+
+/** Whose name signs the e-mail: the division running the freight, or the house name. */
+async function brokerNameFor(loads: Row[]): Promise<string> {
+  const key = loads.map((load) => optionalString(load.divisionKey, 60)).find(Boolean) ?? null
+  const division = await getDivision(key)
+  return optionalString(division?.name, 120) ?? BROKER_FALLBACK
+}
+
+/** The carrier on the road, asked for only when the customer link already names one. */
+async function activeCarrierName(shipmentId: string): Promise<string | null> {
+  const rows = await queryIndex(LOAD_CARRIER_TABLE_NAME, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  const active = rows.find((row) => row.status === 'ACTIVE' && row.kind !== 'OWN_ASSET')
+  return optionalString(active?.carrierName, 200)
+}
+
+/** Customer-visible references only; a milestone e-mail never carries an internal one. */
+function customerReferences(orders: Row[]): { code: string; label: string | null; value: string }[] {
+  const out: { code: string; label: string | null; value: string }[] = []
+  for (const order of orders) {
+    const refs = Array.isArray(order.references) ? (order.references as Row[]) : []
+    for (const ref of refs) {
+      if (!ref || typeof ref !== 'object') continue
+      if (ref.visibility !== 'CUSTOMER' && ref.visibility !== 'ALL') continue
+      const code = optionalString(ref.code, 60)
+      const value = optionalString(ref.value, 200)
+      if (!code || !value) continue
+      out.push({ code, label: optionalString(ref.label, 120), value })
+    }
+  }
+  return out
+}
+
+// ── SEND_UPLOAD_LINK ─────────────────────────────────────────────────────────
+
+/** The live upload link for one assignment, or null when the carrier has none. */
+async function activeUploadLink(loadId: string, loadCarrierId: string): Promise<Row | null> {
+  const rows = await queryIndex(TRACKING_LINK_TABLE_NAME, IDX_TRACKING_LINKS_BY_LOAD, 'loadId', loadId)
+  const active = rows
+    .filter((r) => r.kind === 'CARRIER_UPLOAD' && r.status === 'ACTIVE' && r.loadCarrierId === loadCarrierId)
+    .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')))
+  return active[0] ?? null
+}
+
+/**
+ * What every carrier is asked to upload, snapshotted onto the link so that changing
+ * the setting next month does not rewrite what this carrier was already asked for.
+ */
+function requiredUploadTypes(settings: Row | null): ShipmentDocumentType[] {
+  const raw = settings?.requiredCarrierUploadTypes
+  if (!Array.isArray(raw)) return [...DEFAULT_REQUIRED_CARRIER_UPLOAD_TYPES]
+  return normalizeRequiredDocTypes(raw as string[]).types
+}
+
+async function sendUploadLink(input: Row, caller: Caller): Promise<Row> {
+  const loadCarrierId = assertString(input.loadCarrierId, 'loadCarrierId')
+  const via = assertOneOf<Exclude<TrackingLinkChannel, 'SMS'>>(input.via, 'via', ['EMAIL', 'COPY'])
+  const explicitTo = assertEmailList(input.to, 'to')
+  const message = optionalString(input.message, MAX_MESSAGE)
+  const early = input.early === true
+  const regenerate = input.regenerate === true
+
+  const loadCarrier = await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId)
+  if (!loadCarrier) throw new Error(`Load carrier not found: ${loadCarrierId}`)
+  if (loadCarrier.kind === 'OWN_ASSET') {
+    throw new Error('Own drivers send PODs through the driver app')
+  }
+  if (loadCarrier.status !== 'ACTIVE') {
+    throw new Error('Only the carrier currently on the load can be asked for paperwork')
+  }
+
+  const loadId = String(loadCarrier.loadId)
+  const shipmentId = String(loadCarrier.shipmentId)
+  const [load, shipment, settings] = await Promise.all([
+    getById(LOAD_TABLE_NAME, loadId),
+    getById(SHIPMENT_TABLE_NAME, shipmentId),
+    getSettings(),
+  ])
+  if (!load) throw new Error(`Load not found: ${loadId}`)
+  // Asking for a POD before the freight is off the truck wastes everybody's time —
+  // but a carrier who already has the signed paperwork can be asked early on purpose.
+  if (!DELIVERED_LOAD_STATUSES.includes(String(load.status ?? '')) && !early) {
+    throw new Error('This load has not delivered yet — send the link early only if the carrier already has the paperwork')
+  }
+
+  // The dispatcher on the assignment is who we chase for paperwork; `to` overrides.
+  const fallback = emailOrNull(loadCarrier.dispatcherEmail)
+  const to = explicitTo.length > 0 ? explicitTo : fallback ? [fallback] : []
+  if (via === 'EMAIL' && to.length === 0) {
+    throw new Error('No dispatcher email on this assignment — add one, or copy the link instead')
+  }
+
+  const now = nowIso()
+  const neededTypes = requiredUploadTypes(settings)
+  const expiryDays = numberOrNull(settings?.uploadLinkExpiryDays) ?? DEFAULT_UPLOAD_LINK_EXPIRY_DAYS
+  const deliveredAt = optionalString(load.deliveredAt, 40) ?? optionalString(shipment?.deliveredAt, 40)
+  const expiresAt = uploadLinkExpiry(deliveredAt, expiryDays, now)
+
+  // One live upload link per assignment: a second would leave the first working, and
+  // the carrier would upload into whichever e-mail they happened to open.
+  const existing = await activeUploadLink(loadId, loadCarrierId)
+  const reuse = existing != null && !regenerate
+  const token = reuse ? String(existing!.id) : randomBytes(TOKEN_BYTES).toString('base64url')
+  const url = publicUrl('u', token)
+
+  const patch: Row = {
+    expiresAt,
+    neededTypes,
+    sentTo: to.join(', ') || null,
+    sentVia: via,
+    updatedAt: now,
+  }
+
+  await transact(
+    [
+      ...(existing && !reuse ? [revokeTx(String(existing.id), caller, now)] : []),
+      reuse
+        ? updateItemTx(TRACKING_LINK_TABLE_NAME, token, patch, null)
+        : putItem(TRACKING_LINK_TABLE_NAME, trackingLinkRow({
+            id: token,
+            __typename: 'TrackingLink',
+            kind: 'CARRIER_UPLOAD',
+            shipmentId,
+            loadId,
+            loadCarrierId,
+            status: 'ACTIVE' satisfies TrackingLinkStatus,
+            openCount: 0,
+            requestCount: 0,
+            pingCount: 0,
+            uploadCount: 0,
+            // Stamped only once something actually left, below.
+            sentAt: null,
+            createdBy: caller.email,
+            createdAt: now,
+            ...patch,
+          })),
+      updateItemTx(LOAD_CARRIER_TABLE_NAME, loadCarrierId, {
+        uploadLinkId: token,
+        podRequestedAt: now,
+        updatedBy: caller.email,
+        updatedAt: now,
+      }, null),
+    ],
+    'upload link',
+  )
+
+  const rendered = renderPodRequestEmail({
+    loadNumber: optionalString(load.loadNumber, 60) ?? loadId,
+    carrierName: optionalString(loadCarrier.carrierName, 200),
+    contactName: optionalString(loadCarrier.dispatcherName, 200),
+    stops: readStops(load).map(noticeStop),
+    needed: neededTypes,
+    uploadUrl: url,
+    expiresAt,
+    template: optionalString(settings?.podRequestEmailTemplate, MAX_NOTICE_BODY_CHARS),
+    brokerName: await brokerNameFor([load]),
+    message,
+  })
+
+  // The first request for an assignment takes the deterministic id, so the notifier's
+  // automatic send and this one collide on DynamoDB rather than in the carrier's
+  // inbox. A deliberate resend is a new row, because it really is a second e-mail.
+  const first = optionalString(loadCarrier.podRequestedAt, 40) == null
+  const delivered = await deliverNotice({
+    db: dynamo,
+    ses,
+    tableName: SHIPMENT_NOTICE_TABLE_NAME,
+    from: FROM_ADDRESS,
+    draft: {
+      id: first ? noticeId('POD_REQUEST', loadCarrierId) : `ntc-${randomUUID()}`,
+      shipmentId,
+      loadId,
+      loadCarrierId,
+      kind: 'POD_REQUEST',
+      channel: via,
+      to,
+      subject: rendered.subject,
+      body: rendered.body,
+      trackingLinkId: token,
+      createdBy: caller.email,
+    },
+  })
+
+  const emailStatus: EmailStatus = via === 'COPY' ? 'COPY' : delivered.status === 'SENT' ? 'SENT' : 'NOT_SENT'
+  const emailError = delivered.claimed
+    ? delivered.error
+    : 'This carrier has already been asked for the paperwork once'
+  if (emailStatus !== 'NOT_SENT') {
+    await patchRow(TRACKING_LINK_TABLE_NAME, token, { sentAt: now, updatedAt: nowIso() })
+  }
+  const link = await getById(TRACKING_LINK_TABLE_NAME, token)
+
+  await writeAudit('TRACKING_LINK', token, 'SEND_UPLOAD_LINK', caller, {
+    loadId, loadCarrierId, via, to, regenerate, reused: reuse, early, expiresAt, emailStatus,
+  })
+
+  return { link, url, notice: delivered.notice, emailStatus, emailError }
+}
+
+// ── REVOKE_UPLOAD_LINK ───────────────────────────────────────────────────────
+
+async function revokeUploadLink(input: Row, caller: Caller): Promise<Row> {
+  const trackingLinkId = assertString(input.trackingLinkId, 'trackingLinkId')
+  const link = await getById(TRACKING_LINK_TABLE_NAME, trackingLinkId)
+  if (!link) throw new Error('That upload link no longer exists')
+  if (link.kind !== 'CARRIER_UPLOAD') throw new Error('That is not a carrier upload link')
+  if (link.status !== 'ACTIVE') return { link }
+
+  const now = nowIso()
+  const loadCarrierId = optionalString(link.loadCarrierId, 100)
+  const loadCarrier = loadCarrierId ? await getById(LOAD_CARRIER_TABLE_NAME, loadCarrierId) : null
+
+  await transact(
+    [
+      revokeTx(trackingLinkId, caller, now),
+      // Only clear the pointer when it still points here; a newer link owns it otherwise.
+      ...(loadCarrier && loadCarrier.uploadLinkId === trackingLinkId
+        ? [updateItemTx(LOAD_CARRIER_TABLE_NAME, String(loadCarrier.id), {
+            uploadLinkId: null,
+            updatedBy: caller.email,
+            updatedAt: now,
+          }, null)]
+        : []),
+    ],
+    'upload link',
+  )
+
+  await writeAudit('TRACKING_LINK', trackingLinkId, 'REVOKE_UPLOAD_LINK', caller, { loadCarrierId })
+  return { link: { ...link, status: 'REVOKED', revokedAt: now, revokedBy: caller.email, updatedAt: now } }
+}
+
+// ── SEND_MILESTONE_NOTICE ────────────────────────────────────────────────────
+
+/**
+ * The milestone e-mail an operator sends by hand, and the only way to resend one the
+ * notifier already tried. Every send writes its own row: two rows that say the same
+ * thing are the truth when somebody pressed Send twice.
+ */
+async function sendMilestoneNotice(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const milestone = assertOneOf<CustomerNotification>(input.milestone, 'milestone', MILESTONES)
+  const via = assertOneOf<Exclude<TrackingLinkChannel, 'SMS'>>(input.via, 'via', ['EMAIL', 'COPY'])
+  const explicitTo = assertEmailList(input.to, 'to')
+  const message = optionalString(input.message, MAX_MESSAGE)
+
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+  const status = String(shipment.status ?? '')
+  if (UNTRACKABLE_SHIPMENT_STATUSES.includes(status)) {
+    throw new Error(
+      status === 'DRAFT'
+        ? 'Submit the order before telling the customer anything about it'
+        : 'That shipment is canceled; there is no milestone to send',
+    )
+  }
+
+  const customerId = optionalString(shipment.customerId, 100)
+  const [customer, orders, settings, link] = await Promise.all([
+    customerId && CUSTOMER_TABLE_NAME ? getById(CUSTOMER_TABLE_NAME, customerId) : Promise.resolve(null),
+    queryIndex(ORDER_TABLE_NAME, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId),
+    getSettings(),
+    activeCustomerLink(shipmentId),
+  ])
+
+  // Whoever the operator typed in, otherwise everybody the customer subscribed to this
+  // milestone. An empty list is a refusal, not a send that quietly reaches nobody.
+  const subscribed = milestoneRecipients(customer as unknown as CustomerRecord | null, milestone)
+  const to = explicitTo.length > 0
+    ? explicitTo
+    : subscribed.map((contact) => emailOrNull(contact.email)).filter((email): email is string => email != null)
+  if (via === 'EMAIL' && to.length === 0) {
+    throw new Error('Nobody is subscribed to this milestone — add a recipient, or switch the customer on in the directory')
+  }
+
+  const loads = await shipmentLoads(shipmentId)
+  // The customer only hears the carrier's name when their own link already shows it.
+  const carrierName = link?.showCarrier === true ? await activeCarrierName(shipmentId) : null
+  const rendered = renderMilestoneEmail({
+    milestone,
+    shipmentNumber: optionalString(shipment.number, 60) ?? shipmentId,
+    customerName: optionalString(customer?.name, 200),
+    contactName: subscribed.length === 1 ? optionalString(subscribed[0].name, 200) : null,
+    stops: loads.flatMap((load) => readStops(load).map(noticeStop)),
+    references: customerReferences(orders),
+    customerLinkUrl: link ? publicUrl('s', String(link.id)) : null,
+    carrierName,
+    deliveredAt: optionalString(shipment.deliveredAt, 40),
+    template: optionalString(settings?.milestoneEmailTemplate, MAX_NOTICE_BODY_CHARS),
+    brokerName: await brokerNameFor(loads),
+  })
+  // The lib owns the milestone text; the operator's covering note rides under it.
+  const body = (message ? `${rendered.body}\n\n${message}` : rendered.body).slice(0, MAX_NOTICE_BODY_CHARS)
+
+  const delivered = await deliverNotice({
+    db: dynamo,
+    ses,
+    tableName: SHIPMENT_NOTICE_TABLE_NAME,
+    from: FROM_ADDRESS,
+    draft: {
+      id: `ntc-${randomUUID()}`,
+      shipmentId,
+      kind: 'MILESTONE',
+      milestone,
+      channel: via,
+      to,
+      subject: rendered.subject,
+      body,
+      trackingLinkId: link ? String(link.id) : null,
+      createdBy: caller.email,
+    },
+  })
+
+  const emailStatus: EmailStatus = via === 'COPY' ? 'COPY' : delivered.status === 'SENT' ? 'SENT' : 'NOT_SENT'
+  const saved = await patchRow(SHIPMENT_TABLE_NAME, shipmentId, {
+    lastNoticeAt: nowIso(),
+    lastNoticeStatus: delivered.status,
+    updatedAt: nowIso(),
+  })
+
+  await writeAudit('SHIPMENT', shipmentId, 'SEND_MILESTONE_NOTICE', caller, {
+    milestone, via, to, emailStatus,
+  })
+
+  return { notice: delivered.notice, to, emailStatus, emailError: delivered.error, shipment: saved }
+}
+
+// ── EMAIL_DOCUMENTS ──────────────────────────────────────────────────────────
+
+/**
+ * Why this row cannot go to this kind of recipient, in the operator's words, or null
+ * when it can. `canEmailTo` is the rule; this only explains what it decided.
+ */
+function whyNotEmailable(doc: Row, recipientKind: 'CUSTOMER' | 'CARRIER'): string | null {
+  const view = doc as unknown as Pick<ShipmentDocumentRecord, 'audience' | 'status' | 'reviewStatus'>
+  if (canEmailTo(view, recipientKind)) return null
+  const name = optionalString(doc.name, 200) ?? String(doc.id)
+  if (doc.status === 'VOID') return `${name} is void`
+  if (doc.status === 'SUPERSEDED') return `${name} has been replaced by a newer version`
+  if (doc.reviewStatus === 'PENDING') return `${name} is still waiting to be reviewed`
+  if (doc.reviewStatus === 'REJECTED') return `${name} was rejected`
+  if (doc.audience === 'INTERNAL') return `${name} is internal and never leaves the office`
+  return recipientKind === 'CUSTOMER'
+    ? `${name} is the carrier's paperwork and does not go to the customer`
+    : `${name} is the customer's paperwork and does not go to the carrier`
+}
+
+/** The bytes themselves, from whichever of the four stores the row points at. */
+async function documentBytes(doc: Row): Promise<Uint8Array> {
+  const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: String(doc.s3Key) }))
+  const body = out.Body as { transformToByteArray?: () => Promise<Uint8Array> } | undefined
+  if (!body?.transformToByteArray) throw new Error(`Could not read ${String(doc.name)} out of storage`)
+  return body.transformToByteArray()
+}
+
+async function emailDocuments(input: Row, caller: Caller): Promise<Row> {
+  const shipmentId = assertString(input.shipmentId, 'shipmentId')
+  const recipientKind = assertOneOf<'CUSTOMER' | 'CARRIER'>(input.recipientKind, 'recipientKind', RECIPIENT_KINDS)
+  const to = assertEmailList(input.to, 'to')
+  const cc = assertEmailList(input.cc, 'cc')
+  const subject = optionalString(input.subject, MAX_SUBJECT)
+  const message = optionalString(input.message, MAX_MESSAGE)
+  if (to.length === 0) throw new Error('A document e-mail needs at least one recipient')
+  if (!Array.isArray(input.documentIds)) throw new Error('documentIds must be a list of document ids')
+  const documentIds = [...new Set(input.documentIds.map((v, i) => assertString(v, `documentIds[${i}]`)))]
+  if (documentIds.length === 0) throw new Error('Pick at least one document to send')
+  if (documentIds.length > MAX_EMAIL_DOCUMENTS) {
+    throw new Error(`One e-mail carries at most ${MAX_EMAIL_DOCUMENTS} documents`)
+  }
+
+  const shipment = await getById(SHIPMENT_TABLE_NAME, shipmentId)
+  if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+
+  const docs: Row[] = []
+  for (const documentId of documentIds) {
+    const doc = await getById(SHIPMENT_DOCUMENT_TABLE_NAME, documentId)
+    if (!doc) throw new Error(`Document not found: ${documentId}`)
+    if (String(doc.shipmentId) !== shipmentId) {
+      throw new Error(`${optionalString(doc.name, 200) ?? documentId} belongs to another shipment`)
+    }
+    const refusal = whyNotEmailable(doc, recipientKind)
+    if (refusal) throw new Error(refusal)
+    // A pointer row's bytes live in the driver app's or the rate con's own prefix;
+    // anything outside the four we know is not ours to attach.
+    const key = String(doc.s3Key ?? '')
+    if (!EMAILABLE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      throw new Error(`${optionalString(doc.name, 200) ?? documentId} is not stored where this router can read it`)
+    }
+    docs.push(doc)
+  }
+
+  const totalBytes = docs.reduce((sum, doc) => sum + (numberOrNull(doc.sizeBytes) ?? 0), 0)
+  if (totalBytes > MAX_EMAIL_ATTACHMENT_BYTES) {
+    const totalMb = Math.round((totalBytes / (1024 * 1024)) * 10) / 10
+    throw new Error(
+      `Those documents come to ${totalMb} MB; one e-mail carries at most ${MAX_EMAIL_ATTACHMENT_BYTES / (1024 * 1024)} MB — send them in two`,
+    )
+  }
+
+  const attachments: EmailAttachment[] = []
+  for (const doc of docs) {
+    attachments.push({
+      filename: String(doc.name),
+      contentType: String(doc.contentType),
+      bytes: await documentBytes(doc),
+    })
+  }
+
+  const number = optionalString(shipment.number, 60) ?? shipmentId
+  const rendered = renderDocumentsEmail({
+    shipmentNumber: number,
+    documents: docs.map((doc) => ({ name: String(doc.name), type: doc.type as ShipmentDocumentType })),
+    message,
+    subject,
+    senderName: caller.email,
+    brokerName: await brokerNameFor(await shipmentLoads(shipmentId)),
+  })
+
+  const delivered = await deliverNotice({
+    db: dynamo,
+    ses,
+    tableName: SHIPMENT_NOTICE_TABLE_NAME,
+    from: FROM_ADDRESS,
+    attachments,
+    draft: {
+      id: `ntc-${randomUUID()}`,
+      shipmentId,
+      kind: 'DOCUMENTS',
+      channel: 'EMAIL',
+      to,
+      cc,
+      subject: rendered.subject,
+      body: rendered.body,
+      attachments: docs.map((doc) => ({
+        documentId: String(doc.id),
+        name: String(doc.name),
+        sizeBytes: numberOrNull(doc.sizeBytes) ?? 0,
+      })),
+      createdBy: caller.email,
+    },
+  })
+
+  const emailStatus: EmailStatus = delivered.status === 'SENT' ? 'SENT' : 'NOT_SENT'
+  // SES is denied on dev, and the customer still needs their paperwork. A refused send
+  // hands back a download for every file so the operator can forward them by hand.
+  const downloads = emailStatus === 'SENT'
+    ? []
+    : await Promise.all(docs.map(async (doc) => ({
+        documentId: String(doc.id),
+        name: String(doc.name),
+        url: await getSignedUrl(
+          s3,
+          new GetObjectCommand({ Bucket: BUCKET_NAME, Key: String(doc.s3Key) }),
+          { expiresIn: DOWNLOAD_URL_TTL_SECONDS },
+        ),
+      })))
+
+  await writeAudit('SHIPMENT', shipmentId, 'EMAIL_DOCUMENTS', caller, {
+    documentIds, to, cc, recipientKind, emailStatus,
+  })
+
+  return { notice: delivered.notice, emailStatus, emailError: delivered.error, downloads }
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
@@ -1182,7 +1807,17 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
     case 'TEXT_DRIVER':
       return textDriver(input, caller)
     case 'SAVE_TRACKING_SETTINGS':
-      return saveTrackingSettings(input, caller)
+      return saveSettings(input, caller, action, trackingSettingsPatch(input))
+    case 'SEND_UPLOAD_LINK':
+      return sendUploadLink(input, caller)
+    case 'REVOKE_UPLOAD_LINK':
+      return revokeUploadLink(input, caller)
+    case 'SEND_MILESTONE_NOTICE':
+      return sendMilestoneNotice(input, caller)
+    case 'EMAIL_DOCUMENTS':
+      return emailDocuments(input, caller)
+    case 'SAVE_DOCUMENT_SETTINGS':
+      return saveSettings(input, caller, action, documentSettingsPatch(input))
     default:
       throw new Error(`Unknown action: ${action}`)
   }

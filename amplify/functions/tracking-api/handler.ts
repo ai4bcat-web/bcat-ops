@@ -1,32 +1,42 @@
 /**
  * tracking-api — the public pages behind a tracking link. No sign-in anywhere.
  *
- *   GET  /t/<code>        where a truck is right now (the Equipment trackingCode)
- *   GET  /s/<token>       the shipment's Customer Link
- *   GET  /l/<token>       the carrier driver's ping page
- *   POST /l/<token>/ping  one tap of that page
+ *   GET  /t/<code>          where a truck is right now (the Equipment trackingCode)
+ *   GET  /s/<token>         the shipment's Customer Link
+ *   GET  /l/<token>         the carrier driver's ping page
+ *   POST /l/<token>/ping    one tap of that page
+ *   GET  /u/<token>         the carrier's upload portal (Step E)
+ *   POST /u/<token>/upload  a presigned PUT for one file
+ *   POST /u/<token>/commit  the ShipmentDocument row for a file that landed
  *
- * For the three Step D routes the token **is** the TrackingLink row's primary key —
+ * For the tokenised routes the token **is** the TrackingLink row's primary key —
  * 24 random bytes, base64url — so every lookup is a GetItem on a 192-bit key and no
  * index can be walked from outside. What each page may say is decided once, in
- * `src/lib/trackingLink.ts`; this file only fetches and guards.
+ * `src/lib/trackingLink.ts` and `src/lib/uploadPortal.ts`; this file only fetches
+ * and guards.
  *
  * This role cannot write Load. A ping is one LoadCheckCall row plus the link's own
- * counters, and "last known" is read back from those.
+ * counters, and "last known" is read back from those. An upload is one PENDING
+ * ShipmentDocument row plus the link's counters — nothing else.
  */
 import { randomUUID } from 'node:crypto'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb'
+import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { currentLoadForDriver, laneLabel } from '../../../src/lib/driverJourney'
+import { MAX_UPLOADS_PER_LINK, documentKey, documentPrefix } from '../../../src/lib/shipmentDocuments'
 import { pendingDeliveryEta } from '../../../src/lib/stopEvents'
 import { carrierView, customerView, isLinkToken } from '../../../src/lib/trackingLink'
 import { buildTimeline, lastKnownPosition, thinPositions, trackingWindow, type TrackPosition } from '../../../src/lib/trackingTimeline'
+import { carrierUploadView, portalUploadAllowed, uploadLinkUsable } from '../../../src/lib/uploadPortal'
 import type { Load, Stop } from '../../../src/types'
 import type {
   Division,
   LoadCarrierRecord,
   LoadCheckCallRecord,
   OrderRecord,
+  ShipmentDocumentRecord,
   ShipmentLoad,
   ShipmentRecord,
   TmsSettings,
@@ -35,6 +45,7 @@ import type {
 } from '../../../src/types/tms'
 
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}))
+const s3 = new S3Client({})
 const EQUIPMENT_TABLE = process.env.EQUIPMENT_TABLE_NAME!
 const TRUCK_LOCATION_TABLE = process.env.TRUCK_LOCATION_TABLE_NAME!
 const DRIVER_TABLE = process.env.DRIVER_TABLE_NAME!
@@ -48,6 +59,9 @@ const LOAD_CARRIER_TABLE = process.env.LOAD_CARRIER_TABLE_NAME!
 const DIVISION_TABLE = process.env.DIVISION_TABLE_NAME!
 const TMS_SETTINGS_TABLE = process.env.TMS_SETTINGS_TABLE_NAME!
 const TRUCK_LOCATION_HISTORY_TABLE = process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME!
+// Step E
+const SHIPMENT_DOCUMENT_TABLE = process.env.SHIPMENT_DOCUMENT_TABLE_NAME!
+const DOCUMENT_BUCKET = process.env.BUCKET_NAME!
 
 const IDX_ORDERS_BY_SHIPMENT = 'ordersByShipmentId'
 const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
@@ -57,6 +71,7 @@ const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
 // Amplify pluralises the model for the physical index name: TruckLocationHistory
 // → truckLocationHistories…, exactly like ordersByShipmentId above.
 const IDX_POSITIONS_BY_TRUCK = 'truckLocationHistoriesByTruckIdAndLocatedAt'
+const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
 
 /** The wording every dead link gets, whatever killed it: nothing leaks which. */
 const LINK_GONE = 'This tracking link is no longer active'
@@ -74,6 +89,18 @@ const MAX_ACCURACY_M = 5000
 /** How many timeline rows a public page is allowed to pull. */
 const EVENT_LIMIT = 200
 const POSITION_LIMIT = 500
+/** How many documents one shipment's portal page may pull. */
+const DOCUMENT_LIMIT = 200
+/** An upload link that has run out, been revoked, or never was one. */
+const UPLOAD_LINK_GONE = 'That upload link is no longer active.'
+/** The file budget is spent; a carrier with more to send talks to a person. */
+const UPLOAD_BUDGET_SPENT = 'This link has received all the files it can. Call dispatch.'
+/** Long enough for a phone on truck-stop wifi to push 15 MB, short enough to be useless later. */
+const PRESIGN_EXPIRY_SECONDS = 300
+// `customerView` keeps its own copy of this fallback; the portal view takes the
+// broker name as an argument, so the same default lives here rather than being
+// exported out of a pure lib for one caller.
+const BROKER_FALLBACK = 'BCAT Logistics'
 
 type Row = Record<string, unknown>
 
@@ -514,10 +541,232 @@ async function pingRoute(token: string, event: FnUrlEvent) {
   return reply(200, { ok: true, at: nowIso })
 }
 
+// ── Step E: the carrier upload portal ───────────────────────────────────────
+
+/**
+ * The upload link, or nothing.
+ *
+ * Same answer for wrong shape, wrong kind, revoked, expired and never-existed, so a
+ * guessed token learns nothing; and an ACTIVE row found past its date is marked
+ * EXPIRED on the way past, exactly like the Step D pages.
+ */
+async function uploadLink(token: string): Promise<TrackingLinkRecord | null> {
+  if (!isLinkToken(token)) return null
+  const row = await getRow(TRACKING_LINK_TABLE, { id: token })
+  if (!row) return null
+  const link = row as unknown as TrackingLinkRecord
+  if (uploadLinkUsable(link, new Date().toISOString())) return link
+  if (link.kind === 'CARRIER_UPLOAD' && link.status === 'ACTIVE') await expire(token)
+  return null
+}
+
+/** `GET /u/<token>` — what the carrier still owes us, and what it has already sent. */
+async function uploadViewRoute(token: string) {
+  const link = await uploadLink(token)
+  if (!link?.loadId || !link.loadCarrierId) return reply(404, { error: UPLOAD_LINK_GONE })
+  if (!(await countOpen(token))) return reply(429, { error: 'This tracking link has been opened too many times' })
+
+  const [loadRow, carrierRow, documentRows, settingsRow] = await Promise.all([
+    getRow(LOAD_TABLE, { id: link.loadId }),
+    getRow(LOAD_CARRIER_TABLE, { id: link.loadCarrierId }),
+    // Every document on the shipment; `carrierUploadView` picks out this carrier's own.
+    queryIndex({ table: SHIPMENT_DOCUMENT_TABLE, index: IDX_DOCUMENTS_BY_SHIPMENT, key: 'shipmentId', value: link.shipmentId, limit: DOCUMENT_LIMIT }),
+    settings().catch(() => null),
+  ])
+  if (!loadRow || !carrierRow) return reply(404, { error: UPLOAD_LINK_GONE })
+
+  const load = toLoad(loadRow)
+  const division = await divisionFor([load])
+  return reply(200, carrierUploadView({
+    link,
+    load,
+    loadCarrier: carrierRow as unknown as LoadCarrierRecord,
+    documents: documentRows as unknown as ShipmentDocumentRecord[],
+    brokerName: division?.name?.trim() || BROKER_FALLBACK,
+    contactPhone: settingsRow?.trackingContact?.phone?.trim() || null,
+    nowIso: new Date().toISOString(),
+  }))
+}
+
+interface PortalFile {
+  type: string
+  name: string
+  contentType: string
+  sizeBytes: number
+  documentId: string
+  s3Key: string
+}
+
+/** What the carrier's browser says it is sending, or the reason it is unusable. */
+function readFile(body: unknown, committing: boolean): { file: PortalFile } | { error: string } {
+  const raw = parseJson<Record<string, unknown>>(body)
+  if (!raw || typeof raw !== 'object') return { error: 'Send the file as {type, name, contentType, sizeBytes}.' }
+  const { type, name, contentType, sizeBytes, documentId, s3Key } = raw
+  if (typeof type !== 'string' || typeof contentType !== 'string') {
+    return { error: 'Send the file as {type, name, contentType, sizeBytes}.' }
+  }
+  if (typeof name !== 'string' || !name.trim() || name.length > 255) return { error: 'That file needs a name.' }
+  if (typeof sizeBytes !== 'number') return { error: 'Send the file as {type, name, contentType, sizeBytes}.' }
+  // The id is a DynamoDB key and half of the S3 key, so only the shape this route
+  // mints is ever accepted back.
+  if (committing && (typeof documentId !== 'string' || !/^sdoc-[0-9a-fA-F-]{36}$/.test(documentId))) {
+    return { error: 'That upload is not one this link started.' }
+  }
+  if (committing && (typeof s3Key !== 'string' || !s3Key)) return { error: 'That upload is not one this link started.' }
+  return {
+    file: {
+      type,
+      name: name.trim(),
+      contentType,
+      sizeBytes,
+      documentId: typeof documentId === 'string' ? documentId : '',
+      s3Key: typeof s3Key === 'string' ? s3Key : '',
+    },
+  }
+}
+
+/** `POST /u/<token>/upload` — one presigned PUT. Writes nothing. */
+async function uploadPrepareRoute(token: string, event: FnUrlEvent) {
+  const link = await uploadLink(token)
+  if (!link?.loadCarrierId) return reply(404, { error: UPLOAD_LINK_GONE })
+
+  const prepared = event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf-8') : event.body
+  const read = readFile(prepared, false)
+  if ('error' in read) return reply(400, { error: read.error })
+  const { file } = read
+  const allowed = portalUploadAllowed(file.type, file.contentType, file.sizeBytes)
+  if (!allowed.ok) return reply(400, { error: allowed.reason })
+
+  // The budget is spent on committed files, and checked here: a presigned URL the
+  // carrier never uses must not lock anybody out.
+  if ((link.uploadCount ?? 0) >= MAX_UPLOADS_PER_LINK) return reply(429, { error: UPLOAD_BUDGET_SPENT })
+
+  const documentId = `sdoc-${randomUUID()}`
+  const s3Key = documentKey(link.shipmentId, documentId, file.name, file.contentType)
+  // Pinned to both the type and the exact length, so the signed URL cannot be reused
+  // to put something else — or something very large — into our bucket. `content-type`
+  // sits in the presigner's unsignableHeaders by default, so naming it in
+  // signableHeaders is what actually binds it; the name has to be lowercase because
+  // that is the canonical form the signer compares against, and the browser's
+  // `putPresignedFile` sends the matching `Content-Type` header.
+  const uploadUrl = await getSignedUrl(
+    s3,
+    new PutObjectCommand({ Bucket: DOCUMENT_BUCKET, Key: s3Key, ContentType: file.contentType, ContentLength: file.sizeBytes }),
+    { expiresIn: PRESIGN_EXPIRY_SECONDS, signableHeaders: new Set(['content-type']) },
+  )
+  return reply(200, { uploadUrl, s3Key, documentId })
+}
+
+/**
+ * `POST /u/<token>/commit` — the row for a file that landed.
+ *
+ * The only write the public role has besides the link's own counters, and it is one
+ * PENDING ShipmentDocument row. No Order, Load, LoadCarrier, Shipment or TmsSettings
+ * write may ever appear in these routes: a carrier-portal upload influences a billing
+ * decision only after a member of staff accepts it, in `tmsShipmentActions`.
+ */
+async function uploadCommitRoute(token: string, event: FnUrlEvent) {
+  const link = await uploadLink(token)
+  if (!link?.loadCarrierId) return reply(404, { error: UPLOAD_LINK_GONE })
+
+  const committed = event.isBase64Encoded && event.body ? Buffer.from(event.body, 'base64').toString('utf-8') : event.body
+  const read = readFile(committed, true)
+  if ('error' in read) return reply(400, { error: read.error })
+  const { file } = read
+  const allowed = portalUploadAllowed(file.type, file.contentType, file.sizeBytes)
+  if (!allowed.ok) return reply(400, { error: allowed.reason })
+
+  // The document id is inside its own key, so a commit can only claim bytes this
+  // link's own presign minted, under this shipment's prefix.
+  if (!file.s3Key.startsWith(`${documentPrefix(link.shipmentId)}${file.documentId}-`)) {
+    return reply(400, { error: 'That file does not belong to this load.' })
+  }
+
+  // The ceiling has to hold here too, not only on presign: a link holder can ask for
+  // any number of presigned PUTs in one burst while the count is still low and commit
+  // them all inside the five-minute window, so a prepare-only check is no ceiling at
+  // all. This is the same count the prepare route reads, off the link row already
+  // loaded above.
+  if ((link.uploadCount ?? 0) >= MAX_UPLOADS_PER_LINK) {
+    // A retried commit of a file this link already wrote is not a twenty-first file:
+    // the row exists and was paid for, so repeating it answers 200 exactly as the
+    // ConditionalCheckFailedException path below does. Punishing a retry would strand
+    // a carrier whose first answer was lost on the way back.
+    const existing = await getRow(SHIPMENT_DOCUMENT_TABLE, { id: file.documentId })
+    if (existing) return reply(200, { ok: true, documentId: file.documentId })
+    return reply(429, { error: UPLOAD_BUDGET_SPENT })
+  }
+
+  let head: { ContentLength?: number; ContentType?: string }
+  try {
+    head = await s3.send(new HeadObjectCommand({ Bucket: DOCUMENT_BUCKET, Key: file.s3Key }))
+  } catch {
+    return reply(409, { error: 'That file has not finished uploading — try again.' })
+  }
+  // The bytes have to be the ones the presign was issued for. S3 omits ContentType
+  // only when the PUT carried none, which the presigned URL cannot do, so a missing
+  // one is not treated as a mismatch.
+  if (head.ContentLength !== file.sizeBytes || (head.ContentType ?? file.contentType) !== file.contentType) {
+    return reply(400, { error: 'That file does not match what was uploaded.' })
+  }
+
+  const nowIso = new Date().toISOString()
+  const by = `link:${token.slice(0, 8)}`
+  try {
+    await ddb.send(new PutCommand({
+      TableName: SHIPMENT_DOCUMENT_TABLE,
+      Item: {
+        id: file.documentId,
+        shipmentId: link.shipmentId,
+        loadId: link.loadId ?? null,
+        loadCarrierId: link.loadCarrierId,
+        type: file.type,
+        name: file.name,
+        s3Key: file.s3Key,
+        contentType: file.contentType,
+        sizeBytes: file.sizeBytes,
+        source: 'CARRIER_PORTAL',
+        // PENDING until staff accept it: nothing a carrier sends satisfies a
+        // required document on its own.
+        reviewStatus: 'PENDING',
+        status: 'ACTIVE',
+        version: 1,
+        audience: 'ALL',
+        uploadLinkId: token,
+        uploadedBy: by,
+        uploadedAt: nowIso,
+        createdBy: by,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+      ConditionExpression: 'attribute_not_exists(id)',
+    }))
+  } catch (err) {
+    // A retried commit of the same file: the row is already there, and saying so
+    // again would cost the link another slot of its budget.
+    if ((err as { name?: string } | null)?.name === 'ConditionalCheckFailedException') {
+      return reply(200, { ok: true, documentId: file.documentId })
+    }
+    throw err
+  }
+
+  await ddb.send(new UpdateCommand({
+    TableName: TRACKING_LINK_TABLE,
+    Key: { id: token },
+    UpdateExpression: 'SET lastUploadAt = :now, updatedAt = :now ADD uploadCount :one',
+    ExpressionAttributeValues: { ':now': nowIso, ':one': 1 },
+  }))
+
+  return reply(200, { ok: true, documentId: file.documentId, uploadedAt: nowIso })
+}
+
 const TRUCK_PATH = /^\/t\/([A-Za-z0-9]{6,32})\/?$/
 const CUSTOMER_PATH = /^\/s\/([A-Za-z0-9_-]+)\/?$/
 const CARRIER_PATH = /^\/l\/([A-Za-z0-9_-]+)\/?$/
 const PING_PATH = /^\/l\/([A-Za-z0-9_-]+)\/ping\/?$/
+const UPLOAD_PATH = /^\/u\/([A-Za-z0-9_-]+)\/?$/
+const UPLOAD_PREPARE_PATH = /^\/u\/([A-Za-z0-9_-]+)\/upload\/?$/
+const UPLOAD_COMMIT_PATH = /^\/u\/([A-Za-z0-9_-]+)\/commit\/?$/
 
 export const handler = async (event: FnUrlEvent) => {
   const method = event.requestContext?.http?.method ?? 'GET'
@@ -531,12 +780,18 @@ export const handler = async (event: FnUrlEvent) => {
     if (customer) return customerRoute(customer[1])
     const carrier = CARRIER_PATH.exec(path)
     if (carrier) return carrierRoute(carrier[1])
+    const upload = UPLOAD_PATH.exec(path)
+    if (upload) return uploadViewRoute(upload[1])
     return reply(404, { error: 'Not found' })
   }
 
   if (method === 'POST') {
     const ping = PING_PATH.exec(path)
     if (ping) return pingRoute(ping[1], event)
+    const prepare = UPLOAD_PREPARE_PATH.exec(path)
+    if (prepare) return uploadPrepareRoute(prepare[1], event)
+    const commit = UPLOAD_COMMIT_PATH.exec(path)
+    if (commit) return uploadCommitRoute(commit[1], event)
     return reply(404, { error: 'Not found' })
   }
 

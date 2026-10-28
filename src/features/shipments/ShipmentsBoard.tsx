@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Columns3, Download, Filter, Plus, RefreshCw, Save, Search, Star, Trash2, Truck } from 'lucide-react'
+import { Check, Columns3, Download, Filter, Plus, RefreshCw, Save, Search, Star, Trash2, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,7 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { useDirectory } from '@/hooks/useDirectory'
 import { useShipments } from '@/hooks/useShipments'
+import { useDocumentReviewQueue } from '@/hooks/useDocumentReviewQueue'
 import {
   createShipment, deleteShipment, duplicateShipment, getTmsSettings, graphqlErrorText,
   restoreShipment, setShipmentStatus, tenderRespond,
@@ -49,6 +50,7 @@ export function ShipmentsBoard() {
   const email = user?.email ?? ''
   const { shipments, loading, error, refresh } = useShipments()
   const { customers, locations } = useDirectory()
+  const docReview = useDocumentReviewQueue()
   const [settings, setSettings] = useState<TmsSettings | null>(null)
 
   // Saved views are per user and per browser; the one marked default decides the landing
@@ -80,10 +82,25 @@ export function ShipmentsBoard() {
     return () => clearInterval(t)
   }, [])
 
-  const counts = useMemo(() => tabCounts(shipments), [shipments])
+  // The review queue is the only place that knows a carrier upload is waiting, so the
+  // board borrows its counts for the "Uploads to review" filter. Rows are rebuilt only
+  // when something is actually pending — the common case copies nothing.
+  const pendingByShipment = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const doc of docReview.documents) counts[doc.shipmentId] = (counts[doc.shipmentId] ?? 0) + 1
+    return counts
+  }, [docReview.documents])
+  const boardRows = useMemo(
+    () => (docReview.documents.length === 0
+      ? shipments
+      : shipments.map((s) => ({ ...s, pendingDocReviewCount: pendingByShipment[s.id] ?? null }))),
+    [shipments, pendingByShipment, docReview.documents.length],
+  )
+
+  const counts = useMemo(() => tabCounts(boardRows), [boardRows])
   const rows = useMemo(
-    () => applyBoard(shipments, { tab, query, filters, sortKey, sortDir }),
-    [shipments, tab, query, filters, sortKey, sortDir],
+    () => applyBoard(boardRows, { tab, query, filters, sortKey, sortDir }),
+    [boardRows, tab, query, filters, sortKey, sortDir],
   )
   const columns = visibleColumns(columnKeys)
 
@@ -312,6 +329,25 @@ function BoardCell({ column, row, nowMs }: { column: BoardColumn; row: ShipmentR
       </Badge>
     )
   }
+  if (column.key === 'docsMissing') {
+    // Blank means the gate has never run for this shipment. Saying "complete" there
+    // would be a claim nothing has checked.
+    if (row.docsMissing == null) return null
+    if (row.docsMissing.length === 0) {
+      return <Check size={14} className="text-emerald-600" data-testid="board-docs" data-state="complete" />
+    }
+    return (
+      <Badge
+        variant="outline"
+        className="border-amber-500/40 text-[10px] text-amber-700"
+        data-testid="board-docs"
+        data-state="missing"
+        title={row.docsMissing.join(', ')}
+      >
+        {row.docsMissing.length} missing
+      </Badge>
+    )
+  }
   if (column.key === 'nextCheckCallAt') {
     const state = checkCallState({ nextCheckCallAt: row.nextCheckCallAt }, nowMs)
     return (
@@ -455,6 +491,24 @@ function FilterRail({ filters, customers, onChange }: {
             onChange={(e) => set('openExceptions', e.target.checked ? true : null)}
           />
           Open exceptions
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            aria-label="Filter docs missing"
+            checked={filters.docsMissing === true}
+            onChange={(e) => set('docsMissing', e.target.checked ? true : null)}
+          />
+          Docs missing
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            aria-label="Filter uploads to review"
+            checked={filters.uploadsToReview === true}
+            onChange={(e) => set('uploadsToReview', e.target.checked ? true : null)}
+          />
+          Uploads to review
         </label>
       </div>
     </div>

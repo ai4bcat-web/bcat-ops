@@ -112,5 +112,20 @@ export const storage = defineStorage({
       allow.authenticated.to(['read', 'write']),
       allow.groups(STAFF_GROUPS).to(['read', 'write', 'delete']),
     ],
+    /*
+     * Shipment paperwork (Step E): BOLs, PODs, load summaries, lumper receipts and
+     * whatever else a shipment collects, keyed shipment-docs/{shipmentId}/…
+     *
+     * Read only from the browser, deliberately. Every byte that lands here arrives
+     * through a presigned PUT the Lambda signed — pinned to a content type and a
+     * length it already validated — so there is no path for a logged-in page to put
+     * an arbitrary object next to a shipment's documents, and no delete at all:
+     * voiding a document marks the row and keeps the file as the record of what
+     * actually arrived.
+     */
+    'shipment-docs/*': [
+      allow.authenticated.to(['read']),
+      allow.groups(STAFF_GROUPS).to(['read']),
+    ],
   })
 })

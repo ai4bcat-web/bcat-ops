@@ -18,10 +18,22 @@ vi.mock('@aws-sdk/lib-dynamodb', () => ({
   UpdateCommand: vi.fn(function (params: unknown) { return { __cmd: 'Update', ...(params as object) } }),
 }))
 
+const mockS3Send = vi.hoisted(() => vi.fn())
+const mockGetSignedUrl = vi.hoisted(() => vi.fn())
+
+vi.mock('@aws-sdk/client-s3', () => ({
+  S3Client: vi.fn(function () { return { send: mockS3Send } }),
+  HeadObjectCommand: vi.fn(function (params: unknown) { return { __cmd: 'Head', ...(params as object) } }),
+  PutObjectCommand: vi.fn(function (params: unknown) { return { __cmd: 'PutObject', ...(params as object) } }),
+}))
+
+vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl: mockGetSignedUrl }))
+
 let handler: typeof HandlerModule.handler
 
 const TOKEN = 'Hq3Zn7Lp0vWx9TbKcRdYu1Ms4Ae6Gi2J'   // 32 base64url chars
 const BAD_TOKEN = 'too-short'
+const BUCKET = 'test-bcat-docs'
 
 const TABLES = {
   link: 'test-TrackingLink',
@@ -33,6 +45,7 @@ const TABLES = {
   division: 'test-Division',
   settings: 'test-TmsSettings',
   history: 'test-TruckLocationHistory',
+  document: 'test-ShipmentDocument',
   equipment: 'test-Equipment',
   truckLocation: 'test-TruckLocation',
   driver: 'test-Driver',
@@ -51,6 +64,8 @@ beforeAll(async () => {
   process.env.DIVISION_TABLE_NAME = TABLES.division
   process.env.TMS_SETTINGS_TABLE_NAME = TABLES.settings
   process.env.TRUCK_LOCATION_HISTORY_TABLE_NAME = TABLES.history
+  process.env.SHIPMENT_DOCUMENT_TABLE_NAME = TABLES.document
+  process.env.BUCKET_NAME = BUCKET
   handler = (await import('./handler')).handler
 })
 
@@ -119,6 +134,10 @@ function route(by: {
   orders?: unknown[]
   loads?: unknown[]
   carriers?: unknown[]
+  carrier?: unknown
+  documents?: unknown[]
+  /** The one row a commit retry finds already written, read by id. */
+  document?: unknown
   checkCalls?: unknown[]
   positions?: unknown[]
   division?: unknown
@@ -134,6 +153,8 @@ function route(by: {
       if (cmd.TableName === TABLES.load) return { Item: by.load ?? undefined }
       if (cmd.TableName === TABLES.division) return { Item: by.division ?? undefined }
       if (cmd.TableName === TABLES.settings) return { Item: by.settings ?? undefined }
+      if (cmd.TableName === TABLES.loadCarrier) return { Item: by.carrier ?? undefined }
+      if (cmd.TableName === TABLES.document) return { Item: by.document ?? undefined }
       return { Item: undefined }
     }
     if (cmd.__cmd === 'Query') {
@@ -142,6 +163,7 @@ function route(by: {
       if (cmd.TableName === TABLES.loadCarrier) return { Items: by.carriers ?? [] }
       if (cmd.TableName === TABLES.checkCall) return { Items: by.checkCalls ?? [] }
       if (cmd.TableName === TABLES.history) return { Items: by.positions ?? [] }
+      if (cmd.TableName === TABLES.document) return { Items: by.documents ?? [] }
       return { Items: [] }
     }
     return { Items: [] }
@@ -156,6 +178,9 @@ const json = (res: { body: string }) => JSON.parse(res.body) as Record<string, u
 beforeEach(() => {
   vi.clearAllMocks()
   mockSend.mockReset()
+  mockS3Send.mockReset()
+  mockGetSignedUrl.mockReset()
+  mockGetSignedUrl.mockResolvedValue('https://s3.example/signed-put')
 })
 
 describe('tracking-api routing', () => {
@@ -355,5 +380,279 @@ describe('POST /l/<token>/ping', () => {
     const res = await post(`/l/${TOKEN}/ping`, fix)
     expect(res.statusCode).toBe(429)
     expect(sent().some((c) => c.__cmd === 'Put')).toBe(false)
+  })
+})
+
+// ── Step E: the carrier upload portal ───────────────────────────────────────
+
+const uploadLink = (over: Record<string, unknown> = {}) => ({
+  id: TOKEN,
+  kind: 'CARRIER_UPLOAD',
+  status: 'ACTIVE',
+  shipmentId: 'shp-1',
+  loadId: 'ld-1',
+  loadCarrierId: 'lc-1',
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  neededTypes: ['POD', 'CARRIER_INVOICE'],
+  createdBy: 'rep@bcat.com',
+  ...over,
+})
+
+/** The assignment, and a load row carrying everything the portal may never show. */
+const CARRIER_ROW = { id: 'lc-1', loadId: 'ld-1', shipmentId: 'shp-1', status: 'ACTIVE', carrierName: 'Blue Sky Trucking', rateCents: 185000, dispatcherEmail: 'ops@bluesky.com' }
+const PORTAL_LOAD = { ...LOAD, customerName: 'Acme Foods', customerRefs: 'PO-99-12', rateCents: 250000, carrierRateCents: 185000 }
+
+const DOC_ID = 'sdoc-11111111-2222-4333-8444-555555555555'
+const DOC_KEY = `shipment-docs/shp-1/${DOC_ID}-pod.pdf`
+const portalDoc = (over: Record<string, unknown> = {}) => ({
+  id: DOC_ID,
+  shipmentId: 'shp-1',
+  loadId: 'ld-1',
+  loadCarrierId: 'lc-1',
+  type: 'POD',
+  name: 'pod.pdf',
+  s3Key: DOC_KEY,
+  contentType: 'application/pdf',
+  sizeBytes: 2048,
+  source: 'CARRIER_PORTAL',
+  audience: 'ALL',
+  status: 'ACTIVE',
+  version: 1,
+  reviewStatus: 'PENDING',
+  uploadLinkId: TOKEN,
+  uploadedBy: `link:${TOKEN.slice(0, 8)}`,
+  uploadedAt: '2026-10-23T10:00:00.000Z',
+  createdBy: `link:${TOKEN.slice(0, 8)}`,
+  ...over,
+})
+
+const upload = { type: 'POD', name: 'pod.pdf', contentType: 'application/pdf', sizeBytes: 2048 }
+const commit = { ...upload, documentId: DOC_ID, s3Key: DOC_KEY }
+
+describe('GET /u/<token>', () => {
+  it('shows the load, what is still needed and what this link sent — and nothing else', async () => {
+    const updates: Cmd[] = []
+    route({
+      link: uploadLink(),
+      load: PORTAL_LOAD,
+      carrier: CARRIER_ROW,
+      documents: [
+        portalDoc(),
+        // The customer's own paperwork on the same shipment: never the carrier's business.
+        portalDoc({ id: 'sdoc-other', loadCarrierId: null, orderId: 'ord-1', type: 'CUSTOMER_RATE_CON', name: 'acme-rate-confirmation.pdf', uploadLinkId: null }),
+      ],
+      division: { key: 'BCAT_LOGISTICS', name: 'BCAT Logistics', active: true },
+      settings: { id: 'default', trackingContact: JSON.stringify({ mode: 'FIXED', phone: '(224) 875-6477' }) },
+      onUpdate: (cmd) => updates.push(cmd),
+    })
+
+    const res = await get(`/u/${TOKEN}`)
+    expect(res.statusCode).toBe(200)
+    const view = json(res)
+    expect(view).toMatchObject({
+      broker: { name: 'BCAT Logistics' },
+      loadNumber: 'S-1001-1',
+      carrierName: 'Blue Sky Trucking',
+      contactPhone: '(224) 875-6477',
+    })
+    expect(view.needed).toEqual([
+      { type: 'POD', label: 'Proof of delivery', satisfied: true },
+      { type: 'CARRIER_INVOICE', label: 'Carrier invoice', satisfied: false },
+    ])
+    expect(view.uploads).toHaveLength(1)
+    expect((view.uploads as Record<string, unknown>[])[0]).toMatchObject({ id: DOC_ID, reviewStatus: 'PENDING' })
+
+    // Nobody outside the company learns who the customer is, what the load pays, or
+    // what anybody else attached to the shipment.
+    expect(res.body).not.toContain('Acme Foods')
+    expect(res.body).not.toContain('PO-99-12')
+    expect(res.body).not.toContain('250000')
+    expect(res.body).not.toContain('185000')
+    expect(res.body).not.toContain('acme-rate-confirmation.pdf')
+
+    expect(updates[0].UpdateExpression).toContain('ADD requestCount :one, openCount :one')
+    expect(updates[0].ConditionExpression).toContain('requestCount < :max')
+  })
+
+  it('404s an expired link, a revoked one, a ping token and a stranger, all the same way', async () => {
+    for (const link of [
+      uploadLink({ expiresAt: '2020-01-01T00:00:00.000Z' }),
+      uploadLink({ status: 'REVOKED' }),
+      carrierLink(),
+      undefined,
+    ]) {
+      route({ link, load: PORTAL_LOAD, carrier: CARRIER_ROW })
+      const res = await get(`/u/${TOKEN}`)
+      expect(res.statusCode).toBe(404)
+      expect(json(res).error).toBe('That upload link is no longer active.')
+    }
+  })
+
+  it('marks an expired upload link EXPIRED instead of counting the open', async () => {
+    const updates: Cmd[] = []
+    route({ link: uploadLink({ expiresAt: '2020-01-01T00:00:00.000Z' }), onUpdate: (c) => updates.push(c) })
+    await get(`/u/${TOKEN}`)
+    expect(updates).toHaveLength(1)
+    expect(updates[0].ExpressionAttributeValues?.[':expired']).toBe('EXPIRED')
+  })
+})
+
+describe('POST /u/<token>/upload', () => {
+  it('presigns a PUT under this shipment and writes nothing', async () => {
+    route({ link: uploadLink() })
+    const res = await post(`/u/${TOKEN}/upload`, upload)
+    expect(res.statusCode).toBe(200)
+    const body = json(res)
+    expect(body.uploadUrl).toBe('https://s3.example/signed-put')
+    expect(String(body.documentId)).toMatch(/^sdoc-[0-9a-f-]{36}$/)
+    expect(body.s3Key).toBe(`shipment-docs/shp-1/${body.documentId}-pod.pdf`)
+
+    const signed = mockGetSignedUrl.mock.calls[0]
+    expect(signed[1]).toMatchObject({ Bucket: BUCKET, ContentType: 'application/pdf', ContentLength: 2048 })
+    // The presigner drops `content-type` unless it is named explicitly, so this is
+    // what makes the signed URL refuse a PUT of some other type.
+    expect(signed[2]).toEqual({ expiresIn: 300, signableHeaders: new Set(['content-type']) })
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('400s a document type a carrier may not send here', async () => {
+    route({ link: uploadLink() })
+    const res = await post(`/u/${TOKEN}/upload`, { ...upload, type: 'BOL' })
+    expect(res.statusCode).toBe(400)
+    expect(json(res).error).toBe('That document type cannot be uploaded here.')
+    expect(mockGetSignedUrl).not.toHaveBeenCalled()
+  })
+
+  it('400s a file past the portal ceiling, and one that is not a PDF or photo', async () => {
+    route({ link: uploadLink() })
+    const big = await post(`/u/${TOKEN}/upload`, { ...upload, sizeBytes: 16 * 1024 * 1024 })
+    expect(big.statusCode).toBe(400)
+    expect(json(big).error).toBe('Files must be smaller than 15 MB.')
+    const wrong = await post(`/u/${TOKEN}/upload`, { ...upload, contentType: 'application/zip' })
+    expect(wrong.statusCode).toBe(400)
+    expect(json(wrong).error).toBe('Please send a PDF, JPG or PNG.')
+    expect(mockGetSignedUrl).not.toHaveBeenCalled()
+  })
+
+  it('429s the twenty-first file and tells the carrier to call dispatch', async () => {
+    route({ link: uploadLink({ uploadCount: 20 }) })
+    const res = await post(`/u/${TOKEN}/upload`, upload)
+    expect(res.statusCode).toBe(429)
+    expect(json(res).error).toBe('This link has received all the files it can. Call dispatch.')
+    expect(mockGetSignedUrl).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('404s a revoked link before looking at the body', async () => {
+    route({ link: uploadLink({ status: 'REVOKED' }) })
+    expect((await post(`/u/${TOKEN}/upload`, upload)).statusCode).toBe(404)
+    expect(mockGetSignedUrl).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /u/<token>/commit', () => {
+  beforeEach(() => {
+    mockS3Send.mockResolvedValue({ ContentLength: 2048, ContentType: 'application/pdf' })
+  })
+
+  it('writes one PENDING document row and the link counter, and touches nothing else', async () => {
+    route({ link: uploadLink() })
+    const res = await post(`/u/${TOKEN}/commit`, commit)
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, documentId: DOC_ID })
+
+    const puts = sent().filter((c) => c.__cmd === 'Put')
+    expect(puts).toHaveLength(1)
+    expect(puts[0].TableName).toBe(TABLES.document)
+    expect(puts[0].ConditionExpression).toBe('attribute_not_exists(id)')
+    expect(puts[0].Item).toMatchObject({
+      id: DOC_ID,
+      shipmentId: 'shp-1',
+      loadId: 'ld-1',
+      loadCarrierId: 'lc-1',
+      type: 'POD',
+      s3Key: DOC_KEY,
+      source: 'CARRIER_PORTAL',
+      reviewStatus: 'PENDING',
+      status: 'ACTIVE',
+      version: 1,
+      audience: 'ALL',
+      uploadLinkId: TOKEN,
+      uploadedBy: `link:${TOKEN.slice(0, 8)}`,
+      createdBy: `link:${TOKEN.slice(0, 8)}`,
+    })
+
+    const updates = sent().filter((c) => c.__cmd === 'Update')
+    expect(updates).toHaveLength(1)
+    expect(updates[0].TableName).toBe(TABLES.link)
+    expect(updates[0].UpdateExpression).toContain('ADD uploadCount :one')
+    expect(updates[0].UpdateExpression).toContain('lastUploadAt')
+
+    // A carrier-portal upload influences a billing decision only once staff accept
+    // it: this role writes no Order, Load, LoadCarrier, Shipment or settings row.
+    const forbidden = [TABLES.order, TABLES.load, TABLES.loadCarrier, TABLES.shipment, TABLES.settings]
+    expect(writes().filter((c) => forbidden.includes(c.TableName))).toHaveLength(0)
+  })
+
+  it('refuses a key that belongs to another shipment', async () => {
+    route({ link: uploadLink() })
+    const res = await post(`/u/${TOKEN}/commit`, { ...commit, s3Key: `shipment-docs/shp-9/${DOC_ID}-pod.pdf` })
+    expect(res.statusCode).toBe(400)
+    expect(json(res).error).toBe('That file does not belong to this load.')
+    expect(writes()).toHaveLength(0)
+    expect(mockS3Send).not.toHaveBeenCalled()
+  })
+
+  it('refuses bytes that are not the ones the presign was issued for', async () => {
+    route({ link: uploadLink() })
+    mockS3Send.mockResolvedValue({ ContentLength: 9_000_000, ContentType: 'application/pdf' })
+    const res = await post(`/u/${TOKEN}/commit`, commit)
+    expect(res.statusCode).toBe(400)
+    expect(json(res).error).toBe('That file does not match what was uploaded.')
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('409s a file that has not landed yet, leaving no row behind', async () => {
+    route({ link: uploadLink() })
+    mockS3Send.mockRejectedValue(Object.assign(new Error('NotFound'), { name: 'NotFound' }))
+    const res = await post(`/u/${TOKEN}/commit`, commit)
+    expect(res.statusCode).toBe(409)
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('does not spend a second slot when the same commit is retried', async () => {
+    mockSend.mockImplementation(async (cmd: Cmd) => {
+      if (cmd.__cmd === 'Get' && cmd.TableName === TABLES.link) return { Item: uploadLink() }
+      if (cmd.__cmd === 'Put') throw new ConditionalCheckFailedException()
+      return {}
+    })
+    const res = await post(`/u/${TOKEN}/commit`, commit)
+    expect(res.statusCode).toBe(200)
+    expect(sent().some((c) => c.__cmd === 'Update')).toBe(false)
+  })
+
+  it('429s the twenty-first file at commit, not only at presign', async () => {
+    // A link holder can hold twenty presigned PUTs minted while the count was still
+    // low; the ceiling is only a ceiling if the commit refuses them too.
+    route({ link: uploadLink({ uploadCount: 20 }) })
+    const res = await post(`/u/${TOKEN}/commit`, commit)
+    expect(res.statusCode).toBe(429)
+    expect(json(res).error).toBe('This link has received all the files it can. Call dispatch.')
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('still answers a retried commit of an already-written file at the ceiling', async () => {
+    route({ link: uploadLink({ uploadCount: 20 }), document: portalDoc() })
+    const res = await post(`/u/${TOKEN}/commit`, commit)
+    expect(res.statusCode).toBe(200)
+    expect(json(res)).toMatchObject({ ok: true, documentId: DOC_ID })
+    expect(writes()).toHaveLength(0)
+  })
+
+  it('400s a document id this route never minted', async () => {
+    route({ link: uploadLink() })
+    const res = await post(`/u/${TOKEN}/commit`, { ...commit, documentId: '../../etc/passwd' })
+    expect(res.statusCode).toBe(400)
+    expect(writes()).toHaveLength(0)
   })
 })

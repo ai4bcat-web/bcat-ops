@@ -71,6 +71,34 @@ import {
   type Row,
   type StopShape,
 } from '../_shared/shipmentStore'
+import {
+  assertArrayOf,
+  assertEnum,
+  assertExpectedUpdatedAt,
+  assertIso,
+  assertRecord,
+  assertString,
+  optionalBoolean,
+  optionalEnum,
+  optionalFloat,
+  optionalInteger,
+  optionalIso,
+  optionalString,
+  parseInput,
+  type Caller,
+} from './inputs'
+import {
+  attachDriverDoc,
+  commitDocument,
+  prepareDocumentUpload,
+  rateCarrier,
+  readyToInvoice,
+  reviewDocument,
+  saveGeneratedDocument,
+  updateDocument,
+  voidDocument,
+  type DocumentDeps,
+} from './documents'
 
 import {
   computeFinancials,
@@ -148,6 +176,11 @@ const PORTAL_ORIGIN = process.env.PORTAL_ORIGIN ?? ''
 // revoke the carrier's ping link when the carrier comes off the load.
 const LOAD_CHECK_CALL_TABLE_NAME = process.env.LOAD_CHECK_CALL_TABLE_NAME ?? ''
 const TRACKING_LINK_TABLE_NAME = process.env.TRACKING_LINK_TABLE_NAME ?? ''
+// Step E tables. The shipment's document index is written here and by the public
+// upload portal; the two driver-app tables are read only, to point a shipment row
+// at a POD whose bytes stay where the driver app put them.
+const DRIVER_SUBMISSION_TABLE_NAME = process.env.DRIVER_SUBMISSION_TABLE_NAME ?? ''
+const DRIVER_SUBMISSION_DOC_TABLE_NAME = process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME ?? ''
 
 const OWNER_EMAIL = 'ryne@bcatcorp.com'
 const ADMIN_GROUP = 'ADMIN'
@@ -164,8 +197,6 @@ const IDX_CHECK_CALLS_BY_LOAD = 'loadCheckCallsByLoadIdAndAt'
 
 /** DUPLICATE_SHIPMENT ceiling — one transaction per copy, and 20 is the plan's cap. */
 const MAX_DUPLICATE_COPIES = 20
-/** Element-validated JSON arrays are capped so one request cannot blow the item size. */
-const MAX_JSON_ELEMENTS = 100
 
 // ── Shared shipment store ────────────────────────────────────────────────────
 
@@ -182,6 +213,24 @@ const batchGetByIds = (tableName: string, ids: string[]) => storeBatchGetByIds(d
 const transact = (items: TransactWriteItem[], label: string) => storeTransact(dynamo, items, label)
 const readBundle = (shipmentId: string) => storeReadBundle(store, shipmentId)
 const rederiveShipmentStatus = (shipmentId: string, caller: Caller) => storeRederiveShipmentStatus(store, shipmentId, caller)
+
+// ── Document actions (step E) ────────────────────────────────────────────────
+
+/**
+ * The document rows, the required-document gate and the carrier rating live in
+ * `documents.ts`. They are handed this handler's clients and audit writer rather
+ * than building their own, so one Lambda holds one DynamoDB connection pool.
+ */
+const documentDeps: DocumentDeps = {
+  store,
+  s3,
+  bucket: BUCKET_NAME,
+  customerTable: CUSTOMER_TABLE_NAME,
+  settingsTable: SETTINGS_TABLE_NAME,
+  driverSubmissionTable: DRIVER_SUBMISSION_TABLE_NAME,
+  driverSubmissionDocTable: DRIVER_SUBMISSION_DOC_TABLE_NAME,
+  writeAudit,
+}
 
 // ── AppSync data client (Load writes only) ───────────────────────────────────
 
@@ -317,6 +366,15 @@ type Action =
   | 'SET_ETA'
   | 'GET_SHIPMENT_BUNDLE'
   | 'BACKFILL_SHIPMENT'
+  | 'PREPARE_DOCUMENT_UPLOAD'
+  | 'COMMIT_DOCUMENT'
+  | 'SAVE_GENERATED_DOCUMENT'
+  | 'ATTACH_DRIVER_DOC'
+  | 'REVIEW_DOCUMENT'
+  | 'UPDATE_DOCUMENT'
+  | 'VOID_DOCUMENT'
+  | 'READY_TO_INVOICE'
+  | 'RATE_CARRIER'
 
 interface AppSyncIdentity {
   sub: string
@@ -330,13 +388,6 @@ interface AppSyncEvent {
     input?: string | Record<string, unknown> | null
   }
   identity?: AppSyncIdentity | null
-}
-
-interface Caller {
-  email: string
-  sub: string
-  groups: string[]
-  isAdmin: boolean
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -378,114 +429,6 @@ async function authorize(action: Action, identity?: AppSyncIdentity | null): Pro
   return { email, sub: identity.sub, groups, isAdmin }
 }
 
-// ── Input helpers ────────────────────────────────────────────────────────────
-
-export function parseInput(input: string | Record<string, unknown> | null | undefined): Row {
-  if (input == null) return {}
-  if (typeof input === 'string') {
-    if (!input.trim()) return {}
-    const parsed: unknown = JSON.parse(input)
-    if (parsed === null || Array.isArray(parsed) || typeof parsed !== 'object') {
-      throw new Error('Invalid input: must be a JSON object')
-    }
-    return parsed as Row
-  }
-  if (Array.isArray(input) || typeof input !== 'object') throw new Error('Invalid input: must be an object')
-  return input
-}
-
-function assertString(value: unknown, label: string): string {
-  if (typeof value !== 'string') throw new Error(`${label} must be a string`)
-  const trimmed = value.trim()
-  if (!trimmed) throw new Error(`${label} cannot be empty`)
-  return trimmed
-}
-
-function optionalString(value: unknown, maxLen?: number): string | null {
-  if (value == null) return null
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  if (maxLen != null && trimmed.length > maxLen) throw new Error(`Field exceeds maximum length of ${maxLen}`)
-  return trimmed
-}
-
-function optionalInteger(value: unknown, options?: { min?: number; max?: number; label?: string }): number | null {
-  if (value == null) return null
-  const label = options?.label ?? 'Value'
-  let num: number
-  if (typeof value === 'number') num = value
-  else if (typeof value === 'string' && value.trim()) num = Number(value)
-  else throw new Error(`${label} must be an integer`)
-  if (!Number.isFinite(num) || !Number.isInteger(num)) throw new Error(`${label} must be an integer`)
-  if (options?.min != null && num < options.min) throw new Error(`${label} must be at least ${options.min}`)
-  if (options?.max != null && num > options.max) throw new Error(`${label} must be at most ${options.max}`)
-  if (num < -2_147_483_648 || num > 2_147_483_647) throw new Error(`${label} exceeds GraphQL integer range`)
-  return num
-}
-
-/** A coordinate, which is the one number in this router that is not an integer. */
-function optionalFloat(value: unknown, options: { min: number; max: number; label: string }): number | null {
-  if (value == null || value === '') return null
-  const num = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(num)) throw new Error(`${options.label} must be a number`)
-  if (num < options.min || num > options.max) {
-    throw new Error(`${options.label} must be between ${options.min} and ${options.max}`)
-  }
-  return num
-}
-
-function optionalBoolean(value: unknown): boolean | null {
-  if (value == null) return null
-  if (typeof value === 'boolean') return value
-  if (value === 'true') return true
-  if (value === 'false') return false
-  throw new Error('Value must be a boolean')
-}
-
-function assertEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T {
-  const v = assertString(value, label)
-  if (!(allowed as readonly string[]).includes(v)) throw new Error(`${label} must be one of ${allowed.join(', ')}`)
-  return v as T
-}
-
-function optionalEnum<T extends string>(value: unknown, allowed: readonly T[], label: string): T | null {
-  const v = optionalString(value, 64)
-  if (v == null) return null
-  if (!(allowed as readonly string[]).includes(v)) throw new Error(`${label} must be one of ${allowed.join(', ')}`)
-  return v as T
-}
-
-function assertRecord(value: unknown, label: string): Row {
-  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label} must be a JSON object`)
-  }
-  return value as Row
-}
-
-function assertArrayOf<T>(
-  value: unknown,
-  label: string,
-  validate: (item: unknown, index: number) => T,
-  maxLen = MAX_JSON_ELEMENTS,
-): T[] {
-  if (!Array.isArray(value)) throw new Error(`${label} must be an array`)
-  if (value.length > maxLen) throw new Error(`${label} must have at most ${maxLen} entries`)
-  return value.map(validate)
-}
-
-/** ISO-8601 is what every stop time, appointment and audit row in this system is. */
-function assertIso(value: unknown, label: string): string {
-  const v = assertString(value, label)
-  if (Number.isNaN(Date.parse(v))) throw new Error(`${label} must be an ISO timestamp`)
-  return v
-}
-
-function optionalIso(value: unknown, label: string): string | null {
-  if (value == null || value === '') return null
-  return assertIso(value, label)
-}
-
 // ── DynamoDB helpers ─────────────────────────────────────────────────────────
 
 /**
@@ -502,13 +445,6 @@ async function scanTable(tableName: string): Promise<Row[]> {
     lastKey = result.LastEvaluatedKey
   } while (lastKey)
   return items
-}
-
-function assertExpectedUpdatedAt(input: Row): string {
-  const value = input.expectedUpdatedAt
-  if (value == null) throw new Error('expectedUpdatedAt is required')
-  if (typeof value !== 'string') throw new Error('expectedUpdatedAt must be a string')
-  return value
 }
 
 /**
@@ -4225,6 +4161,24 @@ export const handler = async (event: AppSyncEvent): Promise<Row> => {
       return readBundle(assertString(input.shipmentId, 'shipmentId')) as unknown as Row
     case 'BACKFILL_SHIPMENT':
       return backfillShipments(input, caller)
+    case 'PREPARE_DOCUMENT_UPLOAD':
+      return prepareDocumentUpload(documentDeps, input)
+    case 'COMMIT_DOCUMENT':
+      return commitDocument(documentDeps, input, caller)
+    case 'SAVE_GENERATED_DOCUMENT':
+      return saveGeneratedDocument(documentDeps, input, caller)
+    case 'ATTACH_DRIVER_DOC':
+      return attachDriverDoc(documentDeps, input, caller)
+    case 'REVIEW_DOCUMENT':
+      return reviewDocument(documentDeps, input, caller)
+    case 'UPDATE_DOCUMENT':
+      return updateDocument(documentDeps, input, caller)
+    case 'VOID_DOCUMENT':
+      return voidDocument(documentDeps, input, caller)
+    case 'READY_TO_INVOICE':
+      return readyToInvoice(documentDeps, input, caller)
+    case 'RATE_CARRIER':
+      return rateCarrier(documentDeps, input, caller)
     default:
       throw new Error(`Unknown action: ${action}`)
   }

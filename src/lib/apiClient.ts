@@ -18,7 +18,9 @@ import type {
   CarrierBundle, CarrierStatus, CarrierStatusReason, CarrierContactType, CarrierDocumentType,
   CarrierPaymentMethodKind, CarrierPayeeType, QuickPayTier,
   ChargeSide, CheckCallNotifyChannel, CheckCallType, IncidentType, LoadCheckCallRecord,
-  TrackingContact, TrackingLinkRecord,
+  TrackingContact, TrackingLinkRecord, CustomerNotification,
+  ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentAudience,
+  ShipmentNoticeRecord, DocGateResult,
 } from '@/types/tms'
 import type { CreditSummary } from '@/lib/customerCredit'
 import { isActiveDirectoryRecord } from '@/lib/tmsDirectory'
@@ -1098,17 +1100,24 @@ const TMS_SETTINGS_V5_FIELDS = [
   'checkCallSlackChannelId', 'trackingLinkExpiryHours', 'customerLinkExpiryDays',
   'customerLinkShowsCarrier', 'customerLinkShowsPosition', 'trackingContact', 'trackingSmsTemplate',
 ]
+// Step E's document and notice settings. Its own flag again, for the same reason.
+const TMS_SETTINGS_V6_FIELDS = [
+  'milestoneNoticesEnabled', 'podRequestEnabled', 'requiredCarrierUploadTypes', 'uploadLinkExpiryDays',
+  'milestoneEmailTemplate', 'podRequestEmailTemplate', 'bolTerms', 'documentDeleteAdminOnly',
+]
 const TMS_SETTINGS_JSON_FIELDS: (keyof TmsSettings)[] = ['accessorialCodes', 'loadStatusRules', 'defaultRequiredReferences', 'chargeCodes', 'quickPayTiers', 'trackingContact']
 let settingsHaveV2 = true
 let settingsHaveV3 = true
 let settingsHaveV4 = true
 let settingsHaveV5 = true
+let settingsHaveV6 = true
 const tmsSettingsFields = () => [
   TMS_SETTINGS_FIELDS_BASE,
   settingsHaveV2 ? TMS_SETTINGS_V2_FIELDS.join(' ') : '',
   settingsHaveV3 ? TMS_SETTINGS_V3_FIELDS.join(' ') : '',
   settingsHaveV4 ? TMS_SETTINGS_V4_FIELDS.join(' ') : '',
   settingsHaveV5 ? TMS_SETTINGS_V5_FIELDS.join(' ') : '',
+  settingsHaveV6 ? TMS_SETTINGS_V6_FIELDS.join(' ') : '',
 ].filter(Boolean).join(' ')
 const fieldNamed = (names: string[], err: unknown) => {
   const msg = safeStringify(err)
@@ -1259,7 +1268,12 @@ export async function getTmsSettings(): Promise<TmsSettings | null> {
     try {
       return await run()
     } catch (err) {
-      if (attempt >= 4) throw err
+      if (attempt >= 5) throw err
+      if (settingsHaveV6 && fieldNamed(TMS_SETTINGS_V6_FIELDS, err)) {
+        console.warn('[apiClient] backend has no TmsSettings document fields yet — querying without them until deploy')
+        settingsHaveV6 = false
+        continue
+      }
       if (settingsHaveV5 && fieldNamed(TMS_SETTINGS_V5_FIELDS, err)) {
         console.warn('[apiClient] backend has no TmsSettings tracking fields yet — querying without them until deploy')
         settingsHaveV5 = false
@@ -1307,6 +1321,24 @@ const SHIPMENT_FIELDS = `
   pickupAppt deliveryAppt pickupMonth originCity destinationCity searchKey source
   createdBy updatedBy version createdAt updatedAt
 `
+// Step E stamps the shipment when every load has delivered and remembers the last
+// notice it sent. Its own flag, like the settings generations above: one unhandled
+// throw on a pre-deploy backend empties the whole board.
+const SHIPMENT_DELIVERY_FIELDS = ['deliveredAt', 'lastNoticeAt', 'lastNoticeStatus']
+let shipmentsHaveDelivery = true
+
+/** Every Shipment read, with step E's group dropped and retried if the backend predates it. */
+async function readShipments<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run(shipmentsHaveDelivery ? `${SHIPMENT_FIELDS} ${SHIPMENT_DELIVERY_FIELDS.join(' ')}` : SHIPMENT_FIELDS)
+    } catch (err) {
+      if (!shipmentsHaveDelivery || !fieldNamed(SHIPMENT_DELIVERY_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no delivery fields on Shipment yet — querying without them until deploy')
+      shipmentsHaveDelivery = false
+    }
+  }
+}
 const ORDER_FIELDS = `
   id shipmentId customerId customerName customerContactId customerRepId billToId costCenter
   mode rateType references equipmentType equipmentLengthFt specialRequirements freight
@@ -1315,6 +1347,24 @@ const ORDER_FIELDS = `
   createdBy updatedBy version createdAt updatedAt
 `
 const ORDER_JSON_FIELDS: (keyof OrderRecord)[] = ['references', 'specialRequirements', 'freight']
+// Step E's cached verdict of the required-document gate. Same self-heal, same reason.
+const ORDER_DOC_FIELDS = [
+  'docsRequired', 'docsMissing', 'docsCheckedAt', 'docsOverrideAt', 'docsOverrideBy', 'docsOverrideNote',
+]
+let ordersHaveDocs = true
+
+/** Every Order read, with step E's group dropped and retried if the backend predates it. */
+async function readOrders<T>(run: (fields: string) => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await run(ordersHaveDocs ? `${ORDER_FIELDS} ${ORDER_DOC_FIELDS.join(' ')}` : ORDER_FIELDS)
+    } catch (err) {
+      if (!ordersHaveDocs || !fieldNamed(ORDER_DOC_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no document fields on Order yet — querying without them until deploy')
+      ordersHaveDocs = false
+    }
+  }
+}
 const LOAD_CARRIER_FIELDS = `
   id loadId shipmentId kind status removalReason removedAt removedBy sequence
   carrierId carrierName carrierMc carrierRepId dispatcherName dispatcherPhone dispatcherEmail
@@ -1334,15 +1384,29 @@ const LOAD_CARRIER_V2_FIELDS = [
   'bookedAt', 'bookingWarnings', 'dispatchedAt', 'dispatchNote', 'removalNote',
 ]
 let loadCarriersHaveCarrierV2 = true
-const loadCarrierFields = () =>
-  loadCarriersHaveCarrierV2 ? `${LOAD_CARRIER_FIELDS} ${LOAD_CARRIER_V2_FIELDS.join(' ')}` : LOAD_CARRIER_FIELDS
+// Step E's upload link, the carrier's outstanding paperwork and the rating the office
+// gave them. A third generation with its own flag, because it deploys after step C's.
+const LOAD_CARRIER_V3_FIELDS = [
+  'uploadLinkId', 'podRequestedAt', 'docsMissing', 'ratingStars', 'ratingNote', 'ratedAt', 'ratedBy',
+]
+let loadCarriersHaveDocuments = true
+const loadCarrierFields = () => [
+  LOAD_CARRIER_FIELDS,
+  loadCarriersHaveCarrierV2 ? LOAD_CARRIER_V2_FIELDS.join(' ') : '',
+  loadCarriersHaveDocuments ? LOAD_CARRIER_V3_FIELDS.join(' ') : '',
+].filter(Boolean).join(' ')
 
-/** Every LoadCarrier index read, with that group dropped and retried once if the backend predates it. */
+/** Every LoadCarrier index read, with a group dropped and retried if the backend predates it. */
 async function listLoadCarriersByIndex(name: string, args: Record<string, string>): Promise<LoadCarrierRecord[]> {
   for (;;) {
     try {
       return await listAllByIndex<LoadCarrierRecord>(name, args, loadCarrierFields(), 1000)
     } catch (err) {
+      if (loadCarriersHaveDocuments && fieldNamed(LOAD_CARRIER_V3_FIELDS, err)) {
+        console.warn('[apiClient] backend has no document fields on LoadCarrier yet — querying without them until deploy')
+        loadCarriersHaveDocuments = false
+        continue
+      }
       if (!loadCarriersHaveCarrierV2 || !fieldNamed(LOAD_CARRIER_V2_FIELDS, err)) throw err
       console.warn('[apiClient] backend has no carrier booking fields on LoadCarrier yet — querying without them until deploy')
       loadCarriersHaveCarrierV2 = false
@@ -1610,26 +1674,27 @@ export async function setArStatus(input: SetArStatusInput): Promise<ShipmentBund
 
 export async function listShipmentsByStatus(status: ShipmentStatus): Promise<ShipmentRecord[]> {
   // The index key is the Shipment.status enum, so the variable must be declared as one.
-  return listAllByIndex<ShipmentRecord>(
-    'listShipmentByStatusAndPickupAppt', { status }, SHIPMENT_FIELDS, 1000, { status: 'ShipmentStatus!' },
-  )
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>(
+    'listShipmentByStatusAndPickupAppt', { status }, fields, 1000, { status: 'ShipmentStatus!' },
+  ))
 }
 export async function listShipmentsByCustomer(customerId: string): Promise<ShipmentRecord[]> {
-  return listAllByIndex<ShipmentRecord>('listShipmentByCustomerIdAndPickupAppt', { customerId }, SHIPMENT_FIELDS, 1000)
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByCustomerIdAndPickupAppt', { customerId }, fields, 1000))
 }
 /** `month` is 'YYYY-MM' — the board's default window. */
 export async function listShipmentsByMonth(month: string): Promise<ShipmentRecord[]> {
-  return listAllByIndex<ShipmentRecord>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, SHIPMENT_FIELDS, 1000)
+  return readShipments((fields) => listAllByIndex<ShipmentRecord>('listShipmentByPickupMonthAndPickupAppt', { pickupMonth: month }, fields, 1000))
 }
 export async function listShipments(): Promise<ShipmentRecord[]> {
-  return listAll<ShipmentRecord>('listShipments', SHIPMENT_FIELDS, 1000)
+  return readShipments((fields) => listAll<ShipmentRecord>('listShipments', fields, 1000))
 }
 
 export async function listOrders(): Promise<OrderRecord[]> {
-  return (await listAll<OrderRecord>('listOrders', ORDER_FIELDS, 1000)).map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
+  const rows = await readOrders((fields) => listAll<OrderRecord>('listOrders', fields, 1000))
+  return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
 }
 export async function listOrdersByCustomer(customerId: string): Promise<OrderRecord[]> {
-  const rows = await listAllByIndex<OrderRecord>('listOrderByCustomerIdAndPickupAppt', { customerId }, ORDER_FIELDS, 1000)
+  const rows = await readOrders((fields) => listAllByIndex<OrderRecord>('listOrderByCustomerIdAndPickupAppt', { customerId }, fields, 1000))
   return rows.map((o) => unwrapJsonFields(o, ORDER_JSON_FIELDS))
 }
 
@@ -1638,12 +1703,13 @@ export async function listOrdersByCustomer(customerId: string): Promise<OrderRec
  * LoadFinancials has no index — its `id` IS the load id, so each one is a GetItem.
  */
 export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBundle> {
-  const [shipment, orders, loads, loadCarriers, charges] = await Promise.all([
+  const [shipment, orders, loads, loadCarriers, charges, documents] = await Promise.all([
     getShipment(shipmentId),
-    listAllByIndex<OrderRecord>('listOrderByShipmentId', { shipmentId }, ORDER_FIELDS, 1000),
+    readOrders((fields) => listAllByIndex<OrderRecord>('listOrderByShipmentId', { shipmentId }, fields, 1000)),
     listAllByIndex<Load>('listLoadByShipmentId', { shipmentId }, loadFields(), 1000),
     listLoadCarriersByIndex('listLoadCarrierByShipmentId', { shipmentId }),
     listAllByIndex<LoadChargeRecord>('listLoadChargeByShipmentIdAndSortOrder', { shipmentId }, LOAD_CHARGE_FIELDS, 1000),
+    listShipmentDocuments(shipmentId),
   ])
   if (!shipment) throw new Error('Shipment not found')
   const financials = (await Promise.all(loads.map((l) => getLoadFinancials(l.id))))
@@ -1655,15 +1721,18 @@ export async function getShipmentBundle(shipmentId: string): Promise<ShipmentBun
     loadCarriers,
     charges,
     financials,
+    documents,
   }
 }
 
 export async function getShipment(id: string): Promise<ShipmentRecord | null> {
-  const r = await client.graphql({
-    query: `query GetShipment($id: ID!) { getShipment(id: $id) { ${SHIPMENT_FIELDS} } }`,
-    variables: { id },
-  }) as { data: { getShipment: ShipmentRecord | null } }
-  return r.data.getShipment
+  return readShipments(async (fields) => {
+    const r = await client.graphql({
+      query: `query GetShipment($id: ID!) { getShipment(id: $id) { ${fields} } }`,
+      variables: { id },
+    }) as { data: { getShipment: ShipmentRecord | null } }
+    return r.data.getShipment
+  })
 }
 
 export async function getLoadFinancials(loadId: string): Promise<LoadFinancialsRecord | null> {
@@ -2052,6 +2121,10 @@ const TRACKING_LINK_FIELDS = `
   pingCount lastPingAt lastPingLat lastPingLng lastPingAccuracyM
   revokedAt revokedBy createdBy createdAt updatedAt
 `
+// Step E's carrier upload portal counts its files on the link row. Its own flag, as
+// everywhere else: the tracking tab must still list links on a pre-deploy backend.
+const TRACKING_LINK_UPLOAD_FIELDS = ['uploadCount', 'lastUploadAt', 'neededTypes']
+let trackingLinksHaveUploads = true
 
 /**
  * Every tracking write. Same contract as `carrierAction`: the Lambda's own refusal
@@ -2282,7 +2355,18 @@ export async function listOpenIncidents(): Promise<LoadCheckCallRecord[]> {
 }
 
 export async function listTrackingLinksByShipment(shipmentId: string): Promise<TrackingLinkRecord[]> {
-  return listAllByIndex<TrackingLinkRecord>('listTrackingLinkByShipmentId', { shipmentId }, TRACKING_LINK_FIELDS, 200)
+  for (;;) {
+    const fields = trackingLinksHaveUploads
+      ? `${TRACKING_LINK_FIELDS} ${TRACKING_LINK_UPLOAD_FIELDS.join(' ')}`
+      : TRACKING_LINK_FIELDS
+    try {
+      return await listAllByIndex<TrackingLinkRecord>('listTrackingLinkByShipmentId', { shipmentId }, fields, 200)
+    } catch (err) {
+      if (!trackingLinksHaveUploads || !fieldNamed(TRACKING_LINK_UPLOAD_FIELDS, err)) throw err
+      console.warn('[apiClient] backend has no upload fields on TrackingLink yet — querying without them until deploy')
+      trackingLinksHaveUploads = false
+    }
+  }
 }
 
 /** Motive breadcrumbs for one truck inside a window, oldest → newest. */
@@ -2318,6 +2402,358 @@ export async function listCheckCallWorklist(): Promise<Load[]> {
 /** One load's assignments — the worklist reads the ACTIVE one for carrier and driver phone. */
 export async function listLoadCarriersByLoad(loadId: string): Promise<LoadCarrierRecord[]> {
   return listLoadCarriersByIndex('listLoadCarrierByLoadId', { loadId })
+}
+
+// ── Documents & delivery (tmsShipmentActions · tmsTrackingActions) ───────────
+//
+// Step E. ShipmentDocument is the shipment's index of every file it has, wherever the
+// bytes live; ShipmentNotice is every e-mail the system tried to send, with the text it
+// rendered. The writes split the way step D's did: the rows and the AR gate belong to
+// the shipment router, the links and SES to the tracking router. Neither model has
+// subscriptions, so the Documents tab polls (src/hooks/useShipmentDocuments.ts).
+
+export type {
+  ShipmentDocumentRecord, ShipmentDocumentType, ShipmentDocumentSource, ShipmentDocumentAudience,
+  ShipmentDocumentStatus, ShipmentDocumentReviewStatus, ShipmentDocumentSection,
+  ShipmentNoticeRecord, ShipmentNoticeKind, ShipmentNoticeStatus, DocGateResult,
+} from '@/types/tms'
+
+const SHIPMENT_DOCUMENT_FIELDS = `
+  id shipmentId orderId loadId loadCarrierId stopId
+  type name s3Key contentType sizeBytes pages source sourceRef audience
+  status version supersedesId
+  reviewStatus reviewedAt reviewedBy reviewNote uploadLinkId
+  voidedAt voidedBy voidReason uploadedBy uploadedAt
+  createdBy createdAt updatedAt
+`
+const SHIPMENT_NOTICE_FIELDS = `
+  id shipmentId loadId loadCarrierId kind milestone channel
+  to cc subject body attachments status error messageId sentAt trackingLinkId
+  at createdBy createdAt updatedAt
+`
+const SHIPMENT_NOTICE_JSON_FIELDS: (keyof ShipmentNoticeRecord)[] = ['attachments']
+
+// Both models arrive with step E's deploy, and until it lands AppSync has no such
+// query at all — the error names the query, not a field, so the field-level self-heal
+// above cannot see it. Degrade to "this shipment has no documents" (the same bargain
+// `payCreditsDeployed` strikes) rather than failing every shipment page mid-deploy.
+let documentModelsAvailable = true
+const isMissingDocumentModel = (err: unknown) =>
+  /Cannot query field ['"]listShipment(Document|Notice)|Unknown type ['"]ShipmentDocument/i.test(safeStringify(err))
+
+/** False once a read proved the backend predates the document models. */
+export const shipmentDocumentsDeployed = () => documentModelsAvailable
+
+function forgetDocumentModels(err: unknown): void {
+  if (!isMissingDocumentModel(err)) throw err
+  console.warn('[apiClient] backend has no document models yet — reading no documents until deploy')
+  documentModelsAvailable = false
+}
+
+/**
+ * One shipment's documents, oldest first — the order `ShipmentBundle.documents` comes
+ * back in from the Lambda, so a page that swaps a write's bundle in sees the same
+ * sequence it read. A view that wants newest first sorts its own copy.
+ */
+export async function listShipmentDocuments(shipmentId: string): Promise<ShipmentDocumentRecord[]> {
+  if (!documentModelsAvailable) return []
+  try {
+    return await listTrackingIndex<ShipmentDocumentRecord>({
+      name: 'listShipmentDocumentByShipmentIdAndUploadedAt',
+      decls: '$shipmentId: String!',
+      args: 'shipmentId: $shipmentId',
+      variables: { shipmentId },
+      fields: SHIPMENT_DOCUMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+  } catch (err) {
+    forgetDocumentModels(err)
+    return []
+  }
+}
+
+/**
+ * Every carrier-portal upload still waiting on a person, oldest first: the queue is
+ * worked in the order the carriers sent them. The index is sparse — only CARRIER_PORTAL
+ * rows ever carry PENDING — so this reads exactly the worklist however big the book is.
+ */
+export async function listDocumentReviewQueue(): Promise<ShipmentDocumentRecord[]> {
+  if (!documentModelsAvailable) return []
+  try {
+    return await listTrackingIndex<ShipmentDocumentRecord>({
+      // The index key is the model's own enum, so the variable must be declared as one.
+      name: 'listShipmentDocumentByReviewStatusAndUploadedAt',
+      decls: '$reviewStatus: ShipmentDocumentReviewStatus!',
+      args: 'reviewStatus: $reviewStatus',
+      variables: { reviewStatus: 'PENDING' },
+      fields: SHIPMENT_DOCUMENT_FIELDS,
+      limit: 500,
+      sortDirection: 'ASC',
+    })
+  } catch (err) {
+    forgetDocumentModels(err)
+    return []
+  }
+}
+
+/** One shipment's e-mail history, newest first. A NOT_SENT row is still readable. */
+export async function listShipmentNotices(shipmentId: string): Promise<ShipmentNoticeRecord[]> {
+  if (!documentModelsAvailable) return []
+  try {
+    const rows = await listTrackingIndex<ShipmentNoticeRecord>({
+      name: 'listShipmentNoticeByShipmentIdAndAt',
+      decls: '$shipmentId: String!',
+      args: 'shipmentId: $shipmentId',
+      variables: { shipmentId },
+      fields: SHIPMENT_NOTICE_FIELDS,
+      limit: 200,
+      sortDirection: 'DESC',
+    })
+    return rows.map((n) => unwrapJsonFields(n, SHIPMENT_NOTICE_JSON_FIELDS))
+  } catch (err) {
+    forgetDocumentModels(err)
+    return []
+  }
+}
+
+// ── Document writes (tmsShipmentActions) ─────────────────────────────────────
+
+export interface PrepareDocumentUploadInput {
+  shipmentId: string
+  type: ShipmentDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+}
+/** A presigned PUT pinned to the type and the length, good for five minutes. */
+export interface PreparedDocumentUpload {
+  uploadUrl: string
+  s3Key: string
+  documentId: string
+}
+export async function prepareDocumentUpload(input: PrepareDocumentUploadInput): Promise<PreparedDocumentUpload> {
+  return shipmentAction<PreparedDocumentUpload>('PREPARE_DOCUMENT_UPLOAD', input)
+}
+
+/**
+ * Every document write answers the same way: the whole bundle (its `documents`, the
+ * order's re-cached `docsMissing`) plus the row it wrote, so a dialog swaps the
+ * response in rather than re-reading the shipment.
+ */
+export interface DocumentResult {
+  bundle: ShipmentBundle
+  document: ShipmentDocumentRecord
+}
+
+export interface CommitDocumentInput {
+  shipmentId: string
+  /** Both from the PREPARE_DOCUMENT_UPLOAD that signed the PUT. */
+  documentId: string
+  s3Key: string
+  type: ShipmentDocumentType
+  name: string
+  contentType: string
+  sizeBytes: number
+  /** Which section the row lands in: order → Customer, assignment → Carrier, neither → Shipment. */
+  orderId?: string | null
+  loadId?: string | null
+  loadCarrierId?: string | null
+  stopId?: string | null
+  /** Defaults to the type's own audience; INTERNAL keeps a file in the building. */
+  audience?: ShipmentDocumentAudience | null
+}
+export async function commitDocument(input: CommitDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('COMMIT_DOCUMENT', input)
+}
+
+export interface SaveGeneratedDocumentInput {
+  shipmentId: string
+  type: 'BOL' | 'LOAD_SUMMARY' | 'RATE_CON'
+  loadId?: string | null
+  loadCarrierId?: string | null
+  /** The PDF the browser built, base64 with no data: prefix. */
+  pdfBase64: string
+  filename: string
+}
+export async function saveGeneratedDocument(input: SaveGeneratedDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('SAVE_GENERATED_DOCUMENT', input)
+}
+
+/** Points a shipment at a file the driver app already holds; the bytes are never copied. */
+export interface AttachDriverDocInput {
+  shipmentId: string
+  loadId: string
+  submissionDocId: string
+  type: 'POD' | 'PHOTO' | 'OTHER'
+}
+export async function attachDriverDoc(input: AttachDriverDocInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('ATTACH_DRIVER_DOC', input)
+}
+
+/** PENDING carrier-portal rows only. Nothing a carrier sent satisfies a gate until this. */
+export interface ReviewDocumentInput {
+  documentId: string
+  decision: 'ACCEPT' | 'REJECT'
+  /** ACCEPT may retype the upload, within what a carrier is allowed to send. */
+  type?: ShipmentDocumentType
+  audience?: ShipmentDocumentAudience
+  note?: string | null
+}
+export async function reviewDocument(input: ReviewDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('REVIEW_DOCUMENT', input)
+}
+
+/** ACTIVE rows that own their bytes; a generated row may change audience only. */
+export interface UpdateDocumentInput {
+  documentId: string
+  name?: string
+  type?: ShipmentDocumentType
+  audience?: ShipmentDocumentAudience
+  orderId?: string | null
+  loadCarrierId?: string | null
+}
+export async function updateDocument(input: UpdateDocumentInput): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('UPDATE_DOCUMENT', input)
+}
+
+/** The row goes VOID and stops counting; the file itself is never deleted. */
+export async function voidDocument(input: { documentId: string; reason: string }): Promise<DocumentResult> {
+  return shipmentAction<DocumentResult>('VOID_DOCUMENT', input)
+}
+
+export interface ReadyToInvoiceInput {
+  orderId: string
+  /** The Order's `updatedAt` as the page read it. */
+  expectedUpdatedAt: string
+  /** ADMIN/owner may bill past a missing document; the note is then required. */
+  override?: boolean
+  overrideNote?: string
+}
+/** `gate` is what the required-document check decided, missing documents included. */
+export interface ReadyToInvoiceResult {
+  bundle: ShipmentBundle
+  gate: DocGateResult
+}
+export async function readyToInvoice(input: ReadyToInvoiceInput): Promise<ReadyToInvoiceResult> {
+  return shipmentAction<ReadyToInvoiceResult>('READY_TO_INVOICE', input)
+}
+
+/** How the office rates the carrier once their load is done. One to five stars. */
+export async function rateCarrier(input: {
+  loadCarrierId: string
+  stars: number
+  note?: string
+}): Promise<ShipmentBundle> {
+  return shipmentAction<ShipmentBundle>('RATE_CARRIER', input)
+}
+
+// ── Upload links & notices (tmsTrackingActions) ──────────────────────────────
+
+/** NOT_SENT is an honest outcome: the notice and its text exist, SES refused it. */
+export type NoticeEmailStatus = 'SENT' | 'COPY' | 'NOT_SENT'
+
+export interface SendUploadLinkInput {
+  loadCarrierId: string
+  /** Defaults to the assignment's dispatcher e-mail. */
+  to?: string[]
+  via: 'EMAIL' | 'COPY'
+  message?: string | null
+  /** Ask before the load has delivered; refused without it. */
+  early?: boolean
+  /** Revoke the assignment's link and mint a new token. */
+  regenerate?: boolean
+}
+export interface SendUploadLinkResult {
+  link: TrackingLinkRecord
+  /** Copyable whatever the e-mail did. */
+  url: string
+  /** Written before the send, so the text exists even when SES refused it. */
+  notice: ShipmentNoticeRecord
+  emailStatus: NoticeEmailStatus
+  emailError: string | null
+}
+export async function sendUploadLink(input: SendUploadLinkInput): Promise<SendUploadLinkResult> {
+  return trackingAction<SendUploadLinkResult>('SEND_UPLOAD_LINK', input)
+}
+
+export async function revokeUploadLink(input: { trackingLinkId: string }): Promise<{ link: TrackingLinkRecord }> {
+  return trackingAction<{ link: TrackingLinkRecord }>('REVOKE_UPLOAD_LINK', input)
+}
+
+/** The manual send of a milestone the stream has already passed, or never sent. */
+export interface SendMilestoneNoticeInput {
+  shipmentId: string
+  milestone: CustomerNotification
+  /** Defaults to the customer contacts subscribed to that milestone. */
+  to?: string[]
+  message?: string | null
+  via: 'EMAIL' | 'COPY'
+}
+export interface SendMilestoneNoticeResult {
+  notice: ShipmentNoticeRecord
+  /** Who the server actually addressed it to. */
+  to: string[]
+  emailStatus: NoticeEmailStatus
+  emailError: string | null
+  /** The patched shipment, so `lastNoticeAt` needs no refetch. */
+  shipment: ShipmentRecord
+}
+export async function sendMilestoneNotice(input: SendMilestoneNoticeInput): Promise<SendMilestoneNoticeResult> {
+  return trackingAction<SendMilestoneNoticeResult>('SEND_MILESTONE_NOTICE', input)
+}
+
+export interface EmailDocumentsInput {
+  shipmentId: string
+  documentIds: string[]
+  to: string[]
+  cc?: string[]
+  subject?: string | null
+  message?: string | null
+  /** Decides which audiences may go out; INTERNAL rows are refused either way. */
+  recipientKind: 'CUSTOMER' | 'CARRIER'
+}
+export interface EmailDocumentsResult {
+  notice: ShipmentNoticeRecord
+  emailStatus: NoticeEmailStatus
+  emailError: string | null
+  /** Empty on a send; one-hour presigned GETs to hand over when SES refused. */
+  downloads: { documentId: string; name: string; url: string }[]
+}
+export async function emailDocuments(input: EmailDocumentsInput): Promise<EmailDocumentsResult> {
+  return trackingAction<EmailDocumentsResult>('EMAIL_DOCUMENTS', input)
+}
+
+/** The eight document settings on TmsSettings. ADMIN only, validated server-side. */
+export interface DocumentSettingsPatch {
+  milestoneNoticesEnabled?: boolean | null
+  podRequestEnabled?: boolean | null
+  requiredCarrierUploadTypes?: string[] | null
+  uploadLinkExpiryDays?: number | null
+  milestoneEmailTemplate?: string | null
+  podRequestEmailTemplate?: string | null
+  bolTerms?: string | null
+  documentDeleteAdminOnly?: boolean | null
+}
+export async function saveDocumentSettings(patch: DocumentSettingsPatch, expectedUpdatedAt?: string): Promise<TmsSettings> {
+  return trackingAction<TmsSettings>('SAVE_DOCUMENT_SETTINGS', { id: 'default', expectedUpdatedAt, ...patch })
+}
+
+/**
+ * Send the bytes to a presigned PUT. Both the staff dialog and the public carrier
+ * portal upload through this one implementation: the Content-Type has to be exactly
+ * what the Lambda signed or S3 rejects the PUT, and Amplify's uploadData cannot be
+ * used here — the portal has no credentials at all.
+ */
+export async function putPresignedFile(uploadUrl: string, file: Blob, contentType: string): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': contentType },
+  })
+  if (!res.ok) {
+    throw new Error(`Upload failed (${res.status}). The upload link may have expired — try again.`)
+  }
 }
 
 // ── Google geocoding proxy (tmsGeocode) — real upstream errors, no fallbacks ─────
@@ -2976,6 +3412,16 @@ export async function deleteApptProof(key: string): Promise<void> {
 }
 
 export async function getRateConfirmUrl(key: string): Promise<string> {
+  const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
+  return result.url.toString()
+}
+
+/**
+ * Presigned GET for a shipment document's bytes. Deliberately keyed by the row's own
+ * `s3Key` rather than a prefix: a pointer row's bytes live where the driver app or the
+ * old rate-con store already put them, and the browser's read grant covers all three.
+ */
+export async function getShipmentDocumentUrl(key: string): Promise<string> {
   const result = await getUrl({ path: key, options: { expiresIn: 3600 } })
   return result.url.toString()
 }

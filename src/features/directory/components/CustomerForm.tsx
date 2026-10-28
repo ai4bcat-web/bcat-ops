@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { MoneyField } from './MoneyField'
 import type { Division, CustomerStatus } from '@/types/tms'
 import type { CustomerFormValue } from './useCustomerForm'
@@ -167,10 +168,12 @@ export function CustomerForm({
               <Input value={value.defaultSalesRepId} onChange={(e) => set('defaultSalesRepId', e.target.value)} className="h-9 text-sm" />
             </div>
           </div>
-          <div>
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">Required docs for invoice</Label>
-            <Textarea value={value.requiredDocsText} onChange={(e) => set('requiredDocsText', e.target.value)} className="text-sm" placeholder="One per line" />
-          </div>
+          <DocumentTypesField
+            label="Required docs for invoice"
+            value={value.requiredDocs}
+            onChange={(next) => set('requiredDocs', next)}
+            help="Leave every box clear to use the organization default."
+          />
         </div>
       )}
 

@@ -982,6 +982,16 @@ const schema = a.schema({
       // the public customer page prints as "who to call".
       trackingContact:               a.json(),
       trackingSmsTemplate:           a.string(),    // must contain {url}
+
+      // ── Documents & delivery org defaults (Step E) ────────────────────────
+      milestoneNoticesEnabled:  a.boolean(),      // true; a customer still has to opt in
+      podRequestEnabled:        a.boolean(),      // true — ask the carrier on delivery
+      requiredCarrierUploadTypes: a.string().array(), // ['POD','CARRIER_INVOICE']
+      uploadLinkExpiryDays:     a.integer(),      // 30, counted from delivery
+      milestoneEmailTemplate:   a.string(),       // must contain {url}
+      podRequestEmailTemplate:  a.string(),       // must contain {url}
+      bolTerms:                 a.string(),       // printed on every generated BOL
+      documentDeleteAdminOnly:  a.boolean(),      // true — voiding a document is an admin act
     })
     // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
     // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
@@ -1057,6 +1067,11 @@ const schema = a.schema({
       // across re-sends; Regenerate revokes it and mints a new token.
       customerLinkId:   a.string(),
       customerLinkSentAt: a.datetime(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // Stamped when every load of the shipment has delivered.
+      deliveredAt:      a.datetime(),
+      lastNoticeAt:     a.datetime(),
+      lastNoticeStatus: a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
       version:         a.integer(),
@@ -1101,6 +1116,17 @@ const schema = a.schema({
       invoiceId:       a.string(),
       invoiceEarly:    a.boolean(),          // bill before delivery
       readyToInvoiceAt: a.datetime(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // What the required-document gate decided last time anything changed.
+      // `docsMissing: []` means complete; the board's Docs column reads it so
+      // the list never has to open five tables to colour one cell.
+      docsRequired:    a.string().array(),
+      docsMissing:     a.string().array(),
+      docsCheckedAt:   a.datetime(),
+      // An admin may invoice over a missing document, with a note, on the record.
+      docsOverrideAt:  a.datetime(),
+      docsOverrideBy:  a.string(),
+      docsOverrideNote: a.string(),
       pickupAppt:      a.string(),           // mirror, sort key of the customer index
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
@@ -1198,6 +1224,17 @@ const schema = a.schema({
       trackingLinkId:    a.string(),
       trackingStartedAt: a.datetime(),
       trackingStoppedAt: a.datetime(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // The ACTIVE CARRIER_UPLOAD TrackingLink e-mailed to this carrier.
+      uploadLinkId:      a.string(),
+      podRequestedAt:    a.datetime(),
+      // Carrier-scope paperwork still outstanding, cached for step G's AP gate.
+      // Nothing in step E blocks a payment with it.
+      docsMissing:       a.string().array(),
+      ratingStars:       a.integer(),         // 1–5, set once the load delivered
+      ratingNote:        a.string(),
+      ratedAt:           a.datetime(),
+      ratedBy:           a.string(),
       createdBy:       a.string().required(),
       updatedBy:       a.string().required(),
     })
@@ -1328,7 +1365,7 @@ const schema = a.schema({
   // index anywhere and a guess has to hit a 192-bit primary key.
   TrackingLink: a
     .model({
-      kind:          a.enum(['CARRIER_PING', 'CUSTOMER_VIEW']),
+      kind:          a.enum(['CARRIER_PING', 'CUSTOMER_VIEW', 'CARRIER_UPLOAD']),
       shipmentId:    a.string().required(),
       loadId:        a.string(),
       loadCarrierId: a.string(),
@@ -1355,9 +1392,112 @@ const schema = a.schema({
       lastPingAccuracyM: a.integer(),
       revokedAt:     a.datetime(),
       revokedBy:     a.string(),
+      // ── Documents & delivery (Step E) ───────────────────────────────────
+      // A CARRIER_UPLOAD link's budget and what it was minted asking for.
+      uploadCount:   a.integer(),
+      lastUploadAt:  a.datetime(),
+      neededTypes:   a.string().array(),
       createdBy:     a.string().required(),
     })
     .secondaryIndexes((index) => [index('shipmentId'), index('loadId')])
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // ── Documents & delivery (Step E) ──────────────────────────────────────────
+  // One typed row per file a shipment has, wherever the bytes live. Staff uploads,
+  // carrier-portal uploads and generated PDFs sit under `shipment-docs/{shipmentId}/`;
+  // a driver-app POD or a legacy rate con is a POINTER row whose `s3Key` is the key
+  // the other store already uses, so nothing is ever copied and the driver app's
+  // own records stay the truth about what a driver sent.
+  //
+  // Written by tmsShipmentActions and the public tracking-api; the client reads.
+  // The public role may only ever Put a PENDING CARRIER_PORTAL row — nothing it
+  // writes satisfies a requirement until a person accepts it.
+  ShipmentDocument: a
+    .model({
+      shipmentId:    a.string().required(),
+      // orderId set → the Customer section; loadCarrierId set → the Carrier
+      // section, under that assignment; neither → the Shipment section.
+      orderId:       a.string(),
+      loadId:        a.string(),
+      loadCarrierId: a.string(),
+      stopId:        a.string(),
+      type: a.enum([
+        'BOL', 'POD', 'RATE_CON', 'CUSTOMER_RATE_CON', 'LOAD_SUMMARY',
+        'LUMPER_RECEIPT', 'WEIGHT_TICKET', 'TEMP_LOG', 'INSPECTION_REPORT',
+        'CUSTOMS', 'PACKING_LIST', 'CARRIER_INVOICE', 'INVOICE', 'PHOTO', 'OTHER',
+      ]),
+      name:          a.string().required(),
+      s3Key:         a.string().required(),
+      contentType:   a.string().required(),
+      sizeBytes:     a.integer().required(),
+      pages:         a.integer(),
+      source:        a.enum(['UPLOAD', 'CARRIER_PORTAL', 'GENERATED', 'DRIVER_APP', 'LEGACY']),
+      // The DriverSubmissionDoc / Load id a pointer row points at.
+      sourceRef:     a.string(),
+      // Who may receive this file outside the company. INTERNAL never leaves.
+      audience:      a.enum(['CUSTOMER', 'CARRIER', 'ALL', 'INTERNAL']),
+      // A regenerated document supersedes its predecessor; the old bytes stay.
+      status:        a.enum(['ACTIVE', 'SUPERSEDED', 'VOID']),
+      version:       a.integer(),
+      supersedesId:  a.string(),
+      // Sparse: only CARRIER_PORTAL rows carry PENDING, so the reviewStatus index
+      // holds exactly the review worklist and nothing else.
+      reviewStatus:  a.enum(['PENDING', 'ACCEPTED', 'REJECTED']),
+      reviewedAt:    a.datetime(),
+      reviewedBy:    a.string(),
+      reviewNote:    a.string(),
+      uploadLinkId:  a.string(),
+      voidedAt:      a.datetime(),
+      voidedBy:      a.string(),
+      voidReason:    a.string(),
+      // staff e-mail · `link:<token8>` · `driver:<id>` · `migration:<script>`
+      uploadedBy:    a.string().required(),
+      // When the file was attached. Amplify's own createdAt cannot be a sort key.
+      uploadedAt:    a.datetime().required(),
+      createdBy:     a.string().required(),
+    })
+    .secondaryIndexes((index) => [
+      index('shipmentId').sortKeys(['uploadedAt']),
+      index('reviewStatus').sortKeys(['uploadedAt']),
+    ])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
+    .disableOperations(['subscriptions'])
+    .authorization((allow) => [allow.authenticated().to(['read'])]),
+
+  // Every e-mail step E tries to send, with the text it rendered. The row is written
+  // BEFORE the send and patched with the outcome, so a send SES refuses is still a
+  // readable, copyable artifact rather than a silent nothing. Milestone rows use the
+  // deterministic id `ms:<shipmentId>:<milestone>` and the first POD request
+  // `pod:<loadCarrierId>`, so a second leg or a stream retry never sends twice.
+  ShipmentNotice: a
+    .model({
+      shipmentId:    a.string().required(),
+      loadId:        a.string(),
+      loadCarrierId: a.string(),
+      kind:          a.enum(['MILESTONE', 'POD_REQUEST', 'DOCUMENTS']),
+      // The CustomerNotification vocabulary; null on POD_REQUEST and DOCUMENTS.
+      milestone:     a.string(),
+      channel:       a.enum(['EMAIL', 'COPY']),
+      to:            a.string().required(),   // comma-joined
+      cc:            a.string(),
+      subject:       a.string().required(),
+      body:          a.string().required(),
+      // { documentId, name, sizeBytes }[]
+      attachments:   a.json(),
+      status:        a.enum(['SENT', 'NOT_SENT', 'FAILED', 'COPY']),
+      error:         a.string(),
+      messageId:     a.string(),
+      sentAt:        a.datetime(),
+      trackingLinkId: a.string(),
+      createdBy:     a.string().required(),
+      // When the send was attempted. Amplify's own createdAt cannot be a sort key.
+      at:            a.datetime().required(),
+    })
+    .secondaryIndexes((index) => [index('shipmentId').sortKeys(['at'])])
+    // No client subscribes to this model (see TMS_DESIGN §12): dropping the three
+    // subscription resolvers keeps a fresh stack create under the CloudFormation cap.
     .disableOperations(['subscriptions'])
     .authorization((allow) => [allow.authenticated().to(['read'])]),
 

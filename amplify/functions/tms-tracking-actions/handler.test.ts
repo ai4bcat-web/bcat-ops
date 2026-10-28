@@ -45,6 +45,9 @@ const TABLES = {
   division: 'Division-test',
   conversation: 'DispatchConversation-test',
   message: 'DispatchMessage-test',
+  document: 'ShipmentDocument-test',
+  notice: 'ShipmentNotice-test',
+  customer: 'Customer-test',
 }
 
 const store = vi.hoisted(() => {
@@ -61,6 +64,11 @@ const store = vi.hoisted(() => {
   process.env.MESSAGE_TABLE_NAME = 'DispatchMessage-test'
   process.env.SETTINGS_TABLE_NAME = 'DispatchSettings-test'
   process.env.DRIVER_TABLE_NAME = 'Driver-test'
+  process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
+  process.env.SHIPMENT_NOTICE_TABLE_NAME = 'ShipmentNotice-test'
+  process.env.CUSTOMER_TABLE_NAME = 'Customer-test'
+  process.env.BUCKET_NAME = 'bcat-test-bucket'
+  process.env.FROM_ADDRESS = 'ai4bcat@gmail.com'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
   return new Map<string, Map<string, Row>>()
@@ -88,6 +96,8 @@ const INDEXES: Record<string, Record<string, readonly string[]>> = {
     trackingLinksByLoadId: ['loadId'],
   },
   [TABLES.order]: { ordersByShipmentId: ['shipmentId'] },
+  [TABLES.load]: { loadsByShipmentId: ['shipmentId'] },
+  [TABLES.loadCarrier]: { loadCarriersByShipmentId: ['shipmentId'] },
   [TABLES.checkCall]: { loadCheckCallsByLoadIdAndAt: ['loadId', 'at'] },
   [TABLES.conversation]: { dispatchConversationsByPhone: ['phone'] },
   [TABLES.message]: { dispatchMessagesByConversationIdAndAt: ['conversationId', 'at'] },
@@ -100,11 +110,19 @@ function indexRows(tableName: string, indexName: string): Row[] {
   return [...table(tableName).values()].filter((row) => keys.every((key) => row[key] != null))
 }
 
-class ConditionalCheckFailed extends Error {
-  constructor(message: string) {
-    super(`ConditionalCheckFailedException: ${message}`)
-  }
-}
+/**
+ * The real class name matters: `claimNotice` in `_shared/shipmentNotices` decides
+ * whether a deterministic id was already taken with `instanceof`, so the mocked SDK
+ * has to hand back the same constructor the handler imports.
+ */
+const ConditionalCheckFailed = vi.hoisted(
+  () =>
+    class ConditionalCheckFailedException extends Error {
+      constructor(message: string) {
+        super(`ConditionalCheckFailedException: ${message}`)
+      }
+    },
+)
 
 class TransactionCanceled extends Error {
   constructor(message: string) {
@@ -196,6 +214,7 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
     }
   return {
     DynamoDBClient,
+    ConditionalCheckFailedException: ConditionalCheckFailed,
     GetItemCommand: make('Get'),
     BatchGetItemCommand: make('BatchGet'),
     PutItemCommand: make('Put'),
@@ -221,6 +240,24 @@ vi.mock('@aws-sdk/client-sesv2', () => {
   }
   return { SESv2Client, SendEmailCommand }
 })
+
+// ── S3 mock — the bytes a document e-mail attaches, and the fallback download ─
+const s3Send = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/client-s3', () => {
+  class S3Client {
+    send = s3Send
+  }
+  class GetObjectCommand {
+    input: unknown
+    constructor(input: unknown) {
+      this.input = input
+    }
+  }
+  return { S3Client, GetObjectCommand }
+})
+
+const getSignedUrl = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl }))
 
 // ── Amplify data client mock — Load.trackingProvider ────────────────────────
 const loadUpdate = vi.hoisted(() => vi.fn())
@@ -412,6 +449,58 @@ function links(): Row[] {
   return [...table(TABLES.link).values()]
 }
 
+function notices(): Row[] {
+  return [...table(TABLES.notice).values()]
+}
+
+/** A customer with one contact who asked to hear about deliveries. */
+function seedCustomer(overrides: Row = {}): Row {
+  const customer: Row = {
+    id: 'cus-1',
+    __typename: 'Customer',
+    name: 'ACME FOODS',
+    status: 'ACTIVE',
+    contacts: [
+      {
+        id: 'ctc-1',
+        name: 'Pat Lane',
+        email: 'pat@acme.test',
+        types: ['OPERATIONS'],
+        notifications: ['DELIVERED'],
+        active: true,
+      },
+    ],
+    visibilityPrefs: { milestoneEmails: true },
+    ...overrides,
+  }
+  table(TABLES.customer).set(String(customer.id), customer)
+  return customer
+}
+
+function seedDocument(overrides: Row = {}): Row {
+  const doc: Row = {
+    id: 'sdoc-1',
+    __typename: 'ShipmentDocument',
+    shipmentId: 'shp-1',
+    orderId: 'ord-1',
+    type: 'POD',
+    name: 'pod-BC1001.pdf',
+    s3Key: 'shipment-docs/shp-1/sdoc-1-pod.pdf',
+    contentType: 'application/pdf',
+    sizeBytes: 120_000,
+    source: 'UPLOAD',
+    audience: 'ALL',
+    status: 'ACTIVE',
+    version: 1,
+    uploadedBy: 'ops@bcatcorp.com',
+    uploadedAt: '2026-02-02T11:00:00.000Z',
+    createdBy: 'ops@bcatcorp.com',
+    ...overrides,
+  }
+  table(TABLES.document).set(String(doc.id), doc)
+  return doc
+}
+
 // Link expiry is measured from the last delivery appointment, so the fixtures below
 // only mean anything against a fixed clock. Only Date is faked: the handler awaits
 // real promises throughout.
@@ -428,6 +517,8 @@ beforeEach(() => {
   loadUpdate.mockReset()
   dispatchConfig.mockReset()
   twilioSend.mockReset()
+  s3Send.mockReset()
+  getSignedUrl.mockReset()
 
   send.mockImplementation(async (cmd: MockCommand) => runCommand(cmd))
   cognitoSend.mockResolvedValue({
@@ -447,6 +538,11 @@ beforeEach(() => {
   // Dev: Twilio is unconfigured and SES is denied.
   dispatchConfig.mockResolvedValue(null)
   sesSend.mockRejectedValue(new Error('AccessDeniedException: not authorized to perform ses:SendEmail'))
+  s3Send.mockImplementation(async () => ({
+    Body: { transformToByteArray: async () => new Uint8Array([0x25, 0x50, 0x44, 0x46]) },
+  }))
+  getSignedUrl.mockImplementation(async (_client: unknown, command: { input: { Key: string } }) =>
+    `https://s3.test/${command.input.Key}?signed`)
 })
 
 // ── SEND_TRACKING_LINK ───────────────────────────────────────────────────────
@@ -886,5 +982,360 @@ describe('SAVE_TRACKING_SETTINGS', () => {
         id: 'default', expectedUpdatedAt: '2026-01-01T00:00:00.000Z', checkCallGraceMinutes: 30,
       }, ADMIN),
     ).rejects.toThrow(/changed by someone else/)
+  })
+})
+
+// ── SEND_UPLOAD_LINK ─────────────────────────────────────────────────────────
+
+describe('SEND_UPLOAD_LINK', () => {
+  it('refuses an own-asset leg and points at the driver app instead', async () => {
+    seed({ load: { status: 'DELIVERED' }, loadCarrier: { kind: 'OWN_ASSET', carrierId: null, carrierName: null } })
+
+    await expect(call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })).rejects.toThrow(
+      /driver app/,
+    )
+    expect(links()).toHaveLength(0)
+  })
+
+  it('refuses a load that has not delivered unless the send is deliberate', async () => {
+    seed()
+
+    await expect(call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })).rejects.toThrow(
+      /has not delivered yet/,
+    )
+    expect(links()).toHaveLength(0)
+
+    const early = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY', early: true })
+
+    expect(early.emailStatus).toBe('COPY')
+    expect(links()).toHaveLength(1)
+  })
+
+  it('re-mails the same token, and mints a new one only on regenerate', async () => {
+    seed({ load: { status: 'DELIVERED', deliveredAt: '2026-02-02T09:00:00.000Z' } })
+
+    const first = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })
+    const token = String((first.link as Row).id)
+
+    expect(first.url).toBe(`https://portal.test/track/u/${token}`)
+    expect(first.link).toMatchObject({
+      kind: 'CARRIER_UPLOAD',
+      status: 'ACTIVE',
+      loadCarrierId: 'lc-1',
+      uploadCount: 0,
+      // Thirty days past delivery, the step E default.
+      expiresAt: '2026-03-04T09:00:00.000Z',
+      neededTypes: ['POD', 'CARRIER_INVOICE'],
+    })
+    expect(table(TABLES.loadCarrier).get('lc-1')).toMatchObject({
+      uploadLinkId: token,
+      podRequestedAt: expect.any(String),
+    })
+    // The first request for an assignment is the row the notifier would have claimed.
+    expect(notices().map((n) => n.id)).toEqual(['pod:lc-1'])
+
+    const again = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })
+
+    expect(String((again.link as Row).id)).toBe(token)
+    expect(links()).toHaveLength(1)
+    // A deliberate resend is a second e-mail, so it is a second row.
+    expect(notices()).toHaveLength(2)
+
+    const regenerated = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY', regenerate: true })
+    const newToken = String((regenerated.link as Row).id)
+
+    expect(newToken).not.toBe(token)
+    expect(table(TABLES.link).get(token)).toMatchObject({ status: 'REVOKED' })
+    expect(table(TABLES.link).get(newToken)).toMatchObject({ status: 'ACTIVE' })
+    expect(table(TABLES.loadCarrier).get('lc-1')).toMatchObject({ uploadLinkId: newToken })
+  })
+
+  it('keeps the rendered body on a NOT_SENT notice when SES refuses', async () => {
+    seed({
+      load: { status: 'DELIVERED', deliveredAt: '2026-02-02T09:00:00.000Z' },
+      loadCarrier: { dispatcherEmail: 'Dispatch@Swift.test', dispatcherName: 'Rosa Vega' },
+    })
+
+    const result = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'EMAIL' })
+    const token = String((result.link as Row).id)
+
+    expect(result.emailStatus).toBe('NOT_SENT')
+    expect(result.emailError).toMatch(/AccessDenied/)
+    const notice = table(TABLES.notice).get('pod:lc-1')!
+    expect(notice).toMatchObject({
+      kind: 'POD_REQUEST',
+      status: 'NOT_SENT',
+      // The dispatcher on the assignment is the default recipient.
+      to: 'dispatch@swift.test',
+      loadCarrierId: 'lc-1',
+      trackingLinkId: token,
+    })
+    expect(String(notice.body)).toContain(`https://portal.test/track/u/${token}`)
+    expect(String(notice.body)).toContain('Proof of delivery')
+    expect(String(notice.error)).toMatch(/AccessDenied/)
+    // Nothing was delivered, so nothing is stamped as sent.
+    expect(table(TABLES.link).get(token)).toMatchObject({ sentAt: null })
+  })
+
+  it('does not e-mail the carrier twice when the notifier already claimed pod:lc-1', async () => {
+    // The notifier claimed the deterministic notice and sent it, but its follow-up
+    // stamp on the assignment has not landed (or the operator read the row before it
+    // did), so the manual send still believes this is the first request and draws the
+    // same id. The claim is what stops the second e-mail.
+    seed({
+      load: { status: 'DELIVERED', deliveredAt: '2026-02-02T09:00:00.000Z' },
+      loadCarrier: { dispatcherEmail: 'dispatch@swift.test', dispatcherName: 'Rosa Vega' },
+    })
+    table(TABLES.notice).set('pod:lc-1', {
+      id: 'pod:lc-1',
+      __typename: 'ShipmentNotice',
+      shipmentId: 'shp-1',
+      loadId: 'lod-1',
+      loadCarrierId: 'lc-1',
+      kind: 'POD_REQUEST',
+      channel: 'EMAIL',
+      to: 'dispatch@swift.test',
+      subject: 'Paperwork needed for BC1001-1',
+      body: 'Sent by the notifier',
+      status: 'SENT',
+      messageId: 'ses-notifier-1',
+      sentAt: '2026-02-02T11:00:00.000Z',
+      createdBy: 'shipment-notifier',
+      createdAt: '2026-02-02T11:00:00.000Z',
+      updatedAt: '2026-02-02T11:00:00.000Z',
+    })
+
+    const result = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'EMAIL' })
+    const token = String((result.link as Row).id)
+
+    // Nothing left the building a second time, and the notifier's row is untouched.
+    expect(sesSend).not.toHaveBeenCalled()
+    expect(notices()).toHaveLength(1)
+    expect(table(TABLES.notice).get('pod:lc-1')).toMatchObject({
+      status: 'SENT',
+      messageId: 'ses-notifier-1',
+      body: 'Sent by the notifier',
+    })
+    expect(result.emailStatus).toBe('NOT_SENT')
+    expect(result.emailError).toBe('This carrier has already been asked for the paperwork once')
+    // The operator still gets a working link to copy — the link itself was written.
+    expect(result.url).toBe(`https://portal.test/track/u/${token}`)
+    expect(result.link).toMatchObject({ kind: 'CARRIER_UPLOAD', status: 'ACTIVE', loadCarrierId: 'lc-1', sentAt: null })
+  })
+
+  it('refuses an email send to an assignment with no dispatcher address', async () => {
+    seed({ load: { status: 'DELIVERED' } })
+
+    await expect(call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'EMAIL' })).rejects.toThrow(
+      /No dispatcher email/,
+    )
+    expect(links()).toHaveLength(0)
+  })
+})
+
+// ── REVOKE_UPLOAD_LINK ───────────────────────────────────────────────────────
+
+describe('REVOKE_UPLOAD_LINK', () => {
+  it('kills the link and clears the assignment pointer', async () => {
+    seed({ load: { status: 'DELIVERED' } })
+    const sent = await call('SEND_UPLOAD_LINK', { loadCarrierId: 'lc-1', via: 'COPY' })
+    const token = String((sent.link as Row).id)
+
+    await call('REVOKE_UPLOAD_LINK', { trackingLinkId: token })
+
+    expect(table(TABLES.link).get(token)).toMatchObject({ status: 'REVOKED', revokedBy: 'ops@bcatcorp.com' })
+    expect(table(TABLES.loadCarrier).get('lc-1')).toMatchObject({ uploadLinkId: null })
+  })
+})
+
+// ── SEND_MILESTONE_NOTICE ────────────────────────────────────────────────────
+
+describe('SEND_MILESTONE_NOTICE', () => {
+  it('refuses an email send nobody is subscribed to', async () => {
+    seed()
+    seedCustomer({ visibilityPrefs: { milestoneEmails: false } })
+
+    await expect(
+      call('SEND_MILESTONE_NOTICE', { shipmentId: 'shp-1', milestone: 'DELIVERED', via: 'EMAIL' }),
+    ).rejects.toThrow(/Nobody is subscribed/)
+    expect(notices()).toHaveLength(0)
+  })
+
+  it('mails everyone who subscribed and stamps the shipment', async () => {
+    seed()
+    seedCustomer()
+    sesSend.mockResolvedValue({ MessageId: 'ses-7' })
+
+    const result = await call('SEND_MILESTONE_NOTICE', {
+      shipmentId: 'shp-1', milestone: 'DELIVERED', via: 'EMAIL', message: 'Signed BOL to follow.',
+    })
+
+    expect(result).toMatchObject({ emailStatus: 'SENT', to: ['pat@acme.test'] })
+    const notice = notices()[0]
+    expect(notice).toMatchObject({ kind: 'MILESTONE', milestone: 'DELIVERED', status: 'SENT', messageId: 'ses-7' })
+    expect(String(notice.body)).toContain('Signed BOL to follow.')
+    expect(table(TABLES.shipment).get('shp-1')).toMatchObject({ lastNoticeStatus: 'SENT', lastNoticeAt: expect.any(String) })
+
+    // A resend is a real second row, not a conditional write that silently did nothing.
+    await call('SEND_MILESTONE_NOTICE', { shipmentId: 'shp-1', milestone: 'DELIVERED', via: 'EMAIL' })
+    expect(notices()).toHaveLength(2)
+  })
+
+  it('refuses a shipment nobody has submitted yet', async () => {
+    seed({ shipment: { status: 'DRAFT' } })
+    seedCustomer()
+
+    await expect(
+      call('SEND_MILESTONE_NOTICE', { shipmentId: 'shp-1', milestone: 'DELIVERED', via: 'COPY' }),
+    ).rejects.toThrow(/Submit the order/)
+  })
+})
+
+// ── EMAIL_DOCUMENTS ──────────────────────────────────────────────────────────
+
+describe('EMAIL_DOCUMENTS', () => {
+  it('refuses a document marked internal', async () => {
+    seed()
+    seedDocument({ id: 'sdoc-int', type: 'LOAD_SUMMARY', name: 'load-summary.pdf', audience: 'INTERNAL' })
+
+    await expect(
+      call('EMAIL_DOCUMENTS', {
+        shipmentId: 'shp-1', documentIds: ['sdoc-int'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
+      }),
+    ).rejects.toThrow(/never leaves the office/)
+    expect(notices()).toHaveLength(0)
+  })
+
+  it("refuses the carrier's paperwork on a customer e-mail", async () => {
+    seed()
+    seedDocument({ id: 'sdoc-ci', type: 'CARRIER_INVOICE', name: 'swift-invoice.pdf', audience: 'CARRIER' })
+
+    await expect(
+      call('EMAIL_DOCUMENTS', {
+        shipmentId: 'shp-1', documentIds: ['sdoc-ci'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
+      }),
+    ).rejects.toThrow(/does not go to the customer/)
+  })
+
+  it('refuses a carrier-portal upload nobody has reviewed yet', async () => {
+    seed()
+    seedDocument({ source: 'CARRIER_PORTAL', reviewStatus: 'PENDING' })
+
+    await expect(
+      call('EMAIL_DOCUMENTS', {
+        shipmentId: 'shp-1', documentIds: ['sdoc-1'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
+      }),
+    ).rejects.toThrow(/waiting to be reviewed/)
+  })
+
+  it('attaches the bytes and records what went out', async () => {
+    seed()
+    seedDocument()
+    sesSend.mockResolvedValue({ MessageId: 'ses-9' })
+
+    const result = await call('EMAIL_DOCUMENTS', {
+      shipmentId: 'shp-1', documentIds: ['sdoc-1'], to: ['ap@acme.test'], cc: ['ops@acme.test'],
+      recipientKind: 'CUSTOMER', message: 'POD for BC1001.',
+    })
+
+    expect(result).toMatchObject({ emailStatus: 'SENT', downloads: [] })
+    const raw = new TextDecoder().decode(sesSend.mock.calls[0][0].input.Content.Raw.Data)
+    expect(raw).toContain('filename="pod-BC1001.pdf"')
+    expect(raw).toContain(Buffer.from('%PDF', 'utf8').toString('base64'))
+    expect(notices()[0]).toMatchObject({
+      kind: 'DOCUMENTS',
+      status: 'SENT',
+      to: 'ap@acme.test',
+      cc: 'ops@acme.test',
+      attachments: [{ documentId: 'sdoc-1', name: 'pod-BC1001.pdf', sizeBytes: 120_000 }],
+    })
+  })
+
+  it('hands back a download for every file when SES refuses', async () => {
+    seed()
+    seedDocument()
+
+    const result = await call('EMAIL_DOCUMENTS', {
+      shipmentId: 'shp-1', documentIds: ['sdoc-1'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
+    })
+
+    expect(result.emailStatus).toBe('NOT_SENT')
+    expect(result.downloads).toEqual([
+      {
+        documentId: 'sdoc-1',
+        name: 'pod-BC1001.pdf',
+        url: 'https://s3.test/shipment-docs/shp-1/sdoc-1-pod.pdf?signed',
+      },
+    ])
+    expect(notices()[0]).toMatchObject({ status: 'NOT_SENT', body: expect.stringContaining('Proof of delivery') })
+  })
+
+  it('refuses more than ten megabytes of attachments', async () => {
+    seed()
+    seedDocument({ id: 'sdoc-big', name: 'photos.pdf', sizeBytes: 11 * 1024 * 1024 })
+
+    await expect(
+      call('EMAIL_DOCUMENTS', {
+        shipmentId: 'shp-1', documentIds: ['sdoc-big'], to: ['ap@acme.test'], recipientKind: 'CUSTOMER',
+      }),
+    ).rejects.toThrow(/at most 10 MB/)
+    expect(s3Send).not.toHaveBeenCalled()
+  })
+})
+
+// ── SAVE_DOCUMENT_SETTINGS ───────────────────────────────────────────────────
+
+describe('SAVE_DOCUMENT_SETTINGS', () => {
+  it('refuses a dispatcher who is not an admin', async () => {
+    await expect(call('SAVE_DOCUMENT_SETTINGS', { podRequestEnabled: false })).rejects.toThrow(
+      /requires owner or ADMIN/,
+    )
+    expect(table(TABLES.settings).size).toBe(0)
+  })
+
+  it('refuses a required type nobody can map to a document', async () => {
+    await expect(
+      call('SAVE_DOCUMENT_SETTINGS', { requiredCarrierUploadTypes: ['POD', 'Whatever Ryne wants'] }, ADMIN),
+    ).rejects.toThrow(/does not recognise: Whatever Ryne wants/)
+    expect(table(TABLES.settings).size).toBe(0)
+  })
+
+  it('refuses an email template with no link in it', async () => {
+    await expect(
+      call('SAVE_DOCUMENT_SETTINGS', { podRequestEmailTemplate: 'Send us the POD' }, ADMIN),
+    ).rejects.toThrow(/must contain \{url\}/)
+  })
+
+  it('saves the document block and leaves the rest of the row alone', async () => {
+    table(TABLES.settings).set('default', {
+      id: 'default', __typename: 'TmsSettings', marginFloorBps: 1200, updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const saved = await call('SAVE_DOCUMENT_SETTINGS', {
+      id: 'default',
+      expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+      milestoneNoticesEnabled: true,
+      podRequestEnabled: false,
+      // The free-text vocabulary people already type is normalised, not refused.
+      requiredCarrierUploadTypes: ['Proof of delivery', 'carrier invoice'],
+      uploadLinkExpiryDays: 45,
+      podRequestEmailTemplate: 'Load {loadNumber} delivered — upload here: {url}',
+      documentDeleteAdminOnly: true,
+    }, ADMIN)
+
+    expect(saved).toMatchObject({
+      marginFloorBps: 1200,
+      milestoneNoticesEnabled: true,
+      podRequestEnabled: false,
+      requiredCarrierUploadTypes: ['POD', 'CARRIER_INVOICE'],
+      uploadLinkExpiryDays: 45,
+      documentDeleteAdminOnly: true,
+    })
+  })
+
+  it('refuses an expiry outside one to a hundred and eighty days', async () => {
+    await expect(
+      call('SAVE_DOCUMENT_SETTINGS', { uploadLinkExpiryDays: 365 }, ADMIN),
+    ).rejects.toThrow(/between 1 and 180/)
   })
 })

@@ -44,6 +44,9 @@ const TABLES = {
   driver: 'Driver-test',
   checkCall: 'LoadCheckCall-test',
   trackingLink: 'TrackingLink-test',
+  shipmentDocument: 'ShipmentDocument-test',
+  driverSubmission: 'DriverSubmission-test',
+  driverSubmissionDoc: 'DriverSubmissionDoc-test',
 }
 
 const store = vi.hoisted(() => {
@@ -61,6 +64,9 @@ const store = vi.hoisted(() => {
   process.env.CARRIER_DOCUMENT_TABLE_NAME = 'CarrierDocument-test'
   process.env.LOAD_CHECK_CALL_TABLE_NAME = 'LoadCheckCall-test'
   process.env.TRACKING_LINK_TABLE_NAME = 'TrackingLink-test'
+  process.env.SHIPMENT_DOCUMENT_TABLE_NAME = 'ShipmentDocument-test'
+  process.env.DRIVER_SUBMISSION_TABLE_NAME = 'DriverSubmission-test'
+  process.env.DRIVER_SUBMISSION_DOC_TABLE_NAME = 'DriverSubmissionDoc-test'
   process.env.BUCKET_NAME = 'bcat-test-bucket'
   process.env.PORTAL_ORIGIN = 'https://portal.test'
   process.env.AMPLIFY_DATA_DEFAULT_NAME = 'amplifyData'
@@ -188,20 +194,25 @@ vi.mock('@aws-sdk/client-dynamodb', () => {
   }
 })
 
-// ── S3 / SES mocks — the rate confirmation's PDF and its email ───────────────
+// ── S3 / SES mocks — generated PDFs, uploaded documents and the rate con email ──
 const s3Send = vi.hoisted(() => vi.fn())
 vi.mock('@aws-sdk/client-s3', () => {
   class S3Client {
     send = s3Send
   }
-  class PutObjectCommand {
-    input: unknown
-    constructor(input: unknown) {
-      this.input = input
+  const make = (type: string) =>
+    class {
+      input: Record<string, unknown>
+      __type = type
+      constructor(input: Record<string, unknown>) {
+        this.input = input
+      }
     }
-  }
-  return { S3Client, PutObjectCommand }
+  return { S3Client, PutObjectCommand: make('PutObject'), HeadObjectCommand: make('Head') }
 })
+
+const getSignedUrl = vi.hoisted(() => vi.fn())
+vi.mock('@aws-sdk/s3-request-presigner', () => ({ getSignedUrl }))
 
 const sesSend = vi.hoisted(() => vi.fn())
 vi.mock('@aws-sdk/client-sesv2', () => {
@@ -436,6 +447,44 @@ async function saveForm(shipmentId: string, overrides: Row = {}): Promise<Row> {
   })
 }
 
+/**
+ * What is actually in the bucket, so a COMMIT_DOCUMENT that HEADs an object sees
+ * what the browser's PUT put there — a commit before the upload lands, or one
+ * that lies about the size, is the behaviour under test.
+ */
+interface S3Head {
+  ContentLength: number
+  ContentType: string
+}
+const s3Objects = new Map<string, S3Head>()
+
+/** Stand in for the browser's presigned PUT. */
+function putS3Object(key: string, head: S3Head): void {
+  s3Objects.set(key, head)
+}
+
+function runS3Command(cmd: MockCommand): unknown {
+  const key = String(cmd.input.Key)
+  if (cmd.__type === 'PutObject') {
+    const body = cmd.input.Body as Uint8Array | undefined
+    s3Objects.set(key, {
+      ContentLength: body ? body.length : 0,
+      ContentType: String(cmd.input.ContentType ?? ''),
+    })
+    return {}
+  }
+  if (cmd.__type === 'Head') {
+    const head = s3Objects.get(key)
+    if (!head) {
+      const err = new Error(`NotFound: ${key}`)
+      err.name = 'NotFound'
+      throw err
+    }
+    return head
+  }
+  return {}
+}
+
 beforeEach(() => {
   store.clear()
   send.mockReset()
@@ -444,8 +493,11 @@ beforeEach(() => {
   loadUpdate.mockReset()
   s3Send.mockReset()
   sesSend.mockReset()
-  s3Send.mockResolvedValue({})
+  getSignedUrl.mockReset()
+  s3Objects.clear()
+  s3Send.mockImplementation(async (cmd: MockCommand) => runS3Command(cmd))
   sesSend.mockResolvedValue({ MessageId: 'msg-1' })
+  getSignedUrl.mockResolvedValue('https://signed.example/upload')
 
   send.mockImplementation(async (cmd: MockCommand) => runCommand(cmd))
   loadCreate.mockImplementation(async (input: Row) => {
@@ -2111,6 +2163,397 @@ describe('SET_AR_STATUS', () => {
     const { orderId } = await deliverable()
     await expect(call('SET_AR_STATUS', { orderId, status: 'UNPAID' })).rejects.toThrow(/recorded by invoicing/)
     await expect(call('SET_AR_STATUS', { orderId, status: 'PAID' })).rejects.toThrow(/recorded by invoicing/)
+  })
+})
+
+// ── Documents and the AR gate (step E) ───────────────────────────────────────
+
+interface DocIds {
+  shipmentId: string
+  orderId: string
+  loadId: string
+}
+
+interface Prepared {
+  uploadUrl: string
+  s3Key: string
+  documentId: string
+}
+
+const PDF_BASE64 = Buffer.from('%PDF-1.4 a generated document').toString('base64')
+
+describe('documents', () => {
+  /** A shipment that has actually delivered, which is where paperwork arrives. */
+  async function delivered(): Promise<DocIds> {
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    for (const status of ['BOOKED', 'DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+      await call('SET_LOAD_STATUS', { loadId: ids.loadId, status })
+    }
+    return ids
+  }
+
+  async function prepare(shipmentId: string, overrides: Row = {}): Promise<Prepared> {
+    return (await call('PREPARE_DOCUMENT_UPLOAD', {
+      shipmentId,
+      type: 'POD',
+      name: 'pod.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      ...overrides,
+    })) as unknown as Prepared
+  }
+
+  function commit(ids: DocIds, prepared: Prepared, overrides: Row = {}): Promise<Row> {
+    return call('COMMIT_DOCUMENT', {
+      shipmentId: ids.shipmentId,
+      documentId: prepared.documentId,
+      s3Key: prepared.s3Key,
+      type: 'POD',
+      name: 'pod.pdf',
+      contentType: 'application/pdf',
+      sizeBytes: 1024,
+      orderId: ids.orderId,
+      ...overrides,
+    })
+  }
+
+  /** The driver app's own rows: a submission and the page it carries. */
+  function seedDriverPod(loadId: string, submissionId: string, docId: string, extra: Row = {}): void {
+    table(TABLES.driverSubmission).set(submissionId, {
+      id: submissionId,
+      driverId: 'drv-1',
+      driverName: 'Ivan',
+      loadId,
+      combinedPodKey: `driver-docs/drv-1/${submissionId}/pod-combined.pdf`,
+      podReviewStatus: 'APPROVED',
+      createdAt: '2026-03-03T18:00:00.000Z',
+      ...extra,
+    })
+    table(TABLES.driverSubmissionDoc).set(docId, {
+      id: docId,
+      submissionId,
+      driverId: 'drv-1',
+      kind: 'POD',
+      s3Key: `driver-docs/drv-1/${submissionId}/pod-1.jpg`,
+      fileName: 'pod-1.jpg',
+      contentType: 'image/jpeg',
+      byteSize: 2048,
+      uploadedAt: '2026-03-03T18:00:00.000Z',
+    })
+  }
+
+  /** A carrier's upload exactly as the portal files it: ACTIVE, and waiting for a person. */
+  function seedPortalUpload(ids: DocIds, overrides: Row = {}): void {
+    const id = String(overrides.id ?? 'sdoc-portal')
+    table(TABLES.shipmentDocument).set(id, {
+      id,
+      __typename: 'ShipmentDocument',
+      shipmentId: ids.shipmentId,
+      orderId: ids.orderId,
+      type: 'OTHER',
+      name: 'scan.pdf',
+      s3Key: `shipment-docs/${ids.shipmentId}/${id}-scan.pdf`,
+      contentType: 'application/pdf',
+      sizeBytes: 10,
+      source: 'CARRIER_PORTAL',
+      audience: 'ALL',
+      status: 'ACTIVE',
+      version: 1,
+      reviewStatus: 'PENDING',
+      uploadedBy: 'link:abcd1234',
+      uploadedAt: '2026-03-04T00:00:00.000Z',
+      createdBy: 'link:abcd1234',
+      ...overrides,
+    })
+  }
+
+  it('binds the upload URL to the content type and the exact length', async () => {
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId)
+    expect(prepared.uploadUrl).toBe('https://signed.example/upload')
+    const calls = getSignedUrl.mock.calls
+    const [, command, options] = calls[calls.length - 1] as [unknown, { input: Row }, Row]
+    expect(command.input).toMatchObject({ ContentType: 'application/pdf', ContentLength: 1024 })
+    // `content-type` is unsignable by default, so naming it here is the whole reason
+    // the URL cannot be reused to drop something else in the bucket.
+    expect(options).toEqual({ expiresIn: 300, signableHeaders: new Set(['content-type']) })
+  })
+
+  it('refuses a key that belongs to a different shipment', async () => {
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId)
+    const foreign = `shipment-docs/shp-someone-else/${prepared.documentId}-pod.pdf`
+    putS3Object(foreign, { ContentLength: 1024, ContentType: 'application/pdf' })
+    await expect(commit(ids, { ...prepared, s3Key: foreign })).rejects.toThrow(/does not belong to this shipment/)
+  })
+
+  it('refuses a commit the bytes do not back up', async () => {
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId)
+    // Nothing uploaded yet: the client is told to come back, not that it failed.
+    await expect(commit(ids, prepared)).rejects.toThrow(/has not landed in S3 yet/)
+    putS3Object(prepared.s3Key, { ContentLength: 999, ContentType: 'application/pdf' })
+    await expect(commit(ids, prepared)).rejects.toThrow(/size mismatch/)
+    putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'image/png' })
+    await expect(commit(ids, prepared)).rejects.toThrow(/content type mismatch/)
+    expect(table(TABLES.shipmentDocument).size).toBe(0)
+  })
+
+  it('lists one row when the same upload is committed twice', async () => {
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId)
+    putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
+
+    const first = (await commit(ids, prepared)) as { document: Row }
+    // A retried commit mints a new document id; the key is what identifies the file.
+    const second = (await commit(ids, { ...prepared, documentId: 'sdoc-retry' })) as {
+      document: Row
+      bundle: { documents: Row[] }
+    }
+    expect(second.document.id).toBe(first.document.id)
+    expect(second.bundle.documents).toHaveLength(1)
+    expect(table(TABLES.shipmentDocument).size).toBe(1)
+  })
+
+  it('re-caches what the order still needs in the same write', async () => {
+    seedCustomer({ requiredDocsForInvoice: ['POD', 'BOL'] })
+    const ids = await delivered()
+    const prepared = await prepare(ids.shipmentId)
+    putS3Object(prepared.s3Key, { ContentLength: 1024, ContentType: 'application/pdf' })
+    await commit(ids, prepared)
+
+    const order = table(TABLES.order).get(ids.orderId)!
+    expect(order.docsRequired).toEqual(['POD', 'BOL'])
+    expect(order.docsMissing).toEqual(['BOL'])
+    expect(order.docsCheckedAt).toBeTruthy()
+  })
+
+  it('supersedes exactly the previous version of a generated document', async () => {
+    const ids = await delivered()
+    const save = (): Promise<Row> =>
+      call('SAVE_GENERATED_DOCUMENT', {
+        shipmentId: ids.shipmentId,
+        type: 'BOL',
+        loadId: ids.loadId,
+        pdfBase64: PDF_BASE64,
+        filename: 'bol.pdf',
+      })
+
+    const v1 = (await save()) as { document: Row }
+    const v2 = (await save()) as { document: Row }
+    const v3 = (await save()) as { document: Row; bundle: { documents: Row[] } }
+
+    expect(v3.document.version).toBe(3)
+    expect(v3.document.supersedesId).toBe(v2.document.id)
+    const rows = v3.bundle.documents
+    expect(rows.filter((d) => d.status === 'ACTIVE').map((d) => d.id)).toEqual([v3.document.id])
+    expect(rows.find((d) => d.id === v1.document.id)!.status).toBe('SUPERSEDED')
+    expect(rows.find((d) => d.id === v2.document.id)!.status).toBe('SUPERSEDED')
+  })
+
+  it('refuses a driver document filed against another load, and attaches once', async () => {
+    const ids = await delivered()
+    seedDriverPod('lod-somewhere-else', 'dsb-1', 'dsd-1')
+    await expect(
+      call('ATTACH_DRIVER_DOC', {
+        shipmentId: ids.shipmentId,
+        loadId: ids.loadId,
+        submissionDocId: 'dsd-1',
+        type: 'POD',
+      }),
+    ).rejects.toThrow(/different load/)
+
+    seedDriverPod(ids.loadId, 'dsb-2', 'dsd-2')
+    const attach = (): Promise<Row> =>
+      call('ATTACH_DRIVER_DOC', {
+        shipmentId: ids.shipmentId,
+        loadId: ids.loadId,
+        submissionDocId: 'dsd-2',
+        type: 'POD',
+      })
+    const first = (await attach()) as { document: Row }
+    expect(first.document.id).toBe('drv:dsd-2')
+    // The merged PDF, not the page it was built from, and never copied.
+    expect(first.document.s3Key).toBe('driver-docs/drv-1/dsb-2/pod-combined.pdf')
+    expect(first.document.reviewStatus).toBeUndefined()
+
+    const second = (await attach()) as { document: Row; bundle: { documents: Row[] } }
+    expect(second.document.id).toBe('drv:dsd-2')
+    expect(second.bundle.documents).toHaveLength(1)
+  })
+
+  it('refuses a POD the driver was asked to replace', async () => {
+    const ids = await delivered()
+    seedDriverPod(ids.loadId, 'dsb-3', 'dsd-3', { podReviewStatus: 'NEEDS_REPLACEMENT' })
+    await expect(
+      call('ATTACH_DRIVER_DOC', {
+        shipmentId: ids.shipmentId,
+        loadId: ids.loadId,
+        submissionDocId: 'dsd-3',
+        type: 'POD',
+      }),
+    ).rejects.toThrow(/replacement/)
+  })
+
+  /**
+   * The decision the whole portal rests on: a carrier's upload satisfies nothing
+   * until a person accepts it, and voiding it puts the requirement straight back.
+   */
+  it('moves the gate only once a portal upload is accepted, and back when it is voided', async () => {
+    seedCustomer({ requiredDocsForInvoice: ['POD'] })
+    const ids = await delivered()
+    seedPortalUpload(ids)
+
+    // A carrier labelling their POD "other" is the common case, so accepting retypes.
+    const reviewed = (await call('REVIEW_DOCUMENT', {
+      documentId: 'sdoc-portal',
+      decision: 'ACCEPT',
+      type: 'POD',
+    })) as { document: Row }
+    expect(reviewed.document.reviewStatus).toBe('ACCEPTED')
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual([])
+
+    // Nobody but an admin may take somebody else's upload off the shipment.
+    await expect(call('VOID_DOCUMENT', { documentId: 'sdoc-portal', reason: 'wrong load' })).rejects.toThrow(
+      /filed the document/,
+    )
+    const voided = (await call('VOID_DOCUMENT', { documentId: 'sdoc-portal', reason: 'wrong load' }, ADMIN)) as {
+      document: Row
+    }
+    expect(voided.document.status).toBe('VOID')
+    expect(voided.document.reviewStatus).toBe('ACCEPTED')
+    expect(table(TABLES.order).get(ids.orderId)!.docsMissing).toEqual(['POD'])
+  })
+
+  /**
+   * The review worklist is the sparse reviewStatus index and does not filter on
+   * status, so a junk upload voided while still PENDING would otherwise sit in
+   * dispatch's queue and in the sidebar badge forever.
+   */
+  it('takes a voided upload out of the pending review set', async () => {
+    const ids = await delivered()
+    seedPortalUpload(ids)
+
+    const voided = (await call('VOID_DOCUMENT', { documentId: 'sdoc-portal', reason: 'junk scan' }, ADMIN)) as {
+      document: Row
+    }
+    expect(voided.document.status).toBe('VOID')
+    expect(voided.document.reviewStatus).toBe('REJECTED')
+    expect(voided.document.voidReason).toBe('junk scan')
+    const stored = [...table(TABLES.shipmentDocument).values()]
+    expect(stored.filter((doc) => doc.reviewStatus === 'PENDING')).toEqual([])
+  })
+
+  it('refuses to review a document that is no longer active', async () => {
+    const ids = await delivered()
+    seedPortalUpload(ids, { id: 'sdoc-void', status: 'VOID', voidReason: 'filed on the wrong shipment' })
+    await expect(call('REVIEW_DOCUMENT', { documentId: 'sdoc-void', decision: 'ACCEPT' })).rejects.toThrow(
+      /active document/,
+    )
+    expect(table(TABLES.shipmentDocument).get('sdoc-void')!.reviewStatus).toBe('PENDING')
+  })
+
+  /**
+   * Every page of a merged submission resolves to the same combined PDF, so a
+   * three-page POD must still be one row pointing at one file.
+   */
+  it('files a merged POD once however many pages it was built from', async () => {
+    const ids = await delivered()
+    seedDriverPod(ids.loadId, 'dsb-4', 'dsd-4')
+    // The submission's second page: another driver row, the same merged PDF.
+    table(TABLES.driverSubmissionDoc).set('dsd-5', {
+      ...table(TABLES.driverSubmissionDoc).get('dsd-4')!,
+      id: 'dsd-5',
+      s3Key: 'driver-docs/drv-1/dsb-4/pod-2.jpg',
+      fileName: 'pod-2.jpg',
+    })
+    const attach = (submissionDocId: string): Promise<Row> =>
+      call('ATTACH_DRIVER_DOC', { shipmentId: ids.shipmentId, loadId: ids.loadId, submissionDocId, type: 'POD' })
+
+    const first = (await attach('dsd-4')) as { document: Row }
+    const second = (await attach('dsd-5')) as { document: Row; bundle: { documents: Row[] } }
+    expect(second.document.id).toBe(first.document.id)
+    expect(second.bundle.documents).toHaveLength(1)
+    expect(table(TABLES.shipmentDocument).size).toBe(1)
+  })
+})
+
+describe('READY_TO_INVOICE', () => {
+  async function deliveredOrder(customer: Row = {}): Promise<DocIds> {
+    seedCustomer(customer)
+    const ids = await createDraft()
+    await saveForm(ids.shipmentId)
+    await call('SUBMIT_ORDER', {
+      shipmentId: ids.shipmentId,
+      expectedUpdatedAt: table(TABLES.shipment).get(ids.shipmentId)!.updatedAt,
+      order: { equipmentType: "53' VAN" },
+      stops: [PICKUP, DELIVERY],
+    })
+    for (const status of ['BOOKED', 'DISPATCHED', 'LOADING', 'IN_TRANSIT', 'UNLOADING', 'DELIVERED']) {
+      await call('SET_LOAD_STATUS', { loadId: ids.loadId, status })
+    }
+    return ids
+  }
+
+  function ready(orderId: string, extra: Row = {}, identity: unknown = DISPATCHER): Promise<Row> {
+    return call(
+      'READY_TO_INVOICE',
+      { orderId, expectedUpdatedAt: table(TABLES.order).get(orderId)!.updatedAt, ...extra },
+      identity,
+    )
+  }
+
+  it('names the paperwork it is still waiting on', async () => {
+    const { orderId } = await deliveredOrder({ requiredDocsForInvoice: ['POD', 'BOL'] })
+    await expect(ready(orderId)).rejects.toThrow(/Proof of delivery, Bill of lading/)
+    expect(table(TABLES.order).get(orderId)!.arStatus).toBe('DOCS_NEEDED')
+  })
+
+  it('overrides only for an admin, and only with a note', async () => {
+    const { orderId } = await deliveredOrder({ requiredDocsForInvoice: ['POD'] })
+    await expect(ready(orderId, { override: true, overrideNote: 'bills on the BOL' })).rejects.toThrow(
+      /owner or ADMIN/,
+    )
+    await expect(ready(orderId, { override: true }, ADMIN)).rejects.toThrow(/needs a note/)
+
+    const result = (await ready(orderId, { override: true, overrideNote: 'bills on the BOL' }, ADMIN)) as {
+      bundle: { orders: Row[] }
+      gate: { missing: string[] }
+    }
+    expect(result.gate.missing).toEqual(['POD'])
+    const saved = result.bundle.orders[0]
+    expect(saved.arStatus).toBe('UNBILLED')
+    expect(saved.docsOverrideBy).toBe('admin@bcatcorp.com')
+    expect(saved.docsOverrideNote).toBe('bills on the BOL')
+  })
+
+  it('writes what SET_AR_STATUS writes, plus the gate it checked', async () => {
+    const { orderId } = await deliveredOrder()
+    const before = table(TABLES.order).get(orderId)!
+    const result = (await ready(orderId)) as { bundle: { orders: Row[] } }
+
+    const saved = result.bundle.orders[0]
+    expect(saved.arStatus).toBe('UNBILLED')
+    expect(saved.arStatusChangedAt).toBeTruthy()
+    expect(saved.readyToInvoiceAt).toBeTruthy()
+    expect(saved.updatedBy).toBe('dispatch@bcatcorp.com')
+    expect(saved.version).toBe(Number(before.version ?? 1) + 1)
+    expect(saved.docsMissing).toEqual([])
+    expect(saved.docsCheckedAt).toBeTruthy()
+    expect(saved.docsOverrideAt).toBeUndefined()
+  })
+
+  it('refuses an order that is not waiting on documents', async () => {
+    const { orderId } = await deliveredOrder()
+    await ready(orderId)
+    await expect(ready(orderId)).rejects.toThrow(/already UNBILLED/)
   })
 })
 

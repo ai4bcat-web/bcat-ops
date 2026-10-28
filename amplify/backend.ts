@@ -61,6 +61,7 @@ import { tmsShipmentActions } from './functions/tms-shipment-actions/resource'
 import { tmsCarrierActions } from './functions/tms-carrier-actions/resource'
 import { tmsTrackingActions } from './functions/tms-tracking-actions/resource'
 import { loadTrackingProjector } from './functions/load-tracking-projector/resource'
+import { shipmentNotifier } from './functions/shipment-notifier/resource'
 import { checkCallNotifier } from './functions/check-call-notifier/resource'
 import { rateConSignApi } from './functions/rate-con-sign-api/resource'
 import { tmsGeocode } from './functions/tms-geocode/resource'
@@ -116,6 +117,7 @@ const backend = defineBackend({
   tmsTrackingActions,
   loadTrackingProjector,
   checkCallNotifier,
+  shipmentNotifier,
   rateConSignApi,
   tmsGeocode,
   podActions,
@@ -1384,6 +1386,32 @@ trackingApiFn.addEnvironment('LOAD_TABLE_NAME', backend.data.resources.tables['L
   trackingApiFn.addEnvironment('DIVISION_TABLE_NAME',        trackDivisionTable.tableName)
   trackingApiFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',    trackSettingsTable.tableName)
   trackingApiFn.addEnvironment('TRUCK_LOCATION_HISTORY_TABLE_NAME', trackHistoryTable.tableName)
+  // ── Step E: the carrier upload portal (GET /u/<t>, POST /u/<t>/upload,
+  // POST /u/<t>/commit) ─────────────────────────────────────────────────────
+  // The public role may Put a ShipmentDocument row and Query the shipment's own
+  // documents to render the checklist, and nothing else. There is deliberately no
+  // Order, Load, LoadCarrier or Shipment write grant here: a file a carrier sends
+  // lands PENDING and influences a billing decision only once a member of staff
+  // accepts it from the review queue.
+  const trackShipmentDocTable = backend.data.resources.tables['ShipmentDocument']
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:PutItem', 'dynamodb:Query', 'dynamodb:GetItem'],
+    resources: [trackShipmentDocTable.tableArn, `${trackShipmentDocTable.tableArn}/index/*`],
+  }))
+  trackingApiFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', trackShipmentDocTable.tableName)
+  trackingApiFn.addEnvironment('BUCKET_NAME', backend.storage.resources.bucket.bucketName)
+  // The upload is a presigned PUT this Lambda signs, pinned to the content type
+  // and the length it has already validated; the commit reads the object's
+  // headers back to prove what landed is what was promised.
+  //
+  // Spelled out rather than grantReadWrite, which would hand a public,
+  // unauthenticated Function URL s3:DeleteObject* on every shipment document and
+  // s3:List* on the whole bucket. This role puts a file and reads its headers,
+  // and nothing in step E ever deletes an object.
+  trackingApiFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['s3:PutObject', 's3:GetObject'],
+    resources: [`${backend.storage.resources.bucket.bucketArn}/shipment-docs/*`],
+  }))
 }
 const trackingApiUrl = new FunctionUrl(trackingApiFn.stack, 'TrackingApiUrl', {
   function: trackingApiFn,
@@ -1641,6 +1669,12 @@ directoryActionsFn.addToRolePolicy(
   }),
 )
 
+// ── Step E tables, declared once for the four Lambdas that share them ───────
+const shipmentDocumentTable  = backend.data.resources.tables['ShipmentDocument']
+const shipmentNoticeTable    = backend.data.resources.tables['ShipmentNotice']
+// DriverSubmission / DriverSubmissionDoc are already declared for the driver API
+// above; ATTACH_DRIVER_DOC only reads them.
+
 // ── tmsShipmentActions Lambda (Step B) ──────────────────────────────────────
 // Shipment/Order/LoadCarrier/LoadFinancials/LoadCharge are written with the raw
 // SDK (TransactWriteItems keeps the five tables agreeing); Load goes through the
@@ -1759,6 +1793,37 @@ shipmentActionsFn.addToRolePolicy(
 )
 backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'rate-confirms/*')
 backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'carrier-docs/*')
+
+// ── Step E: the shipment document index ─────────────────────────────────────
+// tmsShipmentActions is the single writer of ShipmentDocument, and the only thing
+// that puts bytes under shipment-docs/*: staff uploads arrive through a presigned
+// PUT it signed, generated PDFs it writes itself. DriverSubmission and its docs
+// are read-only here — ATTACH_DRIVER_DOC points a row at the key the driver app
+// already wrote and never copies the file, so the own-fleet POD flow is untouched.
+shipmentActionsFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+      'dynamodb:ConditionCheckItem',
+    ],
+    resources: [
+      shipmentDocumentTable.tableArn,
+      `${shipmentDocumentTable.tableArn}/index/*`,
+      driverSubmissionTable.tableArn,
+      `${driverSubmissionTable.tableArn}/index/*`,
+      driverSubmissionDocTable.tableArn,
+      `${driverSubmissionDocTable.tableArn}/index/*`,
+    ],
+  }),
+)
+shipmentActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME',     shipmentDocumentTable.tableName)
+shipmentActionsFn.addEnvironment('DRIVER_SUBMISSION_TABLE_NAME',     driverSubmissionTable.tableName)
+shipmentActionsFn.addEnvironment('DRIVER_SUBMISSION_DOC_TABLE_NAME', driverSubmissionDocTable.tableName)
+backend.storage.resources.bucket.grantReadWrite(shipmentActionsFn, 'shipment-docs/*')
 
 // ── tmsCarrierActions Lambda (Step C) ───────────────────────────────────────
 // The carrier directory's single writer: Carrier, CarrierContact,
@@ -1899,6 +1964,7 @@ trackingActionsFn.addEnvironment('AUDIT_LOG_TABLE_NAME',        trackingAuditLog
 trackingActionsFn.addEnvironment('DIVISION_TABLE_NAME',         trackingDivisionTbl.tableName)
 trackingActionsFn.addEnvironment('USER_POOL_ID',                backend.auth.resources.userPool.userPoolId)
 trackingActionsFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+trackingActionsFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({
     // The Customer Link's contact card is the order's rep, read from the pool.
@@ -1909,6 +1975,24 @@ trackingActionsFn.addToRolePolicy(
 trackingActionsFn.addToRolePolicy(
   new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
 )
+// ── Step E: the notice log, the document index and the files they carry ─────
+// tmsTrackingActions owns ShipmentNotice because it owns everything that leaves
+// the building. It only reads ShipmentDocument — document rows belong to
+// tmsShipmentActions — but EMAIL_DOCUMENTS has to fetch the bytes, which live
+// under three different prefixes depending on where the file came from.
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+  resources: [shipmentNoticeTable.tableArn, `${shipmentNoticeTable.tableArn}/index/*`],
+}))
+trackingActionsFn.addToRolePolicy(new PolicyStatement({
+  actions:   ['dynamodb:GetItem', 'dynamodb:Query'],
+  resources: [shipmentDocumentTable.tableArn, `${shipmentDocumentTable.tableArn}/index/*`],
+}))
+trackingActionsFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',   shipmentNoticeTable.tableName)
+trackingActionsFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumentTable.tableName)
+backend.storage.resources.bucket.grantRead(trackingActionsFn, 'shipment-docs/*')
+backend.storage.resources.bucket.grantRead(trackingActionsFn, 'driver-docs/*')
+backend.storage.resources.bucket.grantRead(trackingActionsFn, 'rate-confirms/*')
 
 // ── brokerLoadAlert Lambda (Load stream → broker task + global Slack ping) ──
 // Fires when a load is assigned to the "Broker Need to Cover" driver: creates an
@@ -2017,6 +2101,85 @@ new EventSourceMapping(Stack.of(brokerAlertFn), 'BrokerLoadStreamMapping', {
   // Same own-stack scoping as BrokerLoadStreamMapping (deploy #227 cycle).
   new EventSourceMapping(Stack.of(projectorFn), 'LoadTrackingProjectorStreamMapping', {
     target:            projectorFn,
+    eventSourceArn:    loadTable.tableStreamArn,
+    startingPosition:  StartingPosition.LATEST,
+    batchSize:         10,
+    retryAttempts:     2,
+    enabled:           process.env.BCAT_ISOLATED_PREVIEW !== 'true',
+  })
+}
+
+// ── shipmentNotifier Lambda (Step E; Load stream → delivery notices) ────────
+// The second Load-stream consumer. Where the projector turns a stamped stop time
+// into a status, this one turns a status into the e-mails that status is supposed
+// to cause: the customer's milestone notice, and — once every leg of a shipment
+// has delivered — the request to the outside carrier for their POD and invoice.
+//
+// It is created enabled on dev. Its only reach outside our own tables is SES,
+// which the dev guard below denies outright, so every notice it writes lands as a
+// NOT_SENT row carrying the text it rendered. That is the honest outcome and it is
+// exactly what dev needs to exercise: the rows, the deduplication and the Copy
+// path, with no possibility of a real customer hearing from a test stack.
+{
+  const notifyFn = backend.shipmentNotifier.resources.lambda as LambdaFunction
+  notifyFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:DescribeStream', 'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:ListStreams'],
+    resources: [loadTable.tableStreamArn!],
+  }))
+  // Writes: ShipmentNotice (the row that precedes every send), TrackingLink (the
+  // carrier's upload token), Shipment (deliveredAt and the last-notice stamps),
+  // LoadCarrier (which link was sent and when).
+  notifyFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem', 'dynamodb:Query'],
+    resources: [
+      shipmentNoticeTable.tableArn,
+      trackingLinkTbl.tableArn,
+      trackingShipmentTbl.tableArn,
+      trackingLoadCarrTbl.tableArn,
+    ],
+  }))
+  // Read-only: the load that moved, its order, the customer's contacts and
+  // preferences, the org defaults and the letterhead the e-mail signs off with.
+  notifyFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:GetItem', 'dynamodb:Query'],
+    resources: [
+      loadTable.tableArn,
+      trackingOrderTbl.tableArn,
+      trackingCustomerTbl.tableArn,
+      trackingSettingsTbl.tableArn,
+      trackingDivisionTbl.tableArn,
+      shipmentDocumentTable.tableArn,
+    ],
+  }))
+  notifyFn.addToRolePolicy(new PolicyStatement({
+    actions:   ['dynamodb:Query'],
+    resources: [
+      `${loadTable.tableArn}/index/*`,
+      `${trackingOrderTbl.tableArn}/index/*`,
+      `${trackingLoadCarrTbl.tableArn}/index/*`,
+      `${trackingLinkTbl.tableArn}/index/*`,
+      `${shipmentNoticeTable.tableArn}/index/*`,
+      `${shipmentDocumentTable.tableArn}/index/*`,
+    ],
+  }))
+  notifyFn.addEnvironment('LOAD_TABLE_NAME',             loadTable.tableName)
+  notifyFn.addEnvironment('SHIPMENT_TABLE_NAME',         trackingShipmentTbl.tableName)
+  notifyFn.addEnvironment('ORDER_TABLE_NAME',            trackingOrderTbl.tableName)
+  notifyFn.addEnvironment('LOAD_CARRIER_TABLE_NAME',     trackingLoadCarrTbl.tableName)
+  notifyFn.addEnvironment('CUSTOMER_TABLE_NAME',         trackingCustomerTbl.tableName)
+  notifyFn.addEnvironment('TMS_SETTINGS_TABLE_NAME',     trackingSettingsTbl.tableName)
+  notifyFn.addEnvironment('DIVISION_TABLE_NAME',         trackingDivisionTbl.tableName)
+  notifyFn.addEnvironment('TRACKING_LINK_TABLE_NAME',    trackingLinkTbl.tableName)
+  notifyFn.addEnvironment('SHIPMENT_NOTICE_TABLE_NAME',  shipmentNoticeTable.tableName)
+  notifyFn.addEnvironment('SHIPMENT_DOCUMENT_TABLE_NAME', shipmentDocumentTable.tableName)
+  notifyFn.addEnvironment('PORTAL_ORIGIN',               PORTAL_PROD_ORIGIN)
+  notifyFn.addEnvironment('FROM_ADDRESS',                'ai4bcat@gmail.com')
+  notifyFn.addToRolePolicy(
+    new PolicyStatement({ actions: ['ses:SendEmail', 'ses:SendRawEmail'], resources: ['*'] })
+  )
+  // Same own-stack scoping as LoadTrackingProjectorStreamMapping (deploy #227 cycle).
+  new EventSourceMapping(Stack.of(notifyFn), 'ShipmentNotifierStreamMapping', {
+    target:            notifyFn,
     eventSourceArn:    loadTable.tableStreamArn,
     startingPosition:  StartingPosition.LATEST,
     batchSize:         10,
@@ -2388,6 +2551,9 @@ factoringIntakeFn.addToRolePolicy(
 // ones defineFunction creates) is disabled, and the two Load-stream consumers that
 // reach the outside world (brokerLoadAlert, rateconAssignedText) are created disabled
 // above — loadTrackingProjector stays enabled because it writes only our own tables.
+// shipmentNotifier is enabled here too: its one outside call is SES, which the deny
+// below refuses, so every notice it writes lands as a NOT_SENT row carrying the text
+// it rendered — which is exactly the behaviour dev needs to exercise.
 // Every Lambda is denied SES. Slack, OTR, Paychex and Blue Ink are
 // neutered on dev by branch-level secret overrides (see Docs/DEV_STACK.md); Twilio
 // is inert because dev's user pool has no /bcat/dispatch/<poolId>/ config.

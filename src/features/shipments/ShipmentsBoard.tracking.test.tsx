@@ -55,6 +55,7 @@ vi.mock('@/lib/apiClient', () => ({
   setShipmentStatus: vi.fn(),
   tenderRespond: vi.fn(),
   graphqlErrorText: () => '',
+  listDocumentReviewQueue: vi.fn(async () => []),
 }))
 vi.mock('./components/ShipmentDrawer', () => ({ ShipmentDrawer: () => null }))
 

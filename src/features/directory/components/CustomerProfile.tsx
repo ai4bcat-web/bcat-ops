@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 import { useCustomerOrders } from '@/hooks/useCustomerOrders'
 import {
   resolveCreditPolicy,
@@ -273,14 +274,12 @@ export function CustomerProfile({
           {tab === 'documents' && (
             <div className="space-y-6">
               <section>
-                <h3 className="text-sm font-semibold mb-3">Required documents for invoice</h3>
-                <Textarea
-                  value={value.requiredDocsText}
-                  onChange={(e) => set('requiredDocsText', e.target.value)}
-                  className="text-sm"
-                  placeholder="One document type per line"
+                <DocumentTypesField
+                  label="Required documents for invoice"
+                  value={value.requiredDocs}
+                  onChange={(next) => set('requiredDocs', next)}
+                  help="What must be on file before this customer's orders can be invoiced. Leave every box clear to use the organization default; document upload is managed per shipment."
                 />
-                <p className="text-xs text-muted-foreground mt-1">Configure what must be collected before invoicing. Document upload is managed per shipment.</p>
               </section>
               <section>
                 <h3 className="text-sm font-semibold mb-3">Required references</h3>

@@ -23,6 +23,38 @@ vi.mock('@/lib/apiClient', () => ({
   getCarrierBundle: vi.fn(async () => null),
   listDivisions: vi.fn(async () => []),
   getRateConfirmUrl: vi.fn(async () => ''),
+  // Step E — the Documents tab and the delivery card read through these.
+  listShipmentDocuments: vi.fn(async () => []),
+  listShipmentNotices: vi.fn(async () => []),
+  listTrackingLinksByShipment: vi.fn(async () => []),
+  listCheckCallsByLoad: vi.fn(async () => []),
+  getShipmentDocumentUrl: vi.fn(async () => ''),
+  readyToInvoice: vi.fn(),
+  updateDocument: vi.fn(),
+  voidDocument: vi.fn(),
+  attachDriverDoc: vi.fn(),
+  sendUploadLink: vi.fn(),
+  revokeUploadLink: vi.fn(),
+  sendMilestoneNotice: vi.fn(),
+  emailDocuments: vi.fn(),
+  rateCarrier: vi.fn(),
+  prepareDocumentUpload: vi.fn(),
+  commitDocument: vi.fn(),
+  putPresignedFile: vi.fn(),
+  saveGeneratedDocument: vi.fn(),
+}))
+vi.mock('@/lib/driverSubmissionsClient', () => ({
+  getDriverDocUrl: vi.fn(async () => ''),
+  attachDocs: vi.fn(async () => []),
+}))
+vi.mock('@/hooks/useLoadDriverDocs', () => ({
+  useLoadDriverDocs: () => ({ pods: [], ratecons: [], misc: [], loading: false, error: null, refresh: vi.fn() }),
+}))
+// The generated-document dialog pulls in jsPDF through these; the tab itself does not
+// render a PDF, so the builders stay out of this render test.
+vi.mock('@/lib/bolPdf', () => ({ buildBolPdf: vi.fn(), bolFilename: vi.fn(() => 'bol.pdf') }))
+vi.mock('@/lib/loadSummaryPdf', () => ({
+  buildLoadSummaryPdf: vi.fn(), loadSummaryFilename: vi.fn(() => 'load-summary.pdf'),
 }))
 vi.mock('@/lib/carrierRateCon', () => ({
   buildRateConPdf: vi.fn(),
@@ -56,7 +88,7 @@ function bundle(status: ShipmentStatus): ShipmentBundle {
     createdBy: 'a@b.c', updatedBy: 'a@b.c', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
   }
   const load: ShipmentLoad = { id: 'load-1', stops, miles: 900, status: 'BOOKED', loadNumber: 'S000001-1', leg: 1 }
-  return { shipment, orders: [order], loads: [load], loadCarriers: [], charges, financials: [] }
+  return { shipment, orders: [order], loads: [load], loadCarriers: [], charges, financials: [], documents: [] }
 }
 
 const actions = {
@@ -78,6 +110,11 @@ const actions = {
     onSetLoadStatus: vi.fn(async () => {}), onAssignAsset: vi.fn(async () => {}), onAssignCarrier: vi.fn(async () => {}),
     onBookCarrier: vi.fn(async () => {}), onRemoveCarrier: vi.fn(async () => {}), onSetArStatus: vi.fn(async () => {}),
   },
+  tracking: {
+    logCheckCall: vi.fn(async () => {}), resolveIncident: vi.fn(async () => {}),
+    setNextCheckCall: vi.fn(async () => {}), setEta: vi.fn(async () => {}),
+  },
+  reload: vi.fn(async () => {}),
 } satisfies ShipmentActions
 
 function renderDetail(status: ShipmentStatus = 'BOOKED') {
@@ -107,9 +144,9 @@ describe('ShipmentDetail', () => {
     expect(screen.getByText('$2000.00')).toBeTruthy()
   })
 
-  it('shows all five tabs and switches between them', async () => {
+  it('shows all seven tabs and switches between them', async () => {
     renderDetail()
-    for (const name of ['Summary', 'Details', 'Stops', 'Documents', 'Financials']) {
+    for (const name of ['Summary', 'Details', 'Stops', 'Carrier', 'Tracking', 'Documents', 'Financials']) {
       expect(screen.getByRole('tab', { name })).toBeTruthy()
     }
 

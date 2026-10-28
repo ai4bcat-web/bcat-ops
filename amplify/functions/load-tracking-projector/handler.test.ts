@@ -25,6 +25,8 @@ const TABLES = {
   loadCarrier: 'LoadCarrier-test',
   loadFinancials: 'LoadFinancials-test',
   loadCharge: 'LoadCharge-test',
+  // The projector has no ShipmentDocument grant, so a bundle it reads has no documents.
+  shipmentDocument: '',
 }
 const CHECK_CALL_TABLE = 'LoadCheckCall-test'
 const DRIVER_TABLE = 'Driver-test'

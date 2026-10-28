@@ -72,7 +72,8 @@ export interface CustomerFormValue {
   paymentTermsDays: string
   creditLimitCents: number | null
   creditHoldFlag: boolean
-  requiredDocsText: string
+  /** Stored strings, typed values plus anything that predates the vocabulary. */
+  requiredDocs: string[]
   defaultDivisionKey: string
   defaultSalesRepId: string
   aliasesText: string
@@ -137,7 +138,7 @@ function emptyCustomerForm(initial?: CustomerRecord | null): CustomerFormValue {
     paymentTermsDays: initial?.paymentTermsDays != null ? String(initial.paymentTermsDays) : '',
     creditLimitCents: initial?.creditLimitCents ?? null,
     creditHoldFlag: initial?.creditHoldFlag ?? false,
-    requiredDocsText: arrayToLines(initial?.requiredDocsForInvoice),
+    requiredDocs: initial?.requiredDocsForInvoice ?? [],
     defaultDivisionKey: initial?.defaultDivisionKey ?? '',
     defaultSalesRepId: initial?.defaultSalesRepId ?? '',
     aliasesText: arrayToLines(initial?.aliases),
@@ -245,7 +246,7 @@ export function useCustomerForm(initial?: CustomerRecord | null) {
     paymentTermsDays: value.paymentTermsDays.trim() ? Number(value.paymentTermsDays) : null,
     creditLimitCents: parseOptionalCents(value.creditLimitCents),
     creditHoldFlag: value.creditHoldFlag,
-    requiredDocsForInvoice: linesToArray(value.requiredDocsText),
+    requiredDocsForInvoice: value.requiredDocs,
     defaultDivisionKey: value.defaultDivisionKey || null,
     defaultSalesRepId: value.defaultSalesRepId.trim() || null,
     aliases: linesToArray(value.aliasesText),

@@ -353,6 +353,23 @@ export interface TmsSettings {
   /** Body of the carrier ping text. Must contain `{url}`. */
   trackingSmsTemplate?: string | null
 
+  // Step E — documents and delivery
+  /** Master switch for milestone e-mails; a customer still has to opt in. */
+  milestoneNoticesEnabled?: boolean | null
+  /** Ask the carrier for paperwork automatically when their load delivers. */
+  podRequestEnabled?: boolean | null
+  /** What a carrier upload link asks for. Default POD + CARRIER_INVOICE. */
+  requiredCarrierUploadTypes?: string[] | null
+  /** How long an upload link lives past delivery. Default 30. */
+  uploadLinkExpiryDays?: number | null
+  /** Bodies of the two outgoing e-mails. Both must contain `{url}`. */
+  milestoneEmailTemplate?: string | null
+  podRequestEmailTemplate?: string | null
+  /** Terms printed on every generated bill of lading. */
+  bolTerms?: string | null
+  /** Voiding a document is an ADMIN-only action when true. Default true. */
+  documentDeleteAdminOnly?: boolean | null
+
   createdAt?: string
   updatedAt?: string
 }
@@ -600,6 +617,11 @@ export interface ShipmentRecord {
   // Step D — the customer tracking link, one stable token per shipment
   customerLinkId?: string | null
   customerLinkSentAt?: string | null
+  // Step E — delivery and the notices it triggered
+  /** Stamped when every load of the shipment has delivered. */
+  deliveredAt?: string | null
+  lastNoticeAt?: string | null
+  lastNoticeStatus?: string | null
   createdBy: string
   updatedBy: string
   version?: number | null
@@ -634,6 +656,14 @@ export interface OrderRecord {
   /** Lets AR move ahead of delivery for customers that bill on pickup. */
   invoiceEarly?: boolean | null
   readyToInvoiceAt?: string | null
+  // Step E — what the required-document gate decided last time anything changed
+  docsRequired?: string[] | null
+  /** `[]` means complete. The board's Docs column reads this. */
+  docsMissing?: string[] | null
+  docsCheckedAt?: string | null
+  docsOverrideAt?: string | null
+  docsOverrideBy?: string | null
+  docsOverrideNote?: string | null
   pickupAppt?: string | null
   createdBy: string
   updatedBy: string
@@ -718,6 +748,15 @@ export interface LoadCarrierRecord {
   trackingLinkId?: string | null
   trackingStartedAt?: string | null
   trackingStoppedAt?: string | null
+  // Step E — the carrier upload portal and the carrier's paperwork
+  uploadLinkId?: string | null
+  podRequestedAt?: string | null
+  /** Carrier-scope paperwork still outstanding, cached for step G. Blocks nothing in E. */
+  docsMissing?: string[] | null
+  ratingStars?: number | null
+  ratingNote?: string | null
+  ratedAt?: string | null
+  ratedBy?: string | null
   createdBy: string
   updatedBy: string
   createdAt: string
@@ -798,6 +837,8 @@ export interface ShipmentBundle {
   loadCarriers: LoadCarrierRecord[]
   charges: LoadChargeRecord[]
   financials: LoadFinancialsRecord[]
+  /** Step E: the shipment's typed document index, newest last. */
+  documents: ShipmentDocumentRecord[]
 }
 
 /**
@@ -1211,7 +1252,7 @@ export interface LoadCheckCallRecord {
   updatedAt?: string
 }
 
-export type TrackingLinkKind = 'CARRIER_PING' | 'CUSTOMER_VIEW'
+export type TrackingLinkKind = 'CARRIER_PING' | 'CUSTOMER_VIEW' | 'CARRIER_UPLOAD'
 export type TrackingLinkStatus = 'ACTIVE' | 'REVOKED' | 'EXPIRED'
 export type TrackingLinkChannel = 'SMS' | 'EMAIL' | 'COPY'
 
@@ -1249,6 +1290,10 @@ export interface TrackingLinkRecord {
   lastPingAccuracyM?: number | null
   revokedAt?: string | null
   revokedBy?: string | null
+  /** CARRIER_UPLOAD only: the link's file budget and what it was minted asking for. */
+  uploadCount?: number | null
+  lastUploadAt?: string | null
+  neededTypes?: string[] | null
   createdBy: string
   createdAt?: string
   updatedAt?: string
@@ -1327,6 +1372,195 @@ export interface CarrierTrackingView {
   nextStop: TrackingViewStop | null
   /** The pings this link itself sent, so the driver sees the tap landed. */
   pings: TrackingViewPing[]
+  contactPhone: string | null
+  generatedAt: string
+}
+
+// ── Step E — documents and delivery ─────────────────────────────────────────
+//
+// One index table (ShipmentDocument) carries every file a shipment has, wherever
+// the bytes live: uploads and generated PDFs under `shipment-docs/{shipmentId}/`,
+// driver-app PODs and legacy rate cons as pointer rows into the stores that
+// already hold them. One notice table (ShipmentNotice) records every e-mail the
+// system tried to send with the text it rendered, so a send that SES refuses is
+// still a readable, copyable artifact. The rules that read them are pure and live
+// in src/lib/shipmentDocuments.ts, src/lib/shipmentNotices.ts and
+// src/lib/uploadPortal.ts.
+
+export type ShipmentDocumentType =
+  | 'BOL'
+  | 'POD'
+  | 'RATE_CON'
+  | 'CUSTOMER_RATE_CON'
+  | 'LOAD_SUMMARY'
+  | 'LUMPER_RECEIPT'
+  | 'WEIGHT_TICKET'
+  | 'TEMP_LOG'
+  | 'INSPECTION_REPORT'
+  | 'CUSTOMS'
+  | 'PACKING_LIST'
+  | 'CARRIER_INVOICE'
+  | 'INVOICE'
+  | 'PHOTO'
+  | 'OTHER'
+
+/** Where the bytes came from. DRIVER_APP and LEGACY rows point at another store. */
+export type ShipmentDocumentSource =
+  | 'UPLOAD'
+  | 'CARRIER_PORTAL'
+  | 'GENERATED'
+  | 'DRIVER_APP'
+  | 'LEGACY'
+
+/** Who may receive the file outside the company. INTERNAL never leaves. */
+export type ShipmentDocumentAudience = 'CUSTOMER' | 'CARRIER' | 'ALL' | 'INTERNAL'
+
+export type ShipmentDocumentStatus = 'ACTIVE' | 'SUPERSEDED' | 'VOID'
+
+/** Sparse: only CARRIER_PORTAL rows ever carry PENDING, which is the review queue. */
+export type ShipmentDocumentReviewStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED'
+
+/** Which block of the Documents tab a row belongs to. */
+export type ShipmentDocumentSection = 'CUSTOMER' | 'CARRIER' | 'SHIPMENT'
+
+/**
+ * One file attached to one shipment. `id` is `sdoc-<uuid>` for anything this system
+ * writes, and deterministic (`drv:<submissionDocId>`, `rck:<loadId>`) for pointer
+ * rows, so a backfill re-run or a stream retry can never list the same file twice.
+ */
+export interface ShipmentDocumentRecord {
+  id: string
+  shipmentId: string
+  /** Set → the Customer section. */
+  orderId?: string | null
+  loadId?: string | null
+  /** Set → the Carrier section, under that assignment. */
+  loadCarrierId?: string | null
+  stopId?: string | null
+  type: ShipmentDocumentType
+  name: string
+  s3Key: string
+  contentType: string
+  sizeBytes: number
+  pages?: number | null
+  source: ShipmentDocumentSource
+  /** The DriverSubmissionDoc / Load id a pointer row points at. */
+  sourceRef?: string | null
+  audience: ShipmentDocumentAudience
+  status: ShipmentDocumentStatus
+  /** Per shipment + type + loadId. A regenerated BOL is v2, not a rewrite of v1. */
+  version: number
+  supersedesId?: string | null
+  reviewStatus?: ShipmentDocumentReviewStatus | null
+  reviewedAt?: string | null
+  reviewedBy?: string | null
+  reviewNote?: string | null
+  uploadLinkId?: string | null
+  voidedAt?: string | null
+  voidedBy?: string | null
+  voidReason?: string | null
+  /** Staff e-mail · `link:<token8>` · `driver:<id>` · `migration:<script>`. */
+  uploadedBy: string
+  /** When the file was attached; the sort key of both indexes. */
+  uploadedAt: string
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type ShipmentNoticeKind = 'MILESTONE' | 'POD_REQUEST' | 'DOCUMENTS'
+
+export type ShipmentNoticeChannel = 'EMAIL' | 'COPY'
+
+/** NOT_SENT is an honest dev outcome: the row and its body exist, SES refused. */
+export type ShipmentNoticeStatus = 'SENT' | 'NOT_SENT' | 'FAILED' | 'COPY'
+
+export interface ShipmentNoticeAttachment {
+  documentId: string
+  name: string
+  sizeBytes: number
+}
+
+/**
+ * Every e-mail step E tries to send, with the text it rendered. Milestone rows use
+ * the deterministic id `ms:<shipmentId>:<milestone>` and the first POD request
+ * `pod:<loadCarrierId>`, so a second leg or a stream retry never sends twice.
+ */
+export interface ShipmentNoticeRecord {
+  id: string
+  shipmentId: string
+  loadId?: string | null
+  loadCarrierId?: string | null
+  kind: ShipmentNoticeKind
+  milestone?: CustomerNotification | null
+  channel: ShipmentNoticeChannel
+  /** Comma-joined. */
+  to: string
+  cc?: string | null
+  subject: string
+  body: string
+  attachments?: ShipmentNoticeAttachment[] | null
+  status: ShipmentNoticeStatus
+  error?: string | null
+  messageId?: string | null
+  sentAt?: string | null
+  trackingLinkId?: string | null
+  /** When the send was attempted; the sort key of the shipment index. */
+  at: string
+  createdBy: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+/** What the required-document gate decided for one scope. */
+export interface DocGateResult {
+  required: ShipmentDocumentType[]
+  present: ShipmentDocumentType[]
+  missing: ShipmentDocumentType[]
+  ready: boolean
+  /** Free-text entries nobody could map to a type; they never block. */
+  unrecognised: string[]
+}
+
+/** One line of the carrier portal's "we still need" checklist. */
+export interface UploadNeededType {
+  type: ShipmentDocumentType
+  label: string
+  satisfied: boolean
+}
+
+export interface UploadPortalStop {
+  type: StopType
+  name: string | null
+  city: string | null
+  state: string | null
+  appt: string | null
+}
+
+export interface UploadPortalUpload {
+  id: string
+  type: ShipmentDocumentType
+  name: string
+  sizeBytes: number
+  uploadedAt: string
+  reviewStatus: ShipmentDocumentReviewStatus
+}
+
+/**
+ * What the carrier upload portal shows. The customer, the money and every reference
+ * are absent from the shape itself, so there is nothing to forget to strip.
+ */
+export interface CarrierUploadView {
+  broker: { name: string }
+  loadNumber: string
+  carrierName: string | null
+  stops: UploadPortalStop[]
+  needed: UploadNeededType[]
+  /** Only the rows this link itself uploaded. */
+  uploads: UploadPortalUpload[]
+  expiresAt: string
+  acceptedTypes: string[]
+  maxBytes: number
   contactPhone: string | null
   generatedAt: string
 }

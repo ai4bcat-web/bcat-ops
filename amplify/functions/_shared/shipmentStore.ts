@@ -32,6 +32,7 @@ export const IDX_ORDERS_BY_SHIPMENT = 'ordersByShipmentId'
 export const IDX_LOADS_BY_SHIPMENT = 'loadsByShipmentId'
 export const IDX_CARRIERS_BY_SHIPMENT = 'loadCarriersByShipmentId'
 export const IDX_CHARGES_BY_SHIPMENT = 'loadChargesByShipmentIdAndSortOrder'
+export const IDX_DOCUMENTS_BY_SHIPMENT = 'shipmentDocumentsByShipmentIdAndUploadedAt'
 
 /** DynamoDB refuses a transaction longer than this, so say so before it does. */
 export const MAX_TRANSACT_ITEMS = 100
@@ -43,6 +44,11 @@ export interface ShipmentTables {
   loadCarrier: string
   loadFinancials: string
   loadCharge: string
+  /**
+   * Step E. Set to the empty string by the Lambdas that read a bundle without the
+   * ShipmentDocument grant: they get no documents rather than a failed read.
+   */
+  shipmentDocument: string
 }
 
 /**
@@ -63,6 +69,7 @@ export function shipmentTablesFromEnv(env: NodeJS.ProcessEnv = process.env): Shi
     loadCarrier: env.LOAD_CARRIER_TABLE_NAME ?? '',
     loadFinancials: env.LOAD_FINANCIALS_TABLE_NAME ?? '',
     loadCharge: env.LOAD_CHARGE_TABLE_NAME ?? '',
+    shipmentDocument: env.SHIPMENT_DOCUMENT_TABLE_NAME ?? '',
   }
 }
 
@@ -296,23 +303,42 @@ export interface Bundle {
   loadCarriers: Row[]
   charges: Row[]
   financials: Row[]
+  /** Step E: every file the shipment has, oldest first. */
+  documents: Row[]
+}
+
+/**
+ * The shipment's document index. Lambdas that read a bundle without the
+ * ShipmentDocument grant — the tracking projector, the notifier — get an empty
+ * list rather than a failure, because nothing they do looks at paperwork.
+ */
+export async function queryShipmentDocuments(
+  db: DynamoDBClient,
+  tableName: string,
+  shipmentId: string,
+): Promise<Row[]> {
+  if (!tableName) return []
+  const documents = await queryIndex(db, tableName, IDX_DOCUMENTS_BY_SHIPMENT, 'shipmentId', shipmentId)
+  documents.sort((a, b) => String(a.uploadedAt ?? '').localeCompare(String(b.uploadedAt ?? '')))
+  return documents
 }
 
 export async function readBundle(deps: ShipmentStoreDeps, shipmentId: string): Promise<Bundle> {
   const { db, tables } = deps
   const shipment = await getById(db, tables.shipment, shipmentId)
   if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-  const [orders, loads, loadCarriers, charges] = await Promise.all([
+  const [orders, loads, loadCarriers, charges, documents] = await Promise.all([
     queryIndex(db, tables.order, IDX_ORDERS_BY_SHIPMENT, 'shipmentId', shipmentId),
     queryIndex(db, tables.load, IDX_LOADS_BY_SHIPMENT, 'shipmentId', shipmentId),
     queryIndex(db, tables.loadCarrier, IDX_CARRIERS_BY_SHIPMENT, 'shipmentId', shipmentId),
     queryIndex(db, tables.loadCharge, IDX_CHARGES_BY_SHIPMENT, 'shipmentId', shipmentId),
+    queryShipmentDocuments(db, tables.shipmentDocument, shipmentId),
   ])
   // LoadFinancials.id IS the load id, so the totals come back in one BatchGet.
   const financials = await batchGetByIds(db, tables.loadFinancials, loads.map((l) => String(l.id)))
   loads.sort((a, b) => Number(a.leg ?? 0) - Number(b.leg ?? 0))
   charges.sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0))
-  return { shipment, orders, loads, loadCarriers, charges, financials }
+  return { shipment, orders, loads, loadCarriers, charges, financials, documents }
 }
 
 // ── Shipment mirrors ─────────────────────────────────────────────────────────

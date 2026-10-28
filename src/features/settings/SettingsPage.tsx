@@ -8,6 +8,7 @@ import { DivisionCard } from './DivisionCard'
 import { TmsSettingsCard } from './TmsSettingsCard'
 import { CarrierBookingSettingsCard } from './CarrierBookingSettingsCard'
 import { TrackingSettingsCard } from './TrackingSettingsCard'
+import { DocumentSettingsCard } from './DocumentSettingsCard'
 
 export function SettingsPage() {
   const { isAdmin } = useAuth()
@@ -49,6 +50,7 @@ export function SettingsPage() {
             <TmsSettingsCard />
             <CarrierBookingSettingsCard />
             <TrackingSettingsCard />
+            <DocumentSettingsCard />
           </>
         )}
 

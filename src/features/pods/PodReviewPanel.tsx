@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { useAppStore } from '@/store/useAppStore'
 import { getDriverDocUrl } from '@/lib/driverSubmissionsClient'
 import { queueDriverPodCheck } from '@/lib/podsClient'
-import { graphqlErrorText } from '@/lib/apiClient'
+import { attachDriverDoc, graphqlErrorText } from '@/lib/apiClient'
 import { formatDateTime } from '@/lib/date'
 import {
   approvalBlocker,
@@ -109,12 +109,42 @@ export function PodReviewPanel(props: {
     await updateLoad(load.id, { podNotes: next })
   }
 
+  /**
+   * An approved POD is the paperwork the shipment's customer gate is waiting on, so the
+   * approval points the shipment at the same pages the driver app already holds — no
+   * bytes are copied, and a second approval re-points the same deterministic rows.
+   *
+   * Once the pages have been merged every page resolves to the same combined PDF, so
+   * only the first page is attached: one file is one document, and attaching each page
+   * would put three rows on the shipment pointing at the same bytes. The first page is
+   * also the one `scripts/backfillShipmentDocuments.mjs` attaches, so a merged POD gets
+   * the same deterministic `drv:` id whichever path indexed it first.
+   *
+   * Deliberately after the review is saved and deliberately unable to fail it: the
+   * review is the own-fleet truth, and a TMS write that is refused (an old load with no
+   * shipment, a Lambda that is down) must leave an approved POD approved. The toast is
+   * the whole report; dispatch can attach it by hand from the Documents tab.
+   */
+  const attachToShipment = async () => {
+    const shipmentId = load?.shipmentId
+    if (!shipmentId || !load || pages.length === 0) return
+    const attachable = sub.combinedPodKey ? pages.slice(0, 1) : pages
+    try {
+      for (const page of attachable) {
+        await attachDriverDoc({ shipmentId, loadId: load.id, submissionDocId: page.id, type: 'POD' })
+      }
+    } catch (err) {
+      toast.error(graphqlErrorText(err) || 'Approved — but the POD could not be attached to the shipment')
+    }
+  }
+
   const approve = async () => {
     if (blocker) return toast.error(blocker)
     setSaving('approve')
     try {
       const next = await saveReview({ id: sub.id, status: 'APPROVED', note, checks, reviewer: props.reviewer })
       await saveNoteToLoad()
+      await attachToShipment()
       toast.success(`POD approved${pro ? ` · PRO ${pro}` : ''}`)
       props.onSaved({ ...sub, ...next, docs: sub.docs })
     } catch (err) {

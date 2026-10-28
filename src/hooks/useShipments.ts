@@ -32,6 +32,8 @@ export interface ShipmentListRow extends ShipmentRecord {
   nextCheckCallAt: string | null
   checkCallOpen: 'OPEN' | null
   openIncidentCount: number | null
+  /** Step E — the order's cached gate verdict. `[]` is complete; null is never computed. */
+  docsMissing: string[] | null
 }
 
 const DEFAULT_VIEW: ShipmentsView = { kind: 'all' }
@@ -87,6 +89,16 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
     const arByShipment: Record<string, ArStatus> = {}
     for (const o of orders) if (o.arStatus) arByShipment[o.shipmentId] = o.arStatus
 
+    // `[]` means the gate ran and found nothing outstanding (the column ticks); absent
+    // means it has never run (the column stays blank), so the empty array has to survive
+    // the map. A shipment with two orders shows everything either of them still owes.
+    const docsByShipment: Record<string, string[]> = {}
+    for (const o of orders) {
+      if (o.docsMissing == null) continue
+      const missing = docsByShipment[o.shipmentId] ??= []
+      for (const type of o.docsMissing) if (!missing.includes(type)) missing.push(type)
+    }
+
     const assignmentByShipment: Record<string, AssignmentType> = {}
     const statusByShipment: Record<string, LoadWorkflowStatus> = {}
     // A multi-leg shipment is tracked as one line: the newest update across its legs, the
@@ -120,6 +132,7 @@ export function useShipments(view: ShipmentsView = DEFAULT_VIEW) {
     return shipments.map((s) => ({
       ...s,
       arStatus: arByShipment[s.id] ?? null,
+      docsMissing: docsByShipment[s.id] ?? null,
       assignmentType: assignmentByShipment[s.id] ?? null,
       loadStatus: statusByShipment[s.id] ?? null,
       lastUpdateAt: trackingByShipment[s.id]?.lastUpdateAt ?? null,

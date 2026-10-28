@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { TmsSettings } from '@/types/tms'
 import { MoneyField } from './MoneyField'
 import { ReferencesEditor } from './ReferencesEditor'
+import { DocumentTypesField } from '@/features/documents/DocumentTypesField'
 
 type Defaults = Pick<TmsSettings, 'defaultCreditLimitCents' | 'defaultFreeCreditRequired' | 'defaultCreditUsageWarningBps' | 'defaultMaxDaysLate' | 'requireCustomerApproval' | 'defaultRequiredDocs' | 'defaultRequiredReferences' | 'rateConTerms'>
 
@@ -25,13 +26,12 @@ export function CustomerOrgDefaults({ settings, onSave, onClose }: {
     defaultRequiredReferences: settings?.defaultRequiredReferences ?? [],
     rateConTerms: settings?.rateConTerms ?? null,
   })
-  const [documents, setDocuments] = useState((settings?.defaultRequiredDocs ?? []).join(', '))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const save = async () => {
     setSaving(true)
     setError(null)
-    try { await onSave({ ...draft, defaultRequiredDocs: documents.split(',').map((v) => v.trim()).filter(Boolean) }); onClose() }
+    try { await onSave(draft); onClose() }
     catch (e) { setError(e instanceof Error ? e.message : String(e)) }
     finally { setSaving(false) }
   }
@@ -49,7 +49,13 @@ export function CustomerOrgDefaults({ settings, onSave, onClose }: {
             <label className="flex gap-2 text-sm"><input type="checkbox" checked={draft.requireCustomerApproval === true} onChange={(e) => setDraft({ ...draft, requireCustomerApproval: e.target.checked })} disabled={saving} />Require customer approval</label>
           </div>
         </div>
-        <Label>Required documents (comma separated)<Input aria-label="Default required documents" value={documents} onChange={(e) => setDocuments(e.target.value)} disabled={saving} /></Label>
+        <DocumentTypesField
+          label="Required documents"
+          value={draft.defaultRequiredDocs}
+          onChange={(next) => setDraft({ ...draft, defaultRequiredDocs: next })}
+          disabled={saving}
+          help="What every customer needs on file before an order can be invoiced, unless that customer asks for its own list."
+        />
         <div><h3 className="mb-2 text-sm font-medium">Required references</h3><ReferencesEditor references={draft.defaultRequiredReferences ?? []} onChange={(refs) => setDraft({ ...draft, defaultRequiredReferences: refs })} disabled={saving} /></div>
         <Label>Default rate confirmation terms<Textarea aria-label="Default rate confirmation terms" value={draft.rateConTerms ?? ''} onChange={(e) => setDraft({ ...draft, rateConTerms: e.target.value || null })} disabled={saving} /></Label>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, CalendarDays, Table2, Inbox,
   Truck, Wrench, Fuel, History, CalendarClock,
-  LineChart, Wallet, Boxes, CalendarOff, FileText, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, type LucideIcon,
+  LineChart, Wallet, Boxes, CalendarOff, FileText, FileCheck2, Receipt, Car, CalendarCheck, Scale, Gauge, Umbrella, MessageSquare, FolderOpen, SlidersHorizontal, Building2, MapPin, TrendingUp, Banknote, PackageCheck, Package, PhoneCall, ClipboardList, Clock, type LucideIcon,
 } from 'lucide-react'
 
 export interface NavItem {
@@ -50,6 +50,9 @@ export const NAV_GROUPS: NavSection[] = [
       { to: '/shipments', label: 'Shipments', icon: Package,        pageKey: 'loads' },
       // The worklist for the check calls those shipments are waiting on.
       { to: '/check-calls', label: 'Check calls', icon: PhoneCall,  pageKey: 'loads', badgeKey: 'checkCalls' },
+      // The carrier uploads waiting on somebody to accept them; nothing a carrier sends
+      // satisfies a required document until it is reviewed here.
+      { to: '/documents', label: 'Documents', icon: FileCheck2, pageKey: 'loads', badgeKey: 'documentReview' },
       { to: '/intake',    label: 'Intake',    icon: Inbox,           pageKey: 'intake', badgeKey: 'intake' },
       { to: '/pods',      label: 'PODs',      icon: PackageCheck,    pageKey: 'pods' },
       { to: '/factoring', label: 'Factoring Queue', icon: Banknote, pageKey: 'factoring' },
