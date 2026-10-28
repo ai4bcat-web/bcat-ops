@@ -2,6 +2,69 @@
 
 One entry per unit of work (newest first). Decisions needed from Ryne go under **Decision needed**.
 
+## 2026-10-28 — Step G built and reviewed; dev deploy BLOCKED on the 1 MB template cap
+
+- Step G (AP — carrier bills & payments) is code-complete and committed on `dev`:
+  `5c2a995` (the step) plus `6f3c8ee`, `bf90954`, `43fa92c`, `fa61053`, `5d21f8b`,
+  `98893c4` (five attempts at the deploy blocker below). **It is not deployed.**
+- What shipped in the commit: `CarrierBill` + `ApPayment` models, `LoadCarrier.apOpen`
+  and its index, the `TmsSettings` AP block, `ShipmentNotice` kind `REMITTANCE`,
+  `remittances/*`; twelve AP actions on `tmsFinanceActions` behind `page-carrierPay`
+  with separate approval/posting admin switches; `UPDATE_CARRIER_CHARGES` and the AP
+  state writes on `tmsShipmentActions`; `src/lib/carrierBill.ts` and
+  `remittancePdf.ts`; `paymentApply` refactored to a party/document vocabulary serving
+  both ledgers; `/ap` with six tabs, `/ap/bills/:id`, six dialogs, the shipment AP
+  card, the carrier AP tab, the AP settings card and the nav badge;
+  `scripts/backfillApOpen.mjs`; `Docs/academy/ap-carrier-bills-and-payments.md`.
+- Required gates passed before the commit: `npm run typecheck`, `npm run lint`
+  (3 pre-existing warnings), `npm run test` — **341 files / 4338 tests**, up from
+  336 / 4212. The migration script was never run: it has nothing to migrate until the
+  schema is live.
+- Fable review (`reviewer`, once, on the full diff) found two blockers and three
+  majors, all fixed before the commit, with a regression test added where one was
+  missing: a credit-funded payment could never be reversed (the planner was shown the
+  cash column alone and refused to take back more than it saw); "Record and approve"
+  skipped the admin-only approval switch and the warning acknowledgements; a colliding
+  `:version` placeholder froze the bill's version and made its CAS a tautology; a
+  payment could land on a bill somebody had just unapproved; and the remittance notice
+  id was numbered by successful sends, so every attempt after a refused one was a
+  silent no-op.
+- **Blocker (platform, not code).** Dev jobs `26`, `27`, `28`, `31` and `32` all failed
+  with `Template may not exceed 1000000 bytes in size` on the `data` nested stack: with
+  G's two models it synthesizes to 1,007,296 bytes. Jobs `29` and `30` failed with
+  `CloudformationStackCircularDependencyError` instead. Every one rolled back cleanly —
+  **dev is still serving job `25`'s backend (Step F), unchanged and working.**
+  What was tried, in order:
+  1. `cdk.json` with `@aws-cdk/core:suppressTemplateIndentation` — works under the CDK
+     CLI locally (1,007,304 → 713,837 bytes); `ampx pipeline-deploy` never reads
+     `cdk.json` (job 27).
+  2. The same flag through `CDK_CONTEXT_JSON`, merged in `backend.ts` before
+     `defineBackend` — verified on a programmatic synth locally (642,092 bytes), no
+     effect in the Amplify build, which replaces that variable (job 28).
+  3. `resourceGroupName: 'tms'` on the four TMS routers — circular dependency: a Lambda
+     AppSync calls must live beside the API (job 29). Reverted.
+  4. `resourceGroupName: 'ops'` on seventeen stream/scheduled/import Lambdas — data
+     stack down to 684,996 bytes, but still circular: the data stack references some of
+     them too (jobs 30, 31). Reverted.
+  5. Setting `_suppressTemplateIndentation` on the data stack after `defineBackend`
+     (CDK reads it at synth and assigns it only in the constructor) — 642,092 bytes on
+     the build's own synth path locally; the build still reported 1,007,296 (job 32).
+     This one is still in `backend.ts`, commented with everything above, because it is
+     correct locally and harmless; it is not what will fix the build.
+  The next move is bigger than a step's tail: the `data` stack carries ~97 model
+  nested-stack references, every Lambda AppSync calls, and an IAM policy per router
+  naming every table it touches. Either the TMS models move to a second `defineData`
+  API, or the routers' grants stop naming tables individually, or a newer Amplify that
+  splits model stacks differently is adopted. None of those belong inside Step G.
+- **Decision needed (Ryne):** which of those three the build takes. The cheapest is
+  collapsing each router's IAM policy to one wildcard statement over the dev table
+  prefix — roughly 150 KB back, at the cost of per-table least privilege on dev. The
+  durable one is a second data API for the TMS models, which is a migration of its own.
+- Not done because the schema is not live: the dev AP lifecycle (record → approve →
+  pay → remittance → reverse → void, including the own-driver path), the browser pass
+  over `/ap`, running `scripts/backfillApOpen.mjs`, and the H plan. No temporary dev
+  identity was created, so there is none to remove.
+
 ## 2026-10-28 — Step F done on dev
 
 - Commit `3d50186` pushed to `origin dev` (Invoice + ArPayment models, `tms-finance-actions`
